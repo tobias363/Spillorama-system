@@ -3,20 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Nordisk Bingo</title>
+    <title>Spillorama</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Manrope:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/style.css?v=profile-modal-20260304-1" />
   </head>
   <body>
     <header id="appHeader" class="topbar hidden">
       <div class="brand">
-        <p class="brand-kicker">Nordisk Bingo</p>
-        <h1>Bingolobby</h1>
+        <img class="brand-logo" src="/assets/spillorama-logo.svg" alt="Spillorama" />
+        <p class="brand-kicker">Spillorama</p>
         <p id="activeGameLabel">Ingen spill valgt</p>
       </div>
 
@@ -77,7 +77,7 @@
           <div class="lobby-stage-head">
             <div>
               <p class="hero-kicker">Spilloversikt</p>
-              <h2 id="heroGameTitle">Bingoria</h2>
+              <h2 id="heroGameTitle">Spillorama</h2>
               <p id="heroGameDescription" class="subtle">
                 Velg spillkort under for å gå videre til riktig spillflate.
               </p>
@@ -251,6 +251,6 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js"></script>
+    <script src="/app.js?v=profile-modal-20260304-1"></script>
   </body>
 </html>
