@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Manrope:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/style.css?v=profile-modal-20260304-1" />
+    <link rel="stylesheet" href="/style.css?v=profile-drawer-20260304-2" />
   </head>
   <body>
     <header id="appHeader" class="topbar hidden">
@@ -171,20 +171,17 @@
         <div class="profile-modal-header">
           <div>
             <h2 id="profileTitle">Min profil</h2>
-            <p id="profileSummary" class="subtle">Saldo: 0 kr</p>
+            <p id="profileSummary" class="subtle">Kontoinformasjon</p>
           </div>
           <button id="profileCloseBtn" class="btn-ghost">Lukk</button>
         </div>
 
-        <section class="profile-panel">
-          <h3 class="subsection-title">Konto</h3>
-          <div class="row">
-            <div class="topup-inline">
-              <label for="walletTopupAmount">Innskudd</label>
-              <input id="walletTopupAmount" type="number" min="1" value="100" />
-              <button id="walletTopupBtn" class="btn-primary">Overfør penger</button>
-            </div>
-            <button id="walletSwedbankIntentBtn" class="btn-secondary">Transaksjoner / betaling</button>
+        <section class="profile-panel profile-account-panel">
+          <p id="profileFullName" class="profile-full-name">Spiller</p>
+          <p id="profileBigBalance" class="profile-big-balance">0 kr</p>
+          <div class="row profile-account-actions">
+            <button id="walletTopupBtn" class="btn-primary">Overfør penger</button>
+            <button id="walletSwedbankIntentBtn" class="btn-secondary">Sjekk betaling</button>
             <button id="walletRefreshBtn" class="btn-secondary">Oppdater regnskap</button>
           </div>
         </section>
@@ -251,6 +248,6 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=profile-modal-20260304-1"></script>
+    <script src="/app.js?v=profile-drawer-20260304-2"></script>
   </body>
 </html>

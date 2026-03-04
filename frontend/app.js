@@ -24,6 +24,8 @@ const state = {
   swedbankStatusPollInFlight: false
 };
 
+let profileModalHideTimer = null;
+
 const els = {
   appHeader: document.getElementById("appHeader"),
   activeGameLabel: document.getElementById("activeGameLabel"),
@@ -42,6 +44,8 @@ const els = {
   profileModal: document.getElementById("profileModal"),
   profileTitle: document.getElementById("profileTitle"),
   profileSummary: document.getElementById("profileSummary"),
+  profileFullName: document.getElementById("profileFullName"),
+  profileBigBalance: document.getElementById("profileBigBalance"),
   profileCloseBtn: document.getElementById("profileCloseBtn"),
   swedbankCheckoutModal: document.getElementById("swedbankCheckoutModal"),
   swedbankCheckoutTitle: document.getElementById("swedbankCheckoutTitle"),
@@ -260,7 +264,7 @@ function setStatusBox(element, text, tone = "neutral") {
 
 function syncBodyModalState() {
   const swedbankOpen = els.swedbankCheckoutModal && !els.swedbankCheckoutModal.classList.contains("hidden");
-  const profileOpen = els.profileModal && !els.profileModal.classList.contains("hidden");
+  const profileOpen = els.profileModal && els.profileModal.classList.contains("open");
   document.body.classList.toggle("modal-open", Boolean(swedbankOpen || profileOpen));
 }
 
@@ -276,8 +280,26 @@ function setProfileModalVisible(visible) {
   if (!els.profileModal) {
     return;
   }
-  els.profileModal.classList.toggle("hidden", !visible);
+  if (profileModalHideTimer) {
+    window.clearTimeout(profileModalHideTimer);
+    profileModalHideTimer = null;
+  }
+
+  if (visible) {
+    els.profileModal.classList.remove("hidden");
+    requestAnimationFrame(() => {
+      els.profileModal.classList.add("open");
+      syncBodyModalState();
+    });
+    return;
+  }
+
+  els.profileModal.classList.remove("open");
   syncBodyModalState();
+  profileModalHideTimer = window.setTimeout(() => {
+    els.profileModal.classList.add("hidden");
+    syncBodyModalState();
+  }, 220);
 }
 
 function stopSwedbankStatusPolling() {
@@ -627,21 +649,25 @@ function renderUserBadge() {
 }
 
 function renderProfileSummary() {
-  if (!els.profileTitle || !els.profileSummary) {
+  if (!els.profileTitle || !els.profileSummary || !els.profileFullName || !els.profileBigBalance) {
     return;
   }
 
   if (!state.user) {
     els.profileTitle.textContent = "Min profil";
     els.profileSummary.textContent = "Ikke innlogget.";
+    els.profileFullName.textContent = "Spiller";
+    els.profileBigBalance.textContent = "0 kr";
     return;
   }
 
   const balance =
     state.walletState?.account?.balance ??
     (Number.isFinite(state.user.balance) ? state.user.balance : 0);
-  els.profileTitle.textContent = state.user.displayName || "Min profil";
-  els.profileSummary.textContent = `Saldo: ${formatNok(balance)} • ${state.user.email}`;
+  els.profileTitle.textContent = "Min profil";
+  els.profileSummary.textContent = state.user.email || "";
+  els.profileFullName.textContent = state.user.displayName || "Spiller";
+  els.profileBigBalance.textContent = `${formatNok(balance)}`;
 }
 
 async function openProfileModal() {
@@ -674,12 +700,12 @@ function renderHeroPanel() {
 
   const selected = currentGame();
   if (!selected) {
-    els.heroGameTitle.textContent = "Bingoria";
+    els.heroGameTitle.textContent = "Spillorama";
     els.heroGameDescription.textContent = "Ingen spill publisert. Be admin aktivere spill i /admin.";
     return;
   }
 
-  els.heroGameTitle.textContent = "Bingoria";
+  els.heroGameTitle.textContent = "Spillorama";
   els.heroGameDescription.textContent =
     `${selected.title || selected.slug} er valgt. Les mer for detaljer eller start spill direkte.`;
 }
@@ -1610,7 +1636,16 @@ async function onKycVerify() {
 }
 
 function parseTopupAmount() {
-  const amount = Number(els.walletTopupAmount.value || 0);
+  const inputValue = Number(els.walletTopupAmount?.value || 0);
+  if (Number.isFinite(inputValue) && inputValue > 0) {
+    return inputValue;
+  }
+
+  const prompted = window.prompt("Hvor mye vil du overføre?", "100");
+  if (prompted === null) {
+    throw new Error("Overføring avbrutt.");
+  }
+  const amount = Number(prompted);
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error("Beløp må være større enn 0.");
   }

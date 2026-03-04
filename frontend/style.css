@@ -59,10 +59,21 @@ body.modal-open {
 .brand-kicker {
   margin: 0;
   color: var(--accent);
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   font-weight: 700;
+}
+
+.brand {
+  display: grid;
+  gap: 3px;
+}
+
+.brand-logo {
+  width: min(300px, 100%);
+  height: auto;
+  display: block;
 }
 
 .brand h1 {
@@ -616,24 +627,40 @@ button:hover {
   inset: 0;
   z-index: 250;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(14, 38, 33, 0.24);
+  align-items: stretch;
+  justify-content: flex-start;
+  background: rgba(14, 38, 33, 0.2);
   backdrop-filter: blur(3px);
-  padding: 12px;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.profile-modal.open {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .profile-modal-card {
-  width: min(760px, 96vw);
-  max-height: min(92vh, 920px);
+  width: min(420px, 94vw);
+  height: 100vh;
+  max-height: 100vh;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-left: 0;
+  border-radius: 0 16px 16px 0;
   background: #f8fcfb;
-  padding: 16px;
+  padding: 18px 14px;
   box-shadow: 0 14px 34px rgba(21, 71, 62, 0.18);
   display: grid;
   gap: 12px;
+  transform: translateX(-100%);
+  transition: transform 220ms ease;
+}
+
+.profile-modal.open .profile-modal-card {
+  transform: translateX(0);
 }
 
 .profile-modal-header {
@@ -658,6 +685,35 @@ button:hover {
 
 .profile-panel .topup-inline {
   background: #ffffff;
+}
+
+.profile-account-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.profile-full-name {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #173c36;
+}
+
+.profile-big-balance {
+  margin: 0;
+  font-size: 40px;
+  line-height: 1.05;
+  font-weight: 800;
+  color: #0a6452;
+}
+
+.profile-account-actions {
+  align-items: stretch;
+}
+
+.profile-account-actions button {
+  width: 100%;
 }
 
 .checkout-modal {
@@ -743,7 +799,7 @@ button:hover {
   }
 
   .profile-modal-card {
-    width: min(860px, 96vw);
+    width: min(420px, 94vw);
   }
 }
 
@@ -763,6 +819,10 @@ button:hover {
 
   .topup-inline input {
     max-width: 110px;
+  }
+
+  .brand-logo {
+    width: min(240px, 100%);
   }
 
   .lobby-stage-head h2 {
@@ -790,10 +850,20 @@ button:hover {
   }
 
   .profile-modal-card {
+    width: min(100vw, 100vw);
+    border-radius: 0;
     padding: 12px;
   }
 
   .profile-modal-header h2 {
     font-size: 24px;
+  }
+
+  .profile-full-name {
+    font-size: 22px;
+  }
+
+  .profile-big-balance {
+    font-size: 34px;
   }
 }
