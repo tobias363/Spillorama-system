@@ -8,7 +8,8 @@ import { DomainError } from "../game/BingoEngine.js";
 
 const scrypt = promisify(scryptCallback);
 
-export type UserRole = "ADMIN" | "PLAYER";
+export const APP_USER_ROLES = ["ADMIN", "HALL_OPERATOR", "SUPPORT", "PLAYER"] as const;
+export type UserRole = (typeof APP_USER_ROLES)[number];
 export type KycStatus = "UNVERIFIED" | "PENDING" | "VERIFIED" | "REJECTED";
 
 export interface AppUser {
@@ -840,6 +841,56 @@ export class PlatformService {
     return this.mapUser(row);
   }
 
+  async updateUserRole(userIdInput: string, roleInput: UserRole): Promise<PublicAppUser> {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(userIdInput, "userId");
+    const nextRole = this.assertUserRole(roleInput);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<UserRow>(
+        `SELECT id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
+         FROM ${this.usersTable()}
+         WHERE id = $1
+         FOR UPDATE`,
+        [userId]
+      );
+      const existing = existingRows[0];
+      if (!existing) {
+        throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+      }
+
+      if (existing.role === "ADMIN" && nextRole !== "ADMIN") {
+        const { rows: adminRows } = await client.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count
+           FROM ${this.usersTable()}
+           WHERE role = 'ADMIN'`
+        );
+        const adminCount = Number(adminRows[0]?.count ?? "0");
+        if (adminCount <= 1) {
+          throw new DomainError("LAST_ADMIN_REQUIRED", "Kan ikke fjerne siste admin-bruker.");
+        }
+      }
+
+      const { rows: updatedRows } = await client.query<UserRow>(
+        `UPDATE ${this.usersTable()}
+         SET role = $2,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
+        [userId, nextRole]
+      );
+      await client.query("COMMIT");
+      return this.withBalance(this.mapUser(updatedRows[0]));
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
   assertUserEligibleForGameplay(user: PublicAppUser): void {
     if (user.kycStatus !== "VERIFIED") {
       throw new DomainError("KYC_REQUIRED", "KYC må verifiseres før spill kan startes.");
@@ -1035,7 +1086,7 @@ export class PlatformService {
           display_name TEXT NOT NULL,
           password_hash TEXT NOT NULL,
           wallet_id TEXT UNIQUE NOT NULL,
-          role TEXT NOT NULL CHECK (role IN ('ADMIN', 'PLAYER')),
+          role TEXT NOT NULL CHECK (role IN ('ADMIN', 'HALL_OPERATOR', 'SUPPORT', 'PLAYER')),
           kyc_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
           birth_date DATE NULL,
           kyc_verified_at TIMESTAMPTZ NULL,
@@ -1061,6 +1112,7 @@ export class PlatformService {
         `ALTER TABLE ${this.usersTable()}
          ADD COLUMN IF NOT EXISTS kyc_provider_ref TEXT NULL`
       );
+      await this.ensureUserRoleConstraint(client);
 
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.sessionsTable()} (
@@ -1226,6 +1278,14 @@ export class PlatformService {
     }
   }
 
+  private assertUserRole(roleInput: string): UserRole {
+    const normalized = roleInput.trim().toUpperCase() as UserRole;
+    if (!APP_USER_ROLES.includes(normalized)) {
+      throw new DomainError("INVALID_INPUT", `role må være en av: ${APP_USER_ROLES.join(", ")}.`);
+    }
+    return normalized;
+  }
+
   private assertBirthDate(birthDateInput: string): string {
     const value = birthDateInput.trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -1364,6 +1424,48 @@ export class PlatformService {
       throw new DomainError("INVALID_MIN_ROUND_INTERVAL", "minRoundIntervalMs må være minst 30000.");
     }
     return Math.floor(value);
+  }
+
+  private async ensureUserRoleConstraint(client: PoolClient): Promise<void> {
+    const { rows } = await client.query<{ constraint_name: string; definition: string }>(
+      `SELECT c.conname AS constraint_name,
+              pg_get_constraintdef(c.oid) AS definition
+       FROM pg_constraint c
+       JOIN pg_class t
+         ON t.oid = c.conrelid
+       JOIN pg_namespace n
+         ON n.oid = t.relnamespace
+       WHERE n.nspname = $1
+         AND t.relname = 'app_users'
+         AND c.contype = 'c'
+         AND pg_get_constraintdef(c.oid) ILIKE '%role%'`,
+      [this.schema]
+    );
+    if (rows.length === 1) {
+      const definition = rows[0].definition;
+      const hasAllRoles =
+        definition.includes("'ADMIN'") &&
+        definition.includes("'HALL_OPERATOR'") &&
+        definition.includes("'SUPPORT'") &&
+        definition.includes("'PLAYER'");
+      if (hasAllRoles) {
+        return;
+      }
+    }
+
+    for (const row of rows) {
+      const constraintName = row.constraint_name.replaceAll(`"`, `""`);
+      await client.query(
+        `ALTER TABLE ${this.usersTable()}
+         DROP CONSTRAINT IF EXISTS "${constraintName}"`
+      );
+    }
+
+    await client.query(
+      `ALTER TABLE ${this.usersTable()}
+       ADD CONSTRAINT app_users_role_check
+       CHECK (role IN ('ADMIN', 'HALL_OPERATOR', 'SUPPORT', 'PLAYER'))`
+    );
   }
 
   private wrapError(error: unknown): Error {

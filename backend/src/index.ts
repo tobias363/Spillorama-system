@@ -11,7 +11,8 @@ import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
 import type { ClaimType, RoomSnapshot } from "./game/types.js";
-import { PlatformService, type PublicAppUser } from "./platform/PlatformService.js";
+import { assertAdminPermission, canAccessAdminPermission, type AdminPermission } from "./platform/AdminAccessPolicy.js";
+import { APP_USER_ROLES, PlatformService, type PublicAppUser, type UserRole } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 
 interface AckResponse<T> {
@@ -377,12 +378,25 @@ async function getAuthenticatedSocketUser(payload: AuthenticatedSocketPayload | 
   return platformService.getUserFromAccessToken(accessToken);
 }
 
-async function requireAdminUser(req: express.Request): Promise<PublicAppUser> {
+async function requireAdminPermissionUser(
+  req: express.Request,
+  permission: AdminPermission,
+  message?: string
+): Promise<PublicAppUser> {
   const user = await getAuthenticatedUser(req);
-  if (user.role !== "ADMIN") {
-    throw new DomainError("FORBIDDEN", "Kun admin har tilgang til dette endepunktet.");
-  }
+  assertAdminPermission(user.role, permission, message);
   return user;
+}
+
+function parseUserRoleInput(value: unknown): UserRole {
+  const role = mustBeNonEmptyString(value, "role").toUpperCase();
+  if (!APP_USER_ROLES.includes(role as UserRole)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `role må være en av: ${APP_USER_ROLES.join(", ")}.`
+    );
+  }
+  return role as UserRole;
 }
 
 function assertUserCanAccessRoom(user: PublicAppUser, roomCode: string): void {
@@ -723,9 +737,12 @@ app.post("/api/admin/auth/login", async (req, res) => {
       email,
       password
     });
-    if (session.user.role !== "ADMIN") {
+    if (!canAccessAdminPermission(session.user.role, "ADMIN_PANEL_ACCESS")) {
       await platformService.logout(session.accessToken);
-      throw new DomainError("FORBIDDEN", "Kun admin-brukere kan logge inn i admin-panelet.");
+      throw new DomainError(
+        "FORBIDDEN",
+        "Kun admin, hall-operator eller support kan logge inn i admin-panelet."
+      );
     }
     apiSuccess(res, session);
   } catch (error) {
@@ -745,6 +762,7 @@ app.post("/api/auth/logout", async (req, res) => {
 
 app.post("/api/admin/auth/logout", async (req, res) => {
   try {
+    await requireAdminPermissionUser(req, "ADMIN_PANEL_ACCESS");
     const accessToken = getAccessTokenFromRequest(req);
     await platformService.logout(accessToken);
     apiSuccess(res, { loggedOut: true });
@@ -764,8 +782,20 @@ app.get("/api/auth/me", async (req, res) => {
 
 app.get("/api/admin/auth/me", async (req, res) => {
   try {
-    const user = await requireAdminUser(req);
+    const user = await requireAdminPermissionUser(req, "ADMIN_PANEL_ACCESS");
     apiSuccess(res, user);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.put("/api/admin/users/:userId/role", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "USER_ROLE_WRITE");
+    const userId = mustBeNonEmptyString(req.params.userId, "userId");
+    const role = parseUserRoleInput(req.body?.role);
+    const updated = await platformService.updateUserRole(userId, role);
+    apiSuccess(res, updated);
   } catch (error) {
     apiFailure(res, error);
   }
@@ -816,7 +846,7 @@ app.get("/api/games", async (req, res) => {
 
 app.get("/api/admin/games", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "GAME_CATALOG_READ");
     const games = await platformService.listGames({ includeDisabled: true });
     apiSuccess(res, games);
   } catch (error) {
@@ -826,7 +856,7 @@ app.get("/api/admin/games", async (req, res) => {
 
 app.put("/api/admin/games/:slug", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "GAME_CATALOG_WRITE");
     const slug = mustBeNonEmptyString(req.params.slug, "slug");
     const updated = await platformService.updateGame(slug, {
       title: typeof req.body?.title === "string" ? req.body.title : undefined,
@@ -857,7 +887,7 @@ app.get("/api/halls", async (req, res) => {
 
 app.get("/api/admin/halls", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "HALL_READ");
     const includeInactive = parseBooleanQueryValue(req.query.includeInactive, true);
     const halls = await platformService.listHalls({ includeInactive });
     apiSuccess(res, halls);
@@ -868,7 +898,7 @@ app.get("/api/admin/halls", async (req, res) => {
 
 app.post("/api/admin/halls", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "HALL_WRITE");
     const hall = await platformService.createHall({
       slug: mustBeNonEmptyString(req.body?.slug, "slug"),
       name: mustBeNonEmptyString(req.body?.name, "name"),
@@ -884,7 +914,7 @@ app.post("/api/admin/halls", async (req, res) => {
 
 app.put("/api/admin/halls/:hallId", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "HALL_WRITE");
     const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
     const hall = await platformService.updateHall(hallId, {
       slug: typeof req.body?.slug === "string" ? req.body.slug : undefined,
@@ -901,7 +931,7 @@ app.put("/api/admin/halls/:hallId", async (req, res) => {
 
 app.get("/api/admin/terminals", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "TERMINAL_READ");
     const includeInactive = parseBooleanQueryValue(req.query.includeInactive, true);
     const hallId = typeof req.query.hallId === "string" ? req.query.hallId : undefined;
     const terminals = await platformService.listTerminals({
@@ -916,7 +946,7 @@ app.get("/api/admin/terminals", async (req, res) => {
 
 app.post("/api/admin/terminals", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "TERMINAL_WRITE");
     const terminalCode = mustBeNonEmptyString(req.body?.terminalCode, "terminalCode");
     const displayName =
       typeof req.body?.displayName === "string" && req.body.displayName.trim()
@@ -936,7 +966,7 @@ app.post("/api/admin/terminals", async (req, res) => {
 
 app.put("/api/admin/terminals/:terminalId", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "TERMINAL_WRITE");
     const terminalId = mustBeNonEmptyString(req.params.terminalId, "terminalId");
     const terminal = await platformService.updateTerminal(terminalId, {
       terminalCode: typeof req.body?.terminalCode === "string" ? req.body.terminalCode : undefined,
@@ -952,7 +982,7 @@ app.put("/api/admin/terminals/:terminalId", async (req, res) => {
 
 app.get("/api/admin/halls/:hallId/game-config", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "HALL_GAME_CONFIG_READ");
     const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
     const includeDisabled = parseBooleanQueryValue(req.query.includeDisabled, true);
     const configs = await platformService.listHallGameConfigs({
@@ -967,7 +997,7 @@ app.get("/api/admin/halls/:hallId/game-config", async (req, res) => {
 
 app.put("/api/admin/halls/:hallId/game-config/:gameSlug", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "HALL_GAME_CONFIG_WRITE");
     const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
     const gameSlug = mustBeNonEmptyString(req.params.gameSlug, "gameSlug");
     const maxTicketsPerPlayer = parseOptionalInteger(req.body?.maxTicketsPerPlayer, "maxTicketsPerPlayer");
@@ -1105,7 +1135,7 @@ app.post("/api/wallet/me/topup", async (req, res) => {
 
 app.get("/api/admin/wallets/:walletId/compliance", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_READ");
     const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
     const hallId = typeof req.query.hallId === "string" ? req.query.hallId.trim() : undefined;
     const compliance = engine.getPlayerCompliance(walletId, hallId || undefined);
@@ -1117,7 +1147,7 @@ app.get("/api/admin/wallets/:walletId/compliance", async (req, res) => {
 
 app.put("/api/admin/wallets/:walletId/loss-limits", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
     const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
     const hallId = mustBeNonEmptyString(req.body?.hallId, "hallId");
     const dailyLossLimit = parseOptionalNonNegativeNumber(req.body?.dailyLossLimit, "dailyLossLimit");
@@ -1139,7 +1169,7 @@ app.put("/api/admin/wallets/:walletId/loss-limits", async (req, res) => {
 
 app.post("/api/admin/wallets/:walletId/timed-pause", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
     const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
     const durationMinutes = parseOptionalPositiveInteger(req.body?.durationMinutes, "durationMinutes");
     const compliance = engine.setTimedPause({
@@ -1154,7 +1184,7 @@ app.post("/api/admin/wallets/:walletId/timed-pause", async (req, res) => {
 
 app.delete("/api/admin/wallets/:walletId/timed-pause", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
     const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
     const compliance = engine.clearTimedPause(walletId);
     apiSuccess(res, compliance);
@@ -1165,7 +1195,7 @@ app.delete("/api/admin/wallets/:walletId/timed-pause", async (req, res) => {
 
 app.post("/api/admin/wallets/:walletId/self-exclusion", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
     const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
     const compliance = engine.setSelfExclusion(walletId);
     apiSuccess(res, compliance);
@@ -1176,7 +1206,7 @@ app.post("/api/admin/wallets/:walletId/self-exclusion", async (req, res) => {
 
 app.delete("/api/admin/wallets/:walletId/self-exclusion", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
     const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
     const compliance = engine.clearSelfExclusion(walletId);
     apiSuccess(res, compliance);
@@ -1187,7 +1217,7 @@ app.delete("/api/admin/wallets/:walletId/self-exclusion", async (req, res) => {
 
 app.get("/api/admin/compliance/extra-draw-denials", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "EXTRA_DRAW_DENIALS_READ");
     const limit = parseLimit(req.query.limit, 100);
     apiSuccess(res, engine.listExtraDrawDenials(limit));
   } catch (error) {
@@ -1197,7 +1227,7 @@ app.get("/api/admin/compliance/extra-draw-denials", async (req, res) => {
 
 app.get("/api/admin/prize-policy/active", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "PRIZE_POLICY_READ");
     const hallId = mustBeNonEmptyString(req.query.hallId, "hallId");
     const linkId = typeof req.query.linkId === "string" ? req.query.linkId.trim() : undefined;
     const at = typeof req.query.at === "string" ? req.query.at.trim() : undefined;
@@ -1215,7 +1245,7 @@ app.get("/api/admin/prize-policy/active", async (req, res) => {
 
 app.put("/api/admin/prize-policy", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "PRIZE_POLICY_WRITE");
     const policy = engine.upsertPrizePolicy({
       gameType: "DATABINGO",
       hallId: typeof req.body?.hallId === "string" ? req.body.hallId : undefined,
@@ -1238,7 +1268,7 @@ app.put("/api/admin/prize-policy", async (req, res) => {
 
 app.post("/api/admin/wallets/:walletId/extra-prize", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "EXTRA_PRIZE_AWARD");
     const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
     const hallId = mustBeNonEmptyString(req.body?.hallId, "hallId");
     const amount = mustBePositiveAmount(req.body?.amount);
@@ -1260,7 +1290,7 @@ app.post("/api/admin/wallets/:walletId/extra-prize", async (req, res) => {
 
 app.get("/api/admin/payout-audit", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "PAYOUT_AUDIT_READ");
     const limit = parseLimit(req.query.limit, 100);
     const hallId = typeof req.query.hallId === "string" ? req.query.hallId.trim() : undefined;
     const gameId = typeof req.query.gameId === "string" ? req.query.gameId.trim() : undefined;
@@ -1279,7 +1309,7 @@ app.get("/api/admin/payout-audit", async (req, res) => {
 
 app.get("/api/admin/ledger/entries", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "LEDGER_READ");
     const limit = parseLimit(req.query.limit, 200);
     const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom.trim() : undefined;
     const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo.trim() : undefined;
@@ -1302,7 +1332,7 @@ app.get("/api/admin/ledger/entries", async (req, res) => {
 
 app.post("/api/admin/ledger/entries", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "LEDGER_WRITE");
     const eventTypeRaw = mustBeNonEmptyString(req.body?.eventType, "eventType").toUpperCase();
     if (eventTypeRaw !== "STAKE" && eventTypeRaw !== "PRIZE" && eventTypeRaw !== "EXTRA_PRIZE") {
       throw new DomainError("INVALID_INPUT", "eventType må være STAKE, PRIZE eller EXTRA_PRIZE.");
@@ -1326,7 +1356,7 @@ app.post("/api/admin/ledger/entries", async (req, res) => {
 
 app.post("/api/admin/reports/daily/run", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "DAILY_REPORT_RUN");
     const date = typeof req.body?.date === "string" ? req.body.date.trim() : undefined;
     const hallId = typeof req.body?.hallId === "string" ? req.body.hallId.trim() : undefined;
     const gameType = parseOptionalLedgerGameType(req.body?.gameType);
@@ -1345,7 +1375,7 @@ app.post("/api/admin/reports/daily/run", async (req, res) => {
 
 app.get("/api/admin/reports/daily", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
     const date = mustBeNonEmptyString(req.query.date, "date");
     const hallId = typeof req.query.hallId === "string" ? req.query.hallId.trim() : undefined;
     const gameType = parseOptionalLedgerGameType(req.query.gameType);
@@ -1377,7 +1407,7 @@ app.get("/api/admin/reports/daily", async (req, res) => {
 
 app.get("/api/admin/reports/daily/archive/:date", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
     const date = mustBeNonEmptyString(req.params.date, "date");
     const report = engine.getArchivedDailyReport(date);
     if (!report) {
@@ -1391,7 +1421,7 @@ app.get("/api/admin/reports/daily/archive/:date", async (req, res) => {
 
 app.post("/api/admin/overskudd/distributions", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "OVERSKUDD_WRITE");
     const date = mustBeNonEmptyString(req.body?.date, "date");
     if (!Array.isArray(req.body?.allocations) || req.body.allocations.length === 0) {
       throw new DomainError("INVALID_INPUT", "allocations må inneholde minst én rad.");
@@ -1419,7 +1449,7 @@ app.post("/api/admin/overskudd/distributions", async (req, res) => {
 
 app.get("/api/admin/overskudd/distributions/:batchId", async (req, res) => {
   try {
-    await requireAdminUser(req);
+    await requireAdminPermissionUser(req, "OVERSKUDD_READ");
     const batchId = mustBeNonEmptyString(req.params.batchId, "batchId");
     const batch = engine.getOverskuddDistributionBatch(batchId);
     apiSuccess(res, batch);
