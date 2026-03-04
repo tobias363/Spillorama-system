@@ -1,6 +1,4 @@
-using System.Collections;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -28,20 +26,81 @@ public class UIManager : MonoBehaviour
         return APIManager.instance != null && APIManager.instance.UseRealtimeBackend;
     }
 
+    private void ApplyPlayButtonLabel()
+    {
+        if (playBtn == null)
+        {
+            return;
+        }
+
+        TMP_Text label = playBtn.GetComponentInChildren<TMP_Text>(true);
+        if (label == null)
+        {
+            return;
+        }
+
+        label.text = IsRealtimeMode() ? "Plasser innsats" : "Play";
+    }
+
     private bool IsProductionAutoPlayBlocked()
     {
         return !Application.isEditor && !Debug.isDebugBuild;
     }
 
+    private void EnsurePlayButtonVisible()
+    {
+        if (playBtn == null)
+        {
+            return;
+        }
+
+        if (!playBtn.gameObject.activeSelf)
+        {
+            playBtn.gameObject.SetActive(true);
+        }
+
+        playBtn.interactable = true;
+    }
+
+    private static bool IsValidIndex<T>(List<T> list, int index)
+    {
+        return list != null && index >= 0 && index < list.Count;
+    }
+
+    private void ResetAutoSpinHighlights()
+    {
+        if (autoSpinBtnHighlighter == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < autoSpinBtnHighlighter.Count; i++)
+        {
+            if (autoSpinBtnHighlighter[i] != null)
+            {
+                autoSpinBtnHighlighter[i].SetActive(false);
+            }
+        }
+    }
+
     private void OnEnable()
     {
         EventManager.OnAutoSpinOver += ActiveAllButtons;
-        settingsPanel.SetActive(false);
-        SelectSettingsOption(0);
-        for (int i = 0; i < autoSpinOptions.Count; i++)
+        EnsurePlayButtonVisible();
+        if (settingsPanel != null)
         {
-                autoSpinBtnHighlighter[i].SetActive(false);
-         }
+            settingsPanel.SetActive(false);
+        }
+
+        if (IsValidIndex(settingsOption, 0) &&
+            IsValidIndex(optionSelection, 0) &&
+            IsValidIndex(optionDeSelection, 0))
+        {
+            SelectSettingsOption(0);
+        }
+
+        ApplyPlayButtonLabel();
+        ResetAutoSpinHighlights();
 
         if (autoPlayBtn != null && IsProductionAutoPlayBlocked())
         {
@@ -58,13 +117,21 @@ public class UIManager : MonoBehaviour
     {
         if (IsRealtimeMode())
         {
-            playBtn.interactable = false;
-            APIManager.instance.PlayRealtimeRound();
+            if (playBtn != null)
+            {
+                playBtn.interactable = false;
+            }
+
+            APIManager.instance?.PlayRealtimeRound();
             Invoke(nameof(ActivePlayBtn), 0.5f);
             return;
         }
 
-        playBtn.interactable = false;
+        if (playBtn != null)
+        {
+            playBtn.interactable = false;
+        }
+
         if (EventManager.isPlayOver)
         {
             //Debug.Log("IsPlay Over : " + EventManager.isPlayOver);
@@ -83,8 +150,17 @@ public class UIManager : MonoBehaviour
 
     public void AutoSpin()
     {
-        settingsPanel.SetActive(false);
-        SelectSettingsOption(0);
+        if (settingsPanel != null)
+        {
+            settingsPanel.SetActive(false);
+        }
+
+        if (IsValidIndex(settingsOption, 0) &&
+            IsValidIndex(optionSelection, 0) &&
+            IsValidIndex(optionDeSelection, 0))
+        {
+            SelectSettingsOption(0);
+        }
     }
 
     public void StartAutoSpin()
@@ -97,7 +173,7 @@ public class UIManager : MonoBehaviour
 
         if (IsRealtimeMode())
         {
-            APIManager.instance.RequestRealtimeState();
+            APIManager.instance?.RequestRealtimeState();
             return;
         }
 
@@ -109,50 +185,92 @@ public class UIManager : MonoBehaviour
 
     public void Settings()
     {
-        settingsPanel.SetActive(true);
+        if (settingsPanel != null)
+        {
+            settingsPanel.SetActive(true);
+        }
     }
 
     public void SelectSettingsOption(int index)
     {
-        settingsOption[index].GetComponent<Image>().sprite = optionSelection[index];
+        if (!IsValidIndex(settingsOption, index) ||
+            !IsValidIndex(optionSelection, index) ||
+            settingsOption[index] == null)
+        {
+            return;
+        }
+
+        Image selectedImage = settingsOption[index].GetComponent<Image>();
+        if (selectedImage != null)
+        {
+            selectedImage.sprite = optionSelection[index];
+        }
+
         for (int i = 0; i < settingsOption.Count; i++)
         {
-            if(i != index)
+            if (i != index &&
+                IsValidIndex(optionDeSelection, i) &&
+                settingsOption[i] != null)
             {
-                settingsOption[i].GetComponent<Image>().sprite = optionDeSelection[i];
+                Image image = settingsOption[i].GetComponent<Image>();
+                if (image != null)
+                {
+                    image.sprite = optionDeSelection[i];
+                }
             }
         }
     }
 
     public void ActivePlayBtn()
     {
-
+        if (playBtn != null)
+        {
             playBtn.interactable = true;
-        
+        }
     }
 
     public void AutoSpinOptionSelection(int index)
     {
-        if (index != -1)
+        if (IsValidIndex(autoSpinBtnHighlighter, index) && autoSpinBtnHighlighter[index] != null)
         {
             autoSpinBtnHighlighter[index].SetActive(true);
-            autoSpinCount = int.Parse(autoSpinOptions[index].transform.GetChild(0).GetComponent<TextMeshProUGUI>().text);
-        }
-        for (int i = 0; i < autoSpinOptions.Count; i++)
-        {
-            if (i != index)
+            if (IsValidIndex(autoSpinOptions, index) && autoSpinOptions[index] != null)
             {
-                autoSpinBtnHighlighter[i].SetActive(false);
+                Transform optionLabel = autoSpinOptions[index].transform.childCount > 0
+                    ? autoSpinOptions[index].transform.GetChild(0)
+                    : null;
+                TextMeshProUGUI optionText = optionLabel != null ? optionLabel.GetComponent<TextMeshProUGUI>() : null;
+                if (optionText != null && int.TryParse(optionText.text, out int parsedCount))
+                {
+                    autoSpinCount = parsedCount;
+                }
+            }
+        }
+
+        if (autoSpinOptions != null)
+        {
+            for (int i = 0; i < autoSpinOptions.Count; i++)
+            {
+                if (i != index && IsValidIndex(autoSpinBtnHighlighter, i) && autoSpinBtnHighlighter[i] != null)
+                {
+                    autoSpinBtnHighlighter[i].SetActive(false);
+                }
             }
         }
 
         StartAutoSpin();
-        Invoke(nameof(ClosePanel), 0.5f);
+        if (settingsPanel != null)
+        {
+            Invoke(nameof(ClosePanel), 0.5f);
+        }
     }
 
     public void ClosePanel()
     {
-        settingsPanel.SetActive(false);
+        if (settingsPanel != null)
+        {
+            settingsPanel.SetActive(false);
+        }
     }
 
 
@@ -161,8 +279,15 @@ public class UIManager : MonoBehaviour
         //playBtn.interactable = isOver;
         //autoPlayBtn.interactable = isOver;
         //settingsBtn.interactable = isOver;
-        betUp.interactable = isOver;
-        betDown.interactable = isOver;
+        if (betUp != null)
+        {
+            betUp.interactable = isOver;
+        }
+
+        if (betDown != null)
+        {
+            betDown.interactable = isOver;
+        }
     }
     
 }

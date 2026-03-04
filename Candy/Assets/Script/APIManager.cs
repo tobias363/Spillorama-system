@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using SimpleJSON;
 
-public class APIManager : MonoBehaviour
+public partial class APIManager : MonoBehaviour
 {
     public static APIManager instance;
 
@@ -23,9 +23,19 @@ public class APIManager : MonoBehaviour
     [SerializeField] private bool triggerAutoLoginWhenAuthMissing = true;
     [SerializeField] private bool logBootstrapEvents = false;
     [SerializeField] private bool playButtonStartsAndDrawsRealtime = true;
+    [SerializeField] private bool realtimeScheduledRounds = true;
     [SerializeField] private bool drawImmediatelyAfterManualStart = true;
+    [SerializeField] private bool scheduledModeManualStartFallback = true;
+    [SerializeField] private bool syncRealtimeEntryFeeWithBetSelector = true;
+    [SerializeField] private bool centerRealtimeCountdownUnderBalls = true;
+    [SerializeField] private Vector2 realtimeCountdownOffset = new Vector2(0f, -155f);
+    [SerializeField] [Range(1f, 2f)] private float realtimeCountdownWidthMultiplier = 1.3f;
+    [SerializeField] [Range(0.15f, 0.6f)] private float realtimeCountdownMinParentWidthRatio = 0.3f;
+    [SerializeField] [Min(120f)] private float realtimeCountdownMinWidth = 240f;
+    [SerializeField] [Min(0f)] private float realtimeCountdownEdgePadding = 32f;
     [SerializeField] [Range(1, 5)] private int realtimeTicketsPerPlayer = 4;
     [SerializeField] private int realtimeEntryFee = 0;
+    [SerializeField] private BallManager ballManager;
     [SerializeField] private string roomCode = "";
     [SerializeField] private string hallId = "";
     [SerializeField] private string playerName = "Player";
@@ -51,6 +61,10 @@ public class APIManager : MonoBehaviour
     private List<List<int>> activeTicketSets = new();
     private bool isJoinOrCreatePending = false;
     private float joinOrCreateIssuedAtRealtime = -1f;
+    private float nextCountdownRefreshAt = -1f;
+    private readonly RealtimeSchedulerState realtimeScheduler = new();
+    private readonly RealtimeCountdownPresenter realtimeCountdownPresenter = new();
+    private readonly RealtimeRoomConfigurator realtimeRoomConfigurator = new();
 
     public bool UseRealtimeBackend => useRealtimeBackend;
     public string ActiveRoomCode => activeRoomCode;
@@ -116,6 +130,16 @@ public class APIManager : MonoBehaviour
         }
     }
 
+    void Update()
+    {
+        if (!useRealtimeBackend || !realtimeScheduledRounds)
+        {
+            return;
+        }
+
+        RefreshRealtimeCountdownLabel();
+    }
+
     private void BindRealtimeClient()
     {
         if (realtimeClient == null)
@@ -143,6 +167,39 @@ public class APIManager : MonoBehaviour
         realtimeClient.OnRoomUpdate += HandleRealtimeRoomUpdate;
         realtimeClient.OnError += HandleRealtimeError;
         realtimeClient.SetAccessToken(accessToken);
+    }
+
+    private BallManager ResolveBallManager()
+    {
+        if (ballManager != null)
+        {
+            return ballManager;
+        }
+
+        ballManager = FindObjectOfType<BallManager>();
+        return ballManager;
+    }
+
+    private void ResetRealtimeRoundVisuals()
+    {
+        BallManager resolved = ResolveBallManager();
+        if (resolved == null)
+        {
+            return;
+        }
+
+        resolved.ResetBalls();
+    }
+
+    private void ShowRealtimeDrawBall(int drawIndex, int drawnNumber)
+    {
+        BallManager resolved = ResolveBallManager();
+        if (resolved == null)
+        {
+            return;
+        }
+
+        resolved.ShowRealtimeDrawBall(drawIndex, drawnNumber);
     }
 
     private BingoAutoLogin ResolveAutoLogin()
@@ -272,6 +329,87 @@ public class APIManager : MonoBehaviour
     public void SetRoomCode(string newRoomCode)
     {
         roomCode = (newRoomCode ?? string.Empty).Trim().ToUpperInvariant();
+    }
+
+    public void SetRealtimeEntryFeeFromGameUI(int entryFee)
+    {
+        realtimeEntryFee = Mathf.Max(0, entryFee);
+
+        if (!useRealtimeBackend || !realtimeScheduledRounds)
+        {
+            return;
+        }
+
+        PushRealtimeRoomConfiguration();
+        RefreshRealtimeCountdownLabel(forceRefresh: true);
+    }
+
+    private void SyncRealtimeEntryFeeWithCurrentBet()
+    {
+        if (!syncRealtimeEntryFeeWithBetSelector)
+        {
+            return;
+        }
+
+        if (GameManager.instance == null)
+        {
+            return;
+        }
+
+        realtimeEntryFee = Mathf.Max(0, GameManager.instance.currentBet);
+    }
+
+    private void PushRealtimeRoomConfiguration()
+    {
+        realtimeRoomConfigurator.PushRoomConfiguration(
+            useRealtimeBackend,
+            realtimeScheduledRounds,
+            realtimeClient,
+            activeRoomCode,
+            activePlayerId,
+            realtimeEntryFee,
+            HandleRealtimeRoomUpdate);
+    }
+
+    private void ApplySchedulerMetadata(JSONNode snapshot)
+    {
+        realtimeScheduler.ApplySchedulerSnapshot(snapshot);
+    }
+
+    private void PositionRealtimeCountdownBelowBalls()
+    {
+        if (!centerRealtimeCountdownUnderBalls)
+        {
+            return;
+        }
+
+        realtimeCountdownPresenter.PositionUnderBalls(
+            GameManager.instance?.numberGenerator,
+            ResolveBallManager(),
+            realtimeCountdownOffset,
+            realtimeCountdownWidthMultiplier,
+            realtimeCountdownMinParentWidthRatio,
+            realtimeCountdownMinWidth,
+            realtimeCountdownEdgePadding);
+    }
+
+    private void RefreshRealtimeCountdownLabel(bool forceRefresh = false)
+    {
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        if (generator == null || generator.autoSpinRemainingPlayText == null)
+        {
+            return;
+        }
+
+        if (!forceRefresh && Time.unscaledTime < nextCountdownRefreshAt)
+        {
+            return;
+        }
+        nextCountdownRefreshAt = Time.unscaledTime + 0.2f;
+
+        PositionRealtimeCountdownBelowBalls();
+        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        generator.autoSpinRemainingPlayText.text = realtimeScheduler.BuildCountdownLabel(nowMs);
     }
 
     public void NextTicketPage()
@@ -405,7 +543,20 @@ public class APIManager : MonoBehaviour
 
         if (!ack.ok)
         {
-            if (IsRoomNotFound(ack))
+            if (RealtimeRoomStateUtils.IsPlayerAlreadyInRunningGame(ack))
+            {
+                string existingRoomCode = RealtimeRoomStateUtils.ExtractRoomCodeFromAlreadyRunningMessage(ack.errorMessage);
+                if (!string.IsNullOrWhiteSpace(existingRoomCode))
+                {
+                    Debug.LogWarning($"[APIManager] Spiller er allerede i aktivt spill. Forsoker reconnect til rom {existingRoomCode}.");
+                    activeRoomCode = existingRoomCode;
+                    roomCode = existingRoomCode;
+                    realtimeClient.RequestRoomState(existingRoomCode, HandleRecoverExistingRoomStateAck);
+                    return;
+                }
+            }
+
+            if (RealtimeRoomStateUtils.IsRoomNotFound(ack))
             {
                 Debug.LogWarning("[APIManager] room ack feilet med ROOM_NOT_FOUND. Rommet kan vaere foreldet etter reconnect.");
             }
@@ -435,6 +586,12 @@ public class APIManager : MonoBehaviour
         }
 
         Debug.Log($"[APIManager] Connected to room {activeRoomCode} as player {activePlayerId}");
+
+        if (realtimeScheduledRounds)
+        {
+            SyncRealtimeEntryFeeWithCurrentBet();
+            PushRealtimeRoomConfiguration();
+        }
 
         JSONNode snapshot = data["snapshot"];
         if (snapshot != null && !snapshot.IsNull)
@@ -493,7 +650,7 @@ public class APIManager : MonoBehaviour
         {
             if (ack == null || !ack.ok)
             {
-                if (IsRoomNotFound(ack))
+                if (RealtimeRoomStateUtils.IsRoomNotFound(ack))
                 {
                     Debug.LogWarning("[APIManager] room:state feilet med ROOM_NOT_FOUND. Nullstiller stale room-state.");
                     ResetActiveRoomState(clearDesiredRoomCode: true);
@@ -515,275 +672,18 @@ public class APIManager : MonoBehaviour
         });
     }
 
-    public void PlayRealtimeRound()
-    {
-        if (!useRealtimeBackend)
-        {
-            return;
-        }
-
-        if (!playButtonStartsAndDrawsRealtime)
-        {
-            RequestRealtimeState();
-            return;
-        }
-
-        BindRealtimeClient();
-        if (realtimeClient == null)
-        {
-            return;
-        }
-
-        string desiredAccessToken = (accessToken ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(desiredAccessToken))
-        {
-            RequestRealtimeState();
-            return;
-        }
-
-        string desiredHallId = (hallId ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(desiredHallId))
-        {
-            RequestRealtimeState();
-            return;
-        }
-
-        if (!realtimeClient.IsReady)
-        {
-            realtimeClient.Connect();
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            JoinOrCreateRoom();
-            return;
-        }
-
-        realtimeClient.RequestRoomState(activeRoomCode, HandlePlayRoomStateAck);
-    }
-
-    private void HandlePlayRoomStateAck(SocketAck ack)
+    private void HandleRecoverExistingRoomStateAck(SocketAck ack)
     {
         if (ack == null || !ack.ok)
         {
-            if (IsRoomNotFound(ack))
-            {
-                Debug.LogWarning("[APIManager] Play: room finnes ikke lenger. Oppretter nytt rom.");
-                ResetActiveRoomState(clearDesiredRoomCode: true);
-                JoinOrCreateRoom();
-                return;
-            }
-
-            Debug.LogError($"[APIManager] Play: room:state failed: {ack?.errorCode} {ack?.errorMessage}");
+            Debug.LogError($"[APIManager] recover room:state failed: {ack?.errorCode} {ack?.errorMessage}");
             return;
         }
 
         JSONNode snapshot = ack.data?["snapshot"];
-        if (snapshot != null && !snapshot.IsNull)
-        {
-            HandleRealtimeRoomUpdate(snapshot);
-        }
-
-        JSONNode currentGame = snapshot?["currentGame"];
-        bool isRunning = currentGame != null &&
-                         !currentGame.IsNull &&
-                         string.Equals(currentGame["status"], "RUNNING", StringComparison.OrdinalIgnoreCase);
-
-        if (!isRunning)
-        {
-            StartRealtimeGameFromPlayButton();
-            return;
-        }
-
-        DrawRealtimeNumberFromPlayButton();
-    }
-
-    private void StartRealtimeGameFromPlayButton()
-    {
-        if (realtimeClient == null || !realtimeClient.IsReady)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            return;
-        }
-
-        int ticketsPerPlayer = Mathf.Clamp(realtimeTicketsPerPlayer, 1, 5);
-        int entryFee = Mathf.Max(0, realtimeEntryFee);
-
-        realtimeClient.StartGame(activeRoomCode, activePlayerId, entryFee, ticketsPerPlayer, (startAck) =>
-        {
-            if (startAck == null || !startAck.ok)
-            {
-                if (string.Equals(startAck?.errorCode, "NOT_ENOUGH_PLAYERS", StringComparison.OrdinalIgnoreCase))
-                {
-                    string serverMessage = string.IsNullOrWhiteSpace(startAck?.errorMessage)
-                        ? "Trenger flere spillere i rommet."
-                        : startAck.errorMessage;
-                    Debug.LogWarning("[APIManager] Kan ikke starte runde: " + serverMessage);
-                    return;
-                }
-
-                Debug.LogError($"[APIManager] game:start failed: {startAck?.errorCode} {startAck?.errorMessage}");
-                return;
-            }
-
-            JSONNode snapshot = startAck.data?["snapshot"];
-            if (snapshot != null && !snapshot.IsNull)
-            {
-                HandleRealtimeRoomUpdate(snapshot);
-            }
-
-            if (drawImmediatelyAfterManualStart)
-            {
-                DrawRealtimeNumberFromPlayButton();
-            }
-        });
-    }
-
-    private void DrawRealtimeNumberFromPlayButton()
-    {
-        if (realtimeClient == null || !realtimeClient.IsReady)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            return;
-        }
-
-        realtimeClient.DrawNext(activeRoomCode, activePlayerId, (drawAck) =>
-        {
-            if (drawAck == null || !drawAck.ok)
-            {
-                Debug.LogError($"[APIManager] draw:next failed: {drawAck?.errorCode} {drawAck?.errorMessage}");
-                return;
-            }
-
-            JSONNode snapshot = drawAck.data?["snapshot"];
-            if (snapshot != null && !snapshot.IsNull)
-            {
-                HandleRealtimeRoomUpdate(snapshot);
-            }
-        });
-    }
-
-    private void HandleResumeAck(SocketAck ack)
-    {
-        if (ack == null || !ack.ok)
-        {
-            Debug.LogError($"[APIManager] room:resume failed: {ack?.errorCode} {ack?.errorMessage}");
-            if (IsRoomNotFound(ack))
-            {
-                ResetActiveRoomState(clearDesiredRoomCode: true);
-            }
-            else
-            {
-                activePlayerId = string.Empty;
-            }
-            if (joinOrCreateOnStart)
-            {
-                JoinOrCreateRoom();
-            }
-            return;
-        }
-
-        JSONNode snapshot = ack.data?["snapshot"];
-        if (snapshot != null && !snapshot.IsNull)
-        {
-            HandleRealtimeRoomUpdate(snapshot);
-            return;
-        }
-
-        realtimeClient.RequestRoomState(activeRoomCode, (stateAck) =>
-        {
-            if (stateAck == null || !stateAck.ok)
-            {
-                if (IsRoomNotFound(stateAck))
-                {
-                    Debug.LogWarning("[APIManager] room:state after resume feilet med ROOM_NOT_FOUND. Oppretter nytt rom.");
-                    ResetActiveRoomState(clearDesiredRoomCode: true);
-                    if (joinOrCreateOnStart)
-                    {
-                        JoinOrCreateRoom();
-                    }
-                    return;
-                }
-                Debug.LogError($"[APIManager] room:state after resume failed: {stateAck?.errorCode} {stateAck?.errorMessage}");
-                return;
-            }
-
-            JSONNode stateSnapshot = stateAck.data?["snapshot"];
-            if (stateSnapshot != null && !stateSnapshot.IsNull)
-            {
-                HandleRealtimeRoomUpdate(stateSnapshot);
-            }
-        });
-    }
-
-    public void ClaimLine()
-    {
-        if (!CanSendClaim())
-        {
-            return;
-        }
-        realtimeClient.SubmitClaim(activeRoomCode, activePlayerId, "LINE", HandleClaimAck);
-    }
-
-    public void ClaimBingo()
-    {
-        if (!CanSendClaim())
-        {
-            return;
-        }
-        realtimeClient.SubmitClaim(activeRoomCode, activePlayerId, "BINGO", HandleClaimAck);
-    }
-
-    private bool CanSendClaim()
-    {
-        if (!useRealtimeBackend || realtimeClient == null || !realtimeClient.IsReady)
-        {
-            Debug.LogWarning("[APIManager] Realtime client not ready for claim.");
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            Debug.LogWarning("[APIManager] Missing room/player for claim.");
-            return false;
-        }
-
-        return true;
-    }
-
-    private void HandleClaimAck(SocketAck ack)
-    {
-        if (ack == null)
-        {
-            return;
-        }
-
-        if (!ack.ok)
-        {
-            Debug.LogError($"[APIManager] claim failed: {ack.errorCode} {ack.errorMessage}");
-            return;
-        }
-
-        JSONNode snapshot = ack.data?["snapshot"];
-        if (snapshot != null && !snapshot.IsNull)
-        {
-            HandleRealtimeRoomUpdate(snapshot);
-        }
-    }
-
-    private void HandleRealtimeRoomUpdate(JSONNode snapshot)
-    {
         if (snapshot == null || snapshot.IsNull)
         {
+            Debug.LogError("[APIManager] recover room:state mangler snapshot.");
             return;
         }
 
@@ -794,367 +694,24 @@ public class APIManager : MonoBehaviour
             roomCode = activeRoomCode;
         }
 
-        string snapshotHallId = snapshot["hallId"];
-        if (!string.IsNullOrWhiteSpace(snapshotHallId))
+        string resolvedPlayerId = RealtimeRoomStateUtils.ResolvePlayerIdFromSnapshot(snapshot, walletId, playerName);
+        if (string.IsNullOrWhiteSpace(resolvedPlayerId))
         {
-            hallId = snapshotHallId.Trim();
-        }
-
-        JSONNode currentGame = snapshot["currentGame"];
-        if (currentGame == null || currentGame.IsNull)
-        {
-            activeGameId = string.Empty;
-            processedDrawCount = 0;
-            currentTicketPage = 0;
-            activeTicketSets.Clear();
+            Debug.LogWarning("[APIManager] Klarte ikke finne playerId i eksisterende rom-snapshot.");
+            HandleRealtimeRoomUpdate(snapshot);
             return;
         }
 
-        string gameId = currentGame["id"];
-        if (string.IsNullOrWhiteSpace(gameId))
+        activePlayerId = resolvedPlayerId;
+        Debug.Log($"[APIManager] Reconnect: fant existing room {activeRoomCode} med player {activePlayerId}.");
+
+        if (realtimeClient != null && realtimeClient.IsReady)
         {
+            realtimeClient.ResumeRoom(activeRoomCode, activePlayerId, HandleResumeAck);
             return;
         }
 
-        if (!string.Equals(activeGameId, gameId, StringComparison.Ordinal))
-        {
-            activeGameId = gameId;
-            processedDrawCount = 0;
-            currentTicketPage = 0;
-        }
-
-        ApplyMyTicketToCards(currentGame);
-        ApplyDrawnNumbers(currentGame);
-    }
-
-    private void ApplyMyTicketToCards(JSONNode currentGame)
-    {
-        if (string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            return;
-        }
-
-        JSONNode tickets = currentGame["tickets"];
-        if (tickets == null || tickets.IsNull)
-        {
-            return;
-        }
-
-        JSONNode myTicketsNode = tickets[activePlayerId];
-        if (myTicketsNode == null || myTicketsNode.IsNull)
-        {
-            return;
-        }
-
-        List<List<int>> ticketSets = ExtractTicketSets(myTicketsNode);
-        if (ticketSets.Count == 0)
-        {
-            return;
-        }
-
-        activeTicketSets = ticketSets;
-        ApplyTicketSetsToCards(ticketSets);
-    }
-
-    private void ApplyTicketSetsToCards(List<List<int>> ticketSets)
-    {
-        if (ticketSets == null || ticketSets.Count == 0)
-        {
-            return;
-        }
-
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator == null || generator.cardClasses == null)
-        {
-            return;
-        }
-
-        int cardSlots = Mathf.Max(1, generator.cardClasses.Length);
-        int pageCount = Mathf.Max(1, Mathf.CeilToInt((float)ticketSets.Count / cardSlots));
-        if (!enableTicketPaging)
-        {
-            currentTicketPage = 0;
-        }
-        if (currentTicketPage >= pageCount)
-        {
-            currentTicketPage = 0;
-        }
-        int pageStartIndex = currentTicketPage * cardSlots;
-
-        for (int cardIndex = 0; cardIndex < generator.cardClasses.Length; cardIndex++)
-        {
-            CardClass card = generator.cardClasses[cardIndex];
-            if (card == null)
-            {
-                continue;
-            }
-
-            card.numb.Clear();
-            card.selectedPayLineCanBe.Clear();
-            card.paylineindex.Clear();
-
-            for (int i = 0; i < card.payLinePattern.Count; i++)
-            {
-                card.payLinePattern[i] = 0;
-            }
-
-            for (int i = 0; i < card.selectionImg.Count; i++)
-            {
-                card.selectionImg[i].SetActive(false);
-            }
-
-            for (int i = 0; i < card.missingPatternImg.Count; i++)
-            {
-                card.missingPatternImg[i].SetActive(false);
-            }
-
-            for (int i = 0; i < card.matchPatternImg.Count; i++)
-            {
-                card.matchPatternImg[i].SetActive(false);
-            }
-
-            for (int i = 0; i < card.paylineObj.Count; i++)
-            {
-                card.paylineObj[i].SetActive(false);
-            }
-
-            List<int> sourceTicket = null;
-            int ticketIndex = pageStartIndex + cardIndex;
-            if (ticketIndex < ticketSets.Count)
-            {
-                sourceTicket = NormalizeTicketNumbers(ticketSets[ticketIndex]);
-            }
-            else if (duplicateTicketAcrossAllCards && ticketSets.Count == 1)
-            {
-                sourceTicket = NormalizeTicketNumbers(ticketSets[0]);
-            }
-
-            bool shouldPopulate = sourceTicket != null;
-            for (int cellIndex = 0; cellIndex < 15; cellIndex++)
-            {
-                int value = shouldPopulate ? sourceTicket[cellIndex] : 0;
-                card.numb.Add(value);
-
-                if (cellIndex < card.num_text.Count)
-                {
-                    card.num_text[cellIndex].text = shouldPopulate ? value.ToString() : "-";
-                }
-            }
-        }
-
-        Debug.Log($"[APIManager] Applied ticket page {currentTicketPage + 1}/{pageCount} ({ticketSets.Count} total ticket(s)) for player {activePlayerId}. Room {activeRoomCode}, game {activeGameId}");
-    }
-
-    private void ApplyDrawnNumbers(JSONNode currentGame)
-    {
-        JSONNode drawnNumbers = currentGame["drawnNumbers"];
-        if (drawnNumbers == null || drawnNumbers.IsNull || !drawnNumbers.IsArray)
-        {
-            return;
-        }
-
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator == null || generator.cardClasses == null)
-        {
-            return;
-        }
-
-        for (int drawIndex = processedDrawCount; drawIndex < drawnNumbers.Count; drawIndex++)
-        {
-            int drawnNumber = drawnNumbers[drawIndex].AsInt;
-            MarkDrawnNumberOnCards(generator, drawnNumber);
-
-            if (autoMarkDrawnNumbers && TicketContainsInAnyTicketSet(activeTicketSets, drawnNumber) &&
-                !string.IsNullOrWhiteSpace(activeRoomCode) && !string.IsNullOrWhiteSpace(activePlayerId) &&
-                realtimeClient != null && realtimeClient.IsReady)
-            {
-                realtimeClient.MarkNumber(activeRoomCode, activePlayerId, drawnNumber, null);
-            }
-        }
-
-        processedDrawCount = drawnNumbers.Count;
-    }
-
-    private static bool TicketContainsInAnyTicketSet(List<List<int>> ticketSets, int number)
-    {
-        if (ticketSets == null || ticketSets.Count == 0)
-        {
-            return false;
-        }
-
-        foreach (List<int> ticket in ticketSets)
-        {
-            if (ticket != null && ticket.Contains(number))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static void MarkDrawnNumberOnCards(NumberGenerator generator, int drawnNumber)
-    {
-        foreach (CardClass card in generator.cardClasses)
-        {
-            if (card == null)
-            {
-                continue;
-            }
-
-            for (int cellIndex = 0; cellIndex < card.numb.Count && cellIndex < card.selectionImg.Count; cellIndex++)
-            {
-                if (card.numb[cellIndex] == drawnNumber)
-                {
-                    card.selectionImg[cellIndex].SetActive(true);
-                    if (cellIndex < card.payLinePattern.Count)
-                    {
-                        card.payLinePattern[cellIndex] = 1;
-                    }
-                }
-            }
-        }
-    }
-
-    private static List<int> FlattenTicketGrid(JSONNode gridNode)
-    {
-        List<int> values = new();
-        if (gridNode == null || gridNode.IsNull || !gridNode.IsArray)
-        {
-            return values;
-        }
-
-        for (int row = 0; row < gridNode.Count; row++)
-        {
-            JSONNode rowNode = gridNode[row];
-            if (rowNode == null || rowNode.IsNull || !rowNode.IsArray)
-            {
-                continue;
-            }
-
-            for (int col = 0; col < rowNode.Count; col++)
-            {
-                int number = rowNode[col].AsInt;
-                if (number > 0 && !values.Contains(number))
-                {
-                    values.Add(number);
-                }
-            }
-        }
-
-        return values;
-    }
-
-    private static List<int> NormalizeTicketNumbers(List<int> source)
-    {
-        List<int> numbers = source == null ? new List<int>() : new List<int>(source);
-        while (numbers.Count < 15)
-        {
-            int fallback = UnityEngine.Random.Range(1, 76);
-            if (!numbers.Contains(fallback))
-            {
-                numbers.Add(fallback);
-            }
-        }
-
-        if (numbers.Count > 15)
-        {
-            numbers = numbers.GetRange(0, 15);
-        }
-
-        return numbers;
-    }
-
-    private static List<List<int>> ExtractTicketSets(JSONNode myTicketsNode)
-    {
-        List<List<int>> ticketSets = new();
-        if (myTicketsNode == null || myTicketsNode.IsNull)
-        {
-            return ticketSets;
-        }
-
-        if (myTicketsNode.IsArray)
-        {
-            for (int i = 0; i < myTicketsNode.Count; i++)
-            {
-                List<int> flat = FlattenTicketGrid(myTicketsNode[i]?["grid"]);
-                if (flat.Count > 0)
-                {
-                    ticketSets.Add(flat);
-                }
-            }
-            return ticketSets;
-        }
-
-        List<int> single = FlattenTicketGrid(myTicketsNode["grid"]);
-        if (single.Count > 0)
-        {
-            ticketSets.Add(single);
-        }
-        return ticketSets;
-    }
-
-    private int GetCardSlotsCount()
-    {
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator != null && generator.cardClasses != null && generator.cardClasses.Length > 0)
-        {
-            return generator.cardClasses.Length;
-        }
-
-        return 1;
-    }
-
-    private static bool IsRoomNotFound(SocketAck ack)
-    {
-        if (ack == null)
-        {
-            return false;
-        }
-
-        return string.Equals(ack.errorCode, "ROOM_NOT_FOUND", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private void ResetActiveRoomState(bool clearDesiredRoomCode)
-    {
-        ClearJoinOrCreatePending();
-        activeRoomCode = string.Empty;
-        activePlayerId = string.Empty;
-        activeGameId = string.Empty;
-        processedDrawCount = 0;
-        currentTicketPage = 0;
-        activeTicketSets.Clear();
-
-        if (clearDesiredRoomCode)
-        {
-            roomCode = string.Empty;
-        }
-    }
-
-    private void MarkJoinOrCreatePending()
-    {
-        isJoinOrCreatePending = true;
-        joinOrCreateIssuedAtRealtime = Time.realtimeSinceStartup;
-    }
-
-    private void ClearJoinOrCreatePending()
-    {
-        isJoinOrCreatePending = false;
-        joinOrCreateIssuedAtRealtime = -1f;
-    }
-
-    private bool IsJoinOrCreateTimedOut()
-    {
-        if (!isJoinOrCreatePending)
-        {
-            return false;
-        }
-
-        if (joinOrCreateIssuedAtRealtime < 0f)
-        {
-            return true;
-        }
-
-        return (Time.realtimeSinceStartup - joinOrCreateIssuedAtRealtime) > 8f;
+        HandleRealtimeRoomUpdate(snapshot);
     }
 
     public void CallApisForFetchData()
