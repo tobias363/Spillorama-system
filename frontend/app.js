@@ -16,7 +16,10 @@ const state = {
   playerId: "",
   snapshot: null,
   walletState: null,
-  lastSwedbankIntentId: ""
+  lastSwedbankIntentId: "",
+  lastSwedbankCheckoutUrl: "",
+  swedbankStatusPollTimer: null,
+  swedbankStatusPollInFlight: false
 };
 
 const els = {
@@ -31,6 +34,13 @@ const els = {
   walletRefreshBtn: document.getElementById("walletRefreshBtn"),
   userBadge: document.getElementById("userBadge"),
   logoutBtn: document.getElementById("logoutBtn"),
+  swedbankCheckoutModal: document.getElementById("swedbankCheckoutModal"),
+  swedbankCheckoutTitle: document.getElementById("swedbankCheckoutTitle"),
+  swedbankCheckoutStatus: document.getElementById("swedbankCheckoutStatus"),
+  swedbankCheckoutFrame: document.getElementById("swedbankCheckoutFrame"),
+  swedbankConfirmBtn: document.getElementById("swedbankConfirmBtn"),
+  swedbankOpenExternalBtn: document.getElementById("swedbankOpenExternalBtn"),
+  swedbankCloseBtn: document.getElementById("swedbankCloseBtn"),
 
   authView: document.getElementById("authView"),
   appView: document.getElementById("appView"),
@@ -85,6 +95,9 @@ const els = {
 };
 
 function setStatusBox(element, text, tone = "neutral") {
+  if (!element) {
+    return;
+  }
   element.textContent = text;
   element.classList.remove("error", "success");
   if (tone === "error") {
@@ -93,6 +106,115 @@ function setStatusBox(element, text, tone = "neutral") {
   if (tone === "success") {
     element.classList.add("success");
   }
+}
+
+function setSwedbankModalVisible(visible) {
+  if (!els.swedbankCheckoutModal) {
+    return;
+  }
+  els.swedbankCheckoutModal.classList.toggle("hidden", !visible);
+  document.body.classList.toggle("modal-open", visible);
+}
+
+function stopSwedbankStatusPolling() {
+  if (state.swedbankStatusPollTimer) {
+    window.clearInterval(state.swedbankStatusPollTimer);
+    state.swedbankStatusPollTimer = null;
+  }
+  state.swedbankStatusPollInFlight = false;
+}
+
+function closeSwedbankCheckoutModal() {
+  stopSwedbankStatusPolling();
+  setSwedbankModalVisible(false);
+  if (els.swedbankCheckoutFrame) {
+    els.swedbankCheckoutFrame.removeAttribute("src");
+  }
+}
+
+function openSwedbankCheckoutModal(intent) {
+  if (!els.swedbankCheckoutModal || !els.swedbankCheckoutFrame) {
+    return false;
+  }
+
+  const preferredUrl = (intent?.viewUrl || intent?.redirectUrl || "").trim();
+  if (!preferredUrl) {
+    return false;
+  }
+
+  state.lastSwedbankCheckoutUrl = preferredUrl;
+  els.swedbankCheckoutFrame.src = preferredUrl;
+  if (els.swedbankCheckoutTitle) {
+    els.swedbankCheckoutTitle.textContent = `Swedbank betaling (${intent?.amountMajor ?? "-"} ${intent?.currency ?? "NOK"})`;
+  }
+  setSwedbankModalVisible(true);
+  return true;
+}
+
+function formatSwedbankIntentLines(intent) {
+  return [
+    `Intent: ${intent.id}`,
+    `Reference: ${intent.orderReference}`,
+    `Beløp: ${intent.amountMajor} ${intent.currency}`,
+    `Status: ${intent.status}`,
+    intent.creditedAt ? `Kreditert: ${intent.creditedAt}` : "Kreditert: Nei ennå"
+  ];
+}
+
+async function applySwedbankIntentStatus(intent, tone = "success") {
+  state.lastSwedbankIntentId = intent.id;
+  if (intent.viewUrl || intent.redirectUrl) {
+    state.lastSwedbankCheckoutUrl = (intent.viewUrl || intent.redirectUrl || "").trim();
+  }
+
+  const lines = formatSwedbankIntentLines(intent);
+  setStatusBox(els.walletStatus, lines.join("\n"), tone);
+  setStatusBox(els.swedbankCheckoutStatus, lines.join("\n"), tone);
+
+  if (intent.status === "CREDITED") {
+    stopSwedbankStatusPolling();
+    await loadWalletState();
+    await refreshRoomStateIfConnected();
+  }
+}
+
+async function refreshSwedbankIntentStatus(intentId, confirm = false) {
+  if (!intentId) {
+    throw new Error("Mangler intentId.");
+  }
+  if (confirm) {
+    return api("/api/payments/swedbank/confirm", {
+      method: "POST",
+      body: { intentId }
+    });
+  }
+  return api(`/api/payments/swedbank/intents/${encodeURIComponent(intentId)}?refresh=true`);
+}
+
+function startSwedbankStatusPolling(intentId) {
+  stopSwedbankStatusPolling();
+  if (!intentId) {
+    return;
+  }
+
+  state.swedbankStatusPollTimer = window.setInterval(async () => {
+    if (state.swedbankStatusPollInFlight) {
+      return;
+    }
+    state.swedbankStatusPollInFlight = true;
+    try {
+      const intent = await refreshSwedbankIntentStatus(intentId, false);
+      await applySwedbankIntentStatus(intent);
+    } catch (error) {
+      setStatusBox(
+        els.swedbankCheckoutStatus,
+        error.message || "Klarte ikke hente status fra Swedbank.",
+        "error"
+      );
+    } finally {
+      state.swedbankStatusPollInFlight = false;
+    }
+  }, 8000);
 }
 
 function saveAuthToStorage() {
@@ -126,6 +248,7 @@ function loadAuthFromStorage() {
 }
 
 function resetAuthState() {
+  closeSwedbankCheckoutModal();
   state.accessToken = "";
   state.sessionExpiresAt = "";
   state.user = null;
@@ -139,6 +262,7 @@ function resetAuthState() {
   state.snapshot = null;
   state.walletState = null;
   state.lastSwedbankIntentId = "";
+  state.lastSwedbankCheckoutUrl = "";
   saveAuthToStorage();
 }
 
@@ -840,26 +964,17 @@ async function onWalletTopup() {
       method: "POST",
       body: { amount }
     });
-    state.lastSwedbankIntentId = intent.id;
-
-    const lines = [
-      `Intent: ${intent.id}`,
-      `Order reference: ${intent.orderReference}`,
-      `Beløp: ${intent.amountMajor} ${intent.currency}`,
-      `Status: ${intent.status}`,
-      ""
-    ];
-
-    if (intent.redirectUrl) {
-      lines.push("Checkout åpnes i ny fane.");
-      window.open(intent.redirectUrl, "_blank", "noopener,noreferrer");
-    } else if (intent.viewUrl) {
-      lines.push(`Ingen redirect-url. Bruk view-url: ${intent.viewUrl}`);
-    } else {
-      lines.push("Ingen checkout-url mottatt fra Swedbank.");
+    await applySwedbankIntentStatus(intent);
+    const opened = openSwedbankCheckoutModal(intent);
+    if (!opened) {
+      setStatusBox(
+        els.walletStatus,
+        "Mottok ingen iframe-url fra Swedbank. Bruk 'Åpne i ny fane' hvis URL finnes.",
+        "error"
+      );
+      return;
     }
-
-    setStatusBox(els.walletStatus, lines.join("\n"), "success");
+    startSwedbankStatusPolling(intent.id);
   } catch (error) {
     setStatusBox(els.walletStatus, error.message || "Top-up feilet.", "error");
   }
@@ -867,40 +982,29 @@ async function onWalletTopup() {
 
 async function onSwedbankIntent() {
   try {
-    const suggestedIntentId = state.lastSwedbankIntentId || "";
-    const input = window.prompt("Skriv inn Swedbank intentId for status/confirm:", suggestedIntentId);
-    if (input === null) {
-      return;
-    }
-    const intentId = input.trim() || suggestedIntentId;
+    const intentId = (state.lastSwedbankIntentId || "").trim();
     if (!intentId) {
-      throw new Error("Mangler intentId.");
+      throw new Error("Ingen aktiv Swedbank intent. Trykk 'Fyll på' først.");
     }
 
-    const intent = await api("/api/payments/swedbank/confirm", {
-      method: "POST",
-      body: { intentId }
-    });
-    state.lastSwedbankIntentId = intent.id;
-
-    if (intent.status === "CREDITED") {
-      await loadWalletState();
-      await refreshRoomStateIfConnected();
-    }
-
-    const lines = [
-      `Provider: ${intent.provider}`,
-      `Intent: ${intent.id}`,
-      `Reference: ${intent.orderReference}`,
-      `Wallet: ${intent.walletId}`,
-      `Beløp: ${intent.amountMajor} ${intent.currency}`,
-      `Status: ${intent.status}`,
-      intent.creditedAt ? `Kreditert: ${intent.creditedAt}` : "Kreditert: Nei ennå"
-    ];
-    setStatusBox(els.walletStatus, lines.join("\n"), "success");
+    const intent = await refreshSwedbankIntentStatus(intentId, true);
+    await applySwedbankIntentStatus(intent);
   } catch (error) {
     setStatusBox(els.walletStatus, error.message || "Klarte ikke avstemme Swedbank intent.", "error");
   }
+}
+
+function onSwedbankClose() {
+  closeSwedbankCheckoutModal();
+}
+
+function onSwedbankOpenExternal() {
+  const url = (state.lastSwedbankCheckoutUrl || "").trim();
+  if (!url) {
+    setStatusBox(els.walletStatus, "Ingen checkout-url tilgjengelig.", "error");
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function buildRoomIdentityPayload() {
@@ -1141,6 +1245,22 @@ els.logoutBtn.addEventListener("click", onLogout);
 els.walletRefreshBtn.addEventListener("click", onWalletRefresh);
 els.walletTopupBtn.addEventListener("click", onWalletTopup);
 els.walletSwedbankIntentBtn.addEventListener("click", onSwedbankIntent);
+if (els.swedbankCloseBtn) {
+  els.swedbankCloseBtn.addEventListener("click", onSwedbankClose);
+}
+if (els.swedbankConfirmBtn) {
+  els.swedbankConfirmBtn.addEventListener("click", onSwedbankIntent);
+}
+if (els.swedbankOpenExternalBtn) {
+  els.swedbankOpenExternalBtn.addEventListener("click", onSwedbankOpenExternal);
+}
+if (els.swedbankCheckoutModal) {
+  els.swedbankCheckoutModal.addEventListener("click", (event) => {
+    if (event.target === els.swedbankCheckoutModal) {
+      onSwedbankClose();
+    }
+  });
+}
 if (els.kycVerifyBtn) {
   els.kycVerifyBtn.addEventListener("click", onKycVerify);
 }
@@ -1162,6 +1282,7 @@ els.bingoClaimBingoBtn.addEventListener("click", () => onBingoClaim("BINGO"));
 els.adminSaveGameBtn.addEventListener("click", onAdminSaveGame);
 
 function initialRender() {
+  closeSwedbankCheckoutModal();
   renderLayoutForAuth();
   renderUserBadge();
   renderWalletMini();
@@ -1181,7 +1302,7 @@ async function bootstrap() {
       state.lastSwedbankIntentId = intentFromUrl;
       setStatusBox(
         els.walletStatus,
-        `Fant swedbank_intent i URL: ${intentFromUrl}\nTrykk \"Swedbank intent\" for å bekrefte status.`,
+        `Fant swedbank_intent i URL: ${intentFromUrl}\nTrykk \"Bekreft betaling\" for å oppdatere status.`,
         "success"
       );
     }

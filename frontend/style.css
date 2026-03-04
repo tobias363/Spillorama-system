@@ -24,6 +24,10 @@ body {
     var(--bg);
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
 .hidden {
   display: none !important;
 }
@@ -271,6 +275,52 @@ button:hover {
   align-items: center;
 }
 
+.checkout-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 20, 20, 0.55);
+  backdrop-filter: blur(2px);
+  padding: 12px;
+}
+
+.checkout-modal-card {
+  width: min(1120px, 98vw);
+  height: min(90vh, 860px);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 10px;
+  padding: 12px;
+  box-shadow: 0 12px 42px rgba(0, 0, 0, 0.28);
+}
+
+.checkout-modal-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.checkout-modal-header h2 {
+  margin: 0;
+}
+
+.checkout-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
 @media (max-width: 980px) {
   .topbar {
     grid-template-columns: 1fr;
@@ -286,5 +336,9 @@ button:hover {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .checkout-modal-card {
+    height: 95vh;
   }
 }

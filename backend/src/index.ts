@@ -74,6 +74,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 const frontendDir = path.resolve(__dirname, "../../frontend");
+const adminFrontendFile = path.resolve(frontendDir, "admin/index.html");
 const projectDir = path.resolve(__dirname, "../..");
 
 const app = express();
@@ -714,7 +715,35 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+app.post("/api/admin/auth/login", async (req, res) => {
+  try {
+    const email = mustBeNonEmptyString(req.body?.email, "email");
+    const password = mustBeNonEmptyString(req.body?.password, "password");
+    const session = await platformService.login({
+      email,
+      password
+    });
+    if (session.user.role !== "ADMIN") {
+      await platformService.logout(session.accessToken);
+      throw new DomainError("FORBIDDEN", "Kun admin-brukere kan logge inn i admin-panelet.");
+    }
+    apiSuccess(res, session);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
 app.post("/api/auth/logout", async (req, res) => {
+  try {
+    const accessToken = getAccessTokenFromRequest(req);
+    await platformService.logout(accessToken);
+    apiSuccess(res, { loggedOut: true });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.post("/api/admin/auth/logout", async (req, res) => {
   try {
     const accessToken = getAccessTokenFromRequest(req);
     await platformService.logout(accessToken);
@@ -727,6 +756,15 @@ app.post("/api/auth/logout", async (req, res) => {
 app.get("/api/auth/me", async (req, res) => {
   try {
     const user = await getAuthenticatedUser(req);
+    apiSuccess(res, user);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/auth/me", async (req, res) => {
+  try {
+    const user = await requireAdminUser(req);
     apiSuccess(res, user);
   } catch (error) {
     apiFailure(res, error);
@@ -1806,6 +1844,10 @@ io.on("connection", (socket: Socket) => {
 });
 
 app.get("*", (_req, res) => {
+  if (_req.path === "/admin" || _req.path === "/admin/") {
+    res.sendFile(adminFrontendFile);
+    return;
+  }
   res.sendFile(path.join(frontendDir, "index.html"));
 });
 

@@ -20,7 +20,7 @@
         </div>
         <input id="walletTopupAmount" type="number" min="1" value="100" />
         <button id="walletTopupBtn">Fyll på</button>
-        <button id="walletSwedbankIntentBtn">Swedbank intent</button>
+        <button id="walletSwedbankIntentBtn">Bekreft betaling</button>
         <button id="walletRefreshBtn">Oppdater saldo</button>
         <span id="userBadge" class="user-badge">Ikke innlogget</span>
         <button id="logoutBtn">Logg ut</button>
@@ -175,6 +175,21 @@
         </article>
       </section>
     </main>
+
+    <div id="swedbankCheckoutModal" class="checkout-modal hidden" role="dialog" aria-modal="true" aria-labelledby="swedbankCheckoutTitle">
+      <div class="checkout-modal-card">
+        <div class="checkout-modal-header">
+          <h2 id="swedbankCheckoutTitle">Swedbank betaling</h2>
+          <div class="row">
+            <button id="swedbankConfirmBtn">Oppdater status</button>
+            <button id="swedbankOpenExternalBtn">Åpne i ny fane</button>
+            <button id="swedbankCloseBtn">Lukk</button>
+          </div>
+        </div>
+        <pre id="swedbankCheckoutStatus" class="status-box">Ingen aktiv betaling.</pre>
+        <iframe id="swedbankCheckoutFrame" class="checkout-frame" title="Swedbank checkout"></iframe>
+      </div>
+    </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>
