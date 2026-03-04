@@ -148,10 +148,70 @@
         margin-bottom: 8px;
       }
 
+      .admin-shell {
+        display: grid;
+        grid-template-columns: 250px minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+        margin-top: 16px;
+      }
+
+      .admin-sidebar {
+        margin-top: 0;
+        position: sticky;
+        top: 16px;
+      }
+
+      .admin-sidebar h2 {
+        font-size: 18px;
+        margin-bottom: 12px;
+      }
+
+      .admin-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .admin-nav a {
+        display: block;
+        padding: 10px 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        text-decoration: none;
+        color: #111827;
+        background: #f9fafb;
+      }
+
+      .admin-nav a:hover {
+        background: #f3f4f6;
+      }
+
+      .admin-content .card:first-child {
+        margin-top: 0;
+      }
+
       @media (max-width: 980px) {
         .grid,
         .grid-3 {
           grid-template-columns: 1fr;
+        }
+
+        .admin-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .admin-sidebar {
+          position: static;
+        }
+
+        .admin-nav {
+          flex-direction: row;
+          flex-wrap: wrap;
+        }
+
+        .admin-nav a {
+          flex: 1 1 220px;
         }
       }
     </style>
@@ -182,7 +242,22 @@
       </section>
 
       <section id="adminCard" class="hidden">
-        <article class="card">
+        <div class="admin-shell">
+          <aside class="card admin-sidebar">
+            <h2>Meny</h2>
+            <nav class="admin-nav">
+              <a href="#section-games">Spillkatalog</a>
+              <a href="#section-halls">Haller</a>
+              <a href="#section-terminals">Terminaler</a>
+              <a href="#section-hall-rules">Hall-spillregler</a>
+              <a href="#section-wallet-compliance">Wallet Compliance</a>
+              <a href="#section-prize-policy">Prize Policy & Extra Prize</a>
+              <a href="#section-room-control">Romkontroll</a>
+            </nav>
+          </aside>
+
+          <div class="admin-content">
+        <article id="section-games" class="card">
           <div class="section-header">
             <h2>Spillkatalog</h2>
             <p id="adminIdentity" class="muted"></p>
@@ -232,7 +307,7 @@
           <pre id="adminStatus" class="status">Klar.</pre>
         </article>
 
-        <article class="card">
+        <article id="section-halls" class="card">
           <h2>Haller</h2>
           <div class="grid">
             <div class="field full">
@@ -271,7 +346,7 @@
           <pre id="hallStatus" class="status">Ingen haller lastet.</pre>
         </article>
 
-        <article class="card">
+        <article id="section-terminals" class="card">
           <h2>Terminaler</h2>
           <div class="grid-3">
             <div class="field">
@@ -310,7 +385,7 @@
           <pre id="terminalStatus" class="status">Ingen terminaler lastet.</pre>
         </article>
 
-        <article class="card">
+        <article id="section-hall-rules" class="card">
           <h2>Hall-spillregler</h2>
           <p class="muted">Styr per hall om spillet er aktivt, maks bonger og minimumsintervall mellom runder.</p>
           <div class="grid">
@@ -345,7 +420,7 @@
           <pre id="configStatus" class="status">Ingen konfig lastet.</pre>
         </article>
 
-        <article class="card">
+        <article id="section-wallet-compliance" class="card">
           <h2>Wallet Compliance</h2>
           <p class="muted">
             Hent compliance-status for wallet og styr tapsgrenser, pause og selvekskludering.
@@ -389,7 +464,7 @@
           <pre id="extraDrawDenialsStatus" class="status">Ingen denial-data hentet.</pre>
         </article>
 
-        <article class="card">
+        <article id="section-prize-policy" class="card">
           <h2>Prize Policy & Extra Prize</h2>
           <p class="muted">
             Se aktiv premiepolicy, oppdater policy og tildel ekstra premie manuelt.
@@ -456,7 +531,7 @@
           <pre id="extraPrizeStatus" class="status">Ingen extra prize sendt.</pre>
         </article>
 
-        <article class="card">
+        <article id="section-room-control" class="card">
           <h2>Romkontroll (Backend)</h2>
           <div class="grid">
             <div class="field">
@@ -493,6 +568,8 @@
           </div>
           <pre id="roomStatus" class="status">Ingen rom valgt.</pre>
         </article>
+          </div>
+        </div>
       </section>
     </main>
 
