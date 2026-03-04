@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Nordic Bingo Lounge</title>
+    <title>Nordisk Bingo</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&family=Cinzel:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Manrope:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/style.css" />
@@ -15,8 +15,8 @@
   <body>
     <header id="appHeader" class="topbar hidden">
       <div class="brand">
-        <p class="brand-kicker">Nordic Live</p>
-        <h1>Casino Lounge</h1>
+        <p class="brand-kicker">Nordisk Bingo</p>
+        <h1>Bingolobby</h1>
         <p id="activeGameLabel">Ingen spill valgt</p>
       </div>
 
@@ -28,16 +28,11 @@
           <strong id="walletMiniBalance">Saldo: 0</strong>
         </div>
 
-        <div class="topup-inline">
-          <label for="walletTopupAmount">Innskudd</label>
-          <input id="walletTopupAmount" type="number" min="1" value="100" />
-          <button id="walletTopupBtn" class="btn-primary">Sett inn</button>
-        </div>
-
-        <button id="walletSwedbankIntentBtn" class="btn-secondary">Bekreft betaling</button>
-        <button id="walletRefreshBtn" class="btn-secondary">Oppdater saldo</button>
         <button id="adminPortalBtn" class="btn-secondary hidden">Admin</button>
-        <span id="userBadge" class="user-badge">Ikke innlogget</span>
+        <button id="profileBtn" class="profile-btn">
+          <span id="profileAvatar" class="profile-avatar">?</span>
+          <span id="userBadge" class="user-badge">Min profil</span>
+        </button>
         <button id="logoutBtn" class="btn-ghost">Logg ut</button>
       </div>
     </header>
@@ -78,19 +73,19 @@
       </section>
 
       <section id="appView" class="hidden app-layout">
-        <article class="hero-panel">
-          <div class="hero-copy">
-            <p class="hero-kicker">Live Tables</p>
-            <h2 id="heroGameTitle">Velkommen til casino-lobbyen</h2>
-            <p id="heroGameDescription" class="subtle">
-              Velg spillkort under for å gå videre til riktig bord.
-            </p>
-          </div>
-          <div class="hero-side">
+        <section class="lobby-stage">
+          <div class="lobby-stage-head">
+            <div>
+              <p class="hero-kicker">Spilloversikt</p>
+              <h2 id="heroGameTitle">Bingoria</h2>
+              <p id="heroGameDescription" class="subtle">
+                Velg spillkort under for å gå videre til riktig spillflate.
+              </p>
+            </div>
             <p id="heroWelcome" class="subtle">Logg inn for å starte.</p>
-            <div id="gamesLobby" class="games-lobby"></div>
           </div>
-        </article>
+          <div id="gamesLobby" class="games-showcase"></div>
+        </section>
 
         <section class="dashboard-grid">
           <article id="kycCard" class="card">
@@ -101,44 +96,6 @@
               <button id="kycVerifyBtn" class="btn-secondary">Verifiser KYC</button>
             </div>
             <pre id="kycStatus" class="status-box">KYC ikke verifisert.</pre>
-          </article>
-
-          <article id="spillvettCard" class="card">
-            <h2>Spillvett</h2>
-            <p class="subtle">Styr tapsgrenser, ta spillepause, utesteng deg selv og følg eget spillregnskap.</p>
-
-            <div class="form-grid spillvett-grid">
-              <label>
-                Hall (for tapsgrenser)
-                <select id="safetyHallId"></select>
-              </label>
-              <label>
-                Daglig tapsgrense
-                <input id="safetyDailyLossLimit" type="number" min="0" placeholder="f.eks. 900" />
-              </label>
-              <label>
-                Månedlig tapsgrense
-                <input id="safetyMonthlyLossLimit" type="number" min="0" placeholder="f.eks. 4400" />
-              </label>
-              <label>
-                Spillepause (minutter)
-                <input id="safetyPauseMinutes" type="number" min="1" value="15" />
-              </label>
-            </div>
-
-            <div class="row">
-              <button id="safetyRefreshBtn" class="btn-secondary">Oppdater spillvett</button>
-              <button id="safetySaveLossLimitsBtn" class="btn-secondary">Lagre tapsgrenser</button>
-              <button id="safetySetPauseBtn" class="btn-secondary">Sett pause</button>
-              <button id="safetyClearPauseBtn" class="btn-ghost">Fjern pause</button>
-              <button id="safetySetSelfExclusionBtn" class="btn-primary">Utesteng meg selv</button>
-              <button id="safetyClearSelfExclusionBtn" class="btn-ghost">Forsøk opphev utestenging</button>
-            </div>
-
-            <pre id="safetyStatus" class="status-box">Ingen spillvett-data lastet.</pre>
-
-            <h3 class="subsection-title">Spillregnskap</h3>
-            <pre id="walletStatus" class="status-box">Ingen wallet lastet.</pre>
           </article>
         </section>
 
@@ -208,6 +165,69 @@
         </section>
       </section>
     </main>
+
+    <div id="profileModal" class="profile-modal hidden" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
+      <div class="profile-modal-card">
+        <div class="profile-modal-header">
+          <div>
+            <h2 id="profileTitle">Min profil</h2>
+            <p id="profileSummary" class="subtle">Saldo: 0 kr</p>
+          </div>
+          <button id="profileCloseBtn" class="btn-ghost">Lukk</button>
+        </div>
+
+        <section class="profile-panel">
+          <h3 class="subsection-title">Konto</h3>
+          <div class="row">
+            <div class="topup-inline">
+              <label for="walletTopupAmount">Innskudd</label>
+              <input id="walletTopupAmount" type="number" min="1" value="100" />
+              <button id="walletTopupBtn" class="btn-primary">Overfør penger</button>
+            </div>
+            <button id="walletSwedbankIntentBtn" class="btn-secondary">Transaksjoner / betaling</button>
+            <button id="walletRefreshBtn" class="btn-secondary">Oppdater regnskap</button>
+          </div>
+        </section>
+
+        <section class="profile-panel">
+          <h3 class="subsection-title">Spillvett</h3>
+          <div class="form-grid spillvett-grid">
+            <label>
+              Hall (for tapsgrenser)
+              <select id="safetyHallId"></select>
+            </label>
+            <label>
+              Daglig tapsgrense
+              <input id="safetyDailyLossLimit" type="number" min="0" placeholder="f.eks. 900" />
+            </label>
+            <label>
+              Månedlig tapsgrense
+              <input id="safetyMonthlyLossLimit" type="number" min="0" placeholder="f.eks. 4400" />
+            </label>
+            <label>
+              Spillepause (minutter)
+              <input id="safetyPauseMinutes" type="number" min="1" value="15" />
+            </label>
+          </div>
+
+          <div class="row">
+            <button id="safetyRefreshBtn" class="btn-secondary">Oppdater spillvett</button>
+            <button id="safetySaveLossLimitsBtn" class="btn-secondary">Lagre tapsgrenser</button>
+            <button id="safetySetPauseBtn" class="btn-secondary">Sett pause</button>
+            <button id="safetyClearPauseBtn" class="btn-ghost">Fjern pause</button>
+            <button id="safetySetSelfExclusionBtn" class="btn-primary">Utesteng meg selv</button>
+            <button id="safetyClearSelfExclusionBtn" class="btn-ghost">Forsøk opphev utestenging</button>
+          </div>
+
+          <pre id="safetyStatus" class="status-box">Ingen spillvett-data lastet.</pre>
+        </section>
+
+        <section class="profile-panel">
+          <h3 class="subsection-title">Spillregnskap</h3>
+          <pre id="walletStatus" class="status-box">Ingen wallet lastet.</pre>
+        </section>
+      </div>
+    </div>
 
     <div
       id="swedbankCheckoutModal"

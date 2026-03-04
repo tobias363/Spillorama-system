@@ -35,8 +35,14 @@ const els = {
   walletSwedbankIntentBtn: document.getElementById("walletSwedbankIntentBtn"),
   walletRefreshBtn: document.getElementById("walletRefreshBtn"),
   adminPortalBtn: document.getElementById("adminPortalBtn"),
+  profileBtn: document.getElementById("profileBtn"),
+  profileAvatar: document.getElementById("profileAvatar"),
   userBadge: document.getElementById("userBadge"),
   logoutBtn: document.getElementById("logoutBtn"),
+  profileModal: document.getElementById("profileModal"),
+  profileTitle: document.getElementById("profileTitle"),
+  profileSummary: document.getElementById("profileSummary"),
+  profileCloseBtn: document.getElementById("profileCloseBtn"),
   swedbankCheckoutModal: document.getElementById("swedbankCheckoutModal"),
   swedbankCheckoutTitle: document.getElementById("swedbankCheckoutTitle"),
   swedbankCheckoutStatus: document.getElementById("swedbankCheckoutStatus"),
@@ -115,6 +121,129 @@ const els = {
   adminGameStatus: document.getElementById("adminGameStatus")
 };
 
+const NOK_FORMATTER = new Intl.NumberFormat("nb-NO", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+const GAME_SHOWCASE_THEME = Object.freeze({
+  candy: {
+    accent: "#d96a0c",
+    accentSoft: "rgba(217, 106, 12, 0.28)",
+    background:
+      "linear-gradient(115deg, rgba(51, 21, 13, 0.9) 0%, rgba(100, 45, 27, 0.75) 38%, rgba(16, 26, 44, 0.48) 100%), radial-gradient(circle at 14% 20%, rgba(255, 190, 125, 0.24), transparent 36%), radial-gradient(circle at 78% 74%, rgba(220, 84, 35, 0.28), transparent 44%)",
+    fallbackPrizePool: 1792.52,
+    fallbackPlayers: 159,
+    fallbackTicketPrice: 1,
+    fallbackNextDrawMinutes: 1,
+    badge: 75
+  },
+  bingo: {
+    accent: "#3d6be9",
+    accentSoft: "rgba(61, 107, 233, 0.26)",
+    background:
+      "linear-gradient(108deg, rgba(14, 27, 61, 0.92) 0%, rgba(44, 69, 120, 0.72) 42%, rgba(12, 22, 38, 0.52) 100%), radial-gradient(circle at 19% 23%, rgba(133, 181, 255, 0.24), transparent 35%), radial-gradient(circle at 79% 74%, rgba(84, 117, 255, 0.25), transparent 42%)",
+    fallbackPrizePool: 2789.3,
+    fallbackPlayers: 13,
+    fallbackTicketPrice: 1,
+    fallbackNextDrawMinutes: 2,
+    badge: 90
+  },
+  default: {
+    accent: "#ff3d3d",
+    accentSoft: "rgba(255, 61, 61, 0.28)",
+    background:
+      "linear-gradient(108deg, rgba(52, 14, 22, 0.92) 0%, rgba(86, 38, 46, 0.74) 45%, rgba(14, 20, 32, 0.56) 100%), radial-gradient(circle at 21% 25%, rgba(255, 137, 137, 0.24), transparent 35%), radial-gradient(circle at 84% 74%, rgba(251, 77, 77, 0.25), transparent 42%)",
+    fallbackPrizePool: 3996,
+    fallbackPlayers: 22,
+    fallbackTicketPrice: 2,
+    fallbackNextDrawMinutes: 3,
+    badge: 30
+  }
+});
+
+function formatNok(value) {
+  const safe = Number.isFinite(value) ? value : 0;
+  return `${NOK_FORMATTER.format(safe)} kr`;
+}
+
+function asFiniteNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function formatClockTime(referenceMs) {
+  return new Date(referenceMs).toLocaleTimeString("nb-NO", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function resolveShowcaseTheme(gameSlug) {
+  const key = (gameSlug || "").trim().toLowerCase();
+  return GAME_SHOWCASE_THEME[key] || GAME_SHOWCASE_THEME.default;
+}
+
+function resolveShowcaseStats(game, index) {
+  const settings = getSettingsObject(game?.settings);
+  const theme = resolveShowcaseTheme(game?.slug);
+
+  let prizePool =
+    asFiniteNumber(settings.prizePoolNok) ??
+    asFiniteNumber(settings.jackpotNok) ??
+    asFiniteNumber(settings.prizePool) ??
+    theme.fallbackPrizePool;
+  let players = Math.max(
+    0,
+    Math.floor(asFiniteNumber(settings.livePlayers) ?? asFiniteNumber(settings.playerCount) ?? theme.fallbackPlayers)
+  );
+  let ticketPrice =
+    asFiniteNumber(settings.ticketPriceNok) ??
+    asFiniteNumber(settings.ticketPrice) ??
+    asFiniteNumber(settings.entryFeeNok) ??
+    theme.fallbackTicketPrice;
+
+  const configuredNextDrawAt = Date.parse(String(settings.nextDrawAt || "").trim());
+  const nextDrawAtFromText = Number.isFinite(configuredNextDrawAt) ? configuredNextDrawAt : undefined;
+  const nextDrawAtMs =
+    asFiniteNumber(settings.nextDrawAtMs) ??
+    nextDrawAtFromText ??
+    Date.now() + (theme.fallbackNextDrawMinutes + index) * 60 * 1000;
+
+  let drawText = `Trekkes kl. ${formatClockTime(nextDrawAtMs)}`;
+  if (game?.slug === "bingo" && state.selectedGameSlug === "bingo" && state.snapshot) {
+    const snapshotPlayers = Array.isArray(state.snapshot.players) ? state.snapshot.players.length : 0;
+    if (snapshotPlayers > 0) {
+      players = snapshotPlayers;
+    }
+    if (Number.isFinite(state.snapshot.currentGame?.entryFee)) {
+      ticketPrice = state.snapshot.currentGame.entryFee;
+    }
+    if (Number.isFinite(state.snapshot.currentGame?.prizePool) && state.snapshot.currentGame.prizePool >= 0) {
+      prizePool = state.snapshot.currentGame.prizePool;
+    }
+    if (state.snapshot.currentGame?.status === "RUNNING") {
+      drawText = "Spill i gang";
+    }
+  }
+
+  return {
+    prizePool,
+    players,
+    ticketPrice,
+    drawText,
+    badgeValue: Math.max(1, Math.floor(asFiniteNumber(settings.levelBadge) ?? theme.badge))
+  };
+}
+
 function setStatusBox(element, text, tone = "neutral") {
   if (!element) {
     return;
@@ -129,12 +258,26 @@ function setStatusBox(element, text, tone = "neutral") {
   }
 }
 
+function syncBodyModalState() {
+  const swedbankOpen = els.swedbankCheckoutModal && !els.swedbankCheckoutModal.classList.contains("hidden");
+  const profileOpen = els.profileModal && !els.profileModal.classList.contains("hidden");
+  document.body.classList.toggle("modal-open", Boolean(swedbankOpen || profileOpen));
+}
+
 function setSwedbankModalVisible(visible) {
   if (!els.swedbankCheckoutModal) {
     return;
   }
   els.swedbankCheckoutModal.classList.toggle("hidden", !visible);
-  document.body.classList.toggle("modal-open", visible);
+  syncBodyModalState();
+}
+
+function setProfileModalVisible(visible) {
+  if (!els.profileModal) {
+    return;
+  }
+  els.profileModal.classList.toggle("hidden", !visible);
+  syncBodyModalState();
 }
 
 function stopSwedbankStatusPolling() {
@@ -151,6 +294,10 @@ function closeSwedbankCheckoutModal() {
   if (els.swedbankCheckoutFrame) {
     els.swedbankCheckoutFrame.removeAttribute("src");
   }
+}
+
+function closeProfileModal() {
+  setProfileModalVisible(false);
 }
 
 function openSwedbankCheckoutModal(intent) {
@@ -270,6 +417,7 @@ function loadAuthFromStorage() {
 
 function resetAuthState() {
   closeSwedbankCheckoutModal();
+  closeProfileModal();
   state.accessToken = "";
   state.sessionExpiresAt = "";
   state.user = null;
@@ -450,22 +598,73 @@ function renderLayoutForAuth() {
 
 function renderUserBadge() {
   if (!state.user) {
-    els.userBadge.textContent = "Ikke innlogget";
+    if (els.userBadge) {
+      els.userBadge.textContent = "Min profil";
+    }
+    if (els.profileAvatar) {
+      els.profileAvatar.textContent = "?";
+    }
     if (els.adminPortalBtn) {
       els.adminPortalBtn.classList.add("hidden");
     }
     return;
   }
-  els.userBadge.textContent = `${state.user.displayName} (${state.user.role})`;
+  if (els.userBadge) {
+    els.userBadge.textContent = state.user.displayName || "Min profil";
+  }
+  if (els.profileAvatar) {
+    const initials = String(state.user.displayName || state.user.email || "P")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || "")
+      .join("");
+    els.profileAvatar.textContent = initials || "P";
+  }
   if (els.adminPortalBtn) {
     els.adminPortalBtn.classList.toggle("hidden", !isAdmin());
+  }
+}
+
+function renderProfileSummary() {
+  if (!els.profileTitle || !els.profileSummary) {
+    return;
+  }
+
+  if (!state.user) {
+    els.profileTitle.textContent = "Min profil";
+    els.profileSummary.textContent = "Ikke innlogget.";
+    return;
+  }
+
+  const balance =
+    state.walletState?.account?.balance ??
+    (Number.isFinite(state.user.balance) ? state.user.balance : 0);
+  els.profileTitle.textContent = state.user.displayName || "Min profil";
+  els.profileSummary.textContent = `Saldo: ${formatNok(balance)} • ${state.user.email}`;
+}
+
+async function openProfileModal() {
+  if (!state.user || !state.accessToken) {
+    setStatusBox(els.loginStatus, "Logg inn for å åpne profil.", "error");
+    return;
+  }
+
+  setProfileModalVisible(true);
+  renderProfileSummary();
+
+  try {
+    await Promise.all([loadWalletState(), loadComplianceState()]);
+    renderProfileSummary();
+  } catch (error) {
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke oppdatere profil.", "error");
   }
 }
 
 function renderHeroPanel() {
   if (els.heroWelcome) {
     els.heroWelcome.textContent = state.user
-      ? `Hei ${state.user.displayName}. Velkommen tilbake til bordet.`
+      ? `Hei ${state.user.displayName}. Velg spill og trykk «Spill nå».`
       : "Logg inn for å starte.";
   }
 
@@ -475,14 +674,14 @@ function renderHeroPanel() {
 
   const selected = currentGame();
   if (!selected) {
-    els.heroGameTitle.textContent = "Ingen spill tilgjengelig";
-    els.heroGameDescription.textContent = "Be admin aktivere spill i /admin.";
+    els.heroGameTitle.textContent = "Bingoria";
+    els.heroGameDescription.textContent = "Ingen spill publisert. Be admin aktivere spill i /admin.";
     return;
   }
 
-  els.heroGameTitle.textContent = selected.title || selected.slug;
+  els.heroGameTitle.textContent = "Bingoria";
   els.heroGameDescription.textContent =
-    selected.description || "Velg bord under og gå videre til spillvisningen.";
+    `${selected.title || selected.slug} er valgt. Les mer for detaljer eller start spill direkte.`;
 }
 
 function renderGameLobby() {
@@ -499,31 +698,116 @@ function renderGameLobby() {
     return;
   }
 
-  for (const game of state.games) {
-    const card = document.createElement("button");
-    card.className = "game-lobby-card";
-    card.classList.toggle("active", game.slug === state.selectedGameSlug);
+  for (const [index, game] of state.games.entries()) {
+    const theme = resolveShowcaseTheme(game.slug);
+    const stats = resolveShowcaseStats(game, index);
 
-    const title = document.createElement("span");
-    title.className = "game-lobby-title";
+    const card = document.createElement("article");
+    card.className = "game-showcase-card";
+    card.classList.toggle("active", game.slug === state.selectedGameSlug);
+    card.style.setProperty("--showcase-accent", theme.accent);
+    card.style.setProperty("--showcase-accent-soft", theme.accentSoft);
+    card.style.setProperty("--showcase-bg", theme.background);
+
+    const left = document.createElement("div");
+    left.className = "game-showcase-left";
+
+    const badge = document.createElement("span");
+    badge.className = "game-showcase-badge";
+    badge.textContent = String(stats.badgeValue);
+
+    const title = document.createElement("h3");
+    title.className = "game-showcase-title";
     title.textContent = game.title || game.slug;
 
-    const meta = document.createElement("span");
-    meta.className = "game-lobby-meta";
-    meta.textContent = `${game.route || "/"} • ${game.isEnabled ? "Live" : "Stengt"}`;
+    const meta = document.createElement("p");
+    meta.className = "game-showcase-meta";
+    meta.textContent = `${(game.route || "/").toUpperCase()} • ${game.isEnabled ? "LIVE" : "STENGT"}`;
 
-    const description = document.createElement("span");
-    description.className = "game-lobby-description";
+    const description = document.createElement("p");
+    description.className = "game-showcase-description";
     description.textContent = game.description || "Ingen beskrivelse tilgjengelig.";
 
-    card.appendChild(title);
-    card.appendChild(meta);
-    card.appendChild(description);
+    left.appendChild(badge);
+    left.appendChild(title);
+    left.appendChild(meta);
+    left.appendChild(description);
+
+    const right = document.createElement("div");
+    right.className = "game-showcase-right";
+
+    const metricRows = document.createElement("div");
+    metricRows.className = "game-showcase-metrics";
+
+    const metrics = [
+      { label: "Premiepott", value: formatNok(stats.prizePool), icon: "P" },
+      { label: "Spillere", value: String(stats.players), icon: "S" },
+      { label: "Pris", value: formatNok(stats.ticketPrice), icon: "K" },
+      { label: "Neste", value: stats.drawText, icon: "T" }
+    ];
+
+    for (const metric of metrics) {
+      const row = document.createElement("div");
+      row.className = "game-showcase-metric";
+
+      const value = document.createElement("strong");
+      value.textContent = metric.value;
+
+      const label = document.createElement("span");
+      label.textContent = metric.label;
+
+      const icon = document.createElement("span");
+      icon.className = "game-showcase-icon";
+      icon.textContent = metric.icon;
+
+      row.appendChild(value);
+      row.appendChild(label);
+      row.appendChild(icon);
+      metricRows.appendChild(row);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "game-showcase-actions";
+
+    const readMoreBtn = document.createElement("button");
+    readMoreBtn.type = "button";
+    readMoreBtn.className = "btn-ghost";
+    readMoreBtn.textContent = "Les mer";
+    readMoreBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      state.selectedGameSlug = game.slug;
+      renderSelectedGame();
+    });
+
+    const playBtn = document.createElement("button");
+    playBtn.type = "button";
+    playBtn.className = "btn-primary";
+    playBtn.textContent = "Spill nå";
+    playBtn.disabled = !game.isEnabled;
+    playBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      state.selectedGameSlug = game.slug;
+      renderSelectedGame();
+      const target = game.slug === "candy" ? els.candyView : els.bingoView;
+      if (target && !target.classList.contains("hidden")) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+
+    actions.appendChild(readMoreBtn);
+    actions.appendChild(playBtn);
+
+    right.appendChild(metricRows);
+    right.appendChild(actions);
+
+    card.appendChild(left);
+    card.appendChild(right);
 
     card.addEventListener("click", () => {
       state.selectedGameSlug = game.slug;
       renderSelectedGame();
     });
+
     els.gamesLobby.appendChild(card);
   }
 }
@@ -538,17 +822,7 @@ function renderGamesNav() {
     return;
   }
 
-  els.gamesNav.classList.toggle("hidden", state.games.length <= 1);
-  for (const game of state.games) {
-    const button = document.createElement("button");
-    button.textContent = game.title;
-    button.classList.toggle("active", game.slug === state.selectedGameSlug);
-    button.addEventListener("click", () => {
-      state.selectedGameSlug = game.slug;
-      renderSelectedGame();
-    });
-    els.gamesNav.appendChild(button);
-  }
+  els.gamesNav.classList.add("hidden");
 
   const selected = currentGame();
   els.activeGameLabel.textContent = selected
@@ -604,6 +878,7 @@ function renderWalletMini() {
   if (!state.user) {
     els.walletMiniId.textContent = "Wallet: -";
     els.walletMiniBalance.textContent = "Saldo: 0";
+    renderProfileSummary();
     return;
   }
 
@@ -612,6 +887,7 @@ function renderWalletMini() {
     (Number.isFinite(state.user.balance) ? state.user.balance : 0);
   els.walletMiniId.textContent = `Wallet: ${state.user.walletId}`;
   els.walletMiniBalance.textContent = `Saldo: ${balance}`;
+  renderProfileSummary();
 }
 
 function renderKycCard() {
@@ -994,13 +1270,14 @@ function renderSelectedGame() {
 
   const game = currentGame();
   const slug = game?.slug || "";
-  const showRealtimeGamePanel = slug === "bingo" || slug === "candy";
+  const showCandyPanel = slug === "candy";
+  const showBingoPanel = slug === "bingo";
 
-  els.candyView.classList.toggle("hidden", slug !== "candy");
-  els.bingoView.classList.toggle("hidden", !showRealtimeGamePanel);
+  els.candyView.classList.toggle("hidden", !showCandyPanel);
+  els.bingoView.classList.toggle("hidden", !showBingoPanel);
 
   renderCandyCard();
-  if (showRealtimeGamePanel) {
+  if (showBingoPanel) {
     renderBingoHallSelect();
     renderBingoState();
   }
@@ -1620,6 +1897,19 @@ if (els.adminPortalBtn) {
     window.location.assign("/admin");
   });
 }
+if (els.profileBtn) {
+  els.profileBtn.addEventListener("click", openProfileModal);
+}
+if (els.profileCloseBtn) {
+  els.profileCloseBtn.addEventListener("click", closeProfileModal);
+}
+if (els.profileModal) {
+  els.profileModal.addEventListener("click", (event) => {
+    if (event.target === els.profileModal) {
+      closeProfileModal();
+    }
+  });
+}
 if (els.swedbankCloseBtn) {
   els.swedbankCloseBtn.addEventListener("click", onSwedbankClose);
 }
@@ -1636,6 +1926,12 @@ if (els.swedbankCheckoutModal) {
     }
   });
 }
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeProfileModal();
+    onSwedbankClose();
+  }
+});
 if (els.kycVerifyBtn) {
   els.kycVerifyBtn.addEventListener("click", onKycVerify);
 }
