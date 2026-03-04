@@ -17,7 +17,7 @@
       }
 
       main {
-        max-width: 960px;
+        max-width: 1180px;
         margin: 0 auto;
         padding: 24px 16px 48px;
       }
@@ -25,6 +25,10 @@
       h1 {
         margin: 0 0 8px;
         font-size: 30px;
+      }
+
+      h2 {
+        margin: 0 0 10px;
       }
 
       .muted {
@@ -42,6 +46,12 @@
       .grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 12px;
       }
 
@@ -77,7 +87,7 @@
       }
 
       textarea {
-        min-height: 180px;
+        min-height: 160px;
         resize: vertical;
       }
 
@@ -102,6 +112,12 @@
         color: #111827;
       }
 
+      button.ghost {
+        background: #f9fafb;
+        color: #111827;
+        border: 1px solid #d1d5db;
+      }
+
       .status {
         margin-top: 10px;
         background: #f3f4f6;
@@ -124,8 +140,17 @@
         display: none;
       }
 
-      @media (max-width: 860px) {
-        .grid {
+      .section-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      @media (max-width: 980px) {
+        .grid,
+        .grid-3 {
           grid-template-columns: 1fr;
         }
       }
@@ -135,7 +160,7 @@
     <main>
       <h1>Bingo Admin</h1>
       <p class="muted">
-        Egen admin-login for innstillinger. Denne siden krever en bruker med rolle <code>ADMIN</code>.
+        Egen admin-login for full drift. Her styrer du spillkatalog, haller, terminaler, hall-regler og rom.
       </p>
 
       <section id="loginCard" class="card">
@@ -156,93 +181,207 @@
         <pre id="loginStatus" class="status">Ikke logget inn.</pre>
       </section>
 
-      <section id="adminCard" class="card hidden">
-        <h2>Spillinnstillinger</h2>
-        <p id="adminIdentity" class="muted"></p>
-        <div class="grid">
-          <div class="field full">
-            <label for="gameSelect">Velg spill</label>
-            <select id="gameSelect"></select>
+      <section id="adminCard" class="hidden">
+        <article class="card">
+          <div class="section-header">
+            <h2>Spillkatalog</h2>
+            <p id="adminIdentity" class="muted"></p>
           </div>
-          <div class="field">
-            <label for="title">Tittel</label>
-            <input id="title" />
+          <div class="grid">
+            <div class="field full">
+              <label for="gameSelect">Velg spill</label>
+              <select id="gameSelect"></select>
+            </div>
+            <div class="field">
+              <label for="title">Tittel</label>
+              <input id="title" />
+            </div>
+            <div class="field">
+              <label for="route">Route</label>
+              <input id="route" />
+            </div>
+            <div class="field full">
+              <label for="description">Beskrivelse</label>
+              <textarea id="description"></textarea>
+            </div>
+            <div class="field">
+              <label for="sortOrder">Sortering</label>
+              <input id="sortOrder" type="number" />
+            </div>
+            <div class="field">
+              <label for="enabled">Aktivert</label>
+              <select id="enabled">
+                <option value="true">Ja</option>
+                <option value="false">Nei</option>
+              </select>
+            </div>
+            <div id="payoutPercentField" class="field hidden">
+              <label for="payoutPercent">Candy utbetaling (%)</label>
+              <input id="payoutPercent" type="number" min="0" max="100" step="0.01" />
+            </div>
+            <div class="field full">
+              <label for="settingsJson">Settings JSON</label>
+              <textarea id="settingsJson"></textarea>
+            </div>
           </div>
-          <div class="field">
-            <label for="route">Route</label>
-            <input id="route" />
+          <div class="toolbar">
+            <button id="saveBtn">Lagre spill</button>
+            <button id="reloadBtn" class="secondary">Last spill på nytt</button>
+            <button id="logoutBtn" class="ghost">Logg ut</button>
           </div>
-          <div class="field full">
-            <label for="description">Beskrivelse</label>
-            <textarea id="description"></textarea>
-          </div>
-          <div class="field">
-            <label for="sortOrder">Sortering</label>
-            <input id="sortOrder" type="number" />
-          </div>
-          <div class="field">
-            <label for="enabled">Aktivert</label>
-            <select id="enabled">
-              <option value="true">Ja</option>
-              <option value="false">Nei</option>
-            </select>
-          </div>
-          <div id="payoutPercentField" class="field hidden">
-            <label for="payoutPercent">Candy utbetaling (%)</label>
-            <input id="payoutPercent" type="number" min="0" max="100" step="0.01" />
-          </div>
-          <div class="field full">
-            <label for="settingsJson">Settings JSON</label>
-            <textarea id="settingsJson"></textarea>
-          </div>
-        </div>
-        <div class="toolbar">
-          <button id="saveBtn">Lagre</button>
-          <button id="reloadBtn" class="secondary">Last på nytt</button>
-          <button id="logoutBtn" class="secondary">Logg ut</button>
-        </div>
-        <pre id="adminStatus" class="status">Klar.</pre>
+          <pre id="adminStatus" class="status">Klar.</pre>
+        </article>
 
-        <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 18px 0" />
+        <article class="card">
+          <h2>Haller</h2>
+          <div class="grid">
+            <div class="field full">
+              <label for="hallEditorSelect">Velg hall</label>
+              <select id="hallEditorSelect"></select>
+            </div>
+            <div class="field">
+              <label for="hallSlug">Slug</label>
+              <input id="hallSlug" placeholder="f.eks. oslo-sentrum" />
+            </div>
+            <div class="field">
+              <label for="hallName">Navn</label>
+              <input id="hallName" placeholder="f.eks. Oslo Sentrum" />
+            </div>
+            <div class="field">
+              <label for="hallRegion">Region</label>
+              <input id="hallRegion" placeholder="NO-03" />
+            </div>
+            <div class="field">
+              <label for="hallIsActive">Aktiv</label>
+              <select id="hallIsActive">
+                <option value="true">Ja</option>
+                <option value="false">Nei</option>
+              </select>
+            </div>
+            <div class="field full">
+              <label for="hallAddress">Adresse</label>
+              <input id="hallAddress" placeholder="Gate 1, 0000 By" />
+            </div>
+          </div>
+          <div class="toolbar">
+            <button id="createHallBtn">Opprett hall</button>
+            <button id="saveHallBtn" class="secondary">Lagre hall</button>
+            <button id="reloadHallsBtn" class="secondary">Oppdater hall-liste</button>
+          </div>
+          <pre id="hallStatus" class="status">Ingen haller lastet.</pre>
+        </article>
 
-        <h2>Candy Drift (Backend-kontroll)</h2>
-        <p class="muted">
-          Opprett rom og start/stopp spill fra backend. Kun tilgjengelig for <code>ADMIN</code>.
-        </p>
-        <div class="grid">
-          <div class="field">
-            <label for="hallSelect">Hall</label>
-            <select id="hallSelect"></select>
+        <article class="card">
+          <h2>Terminaler</h2>
+          <div class="grid-3">
+            <div class="field">
+              <label for="terminalHallFilter">Filter hall</label>
+              <select id="terminalHallFilter"></select>
+            </div>
+            <div class="field full">
+              <label for="terminalSelect">Velg terminal</label>
+              <select id="terminalSelect"></select>
+            </div>
+            <div class="field">
+              <label for="terminalHallId">Hall (for terminal)</label>
+              <select id="terminalHallId"></select>
+            </div>
+            <div class="field">
+              <label for="terminalCode">Terminalkode</label>
+              <input id="terminalCode" placeholder="TERM-01" />
+            </div>
+            <div class="field">
+              <label for="terminalDisplayName">Visningsnavn</label>
+              <input id="terminalDisplayName" placeholder="Terminal 1" />
+            </div>
+            <div class="field">
+              <label for="terminalIsActive">Aktiv</label>
+              <select id="terminalIsActive">
+                <option value="true">Ja</option>
+                <option value="false">Nei</option>
+              </select>
+            </div>
           </div>
-          <div class="field">
-            <label for="roomSelect">Rom</label>
-            <select id="roomSelect"></select>
+          <div class="toolbar">
+            <button id="createTerminalBtn">Opprett terminal</button>
+            <button id="saveTerminalBtn" class="secondary">Lagre terminal</button>
+            <button id="reloadTerminalsBtn" class="secondary">Oppdater terminaler</button>
           </div>
-          <div class="field">
-            <label for="hostName">Host navn</label>
-            <input id="hostName" placeholder="Admin Host" />
+          <pre id="terminalStatus" class="status">Ingen terminaler lastet.</pre>
+        </article>
+
+        <article class="card">
+          <h2>Hall-spillregler</h2>
+          <p class="muted">Styr per hall om spillet er aktivt, maks bonger og minimumsintervall mellom runder.</p>
+          <div class="grid">
+            <div class="field">
+              <label for="configHallSelect">Hall</label>
+              <select id="configHallSelect"></select>
+            </div>
+            <div class="field">
+              <label for="configGameSelect">Spill</label>
+              <select id="configGameSelect"></select>
+            </div>
+            <div class="field">
+              <label for="configEnabled">Aktivert</label>
+              <select id="configEnabled">
+                <option value="true">Ja</option>
+                <option value="false">Nei</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="configMaxTicketsPerPlayer">Maks bonger per spiller</label>
+              <input id="configMaxTicketsPerPlayer" type="number" min="1" max="20" />
+            </div>
+            <div class="field">
+              <label for="configMinRoundIntervalMs">Min rundeintervall (ms)</label>
+              <input id="configMinRoundIntervalMs" type="number" min="1000" step="1000" />
+            </div>
           </div>
-          <div class="field">
-            <label for="hostWalletId">Host wallet (valgfri)</label>
-            <input id="hostWalletId" placeholder="admin-host-..." />
+          <div class="toolbar">
+            <button id="saveConfigBtn">Lagre hall-spillregel</button>
+            <button id="reloadConfigBtn" class="secondary">Oppdater fra backend</button>
           </div>
-          <div class="field">
-            <label for="entryFee">Entry fee</label>
-            <input id="entryFee" type="number" min="0" value="0" />
+          <pre id="configStatus" class="status">Ingen konfig lastet.</pre>
+        </article>
+
+        <article class="card">
+          <h2>Romkontroll (Backend)</h2>
+          <div class="grid">
+            <div class="field">
+              <label for="hallSelect">Hall</label>
+              <select id="hallSelect"></select>
+            </div>
+            <div class="field">
+              <label for="roomSelect">Rom</label>
+              <select id="roomSelect"></select>
+            </div>
+            <div class="field">
+              <label for="hostName">Host navn</label>
+              <input id="hostName" placeholder="Admin Host" />
+            </div>
+            <div class="field">
+              <label for="hostWalletId">Host wallet (valgfri)</label>
+              <input id="hostWalletId" placeholder="admin-host-..." />
+            </div>
+            <div class="field">
+              <label for="entryFee">Entry fee</label>
+              <input id="entryFee" type="number" min="0" value="0" />
+            </div>
+            <div class="field">
+              <label for="ticketsPerPlayer">Bonger per spiller</label>
+              <input id="ticketsPerPlayer" type="number" min="1" max="5" value="4" />
+            </div>
           </div>
-          <div class="field">
-            <label for="ticketsPerPlayer">Bonger per spiller</label>
-            <input id="ticketsPerPlayer" type="number" min="1" max="5" value="4" />
+          <div class="toolbar">
+            <button id="createRoomBtn">Opprett rom</button>
+            <button id="refreshRoomsBtn" class="secondary">Oppdater romliste</button>
+            <button id="startRoomBtn">Start spill</button>
+            <button id="drawNextBtn" class="secondary">Trekk neste</button>
+            <button id="endRoomBtn" class="secondary">Avslutt spill</button>
           </div>
-        </div>
-        <div class="toolbar">
-          <button id="createRoomBtn">Opprett rom</button>
-          <button id="refreshRoomsBtn" class="secondary">Oppdater romliste</button>
-          <button id="startRoomBtn">Start spill</button>
-          <button id="drawNextBtn" class="secondary">Trekk neste</button>
-          <button id="endRoomBtn" class="secondary">Avslutt spill</button>
-        </div>
-        <pre id="roomStatus" class="status">Ingen rom valgt.</pre>
+          <pre id="roomStatus" class="status">Ingen rom valgt.</pre>
+        </article>
       </section>
     </main>
 
