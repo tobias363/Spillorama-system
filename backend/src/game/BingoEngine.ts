@@ -657,6 +657,9 @@ export class BingoEngine {
       createdAt: new Date().toISOString()
     };
     game.claims.push(claim);
+    const gameType: LedgerGameType = "DATABINGO";
+    const channel: LedgerChannel = "INTERNET";
+    const houseAccountId = this.makeHouseAccountId(room.hallId, gameType, channel);
 
     if (valid && input.type === "LINE") {
       game.lineWinnerId = player.id;
@@ -668,13 +671,46 @@ export class BingoEngine {
       });
       const payout = Math.min(cappedLinePayout.cappedAmount, game.remainingPrizePool);
       if (payout > 0) {
-        await this.walletAdapter.credit(player.walletId, payout, `Line prize ${room.code}`);
+        const transfer = await this.walletAdapter.transfer(
+          houseAccountId,
+          player.walletId,
+          payout,
+          `Line prize ${room.code}`
+        );
         player.balance += payout;
         game.remainingPrizePool -= payout;
         this.recordLossEntry(player.walletId, room.hallId, {
           type: "PAYOUT",
           amount: payout,
           createdAtMs: Date.now()
+        });
+        this.recordComplianceLedgerEvent({
+          hallId: room.hallId,
+          gameType,
+          channel,
+          eventType: "PRIZE",
+          amount: payout,
+          roomCode: room.code,
+          gameId: game.id,
+          claimId: claim.id,
+          playerId: player.id,
+          walletId: player.walletId,
+          sourceAccountId: transfer.fromTx.accountId,
+          targetAccountId: transfer.toTx.accountId,
+          policyVersion: cappedLinePayout.policy.id
+        });
+        this.appendPayoutAuditEvent({
+          kind: "CLAIM_PRIZE",
+          claimId: claim.id,
+          gameId: game.id,
+          roomCode: room.code,
+          hallId: room.hallId,
+          policyVersion: cappedLinePayout.policy.id,
+          amount: payout,
+          walletId: player.walletId,
+          playerId: player.id,
+          sourceAccountId: houseAccountId,
+          txIds: [transfer.fromTx.id, transfer.toTx.id]
         });
       }
       claim.payoutAmount = payout;
@@ -693,12 +729,45 @@ export class BingoEngine {
       });
       const payout = Math.min(cappedBingoPayout.cappedAmount, game.remainingPrizePool);
       if (payout > 0) {
-        await this.walletAdapter.credit(player.walletId, payout, `Bingo prize ${room.code}`);
+        const transfer = await this.walletAdapter.transfer(
+          houseAccountId,
+          player.walletId,
+          payout,
+          `Bingo prize ${room.code}`
+        );
         player.balance += payout;
         this.recordLossEntry(player.walletId, room.hallId, {
           type: "PAYOUT",
           amount: payout,
           createdAtMs: Date.now()
+        });
+        this.recordComplianceLedgerEvent({
+          hallId: room.hallId,
+          gameType,
+          channel,
+          eventType: "PRIZE",
+          amount: payout,
+          roomCode: room.code,
+          gameId: game.id,
+          claimId: claim.id,
+          playerId: player.id,
+          walletId: player.walletId,
+          sourceAccountId: transfer.fromTx.accountId,
+          targetAccountId: transfer.toTx.accountId,
+          policyVersion: cappedBingoPayout.policy.id
+        });
+        this.appendPayoutAuditEvent({
+          kind: "CLAIM_PRIZE",
+          claimId: claim.id,
+          gameId: game.id,
+          roomCode: room.code,
+          hallId: room.hallId,
+          policyVersion: cappedBingoPayout.policy.id,
+          amount: payout,
+          walletId: player.walletId,
+          playerId: player.id,
+          sourceAccountId: houseAccountId,
+          txIds: [transfer.fromTx.id, transfer.toTx.id]
         });
       }
       game.remainingPrizePool = Math.max(0, game.remainingPrizePool - payout);
@@ -1130,11 +1199,42 @@ export class BingoEngine {
       );
     }
 
-    await this.walletAdapter.credit(walletId, amount, input.reason?.trim() || `Extra prize ${hallId}/${linkId}`);
+    const gameType: LedgerGameType = "DATABINGO";
+    const channel: LedgerChannel = "INTERNET";
+    const sourceAccountId = this.makeHouseAccountId(hallId, gameType, channel);
+    const transfer = await this.walletAdapter.transfer(
+      sourceAccountId,
+      walletId,
+      amount,
+      input.reason?.trim() || `Extra prize ${hallId}/${linkId}`
+    );
     this.recordLossEntry(walletId, hallId, {
       type: "PAYOUT",
       amount,
       createdAtMs: nowMs
+    });
+    this.recordComplianceLedgerEvent({
+      hallId,
+      gameType,
+      channel,
+      eventType: "EXTRA_PRIZE",
+      amount,
+      walletId,
+      sourceAccountId: transfer.fromTx.accountId,
+      targetAccountId: transfer.toTx.accountId,
+      policyVersion: policy.id,
+      metadata: {
+        linkId
+      }
+    });
+    this.appendPayoutAuditEvent({
+      kind: "EXTRA_PRIZE",
+      hallId,
+      policyVersion: policy.id,
+      amount,
+      walletId,
+      sourceAccountId,
+      txIds: [transfer.fromTx.id, transfer.toTx.id]
     });
     existingEntries.push({
       amount,
