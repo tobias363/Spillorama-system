@@ -17,6 +17,7 @@ const state = {
   playerId: "",
   snapshot: null,
   walletState: null,
+  complianceState: null,
   lastSwedbankIntentId: "",
   lastSwedbankCheckoutUrl: "",
   swedbankStatusPollTimer: null,
@@ -68,6 +69,17 @@ const els = {
   kycStatus: document.getElementById("kycStatus"),
 
   walletStatus: document.getElementById("walletStatus"),
+  safetyHallId: document.getElementById("safetyHallId"),
+  safetyDailyLossLimit: document.getElementById("safetyDailyLossLimit"),
+  safetyMonthlyLossLimit: document.getElementById("safetyMonthlyLossLimit"),
+  safetyPauseMinutes: document.getElementById("safetyPauseMinutes"),
+  safetyRefreshBtn: document.getElementById("safetyRefreshBtn"),
+  safetySaveLossLimitsBtn: document.getElementById("safetySaveLossLimitsBtn"),
+  safetySetPauseBtn: document.getElementById("safetySetPauseBtn"),
+  safetyClearPauseBtn: document.getElementById("safetyClearPauseBtn"),
+  safetySetSelfExclusionBtn: document.getElementById("safetySetSelfExclusionBtn"),
+  safetyClearSelfExclusionBtn: document.getElementById("safetyClearSelfExclusionBtn"),
+  safetyStatus: document.getElementById("safetyStatus"),
 
   candyView: document.getElementById("candyView"),
   candyPlayBtn: document.getElementById("candyPlayBtn"),
@@ -270,6 +282,7 @@ function resetAuthState() {
   state.playerId = "";
   state.snapshot = null;
   state.walletState = null;
+  state.complianceState = null;
   state.lastSwedbankIntentId = "";
   state.lastSwedbankCheckoutUrl = "";
   saveAuthToStorage();
@@ -359,6 +372,30 @@ function parseCandyPayoutPercent(value) {
     throw new Error("Candy utbetaling (%) må være et tall mellom 0 og 100.");
   }
   return Math.round(parsed * 100) / 100;
+}
+
+function parseOptionalNonNegativeNumber(value, label) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${label} må være et tall som er 0 eller høyere.`);
+  }
+  return parsed;
+}
+
+function parseOptionalPositiveInteger(value, label) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${label} må være et heltall større enn 0.`);
+  }
+  return parsed;
 }
 
 function isAdmin() {
@@ -640,6 +677,108 @@ function renderWalletCard() {
   setStatusBox(els.walletStatus, lines.join("\n"));
 }
 
+function renderSafetyHallSelect() {
+  if (!els.safetyHallId) {
+    return;
+  }
+
+  els.safetyHallId.innerHTML = "";
+  const halls = Array.isArray(state.halls) ? state.halls : [];
+  if (!halls.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Ingen aktive haller";
+    els.safetyHallId.appendChild(option);
+    els.safetyHallId.disabled = true;
+    return;
+  }
+
+  for (const hall of halls) {
+    const option = document.createElement("option");
+    option.value = hall.id;
+    option.textContent = `${hall.name} (${hall.slug})`;
+    els.safetyHallId.appendChild(option);
+  }
+
+  ensureDefaultSelectedHall();
+  const selectedHallId = state.selectedHallId || halls[0].id;
+  els.safetyHallId.value = selectedHallId;
+  state.selectedHallId = selectedHallId;
+  els.safetyHallId.disabled = false;
+}
+
+function syncSafetyInputsFromCompliance(compliance) {
+  if (!compliance) {
+    return;
+  }
+
+  const daily = compliance?.personalLossLimits?.daily;
+  const monthly = compliance?.personalLossLimits?.monthly;
+  if (els.safetyDailyLossLimit) {
+    els.safetyDailyLossLimit.value = Number.isFinite(daily) ? String(daily) : "";
+  }
+  if (els.safetyMonthlyLossLimit) {
+    els.safetyMonthlyLossLimit.value = Number.isFinite(monthly) ? String(monthly) : "";
+  }
+
+  const hallId = typeof compliance?.hallId === "string" ? compliance.hallId.trim() : "";
+  if (hallId) {
+    state.selectedHallId = hallId;
+    if (els.safetyHallId && [...els.safetyHallId.options].some((option) => option.value === hallId)) {
+      els.safetyHallId.value = hallId;
+    }
+    if (els.bingoHallId && [...els.bingoHallId.options].some((option) => option.value === hallId)) {
+      els.bingoHallId.value = hallId;
+    }
+  }
+}
+
+function formatComplianceForPlayer(snapshot) {
+  const timedPause = snapshot?.restrictions?.timedPause;
+  const selfExclusion = snapshot?.restrictions?.selfExclusion;
+  const mandatoryPause = snapshot?.pause;
+  const regulatoryDaily = snapshot?.regulatoryLossLimits?.daily;
+  const regulatoryMonthly = snapshot?.regulatoryLossLimits?.monthly;
+  const personalDaily = snapshot?.personalLossLimits?.daily;
+  const personalMonthly = snapshot?.personalLossLimits?.monthly;
+  const netDaily = snapshot?.netLoss?.daily;
+  const netMonthly = snapshot?.netLoss?.monthly;
+
+  return [
+    `Wallet: ${snapshot?.walletId || state.user?.walletId || "-"}`,
+    `Hall: ${snapshot?.hallId || state.selectedHallId || "-"}`,
+    `Blokkert: ${snapshot?.restrictions?.isBlocked ? "Ja" : "Nei"}`,
+    `Blokkert av: ${snapshot?.restrictions?.blockedBy || "-"}`,
+    `Frivillig pause: ${timedPause?.isActive ? "Aktiv" : "Ikke aktiv"}`,
+    `Pause til: ${timedPause?.pauseUntil || "-"}`,
+    `Påkrevd pause: ${mandatoryPause?.isOnPause ? "Aktiv" : "Ikke aktiv"}`,
+    `Påkrevd pause til: ${mandatoryPause?.pauseUntil || "-"}`,
+    `Selvekskludering: ${selfExclusion?.isActive ? "Aktiv" : "Ikke aktiv"}`,
+    `Selvekskludering til: ${selfExclusion?.minimumUntil || "-"}`,
+    `Regulatoriske grenser: dag=${regulatoryDaily ?? "-"} / måned=${regulatoryMonthly ?? "-"}`,
+    `Personlige grenser: dag=${personalDaily ?? "-"} / måned=${personalMonthly ?? "-"}`,
+    `Netto tap: dag=${netDaily ?? "-"} / måned=${netMonthly ?? "-"}`
+  ].join("\n");
+}
+
+function renderSafetyStatus() {
+  if (!els.safetyStatus) {
+    return;
+  }
+
+  if (!state.user) {
+    setStatusBox(els.safetyStatus, "Ikke innlogget.");
+    return;
+  }
+
+  if (!state.complianceState) {
+    setStatusBox(els.safetyStatus, "Ingen spillvett-data lastet. Trykk «Oppdater spillvett».");
+    return;
+  }
+
+  setStatusBox(els.safetyStatus, formatComplianceForPlayer(state.complianceState));
+}
+
 function renderBingoStatus(text, tone = "neutral") {
   setStatusBox(els.bingoStatus, text, tone);
 }
@@ -671,6 +810,10 @@ function renderBingoHallSelect() {
   els.bingoHallId.value = state.selectedHallId || halls[0].id;
   state.selectedHallId = els.bingoHallId.value;
   els.bingoHallId.disabled = false;
+
+  if (els.safetyHallId && [...els.safetyHallId.options].some((option) => option.value === state.selectedHallId)) {
+    els.safetyHallId.value = state.selectedHallId;
+  }
 }
 
 function renderBingoPlayers() {
@@ -846,6 +989,8 @@ function renderAdminEditor() {
 
 function renderSelectedGame() {
   renderGamesNav();
+  renderSafetyHallSelect();
+  renderSafetyStatus();
 
   const game = currentGame();
   const slug = game?.slug || "";
@@ -868,6 +1013,8 @@ function renderAfterLogin() {
   renderWalletMini();
   renderKycCard();
   renderWalletCard();
+  renderSafetyHallSelect();
+  renderSafetyStatus();
   renderSelectedGame();
 }
 
@@ -886,6 +1033,111 @@ async function loadWalletState() {
   }
   renderWalletMini();
   renderWalletCard();
+}
+
+function getSelectedSafetyHallId() {
+  const hallId = (els.safetyHallId?.value || state.selectedHallId || "").trim();
+  if (!hallId) {
+    throw new Error("Velg hall for tapsgrenser.");
+  }
+  return hallId;
+}
+
+async function loadComplianceState() {
+  const hallId = (els.safetyHallId?.value || state.selectedHallId || "").trim();
+  const query = hallId ? `?hallId=${encodeURIComponent(hallId)}` : "";
+  const compliance = await api(`/api/wallet/me/compliance${query}`);
+  state.complianceState = compliance;
+  syncSafetyInputsFromCompliance(compliance);
+  setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
+}
+
+function buildLossLimitsPayload() {
+  const hallId = getSelectedSafetyHallId();
+  const dailyLossLimit = parseOptionalNonNegativeNumber(els.safetyDailyLossLimit?.value, "Daglig tapsgrense");
+  const monthlyLossLimit = parseOptionalNonNegativeNumber(
+    els.safetyMonthlyLossLimit?.value,
+    "Månedlig tapsgrense"
+  );
+  if (dailyLossLimit === undefined && monthlyLossLimit === undefined) {
+    throw new Error("Fyll ut minst én tapsgrense.");
+  }
+  return { hallId, dailyLossLimit, monthlyLossLimit };
+}
+
+async function onSafetyRefresh() {
+  try {
+    await Promise.all([loadWalletState(), loadComplianceState()]);
+  } catch (error) {
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke hente spillvett-data.", "error");
+  }
+}
+
+async function onSafetySaveLossLimits() {
+  try {
+    const payload = buildLossLimitsPayload();
+    const compliance = await api("/api/wallet/me/loss-limits", {
+      method: "PUT",
+      body: payload
+    });
+    state.complianceState = compliance;
+    syncSafetyInputsFromCompliance(compliance);
+    setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
+  } catch (error) {
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke lagre tapsgrenser.", "error");
+  }
+}
+
+async function onSafetySetPause() {
+  try {
+    const durationMinutes = parseOptionalPositiveInteger(els.safetyPauseMinutes?.value, "Spillepause");
+    const compliance = await api("/api/wallet/me/timed-pause", {
+      method: "POST",
+      body: {
+        durationMinutes: durationMinutes ?? 15
+      }
+    });
+    state.complianceState = compliance;
+    setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
+  } catch (error) {
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke sette spillepause.", "error");
+  }
+}
+
+async function onSafetyClearPause() {
+  try {
+    const compliance = await api("/api/wallet/me/timed-pause", {
+      method: "DELETE"
+    });
+    state.complianceState = compliance;
+    setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
+  } catch (error) {
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke fjerne spillepause.", "error");
+  }
+}
+
+async function onSafetySetSelfExclusion() {
+  try {
+    const compliance = await api("/api/wallet/me/self-exclusion", {
+      method: "POST"
+    });
+    state.complianceState = compliance;
+    setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
+  } catch (error) {
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke aktivere selvekskludering.", "error");
+  }
+}
+
+async function onSafetyClearSelfExclusion() {
+  try {
+    const compliance = await api("/api/wallet/me/self-exclusion", {
+      method: "DELETE"
+    });
+    state.complianceState = compliance;
+    setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
+  } catch (error) {
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke oppheve selvekskludering.", "error");
+  }
 }
 
 function ensureDefaultSelectedGame() {
@@ -908,6 +1160,9 @@ function ensureDefaultSelectedHall() {
     if (els.bingoHallId) {
       els.bingoHallId.value = state.selectedHallId;
     }
+    if (els.safetyHallId) {
+      els.safetyHallId.value = state.selectedHallId;
+    }
     return;
   }
 
@@ -922,6 +1177,12 @@ function ensureDefaultSelectedHall() {
   }
 
   state.selectedHallId = state.halls[0].id;
+  if (els.bingoHallId) {
+    els.bingoHallId.value = state.selectedHallId;
+  }
+  if (els.safetyHallId) {
+    els.safetyHallId.value = state.selectedHallId;
+  }
 }
 
 async function loadAuthenticatedData() {
@@ -939,6 +1200,12 @@ async function loadAuthenticatedData() {
   state.adminGames = [];
 
   await loadWalletState();
+  try {
+    await loadComplianceState();
+  } catch (error) {
+    state.complianceState = null;
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke laste spillvett-data.", "error");
+  }
 }
 
 async function bootFromToken() {
@@ -1027,6 +1294,8 @@ async function onLogout() {
   renderWalletMini();
   renderKycCard();
   renderWalletCard();
+  renderSafetyHallSelect();
+  renderSafetyStatus();
   renderBingoState();
   setStatusBox(els.loginStatus, "Du er logget ut.", "success");
 }
@@ -1370,10 +1639,39 @@ if (els.swedbankCheckoutModal) {
 if (els.kycVerifyBtn) {
   els.kycVerifyBtn.addEventListener("click", onKycVerify);
 }
+if (els.safetyRefreshBtn) {
+  els.safetyRefreshBtn.addEventListener("click", onSafetyRefresh);
+}
+if (els.safetySaveLossLimitsBtn) {
+  els.safetySaveLossLimitsBtn.addEventListener("click", onSafetySaveLossLimits);
+}
+if (els.safetySetPauseBtn) {
+  els.safetySetPauseBtn.addEventListener("click", onSafetySetPause);
+}
+if (els.safetyClearPauseBtn) {
+  els.safetyClearPauseBtn.addEventListener("click", onSafetyClearPause);
+}
+if (els.safetySetSelfExclusionBtn) {
+  els.safetySetSelfExclusionBtn.addEventListener("click", onSafetySetSelfExclusion);
+}
+if (els.safetyClearSelfExclusionBtn) {
+  els.safetyClearSelfExclusionBtn.addEventListener("click", onSafetyClearSelfExclusion);
+}
+if (els.safetyHallId) {
+  els.safetyHallId.addEventListener("change", () => {
+    state.selectedHallId = (els.safetyHallId.value || "").trim();
+    if (els.bingoHallId && [...els.bingoHallId.options].some((option) => option.value === state.selectedHallId)) {
+      els.bingoHallId.value = state.selectedHallId;
+    }
+  });
+}
 
 if (els.bingoHallId) {
   els.bingoHallId.addEventListener("change", () => {
     state.selectedHallId = (els.bingoHallId.value || "").trim();
+    if (els.safetyHallId && [...els.safetyHallId.options].some((option) => option.value === state.selectedHallId)) {
+      els.safetyHallId.value = state.selectedHallId;
+    }
   });
 }
 
@@ -1401,6 +1699,8 @@ function initialRender() {
   renderWalletMini();
   renderKycCard();
   renderWalletCard();
+  renderSafetyHallSelect();
+  renderSafetyStatus();
   renderBingoState();
   setStatusBox(els.loginStatus, "Ikke logget inn.");
   setStatusBox(els.registerStatus, "Ikke opprettet bruker ennå.");

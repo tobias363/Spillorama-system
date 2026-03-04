@@ -335,6 +335,10 @@ button:hover {
   align-items: end;
 }
 
+.spillvett-grid {
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -369,6 +373,14 @@ button:hover {
   border-color: var(--emerald);
   background: var(--emerald-soft);
   color: #d8ffef;
+}
+
+.subsection-title {
+  margin: 14px 0 8px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
 }
 
 .chips {

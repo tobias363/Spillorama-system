@@ -103,8 +103,41 @@
             <pre id="kycStatus" class="status-box">KYC ikke verifisert.</pre>
           </article>
 
-          <article id="walletCard" class="card">
-            <h2>Lommebok</h2>
+          <article id="spillvettCard" class="card">
+            <h2>Spillvett</h2>
+            <p class="subtle">Styr tapsgrenser, ta spillepause, utesteng deg selv og følg eget spillregnskap.</p>
+
+            <div class="form-grid spillvett-grid">
+              <label>
+                Hall (for tapsgrenser)
+                <select id="safetyHallId"></select>
+              </label>
+              <label>
+                Daglig tapsgrense
+                <input id="safetyDailyLossLimit" type="number" min="0" placeholder="f.eks. 900" />
+              </label>
+              <label>
+                Månedlig tapsgrense
+                <input id="safetyMonthlyLossLimit" type="number" min="0" placeholder="f.eks. 4400" />
+              </label>
+              <label>
+                Spillepause (minutter)
+                <input id="safetyPauseMinutes" type="number" min="1" value="15" />
+              </label>
+            </div>
+
+            <div class="row">
+              <button id="safetyRefreshBtn" class="btn-secondary">Oppdater spillvett</button>
+              <button id="safetySaveLossLimitsBtn" class="btn-secondary">Lagre tapsgrenser</button>
+              <button id="safetySetPauseBtn" class="btn-secondary">Sett pause</button>
+              <button id="safetyClearPauseBtn" class="btn-ghost">Fjern pause</button>
+              <button id="safetySetSelfExclusionBtn" class="btn-primary">Utesteng meg selv</button>
+              <button id="safetyClearSelfExclusionBtn" class="btn-ghost">Forsøk opphev utestenging</button>
+            </div>
+
+            <pre id="safetyStatus" class="status-box">Ingen spillvett-data lastet.</pre>
+
+            <h3 class="subsection-title">Spillregnskap</h3>
             <pre id="walletStatus" class="status-box">Ingen wallet lastet.</pre>
           </article>
         </section>
