@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="nb">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bingo Admin</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: #f5f7fb;
+        color: #111827;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 24px 16px 48px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 30px;
+      }
+
+      .muted {
+        color: #4b5563;
+      }
+
+      .card {
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 16px;
+        margin-top: 16px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .field.full {
+        grid-column: 1 / -1;
+      }
+
+      label {
+        font-size: 13px;
+        color: #374151;
+      }
+
+      input,
+      textarea,
+      select,
+      button {
+        font: inherit;
+      }
+
+      input,
+      textarea,
+      select {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 10px 12px;
+        background: #fff;
+      }
+
+      textarea {
+        min-height: 180px;
+        resize: vertical;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 14px;
+        background: #111827;
+        color: #fff;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #e5e7eb;
+        color: #111827;
+      }
+
+      .status {
+        margin-top: 10px;
+        background: #f3f4f6;
+        border-radius: 8px;
+        padding: 10px 12px;
+        white-space: pre-wrap;
+      }
+
+      .status.error {
+        background: #fef2f2;
+        color: #991b1b;
+      }
+
+      .status.success {
+        background: #ecfdf5;
+        color: #065f46;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      @media (max-width: 860px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Bingo Admin</h1>
+      <p class="muted">
+        Egen admin-login for innstillinger. Denne siden krever en bruker med rolle <code>ADMIN</code>.
+      </p>
+
+      <section id="loginCard" class="card">
+        <h2>Admin Login</h2>
+        <div class="grid">
+          <div class="field">
+            <label for="email">E-post</label>
+            <input id="email" type="email" placeholder="admin@firma.no" />
+          </div>
+          <div class="field">
+            <label for="password">Passord</label>
+            <input id="password" type="password" placeholder="Passord" />
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="loginBtn">Logg inn</button>
+        </div>
+        <pre id="loginStatus" class="status">Ikke logget inn.</pre>
+      </section>
+
+      <section id="adminCard" class="card hidden">
+        <h2>Spillinnstillinger</h2>
+        <p id="adminIdentity" class="muted"></p>
+        <div class="grid">
+          <div class="field full">
+            <label for="gameSelect">Velg spill</label>
+            <select id="gameSelect"></select>
+          </div>
+          <div class="field">
+            <label for="title">Tittel</label>
+            <input id="title" />
+          </div>
+          <div class="field">
+            <label for="route">Route</label>
+            <input id="route" />
+          </div>
+          <div class="field full">
+            <label for="description">Beskrivelse</label>
+            <textarea id="description"></textarea>
+          </div>
+          <div class="field">
+            <label for="sortOrder">Sortering</label>
+            <input id="sortOrder" type="number" />
+          </div>
+          <div class="field">
+            <label for="enabled">Aktivert</label>
+            <select id="enabled">
+              <option value="true">Ja</option>
+              <option value="false">Nei</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label for="settingsJson">Settings JSON</label>
+            <textarea id="settingsJson"></textarea>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="saveBtn">Lagre</button>
+          <button id="reloadBtn" class="secondary">Last på nytt</button>
+          <button id="logoutBtn" class="secondary">Logg ut</button>
+        </div>
+        <pre id="adminStatus" class="status">Klar.</pre>
+      </section>
+    </main>
+
+    <script src="/admin/app.js"></script>
+  </body>
+</html>
