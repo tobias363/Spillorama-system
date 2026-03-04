@@ -7,6 +7,7 @@ const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["candy", "bingo"]);
 const state = {
   accessToken: "",
   sessionExpiresAt: "",
+  isAuthBootstrapping: false,
   user: null,
   games: [],
   selectedGameSlug: "",
@@ -452,6 +453,7 @@ function resetAuthState() {
   closeProfileModal();
   state.accessToken = "";
   state.sessionExpiresAt = "";
+  state.isAuthBootstrapping = false;
   state.user = null;
   state.games = [];
   state.selectedGameSlug = "";
@@ -623,9 +625,12 @@ function syncWalletBalanceFromRoomSnapshot() {
 
 function renderLayoutForAuth() {
   const loggedIn = Boolean(state.user && state.accessToken);
-  els.authView.classList.toggle("hidden", loggedIn);
-  els.appView.classList.toggle("hidden", !loggedIn);
-  els.appHeader.classList.toggle("hidden", !loggedIn);
+  const restoringSession = Boolean(state.isAuthBootstrapping && state.accessToken && !state.user);
+  const showApp = loggedIn || restoringSession;
+
+  els.authView.classList.toggle("hidden", showApp);
+  els.appView.classList.toggle("hidden", !showApp);
+  els.appHeader.classList.toggle("hidden", !showApp);
 }
 
 function renderUserBadge() {
@@ -1303,8 +1308,12 @@ function renderSelectedGame() {
   const showCandyPanel = slug === "candy";
   const showBingoPanel = slug === "bingo";
 
-  els.candyView.classList.toggle("hidden", !showCandyPanel);
-  els.bingoView.classList.toggle("hidden", !showBingoPanel);
+  if (els.candyView) {
+    els.candyView.classList.toggle("hidden", !showCandyPanel);
+  }
+  if (els.bingoView) {
+    els.bingoView.classList.toggle("hidden", !showBingoPanel);
+  }
 
   renderCandyCard();
   if (showBingoPanel) {
@@ -2050,6 +2059,8 @@ function initialRender() {
 }
 
 async function bootstrap() {
+  loadAuthFromStorage();
+  state.isAuthBootstrapping = Boolean(state.accessToken);
   initialRender();
   try {
     const url = new URL(window.location.href);
@@ -2065,8 +2076,12 @@ async function bootstrap() {
   } catch {
     // Ignore URL parse errors.
   }
-  loadAuthFromStorage();
-  await bootFromToken();
+  try {
+    await bootFromToken();
+  } finally {
+    state.isAuthBootstrapping = false;
+    renderLayoutForAuth();
+  }
 }
 
 bootstrap();

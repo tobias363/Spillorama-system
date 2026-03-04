@@ -37,7 +37,7 @@
     </header>
 
     <main class="layout">
-      <section id="authView" class="auth-grid">
+      <section id="authView" class="hidden auth-grid">
         <article class="card auth-card">
           <h2>Logg Inn</h2>
           <label>
@@ -73,16 +73,6 @@
 
       <section id="appView" class="hidden app-layout">
         <section class="lobby-stage">
-          <div class="lobby-stage-head">
-            <div>
-              <p class="hero-kicker">Spilloversikt</p>
-              <h2 id="heroGameTitle">Spillorama</h2>
-              <p id="heroGameDescription" class="subtle">
-                Velg spillkort under for å gå videre til riktig spillflate.
-              </p>
-            </div>
-            <p id="heroWelcome" class="subtle">Logg inn for å starte.</p>
-          </div>
           <div id="gamesLobby" class="games-showcase"></div>
         </section>
 
@@ -97,17 +87,6 @@
             <pre id="kycStatus" class="status-box">KYC ikke verifisert.</pre>
           </article>
         </section>
-
-        <article id="candyView" class="card game-view hidden">
-          <h2>Candy</h2>
-          <p class="subtle">
-            Candy er aktivert i game-katalogen og koblet mot backend-data for saldo og rapportering.
-          </p>
-          <div class="row">
-            <button id="candyPlayBtn" class="btn-secondary">Vis spilldetaljer</button>
-          </div>
-          <pre id="candyStatus" class="status-box">Laster Candy-metadata...</pre>
-        </article>
 
         <section id="bingoView" class="game-view hidden">
           <article class="card">
