@@ -38,7 +38,6 @@ const els = {
   walletRefreshBtn: document.getElementById("walletRefreshBtn"),
   adminPortalBtn: document.getElementById("adminPortalBtn"),
   profileBtn: document.getElementById("profileBtn"),
-  profileAvatar: document.getElementById("profileAvatar"),
   userBadge: document.getElementById("userBadge"),
   logoutBtn: document.getElementById("logoutBtn"),
   profileModal: document.getElementById("profileModal"),
@@ -619,32 +618,11 @@ function renderLayoutForAuth() {
 }
 
 function renderUserBadge() {
-  if (!state.user) {
-    if (els.userBadge) {
-      els.userBadge.textContent = "Min profil";
-    }
-    if (els.profileAvatar) {
-      els.profileAvatar.textContent = "?";
-    }
-    if (els.adminPortalBtn) {
-      els.adminPortalBtn.classList.add("hidden");
-    }
-    return;
-  }
   if (els.userBadge) {
-    els.userBadge.textContent = state.user.displayName || "Min profil";
-  }
-  if (els.profileAvatar) {
-    const initials = String(state.user.displayName || state.user.email || "P")
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() || "")
-      .join("");
-    els.profileAvatar.textContent = initials || "P";
+    els.userBadge.textContent = "Profil";
   }
   if (els.adminPortalBtn) {
-    els.adminPortalBtn.classList.toggle("hidden", !isAdmin());
+    els.adminPortalBtn.classList.add("hidden");
   }
 }
 

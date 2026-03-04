@@ -179,7 +179,7 @@ body.modal-open {
   gap: 8px;
   border: 1px solid var(--line-soft);
   border-radius: 999px;
-  padding: 5px 10px 5px 5px;
+  padding: 7px 12px;
   background: #ffffff;
   color: var(--text);
   box-shadow: 0 2px 8px rgba(17, 54, 48, 0.08);
@@ -194,16 +194,20 @@ body.modal-open {
   text-transform: none;
 }
 
-.profile-avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  font-weight: 800;
-  color: #f8fffd;
-  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+.profile-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+
+.profile-icon svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .layout {
