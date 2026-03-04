@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Manrope:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/style.css?v=profile-drawer-20260304-8" />
+    <link rel="stylesheet" href="/style.css?v=wallet-transfer-20260304-1" />
   </head>
   <body>
     <header id="appHeader" class="topbar hidden">
@@ -145,92 +145,145 @@
     </main>
 
     <div id="profileModal" class="profile-modal hidden" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
-      <div class="profile-modal-card">
+      <div id="profileModalCard" class="profile-modal-card">
         <div class="profile-modal-header">
           <div>
             <h2 id="profileTitle">Min profil</h2>
             <p id="profileSummary" class="subtle">Konto</p>
           </div>
-          <button id="profileCloseBtn" class="btn-ghost">Lukk</button>
+          <button id="profileCloseBtn" class="btn-ghost profile-close-btn">Lukk</button>
         </div>
 
-        <section class="profile-panel profile-account-panel">
-          <p id="profileFullName" class="profile-full-name">Spiller</p>
-          <p id="profileEmail" class="profile-email">ikke-innlogget@eksempel.no</p>
-          <p id="profileBigBalance" class="profile-big-balance">0 kr</p>
-          <div class="row profile-account-actions">
-            <button id="walletTopupBtn" class="btn-primary">Overfør penger</button>
+        <div id="profileMainView" class="profile-main-view">
+          <section class="profile-panel profile-account-panel">
+            <p id="profileFullName" class="profile-full-name">Spiller</p>
+            <p id="profileEmail" class="profile-email">ikke-innlogget@eksempel.no</p>
+            <p id="profileBigBalance" class="profile-big-balance">0 kr</p>
+            <div class="row profile-account-actions">
+              <button id="walletTopupBtn" class="btn-primary">Overfør penger</button>
+            </div>
+          </section>
+
+          <section class="profile-panel profile-personal-panel">
+            <h3 class="subsection-title">Personlig informasjon</h3>
+            <div class="profile-personal-list">
+              <p class="profile-info-row">
+                <span>Navn</span>
+                <strong id="profileInfoName">Spiller</strong>
+              </p>
+              <p class="profile-info-row">
+                <span>E-post</span>
+                <strong id="profileInfoEmail">Ikke innlogget</strong>
+              </p>
+              <p class="profile-info-row">
+                <span>KYC-status</span>
+                <strong id="profileInfoKycStatus">Ukjent</strong>
+              </p>
+            </div>
+          </section>
+
+          <section class="profile-panel">
+            <h3 class="subsection-title">Spillvett</h3>
+            <div class="safety-menu-list">
+              <details class="safety-menu-item">
+                <summary>Spillegrenser</summary>
+                <div class="safety-menu-content">
+                  <label>
+                    Hall (for tapsgrenser)
+                    <select id="safetyHallId"></select>
+                  </label>
+                  <label>
+                    Daglig tapsgrense
+                    <input id="safetyDailyLossLimit" type="number" min="0" placeholder="f.eks. 900" />
+                  </label>
+                  <label>
+                    Månedlig tapsgrense
+                    <input id="safetyMonthlyLossLimit" type="number" min="0" placeholder="f.eks. 4400" />
+                  </label>
+                  <div class="row">
+                    <button id="safetySaveLossLimitsBtn" class="btn-secondary">Lagre spillegrenser</button>
+                    <button id="safetyRefreshBtn" class="btn-ghost">Oppdater data</button>
+                  </div>
+                </div>
+              </details>
+
+              <details class="safety-menu-item">
+                <summary>Spillepause</summary>
+                <div class="safety-menu-content">
+                  <label>
+                    Spillepause (minutter)
+                    <input id="safetyPauseMinutes" type="number" min="1" value="15" />
+                  </label>
+                  <div class="row">
+                    <button id="safetySetPauseBtn" class="btn-secondary">Sett pause</button>
+                    <button id="safetyClearPauseBtn" class="btn-ghost">Fjern pause</button>
+                  </div>
+                </div>
+              </details>
+
+              <details class="safety-menu-item">
+                <summary>Utestenging</summary>
+                <div class="safety-menu-content">
+                  <div class="row">
+                    <button id="safetySetSelfExclusionBtn" class="btn-primary">Utesteng meg selv</button>
+                    <button id="safetyClearSelfExclusionBtn" class="btn-ghost">Forsøk opphev utestenging</button>
+                  </div>
+                </div>
+              </details>
+
+              <details class="safety-menu-item">
+                <summary>Spillregnskap</summary>
+                <div class="safety-menu-content">
+                  <pre id="walletStatus" class="status-box">Ingen wallet lastet.</pre>
+                </div>
+              </details>
+            </div>
+          </section>
+
+          <button id="logoutBtn" class="profile-logout-btn" type="button">
+            <span class="profile-logout-icon" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18">
+                <path
+                  d="M14 3a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0V5H6v14h7v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9zm3.293 5.293a1 1 0 0 1 1.414 0l3.999 4a1 1 0 0 1 0 1.414l-3.999 4a1 1 0 1 1-1.414-1.414L19.586 13H10a1 1 0 1 1 0-2h9.586l-2.293-2.293a1 1 0 0 1 0-1.414z"
+                />
+              </svg>
+            </span>
+            <span>Logg ut</span>
+          </button>
+        </div>
+
+        <section id="profileTransferView" class="profile-transfer hidden" aria-live="polite">
+          <div class="transfer-segment" role="tablist" aria-label="Overføringstype">
+            <button id="transferToPlayerBtn" class="transfer-segment-btn active" type="button">Til spillerkonto</button>
+            <button id="transferToBankBtn" class="transfer-segment-btn" type="button">Til bankkonto</button>
           </div>
-        </section>
 
-        <section class="profile-panel">
-          <h3 class="subsection-title">Spillvett</h3>
-          <div class="safety-menu-list">
-            <details class="safety-menu-item">
-              <summary>Spillegrenser</summary>
-              <div class="safety-menu-content">
-                <label>
-                  Hall (for tapsgrenser)
-                  <select id="safetyHallId"></select>
-                </label>
-                <label>
-                  Daglig tapsgrense
-                  <input id="safetyDailyLossLimit" type="number" min="0" placeholder="f.eks. 900" />
-                </label>
-                <label>
-                  Månedlig tapsgrense
-                  <input id="safetyMonthlyLossLimit" type="number" min="0" placeholder="f.eks. 4400" />
-                </label>
-                <div class="row">
-                  <button id="safetySaveLossLimitsBtn" class="btn-secondary">Lagre spillegrenser</button>
-                  <button id="safetyRefreshBtn" class="btn-ghost">Oppdater data</button>
-                </div>
-              </div>
-            </details>
-
-            <details class="safety-menu-item">
-              <summary>Spillepause</summary>
-              <div class="safety-menu-content">
-                <label>
-                  Spillepause (minutter)
-                  <input id="safetyPauseMinutes" type="number" min="1" value="15" />
-                </label>
-                <div class="row">
-                  <button id="safetySetPauseBtn" class="btn-secondary">Sett pause</button>
-                  <button id="safetyClearPauseBtn" class="btn-ghost">Fjern pause</button>
-                </div>
-              </div>
-            </details>
-
-            <details class="safety-menu-item">
-              <summary>Utestenging</summary>
-              <div class="safety-menu-content">
-                <div class="row">
-                  <button id="safetySetSelfExclusionBtn" class="btn-primary">Utesteng meg selv</button>
-                  <button id="safetyClearSelfExclusionBtn" class="btn-ghost">Forsøk opphev utestenging</button>
-                </div>
-              </div>
-            </details>
-
-            <details class="safety-menu-item">
-              <summary>Spillregnskap</summary>
-              <div class="safety-menu-content">
-                <pre id="walletStatus" class="status-box">Ingen wallet lastet.</pre>
-              </div>
-            </details>
+          <div class="transfer-balance">
+            <p>Saldo på spillerkonto</p>
+            <strong id="transferBalance">0 kr</strong>
           </div>
-        </section>
 
-        <button id="logoutBtn" class="profile-logout-btn" type="button">
-          <span class="profile-logout-icon" aria-hidden="true">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18">
-              <path
-                d="M14 3a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0V5H6v14h7v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9zm3.293 5.293a1 1 0 0 1 1.414 0l3.999 4a1 1 0 0 1 0 1.414l-3.999 4a1 1 0 1 1-1.414-1.414L19.586 13H10a1 1 0 1 1 0-2h9.586l-2.293-2.293a1 1 0 0 1 0-1.414z"
-              />
-            </svg>
-          </span>
-          <span>Logg ut</span>
-        </button>
+          <div class="transfer-amount-block">
+            <p>Hvor mye ønsker du å overføre?</p>
+            <div id="transferAmountGrid" class="transfer-amount-grid">
+              <button type="button" class="transfer-amount-btn" data-transfer-amount="50">50 kr</button>
+              <button type="button" class="transfer-amount-btn" data-transfer-amount="100">100 kr</button>
+              <button type="button" class="transfer-amount-btn" data-transfer-amount="200">200 kr</button>
+              <button type="button" class="transfer-amount-btn" data-transfer-amount="300">300 kr</button>
+              <button type="button" class="transfer-amount-btn" data-transfer-amount="500">500 kr</button>
+              <button type="button" class="transfer-amount-btn" data-transfer-amount="1000">1 000 kr</button>
+              <button type="button" class="transfer-amount-btn" data-transfer-amount="other">Annet</button>
+            </div>
+          </div>
+
+          <div id="transferCustomWrap" class="transfer-custom hidden">
+            <label for="transferCustomAmount">Annet beløp (kr)</label>
+            <input id="transferCustomAmount" type="number" min="1" step="1" inputmode="numeric" placeholder="f.eks. 750" />
+          </div>
+
+          <pre id="transferStatus" class="status-box">Velg beløp og trykk Fortsett.</pre>
+          <button id="transferContinueBtn" class="transfer-continue-btn" type="button">Fortsett</button>
+        </section>
       </div>
     </div>
 
@@ -256,6 +309,6 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js?v=profile-drawer-20260304-8"></script>
+    <script src="/app.js?v=wallet-transfer-20260304-1"></script>
   </body>
 </html>

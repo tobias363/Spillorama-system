@@ -699,6 +699,32 @@ button:hover {
   margin-top: 2px;
 }
 
+.profile-close-btn {
+  min-width: 66px;
+}
+
+.profile-close-btn.profile-close-btn-icon {
+  min-width: 42px;
+  border: 0;
+  background: transparent;
+  padding: 2px 6px;
+  font-size: 38px;
+  line-height: 1;
+  color: #232b2a;
+}
+
+.profile-close-btn.profile-close-btn-icon:hover {
+  border: 0;
+  transform: none;
+  background: rgba(14, 38, 33, 0.06);
+}
+
+.profile-main-view {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+}
+
 .profile-panel {
   border: 1px solid var(--line-soft);
   border-radius: 12px;
@@ -744,6 +770,146 @@ button:hover {
 
 .profile-account-actions button {
   width: 100%;
+}
+
+.profile-transfer {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.transfer-segment {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  border-radius: 999px;
+  background: #d9d8e0;
+  padding: 4px;
+}
+
+.transfer-segment-btn {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #5d5a75;
+  padding: 10px 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.transfer-segment-btn.active {
+  background: #ffffff;
+  color: #2d2742;
+  box-shadow: 0 2px 6px rgba(40, 35, 64, 0.14);
+}
+
+.transfer-segment-btn:hover {
+  transform: none;
+  border: 0;
+}
+
+.transfer-balance {
+  display: grid;
+  gap: 2px;
+}
+
+.transfer-balance p {
+  margin: 0;
+  color: #35374a;
+  font-size: 28px;
+}
+
+.transfer-balance strong {
+  font-size: 42px;
+  line-height: 1.06;
+  color: #11151f;
+}
+
+.transfer-amount-block {
+  display: grid;
+  gap: 10px;
+}
+
+.transfer-amount-block p {
+  margin: 0;
+  color: #2a2e3c;
+  font-size: 28px;
+}
+
+.transfer-amount-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.transfer-amount-btn {
+  border: 0;
+  border-radius: 10px;
+  background: #ececf1;
+  color: #262a36;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.1;
+  min-height: 72px;
+}
+
+.transfer-amount-btn:hover {
+  transform: none;
+  border: 0;
+  background: #e2e3ea;
+}
+
+.transfer-amount-btn.active {
+  background: #1f4fd1;
+  color: #ffffff;
+}
+
+.transfer-custom {
+  display: grid;
+  gap: 8px;
+}
+
+.transfer-custom label {
+  margin: 0;
+  font-size: 22px;
+  color: #2d2f3c;
+}
+
+.transfer-custom input {
+  border-radius: 10px;
+  border-color: rgba(44, 53, 89, 0.2);
+  min-height: 62px;
+  font-size: 30px;
+}
+
+.transfer-continue-btn {
+  margin-top: auto;
+  width: 100%;
+  border: 0;
+  border-radius: 999px;
+  background: #1f4fd1;
+  color: #ffffff;
+  min-height: 80px;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.transfer-continue-btn:hover {
+  border: 0;
+  transform: none;
+  background: #1a43b3;
+}
+
+.transfer-continue-btn:disabled,
+.transfer-continue-btn:disabled:hover {
+  border: 0;
+  transform: none;
+  background: #b4c2ec;
+  color: #f3f6ff;
+  cursor: not-allowed;
 }
 
 .profile-logout-btn {
@@ -911,6 +1077,34 @@ button:hover {
   .profile-modal-card {
     width: min(420px, 94vw);
   }
+
+  .transfer-balance p,
+  .transfer-amount-block p {
+    font-size: 22px;
+  }
+
+  .transfer-balance strong {
+    font-size: 34px;
+  }
+
+  .transfer-amount-btn {
+    font-size: 24px;
+    min-height: 64px;
+  }
+
+  .transfer-custom label {
+    font-size: 18px;
+  }
+
+  .transfer-custom input {
+    min-height: 56px;
+    font-size: 24px;
+  }
+
+  .transfer-continue-btn {
+    min-height: 68px;
+    font-size: 28px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -971,6 +1165,47 @@ button:hover {
 
   .profile-modal-header h2 {
     font-size: 24px;
+  }
+
+  .profile-close-btn.profile-close-btn-icon {
+    font-size: 32px;
+  }
+
+  .transfer-segment-btn {
+    font-size: 14px;
+    min-height: 44px;
+  }
+
+  .transfer-balance p,
+  .transfer-amount-block p {
+    font-size: 18px;
+  }
+
+  .transfer-balance strong {
+    font-size: 30px;
+  }
+
+  .transfer-amount-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transfer-amount-btn {
+    min-height: 56px;
+    font-size: 20px;
+  }
+
+  .transfer-custom label {
+    font-size: 14px;
+  }
+
+  .transfer-custom input {
+    min-height: 48px;
+    font-size: 20px;
+  }
+
+  .transfer-continue-btn {
+    min-height: 58px;
+    font-size: 22px;
   }
 
   .profile-full-name {

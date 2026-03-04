@@ -3,11 +3,17 @@
 const socket = io();
 const AUTH_STORAGE_KEY = "bingo.portal.auth";
 const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["candy", "bingo"]);
+const TOPUP_PRESET_AMOUNTS = [50, 100, 200, 300, 500, 1000];
 
 const state = {
   accessToken: "",
   sessionExpiresAt: "",
   isAuthBootstrapping: false,
+  profileTransferOpen: false,
+  transferDirection: "PLAYER",
+  transferSelectedAmount: 100,
+  transferCustomAmount: "",
+  transferSubmitting: false,
   user: null,
   games: [],
   selectedGameSlug: "",
@@ -42,12 +48,26 @@ const els = {
   userBadge: document.getElementById("userBadge"),
   logoutBtn: document.getElementById("logoutBtn"),
   profileModal: document.getElementById("profileModal"),
+  profileModalCard: document.getElementById("profileModalCard"),
+  profileMainView: document.getElementById("profileMainView"),
+  profileTransferView: document.getElementById("profileTransferView"),
   profileTitle: document.getElementById("profileTitle"),
   profileSummary: document.getElementById("profileSummary"),
   profileFullName: document.getElementById("profileFullName"),
   profileEmail: document.getElementById("profileEmail"),
   profileBigBalance: document.getElementById("profileBigBalance"),
+  profileInfoName: document.getElementById("profileInfoName"),
+  profileInfoEmail: document.getElementById("profileInfoEmail"),
+  profileInfoKycStatus: document.getElementById("profileInfoKycStatus"),
   profileCloseBtn: document.getElementById("profileCloseBtn"),
+  transferToPlayerBtn: document.getElementById("transferToPlayerBtn"),
+  transferToBankBtn: document.getElementById("transferToBankBtn"),
+  transferBalance: document.getElementById("transferBalance"),
+  transferAmountGrid: document.getElementById("transferAmountGrid"),
+  transferCustomWrap: document.getElementById("transferCustomWrap"),
+  transferCustomAmount: document.getElementById("transferCustomAmount"),
+  transferStatus: document.getElementById("transferStatus"),
+  transferContinueBtn: document.getElementById("transferContinueBtn"),
   swedbankCheckoutModal: document.getElementById("swedbankCheckoutModal"),
   swedbankCheckoutTitle: document.getElementById("swedbankCheckoutTitle"),
   swedbankCheckoutStatus: document.getElementById("swedbankCheckoutStatus"),
@@ -330,6 +350,7 @@ function closeSwedbankCheckoutModal() {
 }
 
 function closeProfileModal() {
+  setProfileTransferMode(false);
   setProfileModalVisible(false);
 }
 
@@ -454,6 +475,11 @@ function resetAuthState() {
   state.accessToken = "";
   state.sessionExpiresAt = "";
   state.isAuthBootstrapping = false;
+  state.profileTransferOpen = false;
+  state.transferDirection = "PLAYER";
+  state.transferSelectedAmount = TOPUP_PRESET_AMOUNTS[1];
+  state.transferCustomAmount = "";
+  state.transferSubmitting = false;
   state.user = null;
   state.games = [];
   state.selectedGameSlug = "";
@@ -642,32 +668,192 @@ function renderUserBadge() {
   }
 }
 
+function getCurrentWalletBalance() {
+  if (state.walletState?.account && Number.isFinite(state.walletState.account.balance)) {
+    return state.walletState.account.balance;
+  }
+  if (state.user && Number.isFinite(state.user.balance)) {
+    return state.user.balance;
+  }
+  return 0;
+}
+
+function syncProfileCloseButton() {
+  if (!els.profileCloseBtn) {
+    return;
+  }
+  if (state.profileTransferOpen) {
+    els.profileCloseBtn.textContent = "×";
+    els.profileCloseBtn.classList.add("profile-close-btn-icon");
+    els.profileCloseBtn.setAttribute("aria-label", "Lukk");
+    return;
+  }
+  els.profileCloseBtn.textContent = "Lukk";
+  els.profileCloseBtn.classList.remove("profile-close-btn-icon");
+  els.profileCloseBtn.removeAttribute("aria-label");
+}
+
+function getSelectedTransferAmount() {
+  if (state.transferDirection !== "PLAYER") {
+    return null;
+  }
+  if (state.transferSelectedAmount === "OTHER") {
+    const amount = Number(state.transferCustomAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return null;
+    }
+    return amount;
+  }
+  const amount = Number(state.transferSelectedAmount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+  return amount;
+}
+
+function renderTransferPanel() {
+  if (!els.profileTransferView) {
+    return;
+  }
+
+  if (els.transferBalance) {
+    els.transferBalance.textContent = formatNokWhole(getCurrentWalletBalance());
+  }
+
+  if (els.transferToPlayerBtn) {
+    const active = state.transferDirection === "PLAYER";
+    els.transferToPlayerBtn.classList.toggle("active", active);
+    els.transferToPlayerBtn.setAttribute("aria-selected", active ? "true" : "false");
+  }
+  if (els.transferToBankBtn) {
+    const active = state.transferDirection === "BANK";
+    els.transferToBankBtn.classList.toggle("active", active);
+    els.transferToBankBtn.setAttribute("aria-selected", active ? "true" : "false");
+  }
+
+  if (els.transferAmountGrid) {
+    const amountButtons = els.transferAmountGrid.querySelectorAll("[data-transfer-amount]");
+    amountButtons.forEach((button) => {
+      const raw = String(button.dataset.transferAmount || "").trim().toLowerCase();
+      const isOther = raw === "other";
+      const active = isOther
+        ? state.transferSelectedAmount === "OTHER"
+        : Number(raw) === Number(state.transferSelectedAmount) && state.transferSelectedAmount !== "OTHER";
+      button.classList.toggle("active", active);
+      button.disabled = state.transferDirection !== "PLAYER" || state.transferSubmitting;
+    });
+  }
+
+  if (els.transferCustomWrap) {
+    const showCustom = state.transferDirection === "PLAYER" && state.transferSelectedAmount === "OTHER";
+    els.transferCustomWrap.classList.toggle("hidden", !showCustom);
+  }
+  if (els.transferCustomAmount && els.transferCustomAmount.value !== state.transferCustomAmount) {
+    els.transferCustomAmount.value = state.transferCustomAmount;
+  }
+  if (els.transferCustomAmount) {
+    els.transferCustomAmount.disabled = state.transferDirection !== "PLAYER" || state.transferSubmitting;
+  }
+
+  const selectedAmount = getSelectedTransferAmount();
+  if (els.transferContinueBtn) {
+    const canContinue = state.transferDirection === "PLAYER" && Number.isFinite(selectedAmount) && selectedAmount > 0;
+    els.transferContinueBtn.disabled = state.transferSubmitting || !canContinue;
+  }
+}
+
+function setProfileTransferMode(enabled) {
+  state.profileTransferOpen = Boolean(enabled);
+  state.transferSubmitting = false;
+
+  if (els.profileModalCard) {
+    els.profileModalCard.classList.toggle("transfer-mode", state.profileTransferOpen);
+  }
+  if (els.profileMainView) {
+    els.profileMainView.classList.toggle("hidden", state.profileTransferOpen);
+  }
+  if (els.profileTransferView) {
+    els.profileTransferView.classList.toggle("hidden", !state.profileTransferOpen);
+  }
+  if (els.profileSummary) {
+    els.profileSummary.classList.toggle("hidden", state.profileTransferOpen);
+  }
+
+  if (state.profileTransferOpen) {
+    state.transferDirection = "PLAYER";
+    state.transferSelectedAmount = TOPUP_PRESET_AMOUNTS[1];
+    state.transferCustomAmount = "";
+    if (els.profileTitle) {
+      els.profileTitle.textContent = "Overfør penger";
+    }
+    if (els.transferStatus) {
+      setStatusBox(els.transferStatus, "Velg beløp og trykk Fortsett.");
+    }
+    renderTransferPanel();
+  } else {
+    renderProfileSummary();
+  }
+
+  syncProfileCloseButton();
+}
+
 function renderProfileSummary() {
   if (!els.profileTitle || !els.profileSummary || !els.profileFullName || !els.profileBigBalance) {
     return;
   }
 
   if (!state.user) {
-    els.profileTitle.textContent = "Min profil";
-    els.profileSummary.textContent = "Konto";
+    if (!state.profileTransferOpen) {
+      els.profileTitle.textContent = "Min profil";
+      els.profileSummary.textContent = "Konto";
+    }
     els.profileFullName.textContent = "Spiller";
     if (els.profileEmail) {
       els.profileEmail.textContent = "Ikke innlogget.";
     }
+    if (els.profileInfoName) {
+      els.profileInfoName.textContent = "Spiller";
+    }
+    if (els.profileInfoEmail) {
+      els.profileInfoEmail.textContent = "Ikke innlogget";
+    }
+    if (els.profileInfoKycStatus) {
+      els.profileInfoKycStatus.textContent = "Ukjent";
+    }
     els.profileBigBalance.textContent = "0 kr";
+    renderTransferPanel();
     return;
   }
 
-  const balance =
-    state.walletState?.account?.balance ??
-    (Number.isFinite(state.user.balance) ? state.user.balance : 0);
-  els.profileTitle.textContent = "Min profil";
-  els.profileSummary.textContent = "Konto";
+  const balance = getCurrentWalletBalance();
+  if (!state.profileTransferOpen) {
+    els.profileTitle.textContent = "Min profil";
+    els.profileSummary.textContent = "Konto";
+  }
   els.profileFullName.textContent = state.user.displayName || "Spiller";
   if (els.profileEmail) {
     els.profileEmail.textContent = state.user.email || "";
   }
+  if (els.profileInfoName) {
+    els.profileInfoName.textContent = state.user.displayName || "Spiller";
+  }
+  if (els.profileInfoEmail) {
+    els.profileInfoEmail.textContent = state.user.email || "Ikke oppgitt";
+  }
+  if (els.profileInfoKycStatus) {
+    const rawKycStatus = String(state.user.kycStatus || "").trim().toUpperCase();
+    if (rawKycStatus === "VERIFIED") {
+      els.profileInfoKycStatus.textContent = "Verifisert";
+    } else if (rawKycStatus === "PENDING") {
+      els.profileInfoKycStatus.textContent = "Venter";
+    } else if (rawKycStatus) {
+      els.profileInfoKycStatus.textContent = rawKycStatus;
+    } else {
+      els.profileInfoKycStatus.textContent = "Ikke verifisert";
+    }
+  }
   els.profileBigBalance.textContent = `${formatNokWhole(balance)}`;
+  renderTransferPanel();
 }
 
 async function openProfileModal() {
@@ -676,6 +862,7 @@ async function openProfileModal() {
     return;
   }
 
+  setProfileTransferMode(false);
   setProfileModalVisible(true);
   renderProfileSummary();
 
@@ -1665,6 +1852,92 @@ function parseTopupAmount() {
   return amount;
 }
 
+function setTransferDirection(direction) {
+  const normalized = direction === "BANK" ? "BANK" : "PLAYER";
+  state.transferDirection = normalized;
+  renderTransferPanel();
+  if (els.transferStatus) {
+    if (normalized === "BANK") {
+      setStatusBox(els.transferStatus, "Overføring til bankkonto kommer snart.");
+    } else {
+      setStatusBox(els.transferStatus, "Velg beløp og trykk Fortsett.");
+    }
+  }
+}
+
+function onTransferAmountGridClick(event) {
+  const button = event.target.closest("[data-transfer-amount]");
+  if (!button || button instanceof HTMLButtonElement === false || button.disabled) {
+    return;
+  }
+  const raw = String(button.dataset.transferAmount || "").trim().toLowerCase();
+  if (raw === "other") {
+    state.transferSelectedAmount = "OTHER";
+    renderTransferPanel();
+    if (els.transferCustomAmount) {
+      els.transferCustomAmount.focus();
+    }
+    return;
+  }
+
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return;
+  }
+  state.transferSelectedAmount = amount;
+  state.transferCustomAmount = "";
+  renderTransferPanel();
+}
+
+function onTransferCustomAmountInput() {
+  state.transferCustomAmount = String(els.transferCustomAmount?.value || "").trim();
+  renderTransferPanel();
+}
+
+function resolveTransferAmount() {
+  if (state.transferDirection !== "PLAYER") {
+    throw new Error("Overføring til bankkonto kommer snart.");
+  }
+  const amount = getSelectedTransferAmount();
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Velg et beløp over 0.");
+  }
+  return amount;
+}
+
+async function startSwedbankTopup(amount) {
+  const intent = await api("/api/payments/swedbank/topup-intent", {
+    method: "POST",
+    body: { amount }
+  });
+  await applySwedbankIntentStatus(intent);
+  const opened = openSwedbankCheckoutModal(intent);
+  if (!opened) {
+    throw new Error("Mottok ingen iframe-url fra Swedbank. Bruk 'Åpne i ny fane' hvis URL finnes.");
+  }
+  startSwedbankStatusPolling(intent.id);
+}
+
+async function onTransferContinue() {
+  if (state.transferSubmitting) {
+    return;
+  }
+  try {
+    state.transferSubmitting = true;
+    renderTransferPanel();
+    const amount = resolveTransferAmount();
+    setStatusBox(els.transferStatus, `Starter betaling på ${formatNok(amount)}...`, "success");
+    await startSwedbankTopup(amount);
+    closeProfileModal();
+  } catch (error) {
+    setStatusBox(els.transferStatus, error.message || "Kunne ikke starte betaling.", "error");
+    setStatusBox(els.walletStatus, error.message || "Top-up feilet.", "error");
+  } finally {
+    state.transferSubmitting = false;
+    renderTransferPanel();
+  }
+}
+
 async function refreshRoomStateIfConnected() {
   if (!state.roomCode) {
     return;
@@ -1677,23 +1950,13 @@ async function refreshRoomStateIfConnected() {
 }
 
 async function onWalletTopup() {
+  if (els.profileTransferView && els.profileMainView) {
+    setProfileTransferMode(true);
+    return;
+  }
   try {
     const amount = parseTopupAmount();
-    const intent = await api("/api/payments/swedbank/topup-intent", {
-      method: "POST",
-      body: { amount }
-    });
-    await applySwedbankIntentStatus(intent);
-    const opened = openSwedbankCheckoutModal(intent);
-    if (!opened) {
-      setStatusBox(
-        els.walletStatus,
-        "Mottok ingen iframe-url fra Swedbank. Bruk 'Åpne i ny fane' hvis URL finnes.",
-        "error"
-      );
-      return;
-    }
-    startSwedbankStatusPolling(intent.id);
+    await startSwedbankTopup(amount);
   } catch (error) {
     setStatusBox(els.walletStatus, error.message || "Top-up feilet.", "error");
   }
@@ -1945,6 +2208,27 @@ if (els.walletRefreshBtn) {
 if (els.walletTopupBtn) {
   els.walletTopupBtn.addEventListener("click", onWalletTopup);
 }
+if (els.transferToPlayerBtn) {
+  els.transferToPlayerBtn.addEventListener("click", () => setTransferDirection("PLAYER"));
+}
+if (els.transferToBankBtn) {
+  els.transferToBankBtn.addEventListener("click", () => setTransferDirection("BANK"));
+}
+if (els.transferAmountGrid) {
+  els.transferAmountGrid.addEventListener("click", onTransferAmountGridClick);
+}
+if (els.transferCustomAmount) {
+  els.transferCustomAmount.addEventListener("input", onTransferCustomAmountInput);
+  els.transferCustomAmount.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onTransferContinue();
+    }
+  });
+}
+if (els.transferContinueBtn) {
+  els.transferContinueBtn.addEventListener("click", onTransferContinue);
+}
 if (els.walletSwedbankIntentBtn) {
   els.walletSwedbankIntentBtn.addEventListener("click", onSwedbankIntent);
 }
@@ -2044,6 +2328,7 @@ if (els.adminSaveGameBtn) {
 
 function initialRender() {
   closeSwedbankCheckoutModal();
+  setProfileTransferMode(false);
   renderLayoutForAuth();
   renderUserBadge();
   renderHeroPanel();
