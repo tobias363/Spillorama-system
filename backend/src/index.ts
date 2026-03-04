@@ -11,7 +11,7 @@ import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
 import type { ClaimType, RoomSnapshot } from "./game/types.js";
-import { assertAdminPermission, canAccessAdminPermission, type AdminPermission } from "./platform/AdminAccessPolicy.js";
+import { assertAdminPermission, type AdminPermission } from "./platform/AdminAccessPolicy.js";
 import { APP_USER_ROLES, PlatformService, type PublicAppUser, type UserRole } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 
@@ -348,6 +348,35 @@ function parseTicketsPerPlayerInput(value: unknown): number {
   return parsed;
 }
 
+function normalizeGameSettingsForUpdate(
+  gameSlug: string,
+  settings: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!settings) {
+    return undefined;
+  }
+
+  const normalizedSlug = gameSlug.trim().toLowerCase();
+  if (normalizedSlug !== "candy") {
+    return settings;
+  }
+
+  const nextSettings: Record<string, unknown> = { ...settings };
+  const payoutRaw = nextSettings.payoutPercent;
+
+  if (payoutRaw === undefined || payoutRaw === null || payoutRaw === "") {
+    return nextSettings;
+  }
+
+  const payoutPercent = Number(payoutRaw);
+  if (!Number.isFinite(payoutPercent) || payoutPercent < 0 || payoutPercent > 100) {
+    throw new DomainError("INVALID_PAYOUT_PERCENT", "Candy utbetaling (%) må være mellom 0 og 100.");
+  }
+
+  nextSettings.payoutPercent = Math.round(payoutPercent * 100) / 100;
+  return nextSettings;
+}
+
 function getAccessTokenFromRequest(req: express.Request): string {
   const header = req.headers.authorization;
   if (!header) {
@@ -388,6 +417,14 @@ async function requireAdminPermissionUser(
   return user;
 }
 
+async function requireAdminOnlyUser(req: express.Request, message?: string): Promise<PublicAppUser> {
+  const user = await getAuthenticatedUser(req);
+  if (user.role !== "ADMIN") {
+    throw new DomainError("FORBIDDEN", message ?? "Kun ADMIN har tilgang til dette endepunktet.");
+  }
+  return user;
+}
+
 function parseUserRoleInput(value: unknown): UserRole {
   const role = mustBeNonEmptyString(value, "role").toUpperCase();
   if (!APP_USER_ROLES.includes(role as UserRole)) {
@@ -397,6 +434,13 @@ function parseUserRoleInput(value: unknown): UserRole {
     );
   }
   return role as UserRole;
+}
+
+function parseOptionalTicketsPerPlayerInput(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  return parseTicketsPerPlayerInput(value);
 }
 
 function assertUserCanAccessRoom(user: PublicAppUser, roomCode: string): void {
@@ -737,11 +781,11 @@ app.post("/api/admin/auth/login", async (req, res) => {
       email,
       password
     });
-    if (!canAccessAdminPermission(session.user.role, "ADMIN_PANEL_ACCESS")) {
+    if (session.user.role !== "ADMIN") {
       await platformService.logout(session.accessToken);
       throw new DomainError(
         "FORBIDDEN",
-        "Kun admin, hall-operator eller support kan logge inn i admin-panelet."
+        "Kun ADMIN-brukere kan logge inn i admin-panelet."
       );
     }
     apiSuccess(res, session);
@@ -762,7 +806,7 @@ app.post("/api/auth/logout", async (req, res) => {
 
 app.post("/api/admin/auth/logout", async (req, res) => {
   try {
-    await requireAdminPermissionUser(req, "ADMIN_PANEL_ACCESS");
+    await requireAdminOnlyUser(req);
     const accessToken = getAccessTokenFromRequest(req);
     await platformService.logout(accessToken);
     apiSuccess(res, { loggedOut: true });
@@ -782,7 +826,7 @@ app.get("/api/auth/me", async (req, res) => {
 
 app.get("/api/admin/auth/me", async (req, res) => {
   try {
-    const user = await requireAdminPermissionUser(req, "ADMIN_PANEL_ACCESS");
+    const user = await requireAdminOnlyUser(req);
     apiSuccess(res, user);
   } catch (error) {
     apiFailure(res, error);
@@ -858,16 +902,17 @@ app.put("/api/admin/games/:slug", async (req, res) => {
   try {
     await requireAdminPermissionUser(req, "GAME_CATALOG_WRITE");
     const slug = mustBeNonEmptyString(req.params.slug, "slug");
+    const rawSettings =
+      req.body?.settings && typeof req.body.settings === "object" && !Array.isArray(req.body.settings)
+        ? (req.body.settings as Record<string, unknown>)
+        : undefined;
     const updated = await platformService.updateGame(slug, {
       title: typeof req.body?.title === "string" ? req.body.title : undefined,
       description: typeof req.body?.description === "string" ? req.body.description : undefined,
       route: typeof req.body?.route === "string" ? req.body.route : undefined,
       isEnabled: typeof req.body?.isEnabled === "boolean" ? req.body.isEnabled : undefined,
       sortOrder: Number.isFinite(req.body?.sortOrder) ? Number(req.body.sortOrder) : undefined,
-      settings:
-        req.body?.settings && typeof req.body.settings === "object" && !Array.isArray(req.body.settings)
-          ? req.body.settings
-          : undefined
+      settings: normalizeGameSettingsForUpdate(slug, rawSettings)
     });
     apiSuccess(res, updated);
   } catch (error) {
@@ -1010,6 +1055,131 @@ app.put("/api/admin/halls/:hallId/game-config/:gameSlug", async (req, res) => {
       minRoundIntervalMs: minRoundIntervalMs !== undefined ? Number(minRoundIntervalMs) : undefined
     });
     apiSuccess(res, config);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/rooms", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "ROOM_CONTROL_READ");
+    const includeSnapshots = parseBooleanQueryValue(req.query.includeSnapshots, false);
+    const rooms = engine.listRoomSummaries();
+    if (!includeSnapshots) {
+      apiSuccess(res, rooms);
+      return;
+    }
+    const detailed = rooms.map((room) => ({
+      ...room,
+      snapshot: engine.getRoomSnapshot(room.code)
+    }));
+    apiSuccess(res, detailed);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/rooms/:roomCode", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "ROOM_CONTROL_READ");
+    const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
+    const snapshot = engine.getRoomSnapshot(roomCode);
+    apiSuccess(res, snapshot);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.post("/api/admin/rooms", async (req, res) => {
+  try {
+    const adminUser = await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
+    const hallId = await requireActiveHallIdFromInput(req.body?.hallId);
+    const requestedHostName =
+      typeof req.body?.hostName === "string" && req.body.hostName.trim().length > 0
+        ? req.body.hostName.trim()
+        : `${adminUser.displayName} (Host)`;
+    const requestedHostWalletId =
+      typeof req.body?.hostWalletId === "string" && req.body.hostWalletId.trim().length > 0
+        ? req.body.hostWalletId.trim()
+        : `admin-host-${hallId}-${Date.now().toString(36)}`;
+    const { roomCode, playerId } = await engine.createRoom({
+      hallId,
+      playerName: requestedHostName,
+      walletId: requestedHostWalletId
+    });
+    const snapshot = await emitRoomUpdate(roomCode);
+    apiSuccess(res, {
+      roomCode,
+      playerId,
+      snapshot
+    });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
+    const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
+    const entryFee = parseOptionalNonNegativeNumber(req.body?.entryFee, "entryFee") ?? 0;
+    const ticketsPerPlayer = parseOptionalTicketsPerPlayerInput(req.body?.ticketsPerPlayer);
+    if (ticketsPerPlayer !== undefined) {
+      const hallGameConfig = await resolveBingoHallGameConfigForRoom(roomCode);
+      assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
+    }
+    const beforeStartSnapshot = engine.getRoomSnapshot(roomCode);
+    await engine.startGame({
+      roomCode,
+      actorPlayerId: beforeStartSnapshot.hostPlayerId,
+      entryFee,
+      ticketsPerPlayer
+    });
+    const snapshot = await emitRoomUpdate(roomCode);
+    apiSuccess(res, {
+      roomCode,
+      snapshot
+    });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.post("/api/admin/rooms/:roomCode/draw-next", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
+    const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
+    const snapshot = engine.getRoomSnapshot(roomCode);
+    const number = await engine.drawNextNumber({
+      roomCode,
+      actorPlayerId: snapshot.hostPlayerId
+    });
+    const updatedSnapshot = await emitRoomUpdate(roomCode);
+    apiSuccess(res, {
+      roomCode,
+      number,
+      snapshot: updatedSnapshot
+    });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.post("/api/admin/rooms/:roomCode/end", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
+    const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
+    const beforeEndSnapshot = engine.getRoomSnapshot(roomCode);
+    await engine.endGame({
+      roomCode,
+      actorPlayerId: beforeEndSnapshot.hostPlayerId,
+      reason: typeof req.body?.reason === "string" ? req.body.reason : "Manual end from admin"
+    });
+    const snapshot = await emitRoomUpdate(roomCode);
+    apiSuccess(res, {
+      roomCode,
+      snapshot
+    });
   } catch (error) {
     apiFailure(res, error);
   }

@@ -299,6 +299,7 @@ Adapterne gjør at dere kan integrere uten å skrive om spillreglene.
 - `GET /api/games`
 - `GET /api/admin/games` (admin)
 - `PUT /api/admin/games/:slug` (admin)
+- `POST /api/admin/auth/login` (kun ADMIN)
 
 ### Wallet (innlogget bruker)
 
@@ -321,6 +322,15 @@ Adapterne gjør at dere kan integrere uten å skrive om spillreglene.
 - `GET /api/rooms`
 - `GET /api/rooms/:roomCode`
 - `POST /api/rooms/:roomCode/game/end`
+
+### Spill/rom (admin backend-kontroll)
+
+- `GET /api/admin/rooms`
+- `GET /api/admin/rooms/:roomCode`
+- `POST /api/admin/rooms` (opprett rom)
+- `POST /api/admin/rooms/:roomCode/start` (start spill)
+- `POST /api/admin/rooms/:roomCode/draw-next` (trekk neste tall)
+- `POST /api/admin/rooms/:roomCode/end` (avslutt spill)
 
 ### Wallet
 

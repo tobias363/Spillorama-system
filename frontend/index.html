@@ -84,6 +84,9 @@
             Dette er første spillet etter innlogging. Unity-klienten ligger i
             <code>/Candy</code> og integreres mot realtime-backend.
           </p>
+          <div class="row">
+            <button id="candyPlayBtn">Åpne Candy Admin</button>
+          </div>
           <pre id="candyStatus" class="status-box">Laster Candy-metadata...</pre>
         </article>
 
@@ -163,6 +166,10 @@
           <label class="checkbox-row">
             <input id="adminGameEnabled" type="checkbox" />
             Aktivt spill
+          </label>
+          <label id="adminCandyPayoutField" class="hidden">
+            Candy utbetaling (%)
+            <input id="adminCandyPayoutPercent" type="number" min="0" max="100" step="0.01" />
           </label>
           <label>
             Settings JSON

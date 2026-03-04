@@ -2,6 +2,7 @@
 
 const socket = io();
 const AUTH_STORAGE_KEY = "bingo.portal.auth";
+const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["candy"]);
 
 const state = {
   accessToken: "",
@@ -64,6 +65,7 @@ const els = {
   walletStatus: document.getElementById("walletStatus"),
 
   candyView: document.getElementById("candyView"),
+  candyPlayBtn: document.getElementById("candyPlayBtn"),
   candyStatus: document.getElementById("candyStatus"),
 
   bingoView: document.getElementById("bingoView"),
@@ -89,6 +91,8 @@ const els = {
   adminGameRoute: document.getElementById("adminGameRoute"),
   adminGameSortOrder: document.getElementById("adminGameSortOrder"),
   adminGameEnabled: document.getElementById("adminGameEnabled"),
+  adminCandyPayoutField: document.getElementById("adminCandyPayoutField"),
+  adminCandyPayoutPercent: document.getElementById("adminCandyPayoutPercent"),
   adminGameSettingsJson: document.getElementById("adminGameSettingsJson"),
   adminSaveGameBtn: document.getElementById("adminSaveGameBtn"),
   adminGameStatus: document.getElementById("adminGameStatus")
@@ -319,11 +323,37 @@ function currentGame() {
   return state.games.find((game) => game.slug === state.selectedGameSlug) || null;
 }
 
+function getVisiblePortalGames(allGames) {
+  if (!Array.isArray(allGames)) {
+    return [];
+  }
+  return allGames.filter((game) => CUSTOMER_VISIBLE_GAME_SLUGS.has(game?.slug));
+}
+
+function getCandyGame() {
+  return state.games.find((game) => game.slug === "candy") || null;
+}
+
 function currentAdminGame() {
   if (!state.adminGames.length) {
     return null;
   }
   return state.adminGames.find((game) => game.slug === state.selectedGameSlug) || state.adminGames[0] || null;
+}
+
+function getSettingsObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value;
+}
+
+function parseCandyPayoutPercent(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+    throw new Error("Candy utbetaling (%) må være et tall mellom 0 og 100.");
+  }
+  return Math.round(parsed * 100) / 100;
 }
 
 function isAdmin() {
@@ -388,9 +418,11 @@ function renderGamesNav() {
   els.gamesNav.innerHTML = "";
   if (!state.games.length) {
     els.activeGameLabel.textContent = "Ingen spill tilgjengelig";
+    els.gamesNav.classList.add("hidden");
     return;
   }
 
+  els.gamesNav.classList.toggle("hidden", state.games.length <= 1);
   for (const game of state.games) {
     const button = document.createElement("button");
     button.textContent = game.title;
@@ -409,7 +441,10 @@ function renderGamesNav() {
 }
 
 function renderCandyCard() {
-  const game = state.games.find((entry) => entry.slug === "candy") || currentGame();
+  const game = getCandyGame() || currentGame();
+  if (els.candyPlayBtn) {
+    els.candyPlayBtn.disabled = !game;
+  }
   if (!game) {
     setStatusBox(els.candyStatus, "Candy er ikke aktivert i game-katalogen.", "error");
     return;
@@ -419,12 +454,17 @@ function renderCandyCard() {
     `Slug: ${game.slug}`,
     `Route: ${game.route}`,
     `Aktivt: ${game.isEnabled ? "Ja" : "Nei"}`,
+    "Romopprettelse/start styres fra /admin (ADMIN).",
     "",
     game.description || "Ingen beskrivelse.",
     "",
     `Settings: ${JSON.stringify(game.settings || {}, null, 2)}`
   ];
   setStatusBox(els.candyStatus, lines.join("\n"));
+}
+
+function onCandyPlay() {
+  window.location.assign("/admin");
 }
 
 function renderWalletMini() {
@@ -688,9 +728,28 @@ function renderBingoState() {
   renderWalletCard();
 }
 
+function renderBackendControlledGameOps() {
+  const admin = isAdmin();
+  if (els.bingoCreateRoomBtn) {
+    els.bingoCreateRoomBtn.disabled = !admin;
+  }
+  if (els.bingoStartGameBtn) {
+    els.bingoStartGameBtn.disabled = !admin;
+  }
+  if (els.bingoEndGameBtn) {
+    els.bingoEndGameBtn.disabled = !admin;
+  }
+  if (els.bingoDrawNextBtn) {
+    els.bingoDrawNextBtn.disabled = !admin;
+  }
+}
+
 function renderAdminEditor() {
   if (!isAdmin()) {
     els.adminGameCard.classList.add("hidden");
+    if (els.adminCandyPayoutField) {
+      els.adminCandyPayoutField.classList.add("hidden");
+    }
     return;
   }
 
@@ -701,12 +760,23 @@ function renderAdminEditor() {
     return;
   }
 
+  const settings = getSettingsObject(game.settings);
   els.adminGameTitle.value = game.title || "";
   els.adminGameDescription.value = game.description || "";
   els.adminGameRoute.value = game.route || "";
   els.adminGameSortOrder.value = String(game.sortOrder ?? 100);
   els.adminGameEnabled.checked = Boolean(game.isEnabled);
-  els.adminGameSettingsJson.value = JSON.stringify(game.settings || {}, null, 2);
+  if (els.adminCandyPayoutField && els.adminCandyPayoutPercent) {
+    const isCandy = game.slug === "candy";
+    els.adminCandyPayoutField.classList.toggle("hidden", !isCandy);
+    if (isCandy) {
+      const payout = Number(settings.payoutPercent);
+      els.adminCandyPayoutPercent.value = Number.isFinite(payout) ? String(payout) : "0";
+    } else {
+      els.adminCandyPayoutPercent.value = "";
+    }
+  }
+  els.adminGameSettingsJson.value = JSON.stringify(settings, null, 2);
 
   setStatusBox(
     els.adminGameStatus,
@@ -719,15 +789,17 @@ function renderSelectedGame() {
 
   const game = currentGame();
   const slug = game?.slug || "";
+  const showRealtimeGamePanel = slug === "bingo" || slug === "candy";
 
   els.candyView.classList.toggle("hidden", slug !== "candy");
-  els.bingoView.classList.toggle("hidden", slug !== "bingo");
+  els.bingoView.classList.toggle("hidden", !showRealtimeGamePanel);
 
   renderCandyCard();
-  if (slug === "bingo") {
+  if (showRealtimeGamePanel) {
     renderBingoHallSelect();
     renderBingoState();
   }
+  renderBackendControlledGameOps();
   renderAdminEditor();
 }
 
@@ -758,6 +830,12 @@ async function loadWalletState() {
 }
 
 function ensureDefaultSelectedGame() {
+  const candy = state.games.find((game) => game.slug === "candy");
+  if (candy) {
+    state.selectedGameSlug = candy.slug;
+    return;
+  }
+
   if (!state.games.length) {
     state.selectedGameSlug = "";
     return;
@@ -801,7 +879,7 @@ async function loadAuthenticatedData() {
   ]);
 
   state.user = me;
-  state.games = Array.isArray(games) ? games : [];
+  state.games = getVisiblePortalGames(games);
   state.halls = Array.isArray(halls) ? halls : [];
   ensureDefaultSelectedGame();
   ensureDefaultSelectedHall();
@@ -1039,6 +1117,9 @@ function requireJoinedRoom() {
 
 async function onBingoCreateRoom() {
   try {
+    if (!isAdmin()) {
+      throw new Error("Kun admin kan opprette rom her. Bruk /admin.");
+    }
     requireBingoIdentity();
     requireSelectedHall();
     const response = await emitWithAck("room:create", buildRoomIdentityPayload());
@@ -1088,6 +1169,9 @@ async function onBingoJoinRoom() {
 
 async function onBingoStartGame() {
   try {
+    if (!isAdmin()) {
+      throw new Error("Kun admin kan starte spill her. Bruk /admin.");
+    }
     requireJoinedRoom();
     const entryFee = Number(els.bingoEntryFee.value || 0);
 
@@ -1111,6 +1195,9 @@ async function onBingoStartGame() {
 
 async function onBingoEndGame() {
   try {
+    if (!isAdmin()) {
+      throw new Error("Kun admin kan avslutte spill her. Bruk /admin.");
+    }
     requireJoinedRoom();
 
     const response = await emitWithAck("game:end", {
@@ -1132,6 +1219,9 @@ async function onBingoEndGame() {
 
 async function onBingoDrawNext() {
   try {
+    if (!isAdmin()) {
+      throw new Error("Kun admin kan trekke tall her. Bruk /admin.");
+    }
     requireJoinedRoom();
 
     const response = await emitWithAck("draw:next", {
@@ -1185,6 +1275,19 @@ async function onAdminSaveGame() {
   } catch {
     setStatusBox(els.adminGameStatus, "Settings JSON er ugyldig.", "error");
     return;
+  }
+
+  if (game.slug === "candy") {
+    try {
+      const payoutPercent = parseCandyPayoutPercent(els.adminCandyPayoutPercent?.value || "0");
+      settings = {
+        ...settings,
+        payoutPercent
+      };
+    } catch (error) {
+      setStatusBox(els.adminGameStatus, error.message || "Ugyldig utbetaling %.", "error");
+      return;
+    }
   }
 
   try {
@@ -1278,6 +1381,9 @@ els.bingoEndGameBtn.addEventListener("click", onBingoEndGame);
 els.bingoDrawNextBtn.addEventListener("click", onBingoDrawNext);
 els.bingoClaimLineBtn.addEventListener("click", () => onBingoClaim("LINE"));
 els.bingoClaimBingoBtn.addEventListener("click", () => onBingoClaim("BINGO"));
+if (els.candyPlayBtn) {
+  els.candyPlayBtn.addEventListener("click", onCandyPlay);
+}
 
 els.adminSaveGameBtn.addEventListener("click", onAdminSaveGame);
 

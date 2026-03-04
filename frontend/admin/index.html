@@ -187,6 +187,10 @@
               <option value="false">Nei</option>
             </select>
           </div>
+          <div id="payoutPercentField" class="field hidden">
+            <label for="payoutPercent">Candy utbetaling (%)</label>
+            <input id="payoutPercent" type="number" min="0" max="100" step="0.01" />
+          </div>
           <div class="field full">
             <label for="settingsJson">Settings JSON</label>
             <textarea id="settingsJson"></textarea>
@@ -198,6 +202,47 @@
           <button id="logoutBtn" class="secondary">Logg ut</button>
         </div>
         <pre id="adminStatus" class="status">Klar.</pre>
+
+        <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 18px 0" />
+
+        <h2>Candy Drift (Backend-kontroll)</h2>
+        <p class="muted">
+          Opprett rom og start/stopp spill fra backend. Kun tilgjengelig for <code>ADMIN</code>.
+        </p>
+        <div class="grid">
+          <div class="field">
+            <label for="hallSelect">Hall</label>
+            <select id="hallSelect"></select>
+          </div>
+          <div class="field">
+            <label for="roomSelect">Rom</label>
+            <select id="roomSelect"></select>
+          </div>
+          <div class="field">
+            <label for="hostName">Host navn</label>
+            <input id="hostName" placeholder="Admin Host" />
+          </div>
+          <div class="field">
+            <label for="hostWalletId">Host wallet (valgfri)</label>
+            <input id="hostWalletId" placeholder="admin-host-..." />
+          </div>
+          <div class="field">
+            <label for="entryFee">Entry fee</label>
+            <input id="entryFee" type="number" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label for="ticketsPerPlayer">Bonger per spiller</label>
+            <input id="ticketsPerPlayer" type="number" min="1" max="5" value="4" />
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="createRoomBtn">Opprett rom</button>
+          <button id="refreshRoomsBtn" class="secondary">Oppdater romliste</button>
+          <button id="startRoomBtn">Start spill</button>
+          <button id="drawNextBtn" class="secondary">Trekk neste</button>
+          <button id="endRoomBtn" class="secondary">Avslutt spill</button>
+        </div>
+        <pre id="roomStatus" class="status">Ingen rom valgt.</pre>
       </section>
     </main>
 

@@ -6,10 +6,10 @@ import type { UserRole } from "./PlatformService.js";
 
 const NON_ADMIN_ROLES: UserRole[] = ["HALL_OPERATOR", "SUPPORT", "PLAYER"];
 
-test("admin panel is accessible for admin, hall operator, and support", () => {
+test("admin panel is accessible only for admin", () => {
   assert.equal(canAccessAdminPermission("ADMIN", "ADMIN_PANEL_ACCESS"), true);
-  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "ADMIN_PANEL_ACCESS"), true);
-  assert.equal(canAccessAdminPermission("SUPPORT", "ADMIN_PANEL_ACCESS"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "ADMIN_PANEL_ACCESS"), false);
+  assert.equal(canAccessAdminPermission("SUPPORT", "ADMIN_PANEL_ACCESS"), false);
   assert.equal(canAccessAdminPermission("PLAYER", "ADMIN_PANEL_ACCESS"), false);
 });
 
@@ -22,7 +22,9 @@ test("sensitive write permissions are restricted to admin", () => {
     "LEDGER_WRITE",
     "OVERSKUDD_READ",
     "OVERSKUDD_WRITE",
-    "USER_ROLE_WRITE"
+    "USER_ROLE_WRITE",
+    "ROOM_CONTROL_READ",
+    "ROOM_CONTROL_WRITE"
   ];
   for (const permission of adminOnlyPermissions) {
     assert.equal(canAccessAdminPermission("ADMIN", permission), true);
