@@ -1,0 +1,1378 @@
+import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, createHash } from "node:crypto";
+import { promisify } from "node:util";
+import { Pool, type PoolClient } from "pg";
+import type { KycAdapter } from "../adapters/KycAdapter.js";
+import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import { WalletError } from "../adapters/WalletAdapter.js";
+import { DomainError } from "../game/BingoEngine.js";
+
+const scrypt = promisify(scryptCallback);
+
+export type UserRole = "ADMIN" | "PLAYER";
+export type KycStatus = "UNVERIFIED" | "PENDING" | "VERIFIED" | "REJECTED";
+
+export interface AppUser {
+  id: string;
+  email: string;
+  displayName: string;
+  walletId: string;
+  role: UserRole;
+  kycStatus: KycStatus;
+  birthDate?: string;
+  kycVerifiedAt?: string;
+  kycProviderRef?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicAppUser extends AppUser {
+  balance: number;
+}
+
+export interface SessionInfo {
+  accessToken: string;
+  expiresAt: string;
+  user: PublicAppUser;
+}
+
+export interface GameDefinition {
+  slug: string;
+  title: string;
+  description: string;
+  route: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  settings: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateGameInput {
+  title?: string;
+  description?: string;
+  route?: string;
+  isEnabled?: boolean;
+  sortOrder?: number;
+  settings?: Record<string, unknown>;
+}
+
+export interface HallDefinition {
+  id: string;
+  slug: string;
+  name: string;
+  region: string;
+  address: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateHallInput {
+  slug: string;
+  name: string;
+  region?: string;
+  address?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateHallInput {
+  slug?: string;
+  name?: string;
+  region?: string;
+  address?: string;
+  isActive?: boolean;
+}
+
+export interface TerminalDefinition {
+  id: string;
+  hallId: string;
+  terminalCode: string;
+  displayName: string;
+  isActive: boolean;
+  lastSeenAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTerminalInput {
+  hallId: string;
+  terminalCode: string;
+  displayName: string;
+  isActive?: boolean;
+}
+
+export interface UpdateTerminalInput {
+  terminalCode?: string;
+  displayName?: string;
+  isActive?: boolean;
+  lastSeenAt?: string;
+}
+
+export interface HallGameConfigDefinition {
+  hallId: string;
+  gameSlug: string;
+  isEnabled: boolean;
+  maxTicketsPerPlayer: number;
+  minRoundIntervalMs: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertHallGameConfigInput {
+  hallId: string;
+  gameSlug: string;
+  isEnabled?: boolean;
+  maxTicketsPerPlayer?: number;
+  minRoundIntervalMs?: number;
+}
+
+interface PlatformServiceOptions {
+  connectionString: string;
+  schema?: string;
+  sessionTtlHours?: number;
+  minAgeYears?: number;
+  kycAdapter?: KycAdapter;
+}
+
+interface UserRow {
+  id: string;
+  email: string;
+  display_name: string;
+  wallet_id: string;
+  role: UserRole;
+  kyc_status: KycStatus;
+  birth_date: Date | string | null;
+  kyc_verified_at: Date | string | null;
+  kyc_provider_ref: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface GameRow {
+  slug: string;
+  title: string;
+  description: string;
+  route: string;
+  is_enabled: boolean;
+  sort_order: number;
+  settings_json: Record<string, unknown>;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface HallRow {
+  id: string;
+  slug: string;
+  name: string;
+  region: string;
+  address: string;
+  is_active: boolean;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface TerminalRow {
+  id: string;
+  hall_id: string;
+  terminal_code: string;
+  display_name: string;
+  is_active: boolean;
+  last_seen_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface HallGameConfigRow {
+  hall_id: string;
+  game_slug: string;
+  is_enabled: boolean;
+  max_tickets_per_player: number;
+  min_round_interval_ms: number;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+function asIso(value: Date | string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString();
+  }
+  return date.toISOString();
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function assertSchemaName(schema: string): string {
+  const trimmed = schema.trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) {
+    throw new DomainError(
+      "INVALID_CONFIG",
+      "APP_PG_SCHEMA er ugyldig. Bruk kun bokstaver, tall og underscore."
+    );
+  }
+  return trimmed;
+}
+
+function parseHashEnvelope(hash: string): { saltHex: string; digestHex: string } {
+  const parts = hash.split(":");
+  if (parts.length !== 3 || parts[0] !== "scrypt") {
+    throw new DomainError("INVALID_PASSWORD_HASH", "Ugyldig password hash-format.");
+  }
+  return {
+    saltHex: parts[1],
+    digestHex: parts[2]
+  };
+}
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function calculateAgeYears(birthDate: Date, now: Date): number {
+  let age = now.getUTCFullYear() - birthDate.getUTCFullYear();
+  const monthDiff = now.getUTCMonth() - birthDate.getUTCMonth();
+  const dayDiff = now.getUTCDate() - birthDate.getUTCDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+    age -= 1;
+  }
+  return age;
+}
+
+const DEFAULT_HALL_ID = "hall-default";
+const DEFAULT_HALL_SLUG = "default-hall";
+
+export class PlatformService {
+  private readonly pool: Pool;
+
+  private readonly schema: string;
+
+  private readonly sessionTtlHours: number;
+
+  private readonly minAgeYears: number;
+
+  private readonly kycAdapter?: KycAdapter;
+
+  private initPromise: Promise<void> | null = null;
+
+  constructor(
+    private readonly walletAdapter: WalletAdapter,
+    options: PlatformServiceOptions
+  ) {
+    if (!options.connectionString.trim()) {
+      throw new DomainError("INVALID_CONFIG", "Mangler connection string for plattform-database.");
+    }
+    this.schema = assertSchemaName(options.schema ?? "public");
+    this.sessionTtlHours = options.sessionTtlHours ?? 24 * 7;
+    this.minAgeYears = Math.max(18, Math.floor(options.minAgeYears ?? 18));
+    this.kycAdapter = options.kycAdapter;
+    this.pool = new Pool({
+      connectionString: options.connectionString
+    });
+  }
+
+  async register(input: {
+    email: string;
+    password: string;
+    displayName: string;
+  }): Promise<SessionInfo> {
+    await this.ensureInitialized();
+    const email = normalizeEmail(input.email);
+    const displayName = input.displayName.trim();
+    this.assertEmail(email);
+    this.assertDisplayName(displayName);
+    this.assertPassword(input.password);
+
+    const passwordHash = await this.hashPassword(input.password);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<{ id: string }>(
+        `SELECT id FROM ${this.usersTable()} WHERE email = $1`,
+        [email]
+      );
+      if (existingRows[0]) {
+        throw new DomainError("EMAIL_EXISTS", "E-post er allerede registrert.");
+      }
+
+      const { rows: countRows } = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM ${this.usersTable()}`
+      );
+      const role: UserRole = Number(countRows[0]?.count ?? "0") === 0 ? "ADMIN" : "PLAYER";
+
+      const userId = randomUUID();
+      const walletId = `wallet-user-${userId}`;
+      const { rows: createdRows } = await client.query<UserRow>(
+        `INSERT INTO ${this.usersTable()}
+          (id, email, display_name, password_hash, wallet_id, role)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
+        [userId, email, displayName, passwordHash, walletId, role]
+      );
+      await client.query("COMMIT");
+
+      await this.walletAdapter.ensureAccount(walletId);
+      const user = await this.withBalance(this.mapUser(createdRows[0]));
+      const session = await this.createSession(user.id);
+      return {
+        accessToken: session.accessToken,
+        expiresAt: session.expiresAt,
+        user
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  async login(input: { email: string; password: string }): Promise<SessionInfo> {
+    await this.ensureInitialized();
+    const email = normalizeEmail(input.email);
+    this.assertEmail(email);
+    this.assertPassword(input.password);
+
+    const { rows } = await this.pool.query<
+      UserRow & {
+        password_hash: string;
+      }
+    >(
+      `SELECT id, email, display_name, password_hash, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
+       FROM ${this.usersTable()}
+       WHERE email = $1`,
+      [email]
+    );
+    const userRow = rows[0];
+    if (!userRow) {
+      throw new DomainError("INVALID_CREDENTIALS", "Ugyldig e-post eller passord.");
+    }
+    const ok = await this.verifyPassword(input.password, userRow.password_hash);
+    if (!ok) {
+      throw new DomainError("INVALID_CREDENTIALS", "Ugyldig e-post eller passord.");
+    }
+
+    const session = await this.createSession(userRow.id);
+    const user = await this.withBalance(this.mapUser(userRow));
+    return {
+      accessToken: session.accessToken,
+      expiresAt: session.expiresAt,
+      user
+    };
+  }
+
+  async logout(accessToken: string): Promise<void> {
+    await this.ensureInitialized();
+    const token = accessToken.trim();
+    if (!token) {
+      return;
+    }
+    await this.pool.query(
+      `UPDATE ${this.sessionsTable()}
+       SET revoked_at = now()
+       WHERE token_hash = $1`,
+      [hashToken(token)]
+    );
+  }
+
+  async getUserFromAccessToken(accessToken: string): Promise<PublicAppUser> {
+    await this.ensureInitialized();
+    const token = accessToken.trim();
+    if (!token) {
+      throw new DomainError("UNAUTHORIZED", "Mangler access token.");
+    }
+
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT u.id, u.email, u.display_name, u.wallet_id, u.role, u.kyc_status, u.birth_date, u.kyc_verified_at, u.kyc_provider_ref, u.created_at, u.updated_at
+       FROM ${this.sessionsTable()} s
+       JOIN ${this.usersTable()} u ON u.id = s.user_id
+       WHERE s.token_hash = $1
+         AND s.revoked_at IS NULL
+         AND s.expires_at > now()
+       ORDER BY s.created_at DESC
+       LIMIT 1`,
+      [hashToken(token)]
+    );
+
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("UNAUTHORIZED", "Innlogging er utløpt eller ugyldig.");
+    }
+    return this.withBalance(this.mapUser(row));
+  }
+
+  async listGames(options?: { includeDisabled?: boolean }): Promise<GameDefinition[]> {
+    await this.ensureInitialized();
+    const includeDisabled = options?.includeDisabled ?? false;
+    const { rows } = await this.pool.query<GameRow>(
+      `SELECT slug, title, description, route, is_enabled, sort_order, settings_json, created_at, updated_at
+       FROM ${this.gamesTable()}
+       ${includeDisabled ? "" : "WHERE is_enabled = true"}
+       ORDER BY sort_order ASC, slug ASC`
+    );
+    return rows.map((row) => this.mapGame(row));
+  }
+
+  async getGame(slug: string): Promise<GameDefinition> {
+    await this.ensureInitialized();
+    const normalizedSlug = this.assertGameSlug(slug);
+    const { rows } = await this.pool.query<GameRow>(
+      `SELECT slug, title, description, route, is_enabled, sort_order, settings_json, created_at, updated_at
+       FROM ${this.gamesTable()}
+       WHERE slug = $1`,
+      [normalizedSlug]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke.");
+    }
+    return this.mapGame(row);
+  }
+
+  async updateGame(slug: string, update: UpdateGameInput): Promise<GameDefinition> {
+    await this.ensureInitialized();
+    const normalizedSlug = this.assertGameSlug(slug);
+    const current = await this.getGame(normalizedSlug);
+
+    const nextTitle = update.title !== undefined ? this.assertTitle(update.title) : current.title;
+    const nextDescription =
+      update.description !== undefined ? this.assertDescription(update.description) : current.description;
+    const nextRoute = update.route !== undefined ? this.assertRoute(update.route) : current.route;
+    const nextEnabled =
+      update.isEnabled !== undefined ? Boolean(update.isEnabled) : current.isEnabled;
+    const nextSortOrder =
+      update.sortOrder !== undefined ? this.assertSortOrder(update.sortOrder) : current.sortOrder;
+    const nextSettings =
+      update.settings !== undefined ? this.assertSettings(update.settings) : current.settings;
+
+    const { rows } = await this.pool.query<GameRow>(
+      `UPDATE ${this.gamesTable()}
+       SET title = $2,
+           description = $3,
+           route = $4,
+           is_enabled = $5,
+           sort_order = $6,
+           settings_json = $7::jsonb,
+           updated_at = now()
+       WHERE slug = $1
+       RETURNING slug, title, description, route, is_enabled, sort_order, settings_json, created_at, updated_at`,
+      [
+        normalizedSlug,
+        nextTitle,
+        nextDescription,
+        nextRoute,
+        nextEnabled,
+        nextSortOrder,
+        JSON.stringify(nextSettings)
+      ]
+    );
+    return this.mapGame(rows[0]);
+  }
+
+  async listHalls(options?: { includeInactive?: boolean }): Promise<HallDefinition[]> {
+    await this.ensureInitialized();
+    const includeInactive = options?.includeInactive ?? false;
+    const { rows } = await this.pool.query<HallRow>(
+      `SELECT id, slug, name, region, address, is_active, created_at, updated_at
+       FROM ${this.hallsTable()}
+       ${includeInactive ? "" : "WHERE is_active = true"}
+       ORDER BY name ASC, slug ASC`
+    );
+    return rows.map((row) => this.mapHall(row));
+  }
+
+  async getHall(hallReference: string): Promise<HallDefinition> {
+    await this.ensureInitialized();
+    const hallRow = await this.resolveHallRowByReference(hallReference);
+    if (!hallRow) {
+      throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+    }
+    return this.mapHall(hallRow);
+  }
+
+  async requireActiveHall(hallReference: string): Promise<HallDefinition> {
+    const hall = await this.getHall(hallReference);
+    if (!hall.isActive) {
+      throw new DomainError("HALL_INACTIVE", "Hallen er ikke aktiv.");
+    }
+    return hall;
+  }
+
+  async createHall(input: CreateHallInput): Promise<HallDefinition> {
+    await this.ensureInitialized();
+    const slug = this.assertHallSlug(input.slug);
+    const name = this.assertHallName(input.name);
+    const region = this.assertHallRegion(input.region ?? "NO");
+    const address = this.assertHallAddress(input.address ?? "");
+    const isActive = input.isActive ?? true;
+    const hallId = randomUUID();
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<{ id: string }>(
+        `SELECT id FROM ${this.hallsTable()} WHERE slug = $1`,
+        [slug]
+      );
+      if (existingRows[0]) {
+        throw new DomainError("HALL_SLUG_EXISTS", "Hall med samme slug finnes allerede.");
+      }
+
+      const { rows } = await client.query<HallRow>(
+        `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, slug, name, region, address, is_active, created_at, updated_at`,
+        [hallId, slug, name, region, address, isActive]
+      );
+      await this.seedHallGameConfigForHall(client, hallId);
+      await client.query("COMMIT");
+      return this.mapHall(rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateHall(hallReference: string, update: UpdateHallInput): Promise<HallDefinition> {
+    await this.ensureInitialized();
+    const currentRow = await this.resolveHallRowByReference(hallReference);
+    if (!currentRow) {
+      throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+    }
+    const current = this.mapHall(currentRow);
+
+    const nextSlug = update.slug !== undefined ? this.assertHallSlug(update.slug) : current.slug;
+    const nextName = update.name !== undefined ? this.assertHallName(update.name) : current.name;
+    const nextRegion = update.region !== undefined ? this.assertHallRegion(update.region) : current.region;
+    const nextAddress = update.address !== undefined ? this.assertHallAddress(update.address) : current.address;
+    const nextIsActive = update.isActive !== undefined ? Boolean(update.isActive) : current.isActive;
+
+    if (nextSlug !== current.slug) {
+      const { rows: conflictRows } = await this.pool.query<{ id: string }>(
+        `SELECT id FROM ${this.hallsTable()} WHERE slug = $1 AND id <> $2`,
+        [nextSlug, current.id]
+      );
+      if (conflictRows[0]) {
+        throw new DomainError("HALL_SLUG_EXISTS", "Hall med samme slug finnes allerede.");
+      }
+    }
+
+    const { rows } = await this.pool.query<HallRow>(
+      `UPDATE ${this.hallsTable()}
+       SET slug = $2,
+           name = $3,
+           region = $4,
+           address = $5,
+           is_active = $6,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING id, slug, name, region, address, is_active, created_at, updated_at`,
+      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextIsActive]
+    );
+
+    return this.mapHall(rows[0]);
+  }
+
+  async listTerminals(options?: {
+    hallId?: string;
+    includeInactive?: boolean;
+  }): Promise<TerminalDefinition[]> {
+    await this.ensureInitialized();
+    const includeInactive = options?.includeInactive ?? false;
+    let hallId: string | undefined;
+    if (options?.hallId) {
+      const hall = await this.getHall(options.hallId);
+      hallId = hall.id;
+    }
+
+    const params: string[] = [];
+    const conditions: string[] = [];
+    if (!includeInactive) {
+      conditions.push("is_active = true");
+    }
+    if (hallId) {
+      params.push(hallId);
+      conditions.push(`hall_id = $${params.length}`);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const { rows } = await this.pool.query<TerminalRow>(
+      `SELECT id, hall_id, terminal_code, display_name, is_active, last_seen_at, created_at, updated_at
+       FROM ${this.terminalsTable()}
+       ${whereClause}
+       ORDER BY hall_id ASC, terminal_code ASC`,
+      params
+    );
+    return rows.map((row) => this.mapTerminal(row));
+  }
+
+  async createTerminal(input: CreateTerminalInput): Promise<TerminalDefinition> {
+    await this.ensureInitialized();
+    const hall = await this.getHall(input.hallId);
+    const terminalCode = this.assertTerminalCode(input.terminalCode);
+    const displayName = this.assertTerminalDisplayName(input.displayName);
+    const isActive = input.isActive ?? true;
+    const terminalId = randomUUID();
+
+    const { rows: existingRows } = await this.pool.query<{ id: string }>(
+      `SELECT id
+       FROM ${this.terminalsTable()}
+       WHERE hall_id = $1
+         AND terminal_code = $2`,
+      [hall.id, terminalCode]
+    );
+    if (existingRows[0]) {
+      throw new DomainError("TERMINAL_CODE_EXISTS", "Terminalkode finnes allerede i hallen.");
+    }
+
+    const { rows } = await this.pool.query<TerminalRow>(
+      `INSERT INTO ${this.terminalsTable()} (id, hall_id, terminal_code, display_name, is_active)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, hall_id, terminal_code, display_name, is_active, last_seen_at, created_at, updated_at`,
+      [terminalId, hall.id, terminalCode, displayName, isActive]
+    );
+    return this.mapTerminal(rows[0]);
+  }
+
+  async updateTerminal(terminalIdInput: string, update: UpdateTerminalInput): Promise<TerminalDefinition> {
+    await this.ensureInitialized();
+    const terminalId = this.assertEntityReference(terminalIdInput, "terminalId");
+    const { rows: existingRows } = await this.pool.query<TerminalRow>(
+      `SELECT id, hall_id, terminal_code, display_name, is_active, last_seen_at, created_at, updated_at
+       FROM ${this.terminalsTable()}
+       WHERE id = $1`,
+      [terminalId]
+    );
+    const existing = existingRows[0];
+    if (!existing) {
+      throw new DomainError("TERMINAL_NOT_FOUND", "Terminalen finnes ikke.");
+    }
+
+    const nextTerminalCode =
+      update.terminalCode !== undefined
+        ? this.assertTerminalCode(update.terminalCode)
+        : existing.terminal_code;
+    const nextDisplayName =
+      update.displayName !== undefined
+        ? this.assertTerminalDisplayName(update.displayName)
+        : existing.display_name;
+    const nextIsActive = update.isActive !== undefined ? Boolean(update.isActive) : existing.is_active;
+    const nextLastSeenAt =
+      update.lastSeenAt !== undefined
+        ? this.assertOptionalIsoDate(update.lastSeenAt, "lastSeenAt")
+        : existing.last_seen_at;
+
+    if (nextTerminalCode !== existing.terminal_code) {
+      const { rows: conflictRows } = await this.pool.query<{ id: string }>(
+        `SELECT id
+         FROM ${this.terminalsTable()}
+         WHERE hall_id = $1
+           AND terminal_code = $2
+           AND id <> $3`,
+        [existing.hall_id, nextTerminalCode, existing.id]
+      );
+      if (conflictRows[0]) {
+        throw new DomainError("TERMINAL_CODE_EXISTS", "Terminalkode finnes allerede i hallen.");
+      }
+    }
+
+    const { rows } = await this.pool.query<TerminalRow>(
+      `UPDATE ${this.terminalsTable()}
+       SET terminal_code = $2,
+           display_name = $3,
+           is_active = $4,
+           last_seen_at = $5,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING id, hall_id, terminal_code, display_name, is_active, last_seen_at, created_at, updated_at`,
+      [existing.id, nextTerminalCode, nextDisplayName, nextIsActive, nextLastSeenAt]
+    );
+    return this.mapTerminal(rows[0]);
+  }
+
+  async listHallGameConfigs(options?: {
+    hallId?: string;
+    includeDisabled?: boolean;
+  }): Promise<HallGameConfigDefinition[]> {
+    await this.ensureInitialized();
+    const includeDisabled = options?.includeDisabled ?? true;
+    let hallId: string | undefined;
+    if (options?.hallId) {
+      const hall = await this.getHall(options.hallId);
+      hallId = hall.id;
+    }
+
+    const params: string[] = [];
+    const conditions: string[] = [];
+    if (!includeDisabled) {
+      conditions.push("is_enabled = true");
+    }
+    if (hallId) {
+      params.push(hallId);
+      conditions.push(`hall_id = $${params.length}`);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const { rows } = await this.pool.query<HallGameConfigRow>(
+      `SELECT hall_id, game_slug, is_enabled, max_tickets_per_player, min_round_interval_ms, created_at, updated_at
+       FROM ${this.hallGameConfigTable()}
+       ${whereClause}
+       ORDER BY hall_id ASC, game_slug ASC`,
+      params
+    );
+    return rows.map((row) => this.mapHallGameConfig(row));
+  }
+
+  async upsertHallGameConfig(input: UpsertHallGameConfigInput): Promise<HallGameConfigDefinition> {
+    await this.ensureInitialized();
+    const hall = await this.getHall(input.hallId);
+    const gameSlug = this.assertGameSlug(input.gameSlug);
+    await this.getGame(gameSlug);
+
+    const { rows: existingRows } = await this.pool.query<HallGameConfigRow>(
+      `SELECT hall_id, game_slug, is_enabled, max_tickets_per_player, min_round_interval_ms, created_at, updated_at
+       FROM ${this.hallGameConfigTable()}
+       WHERE hall_id = $1
+         AND game_slug = $2`,
+      [hall.id, gameSlug]
+    );
+    const existing = existingRows[0];
+
+    const nextIsEnabled = input.isEnabled ?? existing?.is_enabled ?? true;
+    const nextMaxTicketsPerPlayer = this.assertMaxTicketsPerPlayer(
+      input.maxTicketsPerPlayer ?? existing?.max_tickets_per_player ?? 5
+    );
+    const nextMinRoundIntervalMs = this.assertMinRoundIntervalMs(
+      input.minRoundIntervalMs ?? existing?.min_round_interval_ms ?? 30000
+    );
+
+    const { rows } = await this.pool.query<HallGameConfigRow>(
+      `INSERT INTO ${this.hallGameConfigTable()}
+        (hall_id, game_slug, is_enabled, max_tickets_per_player, min_round_interval_ms)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (hall_id, game_slug) DO UPDATE
+       SET is_enabled = EXCLUDED.is_enabled,
+           max_tickets_per_player = EXCLUDED.max_tickets_per_player,
+           min_round_interval_ms = EXCLUDED.min_round_interval_ms,
+           updated_at = now()
+       RETURNING hall_id, game_slug, is_enabled, max_tickets_per_player, min_round_interval_ms, created_at, updated_at`,
+      [hall.id, gameSlug, nextIsEnabled, nextMaxTicketsPerPlayer, nextMinRoundIntervalMs]
+    );
+    return this.mapHallGameConfig(rows[0]);
+  }
+
+  async submitKycVerification(input: {
+    userId: string;
+    birthDate: string;
+    nationalId?: string;
+  }): Promise<AppUser> {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(input.userId, "userId");
+    const birthDate = this.assertBirthDate(input.birthDate);
+    const current = await this.getUserById(userId);
+
+    const nowIso = new Date().toISOString();
+    if (!this.kycAdapter) {
+      const ageYears = calculateAgeYears(new Date(birthDate), new Date());
+      if (ageYears < this.minAgeYears) {
+        const updated = await this.updateKycStatus({
+          userId: current.id,
+          status: "REJECTED",
+          birthDate,
+          providerRef: "local-no-provider",
+          verifiedAt: nowIso
+        });
+        return updated;
+      }
+      return this.updateKycStatus({
+        userId: current.id,
+        status: "VERIFIED",
+        birthDate,
+        providerRef: "local-no-provider",
+        verifiedAt: nowIso
+      });
+    }
+
+    await this.updateKycStatus({
+      userId: current.id,
+      status: "PENDING",
+      birthDate,
+      providerRef: undefined,
+      verifiedAt: undefined
+    });
+
+    let result: Awaited<ReturnType<KycAdapter["verify"]>>;
+    try {
+      result = await this.kycAdapter.verify({
+        userId: current.id,
+        birthDate,
+        nationalId: input.nationalId
+      });
+    } catch {
+      throw new DomainError("KYC_PROVIDER_ERROR", "Klarte ikke verifisere KYC akkurat nå.");
+    }
+
+    return this.updateKycStatus({
+      userId: current.id,
+      status: result.decision === "VERIFIED" ? "VERIFIED" : "REJECTED",
+      birthDate,
+      providerRef: result.providerReference,
+      verifiedAt: result.checkedAt
+    });
+  }
+
+  async getUserById(userIdInput: string): Promise<AppUser> {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(userIdInput, "userId");
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
+       FROM ${this.usersTable()}
+       WHERE id = $1`,
+      [userId]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
+    return this.mapUser(row);
+  }
+
+  assertUserEligibleForGameplay(user: PublicAppUser): void {
+    if (user.kycStatus !== "VERIFIED") {
+      throw new DomainError("KYC_REQUIRED", "KYC må verifiseres før spill kan startes.");
+    }
+    if (!user.birthDate) {
+      throw new DomainError("KYC_REQUIRED", "Fødselsdato mangler for KYC-verifisering.");
+    }
+
+    const birthDate = new Date(user.birthDate);
+    if (Number.isNaN(birthDate.getTime())) {
+      throw new DomainError("KYC_REQUIRED", "Ugyldig fødselsdato registrert på bruker.");
+    }
+    const ageYears = calculateAgeYears(birthDate, new Date());
+    if (ageYears < this.minAgeYears) {
+      throw new DomainError("AGE_RESTRICTED", `Spiller må være minst ${this.minAgeYears} år.`);
+    }
+  }
+
+  private async createSession(userId: string): Promise<{ accessToken: string; expiresAt: string }> {
+    const rawToken = randomBytes(32).toString("hex");
+    const tokenHash = hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + this.sessionTtlHours * 60 * 60 * 1000).toISOString();
+    await this.pool.query(
+      `INSERT INTO ${this.sessionsTable()} (id, user_id, token_hash, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [randomUUID(), userId, tokenHash, expiresAt]
+    );
+    return { accessToken: rawToken, expiresAt };
+  }
+
+  private async withBalance(user: AppUser): Promise<PublicAppUser> {
+    const balance = await this.walletAdapter.getBalance(user.walletId);
+    return {
+      ...user,
+      balance
+    };
+  }
+
+  private mapUser(row: UserRow): AppUser {
+    const birthDate =
+      typeof row.birth_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.birth_date)
+        ? row.birth_date
+        : row.birth_date
+          ? asIso(row.birth_date).slice(0, 10)
+          : undefined;
+    return {
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      walletId: row.wallet_id,
+      role: row.role,
+      kycStatus: row.kyc_status,
+      birthDate,
+      kycVerifiedAt: row.kyc_verified_at ? asIso(row.kyc_verified_at) : undefined,
+      kycProviderRef: row.kyc_provider_ref ?? undefined,
+      createdAt: asIso(row.created_at),
+      updatedAt: asIso(row.updated_at)
+    };
+  }
+
+  private mapGame(row: GameRow): GameDefinition {
+    return {
+      slug: row.slug,
+      title: row.title,
+      description: row.description,
+      route: row.route,
+      isEnabled: row.is_enabled,
+      sortOrder: Number(row.sort_order),
+      settings: row.settings_json ?? {},
+      createdAt: asIso(row.created_at),
+      updatedAt: asIso(row.updated_at)
+    };
+  }
+
+  private mapHall(row: HallRow): HallDefinition {
+    return {
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      region: row.region,
+      address: row.address,
+      isActive: row.is_active,
+      createdAt: asIso(row.created_at),
+      updatedAt: asIso(row.updated_at)
+    };
+  }
+
+  private mapTerminal(row: TerminalRow): TerminalDefinition {
+    return {
+      id: row.id,
+      hallId: row.hall_id,
+      terminalCode: row.terminal_code,
+      displayName: row.display_name,
+      isActive: row.is_active,
+      lastSeenAt: row.last_seen_at ? asIso(row.last_seen_at) : undefined,
+      createdAt: asIso(row.created_at),
+      updatedAt: asIso(row.updated_at)
+    };
+  }
+
+  private mapHallGameConfig(row: HallGameConfigRow): HallGameConfigDefinition {
+    return {
+      hallId: row.hall_id,
+      gameSlug: row.game_slug,
+      isEnabled: row.is_enabled,
+      maxTicketsPerPlayer: Number(row.max_tickets_per_player),
+      minRoundIntervalMs: Number(row.min_round_interval_ms),
+      createdAt: asIso(row.created_at),
+      updatedAt: asIso(row.updated_at)
+    };
+  }
+
+  private async resolveHallRowByReference(hallReference: string): Promise<HallRow | undefined> {
+    const normalizedReference = this.assertEntityReference(hallReference, "hallId");
+    const normalizedSlug = normalizedReference.toLowerCase();
+    const { rows } = await this.pool.query<HallRow>(
+      `SELECT id, slug, name, region, address, is_active, created_at, updated_at
+       FROM ${this.hallsTable()}
+       WHERE id = $1
+          OR slug = $2
+       LIMIT 1`,
+      [normalizedReference, normalizedSlug]
+    );
+    return rows[0];
+  }
+
+  private async seedHallGameConfigForHall(client: PoolClient, hallId: string): Promise<void> {
+    await client.query(
+      `INSERT INTO ${this.hallGameConfigTable()}
+        (hall_id, game_slug, is_enabled, max_tickets_per_player, min_round_interval_ms)
+       SELECT $1, g.slug, true, 5, 30000
+       FROM ${this.gamesTable()} g
+       ON CONFLICT (hall_id, game_slug) DO NOTHING`,
+      [hallId]
+    );
+  }
+
+  private async seedHallGameConfigForAllHalls(client: PoolClient): Promise<void> {
+    await client.query(
+      `INSERT INTO ${this.hallGameConfigTable()}
+        (hall_id, game_slug, is_enabled, max_tickets_per_player, min_round_interval_ms)
+       SELECT h.id, g.slug, true, 5, 30000
+       FROM ${this.hallsTable()} h
+       CROSS JOIN ${this.gamesTable()} g
+       ON CONFLICT (hall_id, game_slug) DO NOTHING`
+    );
+  }
+
+  private async updateKycStatus(input: {
+    userId: string;
+    status: KycStatus;
+    birthDate: string;
+    providerRef?: string;
+    verifiedAt?: string;
+  }): Promise<AppUser> {
+    const verifiedAt = input.verifiedAt ? new Date(input.verifiedAt).toISOString() : null;
+    const providerRef = input.providerRef?.trim() || null;
+    const { rows } = await this.pool.query<UserRow>(
+      `UPDATE ${this.usersTable()}
+       SET kyc_status = $2,
+           birth_date = $3::date,
+           kyc_provider_ref = $4,
+           kyc_verified_at = $5,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
+      [input.userId, input.status, input.birthDate, providerRef, verifiedAt]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
+    return this.mapUser(row);
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.initializeSchema();
+    }
+    await this.initPromise;
+  }
+
+  private async initializeSchema(): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
+
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.usersTable()} (
+          id TEXT PRIMARY KEY,
+          email TEXT UNIQUE NOT NULL,
+          display_name TEXT NOT NULL,
+          password_hash TEXT NOT NULL,
+          wallet_id TEXT UNIQUE NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('ADMIN', 'PLAYER')),
+          kyc_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
+          birth_date DATE NULL,
+          kyc_verified_at TIMESTAMPTZ NULL,
+          kyc_provider_ref TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`
+      );
+
+      await client.query(
+        `ALTER TABLE ${this.usersTable()}
+         ADD COLUMN IF NOT EXISTS kyc_status TEXT NOT NULL DEFAULT 'UNVERIFIED'`
+      );
+      await client.query(
+        `ALTER TABLE ${this.usersTable()}
+         ADD COLUMN IF NOT EXISTS birth_date DATE NULL`
+      );
+      await client.query(
+        `ALTER TABLE ${this.usersTable()}
+         ADD COLUMN IF NOT EXISTS kyc_verified_at TIMESTAMPTZ NULL`
+      );
+      await client.query(
+        `ALTER TABLE ${this.usersTable()}
+         ADD COLUMN IF NOT EXISTS kyc_provider_ref TEXT NULL`
+      );
+
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.sessionsTable()} (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES ${this.usersTable()}(id),
+          token_hash TEXT UNIQUE NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          revoked_at TIMESTAMPTZ NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`
+      );
+
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.gamesTable()} (
+          slug TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL,
+          route TEXT NOT NULL,
+          is_enabled BOOLEAN NOT NULL DEFAULT true,
+          sort_order INTEGER NOT NULL DEFAULT 100,
+          settings_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`
+      );
+
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.hallsTable()} (
+          id TEXT PRIMARY KEY,
+          slug TEXT UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          region TEXT NOT NULL DEFAULT 'NO',
+          address TEXT NOT NULL DEFAULT '',
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`
+      );
+
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.terminalsTable()} (
+          id TEXT PRIMARY KEY,
+          hall_id TEXT NOT NULL REFERENCES ${this.hallsTable()}(id) ON DELETE CASCADE,
+          terminal_code TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          last_seen_at TIMESTAMPTZ NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (hall_id, terminal_code)
+        )`
+      );
+
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.hallGameConfigTable()} (
+          hall_id TEXT NOT NULL REFERENCES ${this.hallsTable()}(id) ON DELETE CASCADE,
+          game_slug TEXT NOT NULL REFERENCES ${this.gamesTable()}(slug) ON DELETE CASCADE,
+          is_enabled BOOLEAN NOT NULL DEFAULT true,
+          max_tickets_per_player INTEGER NOT NULL DEFAULT 5 CHECK (max_tickets_per_player >= 1 AND max_tickets_per_player <= 5),
+          min_round_interval_ms INTEGER NOT NULL DEFAULT 30000 CHECK (min_round_interval_ms >= 30000),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (hall_id, game_slug)
+        )`
+      );
+
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_app_sessions_token_hash
+         ON ${this.sessionsTable()} (token_hash)`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_app_terminals_hall_id
+         ON ${this.terminalsTable()} (hall_id)`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_app_hall_game_config_game_slug
+         ON ${this.hallGameConfigTable()} (game_slug)`
+      );
+
+      await client.query(
+        `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
+         VALUES ('candy', 'Candy', 'Candy-spillet (Unity) er under integrasjon mot realtime backend.', '/candy', true, 1, '{}'::jsonb)
+         ON CONFLICT (slug) DO NOTHING`
+      );
+      await client.query(
+        `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
+         VALUES ('bingo', 'Bingo', 'Multiplayer bingo i web-klienten.', '/bingo', true, 2, '{}'::jsonb)
+         ON CONFLICT (slug) DO NOTHING`
+      );
+
+      await client.query(
+        `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, is_active)
+         VALUES ($1, $2, 'Default hall', 'NO', '', true)
+         ON CONFLICT DO NOTHING`,
+        [DEFAULT_HALL_ID, DEFAULT_HALL_SLUG]
+      );
+      await this.seedHallGameConfigForAllHalls(client);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  private usersTable(): string {
+    return `"${this.schema}"."app_users"`;
+  }
+
+  private sessionsTable(): string {
+    return `"${this.schema}"."app_sessions"`;
+  }
+
+  private gamesTable(): string {
+    return `"${this.schema}"."app_games"`;
+  }
+
+  private hallsTable(): string {
+    return `"${this.schema}"."app_halls"`;
+  }
+
+  private terminalsTable(): string {
+    return `"${this.schema}"."app_terminals"`;
+  }
+
+  private hallGameConfigTable(): string {
+    return `"${this.schema}"."app_hall_game_config"`;
+  }
+
+  private async hashPassword(password: string): Promise<string> {
+    const salt = randomBytes(16);
+    const digest = (await scrypt(password, salt, 64)) as Buffer;
+    return `scrypt:${salt.toString("hex")}:${digest.toString("hex")}`;
+  }
+
+  private async verifyPassword(password: string, storedHash: string): Promise<boolean> {
+    const { saltHex, digestHex } = parseHashEnvelope(storedHash);
+    const salt = Buffer.from(saltHex, "hex");
+    const expected = Buffer.from(digestHex, "hex");
+    const actual = (await scrypt(password, salt, expected.length)) as Buffer;
+    if (expected.length !== actual.length) {
+      return false;
+    }
+    return timingSafeEqual(expected, actual);
+  }
+
+  private assertEmail(email: string): void {
+    if (!email || email.length > 255 || !email.includes("@")) {
+      throw new DomainError("INVALID_EMAIL", "Ugyldig e-post.");
+    }
+  }
+
+  private assertDisplayName(displayName: string): void {
+    if (!displayName || displayName.length > 40) {
+      throw new DomainError("INVALID_NAME", "displayName må være 1-40 tegn.");
+    }
+  }
+
+  private assertPassword(password: string): void {
+    if (password.length < 8 || password.length > 128) {
+      throw new DomainError("INVALID_PASSWORD", "Passord må være mellom 8 og 128 tegn.");
+    }
+  }
+
+  private assertBirthDate(birthDateInput: string): string {
+    const value = birthDateInput.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new DomainError("INVALID_BIRTH_DATE", "birthDate må være i format YYYY-MM-DD.");
+    }
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new DomainError("INVALID_BIRTH_DATE", "birthDate er ugyldig.");
+    }
+    return value;
+  }
+
+  private assertGameSlug(slug: string): string {
+    const normalized = slug.trim().toLowerCase();
+    if (!/^[a-z0-9-]{2,40}$/.test(normalized)) {
+      throw new DomainError("INVALID_GAME_SLUG", "Ugyldig game slug.");
+    }
+    return normalized;
+  }
+
+  private assertTitle(title: string): string {
+    const value = title.trim();
+    if (!value || value.length > 80) {
+      throw new DomainError("INVALID_TITLE", "title må være 1-80 tegn.");
+    }
+    return value;
+  }
+
+  private assertDescription(description: string): string {
+    const value = description.trim();
+    if (!value || value.length > 500) {
+      throw new DomainError("INVALID_DESCRIPTION", "description må være 1-500 tegn.");
+    }
+    return value;
+  }
+
+  private assertRoute(route: string): string {
+    const value = route.trim();
+    if (!value.startsWith("/") || value.length > 120) {
+      throw new DomainError("INVALID_ROUTE", "route må starte med '/' og være maks 120 tegn.");
+    }
+    return value;
+  }
+
+  private assertSortOrder(sortOrder: number): number {
+    if (!Number.isFinite(sortOrder)) {
+      throw new DomainError("INVALID_SORT_ORDER", "sortOrder må være et tall.");
+    }
+    return Math.floor(sortOrder);
+  }
+
+  private assertSettings(settings: Record<string, unknown>): Record<string, unknown> {
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      throw new DomainError("INVALID_SETTINGS", "settings må være et objekt.");
+    }
+    return settings;
+  }
+
+  private assertEntityReference(value: string, fieldName: string): string {
+    const normalized = value.trim();
+    if (!normalized || normalized.length > 120) {
+      throw new DomainError("INVALID_INPUT", `${fieldName} er ugyldig.`);
+    }
+    return normalized;
+  }
+
+  private assertHallSlug(slug: string): string {
+    const normalized = slug.trim().toLowerCase();
+    if (!/^[a-z0-9-]{2,40}$/.test(normalized)) {
+      throw new DomainError("INVALID_HALL_SLUG", "hall.slug må være 2-40 tegn (a-z, 0-9, bindestrek).");
+    }
+    return normalized;
+  }
+
+  private assertHallName(name: string): string {
+    const value = name.trim();
+    if (!value || value.length > 120) {
+      throw new DomainError("INVALID_HALL_NAME", "hall.name må være 1-120 tegn.");
+    }
+    return value;
+  }
+
+  private assertHallRegion(region: string): string {
+    const value = region.trim().toUpperCase();
+    if (!value || value.length > 40) {
+      throw new DomainError("INVALID_HALL_REGION", "hall.region må være 1-40 tegn.");
+    }
+    return value;
+  }
+
+  private assertHallAddress(address: string): string {
+    const value = address.trim();
+    if (value.length > 200) {
+      throw new DomainError("INVALID_HALL_ADDRESS", "hall.address kan være maks 200 tegn.");
+    }
+    return value;
+  }
+
+  private assertTerminalCode(terminalCode: string): string {
+    const value = terminalCode.trim().toUpperCase();
+    if (!/^[A-Z0-9_-]{2,40}$/.test(value)) {
+      throw new DomainError("INVALID_TERMINAL_CODE", "terminalCode må være 2-40 tegn (A-Z, 0-9, _ eller -).");
+    }
+    return value;
+  }
+
+  private assertTerminalDisplayName(displayName: string): string {
+    const value = displayName.trim();
+    if (!value || value.length > 80) {
+      throw new DomainError("INVALID_TERMINAL_NAME", "displayName må være 1-80 tegn.");
+    }
+    return value;
+  }
+
+  private assertOptionalIsoDate(value: string, fieldName: string): string | null {
+    const normalized = value.trim();
+    if (!normalized) {
+      return null;
+    }
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new DomainError("INVALID_INPUT", `${fieldName} må være en gyldig dato.`);
+    }
+    return parsed.toISOString();
+  }
+
+  private assertMaxTicketsPerPlayer(value: number): number {
+    if (!Number.isInteger(value) || value < 1 || value > 5) {
+      throw new DomainError("INVALID_MAX_TICKETS", "maxTicketsPerPlayer må være et heltall mellom 1 og 5.");
+    }
+    return value;
+  }
+
+  private assertMinRoundIntervalMs(value: number): number {
+    if (!Number.isFinite(value) || value < 30000) {
+      throw new DomainError("INVALID_MIN_ROUND_INTERVAL", "minRoundIntervalMs må være minst 30000.");
+    }
+    return Math.floor(value);
+  }
+
+  private wrapError(error: unknown): Error {
+    if (error instanceof DomainError) {
+      return error;
+    }
+    if (error instanceof WalletError) {
+      return error;
+    }
+    return new DomainError("PLATFORM_DB_ERROR", "Feil i plattform-databasen.");
+  }
+}

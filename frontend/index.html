@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="no">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game Portal</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header id="appHeader" class="topbar hidden">
+      <div class="brand">
+        <h1>Game Portal</h1>
+        <p id="activeGameLabel">Ingen spill valgt</p>
+      </div>
+      <nav id="gamesNav" class="games-nav"></nav>
+      <div class="topbar-actions">
+        <div class="wallet-mini">
+          <span id="walletMiniId">Wallet: -</span>
+          <strong id="walletMiniBalance">Saldo: 0</strong>
+        </div>
+        <input id="walletTopupAmount" type="number" min="1" value="100" />
+        <button id="walletTopupBtn">Fyll på</button>
+        <button id="walletSwedbankIntentBtn">Swedbank intent</button>
+        <button id="walletRefreshBtn">Oppdater saldo</button>
+        <span id="userBadge" class="user-badge">Ikke innlogget</span>
+        <button id="logoutBtn">Logg ut</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section id="authView" class="auth-grid">
+        <article class="card">
+          <h2>Logg Inn</h2>
+          <label>
+            E-post
+            <input id="loginEmail" type="email" placeholder="navn@firma.no" />
+          </label>
+          <label>
+            Passord
+            <input id="loginPassword" type="password" placeholder="Minst 8 tegn" />
+          </label>
+          <button id="loginBtn">Logg inn</button>
+          <pre id="loginStatus" class="status-box">Ikke logget inn.</pre>
+        </article>
+
+        <article class="card">
+          <h2>Opprett Bruker</h2>
+          <label>
+            Navn
+            <input id="registerDisplayName" placeholder="Ditt navn" />
+          </label>
+          <label>
+            E-post
+            <input id="registerEmail" type="email" placeholder="navn@firma.no" />
+          </label>
+          <label>
+            Passord
+            <input id="registerPassword" type="password" placeholder="Minst 8 tegn" />
+          </label>
+          <button id="registerBtn">Opprett bruker</button>
+          <pre id="registerStatus" class="status-box">Ikke opprettet bruker ennå.</pre>
+        </article>
+      </section>
+
+      <section id="appView" class="hidden app-layout">
+        <article id="kycCard" class="card">
+          <h2>KYC</h2>
+          <p class="subtle">Kreves før spill kan opprettes eller startes.</p>
+          <div class="row">
+            <input id="kycBirthDate" type="date" />
+            <button id="kycVerifyBtn">Verifiser KYC</button>
+          </div>
+          <pre id="kycStatus" class="status-box">KYC ikke verifisert.</pre>
+        </article>
+
+        <article id="walletCard" class="card">
+          <h2>Lommebok</h2>
+          <pre id="walletStatus" class="status-box">Ingen wallet lastet.</pre>
+        </article>
+
+        <article id="candyView" class="card game-view hidden">
+          <h2>Candy</h2>
+          <p class="subtle">
+            Dette er første spillet etter innlogging. Unity-klienten ligger i
+            <code>/Candy</code> og integreres mot realtime-backend.
+          </p>
+          <pre id="candyStatus" class="status-box">Laster Candy-metadata...</pre>
+        </article>
+
+        <section id="bingoView" class="game-view hidden">
+          <article class="card">
+            <h2>Bingo</h2>
+            <p class="subtle">Serveren validerer trekk, markering og claim.</p>
+            <div class="form-grid">
+              <label>
+                Hall
+                <select id="bingoHallId"></select>
+              </label>
+              <label>
+                Spillernavn i rom (valgfritt)
+                <input id="bingoPlayerAlias" placeholder="Bruker profilnavn hvis tomt" />
+              </label>
+              <label>
+                Romkode
+                <input id="bingoRoomCode" placeholder="Romkode" />
+              </label>
+              <div class="button-stack">
+                <button id="bingoCreateRoomBtn">Opprett rom</button>
+                <button id="bingoJoinRoomBtn">Join rom</button>
+              </div>
+            </div>
+
+            <div class="row">
+              <input id="bingoEntryFee" type="number" min="0" value="0" />
+              <button id="bingoStartGameBtn">Start spill</button>
+              <button id="bingoEndGameBtn">Avslutt spill</button>
+              <button id="bingoDrawNextBtn">Trekk neste tall</button>
+              <button id="bingoClaimLineBtn">Claim linje</button>
+              <button id="bingoClaimBingoBtn">Claim bingo</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <h2>Status</h2>
+            <pre id="bingoStatus" class="status-box">Ikke tilkoblet rom.</pre>
+          </article>
+
+          <article class="card">
+            <h2>Spillere</h2>
+            <div id="bingoPlayers"></div>
+          </article>
+
+          <article class="card">
+            <h2>Trukne tall</h2>
+            <div id="bingoDrawnNumbers" class="chips"></div>
+          </article>
+
+          <article class="card">
+            <h2>Brett</h2>
+            <div id="bingoTickets"></div>
+          </article>
+        </section>
+
+        <article id="adminGameCard" class="card hidden">
+          <h2>Spillinnstillinger (Admin)</h2>
+          <p class="subtle">Endringer lagres i backend og styrer game-katalogen.</p>
+          <label>
+            Tittel
+            <input id="adminGameTitle" />
+          </label>
+          <label>
+            Beskrivelse
+            <input id="adminGameDescription" />
+          </label>
+          <label>
+            Route
+            <input id="adminGameRoute" />
+          </label>
+          <label>
+            Sortering
+            <input id="adminGameSortOrder" type="number" />
+          </label>
+          <label class="checkbox-row">
+            <input id="adminGameEnabled" type="checkbox" />
+            Aktivt spill
+          </label>
+          <label>
+            Settings JSON
+            <textarea id="adminGameSettingsJson" rows="6"></textarea>
+          </label>
+          <div class="row">
+            <button id="adminSaveGameBtn">Lagre innstillinger</button>
+          </div>
+          <pre id="adminGameStatus" class="status-box">Ingen endringer lagret ennå.</pre>
+        </article>
+      </section>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

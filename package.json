@@ -1,0 +1,10 @@
+{
+  "name": "bingo",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix backend run dev",
+    "check": "npm --prefix backend run check",
+    "build": "npm --prefix backend run build"
+  }
+}
