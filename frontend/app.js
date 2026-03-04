@@ -130,6 +130,11 @@ const NOK_FORMATTER = new Intl.NumberFormat("nb-NO", {
   maximumFractionDigits: 2
 });
 
+const NOK_INTEGER_FORMATTER = new Intl.NumberFormat("nb-NO", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0
+});
+
 const GAME_SHOWCASE_THEME = Object.freeze({
   candy: {
     accent: "#d96a0c",
@@ -169,6 +174,11 @@ const GAME_SHOWCASE_THEME = Object.freeze({
 function formatNok(value) {
   const safe = Number.isFinite(value) ? value : 0;
   return `${NOK_FORMATTER.format(safe)} kr`;
+}
+
+function formatNokWhole(value) {
+  const safe = Number.isFinite(value) ? value : 0;
+  return `${NOK_INTEGER_FORMATTER.format(Math.round(safe))} kr`;
 }
 
 function asFiniteNumber(value) {
@@ -652,7 +662,7 @@ function renderProfileSummary() {
   if (els.profileEmail) {
     els.profileEmail.textContent = state.user.email || "";
   }
-  els.profileBigBalance.textContent = `${formatNok(balance)}`;
+  els.profileBigBalance.textContent = `${formatNokWhole(balance)}`;
 }
 
 async function openProfileModal() {
@@ -906,7 +916,7 @@ function renderWalletMini() {
     state.walletState?.account?.balance ??
     (Number.isFinite(state.user.balance) ? state.user.balance : 0);
   els.walletMiniId.textContent = `Wallet: ${state.user.walletId}`;
-  els.walletMiniBalance.textContent = `Saldo: ${balance}`;
+  els.walletMiniBalance.textContent = `Saldo: ${formatNokWhole(balance)}`;
   renderProfileSummary();
 }
 
@@ -952,7 +962,7 @@ function renderWalletCard() {
 
   const lines = [
     `Wallet: ${state.walletState.account.id}`,
-    `Saldo: ${state.walletState.account.balance}`,
+    `Saldo: ${formatNokWhole(state.walletState.account.balance)}`,
     "",
     "Siste transaksjoner:"
   ];
