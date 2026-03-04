@@ -692,7 +692,7 @@ button:hover {
 .profile-modal-header h2 {
   margin: 0 0 6px;
   font-family: var(--display);
-  font-size: 30px;
+  font-size: 20px;
 }
 
 .profile-modal-header .subtle {
@@ -772,6 +772,38 @@ button:hover {
   width: 100%;
 }
 
+.profile-personal-panel .subsection-title {
+  margin-top: 0;
+}
+
+.profile-personal-list {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-info-row {
+  margin: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--panel-soft);
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.profile-info-row span {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.profile-info-row strong {
+  font-size: 16px;
+  line-height: 1.2;
+  color: #173c36;
+}
+
 .profile-transfer {
   min-height: 0;
   height: 100%;
@@ -794,7 +826,7 @@ button:hover {
   border-radius: 999px;
   background: transparent;
   color: #5d5a75;
-  padding: 10px 12px;
+  padding: 6px 10px;
   font-size: 16px;
   font-weight: 700;
 }
@@ -818,13 +850,14 @@ button:hover {
 .transfer-balance p {
   margin: 0;
   color: #35374a;
-  font-size: 28px;
+  font-size: 16px;
 }
 
 .transfer-balance strong {
-  font-size: 42px;
+  font-size: 23px;
   line-height: 1.06;
   color: #11151f;
+  margin-top: 10px;
 }
 
 .transfer-amount-block {
@@ -835,7 +868,7 @@ button:hover {
 .transfer-amount-block p {
   margin: 0;
   color: #2a2e3c;
-  font-size: 28px;
+  font-size: 16px;
 }
 
 .transfer-amount-grid {
@@ -849,10 +882,10 @@ button:hover {
   border-radius: 10px;
   background: #ececf1;
   color: #262a36;
-  font-size: 32px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1.1;
-  min-height: 72px;
+  min-height: 60px;
 }
 
 .transfer-amount-btn:hover {
@@ -887,28 +920,28 @@ button:hover {
 .transfer-continue-btn {
   margin-top: auto;
   width: 100%;
-  border: 0;
+  border: 1px solid #bcbcbc;
   border-radius: 999px;
-  background: #1f4fd1;
-  color: #ffffff;
-  min-height: 80px;
-  font-size: 34px;
+  background: #ffffff;
+  color: #000000;
+  min-height: 50px;
+  font-size: 22px;
   font-weight: 800;
   letter-spacing: 0.01em;
 }
 
 .transfer-continue-btn:hover {
-  border: 0;
   transform: none;
-  background: #1a43b3;
+  background: #f7f7f7;
+  border-color: #a9a9a9;
 }
 
 .transfer-continue-btn:disabled,
 .transfer-continue-btn:disabled:hover {
-  border: 0;
+  border: 1px solid #d6d6d6;
   transform: none;
-  background: #b4c2ec;
-  color: #f3f6ff;
+  background: #efefef;
+  color: #9d9d9d;
   cursor: not-allowed;
 }
 
@@ -1078,33 +1111,6 @@ button:hover {
     width: min(420px, 94vw);
   }
 
-  .transfer-balance p,
-  .transfer-amount-block p {
-    font-size: 22px;
-  }
-
-  .transfer-balance strong {
-    font-size: 34px;
-  }
-
-  .transfer-amount-btn {
-    font-size: 24px;
-    min-height: 64px;
-  }
-
-  .transfer-custom label {
-    font-size: 18px;
-  }
-
-  .transfer-custom input {
-    min-height: 56px;
-    font-size: 24px;
-  }
-
-  .transfer-continue-btn {
-    min-height: 68px;
-    font-size: 28px;
-  }
 }
 
 @media (max-width: 720px) {
@@ -1163,49 +1169,8 @@ button:hover {
     padding: 12px;
   }
 
-  .profile-modal-header h2 {
-    font-size: 24px;
-  }
-
   .profile-close-btn.profile-close-btn-icon {
     font-size: 32px;
-  }
-
-  .transfer-segment-btn {
-    font-size: 14px;
-    min-height: 44px;
-  }
-
-  .transfer-balance p,
-  .transfer-amount-block p {
-    font-size: 18px;
-  }
-
-  .transfer-balance strong {
-    font-size: 30px;
-  }
-
-  .transfer-amount-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .transfer-amount-btn {
-    min-height: 56px;
-    font-size: 20px;
-  }
-
-  .transfer-custom label {
-    font-size: 14px;
-  }
-
-  .transfer-custom input {
-    min-height: 48px;
-    font-size: 20px;
-  }
-
-  .transfer-continue-btn {
-    min-height: 58px;
-    font-size: 22px;
   }
 
   .profile-full-name {

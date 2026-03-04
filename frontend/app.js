@@ -66,7 +66,6 @@ const els = {
   transferAmountGrid: document.getElementById("transferAmountGrid"),
   transferCustomWrap: document.getElementById("transferCustomWrap"),
   transferCustomAmount: document.getElementById("transferCustomAmount"),
-  transferStatus: document.getElementById("transferStatus"),
   transferContinueBtn: document.getElementById("transferContinueBtn"),
   swedbankCheckoutModal: document.getElementById("swedbankCheckoutModal"),
   swedbankCheckoutTitle: document.getElementById("swedbankCheckoutTitle"),
@@ -759,6 +758,7 @@ function renderTransferPanel() {
   if (els.transferContinueBtn) {
     const canContinue = state.transferDirection === "PLAYER" && Number.isFinite(selectedAmount) && selectedAmount > 0;
     els.transferContinueBtn.disabled = state.transferSubmitting || !canContinue;
+    els.transferContinueBtn.textContent = state.transferSubmitting ? "Starter..." : "Fortsett";
   }
 }
 
@@ -785,9 +785,6 @@ function setProfileTransferMode(enabled) {
     state.transferCustomAmount = "";
     if (els.profileTitle) {
       els.profileTitle.textContent = "Overfør penger";
-    }
-    if (els.transferStatus) {
-      setStatusBox(els.transferStatus, "Velg beløp og trykk Fortsett.");
     }
     renderTransferPanel();
   } else {
@@ -1856,13 +1853,6 @@ function setTransferDirection(direction) {
   const normalized = direction === "BANK" ? "BANK" : "PLAYER";
   state.transferDirection = normalized;
   renderTransferPanel();
-  if (els.transferStatus) {
-    if (normalized === "BANK") {
-      setStatusBox(els.transferStatus, "Overføring til bankkonto kommer snart.");
-    } else {
-      setStatusBox(els.transferStatus, "Velg beløp og trykk Fortsett.");
-    }
-  }
 }
 
 function onTransferAmountGridClick(event) {
@@ -1926,11 +1916,9 @@ async function onTransferContinue() {
     state.transferSubmitting = true;
     renderTransferPanel();
     const amount = resolveTransferAmount();
-    setStatusBox(els.transferStatus, `Starter betaling på ${formatNok(amount)}...`, "success");
     await startSwedbankTopup(amount);
     closeProfileModal();
   } catch (error) {
-    setStatusBox(els.transferStatus, error.message || "Kunne ikke starte betaling.", "error");
     setStatusBox(els.walletStatus, error.message || "Top-up feilet.", "error");
   } finally {
     state.transferSubmitting = false;
