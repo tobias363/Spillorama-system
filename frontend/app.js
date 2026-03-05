@@ -2,7 +2,8 @@
 
 const socket = io();
 const AUTH_STORAGE_KEY = "bingo.portal.auth";
-const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["candy", "bingo"]);
+const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["candy", "roma", "bingo"]);
+const INSTANT_LAUNCH_GAME_SLUGS = new Set(["candy", "roma"]);
 const TOPUP_PRESET_AMOUNTS = [50, 100, 200, 300, 500, 1000];
 
 const state = {
@@ -174,6 +175,17 @@ const GAME_SHOWCASE_THEME = Object.freeze({
     fallbackTicketPrice: 1,
     fallbackNextDrawMinutes: 1,
     badge: 75
+  },
+  roma: {
+    accent: "#c58a3d",
+    accentSoft: "rgba(197, 138, 61, 0.28)",
+    background:
+      "linear-gradient(112deg, rgba(45, 22, 16, 0.92) 0%, rgba(96, 53, 34, 0.74) 41%, rgba(18, 22, 31, 0.56) 100%), radial-gradient(circle at 18% 22%, rgba(234, 176, 110, 0.22), transparent 35%), radial-gradient(circle at 80% 76%, rgba(190, 108, 52, 0.22), transparent 42%)",
+    fallbackPrizePool: 2100,
+    fallbackPlayers: 84,
+    fallbackTicketPrice: 1,
+    fallbackNextDrawMinutes: 1,
+    badge: 80
   },
   bingo: {
     accent: "#3d6be9",
@@ -565,7 +577,11 @@ function getVisiblePortalGames(allGames) {
 }
 
 function getCandyGame() {
-  return state.games.find((game) => game.slug === "candy") || null;
+  const selected = currentGame();
+  if (selected && INSTANT_LAUNCH_GAME_SLUGS.has(selected.slug)) {
+    return selected;
+  }
+  return state.games.find((game) => INSTANT_LAUNCH_GAME_SLUGS.has(game.slug)) || null;
 }
 
 function currentAdminGame() {
@@ -1090,7 +1106,7 @@ function renderGameLobby() {
       event.stopPropagation();
       state.selectedGameSlug = game.slug;
       renderSelectedGame();
-      if (game.slug === "candy") {
+      if (INSTANT_LAUNCH_GAME_SLUGS.has(game.slug)) {
         onCandyPlay();
         return;
       }
@@ -1144,11 +1160,12 @@ function renderGamesNav() {
 
 function renderCandyCard() {
   const game = getCandyGame() || currentGame();
+  const gameTitle = game?.title || "spillet";
   if (els.candyPlayBtn) {
     els.candyPlayBtn.disabled = !game;
   }
   if (!game) {
-    setStatusBox(els.candyStatus, "Candy er ikke aktivert i game-katalogen.", "error");
+    setStatusBox(els.candyStatus, "Ingen launch-spill (Candy/Roma) er aktivert i game-katalogen.", "error");
     return;
   }
 
@@ -1157,7 +1174,7 @@ function renderCandyCard() {
     `Route: ${game.route}`,
     `Aktivt: ${game.isEnabled ? "Ja" : "Nei"}`,
     "Spill nå åpner URL fra game.settings.launchUrl.",
-    "Sett launchUrl i /admin > Games > Settings JSON for Candy.",
+    `Sett launchUrl i /admin > Games > ${gameTitle} > Settings JSON.`,
     "",
     game.description || "Ingen beskrivelse.",
     "",
@@ -1168,8 +1185,9 @@ function renderCandyCard() {
 
 function onCandyPlay() {
   const game = getCandyGame() || currentGame();
+  const gameTitle = game?.title || "spill";
   if (!game) {
-    setStatusBox(els.candyStatus, "Fant ikke spilldata for Candy.", "error");
+    setStatusBox(els.candyStatus, "Fant ikke spilldata for launch-spill.", "error");
     return;
   }
 
@@ -1178,8 +1196,8 @@ function onCandyPlay() {
     setStatusBox(
       els.candyStatus,
       [
-        "Mangler launchUrl for Candy.",
-        "Gå til /admin > Games > Candy > Settings JSON og sett f.eks.:",
+        `Mangler launchUrl for ${gameTitle}.`,
+        `Gå til /admin > Games > ${gameTitle} > Settings JSON og sett f.eks.:`,
         '{ "launchUrl": "https://din-candy-url.no" }'
       ].join("\n"),
       "error"
@@ -1187,7 +1205,7 @@ function onCandyPlay() {
     return;
   }
 
-  setStatusBox(els.candyStatus, `Starter Candy fra ${launchUrl}`, "success");
+  setStatusBox(els.candyStatus, `Starter ${gameTitle} fra ${launchUrl}`, "success");
   window.location.assign(launchUrl);
 }
 
@@ -1691,7 +1709,7 @@ function renderSelectedGame() {
 
   const game = currentGame();
   const slug = game?.slug || "";
-  const showCandyPanel = slug === "candy";
+  const showCandyPanel = INSTANT_LAUNCH_GAME_SLUGS.has(slug);
   const showBingoPanel = slug === "bingo";
 
   if (els.candyView) {

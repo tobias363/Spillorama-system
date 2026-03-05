@@ -1202,6 +1202,11 @@ export class PlatformService {
          VALUES ('bingo', 'Bingo', 'Multiplayer bingo i web-klienten.', '/bingo', true, 2, '{}'::jsonb)
          ON CONFLICT (slug) DO NOTHING`
       );
+      await client.query(
+        `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
+         VALUES ('roma', 'Roma', 'Roma-spillet (Unity) med samme realtime-logikk som Candy.', '/roma', true, 3, '{}'::jsonb)
+         ON CONFLICT (slug) DO NOTHING`
+      );
 
       await client.query(
         `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, is_active)
