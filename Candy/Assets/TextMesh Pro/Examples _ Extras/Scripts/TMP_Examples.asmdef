@@ -1,0 +1,19 @@
+{
+  "name": "TMP_Examples",
+  "rootNamespace": "TMPro.Examples",
+  "references": [
+    "Unity.TextMeshPro",
+    "Unity.ugui"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "TMP_EXAMPLES"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
