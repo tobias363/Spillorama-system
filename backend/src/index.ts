@@ -10,7 +10,7 @@ import { LocalBingoSystemAdapter } from "./adapters/LocalBingoSystemAdapter.js";
 import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
-import type { ClaimType, RoomSnapshot } from "./game/types.js";
+import type { ClaimType, RoomSnapshot, RoomSummary } from "./game/types.js";
 import { assertAdminPermission, type AdminPermission } from "./platform/AdminAccessPolicy.js";
 import { APP_USER_ROLES, PlatformService, type PublicAppUser, type UserRole } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
@@ -181,6 +181,10 @@ const requestedAutoDrawEnabled = parseBooleanEnv(process.env.AUTO_DRAW_ENABLED, 
 const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, true);
 const forceCandyAutoStart = true;
 const forceCandyAutoDraw = true;
+const enforceSingleCandyRoomPerHall = parseBooleanEnv(
+  process.env.CANDY_SINGLE_ACTIVE_ROOM_PER_HALL,
+  true
+);
 const autoplayAllowed = !isProductionRuntime || allowAutoplayInProduction;
 const runtimeCandyManiaSettings: CandyManiaSchedulerSettings = {
   autoRoundStartEnabled: forceCandyAutoStart
@@ -863,6 +867,61 @@ const roomConfiguredEntryFeeByRoom = new Map<string, number>();
 const roomSchedulerLocks = new Set<string>();
 let schedulerTickInProgress = false;
 
+function compareCandyRoomPriority(a: RoomSummary, b: RoomSummary): number {
+  const runningScoreA = a.gameStatus === "RUNNING" ? 1 : 0;
+  const runningScoreB = b.gameStatus === "RUNNING" ? 1 : 0;
+  if (runningScoreA !== runningScoreB) {
+    return runningScoreB - runningScoreA;
+  }
+
+  if (a.playerCount !== b.playerCount) {
+    return b.playerCount - a.playerCount;
+  }
+
+  const createdAtA = Date.parse(a.createdAt);
+  const createdAtB = Date.parse(b.createdAt);
+  const normalizedCreatedAtA = Number.isFinite(createdAtA) ? createdAtA : Number.MAX_SAFE_INTEGER;
+  const normalizedCreatedAtB = Number.isFinite(createdAtB) ? createdAtB : Number.MAX_SAFE_INTEGER;
+  if (normalizedCreatedAtA !== normalizedCreatedAtB) {
+    return normalizedCreatedAtA - normalizedCreatedAtB;
+  }
+
+  return a.code.localeCompare(b.code);
+}
+
+function selectCanonicalCandyRoomSummariesByHall(summaries: RoomSummary[]): RoomSummary[] {
+  if (!enforceSingleCandyRoomPerHall) {
+    return summaries;
+  }
+
+  const canonicalByHall = new Map<string, RoomSummary>();
+  for (const summary of summaries) {
+    const existing = canonicalByHall.get(summary.hallId);
+    if (!existing || compareCandyRoomPriority(summary, existing) < 0) {
+      canonicalByHall.set(summary.hallId, summary);
+    }
+  }
+
+  return [...canonicalByHall.values()].sort((a, b) => a.code.localeCompare(b.code));
+}
+
+function getCanonicalCandyRoomForHall(hallId: string, summaries = engine.listRoomSummaries()): RoomSummary | null {
+  const hallSummaries = summaries.filter((summary) => summary.hallId === hallId);
+  if (hallSummaries.length === 0) {
+    return null;
+  }
+  hallSummaries.sort(compareCandyRoomPriority);
+  return hallSummaries[0];
+}
+
+function findPlayerInRoomByWallet(snapshot: RoomSnapshot, walletId: string): RoomSnapshot["players"][number] | null {
+  const normalizedWalletId = walletId.trim();
+  if (!normalizedWalletId) {
+    return null;
+  }
+  return snapshot.players.find((player) => player.walletId === normalizedWalletId) ?? null;
+}
+
 function getNextRoundBoundaryMs(nowMs: number): number {
   return (
     Math.ceil(nowMs / runtimeCandyManiaSettings.autoRoundStartIntervalMs) *
@@ -1164,9 +1223,10 @@ async function runSchedulerTick(): Promise<void> {
     if (await applyPendingCandyManiaSettingsIfDue(now, summaries)) {
       summaries = engine.listRoomSummaries();
     }
-    cleanupSchedulerState(new Set(summaries.map((summary) => summary.code)));
+    const schedulerSummaries = selectCanonicalCandyRoomSummariesByHall(summaries);
+    cleanupSchedulerState(new Set(schedulerSummaries.map((summary) => summary.code)));
 
-    for (const summary of summaries) {
+    for (const summary of schedulerSummaries) {
       try {
         await processAutoStart(summary, now);
         await processAutoDraw(summary, now);
@@ -2446,6 +2506,33 @@ io.on("connection", (socket: Socket) => {
   socket.on("room:create", async (payload: CreateRoomPayload, callback: (response: AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>) => void) => {
     try {
       const identity = await resolveIdentityFromPayload(payload);
+      if (enforceSingleCandyRoomPerHall) {
+        const canonicalRoom = getCanonicalCandyRoomForHall(identity.hallId);
+        if (canonicalRoom) {
+          const canonicalSnapshot = engine.getRoomSnapshot(canonicalRoom.code);
+          const existingPlayer = findPlayerInRoomByWallet(canonicalSnapshot, identity.walletId);
+
+          let playerId = existingPlayer?.id ?? "";
+          if (existingPlayer) {
+            engine.attachPlayerSocket(canonicalRoom.code, existingPlayer.id, socket.id);
+          } else {
+            const joined = await engine.joinRoom({
+              roomCode: canonicalRoom.code,
+              hallId: identity.hallId,
+              playerName: identity.playerName,
+              walletId: identity.walletId,
+              socketId: socket.id
+            });
+            playerId = joined.playerId;
+          }
+
+          socket.join(canonicalRoom.code);
+          const snapshot = await emitRoomUpdate(canonicalRoom.code);
+          ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
+          return;
+        }
+      }
+
       const { roomCode, playerId } = await engine.createRoom({
         playerName: identity.playerName,
         hallId: identity.hallId,
@@ -2464,6 +2551,26 @@ io.on("connection", (socket: Socket) => {
     try {
       const roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
       const identity = await resolveIdentityFromPayload(payload);
+      if (enforceSingleCandyRoomPerHall) {
+        const canonicalRoom = getCanonicalCandyRoomForHall(identity.hallId);
+        if (canonicalRoom && canonicalRoom.code !== roomCode) {
+          throw new DomainError(
+            "SINGLE_ROOM_ONLY",
+            `Kun ett Candy-rom er aktivt per hall. Bruk rom ${canonicalRoom.code}.`
+          );
+        }
+      }
+
+      const roomSnapshot = engine.getRoomSnapshot(roomCode);
+      const existingPlayer = findPlayerInRoomByWallet(roomSnapshot, identity.walletId);
+      if (existingPlayer) {
+        engine.attachPlayerSocket(roomCode, existingPlayer.id, socket.id);
+        socket.join(roomCode);
+        const snapshot = await emitRoomUpdate(roomCode);
+        ackSuccess(callback, { roomCode, playerId: existingPlayer.id, snapshot });
+        return;
+      }
+
       const { playerId } = await engine.joinRoom({
         roomCode,
         hallId: identity.hallId,
@@ -2660,7 +2767,7 @@ hydrateCandyManiaSettingsFromCatalog()
         `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
       );
       console.log(
-        `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} forceAutoStart=${forceCandyAutoStart} forceAutoDraw=${forceCandyAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`
+        `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} forceAutoStart=${forceCandyAutoStart} forceAutoDraw=${forceCandyAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleCandyRoomPerHall} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`
       );
       console.log(
         `[scheduler] autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} interval=${runtimeCandyManiaSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms`
