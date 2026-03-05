@@ -63,6 +63,7 @@ public class GameManager : MonoBehaviour
         SetCurrentBets(betlevel);
         EnsureRoundStateCollections();
         ResetRoundWinState();
+        ApplyReadableTypographyProfile();
     }
 
     private void EnsureRoundStateCollections()
@@ -110,8 +111,17 @@ public class GameManager : MonoBehaviour
 
     private void OnPlay()
     {
-        SetTotalMoney(-currentBet);
+        if (!IsRealtimeCreditAuthoritative())
+        {
+            SetTotalMoney(-currentBet);
+        }
+
         ResetRoundWinState();
+    }
+
+    private bool IsRealtimeCreditAuthoritative()
+    {
+        return APIManager.instance != null && APIManager.instance.UseRealtimeBackend;
     }
     public void BetUp()
     {
@@ -157,6 +167,15 @@ public class GameManager : MonoBehaviour
     {
         totalMoney += atm;
         displayTotalMoney.text = totalMoney.ToString() ;
+    }
+
+    public void SetTotalMoneyAbsoluteFromRealtime(int amount)
+    {
+        totalMoney = Mathf.Max(0, amount);
+        if (displayTotalMoney != null)
+        {
+            displayTotalMoney.text = totalMoney.ToString();
+        }
     }
 
     void SetCurrentBets(int lvl)
@@ -259,9 +278,13 @@ public class GameManager : MonoBehaviour
         winList.Add(totalRoundWinning);
 
         int delta = totalRoundWinning - creditedRoundWinTotal;
-        if (delta > 0)
+        if (delta > 0 && !IsRealtimeCreditAuthoritative())
         {
             SetTotalMoney(delta);
+            creditedRoundWinTotal = totalRoundWinning;
+        }
+        else
+        {
             creditedRoundWinTotal = totalRoundWinning;
         }
     }
@@ -281,7 +304,7 @@ public class GameManager : MonoBehaviour
         winList.Add(totalRoundWinning);
 
         int delta = totalRoundWinning - creditedRoundWinTotal;
-        if (delta > 0)
+        if (delta > 0 && !IsRealtimeCreditAuthoritative())
         {
             SetTotalMoney(delta);
         }
@@ -315,6 +338,29 @@ public class GameManager : MonoBehaviour
 
         testingSpeedApplied = false;
         Time.timeScale = 1f;
+    }
+
+    private void ApplyReadableTypographyProfile()
+    {
+        TMP_FontAsset preferredFont = RealtimeTextStyleUtils.ResolvePreferredGameFont();
+        RealtimeTextStyleUtils.ApplyReadableTypography(displayTotalMoney, preferredFont, minFontSize: 22f, maxFontSize: 60f);
+        RealtimeTextStyleUtils.ApplyReadableTypography(displayCurrentBets, preferredFont, minFontSize: 22f, maxFontSize: 60f);
+        RealtimeTextStyleUtils.ApplyReadableTypography(winAmtText, preferredFont, minFontSize: 22f, maxFontSize: 60f);
+
+        for (int i = 0; i < CardBets.Count; i++)
+        {
+            RealtimeTextStyleUtils.ApplyReadableTypography(CardBets[i], preferredFont, minFontSize: 18f, maxFontSize: 42f);
+        }
+
+        for (int i = 0; i < displayCurrentPoints.Count; i++)
+        {
+            RealtimeTextStyleUtils.ApplyReadableTypography(displayCurrentPoints[i], preferredFont, minFontSize: 16f, maxFontSize: 40f);
+        }
+
+        for (int i = 0; i < displayCardWinPoints.Count; i++)
+        {
+            RealtimeTextStyleUtils.ApplyReadableTypography(displayCardWinPoints[i], preferredFont, minFontSize: 16f, maxFontSize: 40f);
+        }
     }
 }
 [System.Serializable]

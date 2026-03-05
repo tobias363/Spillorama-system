@@ -18,6 +18,9 @@ public class TopperManager : MonoBehaviour
     [SerializeField] private bool useSolidMissingHighlight = true;
     [SerializeField] private bool showMissingNumberInPrizeLabel = true;
     [SerializeField] private string missingNumberLabelPrefix = "Mangler";
+    [SerializeField] private bool showBonusLabelUnderConfiguredPattern = true;
+    [SerializeField] [Min(1)] private int bonusPatternPositionFromRight = 2;
+    [SerializeField] private string bonusPatternLabel = "BONUS";
 
     private readonly Dictionary<(int patternIndex, int colIndex, int cardNo), Coroutine> missingPatternBlinkRoutines =
         new Dictionary<(int patternIndex, int colIndex, int cardNo), Coroutine>();
@@ -35,6 +38,7 @@ public class TopperManager : MonoBehaviour
         CacheDefaultPrizeColors();
         CacheDefaultPrizeTexts();
         RefreshDefaultPrizeTextsFromRuntime(applyToPrizeLabels: false);
+        ApplyPrizeTypography();
     }
 
     private void OnDisable()
@@ -54,6 +58,7 @@ public class TopperManager : MonoBehaviour
         ShowAllPatterns();
         PrepareMissingPatternVisuals();
         RefreshDefaultPrizeTextsFromRuntime(applyToPrizeLabels: true);
+        ApplyPrizeTypography();
         DisableAllMatchedPattern();
         DisableAllMissedPattern();
     }
@@ -420,6 +425,19 @@ public class TopperManager : MonoBehaviour
 
             if (i >= 0 && i < defaultPrizeTexts.Count)
             {
+                if (showBonusLabelUnderConfiguredPattern && i == ResolveBonusPatternIndexFromRight())
+                {
+                    string trimmedBonusLabel = string.IsNullOrWhiteSpace(bonusPatternLabel) ? "BONUS" : bonusPatternLabel.Trim();
+                    if (!string.IsNullOrWhiteSpace(resolvedText))
+                    {
+                        resolvedText = $"{resolvedText}\n{trimmedBonusLabel}";
+                    }
+                    else
+                    {
+                        resolvedText = trimmedBonusLabel;
+                    }
+                }
+
                 defaultPrizeTexts[i] = resolvedText;
             }
 
@@ -458,6 +476,14 @@ public class TopperManager : MonoBehaviour
     {
         if (TryResolveRuntimePrizeText(index, out string runtimePrizeText))
         {
+            if (showBonusLabelUnderConfiguredPattern && index == ResolveBonusPatternIndexFromRight())
+            {
+                string trimmedBonusLabel = string.IsNullOrWhiteSpace(bonusPatternLabel) ? "BONUS" : bonusPatternLabel.Trim();
+                return string.IsNullOrWhiteSpace(runtimePrizeText)
+                    ? trimmedBonusLabel
+                    : $"{runtimePrizeText}\n{trimmedBonusLabel}";
+            }
+
             return runtimePrizeText;
         }
 
@@ -467,6 +493,32 @@ public class TopperManager : MonoBehaviour
         }
 
         return string.Empty;
+    }
+
+    private int ResolveBonusPatternIndexFromRight()
+    {
+        if (prizes == null || prizes.Count == 0)
+        {
+            return -1;
+        }
+
+        int offsetFromRight = Mathf.Max(1, bonusPatternPositionFromRight);
+        int resolvedIndex = prizes.Count - offsetFromRight;
+        return Mathf.Clamp(resolvedIndex, 0, prizes.Count - 1);
+    }
+
+    private void ApplyPrizeTypography()
+    {
+        TMP_FontAsset preferredFont = RealtimeTextStyleUtils.ResolvePreferredGameFont();
+        for (int i = 0; i < prizes.Count; i++)
+        {
+            if (prizes[i] == null)
+            {
+                continue;
+            }
+
+            RealtimeTextStyleUtils.ApplyReadableTypography(prizes[i], preferredFont, minFontSize: 16f, maxFontSize: 40f);
+        }
     }
 
     private void UpdatePatternMissingNumberLabel(int patternIndex, int missingNumber)

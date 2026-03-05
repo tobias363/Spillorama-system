@@ -6,10 +6,17 @@ public static class RealtimeTextStyleUtils
 {
     private static readonly Color DefaultCardNumberColor = new Color32(184, 51, 99, 255);
     private static readonly Color DefaultBallNumberColor = Color.black;
-    private const string ProblematicFontName = "FredokaOne-Regular SDF";
+    private const string PreferredFontKeyword = "Fredoka";
+    private static TMP_FontAsset cachedPreferredFontAsset;
 
     public static TMP_FontAsset ResolveFallbackFont()
     {
+        TMP_FontAsset preferred = ResolvePreferredGameFont();
+        if (preferred != null)
+        {
+            return preferred;
+        }
+
         GameManager gm = GameManager.instance;
         if (gm != null)
         {
@@ -46,6 +53,37 @@ public static class RealtimeTextStyleUtils
         return TMP_Settings.defaultFontAsset;
     }
 
+    public static TMP_FontAsset ResolvePreferredGameFont()
+    {
+        if (cachedPreferredFontAsset != null)
+        {
+            return cachedPreferredFontAsset;
+        }
+
+        TMP_FontAsset[] loadedFonts = Resources.FindObjectsOfTypeAll<TMP_FontAsset>();
+        if (loadedFonts == null || loadedFonts.Length == 0)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < loadedFonts.Length; i++)
+        {
+            TMP_FontAsset candidate = loadedFonts[i];
+            if (candidate == null || string.IsNullOrWhiteSpace(candidate.name))
+            {
+                continue;
+            }
+
+            if (candidate.name.IndexOf(PreferredFontKeyword, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                cachedPreferredFontAsset = candidate;
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
     public static void ApplyCardNumber(TextMeshProUGUI target, string value, TMP_FontAsset fallbackFont = null)
     {
         Apply(target, value, DefaultCardNumberColor, fallbackFont);
@@ -54,6 +92,34 @@ public static class RealtimeTextStyleUtils
     public static void ApplyBallNumber(TextMeshProUGUI target, string value, TMP_FontAsset fallbackFont = null)
     {
         Apply(target, value, DefaultBallNumberColor, fallbackFont);
+    }
+
+    public static void ApplyReadableTypography(
+        TextMeshProUGUI target,
+        TMP_FontAsset preferredFont = null,
+        float minFontSize = 18f,
+        float maxFontSize = 56f)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        TMP_FontAsset resolvedFont = preferredFont != null ? preferredFont : ResolveFallbackFont();
+        if (resolvedFont != null && !ReferenceEquals(target.font, resolvedFont))
+        {
+            target.font = resolvedFont;
+            if (resolvedFont.material != null)
+            {
+                target.fontSharedMaterial = resolvedFont.material;
+            }
+        }
+
+        target.enableWordWrapping = false;
+        target.enableAutoSizing = true;
+        target.fontSizeMin = Mathf.Clamp(minFontSize, 10f, 72f);
+        target.fontSizeMax = Mathf.Clamp(maxFontSize, target.fontSizeMin, 96f);
+        target.overflowMode = TextOverflowModes.Overflow;
     }
 
     private static void Apply(TextMeshProUGUI target, string value, Color preferredColor, TMP_FontAsset fallbackFont)
@@ -70,7 +136,7 @@ public static class RealtimeTextStyleUtils
         }
 
         TMP_FontAsset resolvedFallback = fallbackFont != null ? fallbackFont : ResolveFallbackFont();
-        if (resolvedFallback != null && ShouldReplaceFont(target.font, resolvedFallback))
+        if (resolvedFallback != null && !ReferenceEquals(target.font, resolvedFallback))
         {
             target.font = resolvedFallback;
             if (resolvedFallback.material != null)
@@ -92,21 +158,5 @@ public static class RealtimeTextStyleUtils
         target.overflowMode = TextOverflowModes.Overflow;
         target.text = value;
         target.ForceMeshUpdate();
-    }
-
-    private static bool ShouldReplaceFont(TMP_FontAsset current, TMP_FontAsset fallback)
-    {
-        if (current == null)
-        {
-            return true;
-        }
-
-        if (ReferenceEquals(current, fallback))
-        {
-            return false;
-        }
-
-        string currentName = current.name ?? string.Empty;
-        return currentName.IndexOf(ProblematicFontName, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

@@ -112,6 +112,7 @@ public class NumberGenerator : MonoBehaviour
             TrySetAutoSpinRemainingPlayText(string.Empty);
             EventManager.isPlayOver = true;
             InitializeSelectedPatterns();
+            ApplyReadableTypographyToBoard();
         }
         catch (Exception ex)
         {
@@ -999,15 +1000,24 @@ public class NumberGenerator : MonoBehaviour
 
                 if (missingPatternCell.activeInHierarchy && !missingPatternPrize.text.Contains(patternIndexInTopper.text))
                 {
-                    //missingPatternPrize.text += ", " + patternIndexInTopper.text;
-                    //Debug.Log(missingPatternPrize.text + " + " + patternIndexInTopper.text);
-                    int totalLoss = int.Parse(missingPatternPrize.text) + int.Parse(patternIndexInTopper.text);
-                    missingPatternPrize.text = totalLoss.ToString();
-                    // Debug.Log("total : " + missingPatternPrize.text);
+                    if (TryExtractFirstInteger(missingPatternPrize.text, out int existingLoss) &&
+                        TryExtractFirstInteger(patternIndexInTopper.text, out int patternPrize))
+                    {
+                        int totalLoss = existingLoss + patternPrize;
+                        missingPatternPrize.text = totalLoss.ToString();
+                    }
                 }
                 else
                 {
-                    missingPatternPrize.text = patternIndexInTopper.text;
+                    if (TryExtractFirstInteger(patternIndexInTopper.text, out int patternPrize))
+                    {
+                        missingPatternPrize.text = patternPrize.ToString();
+                    }
+                    else
+                    {
+                        missingPatternPrize.text = patternIndexInTopper.text;
+                    }
+
                     SetActiveIfChanged(missingPatternCell, true);
                 }
 
@@ -1041,6 +1051,80 @@ public class NumberGenerator : MonoBehaviour
         else
         {
             NextPlay();
+        }
+    }
+
+    private static bool TryExtractFirstInteger(string rawText, out int value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(rawText))
+        {
+            return false;
+        }
+
+        int start = -1;
+        int end = -1;
+        for (int i = 0; i < rawText.Length; i++)
+        {
+            if (!char.IsDigit(rawText[i]))
+            {
+                if (start >= 0)
+                {
+                    end = i;
+                    break;
+                }
+
+                continue;
+            }
+
+            if (start < 0)
+            {
+                start = i;
+            }
+        }
+
+        if (start < 0)
+        {
+            return false;
+        }
+
+        if (end < 0)
+        {
+            end = rawText.Length;
+        }
+
+        string digits = rawText.Substring(start, end - start);
+        return int.TryParse(digits, out value);
+    }
+
+    private void ApplyReadableTypographyToBoard()
+    {
+        TMP_FontAsset preferredFont = RealtimeTextStyleUtils.ResolvePreferredGameFont();
+        RealtimeTextStyleUtils.ApplyReadableTypography(autoSpinRemainingPlayText, preferredFont, minFontSize: 20f, maxFontSize: 68f);
+        RealtimeTextStyleUtils.ApplyReadableTypography(extraBallCountText, preferredFont, minFontSize: 16f, maxFontSize: 40f);
+
+        if (cardClasses == null)
+        {
+            return;
+        }
+
+        for (int cardIndex = 0; cardIndex < cardClasses.Length; cardIndex++)
+        {
+            CardClass card = cardClasses[cardIndex];
+            if (card == null)
+            {
+                continue;
+            }
+
+            if (card.num_text != null)
+            {
+                for (int i = 0; i < card.num_text.Count; i++)
+                {
+                    RealtimeTextStyleUtils.ApplyReadableTypography(card.num_text[i], preferredFont, minFontSize: 20f, maxFontSize: 48f);
+                }
+            }
+
+            RealtimeTextStyleUtils.ApplyReadableTypography(card.win, preferredFont, minFontSize: 16f, maxFontSize: 40f);
         }
     }
 

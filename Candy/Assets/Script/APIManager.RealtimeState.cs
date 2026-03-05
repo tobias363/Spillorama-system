@@ -15,6 +15,10 @@ public partial class APIManager
         public JSONNode ClaimNode;
     }
 
+    private int hardFallbackDrawNumber = -1;
+    private float hardFallbackDrawVisibleUntil = -1f;
+    private GUIStyle hardFallbackDrawGuiStyle;
+
     private void HandleRealtimeRoomUpdate(JSONNode snapshot)
     {
         if (snapshot == null || snapshot.IsNull)
@@ -42,6 +46,8 @@ public partial class APIManager
         }
 
         ApplySchedulerMetadata(snapshot);
+        RefreshRealtimePlayerContext(snapshot);
+        TrySendPendingRealtimeBetArm();
 
         JSONNode currentGame = snapshot["currentGame"];
         if (currentGame == null || currentGame.IsNull)
@@ -51,15 +57,19 @@ public partial class APIManager
             {
                 ScheduleDelayedOverlayReset(activeGameId);
                 ResetRealtimeRoundVisuals();
+                LogRealtimeDrawMetrics(activeGameId, "no-current-game");
             }
 
             activeGameId = string.Empty;
             processedDrawCount = 0;
             renderedDrawCount = 0;
+            realtimeBetArmedForNextRound = false;
+            realtimeClaimAttemptKeys.Clear();
             currentTicketPage = 0;
             activeTicketSets.Clear();
             overlaysClearedForEndedGameId = string.Empty;
             GameManager.instance?.SetRoundWinningTotalFromRealtime(0);
+            ResetRealtimeDrawReplayState(clearMetrics: true);
             RefreshRealtimeCountdownLabel(forceRefresh: true);
             return;
         }
@@ -77,9 +87,15 @@ public partial class APIManager
         if (!string.Equals(activeGameId, gameId, StringComparison.Ordinal))
         {
             string previousGameId = activeGameId;
+            if (!string.IsNullOrWhiteSpace(previousGameId))
+            {
+                LogRealtimeDrawMetrics(previousGameId, "game-transition");
+            }
             activeGameId = gameId;
             processedDrawCount = 0;
             renderedDrawCount = 0;
+            realtimeClaimAttemptKeys.Clear();
+            ResetRealtimeDrawReplayState(clearMetrics: true);
             currentTicketPage = 0;
             activeTicketSets.Clear();
             overlaysClearedForEndedGameId = string.Empty;
@@ -107,14 +123,104 @@ public partial class APIManager
         else if (isEnded)
         {
             ScheduleDelayedOverlayReset(gameId);
+            LogRealtimeDrawMetrics(gameId, "game-ended");
         }
 
         ApplyMyTicketToCards(currentGame);
         bool skipCardMarking = string.Equals(overlaysClearedForEndedGameId, gameId, StringComparison.Ordinal);
         ApplyDrawnNumbers(currentGame, skipCardMarking);
+        TryAutoSubmitClaimsFromRealtime(currentGame);
         RefreshRealtimeRoundWinning(currentGame);
         RefreshRealtimeWinningPatternVisuals(currentGame);
         RefreshRealtimeCountdownLabel(forceRefresh: true);
+    }
+
+    private void RefreshRealtimePlayerContext(JSONNode snapshot)
+    {
+        if (snapshot == null || snapshot.IsNull)
+        {
+            return;
+        }
+
+        JSONNode players = snapshot["players"];
+        if (!string.IsNullOrWhiteSpace(activePlayerId) &&
+            players != null &&
+            !players.IsNull &&
+            players.IsArray)
+        {
+            for (int i = 0; i < players.Count; i++)
+            {
+                JSONNode player = players[i];
+                if (player == null || player.IsNull)
+                {
+                    continue;
+                }
+
+                string playerId = player["id"];
+                if (!string.Equals(playerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (TryParseNonNegativeRoundedAmount(player["balance"], out int resolvedBalance))
+                {
+                    GameManager.instance?.SetTotalMoneyAbsoluteFromRealtime(resolvedBalance);
+                }
+
+                break;
+            }
+        }
+
+        realtimeBetArmedForNextRound = false;
+        JSONNode scheduler = snapshot["scheduler"];
+        if (scheduler == null || scheduler.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            return;
+        }
+
+        JSONNode armedPlayerIds = scheduler["armedPlayerIds"];
+        if (armedPlayerIds == null || armedPlayerIds.IsNull || !armedPlayerIds.IsArray)
+        {
+            return;
+        }
+
+        for (int i = 0; i < armedPlayerIds.Count; i++)
+        {
+            string armedPlayerId = armedPlayerIds[i];
+            if (string.Equals(armedPlayerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                realtimeBetArmedForNextRound = true;
+                return;
+            }
+        }
+    }
+
+    private static bool TryParseNonNegativeRoundedAmount(JSONNode node, out int roundedAmount)
+    {
+        roundedAmount = 0;
+        if (node == null || node.IsNull)
+        {
+            return false;
+        }
+
+        string raw = node.Value;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        if (!float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
+        {
+            return false;
+        }
+
+        if (float.IsNaN(parsed) || float.IsInfinity(parsed) || parsed < 0f)
+        {
+            return false;
+        }
+
+        roundedAmount = Mathf.RoundToInt(parsed);
+        return true;
     }
 
     private void ApplyMyTicketToCards(JSONNode currentGame)
@@ -283,11 +389,9 @@ public partial class APIManager
             return;
         }
 
+        string drawGameId = FirstNonEmptyValue(currentGame["id"], activeGameId);
         int drawCountCap = ResolveRealtimeDrawCountCap();
         int cappedDrawCount = Mathf.Min(drawnNumbers.Count, drawCountCap);
-        int previousRenderedDrawCount = Mathf.Clamp(renderedDrawCount, 0, drawCountCap);
-        int nextRenderedDrawCount = previousRenderedDrawCount;
-
         for (int drawIndex = 0; drawIndex < cappedDrawCount; drawIndex++)
         {
             int drawnNumber = drawnNumbers[drawIndex].AsInt;
@@ -296,19 +400,7 @@ public partial class APIManager
                 RealtimeTicketSetUtils.MarkDrawnNumberOnCards(generator, drawnNumber);
             }
 
-            if (drawIndex < previousRenderedDrawCount)
-            {
-                continue;
-            }
-
-            bool rendered = ShowRealtimeDrawBall(drawIndex, drawnNumber);
-            if (!rendered)
-            {
-                QueueDrawResync($"draw-render-missing:{drawIndex}");
-                break;
-            }
-
-            nextRenderedDrawCount = drawIndex + 1;
+            EnqueueRealtimeDrawForReplay(drawGameId, drawIndex, drawnNumber);
 
             if (autoMarkDrawnNumbers &&
                 RealtimeTicketSetUtils.TicketContainsInAnyTicketSet(activeTicketSets, drawnNumber) &&
@@ -329,12 +421,242 @@ public partial class APIManager
         }
 
         processedDrawCount = cappedDrawCount;
-        renderedDrawCount = Mathf.Clamp(nextRenderedDrawCount, 0, drawCountCap);
+        renderedDrawCount = Mathf.Clamp(renderedDrawCount, 0, drawCountCap);
 
-        if (renderedDrawCount < cappedDrawCount)
+        if (renderedDrawCount < cappedDrawCount && pendingRealtimeDrawQueue.Count == 0)
         {
-            QueueDrawResync("draw-render-lag");
+            QueueDrawResync("draw-replay-empty-lag");
         }
+    }
+
+    private void EnqueueRealtimeDrawForReplay(string gameId, int drawIndex, int drawnNumber)
+    {
+        if (string.IsNullOrWhiteSpace(gameId) || drawIndex < 0)
+        {
+            return;
+        }
+
+        if (drawIndex < renderedDrawCount)
+        {
+            return;
+        }
+
+        string drawKey = $"{gameId}:{drawIndex}";
+        if (pendingRealtimeDrawKeys.Contains(drawKey))
+        {
+            return;
+        }
+
+        pendingRealtimeDrawQueue.Enqueue(new RealtimeDrawRenderItem
+        {
+            GameId = gameId,
+            DrawIndex = drawIndex,
+            DrawnNumber = drawnNumber
+        });
+        pendingRealtimeDrawKeys.Add(drawKey);
+        drawMetricEnqueued += 1;
+
+        if (drawMetricsGameId != gameId)
+        {
+            drawMetricsGameId = gameId;
+        }
+
+        if (logRealtimeDrawMetrics)
+        {
+            Debug.Log($"[draw] draw_enqueued game={gameId} idx={drawIndex} no={drawnNumber} backlog={pendingRealtimeDrawQueue.Count}");
+        }
+
+        StartRealtimeDrawReplayLoop();
+    }
+
+    private void StartRealtimeDrawReplayLoop()
+    {
+        if (realtimeDrawReplayCoroutine != null)
+        {
+            return;
+        }
+
+        realtimeDrawReplayCoroutine = StartCoroutine(ReplayPendingRealtimeDraws());
+    }
+
+    private IEnumerator ReplayPendingRealtimeDraws()
+    {
+        while (pendingRealtimeDrawQueue.Count > 0)
+        {
+            RealtimeDrawRenderItem nextDraw = pendingRealtimeDrawQueue.Dequeue();
+            pendingRealtimeDrawKeys.Remove($"{nextDraw.GameId}:{nextDraw.DrawIndex}");
+
+            if (!string.Equals(nextDraw.GameId, activeGameId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            bool rendered = ShowRealtimeDrawBall(nextDraw.DrawIndex, nextDraw.DrawnNumber);
+            bool fallbackRendered = false;
+            if (!rendered)
+            {
+                fallbackRendered = TryShowRealtimeDrawFallback(nextDraw.DrawnNumber);
+                if (fallbackRendered)
+                {
+                    drawMetricFallbackRendered += 1;
+                    if (logRealtimeDrawMetrics)
+                    {
+                        Debug.Log($"[draw] draw_fallback_rendered game={nextDraw.GameId} idx={nextDraw.DrawIndex} no={nextDraw.DrawnNumber}");
+                    }
+                }
+                else
+                {
+                    drawMetricSkipped += 1;
+                    Debug.LogError($"[draw] draw_skipped game={nextDraw.GameId} idx={nextDraw.DrawIndex} no={nextDraw.DrawnNumber}");
+                }
+
+                QueueDrawResync($"draw-render-missing:{nextDraw.DrawIndex}");
+            }
+            else
+            {
+                drawMetricRendered += 1;
+                if (logRealtimeDrawMetrics)
+                {
+                    Debug.Log($"[draw] draw_rendered game={nextDraw.GameId} idx={nextDraw.DrawIndex} no={nextDraw.DrawnNumber}");
+                }
+            }
+
+            renderedDrawCount = Mathf.Max(renderedDrawCount, nextDraw.DrawIndex + 1);
+            lastRealtimeDrawRenderAt = Time.unscaledTime;
+
+            float interval = ResolveRealtimeDrawReplayIntervalSeconds(pendingRealtimeDrawQueue.Count);
+            if (interval > 0f)
+            {
+                yield return new WaitForSecondsRealtime(interval);
+            }
+            else
+            {
+                yield return null;
+            }
+        }
+
+        realtimeDrawReplayCoroutine = null;
+    }
+
+    private float ResolveRealtimeDrawReplayIntervalSeconds(int backlogCount)
+    {
+        float normalInterval = Mathf.Max(0.05f, realtimeDrawReplayNormalIntervalSeconds);
+        float minInterval = Mathf.Clamp(realtimeDrawReplayMinIntervalSeconds, 0.02f, normalInterval);
+        int catchupThreshold = Mathf.Max(1, realtimeDrawBacklogCatchupThreshold);
+        if (backlogCount <= 0)
+        {
+            return normalInterval;
+        }
+
+        if (backlogCount <= catchupThreshold)
+        {
+            return normalInterval;
+        }
+
+        float catchupRatio = Mathf.Clamp01((backlogCount - catchupThreshold) / (float)(catchupThreshold * 2));
+        return Mathf.Lerp(normalInterval, minInterval, catchupRatio);
+    }
+
+    private bool TryShowRealtimeDrawFallback(int drawnNumber)
+    {
+        SetHardRealtimeDrawFallback(drawnNumber);
+
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        if (generator == null || generator.autoSpinRemainingPlayText == null)
+        {
+            return true;
+        }
+
+        generator.autoSpinRemainingPlayText.text = $"Trekk: {drawnNumber}";
+        return true;
+    }
+
+    private void SetHardRealtimeDrawFallback(int drawnNumber)
+    {
+        hardFallbackDrawNumber = drawnNumber;
+        hardFallbackDrawVisibleUntil = Time.unscaledTime + Mathf.Max(0.75f, realtimeDrawReplayNormalIntervalSeconds * 2f);
+    }
+
+    private void OnGUI()
+    {
+        if (!useRealtimeBackend)
+        {
+            return;
+        }
+
+        if (hardFallbackDrawNumber <= 0 || Time.unscaledTime > hardFallbackDrawVisibleUntil)
+        {
+            return;
+        }
+
+        if (hardFallbackDrawGuiStyle == null)
+        {
+            hardFallbackDrawGuiStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = Mathf.Clamp(Mathf.RoundToInt(Screen.height * 0.03f), 22, 44),
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = Color.white }
+            };
+        }
+
+        float width = Mathf.Clamp(Screen.width * 0.24f, 220f, 340f);
+        float height = Mathf.Clamp(Screen.height * 0.08f, 54f, 88f);
+        float x = (Screen.width - width) * 0.5f;
+        float y = Mathf.Clamp(Screen.height * 0.13f, 18f, Screen.height - height - 18f);
+        Rect drawRect = new Rect(x, y, width, height);
+        GUI.Box(drawRect, GUIContent.none);
+        GUI.Label(drawRect, $"TREKK {hardFallbackDrawNumber}", hardFallbackDrawGuiStyle);
+    }
+
+    private void ResetRealtimeDrawReplayState(bool clearMetrics)
+    {
+        if (realtimeDrawReplayCoroutine != null)
+        {
+            StopCoroutine(realtimeDrawReplayCoroutine);
+            realtimeDrawReplayCoroutine = null;
+        }
+
+        pendingRealtimeDrawQueue.Clear();
+        pendingRealtimeDrawKeys.Clear();
+        lastRealtimeDrawRenderAt = -1f;
+        hardFallbackDrawNumber = -1;
+        hardFallbackDrawVisibleUntil = -1f;
+
+        if (!clearMetrics)
+        {
+            return;
+        }
+
+        drawMetricEnqueued = 0;
+        drawMetricRendered = 0;
+        drawMetricFallbackRendered = 0;
+        drawMetricSkipped = 0;
+        drawMetricsGameId = string.Empty;
+    }
+
+    private void LogRealtimeDrawMetrics(string gameId, string reason)
+    {
+        if (!logRealtimeDrawMetrics || string.IsNullOrWhiteSpace(gameId))
+        {
+            return;
+        }
+
+        if (!string.Equals(drawMetricsGameId, gameId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Debug.Log(
+            $"[draw] summary game={gameId} reason={reason} " +
+            $"draw_enqueued={drawMetricEnqueued} draw_rendered={drawMetricRendered} " +
+            $"draw_fallback_rendered={drawMetricFallbackRendered} draw_skipped={drawMetricSkipped}");
+
+        drawMetricEnqueued = 0;
+        drawMetricRendered = 0;
+        drawMetricFallbackRendered = 0;
+        drawMetricSkipped = 0;
+        drawMetricsGameId = string.Empty;
     }
 
     private void RefreshRealtimeRoundWinning(JSONNode currentGame)
@@ -380,6 +702,196 @@ public partial class APIManager
         }
 
         manager.SetRoundWinningTotalFromRealtime(resolvedRoundWinning);
+    }
+
+    private void TryAutoSubmitClaimsFromRealtime(JSONNode currentGame)
+    {
+        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activeGameId))
+        {
+            return;
+        }
+
+        if (!CanSendClaim(logWarnings: false))
+        {
+            return;
+        }
+
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        if (generator == null || generator.cardClasses == null || generator.patternList == null)
+        {
+            return;
+        }
+
+        if (HasValidClaimForCurrentPlayer(currentGame, "BINGO"))
+        {
+            return;
+        }
+
+        if (HasAnyRealtimeFullBingo(generator.cardClasses))
+        {
+            TrySubmitRealtimeClaimOnce("BINGO");
+            return;
+        }
+
+        if (HasValidClaimForCurrentPlayer(currentGame, "LINE"))
+        {
+            return;
+        }
+
+        List<int> activePatternIndexes = GetActivePatternIndexes(generator);
+        if (HasAnyRealtimeLineWin(generator, activePatternIndexes))
+        {
+            TrySubmitRealtimeClaimOnce("LINE");
+        }
+    }
+
+    private bool HasValidClaimForCurrentPlayer(JSONNode currentGame, string claimType)
+    {
+        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            return false;
+        }
+
+        JSONNode claims = currentGame["claims"];
+        if (claims == null || claims.IsNull || !claims.IsArray)
+        {
+            return false;
+        }
+
+        for (int i = claims.Count - 1; i >= 0; i--)
+        {
+            JSONNode claim = claims[i];
+            if (claim == null || claim.IsNull || !claim["valid"].AsBool)
+            {
+                continue;
+            }
+
+            if (!string.Equals(claim["playerId"]?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.Equals(claim["type"], claimType, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool HasAnyRealtimeLineWin(NumberGenerator generator, List<int> activePatternIndexes)
+    {
+        if (generator == null || generator.cardClasses == null || generator.patternList == null)
+        {
+            return false;
+        }
+
+        for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
+        {
+            CardClass card = generator.cardClasses[cardNo];
+            if (card == null)
+            {
+                continue;
+            }
+
+            int matchedPatternIndex = FindFirstMatchedPatternIndex(card, generator.patternList, activePatternIndexes);
+            if (matchedPatternIndex >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool HasAnyRealtimeFullBingo(CardClass[] cards)
+    {
+        if (cards == null || cards.Length == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < cards.Length; i++)
+        {
+            CardClass card = cards[i];
+            if (card == null || card.numb == null || card.payLinePattern == null)
+            {
+                continue;
+            }
+
+            bool isFullBingo = true;
+            int cellCount = Mathf.Min(card.numb.Count, card.payLinePattern.Count);
+            for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
+            {
+                int value = card.numb[cellIndex];
+                if (value <= 0)
+                {
+                    continue;
+                }
+
+                if (card.payLinePattern[cellIndex] != 1)
+                {
+                    isFullBingo = false;
+                    break;
+                }
+            }
+
+            if (isFullBingo)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void TrySubmitRealtimeClaimOnce(string claimType)
+    {
+        if (string.IsNullOrWhiteSpace(activeGameId) ||
+            string.IsNullOrWhiteSpace(claimType) ||
+            realtimeClient == null ||
+            !realtimeClient.IsReady)
+        {
+            return;
+        }
+
+        string normalizedType = claimType.Trim().ToUpperInvariant();
+        string claimAttemptKey = $"{activeGameId}:{normalizedType}";
+        if (realtimeClaimAttemptKeys.Contains(claimAttemptKey))
+        {
+            return;
+        }
+
+        realtimeClaimAttemptKeys.Add(claimAttemptKey);
+        realtimeClient.SubmitClaim(activeRoomCode, activePlayerId, normalizedType, (ack) =>
+        {
+            if (ack == null)
+            {
+                realtimeClaimAttemptKeys.Remove(claimAttemptKey);
+                return;
+            }
+
+            if (!ack.ok)
+            {
+                bool retryable =
+                    string.Equals(ack.errorCode, "NO_VALID_LINE", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(ack.errorCode, "NO_VALID_BINGO", StringComparison.OrdinalIgnoreCase);
+                if (retryable)
+                {
+                    realtimeClaimAttemptKeys.Remove(claimAttemptKey);
+                }
+
+                Debug.LogWarning($"[APIManager] Auto-claim {normalizedType} feilet: {ack.errorCode} {ack.errorMessage}");
+                return;
+            }
+
+            JSONNode snapshot = ack.data?["snapshot"];
+            if (snapshot != null && !snapshot.IsNull)
+            {
+                HandleRealtimeRoomUpdate(snapshot);
+            }
+        });
     }
 
     private bool TryResolveClaimPayoutAmount(JSONNode claimNode, out int payoutAmount)
@@ -859,6 +1371,7 @@ public partial class APIManager
             ApplyTicketPatternState(
                 card,
                 cardNo,
+                patternIndex,
                 generator.patternList[patternIndex].pattern,
                 state,
                 missingCellIndex,
@@ -869,6 +1382,7 @@ public partial class APIManager
     private void ApplyTicketPatternState(
         CardClass card,
         int cardNo,
+        int patternIndex,
         List<byte> mask,
         TicketUiState state,
         int missingCellIndex,
@@ -894,6 +1408,26 @@ public partial class APIManager
 
         int blinkKey = BuildNearWinBlinkKey(cardNo, missingCellIndex);
         activeNearWinKeys.Add(blinkKey);
+        int missingNumber = (card.numb != null && missingCellIndex >= 0 && missingCellIndex < card.numb.Count)
+            ? Mathf.Max(0, card.numb[missingCellIndex])
+            : 0;
+        RealtimeNearWinMeta nextMeta = new RealtimeNearWinMeta
+        {
+            PatternIndex = patternIndex,
+            CellIndex = missingCellIndex,
+            CardNo = cardNo,
+            MissingNumber = missingNumber
+        };
+        if (realtimeNearWinMetaByKey.TryGetValue(blinkKey, out RealtimeNearWinMeta previousMeta))
+        {
+            if (previousMeta.PatternIndex != nextMeta.PatternIndex || previousMeta.CardNo != nextMeta.CardNo)
+            {
+                EventManager.ShowMissingPattern(previousMeta.PatternIndex, previousMeta.CellIndex, false, 0, previousMeta.CardNo);
+            }
+        }
+        realtimeNearWinMetaByKey[blinkKey] = nextMeta;
+        EventManager.ShowMissingPattern(patternIndex, missingCellIndex, true, missingNumber, cardNo);
+
         if (!realtimeNearWinBlinkCoroutines.ContainsKey(blinkKey))
         {
             Coroutine blinkRoutine = StartCoroutine(BlinkRealtimeNearWinCell(blinkKey, card.missingPatternImg[missingCellIndex]));
@@ -975,6 +1509,11 @@ public partial class APIManager
 
             realtimeNearWinBlinkCoroutines.Remove(key);
             SetNearWinCellActive(cards, key, false);
+            if (realtimeNearWinMetaByKey.TryGetValue(key, out RealtimeNearWinMeta meta))
+            {
+                EventManager.ShowMissingPattern(meta.PatternIndex, meta.CellIndex, false, 0, meta.CardNo);
+                realtimeNearWinMetaByKey.Remove(key);
+            }
         }
     }
 
@@ -1056,9 +1595,14 @@ public partial class APIManager
             }
 
             SetNearWinCellActive(cards, entry.Key, false);
+            if (realtimeNearWinMetaByKey.TryGetValue(entry.Key, out RealtimeNearWinMeta meta))
+            {
+                EventManager.ShowMissingPattern(meta.PatternIndex, meta.CellIndex, false, 0, meta.CardNo);
+            }
         }
 
         realtimeNearWinBlinkCoroutines.Clear();
+        realtimeNearWinMetaByKey.Clear();
         HideAllMissingPatternVisuals(cards);
     }
 
@@ -1158,15 +1702,48 @@ public partial class APIManager
 
         foreach (KeyValuePair<int, int> cardWin in winningPatternsByCard)
         {
-            if (cardWin.Value == realtimeBonusPatternIndex)
+            if (IsConfiguredBonusWinningPattern(cardWin.Value))
             {
-                triggerSource = $"winningPatternIndex={realtimeBonusPatternIndex}";
+                triggerSource = $"winningPatternTopIndex={ResolveConfiguredBonusTopPatternIndex()}";
                 LogBonusFallbackUsed("trigger", triggerSource, latestClaim.ClaimId);
                 return true;
             }
         }
 
         return false;
+    }
+
+    private bool IsConfiguredBonusWinningPattern(int winningPatternIndex)
+    {
+        if (winningPatternIndex < 0)
+        {
+            return false;
+        }
+
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        TopperManager topperManager = generator?.topperManager;
+        if (topperManager == null)
+        {
+            return winningPatternIndex == realtimeBonusPatternIndex;
+        }
+
+        int mappedTopPatternIndex = topperManager.GetPatternIndex(winningPatternIndex);
+        return mappedTopPatternIndex == ResolveConfiguredBonusTopPatternIndex();
+    }
+
+    private int ResolveConfiguredBonusTopPatternIndex()
+    {
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        TopperManager topperManager = generator?.topperManager;
+        int prizeCount = topperManager != null && topperManager.prizes != null ? topperManager.prizes.Count : 0;
+        if (prizeCount <= 0)
+        {
+            return Mathf.Max(0, realtimeBonusPatternIndex);
+        }
+
+        int offsetFromRight = Mathf.Max(1, realtimeBonusPatternPositionFromRight);
+        int resolvedIndex = prizeCount - offsetFromRight;
+        return Mathf.Clamp(resolvedIndex, 0, prizeCount - 1);
     }
 
     private bool TryResolveBackendBonusTrigger(JSONNode claimNode, out bool bonusTriggered, out string source)
@@ -1537,6 +2114,10 @@ public partial class APIManager
         nextScheduledManualStartAttemptAt = -1f;
         nextInsufficientFundsWarningAt = -1f;
         hasAppliedZeroEntryFeeFallbackForRoom = false;
+        realtimeBetArmedForNextRound = false;
+        pendingRealtimeBetArmRequest = false;
+        realtimeClaimAttemptKeys.Clear();
+        ResetRealtimeDrawReplayState(clearMetrics: true);
 
         if (clearDesiredRoomCode)
         {
@@ -1594,6 +2175,18 @@ public partial class APIManager
         if (nextDrawResyncAt < 0f || Time.unscaledTime < nextDrawResyncAt)
         {
             return;
+        }
+
+        if (pendingRealtimeDrawQueue.Count > 0)
+        {
+            float idleSeconds = lastRealtimeDrawRenderAt < 0f
+                ? 0f
+                : Time.unscaledTime - lastRealtimeDrawRenderAt;
+            if (idleSeconds < Mathf.Max(0.25f, realtimeDrawReplayNormalIntervalSeconds * 2f))
+            {
+                nextDrawResyncAt = Time.unscaledTime + Mathf.Max(0.25f, realtimeDrawResyncIntervalSeconds);
+                return;
+            }
         }
 
         if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))

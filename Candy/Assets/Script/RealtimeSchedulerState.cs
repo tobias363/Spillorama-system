@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using SimpleJSON;
 
 public sealed class RealtimeSchedulerState
@@ -11,6 +12,8 @@ public sealed class RealtimeSchedulerState
     public bool CanStartNow { get; private set; }
     public int MinPlayers { get; private set; } = 1;
     public int PlayerCount { get; private set; }
+    public int ArmedPlayerCount { get; private set; }
+    public HashSet<string> ArmedPlayerIds { get; } = new();
     public int DrawCapacity { get; private set; } = 30;
     public bool IsGameRunning =>
         string.Equals(LatestGameStatus, "RUNNING", StringComparison.OrdinalIgnoreCase);
@@ -23,6 +26,8 @@ public sealed class RealtimeSchedulerState
         CanStartNow = false;
         MinPlayers = 1;
         PlayerCount = 0;
+        ArmedPlayerCount = 0;
+        ArmedPlayerIds.Clear();
         DrawCapacity = 30;
     }
 
@@ -33,6 +38,8 @@ public sealed class RealtimeSchedulerState
         CanStartNow = false;
         MinPlayers = 1;
         PlayerCount = 0;
+        ArmedPlayerCount = 0;
+        ArmedPlayerIds.Clear();
         DrawCapacity = 30;
 
         if (snapshot == null || snapshot.IsNull)
@@ -56,7 +63,21 @@ public sealed class RealtimeSchedulerState
         CanStartNow = scheduler["canStartNow"].AsBool;
         MinPlayers = Math.Max(1, scheduler["minPlayers"].AsInt);
         PlayerCount = Math.Max(PlayerCount, scheduler["playerCount"].AsInt);
+        ArmedPlayerCount = Math.Max(0, scheduler["armedPlayerCount"].AsInt);
         DrawCapacity = Math.Max(1, scheduler["drawCapacity"].AsInt > 0 ? scheduler["drawCapacity"].AsInt : DrawCapacity);
+
+        JSONNode armedPlayerIds = scheduler["armedPlayerIds"];
+        if (armedPlayerIds != null && armedPlayerIds.IsArray)
+        {
+            for (int i = 0; i < armedPlayerIds.Count; i++)
+            {
+                string playerId = armedPlayerIds[i];
+                if (!string.IsNullOrWhiteSpace(playerId))
+                {
+                    ArmedPlayerIds.Add(playerId.Trim());
+                }
+            }
+        }
 
         string nextStartAtRaw = scheduler["nextStartAt"];
         if (!string.IsNullOrWhiteSpace(nextStartAtRaw) &&
@@ -98,6 +119,11 @@ public sealed class RealtimeSchedulerState
             return $"Venter på spillere {PlayerCount}/{MinPlayers}\n{minutes:00}:{seconds:00}";
         }
 
+        if (ArmedPlayerCount < MinPlayers)
+        {
+            return $"Venter på innsats {ArmedPlayerCount}/{MinPlayers}\n{minutes:00}:{seconds:00}";
+        }
+
         return $"Neste runde\n{minutes:00}:{seconds:00}";
     }
 
@@ -108,7 +134,7 @@ public sealed class RealtimeSchedulerState
             return false;
         }
 
-        if (PlayerCount < MinPlayers)
+        if (ArmedPlayerCount < MinPlayers)
         {
             return false;
         }

@@ -93,11 +93,8 @@ public sealed class RealtimeCountdownPresenter
 
     private static void ConfigureCountdownText(TextMeshProUGUI countdownText)
     {
+        RealtimeTextStyleUtils.ApplyReadableTypography(countdownText, minFontSize: 20f, maxFontSize: 72f);
         countdownText.alignment = TextAlignmentOptions.Center;
-        countdownText.enableWordWrapping = false;
-        countdownText.enableAutoSizing = true;
-        countdownText.fontSizeMin = 20f;
-        countdownText.overflowMode = TextOverflowModes.Overflow;
     }
 
     private static bool TryGetHorizontalSafeBounds(

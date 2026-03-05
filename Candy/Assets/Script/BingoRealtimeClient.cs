@@ -236,6 +236,16 @@ public class BingoRealtimeClient : MonoBehaviour
         EmitWithAck("game:start", payload, onAck);
     }
 
+    public void ArmBet(string roomCode, string playerId, bool armed = true, Action<SocketAck> onAck = null)
+    {
+        JSONObject payload = new();
+        payload["roomCode"] = (roomCode ?? string.Empty).Trim().ToUpperInvariant();
+        payload["playerId"] = playerId ?? string.Empty;
+        payload["armed"] = armed;
+        AppendAccessToken(payload);
+        EmitWithAck("bet:arm", payload, onAck);
+    }
+
     public void EndGame(string roomCode, string playerId, string reason = "Manual end", Action<SocketAck> onAck = null)
     {
         JSONObject payload = new();

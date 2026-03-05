@@ -366,6 +366,41 @@ test("startGame accepts ticketsPerPlayer equal to 5", async () => {
   assert.equal(snapshot.currentGame?.ticketsPerPlayer, 5);
 });
 
+test("startGame can include only bet-armed participants", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minPlayersToStart: 1
+  });
+  const { roomCode, hostPlayerId } = await createRoomWithTwoPlayers({
+    engine,
+    hallId: "hall-1",
+    hostName: "Host",
+    hostWalletId: "wallet-host",
+    guestName: "Guest",
+    guestWalletId: "wallet-guest"
+  });
+  const beforeStartSnapshot = engine.getRoomSnapshot(roomCode);
+  const guestPlayerId = beforeStartSnapshot.players.find((player) => player.id !== hostPlayerId)?.id;
+  assert.ok(guestPlayerId);
+
+  await engine.startGame({
+    roomCode,
+    actorPlayerId: hostPlayerId,
+    entryFee: 100,
+    ticketsPerPlayer: 1,
+    participantPlayerIds: [hostPlayerId]
+  });
+
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  assert.ok(snapshot.currentGame);
+  assert.deepEqual(Object.keys(snapshot.currentGame.tickets).sort(), [hostPlayerId].sort());
+  const hostPlayer = snapshot.players.find((player) => player.id === hostPlayerId);
+  const guestPlayer = snapshot.players.find((player) => player.id === guestPlayerId);
+  assert.ok(hostPlayer);
+  assert.ok(guestPlayer);
+  assert.equal(hostPlayer.balance, 900);
+  assert.equal(guestPlayer.balance, 1000);
+});
+
 test("startGame rejects payoutPercent outside 0-100", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await assert.rejects(

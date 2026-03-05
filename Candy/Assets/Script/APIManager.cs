@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Networking;
 using SimpleJSON;
+using TMPro;
 
 public partial class APIManager : MonoBehaviour
 {
@@ -12,6 +13,21 @@ public partial class APIManager : MonoBehaviour
         normal = 0,
         nearWin = 1,
         won = 2
+    }
+
+    private struct RealtimeDrawRenderItem
+    {
+        public string GameId;
+        public int DrawIndex;
+        public int DrawnNumber;
+    }
+
+    private struct RealtimeNearWinMeta
+    {
+        public int PatternIndex;
+        public int CellIndex;
+        public int CardNo;
+        public int MissingNumber;
     }
 
     public static APIManager instance;
@@ -33,11 +49,11 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] private bool playButtonStartsAndDrawsRealtime = true;
     [SerializeField] private bool realtimeScheduledRounds = true;
     [SerializeField] private bool drawImmediatelyAfterManualStart = true;
-    [SerializeField] private bool scheduledModeManualStartFallback = true;
+    [SerializeField] private bool scheduledModeManualStartFallback = false;
     [SerializeField] [Min(0.5f)] private float scheduledRoomStateHeartbeatSeconds = 2f;
     [SerializeField] private bool syncRealtimeEntryFeeWithBetSelector = true;
-    [SerializeField] private bool fallbackToZeroEntryFeeOnInsufficientFunds = true;
-    [SerializeField] private bool disableEntryFeeSyncAfterInsufficientFundsFallback = true;
+    [SerializeField] private bool fallbackToZeroEntryFeeOnInsufficientFunds = false;
+    [SerializeField] private bool disableEntryFeeSyncAfterInsufficientFundsFallback = false;
     [SerializeField] [Min(1f)] private float insufficientFundsRetryDelaySeconds = 6f;
     [SerializeField] private bool centerRealtimeCountdownUnderBalls = true;
     [SerializeField] private Vector2 realtimeCountdownOffset = new Vector2(0f, -155f);
@@ -53,6 +69,11 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] [Min(1)] private int realtimeDefaultBonusAmount = 150;
     [SerializeField] [Min(0f)] private float realtimeRoundOverlayResetDelaySeconds = 10f;
     [SerializeField] [Min(0.1f)] private float realtimeDrawResyncIntervalSeconds = 0.75f;
+    [SerializeField] [Min(0.02f)] private float realtimeDrawReplayMinIntervalSeconds = 0.06f;
+    [SerializeField] [Min(0.05f)] private float realtimeDrawReplayNormalIntervalSeconds = 0.28f;
+    [SerializeField] [Min(1)] private int realtimeDrawBacklogCatchupThreshold = 4;
+    [SerializeField] private bool logRealtimeDrawMetrics = true;
+    [SerializeField] [Min(1)] private int realtimeBonusPatternPositionFromRight = 2;
     [SerializeField] private bool enableLaunchTokenBootstrap = true;
     [SerializeField] private string launchResolveBaseUrl = "https://bingosystem-3.onrender.com";
     [SerializeField] private BallManager ballManager;
@@ -98,10 +119,23 @@ public partial class APIManager : MonoBehaviour
     private readonly RealtimeCountdownPresenter realtimeCountdownPresenter = new();
     private readonly RealtimeRoomConfigurator realtimeRoomConfigurator = new();
     private readonly Dictionary<int, Coroutine> realtimeNearWinBlinkCoroutines = new();
+    private readonly Dictionary<int, RealtimeNearWinMeta> realtimeNearWinMetaByKey = new();
     private string realtimeBonusTriggeredGameId = string.Empty;
     private string realtimeBonusTriggeredClaimId = string.Empty;
     private string realtimeBonusMissingDataLogKey = string.Empty;
     private bool hasAppliedZeroEntryFeeFallbackForRoom = false;
+    private readonly Queue<RealtimeDrawRenderItem> pendingRealtimeDrawQueue = new();
+    private readonly HashSet<string> pendingRealtimeDrawKeys = new();
+    private Coroutine realtimeDrawReplayCoroutine;
+    private float lastRealtimeDrawRenderAt = -1f;
+    private int drawMetricEnqueued = 0;
+    private int drawMetricRendered = 0;
+    private int drawMetricFallbackRendered = 0;
+    private int drawMetricSkipped = 0;
+    private string drawMetricsGameId = string.Empty;
+    private bool realtimeBetArmedForNextRound = false;
+    private bool pendingRealtimeBetArmRequest = false;
+    private readonly HashSet<string> realtimeClaimAttemptKeys = new();
 
     public bool UseRealtimeBackend => useRealtimeBackend;
     public string ActiveRoomCode => activeRoomCode;
@@ -122,6 +156,11 @@ public partial class APIManager : MonoBehaviour
     void Awake()
     {
         instance = this;
+        // V4 policy: aldri fall tilbake til gratis buy-in ved INSUFFICIENT_FUNDS.
+        fallbackToZeroEntryFeeOnInsufficientFunds = false;
+        disableEntryFeeSyncAfterInsufficientFundsFallback = false;
+        // V4 policy: server-scheduler er autoritativ for rundestart i realtime.
+        scheduledModeManualStartFallback = false;
     }
 
     void OnEnable()
@@ -136,6 +175,7 @@ public partial class APIManager : MonoBehaviour
     {
         StopRealtimeNearWinBlinking();
         ResetRealtimeBonusState(closeBonusPanel: true);
+        ResetRealtimeDrawReplayState(clearMetrics: true);
 
         if (realtimeClient != null)
         {

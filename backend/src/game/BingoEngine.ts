@@ -48,6 +48,7 @@ interface StartGameInput {
   entryFee?: number;
   ticketsPerPlayer?: number;
   payoutPercent?: number;
+  participantPlayerIds?: string[];
 }
 
 interface DrawNextInput {
@@ -528,13 +529,6 @@ export class BingoEngine {
     const nowMs = Date.now();
     this.assertRoundStartInterval(room, nowMs);
 
-    if (room.players.size < this.minPlayersToStart) {
-      throw new DomainError(
-        "NOT_ENOUGH_PLAYERS",
-        `Du trenger minst ${this.minPlayersToStart} spiller${this.minPlayersToStart == 1 ? "" : "e"} for å starte.`
-      );
-    }
-
     const entryFee = input.entryFee ?? 0;
     if (!Number.isFinite(entryFee) || entryFee < 0) {
       throw new DomainError("INVALID_ENTRY_FEE", "entryFee må være >= 0.");
@@ -549,7 +543,40 @@ export class BingoEngine {
     }
     const normalizedPayoutPercent = Math.round(payoutPercent * 100) / 100;
 
-    const players = [...room.players.values()];
+    const requestedParticipants = Array.isArray(input.participantPlayerIds)
+      ? input.participantPlayerIds
+      : [];
+    const players: Player[] = [];
+    if (requestedParticipants.length > 0) {
+      const seenPlayerIds = new Set<string>();
+      for (const participantPlayerId of requestedParticipants) {
+        const normalizedPlayerId = participantPlayerId?.trim();
+        if (!normalizedPlayerId || seenPlayerIds.has(normalizedPlayerId)) {
+          continue;
+        }
+
+        const participant = room.players.get(normalizedPlayerId);
+        if (!participant) {
+          throw new DomainError(
+            "PLAYER_NOT_FOUND",
+            `Spiller ${normalizedPlayerId} finnes ikke i rommet.`
+          );
+        }
+
+        seenPlayerIds.add(normalizedPlayerId);
+        players.push(participant);
+      }
+    } else {
+      players.push(...room.players.values());
+    }
+
+    if (players.length < this.minPlayersToStart) {
+      throw new DomainError(
+        "NOT_ENOUGH_PLAYERS",
+        `Du trenger minst ${this.minPlayersToStart} spiller${this.minPlayersToStart == 1 ? "" : "e"} for å starte.`
+      );
+    }
+
     this.assertPlayersNotInAnotherRunningGame(room.code, players);
     this.assertPlayersNotBlockedByRestriction(players, nowMs);
     this.assertPlayersNotOnRequiredPause(players, nowMs);

@@ -11,53 +11,10 @@ public partial class APIManager
             return;
         }
 
-        if (realtimeScheduledRounds)
-        {
-            SyncRealtimeEntryFeeWithCurrentBet();
-            PushRealtimeRoomConfiguration();
-            RequestRealtimeStateForScheduledPlay();
-            return;
-        }
-
-        if (!playButtonStartsAndDrawsRealtime)
-        {
-            RequestRealtimeState();
-            return;
-        }
-
-        BindRealtimeClient();
-        if (realtimeClient == null)
-        {
-            return;
-        }
-
-        string desiredAccessToken = (accessToken ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(desiredAccessToken))
-        {
-            RequestRealtimeState();
-            return;
-        }
-
-        string desiredHallId = (hallId ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(desiredHallId))
-        {
-            RequestRealtimeState();
-            return;
-        }
-
-        if (!realtimeClient.IsReady)
-        {
-            realtimeClient.Connect();
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            JoinOrCreateRoom();
-            return;
-        }
-
-        realtimeClient.RequestRoomState(activeRoomCode, HandlePlayRoomStateAck);
+        pendingRealtimeBetArmRequest = true;
+        SyncRealtimeEntryFeeWithCurrentBet();
+        PushRealtimeRoomConfiguration();
+        TrySendPendingRealtimeBetArm();
     }
 
     public void StartRealtimeRoundNow()
@@ -95,6 +52,75 @@ public partial class APIManager
         }
 
         StartRealtimeGameFromPlayButton();
+    }
+
+    private void TrySendPendingRealtimeBetArm()
+    {
+        if (!pendingRealtimeBetArmRequest)
+        {
+            return;
+        }
+
+        BindRealtimeClient();
+        if (realtimeClient == null)
+        {
+            return;
+        }
+
+        string desiredAccessToken = (accessToken ?? string.Empty).Trim();
+        string desiredHallId = (hallId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(desiredAccessToken) || string.IsNullOrWhiteSpace(desiredHallId))
+        {
+            RequestRealtimeState();
+            return;
+        }
+
+        if (!realtimeClient.IsReady)
+        {
+            realtimeClient.Connect();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            JoinOrCreateRoom();
+            return;
+        }
+
+        if (realtimeBetArmedForNextRound)
+        {
+            pendingRealtimeBetArmRequest = false;
+            return;
+        }
+
+        realtimeClient.ArmBet(activeRoomCode, activePlayerId, true, (ack) =>
+        {
+            if (ack == null)
+            {
+                return;
+            }
+
+            if (!ack.ok)
+            {
+                if (RealtimeRoomStateUtils.IsRoomNotFound(ack))
+                {
+                    ResetActiveRoomState(clearDesiredRoomCode: true);
+                    JoinOrCreateRoom();
+                    return;
+                }
+
+                Debug.LogError($"[APIManager] bet:arm failed: {ack.errorCode} {ack.errorMessage}");
+                return;
+            }
+
+            pendingRealtimeBetArmRequest = false;
+            realtimeBetArmedForNextRound = true;
+            JSONNode snapshot = ack.data?["snapshot"];
+            if (snapshot != null && !snapshot.IsNull)
+            {
+                HandleRealtimeRoomUpdate(snapshot);
+            }
+        });
     }
 
     private void RequestRealtimeStateForScheduledPlay()
@@ -426,17 +452,23 @@ public partial class APIManager
         realtimeClient.SubmitClaim(activeRoomCode, activePlayerId, "BINGO", HandleClaimAck);
     }
 
-    private bool CanSendClaim()
+    private bool CanSendClaim(bool logWarnings = true)
     {
         if (!useRealtimeBackend || realtimeClient == null || !realtimeClient.IsReady)
         {
-            Debug.LogWarning("[APIManager] Realtime client not ready for claim.");
+            if (logWarnings)
+            {
+                Debug.LogWarning("[APIManager] Realtime client not ready for claim.");
+            }
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
         {
-            Debug.LogWarning("[APIManager] Missing room/player for claim.");
+            if (logWarnings)
+            {
+                Debug.LogWarning("[APIManager] Missing room/player for claim.");
+            }
             return false;
         }
 

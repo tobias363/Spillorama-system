@@ -70,6 +70,10 @@ interface StartGamePayload extends RoomActionPayload {
   ticketsPerPlayer?: number;
 }
 
+interface BetArmPayload extends RoomActionPayload {
+  armed?: boolean;
+}
+
 interface ConfigureRoomPayload extends RoomActionPayload {
   entryFee?: number;
 }
@@ -1190,8 +1194,58 @@ async function emitWalletRoomUpdates(walletIds: string[]): Promise<void> {
 const nextAutoStartAtByRoom = new Map<string, number>();
 const lastAutoDrawAtByRoom = new Map<string, number>();
 const roomConfiguredEntryFeeByRoom = new Map<string, number>();
+const armedPlayersByRoom = new Map<string, Set<string>>();
 const roomSchedulerLocks = new Set<string>();
 let schedulerTickInProgress = false;
+
+function getOrCreateArmedPlayers(roomCode: string): Set<string> {
+  const normalizedRoomCode = roomCode.trim().toUpperCase();
+  let armedPlayers = armedPlayersByRoom.get(normalizedRoomCode);
+  if (!armedPlayers) {
+    armedPlayers = new Set<string>();
+    armedPlayersByRoom.set(normalizedRoomCode, armedPlayers);
+  }
+  return armedPlayers;
+}
+
+function clearArmedPlayers(roomCode: string): void {
+  armedPlayersByRoom.delete(roomCode.trim().toUpperCase());
+}
+
+function setPlayerBetArm(roomCode: string, playerId: string, armed: boolean): void {
+  const normalizedRoomCode = roomCode.trim().toUpperCase();
+  const normalizedPlayerId = playerId.trim();
+  const armedPlayers = getOrCreateArmedPlayers(normalizedRoomCode);
+  if (armed) {
+    armedPlayers.add(normalizedPlayerId);
+    return;
+  }
+
+  armedPlayers.delete(normalizedPlayerId);
+  if (armedPlayers.size === 0) {
+    armedPlayersByRoom.delete(normalizedRoomCode);
+  }
+}
+
+function getArmedPlayerIdsForSnapshot(snapshot: RoomSnapshot): string[] {
+  const armedPlayers = armedPlayersByRoom.get(snapshot.code);
+  if (!armedPlayers || armedPlayers.size === 0) {
+    return [];
+  }
+
+  const roomPlayerIds = new Set(snapshot.players.map((player) => player.id));
+  const filteredArmedPlayerIds = [...armedPlayers].filter((playerId) => roomPlayerIds.has(playerId));
+  if (filteredArmedPlayerIds.length !== armedPlayers.size) {
+    if (filteredArmedPlayerIds.length === 0) {
+      armedPlayersByRoom.delete(snapshot.code);
+    } else {
+      armedPlayersByRoom.set(snapshot.code, new Set(filteredArmedPlayerIds));
+    }
+  }
+
+  filteredArmedPlayerIds.sort((a, b) => a.localeCompare(b));
+  return filteredArmedPlayerIds;
+}
 
 function compareCandyRoomPriority(a: RoomSummary, b: RoomSummary): number {
   const runningScoreA = a.gameStatus === "RUNNING" ? 1 : 0;
@@ -1309,10 +1363,12 @@ function buildRoomSchedulerState(snapshot: RoomSnapshot, nowMs: number): Record<
   const millisUntilNextStart = nextStartAtMs === null ? null : Math.max(0, nextStartAtMs - nowMs);
   const currentDrawCount = snapshot.currentGame?.drawnNumbers?.length ?? 0;
   const drawCapacity = Math.max(1, bingoMaxDrawsPerRound);
+  const armedPlayerIds = getArmedPlayerIdsForSnapshot(snapshot);
+  const armedPlayerCount = armedPlayerIds.length;
   const canStartNow =
     runtimeCandyManiaSettings.autoRoundStartEnabled &&
     snapshot.currentGame?.status !== "RUNNING" &&
-    snapshot.players.length >= runtimeCandyManiaSettings.autoRoundMinPlayers &&
+    armedPlayerCount >= runtimeCandyManiaSettings.autoRoundMinPlayers &&
     millisUntilNextStart !== null &&
     millisUntilNextStart <= Math.max(1000, schedulerTickMs * 2);
 
@@ -1321,6 +1377,8 @@ function buildRoomSchedulerState(snapshot: RoomSnapshot, nowMs: number): Record<
     intervalMs: runtimeCandyManiaSettings.autoRoundStartIntervalMs,
     minPlayers: runtimeCandyManiaSettings.autoRoundMinPlayers,
     playerCount: snapshot.players.length,
+    armedPlayerCount,
+    armedPlayerIds,
     entryFee: getRoomConfiguredEntryFee(snapshot.code),
     payoutPercent: resolveAdaptivePayoutPercent(snapshot.hallId),
     drawCapacity,
@@ -1369,6 +1427,11 @@ function cleanupSchedulerState(activeRoomCodes: Set<string>): void {
   for (const roomCode of roomConfiguredEntryFeeByRoom.keys()) {
     if (!activeRoomCodes.has(roomCode)) {
       roomConfiguredEntryFeeByRoom.delete(roomCode);
+    }
+  }
+  for (const roomCode of armedPlayersByRoom.keys()) {
+    if (!activeRoomCodes.has(roomCode)) {
+      armedPlayersByRoom.delete(roomCode);
     }
   }
 }
@@ -1475,7 +1538,8 @@ async function processAutoStart(summary: ReturnType<typeof engine.listRoomSummar
       setNextRoundForRoom(roomCode, Date.now());
       return;
     }
-    if (latestSnapshot.players.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
+    const armedPlayerIds = getArmedPlayerIdsForSnapshot(latestSnapshot);
+    if (armedPlayerIds.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
       setNextRoundForRoom(roomCode, Date.now());
       return;
     }
@@ -1487,7 +1551,8 @@ async function processAutoStart(summary: ReturnType<typeof engine.listRoomSummar
         actorPlayerId: latestSnapshot.hostPlayerId,
         entryFee: getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer: runtimeCandyManiaSettings.autoRoundTicketsPerPlayer,
-        payoutPercent: adaptivePayoutPercent
+        payoutPercent: adaptivePayoutPercent,
+        participantPlayerIds: armedPlayerIds
       });
     } catch (error) {
       if (
@@ -1501,6 +1566,7 @@ async function processAutoStart(summary: ReturnType<typeof engine.listRoomSummar
       }
       throw error;
     }
+    clearArmedPlayers(roomCode);
     setNextRoundForRoom(roomCode, Date.now());
     lastAutoDrawAtByRoom.delete(roomCode);
     await emitRoomUpdate(roomCode);
@@ -2320,14 +2386,23 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
       Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
     assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
     const beforeStartSnapshot = engine.getRoomSnapshot(roomCode);
+    const armedPlayerIds = getArmedPlayerIdsForSnapshot(beforeStartSnapshot);
+    if (armedPlayerIds.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
+      throw new DomainError(
+        "NOT_ENOUGH_PLAYERS",
+        `For faa spillere med registrert innsats (${armedPlayerIds.length}/${runtimeCandyManiaSettings.autoRoundMinPlayers}).`
+      );
+    }
     const adaptivePayoutPercent = resolveAdaptivePayoutPercent(beforeStartSnapshot.hallId);
     await engine.startGame({
       roomCode,
       actorPlayerId: beforeStartSnapshot.hostPlayerId,
       entryFee,
       ticketsPerPlayer,
-      payoutPercent: adaptivePayoutPercent
+      payoutPercent: adaptivePayoutPercent,
+      participantPlayerIds: armedPlayerIds
     });
+    clearArmedPlayers(roomCode);
     const snapshot = await emitRoomUpdate(roomCode);
     apiSuccess(res, {
       roomCode,
@@ -2993,6 +3068,25 @@ app.post("/api/rooms/:roomCode/game/extra-draw", async (req, res) => {
   }
 });
 
+app.post("/api/rooms/:roomCode/bet-arm", async (req, res) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
+    const actorPlayerId = mustBeNonEmptyString(req.body?.actorPlayerId, "actorPlayerId");
+    assertUserCanActAsPlayer(user, roomCode, actorPlayerId);
+    const shouldArm = req.body?.armed === undefined ? true : Boolean(req.body.armed);
+    setPlayerBetArm(roomCode, actorPlayerId, shouldArm);
+    const snapshot = await emitRoomUpdate(roomCode);
+    apiSuccess(res, {
+      armed: shouldArm,
+      armedPlayerIds: getArmedPlayerIdsForSnapshot(snapshot),
+      snapshot
+    });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
 app.post("/api/wallets", async (req, res) => {
   try {
     const walletId = typeof req.body?.walletId === "string" ? req.body.walletId.trim() : undefined;
@@ -3215,6 +3309,25 @@ io.on("connection", (socket: Socket) => {
     }
   );
 
+  socket.on(
+    "bet:arm",
+    async (
+      payload: BetArmPayload,
+      callback: (response: AckResponse<{ snapshot: RoomSnapshot; armed: boolean; armedPlayerIds: string[] }>) => void
+    ) => {
+      try {
+        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+        const shouldArm = payload?.armed === undefined ? true : Boolean(payload.armed);
+        setPlayerBetArm(roomCode, playerId, shouldArm);
+        const snapshot = await emitRoomUpdate(roomCode);
+        const armedPlayerIds = getArmedPlayerIdsForSnapshot(snapshot);
+        ackSuccess(callback, { snapshot, armed: shouldArm, armedPlayerIds });
+      } catch (error) {
+        ackFailure(callback, error);
+      }
+    }
+  );
+
   socket.on("game:start", async (payload: StartGamePayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
@@ -3228,14 +3341,23 @@ io.on("connection", (socket: Socket) => {
         Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
       assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
       const roomSnapshotForPayout = engine.getRoomSnapshot(roomCode);
+      const armedPlayerIds = getArmedPlayerIdsForSnapshot(roomSnapshotForPayout);
+      if (armedPlayerIds.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
+        throw new DomainError(
+          "NOT_ENOUGH_PLAYERS",
+          `For faa spillere med registrert innsats (${armedPlayerIds.length}/${runtimeCandyManiaSettings.autoRoundMinPlayers}).`
+        );
+      }
       const adaptivePayoutPercent = resolveAdaptivePayoutPercent(roomSnapshotForPayout.hallId);
       await engine.startGame({
         roomCode,
         actorPlayerId: playerId,
         entryFee: payload?.entryFee ?? getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer,
-        payoutPercent: adaptivePayoutPercent
+        payoutPercent: adaptivePayoutPercent,
+        participantPlayerIds: armedPlayerIds
       });
+      clearArmedPlayers(roomCode);
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { snapshot });
     } catch (error) {
