@@ -1,12 +1,71 @@
 const ADMIN_TOKEN_KEY = "bingo_admin_access_token";
 const CANDY_GAME_SLUG = "candy";
 
+// Chat3: RBAC block start
+const CHAT3_SECTION_ACCESS_RULES = {
+  "section-games": { permissions: ["GAME_CATALOG_READ"], mode: "all" },
+  "section-settings-change-log": { permissions: ["GAME_SETTINGS_CHANGELOG_READ"], mode: "all" },
+  "section-candy-mania": { permissions: ["GAME_CATALOG_READ", "ROOM_CONTROL_READ"], mode: "any" },
+  "section-halls": { permissions: ["HALL_READ"], mode: "all" },
+  "section-terminals": { permissions: ["TERMINAL_READ"], mode: "all" },
+  "section-hall-rules": { permissions: ["HALL_GAME_CONFIG_READ"], mode: "all" },
+  "section-wallet-compliance": { permissions: ["WALLET_COMPLIANCE_READ"], mode: "all" },
+  "section-prize-policy": { permissions: ["PRIZE_POLICY_READ"], mode: "all" },
+  "section-room-control": { permissions: ["ROOM_CONTROL_READ"], mode: "all" }
+};
+
+const CHAT3_ACTION_PERMISSION_RULES = {
+  saveBtn: "GAME_CATALOG_WRITE",
+  reloadBtn: "GAME_CATALOG_READ",
+  candyLoadGameBtn: "GAME_CATALOG_READ",
+  candySaveGameBtn: "GAME_CATALOG_WRITE",
+  createHallBtn: "HALL_WRITE",
+  saveHallBtn: "HALL_WRITE",
+  reloadHallsBtn: "HALL_READ",
+  createTerminalBtn: "TERMINAL_WRITE",
+  saveTerminalBtn: "TERMINAL_WRITE",
+  reloadTerminalsBtn: "TERMINAL_READ",
+  saveConfigBtn: "HALL_GAME_CONFIG_WRITE",
+  reloadConfigBtn: "HALL_GAME_CONFIG_READ",
+  candyLoadSettingsBtn: "ROOM_CONTROL_READ",
+  candySaveSettingsBtn: "ROOM_CONTROL_WRITE",
+  candyQuickStartNowBtn: "ROOM_CONTROL_WRITE",
+  candyQuickCreateStartBtn: "ROOM_CONTROL_WRITE",
+  candyQuickStartExistingBtn: "ROOM_CONTROL_WRITE",
+  candyQuickDrawNextBtn: "ROOM_CONTROL_WRITE",
+  candyQuickEndRoomBtn: "ROOM_CONTROL_WRITE",
+  candyQuickRefreshRoomsBtn: "ROOM_CONTROL_READ",
+  loadComplianceBtn: "WALLET_COMPLIANCE_READ",
+  saveLossLimitsBtn: "WALLET_COMPLIANCE_WRITE",
+  setTimedPauseBtn: "WALLET_COMPLIANCE_WRITE",
+  clearTimedPauseBtn: "WALLET_COMPLIANCE_WRITE",
+  setSelfExclusionBtn: "WALLET_COMPLIANCE_WRITE",
+  clearSelfExclusionBtn: "WALLET_COMPLIANCE_WRITE",
+  loadExtraDrawDenialsBtn: "EXTRA_DRAW_DENIALS_READ",
+  loadPrizePolicyBtn: "PRIZE_POLICY_READ",
+  savePrizePolicyBtn: "PRIZE_POLICY_WRITE",
+  awardExtraPrizeBtn: "EXTRA_PRIZE_AWARD",
+  refreshRoomsBtn: "ROOM_CONTROL_READ",
+  createRoomBtn: "ROOM_CONTROL_WRITE",
+  createAndStartRoomBtn: "ROOM_CONTROL_WRITE",
+  startRoomBtn: "ROOM_CONTROL_WRITE",
+  drawNextBtn: "ROOM_CONTROL_WRITE",
+  endRoomBtn: "ROOM_CONTROL_WRITE",
+  settingsLogLoadBtn: "GAME_SETTINGS_CHANGELOG_READ"
+};
+// Chat3: RBAC block end
+
 const elements = {
   loginCard: document.getElementById("loginCard"),
   adminCard: document.getElementById("adminCard"),
   loginStatus: document.getElementById("loginStatus"),
   adminStatus: document.getElementById("adminStatus"),
   adminIdentity: document.getElementById("adminIdentity"),
+  // Chat3: RBAC block start
+  adminNavLinks: Array.from(document.querySelectorAll(".admin-nav a[href^='#section-']")),
+  adminSections: Array.from(document.querySelectorAll("article[id^='section-']")),
+  adminSidebar: document.querySelector(".admin-sidebar"),
+  // Chat3: RBAC block end
   email: document.getElementById("email"),
   password: document.getElementById("password"),
   loginBtn: document.getElementById("loginBtn"),
@@ -134,7 +193,16 @@ const elements = {
   startRoomBtn: document.getElementById("startRoomBtn"),
   drawNextBtn: document.getElementById("drawNextBtn"),
   endRoomBtn: document.getElementById("endRoomBtn"),
-  roomStatus: document.getElementById("roomStatus")
+  roomStatus: document.getElementById("roomStatus"),
+  // Chat3: RBAC block start
+  settingsLogGameSlug: null,
+  settingsLogLimit: null,
+  settingsLogLoadBtn: null,
+  settingsLogStatus: null,
+  policyRoleSummary: null,
+  policySummaryList: null,
+  policyStatus: null
+  // Chat3: RBAC block end
 };
 
 const state = {
@@ -145,7 +213,12 @@ const state = {
   terminals: [],
   rooms: [],
   hallGameConfigs: [],
-  candySettings: null
+  candySettings: null,
+  // Chat3: RBAC block start
+  adminPermissions: [],
+  adminPermissionMap: {},
+  adminPolicy: {}
+  // Chat3: RBAC block end
 };
 
 function setStatus(element, message, type) {
@@ -163,7 +236,8 @@ function setLoading(button, isLoading, loadingLabel, defaultLabel) {
   if (!button) {
     return;
   }
-  button.disabled = isLoading;
+  const rbacLocked = button.dataset?.rbacLocked === "true";
+  button.disabled = rbacLocked || isLoading;
   button.textContent = isLoading ? loadingLabel : defaultLabel;
 }
 
@@ -281,6 +355,235 @@ function showAdmin() {
   elements.adminCard.classList.remove("hidden");
 }
 
+// Chat3: RBAC block start
+function chat3HasPermission(permission) {
+  return Boolean(state.adminPermissionMap?.[permission]);
+}
+
+function chat3EnsureUiExtensions() {
+  const sidebar = elements.adminSidebar || document.querySelector(".admin-sidebar");
+  if (sidebar && !document.getElementById("policyStatus")) {
+    const policyBox = document.createElement("div");
+    policyBox.style.marginTop = "14px";
+    policyBox.style.borderTop = "1px solid #e5e7eb";
+    policyBox.style.paddingTop = "10px";
+    policyBox.innerHTML = `
+      <h3 style="margin:0 0 6px;font-size:14px;">Tilgangspolicy</h3>
+      <p id="policyRoleSummary" class="muted">Policy ikke lastet.</p>
+      <ul id="policySummaryList" style="margin:0;padding-left:18px;color:#374151;font-size:13px;"></ul>
+      <pre id="policyStatus" class="status">Ingen policydata lastet.</pre>
+    `;
+    sidebar.appendChild(policyBox);
+  }
+
+  if (!document.getElementById("section-settings-change-log")) {
+    const adminContent = document.querySelector(".admin-content");
+    if (adminContent) {
+      const section = document.createElement("article");
+      section.id = "section-settings-change-log";
+      section.className = "card";
+      section.innerHTML = `
+        <h2>Settings endringslogg</h2>
+        <p class="muted">Viser hvem som endret settings, rolle, tidspunkt, source, effekt fra og payload-sammendrag.</p>
+        <div class="grid">
+          <div class="field">
+            <label for="settingsLogGameSlug">Spill (gameSlug)</label>
+            <select id="settingsLogGameSlug"></select>
+          </div>
+          <div class="field">
+            <label for="settingsLogLimit">Antall rader (limit)</label>
+            <input id="settingsLogLimit" type="number" min="1" max="200" value="50" />
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="settingsLogLoadBtn" class="secondary">Last endringslogg</button>
+        </div>
+        <pre id="settingsLogStatus" class="status">Ingen endringslogg lastet.</pre>
+      `;
+      adminContent.insertBefore(section, adminContent.firstChild);
+    }
+  }
+
+  if (sidebar) {
+    const nav = sidebar.querySelector(".admin-nav");
+    if (nav && !nav.querySelector("a[href='#section-settings-change-log']")) {
+      const link = document.createElement("a");
+      link.href = "#section-settings-change-log";
+      link.textContent = "Settings endringslogg";
+      nav.insertBefore(link, nav.firstChild);
+    }
+  }
+
+  elements.policyRoleSummary = document.getElementById("policyRoleSummary");
+  elements.policySummaryList = document.getElementById("policySummaryList");
+  elements.policyStatus = document.getElementById("policyStatus");
+  elements.settingsLogGameSlug = document.getElementById("settingsLogGameSlug");
+  elements.settingsLogLimit = document.getElementById("settingsLogLimit");
+  elements.settingsLogLoadBtn = document.getElementById("settingsLogLoadBtn");
+  elements.settingsLogStatus = document.getElementById("settingsLogStatus");
+  elements.adminNavLinks = Array.from(document.querySelectorAll(".admin-nav a[href^='#section-']"));
+  elements.adminSections = Array.from(document.querySelectorAll("article[id^='section-']"));
+}
+
+function chat3EvaluateSectionAccess(sectionId) {
+  const rule = CHAT3_SECTION_ACCESS_RULES[sectionId];
+  if (!rule) {
+    return { allowed: true, missingPermissions: [] };
+  }
+  const missingPermissions = rule.permissions.filter((permission) => !chat3HasPermission(permission));
+  if (rule.mode === "any") {
+    return {
+      allowed: missingPermissions.length < rule.permissions.length,
+      missingPermissions
+    };
+  }
+  return {
+    allowed: missingPermissions.length === 0,
+    missingPermissions
+  };
+}
+
+function chat3ApplySectionVisibility() {
+  const lockedLines = [];
+  for (const section of elements.adminSections) {
+    const evaluation = chat3EvaluateSectionAccess(section.id);
+    const hidden = !evaluation.allowed;
+    section.hidden = hidden;
+
+    const navLink = elements.adminNavLinks.find((link) => link.getAttribute("href") === `#${section.id}`);
+    if (navLink) {
+      navLink.hidden = hidden;
+      navLink.classList.toggle("locked", hidden);
+    }
+
+    if (hidden) {
+      const sectionLabel =
+        navLink?.textContent?.trim() ||
+        section.querySelector("h2")?.textContent?.trim() ||
+        section.id;
+      lockedLines.push(`${sectionLabel}: mangler ${evaluation.missingPermissions.join(", ")}`);
+    }
+  }
+  return lockedLines;
+}
+
+function chat3ApplyActionPermissionLocks() {
+  for (const [elementKey, permission] of Object.entries(CHAT3_ACTION_PERMISSION_RULES)) {
+    const element = elements[elementKey];
+    if (!(element instanceof HTMLButtonElement)) {
+      continue;
+    }
+    const allowed = chat3HasPermission(permission);
+    if (!allowed) {
+      element.dataset.rbacLocked = "true";
+      element.disabled = true;
+      element.title = `Låst for rollen ${state.user?.role || "ukjent"} (krever ${permission}).`;
+      continue;
+    }
+    delete element.dataset.rbacLocked;
+    element.disabled = false;
+    if (element.title.includes("krever")) {
+      element.removeAttribute("title");
+    }
+  }
+}
+
+function chat3RenderPolicySummary(lockedLines) {
+  const totalPermissions = Object.keys(state.adminPolicy || {}).length;
+  if (elements.policyRoleSummary) {
+    elements.policyRoleSummary.textContent = `Rolle: ${state.user?.role || "-"} | Tilgang: ${state.adminPermissions.length}/${totalPermissions} permissions`;
+  }
+
+  if (elements.policySummaryList) {
+    elements.policySummaryList.innerHTML = "";
+    for (const [sectionId, rule] of Object.entries(CHAT3_SECTION_ACCESS_RULES)) {
+      const evaluation = chat3EvaluateSectionAccess(sectionId);
+      const line = document.createElement("li");
+      const sectionLabel =
+        elements.adminNavLinks.find((link) => link.getAttribute("href") === `#${sectionId}`)?.textContent?.trim() ||
+        sectionId;
+      const joiner = rule.mode === "any" ? " eller " : " + ";
+      line.textContent = `${sectionLabel}: ${evaluation.allowed ? "åpen" : "låst"} (krever ${rule.permissions.join(joiner)})`;
+      elements.policySummaryList.appendChild(line);
+    }
+  }
+
+  if (lockedLines.length === 0) {
+    setStatus(elements.policyStatus, "Ingen seksjoner er låst for din rolle.", "success");
+    return;
+  }
+  setStatus(elements.policyStatus, `Skjult/låst:\n${lockedLines.map((line) => `- ${line}`).join("\n")}`);
+}
+
+function chat3ApplyRbacUi() {
+  const lockedLines = chat3ApplySectionVisibility();
+  chat3ApplyActionPermissionLocks();
+  chat3RenderPolicySummary(lockedLines);
+}
+
+function chat3RenderSettingsLogGameOptions() {
+  if (!elements.settingsLogGameSlug) {
+    return;
+  }
+  const previous = elements.settingsLogGameSlug.value;
+  setSelectOptions(
+    elements.settingsLogGameSlug,
+    [
+      { value: "", label: "Alle spill" },
+      ...state.games.map((game) => ({
+        value: game.slug,
+        label: `${game.title} (${game.slug})`
+      }))
+    ],
+    previous,
+    "Alle spill"
+  );
+}
+
+function chat3FormatSettingsLogEntry(entry) {
+  const actor = entry?.changedByDisplayName || entry?.changedByUserId || "System";
+  return [
+    `${entry?.createdAt || "-"} | game=${entry?.gameSlug || "-"} | source=${entry?.source || "-"}`,
+    `aktor=${actor} (${entry?.changedByRole || "-"}) | effektFra=${entry?.effectiveFrom || "-"}`,
+    `payload=${entry?.payloadSummary || "-"}`
+  ].join("\n");
+}
+
+async function chat3LoadSettingsChangeLog() {
+  if (!chat3HasPermission("GAME_SETTINGS_CHANGELOG_READ")) {
+    setStatus(elements.settingsLogStatus, "Låst: mangler GAME_SETTINGS_CHANGELOG_READ.");
+    return;
+  }
+
+  const limitRaw = Number.parseInt(String(elements.settingsLogLimit?.value || "50"), 10);
+  const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(200, limitRaw) : 50;
+  const gameSlug = String(elements.settingsLogGameSlug?.value || "").trim();
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (gameSlug) {
+    query.set("gameSlug", gameSlug);
+  }
+  const entries = await apiRequest(`/api/admin/game-settings/change-log?${query.toString()}`, { auth: true });
+  if (!Array.isArray(entries) || entries.length === 0) {
+    setStatus(elements.settingsLogStatus, "Ingen endringer funnet med valgt filter.", "success");
+    return;
+  }
+  setStatus(
+    elements.settingsLogStatus,
+    entries.map((entry) => chat3FormatSettingsLogEntry(entry)).join("\n\n"),
+    "success"
+  );
+}
+
+async function chat3LoadAdminPermissions() {
+  const payload = await apiRequest("/api/admin/permissions", { auth: true });
+  state.adminPermissions = Array.isArray(payload?.permissions) ? payload.permissions : [];
+  state.adminPermissionMap =
+    payload?.permissionMap && typeof payload.permissionMap === "object" ? payload.permissionMap : {};
+  state.adminPolicy = payload?.policy && typeof payload.policy === "object" ? payload.policy : {};
+  chat3ApplyRbacUi();
+}
+// Chat3: RBAC block end
+
 function getSelectedGame() {
   const slug = elements.gameSelect.value;
   return state.games.find((game) => game.slug === slug) || null;
@@ -377,6 +680,7 @@ function renderGameOptions() {
     "Ingen spill"
   );
 
+  chat3RenderSettingsLogGameOptions();
   renderSelectedGame();
   applyCandyGameToForm(getCandyGame());
   renderSelectedHallGameConfig();
@@ -2006,9 +2310,10 @@ async function handleLogin() {
     setStoredToken(state.token);
     showAdmin();
 
-    elements.adminIdentity.textContent = `Innlogget som ${session.user.displayName} (${session.user.email})`;
+    elements.adminIdentity.textContent = `Innlogget som ${session.user.displayName} (${session.user.email}) [${session.user.role}]`;
     setStatus(elements.loginStatus, "Innlogging OK.", "success");
 
+    await chat3LoadAdminPermissions();
     await loadAllAdminData();
     setStatus(elements.roomStatus, "Klar for backend-kontroll av rom/spill.");
   } catch (error) {
@@ -2042,6 +2347,11 @@ async function handleLogout() {
     state.rooms = [];
     state.hallGameConfigs = [];
     state.candySettings = null;
+    // Chat3: RBAC block start
+    state.adminPermissions = [];
+    state.adminPermissionMap = {};
+    state.adminPolicy = {};
+    // Chat3: RBAC block end
     setStoredToken("");
     showLogin();
     setStatus(elements.loginStatus, "Logget ut.", "success");
@@ -2057,22 +2367,65 @@ async function handleLogout() {
     setStatus(elements.prizePolicyStatus, "Ingen policy lastet.");
     setStatus(elements.extraPrizeStatus, "Ingen extra prize sendt.");
     setStatus(elements.roomStatus, "Ingen rom valgt.");
+    // Chat3: RBAC block start
+    setStatus(elements.settingsLogStatus, "Ingen endringslogg lastet.");
+    setStatus(elements.policyStatus, "Ingen policydata lastet.");
+    if (elements.policyRoleSummary) {
+      elements.policyRoleSummary.textContent = "Policy ikke lastet.";
+    }
+    if (elements.policySummaryList) {
+      elements.policySummaryList.innerHTML = "";
+    }
+    // Chat3: RBAC block end
     elements.adminIdentity.textContent = "";
     setLoading(elements.logoutBtn, false, "Logger ut...", "Logg ut");
   }
 }
 
 async function loadAllAdminData() {
-  await loadGames();
-  await loadHalls();
+  const shouldLoadGames =
+    chat3HasPermission("GAME_CATALOG_READ") ||
+    chat3HasPermission("HALL_GAME_CONFIG_READ") ||
+    chat3HasPermission("GAME_SETTINGS_CHANGELOG_READ");
+  if (shouldLoadGames) {
+    await loadGames();
+  }
+
+  const shouldLoadHalls =
+    chat3HasPermission("HALL_READ") ||
+    chat3HasPermission("TERMINAL_READ") ||
+    chat3HasPermission("HALL_GAME_CONFIG_READ") ||
+    chat3HasPermission("WALLET_COMPLIANCE_READ") ||
+    chat3HasPermission("PRIZE_POLICY_READ") ||
+    chat3HasPermission("ROOM_CONTROL_READ");
+  if (shouldLoadHalls) {
+    await loadHalls();
+  }
+
   ensurePrizePolicyEffectiveFromDefault();
-  await loadHallGameConfigs();
-  await loadCandyManiaSettings();
-  await loadTerminals();
-  await loadRooms();
+  if (chat3HasPermission("HALL_GAME_CONFIG_READ")) {
+    await loadHallGameConfigs();
+  }
+  if (chat3HasPermission("ROOM_CONTROL_READ")) {
+    await loadCandyManiaSettings();
+    await loadRooms();
+  }
+  if (chat3HasPermission("TERMINAL_READ")) {
+    await loadTerminals();
+  }
+  if (chat3HasPermission("GAME_SETTINGS_CHANGELOG_READ")) {
+    await chat3LoadSettingsChangeLog().catch((error) => {
+      setStatus(elements.settingsLogStatus, error.message || "Kunne ikke laste settings endringslogg.", "error");
+    });
+  } else {
+    setStatus(elements.settingsLogStatus, "Låst: mangler GAME_SETTINGS_CHANGELOG_READ.");
+  }
 }
 
 async function bootstrap() {
+  // Chat3: RBAC block start
+  chat3EnsureUiExtensions();
+  // Chat3: RBAC block end
   elements.loginBtn.addEventListener("click", () => {
     handleLogin().catch((error) => {
       setStatus(elements.loginStatus, error.message || "Innlogging feilet.", "error");
@@ -2087,6 +2440,14 @@ async function bootstrap() {
       });
     }
   });
+
+  // Chat3: RBAC block start
+  elements.settingsLogLoadBtn?.addEventListener("click", () => {
+    chat3LoadSettingsChangeLog().catch((error) => {
+      setStatus(elements.settingsLogStatus, error.message || "Kunne ikke laste settings endringslogg.", "error");
+    });
+  });
+  // Chat3: RBAC block end
 
   elements.gameSelect.addEventListener("change", () => {
     renderSelectedGame();
@@ -2425,7 +2786,8 @@ async function bootstrap() {
     const user = await apiRequest("/api/admin/auth/me", { auth: true });
     state.user = user;
     showAdmin();
-    elements.adminIdentity.textContent = `Innlogget som ${user.displayName} (${user.email})`;
+    elements.adminIdentity.textContent = `Innlogget som ${user.displayName} (${user.email}) [${user.role}]`;
+    await chat3LoadAdminPermissions();
     await loadAllAdminData();
     setStatus(elements.roomStatus, "Klar for backend-kontroll av rom/spill.");
   } catch (_error) {
