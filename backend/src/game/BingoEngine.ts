@@ -420,9 +420,6 @@ export class BingoEngine {
     if (room.hallId !== hallId) {
       throw new DomainError("HALL_MISMATCH", "Rommet tilhører en annen hall.");
     }
-    if (room.currentGame?.status === "RUNNING") {
-      throw new DomainError("GAME_ALREADY_RUNNING", "Kan ikke joine mens et spill er i gang.");
-    }
 
     const playerId = randomUUID();
     const walletId = input.walletId?.trim() || `wallet-${playerId}`;
