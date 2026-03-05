@@ -105,6 +105,37 @@ function asNumber(value: unknown): number | undefined {
   return value;
 }
 
+function extractProblemsSummary(root: Record<string, unknown> | null): string | undefined {
+  if (!root) {
+    return undefined;
+  }
+  const rawProblems = root.problems;
+  if (!Array.isArray(rawProblems) || rawProblems.length === 0) {
+    return undefined;
+  }
+
+  const summaries = rawProblems
+    .map((problem) => {
+      const parsed = asObject(problem);
+      if (!parsed) {
+        return undefined;
+      }
+      const name = asString(parsed.name);
+      const description = asString(parsed.description);
+      if (name && description) {
+        return `${name}: ${description}`;
+      }
+      return name || description || undefined;
+    })
+    .filter((entry): entry is string => Boolean(entry));
+
+  if (!summaries.length) {
+    return undefined;
+  }
+
+  return summaries.slice(0, 3).join(" | ");
+}
+
 function asDateIso(value: Date | string | null | undefined): string | undefined {
   if (!value) {
     return undefined;
@@ -715,11 +746,13 @@ export class SwedbankPayService {
       if (!response.ok) {
         const root = asObject(parsed);
         const errorMessage = asString(root?.detail) || asString(root?.title) || asString(root?.errorCode);
+        const problemsSummary = extractProblemsSummary(root);
+        const messageBase = errorMessage
+          ? `Swedbank Pay API feilet (${response.status}): ${errorMessage}`
+          : `Swedbank Pay API feilet (${response.status}).`;
         throw new DomainError(
           "SWEDBANK_API_ERROR",
-          errorMessage
-            ? `Swedbank Pay API feilet (${response.status}): ${errorMessage}`
-            : `Swedbank Pay API feilet (${response.status}).`
+          problemsSummary ? `${messageBase} Problems: ${problemsSummary}` : messageBase
         );
       }
 
