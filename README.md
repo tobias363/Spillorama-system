@@ -8,6 +8,7 @@ Dette er et startpunkt for en tradisjonell multiplayer-bingo med server-autorita
 - Romflyt: opprett rom, join rom, start spill.
 - Spillflyt: trekk tall, markér tall, claim linje/bingo, avslutt runde.
 - Automatisk rundestart per rom (konfigurerbart intervall, default 30 sek).
+- RTP-styring for Candy (konfigurerbar `payoutPercent`, hard cap på total utbetaling per runde).
 - Opptil 5 bonger per spiller støttes (`ticketsPerPlayer` 1-5).
 - Sperre mot parallell deltakelse: samme wallet kan ikke spille i to aktive runder samtidig.
 - Minst 30 sekunder mellom spillstarter håndheves også ved manuell `game:start`.
@@ -77,6 +78,20 @@ Denne dekker nå kjernekrav for:
 
 CI-gate er lagt i `.github/workflows/compliance-gate.yml` og krever grønn `test:compliance`.
 
+## Rask kvalitets-sjekk (backend + Unity)
+
+Kjør alle basiskontroller med:
+
+```bash
+npm run check:all
+```
+
+Dette kjører:
+
+- backend typecheck
+- compliance-suite
+- Unity batch compile-check (`scripts/unity-compile-check.sh`)
+
 ## Hall pilot runbook (BG-027)
 
 Pilotprosedyrer ligger i:
@@ -134,11 +149,13 @@ BINGO_MONTHLY_LOSS_LIMIT=4400
 BINGO_PLAY_SESSION_LIMIT_MS=3600000
 BINGO_PAUSE_DURATION_MS=300000
 
+BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION=true
 AUTO_ROUND_START_ENABLED=true
 AUTO_ROUND_START_INTERVAL_MS=30000
-AUTO_ROUND_MIN_PLAYERS=2
+AUTO_ROUND_MIN_PLAYERS=1
 AUTO_ROUND_TICKETS_PER_PLAYER=4
 AUTO_ROUND_ENTRY_FEE=0
+CANDY_PAYOUT_PERCENT=100
 ```
 
 Automatisk trekking (serveren trekker tall uten host-klikk):

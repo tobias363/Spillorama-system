@@ -174,13 +174,8 @@ const bingoSelfExclusionMinMs = Math.max(
 );
 
 const isProductionRuntime = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
-const allowSinglePlayerInProduction = parseBooleanEnv(
-  process.env.BINGO_ALLOW_SINGLE_PLAYER_IN_PRODUCTION,
-  false
-);
-const minPlayersFloor = isProductionRuntime ? (allowSinglePlayerInProduction ? 1 : 2) : 1;
-const requestedMinPlayersToStart = parsePositiveIntEnv(process.env.BINGO_MIN_PLAYERS_TO_START, 1);
-const bingoMinPlayersToStart = Math.max(minPlayersFloor, requestedMinPlayersToStart);
+const minPlayersFloor = 1;
+const bingoMinPlayersToStart = minPlayersFloor;
 const requestedAutoRoundStartEnabled = parseBooleanEnv(process.env.AUTO_ROUND_START_ENABLED, true);
 const requestedAutoDrawEnabled = parseBooleanEnv(process.env.AUTO_DRAW_ENABLED, true);
 const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, false);
@@ -218,11 +213,6 @@ const dailyReportJobIntervalMs = Math.max(
 if (isProductionRuntime && !autoplayAllowed && (requestedAutoRoundStartEnabled || requestedAutoDrawEnabled)) {
   console.warn(
     "[scheduler] Autoplay er deaktivert i production (sett BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION=true for aa tillate AUTO_ROUND_START_ENABLED/AUTO_DRAW_ENABLED)."
-  );
-}
-if (isProductionRuntime && minPlayersFloor === 2 && requestedMinPlayersToStart < 2) {
-  console.warn(
-    "[compliance] BINGO_MIN_PLAYERS_TO_START<2 ble overstyrt i production (sett BINGO_ALLOW_SINGLE_PLAYER_IN_PRODUCTION=true for aa tillate 1 spiller)."
   );
 }
 
@@ -2646,7 +2636,7 @@ hydrateCandyManiaSettingsFromCatalog()
     server.listen(PORT, () => {
       console.log(`Bingo backend kjører på http://localhost:${PORT}`);
       console.log(
-        `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} singlePlayerInProd=${allowSinglePlayerInProduction} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
+        `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
       );
       console.log(
         `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoAllowedInProd=${allowAutoplayInProduction} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`

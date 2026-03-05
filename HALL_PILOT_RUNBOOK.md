@@ -58,7 +58,9 @@ Kjores siste 24 timer og paa nytt 60 min foer pilotstart.
   - `BINGO_PLAY_SESSION_LIMIT_MS=3600000`
   - `BINGO_PAUSE_DURATION_MS=300000`
   - `BINGO_SELF_EXCLUSION_MIN_MS>=31536000000`
-- [ ] `NODE_ENV=production` bekreftet (autoplay guard aktiv).
+  - `CANDY_PAYOUT_PERCENT` verifisert mot godkjent RTP (0-100)
+- [ ] `NODE_ENV=production` bekreftet, og policy for produksjon er eksplisitt satt:
+  - `BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION` (true/false iht. tillatelse)
 
 ### 3.3 Data Og Halloppsett
 
@@ -174,4 +176,3 @@ Signaturer:
 - Hallleder: `<navn/dato>`
 - Incident Commander: `<navn/dato>`
 - Compliance Owner: `<navn/dato>`
-
