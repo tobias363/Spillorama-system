@@ -981,7 +981,7 @@ public class NumberGenerator : MonoBehaviour
             unMatchedMat);
 
         int missingNumber = ResolveMissingNumber(cardNo, missingBlockIndex);
-        EventManager.ShowMissingPattern(patternIndex, missingBlockIndex, true, missingNumber);
+        EventManager.ShowMissingPattern(patternIndex, missingBlockIndex, true, missingNumber, cardNo);
 
         if (missingBlockIndex >= 0 && missingBlockIndex < cardClasses[cardNo].missingPatternImg.Count)
         {
@@ -1019,7 +1019,7 @@ public class NumberGenerator : MonoBehaviour
                 continue;
             }
 
-            EventManager.ShowMissingPattern(patternIndex, cellIndex, false, 0);
+            EventManager.ShowMissingPattern(patternIndex, cellIndex, false, 0, cardNo);
 
             if (cellIndex < 0 || cellIndex >= cardClasses[cardNo].missingPatternImg.Count)
             {

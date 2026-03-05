@@ -19,7 +19,8 @@ public class TopperManager : MonoBehaviour
     [SerializeField] private bool showMissingNumberInPrizeLabel = true;
     [SerializeField] private string missingNumberLabelPrefix = "Mangler";
 
-    private readonly Dictionary<KeyValuePair<int, int>, Coroutine> missingPatternBlinkRoutines = new Dictionary<KeyValuePair<int, int>, Coroutine>();
+    private readonly Dictionary<(int patternIndex, int colIndex, int cardNo), Coroutine> missingPatternBlinkRoutines =
+        new Dictionary<(int patternIndex, int colIndex, int cardNo), Coroutine>();
     private readonly List<Color> defaultPrizeColors = new List<Color>();
     private readonly List<string> defaultPrizeTexts = new List<string>();
     private Sprite solidHighlightSprite;
@@ -104,43 +105,61 @@ public class TopperManager : MonoBehaviour
     }
 
 
-    private void ShowMissingPattern(int patternIndex, int colIndex, bool active, int missingNumber)
+    private void ShowMissingPattern(int patternIndex, int colIndex, bool active, int missingNumber, int cardNo)
     {
         patternIndex = GetPatternIndex(patternIndex);
 
-        if (!TryGetMissingCell(patternIndex, colIndex, out GameObject missingCell))
+        if (!TryGetMissingCell(patternIndex, colIndex, out GameObject headerMissingCell))
         {
             return;
         }
 
-        KeyValuePair<int, int> key = new KeyValuePair<int, int>(patternIndex, colIndex);
+        GameObject cardMissingCell = ResolveCardMissingCell(cardNo, colIndex);
+        var key = (patternIndex, colIndex, cardNo);
 
         if (active)
         {
-            StartMissingPatternBlink(key, missingCell, missingNumber);
+            StartMissingPatternBlink(key, headerMissingCell, cardMissingCell, missingNumber);
         }
         else
         {
-            StopMissingPatternBlink(key, missingCell);
+            StopMissingPatternBlink(key, headerMissingCell, cardMissingCell);
         }
     }
 
-    private void StartMissingPatternBlink(KeyValuePair<int, int> key, GameObject missingCell, int missingNumber)
+    private void StartMissingPatternBlink(
+        (int patternIndex, int colIndex, int cardNo) key,
+        GameObject headerMissingCell,
+        GameObject cardMissingCell,
+        int missingNumber)
     {
-        UpdatePatternMissingNumberLabel(key.Key, missingNumber);
+        UpdatePatternMissingNumberLabel(key.patternIndex, missingNumber);
+        UpdateCardMissingNumberLabel(cardMissingCell, missingNumber);
 
         if (missingPatternBlinkRoutines.ContainsKey(key))
         {
             return;
         }
 
-        missingCell.SetActive(false);
-        Coroutine blinkRoutine = StartCoroutine(BlinkMissingPattern(key, missingCell));
+        if (headerMissingCell != null)
+        {
+            headerMissingCell.SetActive(false);
+        }
+
+        if (cardMissingCell != null)
+        {
+            cardMissingCell.SetActive(false);
+        }
+
+        Coroutine blinkRoutine = StartCoroutine(BlinkMissingPattern(key, headerMissingCell, cardMissingCell));
         missingPatternBlinkRoutines.Add(key, blinkRoutine);
         NumberGenerator.isPrizeMissedByOneCard = true;
     }
 
-    private void StopMissingPatternBlink(KeyValuePair<int, int> key, GameObject missingCell)
+    private void StopMissingPatternBlink(
+        (int patternIndex, int colIndex, int cardNo) key,
+        GameObject headerMissingCell,
+        GameObject cardMissingCell)
     {
         if (missingPatternBlinkRoutines.TryGetValue(key, out Coroutine blinkRoutine))
         {
@@ -152,35 +171,66 @@ public class TopperManager : MonoBehaviour
             missingPatternBlinkRoutines.Remove(key);
         }
 
-        missingCell.SetActive(false);
-
-        if (key.Key < prizes.Count && !HasActiveBlinkForPattern(key.Key))
+        if (headerMissingCell != null)
         {
-            prizes[key.Key].color = GetDefaultPrizeColor(key.Key);
-            prizes[key.Key].text = GetDefaultPrizeText(key.Key);
+            headerMissingCell.SetActive(false);
+        }
+
+        if (cardMissingCell != null)
+        {
+            cardMissingCell.SetActive(false);
+            UpdateCardMissingNumberLabel(cardMissingCell, 0);
+        }
+
+        if (key.patternIndex < prizes.Count && !HasActiveBlinkForPattern(key.patternIndex))
+        {
+            prizes[key.patternIndex].color = GetDefaultPrizeColor(key.patternIndex);
+            prizes[key.patternIndex].text = GetDefaultPrizeText(key.patternIndex);
         }
 
         NumberGenerator.isPrizeMissedByOneCard = missingPatternBlinkRoutines.Count > 0;
     }
 
-    private IEnumerator BlinkMissingPattern(KeyValuePair<int, int> key, GameObject missingCell)
+    private IEnumerator BlinkMissingPattern(
+        (int patternIndex, int colIndex, int cardNo) key,
+        GameObject headerMissingCell,
+        GameObject cardMissingCell)
     {
         bool isVisible = false;
 
         while (missingPatternBlinkRoutines.ContainsKey(key))
         {
             isVisible = !isVisible;
-            missingCell.SetActive(isVisible);
 
-            if (key.Key < prizes.Count)
+            if (headerMissingCell != null)
             {
-                prizes[key.Key].color = isVisible ? missingPrizeBlinkColor : GetDefaultPrizeColor(key.Key);
+                headerMissingCell.SetActive(isVisible);
+            }
+
+            if (cardMissingCell != null)
+            {
+                cardMissingCell.SetActive(isVisible);
+            }
+
+            if (key.patternIndex < prizes.Count)
+            {
+                prizes[key.patternIndex].color = isVisible
+                    ? missingPrizeBlinkColor
+                    : GetDefaultPrizeColor(key.patternIndex);
             }
 
             yield return new WaitForSeconds(missingPatternBlinkInterval);
         }
 
-        missingCell.SetActive(false);
+        if (headerMissingCell != null)
+        {
+            headerMissingCell.SetActive(false);
+        }
+
+        if (cardMissingCell != null)
+        {
+            cardMissingCell.SetActive(false);
+        }
     }
 
     private bool TryGetMissingCell(int patternIndex, int colIndex, out GameObject missingCell)
@@ -204,15 +254,53 @@ public class TopperManager : MonoBehaviour
 
     private bool HasActiveBlinkForPattern(int patternIndex)
     {
-        foreach (KeyValuePair<int, int> key in missingPatternBlinkRoutines.Keys)
+        foreach (var key in missingPatternBlinkRoutines.Keys)
         {
-            if (key.Key == patternIndex)
+            if (key.patternIndex == patternIndex)
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private GameObject ResolveCardMissingCell(int cardNo, int colIndex)
+    {
+        if (cardNo < 0)
+        {
+            return null;
+        }
+
+        CardClass[] cards = GameManager.instance?.numberGenerator?.cardClasses;
+        if (cards == null || cardNo >= cards.Length)
+        {
+            return null;
+        }
+
+        CardClass card = cards[cardNo];
+        if (card == null || card.missingPatternImg == null || colIndex < 0 || colIndex >= card.missingPatternImg.Count)
+        {
+            return null;
+        }
+
+        return card.missingPatternImg[colIndex];
+    }
+
+    private static void UpdateCardMissingNumberLabel(GameObject cardMissingCell, int missingNumber)
+    {
+        if (cardMissingCell == null)
+        {
+            return;
+        }
+
+        TextMeshProUGUI label = cardMissingCell.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (label == null)
+        {
+            return;
+        }
+
+        label.text = missingNumber > 0 ? missingNumber.ToString() : string.Empty;
     }
 
     private void PrepareMissingPatternVisuals()
