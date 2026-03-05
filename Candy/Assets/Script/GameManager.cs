@@ -123,6 +123,7 @@ public class GameManager : MonoBehaviour
     {
         currentBet = totalBets[lvl];
         displayCurrentBets.text = currentBet.ToString();
+        APIManager.instance?.SetRealtimeEntryFeeFromGameUI(currentBet);
         for (int i = 0; i < CardBets.Count; i++)
         {
             CardBets[i].text = "= "+(currentBet / 4).ToString();

@@ -131,10 +131,10 @@ TextureImporter:
       name: BEt_0
       rect:
         serializedVersion: 2
-        x: 84
-        y: 85
-        width: 89
-        height: 89
+        x: 0
+        y: 0
+        width: 2256
+        height: 969
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}

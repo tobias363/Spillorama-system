@@ -816,13 +816,24 @@ public class NumberGenerator : MonoBehaviour
         }
     }
 
+    public void ShowMatchedPaylinePatternsForCurrentCards(bool onlyFirstMatchPerCard = false)
+    {
+        RealtimePaylineUtils.ShowMatchedPaylinePatternsForCurrentCards(
+            cardClasses,
+            patternList,
+            onlyFirstMatchPerCard,
+            matchedMat,
+            unMatchedMat);
+    }
+
+    public void ClearPaylineVisuals()
+    {
+        RealtimePaylineUtils.ClearPaylineVisuals(cardClasses);
+    }
+
     public void CheckPayLineMatch(int cardNo)
     {
-
-        for (int i = 0; i < cardClasses[cardNo].paylineObj.Count; i++)
-        {
-            cardClasses[cardNo].paylineindex.Add(false);
-        }
+        RealtimePaylineUtils.EnsurePaylineIndexCapacity(cardClasses[cardNo], patternList.Count);
 
         for (int patternIndex = 0; patternIndex < patternList.Count; patternIndex++)
         {
@@ -870,17 +881,21 @@ public class NumberGenerator : MonoBehaviour
     //Won the Prize
     public void PrizeWin(int cardNo, int patternIndex)
     {
+        RealtimePaylineUtils.EnsurePaylineIndexCapacity(cardClasses[cardNo], patternIndex + 1);
         cardClasses[cardNo].paylineindex[patternIndex] = true;
-        cardClasses[cardNo].paylineObj[patternIndex].SetActive(false);
-        //cardClasses[cardNo].paylineObj[i].SetActive(true);
+        RealtimePaylineUtils.SetPaylineVisual(
+            cardClasses,
+            cardNo,
+            patternIndex,
+            true,
+            true,
+            matchedMat,
+            unMatchedMat);
         EventManager.ShowMatchedPattern(patternIndex, true);
-        //        Debug.Log("patternIndex : " + patternIndex);
         for (int m = 0; m < selectedIndex.Count; m++)
         {
-            // Debug.Log("cardNo : " + cardNo + " selectedIndex : " + m);
             cardClasses[cardNo].matchPatternImg[selectedIndex[m]].SetActive(true);
             ballAnimSpeed = 0.11f;
-            //Debug.Log("m : " + m + " selectedIndex[m] : " + selectedIndex[m]);
             EventManager.ShowMissingPattern(patternIndex, selectedIndex[m], false);
         }
 
@@ -906,7 +921,14 @@ public class NumberGenerator : MonoBehaviour
         {
             if (patternList[patternIndex].pattern[blockCount] == 1 && cardClasses[cardNo].payLinePattern[blockCount] == 0)
             {
-                cardClasses[cardNo].paylineObj[patternIndex].SetActive(true);
+                RealtimePaylineUtils.SetPaylineVisual(
+                    cardClasses,
+                    cardNo,
+                    patternIndex,
+                    true,
+                    false,
+                    matchedMat,
+                    unMatchedMat);
 
                 EventManager.ShowMissingPattern(patternIndex, blockCount, true);
                 TextMeshProUGUI missingPatternPrize = cardClasses[cardNo].missingPatternImg[blockCount].transform.GetChild(0).GetComponentInChildren<TextMeshProUGUI>();
@@ -976,6 +998,7 @@ public class NumberGenerator : MonoBehaviour
         StopAllCoroutines();
         if (random.Count != 0) random.Clear();
         if (generatedNO.Count != 0) generatedNO.Clear();
+        ClearPaylineVisuals();
 
         for (int i = 0; i < cardClasses.Length; i++)
         {
@@ -983,15 +1006,7 @@ public class NumberGenerator : MonoBehaviour
             cardClasses[i].selectionImg.ForEach(p => p.SetActive(false));
             cardClasses[i].missingPatternImg.ForEach(p => p.SetActive(false));
             cardClasses[i].matchPatternImg.ForEach(p => p.SetActive(false));
-            cardClasses[i].paylineObj.ForEach(p => p.SetActive(false));
             if (cardClasses[i].paylineindex.Count != 0) cardClasses[i].paylineindex.Clear();
-            for (int j = 0; j < cardClasses[i].paylineObj.Count; j++)
-            {
-                foreach (Transform l in cardClasses[i].paylineObj[j].transform)
-                {
-                    //l.GetComponent<LineRenderer>().material = matchedMat;
-                }
-            }
 
             for (int j = 0; j < cardClasses[i].payLinePattern.Count; j++)
             {

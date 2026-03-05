@@ -28,6 +28,7 @@ public class BallManager : MonoBehaviour
     private List<int> ballIndexList = new List<int>();
     private int[] extraBallPosArr = new int[5] { -140, -70, 140, 70, 0 };
     private List<GameObject> instantiatedExtraBall = new List<GameObject>();
+    private readonly List<Vector3> realtimeBallLayoutPositions = new List<Vector3>();
 
     private void OnEnable()
     {
@@ -46,6 +47,8 @@ public class BallManager : MonoBehaviour
         	ballMachine.SetActive(false);
         if(extraBallMachine != null)
         	extraBallMachine.SetActive(false);
+
+        CacheRealtimeBallLayoutPositions();
 
 
     }
@@ -67,6 +70,98 @@ public class BallManager : MonoBehaviour
             extraBaStartPos[i] = extraBalls[i].transform.localPosition;
             extraBalls[i].SetActive(false);
         }
+    }
+
+    void CacheRealtimeBallLayoutPositions()
+    {
+        if (balls == null || balls.Count == 0)
+        {
+            return;
+        }
+
+        if (realtimeBallLayoutPositions.Count == balls.Count)
+        {
+            return;
+        }
+
+        realtimeBallLayoutPositions.Clear();
+        for (int i = 0; i < balls.Count; i++)
+        {
+            realtimeBallLayoutPositions.Add(balls[i].transform.localPosition);
+        }
+    }
+
+    public void ShowRealtimeDrawBall(int drawIndex, int drawnNumber)
+    {
+        if (balls == null || drawIndex < 0 || drawIndex >= balls.Count)
+        {
+            return;
+        }
+
+        CacheRealtimeBallLayoutPositions();
+
+        if (ballMachine != null)
+        {
+            ballMachine.SetActive(true);
+        }
+
+        if (extraBallMachine != null)
+        {
+            extraBallMachine.SetActive(false);
+        }
+
+        if (bigBallImg != null)
+        {
+            bigBallImg.gameObject.SetActive(true);
+            int bigSpriteIndex = (bigBallSprite != null && bigBallSprite.Count > 0) ? Random.Range(0, bigBallSprite.Count) : -1;
+            if (bigSpriteIndex >= 0)
+            {
+                bigBallImg.sprite = bigBallSprite[bigSpriteIndex];
+            }
+
+            Transform bigBallText = bigBallImg.transform.childCount > 0 ? bigBallImg.transform.GetChild(0) : null;
+            if (bigBallText != null)
+            {
+                TextMeshProUGUI tmp = bigBallText.GetComponent<TextMeshProUGUI>();
+                if (tmp != null)
+                {
+                    tmp.text = drawnNumber.ToString();
+                }
+            }
+        }
+
+        GameObject ballObject = balls[drawIndex];
+        if (ballObject == null)
+        {
+            return;
+        }
+
+        int spriteIndex = (ballSprite != null && ballSprite.Count > 0) ? Random.Range(0, ballSprite.Count) : -1;
+        if (spriteIndex >= 0)
+        {
+            Image img = ballObject.GetComponent<Image>();
+            if (img != null)
+            {
+                img.sprite = ballSprite[spriteIndex];
+            }
+        }
+
+        Transform child = ballObject.transform.childCount > 0 ? ballObject.transform.GetChild(0) : null;
+        if (child != null)
+        {
+            TextMeshProUGUI tmp = child.GetComponent<TextMeshProUGUI>();
+            if (tmp != null)
+            {
+                tmp.text = drawnNumber.ToString();
+            }
+        }
+
+        if (drawIndex < realtimeBallLayoutPositions.Count)
+        {
+            ballObject.transform.localPosition = realtimeBallLayoutPositions[drawIndex];
+        }
+
+        ballObject.SetActive(true);
     }
 
     void GenerateBall(List<int> _ballIndexList)
@@ -317,25 +412,53 @@ public class BallManager : MonoBehaviour
         EventManager.ShowBallOnCard(ballIndexList.Count - 1);
     }
 
-    void ResetBalls()
+    public void ResetBalls()
     {
-        extraBallMachine.SetActive(false);
-
-        StopAllCoroutines();
-        foreach (var e in balls)
+        if (extraBallMachine != null)
         {
-            e.SetActive(false);
+            extraBallMachine.SetActive(false);
         }
 
-        foreach (var e in extraBalls)
+        StopAllCoroutines();
+        if (balls != null)
         {
-            e.SetActive(false);
+            foreach (var e in balls)
+            {
+                if (e != null)
+                {
+                    e.SetActive(false);
+                }
+            }
+        }
+
+        if (extraBalls != null)
+        {
+            foreach (var e in extraBalls)
+            {
+                if (e != null)
+                {
+                    e.SetActive(false);
+                }
+            }
         }
 
         ballIndex = 0;
         foreach (var g in instantiatedExtraBall)
         {
-            g.SetActive(false);
+            if (g != null)
+            {
+                g.SetActive(false);
+            }
+        }
+
+        if (bigBallImg != null)
+        {
+            bigBallImg.gameObject.SetActive(false);
+        }
+
+        if (ballMachine != null)
+        {
+            ballMachine.SetActive(false);
         }
     }
 
