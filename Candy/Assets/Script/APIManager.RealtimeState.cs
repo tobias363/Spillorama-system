@@ -766,7 +766,8 @@ public partial class APIManager
                 continue;
             }
 
-            if (!string.Equals(claim["playerId"]?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
+            string claimPlayerId = claim["playerId"];
+            if (!string.Equals(claimPlayerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
