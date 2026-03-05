@@ -1,0 +1,77 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main') }}
+
+    steps:
+      - name: Show deploy metadata
+        run: |
+          echo "event=${{ github.event_name }}"
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "head_branch=${{ github.event.workflow_run.head_branch }}"
+            echo "head_sha=${{ github.event.workflow_run.head_sha }}"
+          else
+            echo "head_branch=${{ github.ref_name }}"
+            echo "head_sha=${{ github.sha }}"
+          fi
+
+      - name: Trigger Render production deploy hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_PRODUCTION_DEPLOY_HOOK_URL }}
+          RENDER_HEALTHCHECK_URL: ${{ secrets.RENDER_PRODUCTION_HEALTHCHECK_URL }}
+          RENDER_DEPLOY_WAIT_TIMEOUT_SECONDS: ${{ vars.RENDER_PRODUCTION_WAIT_TIMEOUT_SECONDS || '900' }}
+          RENDER_DEPLOY_POLL_INTERVAL_SECONDS: ${{ vars.RENDER_PRODUCTION_POLL_INTERVAL_SECONDS || '10' }}
+          RENDER_DEPLOY_CURL_RETRIES: ${{ vars.RENDER_PRODUCTION_CURL_RETRIES || '3' }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RENDER_DEPLOY_HOOK_URL}" ]]; then
+            echo "RENDER_PRODUCTION_DEPLOY_HOOK_URL mangler i GitHub Secrets." >&2
+            exit 1
+          fi
+          if [[ -z "${RENDER_HEALTHCHECK_URL}" ]]; then
+            echo "RENDER_PRODUCTION_HEALTHCHECK_URL mangler i GitHub Secrets." >&2
+            exit 1
+          fi
+
+          echo "Trigger production deploy hook ..."
+          curl -fsS \
+            --retry "${RENDER_DEPLOY_CURL_RETRIES}" \
+            --retry-all-errors \
+            --connect-timeout 10 \
+            -X POST \
+            "${RENDER_DEPLOY_HOOK_URL}" >/dev/null
+
+          echo "Venter på healthcheck: ${RENDER_HEALTHCHECK_URL}"
+          start_ts="$(date +%s)"
+
+          while true; do
+            if curl -fsS "${RENDER_HEALTHCHECK_URL}" >/dev/null; then
+              echo "Production healthcheck OK."
+              break
+            fi
+
+            now_ts="$(date +%s)"
+            elapsed="$((now_ts - start_ts))"
+            if (( elapsed >= RENDER_DEPLOY_WAIT_TIMEOUT_SECONDS )); then
+              echo "Timeout etter ${RENDER_DEPLOY_WAIT_TIMEOUT_SECONDS}s uten grønn production healthcheck." >&2
+              exit 1
+            fi
+
+            sleep "${RENDER_DEPLOY_POLL_INTERVAL_SECONDS}"
+          done

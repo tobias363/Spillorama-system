@@ -39,6 +39,9 @@ Recommended Render setup:
 
 - `staging` service deploys from PR branch or `develop` branch.
 - `production` service deploys from `main` only.
+- GitHub Actions workflows:
+  - `.github/workflows/deploy-staging.yml`
+  - `.github/workflows/deploy-production.yml`
 
 Minimum production gate:
 
@@ -50,6 +53,10 @@ Minimum production gate:
    - wallet balance fetch
    - Swedbank top-up intent create
    - one game join/start flow
+
+Setup av Render-secrets/variables er dokumentert i:
+
+- `docs/RENDER_GITHUB_SETUP.md`
 
 ## 4) Release and rollback tracking
 
