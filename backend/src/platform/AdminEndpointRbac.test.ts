@@ -13,6 +13,21 @@ interface EndpointPolicyCase {
 // Viktige admin-endepunkter med forventet permission-guard.
 const ENDPOINT_POLICY_CASES: EndpointPolicyCase[] = [
   {
+    endpoint: "GET /api/admin/settings/catalog",
+    permission: "GAME_CATALOG_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    endpoint: "GET /api/admin/settings/games/:slug",
+    permission: "GAME_CATALOG_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    endpoint: "PUT /api/admin/settings/games/:slug",
+    permission: "GAME_CATALOG_WRITE",
+    allowedRoles: ["ADMIN"]
+  },
+  {
     endpoint: "PUT /api/admin/games/:slug",
     permission: "GAME_CATALOG_WRITE",
     allowedRoles: ["ADMIN"]
