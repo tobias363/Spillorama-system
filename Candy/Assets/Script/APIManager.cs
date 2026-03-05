@@ -7,6 +7,13 @@ using SimpleJSON;
 
 public partial class APIManager : MonoBehaviour
 {
+    private enum TicketUiState
+    {
+        normal = 0,
+        nearWin = 1,
+        won = 2
+    }
+
     public static APIManager instance;
 
     private const string BASE_URL = "https://bingoapi.codehabbit.com/";
@@ -34,6 +41,7 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] [Range(0.15f, 0.6f)] private float realtimeCountdownMinParentWidthRatio = 0.3f;
     [SerializeField] [Min(120f)] private float realtimeCountdownMinWidth = 240f;
     [SerializeField] [Min(0f)] private float realtimeCountdownEdgePadding = 32f;
+    [SerializeField] [Range(0.1f, 0.6f)] private float realtimeNearWinBlinkInterval = 0.25f;
     [SerializeField] [Range(1, 5)] private int realtimeTicketsPerPlayer = 4;
     [SerializeField] private int realtimeEntryFee = 0;
     [SerializeField] private BallManager ballManager;
@@ -70,6 +78,7 @@ public partial class APIManager : MonoBehaviour
     private readonly RealtimeSchedulerState realtimeScheduler = new();
     private readonly RealtimeCountdownPresenter realtimeCountdownPresenter = new();
     private readonly RealtimeRoomConfigurator realtimeRoomConfigurator = new();
+    private readonly Dictionary<int, Coroutine> realtimeNearWinBlinkCoroutines = new();
 
     public bool UseRealtimeBackend => useRealtimeBackend;
     public string ActiveRoomCode => activeRoomCode;
@@ -102,6 +111,8 @@ public partial class APIManager : MonoBehaviour
 
     void OnDisable()
     {
+        StopRealtimeNearWinBlinking();
+
         if (realtimeClient != null)
         {
             realtimeClient.OnConnectionChanged -= HandleRealtimeConnectionChanged;

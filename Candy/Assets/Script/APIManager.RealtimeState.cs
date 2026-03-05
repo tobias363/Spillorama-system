@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using SimpleJSON;
 using TMPro;
@@ -6,6 +7,12 @@ using UnityEngine;
 
 public partial class APIManager
 {
+    private struct RealtimeClaimInfo
+    {
+        public string ClaimType;
+        public JSONNode ClaimNode;
+    }
+
     private void HandleRealtimeRoomUpdate(JSONNode snapshot)
     {
         if (snapshot == null || snapshot.IsNull)
@@ -49,6 +56,8 @@ public partial class APIManager
                 endedRoundGenerator.ClearPaylineVisuals();
             }
 
+            StopRealtimeNearWinBlinking();
+
             activeGameId = string.Empty;
             processedDrawCount = 0;
             currentTicketPage = 0;
@@ -78,6 +87,8 @@ public partial class APIManager
             {
                 nextRoundGenerator.ClearPaylineVisuals();
             }
+
+            StopRealtimeNearWinBlinking();
         }
 
         ApplyMyTicketToCards(currentGame);
@@ -133,6 +144,8 @@ public partial class APIManager
             return;
         }
 
+        StopRealtimeNearWinBlinking();
+
         int cardSlots = Mathf.Max(1, generator.cardClasses.Length);
         int pageCount = Mathf.Max(1, Mathf.CeilToInt((float)ticketSets.Count / cardSlots));
         if (!enableTicketPaging)
@@ -180,7 +193,8 @@ public partial class APIManager
                 card.matchPatternImg[i].SetActive(false);
             }
 
-            for (int i = 0; i < card.paylineObj.Count; i++)
+            int paylineCount = card.paylineObj != null ? card.paylineObj.Count : 0;
+            for (int i = 0; i < paylineCount; i++)
             {
                 card.paylineObj[i].SetActive(false);
             }
@@ -206,7 +220,7 @@ public partial class APIManager
                 {
                     RealtimeTextStyleUtils.ApplyCardNumber(
                         card.num_text[cellIndex],
-                        shouldPopulate ? value.ToString() : "-",
+                        value > 0 ? value.ToString() : "-",
                         numberFallbackFont);
                 }
             }
@@ -259,33 +273,73 @@ public partial class APIManager
     private void RefreshRealtimeWinningPatternVisuals(JSONNode currentGame)
     {
         NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator == null)
+        if (generator == null || generator.cardClasses == null || generator.patternList == null)
         {
+            StopRealtimeNearWinBlinking();
             return;
         }
 
-        string latestClaimType = GetLatestValidClaimTypeForCurrentPlayer(currentGame);
-        if (string.IsNullOrWhiteSpace(latestClaimType))
+        List<int> activePatternIndexes = GetActivePatternIndexes(generator);
+        if (activePatternIndexes.Count == 0)
         {
             generator.ClearPaylineVisuals();
+            StopRealtimeNearWinBlinking();
+            NumberGenerator.isPrizeMissedByOneCard = false;
             return;
         }
 
-        bool onlyFirstMatchPerCard = string.Equals(latestClaimType, "LINE", StringComparison.OrdinalIgnoreCase);
-        generator.ShowMatchedPaylinePatternsForCurrentCards(onlyFirstMatchPerCard);
+        RealtimeClaimInfo latestClaim = GetLatestValidClaimForCurrentPlayer(currentGame);
+        Dictionary<int, int> winningPatternsByCard = ResolveWinningPatternsByCard(generator, activePatternIndexes, latestClaim);
+
+        bool hasAnyWonPattern = false;
+        foreach (KeyValuePair<int, int> cardWin in winningPatternsByCard)
+        {
+            if (cardWin.Value >= 0)
+            {
+                hasAnyWonPattern = true;
+                break;
+            }
+        }
+
+        HideAllMissingPatternVisuals(generator.cardClasses);
+
+        HashSet<int> activeNearWinKeys = new();
+        for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
+        {
+            CardClass card = generator.cardClasses[cardNo];
+            if (card == null)
+            {
+                continue;
+            }
+
+            int wonPatternIndex = winningPatternsByCard.TryGetValue(cardNo, out int resolvedWonPatternIndex)
+                ? resolvedWonPatternIndex
+                : -1;
+
+            ApplyTicketStateVisualsForCard(
+                generator,
+                cardNo,
+                activePatternIndexes,
+                wonPatternIndex,
+                allowNearWin: !hasAnyWonPattern,
+                activeNearWinKeys);
+        }
+
+        SyncRealtimeNearWinBlinking(activeNearWinKeys, generator.cardClasses);
+        NumberGenerator.isPrizeMissedByOneCard = activeNearWinKeys.Count > 0;
     }
 
-    private string GetLatestValidClaimTypeForCurrentPlayer(JSONNode currentGame)
+    private RealtimeClaimInfo GetLatestValidClaimForCurrentPlayer(JSONNode currentGame)
     {
         if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
         {
-            return string.Empty;
+            return default;
         }
 
         JSONNode claims = currentGame["claims"];
         if (claims == null || claims.IsNull || !claims.IsArray)
         {
-            return string.Empty;
+            return default;
         }
 
         for (int i = claims.Count - 1; i >= 0; i--)
@@ -306,11 +360,544 @@ public partial class APIManager
             if (string.Equals(claimType, "LINE", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(claimType, "BINGO", StringComparison.OrdinalIgnoreCase))
             {
-                return claimType.Trim().ToUpperInvariant();
+                return new RealtimeClaimInfo
+                {
+                    ClaimType = claimType.Trim().ToUpperInvariant(),
+                    ClaimNode = claim
+                };
             }
         }
 
-        return string.Empty;
+        return default;
+    }
+
+    private List<int> GetActivePatternIndexes(NumberGenerator generator)
+    {
+        List<int> activePatternIndexes = new();
+        if (generator == null || generator.patternList == null || generator.patternList.Count == 0)
+        {
+            return activePatternIndexes;
+        }
+
+        HashSet<int> uniquePatternIndexes = new();
+        List<int> selectedPatterns = generator.totalSelectedPatterns;
+        if (selectedPatterns != null)
+        {
+            for (int i = 0; i < selectedPatterns.Count; i++)
+            {
+                int patternIndex = selectedPatterns[i];
+                if (patternIndex < 0 || patternIndex >= generator.patternList.Count)
+                {
+                    continue;
+                }
+
+                if (uniquePatternIndexes.Add(patternIndex))
+                {
+                    activePatternIndexes.Add(patternIndex);
+                }
+            }
+        }
+
+        if (activePatternIndexes.Count == 0)
+        {
+            for (int patternIndex = 0; patternIndex < generator.patternList.Count; patternIndex++)
+            {
+                activePatternIndexes.Add(patternIndex);
+            }
+        }
+
+        return activePatternIndexes;
+    }
+
+    private Dictionary<int, int> ResolveWinningPatternsByCard(
+        NumberGenerator generator,
+        List<int> activePatternIndexes,
+        RealtimeClaimInfo latestClaim)
+    {
+        Dictionary<int, int> winningPatternsByCard = new();
+        if (generator == null || generator.cardClasses == null || generator.patternList == null)
+        {
+            return winningPatternsByCard;
+        }
+
+        for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
+        {
+            winningPatternsByCard[cardNo] = -1;
+        }
+
+        HashSet<int> explicitWinningPatternIndexes = ExtractWinningPatternIndexes(
+            latestClaim.ClaimNode,
+            generator.patternList.Count);
+
+        if (explicitWinningPatternIndexes.Count > 0)
+        {
+            List<int> orderedClaimPatternIndexes = BuildOrderedPatternPriority(
+                activePatternIndexes,
+                explicitWinningPatternIndexes);
+
+            for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
+            {
+                CardClass card = generator.cardClasses[cardNo];
+                if (card == null)
+                {
+                    continue;
+                }
+
+                winningPatternsByCard[cardNo] = FindFirstMatchedPatternIndex(
+                    card,
+                    generator.patternList,
+                    orderedClaimPatternIndexes);
+            }
+
+            return winningPatternsByCard;
+        }
+
+        bool lineClaim = string.Equals(latestClaim.ClaimType, "LINE", StringComparison.OrdinalIgnoreCase);
+        if (lineClaim)
+        {
+            for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
+            {
+                CardClass card = generator.cardClasses[cardNo];
+                if (card == null)
+                {
+                    continue;
+                }
+
+                int firstMatch = FindFirstMatchedPatternIndex(card, generator.patternList, activePatternIndexes);
+                if (firstMatch >= 0)
+                {
+                    winningPatternsByCard[cardNo] = firstMatch;
+                    break;
+                }
+            }
+
+            return winningPatternsByCard;
+        }
+
+        for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
+        {
+            CardClass card = generator.cardClasses[cardNo];
+            if (card == null)
+            {
+                continue;
+            }
+
+            winningPatternsByCard[cardNo] = FindFirstMatchedPatternIndex(card, generator.patternList, activePatternIndexes);
+        }
+
+        return winningPatternsByCard;
+    }
+
+    private HashSet<int> ExtractWinningPatternIndexes(JSONNode claimNode, int patternCount)
+    {
+        HashSet<int> winningIndexes = new();
+        if (claimNode == null || claimNode.IsNull || patternCount <= 0)
+        {
+            return winningIndexes;
+        }
+
+        AddWinningPatternIndex(claimNode["patternIndex"], patternCount, winningIndexes);
+        AddWinningPatternIndex(claimNode["winningPatternIndex"], patternCount, winningIndexes);
+        AddWinningPatternIndex(claimNode["lineIndex"], patternCount, winningIndexes);
+        AddWinningPatternIndexesFromArray(claimNode["patternIndexes"], patternCount, winningIndexes);
+        AddWinningPatternIndexesFromArray(claimNode["winningPatternIndexes"], patternCount, winningIndexes);
+
+        JSONNode payloadNode = claimNode["payload"];
+        if (payloadNode != null && !payloadNode.IsNull)
+        {
+            AddWinningPatternIndex(payloadNode["patternIndex"], patternCount, winningIndexes);
+            AddWinningPatternIndex(payloadNode["winningPatternIndex"], patternCount, winningIndexes);
+            AddWinningPatternIndex(payloadNode["lineIndex"], patternCount, winningIndexes);
+            AddWinningPatternIndexesFromArray(payloadNode["patternIndexes"], patternCount, winningIndexes);
+            AddWinningPatternIndexesFromArray(payloadNode["winningPatternIndexes"], patternCount, winningIndexes);
+        }
+
+        return winningIndexes;
+    }
+
+    private void AddWinningPatternIndexesFromArray(JSONNode node, int patternCount, HashSet<int> target)
+    {
+        if (node == null || node.IsNull || !node.IsArray)
+        {
+            return;
+        }
+
+        for (int i = 0; i < node.Count; i++)
+        {
+            AddWinningPatternIndex(node[i], patternCount, target);
+        }
+    }
+
+    private void AddWinningPatternIndex(JSONNode node, int patternCount, HashSet<int> target)
+    {
+        if (!TryParsePatternIndex(node, patternCount, out int patternIndex))
+        {
+            return;
+        }
+
+        target.Add(patternIndex);
+    }
+
+    private bool TryParsePatternIndex(JSONNode node, int patternCount, out int patternIndex)
+    {
+        patternIndex = -1;
+        if (node == null || node.IsNull || patternCount <= 0)
+        {
+            return false;
+        }
+
+        string rawValue = node.Value;
+        if (!int.TryParse(rawValue, out int parsed))
+        {
+            return false;
+        }
+
+        if (parsed >= 0 && parsed < patternCount)
+        {
+            patternIndex = parsed;
+            return true;
+        }
+
+        if (parsed > 0 && parsed <= patternCount)
+        {
+            patternIndex = parsed - 1;
+            return true;
+        }
+
+        return false;
+    }
+
+    private List<int> BuildOrderedPatternPriority(List<int> activePatternIndexes, HashSet<int> explicitPatternIndexes)
+    {
+        List<int> orderedPatterns = new();
+        HashSet<int> seen = new();
+
+        if (activePatternIndexes != null)
+        {
+            for (int i = 0; i < activePatternIndexes.Count; i++)
+            {
+                int patternIndex = activePatternIndexes[i];
+                if (!explicitPatternIndexes.Contains(patternIndex))
+                {
+                    continue;
+                }
+
+                if (seen.Add(patternIndex))
+                {
+                    orderedPatterns.Add(patternIndex);
+                }
+            }
+        }
+
+        foreach (int patternIndex in explicitPatternIndexes)
+        {
+            if (seen.Add(patternIndex))
+            {
+                orderedPatterns.Add(patternIndex);
+            }
+        }
+
+        return orderedPatterns;
+    }
+
+    private int FindFirstMatchedPatternIndex(CardClass card, List<Patterns> patternList, List<int> candidatePatternIndexes)
+    {
+        if (card == null || patternList == null || candidatePatternIndexes == null)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < candidatePatternIndexes.Count; i++)
+        {
+            int patternIndex = candidatePatternIndexes[i];
+            if (patternIndex < 0 || patternIndex >= patternList.Count)
+            {
+                continue;
+            }
+
+            if (RealtimePaylineUtils.IsPatternMatchedOnCard(card, patternList, patternIndex))
+            {
+                return patternIndex;
+            }
+        }
+
+        return -1;
+    }
+
+    private void ApplyTicketStateVisualsForCard(
+        NumberGenerator generator,
+        int cardNo,
+        List<int> activePatternIndexes,
+        int wonPatternIndex,
+        bool allowNearWin,
+        HashSet<int> activeNearWinKeys)
+    {
+        if (generator == null || generator.cardClasses == null || cardNo < 0 || cardNo >= generator.cardClasses.Length)
+        {
+            return;
+        }
+
+        CardClass card = generator.cardClasses[cardNo];
+        if (card == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < card.matchPatternImg.Count; i++)
+        {
+            if (card.matchPatternImg[i] != null)
+            {
+                card.matchPatternImg[i].SetActive(false);
+            }
+        }
+
+        int paylineCount = card.paylineObj != null ? card.paylineObj.Count : 0;
+        int visualPatternCount = Mathf.Min(generator.patternList.Count, paylineCount);
+        RealtimePaylineUtils.EnsurePaylineIndexCapacity(card, visualPatternCount);
+
+        for (int patternIndex = 0; patternIndex < visualPatternCount; patternIndex++)
+        {
+            bool isWinner = patternIndex == wonPatternIndex;
+            if (patternIndex < card.paylineindex.Count)
+            {
+                card.paylineindex[patternIndex] = isWinner;
+            }
+
+            RealtimePaylineUtils.SetPaylineVisual(
+                generator.cardClasses,
+                cardNo,
+                patternIndex,
+                isWinner,
+                isWinner,
+                generator.matchedMat,
+                generator.unMatchedMat);
+        }
+
+        for (int i = 0; i < activePatternIndexes.Count; i++)
+        {
+            int patternIndex = activePatternIndexes[i];
+            if (patternIndex < 0 || patternIndex >= generator.patternList.Count)
+            {
+                continue;
+            }
+
+            TicketUiState state = TicketUiState.normal;
+            int missingCellIndex = -1;
+
+            if (patternIndex == wonPatternIndex)
+            {
+                state = TicketUiState.won;
+            }
+            else if (allowNearWin && TryGetNearWinCellIndex(card, generator.patternList[patternIndex].pattern, out missingCellIndex))
+            {
+                state = TicketUiState.nearWin;
+            }
+
+            ApplyTicketPatternState(
+                card,
+                cardNo,
+                generator.patternList[patternIndex].pattern,
+                state,
+                missingCellIndex,
+                activeNearWinKeys);
+        }
+    }
+
+    private void ApplyTicketPatternState(
+        CardClass card,
+        int cardNo,
+        List<byte> mask,
+        TicketUiState state,
+        int missingCellIndex,
+        HashSet<int> activeNearWinKeys)
+    {
+        if (card == null || mask == null)
+        {
+            return;
+        }
+
+        if (state == TicketUiState.won)
+        {
+            int cellCount = Mathf.Min(mask.Count, card.payLinePattern.Count);
+            for (int cellIndex = 0; cellIndex < cellCount && cellIndex < card.matchPatternImg.Count; cellIndex++)
+            {
+                if (mask[cellIndex] == 1 &&
+                    card.payLinePattern[cellIndex] == 1 &&
+                    card.matchPatternImg[cellIndex] != null)
+                {
+                    card.matchPatternImg[cellIndex].SetActive(true);
+                }
+            }
+            return;
+        }
+
+        if (state != TicketUiState.nearWin ||
+            missingCellIndex < 0 ||
+            missingCellIndex >= card.missingPatternImg.Count ||
+            card.missingPatternImg[missingCellIndex] == null)
+        {
+            return;
+        }
+
+        int blinkKey = BuildNearWinBlinkKey(cardNo, missingCellIndex);
+        activeNearWinKeys.Add(blinkKey);
+        if (!realtimeNearWinBlinkCoroutines.ContainsKey(blinkKey))
+        {
+            Coroutine blinkRoutine = StartCoroutine(BlinkRealtimeNearWinCell(blinkKey, card.missingPatternImg[missingCellIndex]));
+            realtimeNearWinBlinkCoroutines[blinkKey] = blinkRoutine;
+        }
+    }
+
+    private bool TryGetNearWinCellIndex(CardClass card, List<byte> mask, out int missingCellIndex)
+    {
+        missingCellIndex = -1;
+        if (card == null || mask == null || card.payLinePattern == null)
+        {
+            return false;
+        }
+
+        int requiredCount = 0;
+        int matchedCount = 0;
+        int cellCount = Mathf.Min(mask.Count, card.payLinePattern.Count);
+        for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
+        {
+            if (mask[cellIndex] != 1)
+            {
+                continue;
+            }
+
+            requiredCount++;
+            if (card.payLinePattern[cellIndex] == 1)
+            {
+                matchedCount++;
+            }
+            else if (missingCellIndex < 0)
+            {
+                missingCellIndex = cellIndex;
+            }
+        }
+
+        return requiredCount > 0 && matchedCount == requiredCount - 1 && missingCellIndex >= 0;
+    }
+
+    private IEnumerator BlinkRealtimeNearWinCell(int blinkKey, GameObject nearWinCell)
+    {
+        bool visible = false;
+        while (realtimeNearWinBlinkCoroutines.ContainsKey(blinkKey))
+        {
+            visible = !visible;
+            if (nearWinCell != null)
+            {
+                nearWinCell.SetActive(visible);
+            }
+
+            yield return new WaitForSeconds(realtimeNearWinBlinkInterval);
+        }
+
+        if (nearWinCell != null)
+        {
+            nearWinCell.SetActive(false);
+        }
+    }
+
+    private void SyncRealtimeNearWinBlinking(HashSet<int> activeNearWinKeys, CardClass[] cards)
+    {
+        List<int> keysToStop = new();
+        foreach (int key in realtimeNearWinBlinkCoroutines.Keys)
+        {
+            if (!activeNearWinKeys.Contains(key))
+            {
+                keysToStop.Add(key);
+            }
+        }
+
+        for (int i = 0; i < keysToStop.Count; i++)
+        {
+            int key = keysToStop[i];
+            if (realtimeNearWinBlinkCoroutines.TryGetValue(key, out Coroutine routine) && routine != null)
+            {
+                StopCoroutine(routine);
+            }
+
+            realtimeNearWinBlinkCoroutines.Remove(key);
+            SetNearWinCellActive(cards, key, false);
+        }
+    }
+
+    private void HideAllMissingPatternVisuals(CardClass[] cards)
+    {
+        if (cards == null)
+        {
+            return;
+        }
+
+        for (int cardNo = 0; cardNo < cards.Length; cardNo++)
+        {
+            CardClass card = cards[cardNo];
+            if (card == null || card.missingPatternImg == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < card.missingPatternImg.Count; cellIndex++)
+            {
+                GameObject missingCell = card.missingPatternImg[cellIndex];
+                if (missingCell != null)
+                {
+                    missingCell.SetActive(false);
+                }
+            }
+        }
+    }
+
+    private int BuildNearWinBlinkKey(int cardNo, int cellIndex)
+    {
+        return (cardNo * 100) + cellIndex;
+    }
+
+    private void DecodeNearWinBlinkKey(int key, out int cardNo, out int cellIndex)
+    {
+        cardNo = key / 100;
+        cellIndex = key % 100;
+    }
+
+    private void SetNearWinCellActive(CardClass[] cards, int blinkKey, bool active)
+    {
+        DecodeNearWinBlinkKey(blinkKey, out int cardNo, out int cellIndex);
+        if (cards == null || cardNo < 0 || cardNo >= cards.Length)
+        {
+            return;
+        }
+
+        CardClass card = cards[cardNo];
+        if (card == null || card.missingPatternImg == null || cellIndex < 0 || cellIndex >= card.missingPatternImg.Count)
+        {
+            return;
+        }
+
+        GameObject missingCell = card.missingPatternImg[cellIndex];
+        if (missingCell != null)
+        {
+            missingCell.SetActive(active);
+        }
+    }
+
+    private void StopRealtimeNearWinBlinking()
+    {
+        CardClass[] cards = GameManager.instance?.numberGenerator?.cardClasses;
+
+        foreach (KeyValuePair<int, Coroutine> entry in realtimeNearWinBlinkCoroutines)
+        {
+            if (entry.Value != null)
+            {
+                StopCoroutine(entry.Value);
+            }
+
+            SetNearWinCellActive(cards, entry.Key, false);
+        }
+
+        realtimeNearWinBlinkCoroutines.Clear();
+        HideAllMissingPatternVisuals(cards);
     }
 
     private int GetCardSlotsCount()
@@ -337,6 +924,7 @@ public partial class APIManager
         processedDrawCount = 0;
         currentTicketPage = 0;
         activeTicketSets.Clear();
+        StopRealtimeNearWinBlinking();
         nextScheduledRoomStateRefreshAt = -1f;
         nextScheduledManualStartAttemptAt = -1f;
 
