@@ -1,7 +1,9 @@
 node_modules/
 dist/
 .env
+scripts/release.env
 backend/.env
 npm-debug.log*
 .DS_Store
 backend/data/
+CandyBuilds/
