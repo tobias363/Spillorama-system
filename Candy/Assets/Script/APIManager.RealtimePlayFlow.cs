@@ -231,6 +231,11 @@ public partial class APIManager
                     return;
                 }
 
+                if (TryRecoverFromInsufficientFundsStartFailure(startAck))
+                {
+                    return;
+                }
+
                 Debug.LogError($"[APIManager] game:start failed: {startAck?.errorCode} {startAck?.errorMessage}");
                 return;
             }
@@ -246,6 +251,64 @@ public partial class APIManager
                 DrawRealtimeNumberFromPlayButton();
             }
         });
+    }
+
+    private bool TryRecoverFromInsufficientFundsStartFailure(SocketAck startAck)
+    {
+        if (!string.Equals(startAck?.errorCode, "INSUFFICIENT_FUNDS", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        float retryDelaySeconds = Mathf.Max(1f, insufficientFundsRetryDelaySeconds);
+        nextScheduledManualStartAttemptAt = Time.unscaledTime + retryDelaySeconds;
+
+        if (!fallbackToZeroEntryFeeOnInsufficientFunds || realtimeEntryFee <= 0)
+        {
+            LogInsufficientFundsWarning(startAck?.errorMessage, usedZeroEntryFeeFallback: false);
+            return true;
+        }
+
+        if (hasAppliedZeroEntryFeeFallbackForRoom)
+        {
+            LogInsufficientFundsWarning(startAck?.errorMessage, usedZeroEntryFeeFallback: false);
+            return true;
+        }
+
+        int previousEntryFee = realtimeEntryFee;
+        hasAppliedZeroEntryFeeFallbackForRoom = true;
+        realtimeEntryFee = 0;
+        if (disableEntryFeeSyncAfterInsufficientFundsFallback)
+        {
+            syncRealtimeEntryFeeWithBetSelector = false;
+        }
+
+        LogInsufficientFundsWarning(startAck?.errorMessage, usedZeroEntryFeeFallback: true);
+        PushRealtimeRoomConfiguration();
+        Debug.LogWarning(
+            $"[APIManager] game:start fikk INSUFFICIENT_FUNDS. " +
+            $"Setter entryFee {previousEntryFee} -> 0 for dette rommet og prover igjen.");
+
+        nextScheduledManualStartAttemptAt = Time.unscaledTime + 0.35f;
+        StartRealtimeGameFromPlayButton();
+        return true;
+    }
+
+    private void LogInsufficientFundsWarning(string serverMessage, bool usedZeroEntryFeeFallback)
+    {
+        if (Time.unscaledTime < nextInsufficientFundsWarningAt)
+        {
+            return;
+        }
+
+        nextInsufficientFundsWarningAt = Time.unscaledTime + 6f;
+        string resolvedMessage = string.IsNullOrWhiteSpace(serverMessage)
+            ? "Spilleren har ikke nok saldo til buy-in."
+            : serverMessage;
+        string fallbackMessage = usedZeroEntryFeeFallback
+            ? "Prover med entryFee=0."
+            : "Top-up wallet eller sett entryFee=0 i realtime-oppsett.";
+        Debug.LogWarning($"[APIManager] INSUFFICIENT_FUNDS: {resolvedMessage} {fallbackMessage}");
     }
 
     private void DrawRealtimeNumberFromPlayButton()

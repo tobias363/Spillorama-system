@@ -36,6 +36,9 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] private bool scheduledModeManualStartFallback = true;
     [SerializeField] [Min(0.5f)] private float scheduledRoomStateHeartbeatSeconds = 2f;
     [SerializeField] private bool syncRealtimeEntryFeeWithBetSelector = true;
+    [SerializeField] private bool fallbackToZeroEntryFeeOnInsufficientFunds = true;
+    [SerializeField] private bool disableEntryFeeSyncAfterInsufficientFundsFallback = true;
+    [SerializeField] [Min(1f)] private float insufficientFundsRetryDelaySeconds = 6f;
     [SerializeField] private bool centerRealtimeCountdownUnderBalls = true;
     [SerializeField] private Vector2 realtimeCountdownOffset = new Vector2(0f, -155f);
     [SerializeField] [Range(1f, 2f)] private float realtimeCountdownWidthMultiplier = 1.3f;
@@ -86,6 +89,7 @@ public partial class APIManager : MonoBehaviour
     private float nextScheduledRoomStateRefreshAt = -1f;
     private float nextScheduledManualStartAttemptAt = -1f;
     private float nextScheduledHeartbeatAt = -1f;
+    private float nextInsufficientFundsWarningAt = -1f;
     private float nextDrawResyncAt = -1f;
     private Coroutine delayedOverlayResetCoroutine;
     private string delayedOverlayResetGameId = string.Empty;
@@ -97,6 +101,7 @@ public partial class APIManager : MonoBehaviour
     private string realtimeBonusTriggeredGameId = string.Empty;
     private string realtimeBonusTriggeredClaimId = string.Empty;
     private string realtimeBonusMissingDataLogKey = string.Empty;
+    private bool hasAppliedZeroEntryFeeFallbackForRoom = false;
 
     public bool UseRealtimeBackend => useRealtimeBackend;
     public string ActiveRoomCode => activeRoomCode;
@@ -688,6 +693,10 @@ public partial class APIManager : MonoBehaviour
     public void SetRealtimeEntryFeeFromGameUI(int entryFee)
     {
         realtimeEntryFee = Mathf.Max(0, entryFee);
+        if (realtimeEntryFee > 0)
+        {
+            hasAppliedZeroEntryFeeFallbackForRoom = false;
+        }
 
         if (!useRealtimeBackend || !realtimeScheduledRounds)
         {
@@ -711,6 +720,10 @@ public partial class APIManager : MonoBehaviour
         }
 
         realtimeEntryFee = Mathf.Max(0, GameManager.instance.currentBet);
+        if (realtimeEntryFee > 0)
+        {
+            hasAppliedZeroEntryFeeFallbackForRoom = false;
+        }
     }
 
     private void PushRealtimeRoomConfiguration()

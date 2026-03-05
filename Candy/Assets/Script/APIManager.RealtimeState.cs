@@ -1535,6 +1535,8 @@ public partial class APIManager
         ResetRealtimeBonusState(closeBonusPanel: true);
         nextScheduledRoomStateRefreshAt = -1f;
         nextScheduledManualStartAttemptAt = -1f;
+        nextInsufficientFundsWarningAt = -1f;
+        hasAppliedZeroEntryFeeFallbackForRoom = false;
 
         if (clearDesiredRoomCode)
         {
