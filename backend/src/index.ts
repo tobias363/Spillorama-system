@@ -512,6 +512,16 @@ function parseOptionalAbsoluteHttpUrl(
   return normalizeAbsoluteHttpUrl(value, fieldName, errorCode);
 }
 
+function sanitizeCandyLaunchUrlForRuntime(launchUrl: string): string {
+  try {
+    const parsed = new URL(launchUrl);
+    parsed.searchParams.delete("v");
+    return parsed.toString();
+  } catch {
+    return launchUrl;
+  }
+}
+
 function readCandyLaunchSettings(
   settings: Record<string, unknown>,
   options: { requireLaunchUrl: boolean }
@@ -1775,6 +1785,9 @@ app.post("/api/games/candy/launch-token", async (req, res) => {
     engine.assertWalletAllowedForGameplay(user.walletId);
 
     const launchSettings = await getCandyLaunchSettingsForRuntime(true);
+    if (!launchSettings.launchUrl) {
+      throw new DomainError("INVALID_CANDY_LAUNCH_URL", "Candy launchUrl mangler.");
+    }
     const hallId = await resolveCandyLaunchHallId(req.body?.hallId);
     const apiBaseUrl = launchSettings.apiBaseUrl || deriveRequestApiBaseUrl(req);
     const issued = candyLaunchTokenStore.issue({
@@ -1789,7 +1802,7 @@ app.post("/api/games/candy/launch-token", async (req, res) => {
       launchToken: issued.launchToken,
       issuedAt: issued.issuedAt,
       expiresAt: issued.expiresAt,
-      launchUrl: launchSettings.launchUrl
+      launchUrl: sanitizeCandyLaunchUrlForRuntime(launchSettings.launchUrl)
     });
   } catch (error) {
     apiFailure(res, error);
