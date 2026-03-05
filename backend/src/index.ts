@@ -179,7 +179,8 @@ const bingoMinPlayersToStart = minPlayersFloor;
 const requestedAutoRoundStartEnabled = parseBooleanEnv(process.env.AUTO_ROUND_START_ENABLED, true);
 const requestedAutoDrawEnabled = parseBooleanEnv(process.env.AUTO_DRAW_ENABLED, true);
 const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, true);
-const forceCandyAutoStart = parseBooleanEnv(process.env.CANDY_FORCE_AUTOSTART, true);
+const forceCandyAutoStart = true;
+const forceCandyAutoDraw = true;
 const autoplayAllowed = !isProductionRuntime || allowAutoplayInProduction;
 const runtimeCandyManiaSettings: CandyManiaSchedulerSettings = {
   autoRoundStartEnabled: forceCandyAutoStart
@@ -203,7 +204,7 @@ const runtimeCandyManiaSettings: CandyManiaSchedulerSettings = {
   payoutPercent: Math.round(
     Math.min(100, Math.max(0, parseNonNegativeNumberEnv(process.env.CANDY_PAYOUT_PERCENT, 100))) * 100
   ) / 100,
-  autoDrawEnabled: autoplayAllowed ? requestedAutoDrawEnabled : false,
+  autoDrawEnabled: forceCandyAutoDraw ? true : autoplayAllowed ? requestedAutoDrawEnabled : false,
   autoDrawIntervalMs: parsePositiveIntEnv(process.env.AUTO_DRAW_INTERVAL_MS, 1200)
 };
 let candyManiaSettingsEffectiveFromMs = Date.now();
@@ -542,13 +543,19 @@ function normalizeCandyManiaSchedulerSettings(
   if (forceCandyAutoStart) {
     next.autoRoundStartEnabled = true;
   }
+  if (forceCandyAutoDraw) {
+    next.autoDrawEnabled = true;
+  }
   next.autoRoundMinPlayers = Math.max(bingoMinPlayersToStart, Math.floor(next.autoRoundMinPlayers));
   next.autoRoundTicketsPerPlayer = Math.min(5, Math.max(1, Math.floor(next.autoRoundTicketsPerPlayer)));
   next.autoRoundEntryFee = Math.max(0, Math.round(next.autoRoundEntryFee * 100) / 100);
   next.payoutPercent = Math.min(100, Math.max(0, Math.round(next.payoutPercent * 100) / 100));
   next.autoDrawIntervalMs = Math.max(250, Math.floor(next.autoDrawIntervalMs));
 
-  if (!autoplayAllowed && (next.autoRoundStartEnabled || next.autoDrawEnabled)) {
+  if (
+    !autoplayAllowed &&
+    ((next.autoRoundStartEnabled && !forceCandyAutoStart) || (next.autoDrawEnabled && !forceCandyAutoDraw))
+  ) {
     throw new DomainError(
       "INVALID_INPUT",
       "Autoplay er deaktivert i production. Sett BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION=true for aa aktivere autoStart/autoDraw."
@@ -639,6 +646,7 @@ function getCandyManiaAdminSettingsResponse(): Record<string, unknown> {
       autoplayAllowed,
       allowAutoplayInProduction,
       forceCandyAutoStart,
+      forceCandyAutoDraw,
       minRoundIntervalMs: bingoMinRoundIntervalMs,
       minPlayersToStart: bingoMinPlayersToStart,
       maxTicketsPerPlayer: 5,
@@ -2652,7 +2660,7 @@ hydrateCandyManiaSettingsFromCatalog()
         `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
       );
       console.log(
-        `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} forceAutoStart=${forceCandyAutoStart} autoAllowedInProd=${allowAutoplayInProduction} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`
+        `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} forceAutoStart=${forceCandyAutoStart} forceAutoDraw=${forceCandyAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`
       );
       console.log(
         `[scheduler] autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} interval=${runtimeCandyManiaSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms`
