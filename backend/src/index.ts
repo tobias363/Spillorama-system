@@ -178,10 +178,15 @@ const minPlayersFloor = 1;
 const bingoMinPlayersToStart = minPlayersFloor;
 const requestedAutoRoundStartEnabled = parseBooleanEnv(process.env.AUTO_ROUND_START_ENABLED, true);
 const requestedAutoDrawEnabled = parseBooleanEnv(process.env.AUTO_DRAW_ENABLED, true);
-const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, false);
+const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, true);
+const forceCandyAutoStart = parseBooleanEnv(process.env.CANDY_FORCE_AUTOSTART, true);
 const autoplayAllowed = !isProductionRuntime || allowAutoplayInProduction;
 const runtimeCandyManiaSettings: CandyManiaSchedulerSettings = {
-  autoRoundStartEnabled: autoplayAllowed ? requestedAutoRoundStartEnabled : false,
+  autoRoundStartEnabled: forceCandyAutoStart
+    ? true
+    : autoplayAllowed
+      ? requestedAutoRoundStartEnabled
+      : false,
   autoRoundStartIntervalMs: Math.max(
     bingoMinRoundIntervalMs,
     parsePositiveIntEnv(process.env.AUTO_ROUND_START_INTERVAL_MS, 3 * 60 * 1000)
@@ -534,6 +539,9 @@ function normalizeCandyManiaSchedulerSettings(
     bingoMinRoundIntervalMs,
     Math.floor(next.autoRoundStartIntervalMs)
   );
+  if (forceCandyAutoStart) {
+    next.autoRoundStartEnabled = true;
+  }
   next.autoRoundMinPlayers = Math.max(bingoMinPlayersToStart, Math.floor(next.autoRoundMinPlayers));
   next.autoRoundTicketsPerPlayer = Math.min(5, Math.max(1, Math.floor(next.autoRoundTicketsPerPlayer)));
   next.autoRoundEntryFee = Math.max(0, Math.round(next.autoRoundEntryFee * 100) / 100);
@@ -630,6 +638,7 @@ function getCandyManiaAdminSettingsResponse(): Record<string, unknown> {
       runtime: isProductionRuntime ? "production" : "non-production",
       autoplayAllowed,
       allowAutoplayInProduction,
+      forceCandyAutoStart,
       minRoundIntervalMs: bingoMinRoundIntervalMs,
       minPlayersToStart: bingoMinPlayersToStart,
       maxTicketsPerPlayer: 5,
@@ -2643,7 +2652,7 @@ hydrateCandyManiaSettingsFromCatalog()
         `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
       );
       console.log(
-        `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoAllowedInProd=${allowAutoplayInProduction} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`
+        `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} forceAutoStart=${forceCandyAutoStart} autoAllowedInProd=${allowAutoplayInProduction} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`
       );
       console.log(
         `[scheduler] autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} interval=${runtimeCandyManiaSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms`

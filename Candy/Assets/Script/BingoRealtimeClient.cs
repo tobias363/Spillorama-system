@@ -22,7 +22,7 @@ public class BingoRealtimeClient : MonoBehaviour
     public static BingoRealtimeClient instance;
 
     [Header("Backend")]
-    [SerializeField] private string backendBaseUrl = "http://localhost:4000";
+    [SerializeField] private string backendBaseUrl = "https://bingosystem-3.onrender.com";
     [SerializeField] private bool autoConnectOnStart = false;
     [SerializeField] private bool autoReconnect = true;
     [SerializeField] private float reconnectDelaySeconds = 2f;

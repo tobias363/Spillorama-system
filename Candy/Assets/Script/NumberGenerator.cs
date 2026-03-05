@@ -1044,6 +1044,11 @@ public class NumberGenerator : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (APIManager.instance != null && APIManager.instance.UseRealtimeBackend)
+        {
+            return;
+        }
+
         if (!EventManager.isPlayOver || isExtraBallDone)
         {
             remTime = 30 - (int)(getGameTime());

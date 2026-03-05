@@ -20,7 +20,7 @@ public class BingoAutoLogin : MonoBehaviour
     [SerializeField] private TextMeshProUGUI statusText;
 
     [Header("Backend")]
-    [SerializeField] private string backendBaseUrl = "http://localhost:4000";
+    [SerializeField] private string backendBaseUrl = "https://bingosystem-3.onrender.com";
 
     [Header("Credential Fallback (used when inputs are empty)")]
     [SerializeField] private string email = "demo@bingo.local";
