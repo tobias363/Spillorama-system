@@ -214,6 +214,14 @@ public partial class APIManager
         {
             if (startAck == null || !startAck.ok)
             {
+                if (string.Equals(startAck?.errorCode, "GAME_ALREADY_RUNNING", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(startAck?.errorCode, "ROUND_START_TOO_SOON", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(startAck?.errorCode, "PLAYER_ALREADY_IN_RUNNING_GAME", StringComparison.OrdinalIgnoreCase))
+                {
+                    Debug.Log($"[APIManager] game:start skipped ({startAck?.errorCode}).");
+                    return;
+                }
+
                 if (string.Equals(startAck?.errorCode, "NOT_ENOUGH_PLAYERS", StringComparison.OrdinalIgnoreCase))
                 {
                     string serverMessage = string.IsNullOrWhiteSpace(startAck?.errorMessage)

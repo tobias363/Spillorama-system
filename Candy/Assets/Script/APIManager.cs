@@ -142,6 +142,9 @@ public partial class APIManager : MonoBehaviour
 
         RefreshRealtimeCountdownLabel();
         TickScheduledRoundStateRefresh();
+        TryStartRealtimeRoundFromSchedulerFallback(
+            allowManualWhenSchedulerDisabled: false,
+            source: "scheduled-update-loop");
     }
 
     private void BindRealtimeClient()
