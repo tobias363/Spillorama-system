@@ -992,6 +992,21 @@ public class NumberGenerator : MonoBehaviour
         bonusMainObj.SetActive(true);
     }
 
+    public void TriggerRealtimeBonus(int resolvedBonusAmount)
+    {
+        int normalizedBonusAmount = Mathf.Max(1, resolvedBonusAmount);
+        if (APIManager.instance != null)
+        {
+            APIManager.instance.bonusAMT = normalizedBonusAmount;
+        }
+
+        isBonusSelected = true;
+        if (bonusMainObj != null && !bonusMainObj.activeSelf)
+        {
+            bonusMainObj.SetActive(true);
+        }
+    }
+
 
     void ResetNumb()
     {

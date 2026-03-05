@@ -51,6 +51,7 @@ public partial class APIManager
             }
 
             activeGameId = string.Empty;
+            realtimeBonusTriggeredForActiveGame = false;
             processedDrawCount = 0;
             currentTicketPage = 0;
             activeTicketSets.Clear();
@@ -71,6 +72,7 @@ public partial class APIManager
         if (!string.Equals(activeGameId, gameId, StringComparison.Ordinal))
         {
             activeGameId = gameId;
+            realtimeBonusTriggeredForActiveGame = false;
             processedDrawCount = 0;
             currentTicketPage = 0;
             activeTicketSets.Clear();
@@ -85,6 +87,7 @@ public partial class APIManager
         ApplyMyTicketToCards(currentGame);
         ApplyDrawnNumbers(currentGame);
         RefreshRealtimeWinningPatternVisuals(currentGame);
+        TryTriggerRealtimeBonus(currentGame);
         RefreshRealtimeWinningAmount(currentGame);
         RefreshRealtimeCountdownLabel(forceRefresh: true);
     }
@@ -314,6 +317,238 @@ public partial class APIManager
         }
 
         return string.Empty;
+    }
+
+    private void TryTriggerRealtimeBonus(JSONNode currentGame)
+    {
+        if (realtimeBonusTriggeredForActiveGame || currentGame == null || currentGame.IsNull)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            return;
+        }
+
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        if (generator == null || generator.cardClasses == null || generator.patternList == null)
+        {
+            return;
+        }
+
+        if (generator.patternList.Count == 0)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(GetLatestValidClaimTypeForCurrentPlayer(currentGame)))
+        {
+            return;
+        }
+
+        int clampedBonusPatternIndex = Mathf.Clamp(realtimeBonusPatternIndex, 0, generator.patternList.Count - 1);
+        bool bonusMatched = false;
+        for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
+        {
+            CardClass card = generator.cardClasses[cardNo];
+            if (card == null)
+            {
+                continue;
+            }
+
+            if (!RealtimePaylineUtils.IsPatternMatchedOnCard(card, generator.patternList, clampedBonusPatternIndex))
+            {
+                continue;
+            }
+
+            bonusMatched = true;
+            break;
+        }
+
+        if (!bonusMatched)
+        {
+            return;
+        }
+
+        int bonusAmount = ResolveRealtimeBonusAmount(currentGame, generator, clampedBonusPatternIndex);
+        bonusAMT = bonusAmount;
+        generator.TriggerRealtimeBonus(bonusAmount);
+        realtimeBonusTriggeredForActiveGame = true;
+        Debug.Log($"[APIManager] Realtime bonus trigget for game {activeGameId}. bonusAmount={bonusAmount}");
+    }
+
+    private int ResolveRealtimeBonusAmount(JSONNode currentGame, NumberGenerator generator, int bonusPatternIndex)
+    {
+        if (TryExtractBonusAmountFromClaimPayload(currentGame, out int claimBonusAmount))
+        {
+            return claimBonusAmount;
+        }
+
+        if (TryExtractBonusAmountFromTopper(generator, bonusPatternIndex, out int topperBonusAmount))
+        {
+            return topperBonusAmount;
+        }
+
+        return Mathf.Max(1, realtimeDefaultBonusAmount);
+    }
+
+    private bool TryExtractBonusAmountFromClaimPayload(JSONNode currentGame, out int bonusAmount)
+    {
+        bonusAmount = 0;
+        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            return false;
+        }
+
+        JSONNode claims = currentGame["claims"];
+        if (claims == null || claims.IsNull || !claims.IsArray)
+        {
+            return false;
+        }
+
+        for (int i = claims.Count - 1; i >= 0; i--)
+        {
+            JSONNode claim = claims[i];
+            if (claim == null || claim.IsNull || !claim["valid"].AsBool)
+            {
+                continue;
+            }
+
+            string claimPlayerId = claim["playerId"];
+            if (!string.Equals(claimPlayerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (TryGetPositiveIntNodeValue(claim["bonusAmount"], out bonusAmount))
+            {
+                return true;
+            }
+
+            if (TryGetPositiveIntNodeValue(claim["bonusWinAmount"], out bonusAmount))
+            {
+                return true;
+            }
+
+            JSONNode payloadNode = claim["payload"];
+            if (payloadNode != null && !payloadNode.IsNull)
+            {
+                if (TryGetPositiveIntNodeValue(payloadNode["bonusAmount"], out bonusAmount))
+                {
+                    return true;
+                }
+
+                if (TryGetPositiveIntNodeValue(payloadNode["bonusWinAmount"], out bonusAmount))
+                {
+                    return true;
+                }
+
+                JSONNode bonusNode = payloadNode["bonus"];
+                if (bonusNode != null && !bonusNode.IsNull)
+                {
+                    if (TryGetPositiveIntNodeValue(bonusNode["amount"], out bonusAmount))
+                    {
+                        return true;
+                    }
+
+                    if (TryGetPositiveIntNodeValue(bonusNode["winAmount"], out bonusAmount))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryExtractBonusAmountFromTopper(NumberGenerator generator, int bonusPatternIndex, out int bonusAmount)
+    {
+        bonusAmount = 0;
+        if (generator == null || generator.topperManager == null || generator.topperManager.prizes == null)
+        {
+            return false;
+        }
+
+        int topperPatternIndex = generator.topperManager.GetPatternIndex(bonusPatternIndex);
+        if (topperPatternIndex < 0 || topperPatternIndex >= generator.topperManager.prizes.Count)
+        {
+            return false;
+        }
+
+        TextMeshProUGUI prizeLabel = generator.topperManager.prizes[topperPatternIndex];
+        if (prizeLabel == null)
+        {
+            return false;
+        }
+
+        return TryParsePositiveIntFromAnyText(prizeLabel.text, out bonusAmount);
+    }
+
+    private bool TryGetPositiveIntNodeValue(JSONNode node, out int value)
+    {
+        value = 0;
+        if (node == null || node.IsNull)
+        {
+            return false;
+        }
+
+        if (int.TryParse(node.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedInt) &&
+            parsedInt > 0)
+        {
+            value = parsedInt;
+            return true;
+        }
+
+        if (double.TryParse(node.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedDouble))
+        {
+            int rounded = (int)Math.Round(parsedDouble, MidpointRounding.AwayFromZero);
+            if (rounded > 0)
+            {
+                value = rounded;
+                return true;
+            }
+        }
+
+        return TryParsePositiveIntFromAnyText(node.Value, out value);
+    }
+
+    private bool TryParsePositiveIntFromAnyText(string raw, out int value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        char[] digitBuffer = new char[raw.Length];
+        int digitCount = 0;
+        for (int i = 0; i < raw.Length; i++)
+        {
+            char current = raw[i];
+            if (!char.IsDigit(current))
+            {
+                continue;
+            }
+
+            digitBuffer[digitCount] = current;
+            digitCount += 1;
+        }
+
+        if (digitCount == 0)
+        {
+            return false;
+        }
+
+        string numericOnly = new string(digitBuffer, 0, digitCount);
+        if (!int.TryParse(numericOnly, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) || parsed <= 0)
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
     }
 
     private void RefreshRealtimeWinningAmount(JSONNode currentGame)
