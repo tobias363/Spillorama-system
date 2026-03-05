@@ -1673,11 +1673,12 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
     await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
     const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
     const entryFee = parseOptionalNonNegativeNumber(req.body?.entryFee, "entryFee") ?? getRoomConfiguredEntryFee(roomCode);
-    const ticketsPerPlayer = parseOptionalTicketsPerPlayerInput(req.body?.ticketsPerPlayer);
-    if (ticketsPerPlayer !== undefined) {
-      const hallGameConfig = await resolveBingoHallGameConfigForRoom(roomCode);
-      assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
-    }
+    const hallGameConfig = await resolveBingoHallGameConfigForRoom(roomCode);
+    const requestedTicketsPerPlayer = parseOptionalTicketsPerPlayerInput(req.body?.ticketsPerPlayer);
+    const ticketsPerPlayer =
+      requestedTicketsPerPlayer ??
+      Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
+    assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
     const beforeStartSnapshot = engine.getRoomSnapshot(roomCode);
     await engine.startGame({
       roomCode,
@@ -2500,11 +2501,14 @@ io.on("connection", (socket: Socket) => {
   socket.on("game:start", async (payload: StartGamePayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
-      const ticketsPerPlayer =
+      const requestedTicketsPerPlayer =
         payload?.ticketsPerPlayer === undefined || payload?.ticketsPerPlayer === null
           ? undefined
           : parseTicketsPerPlayerInput(payload.ticketsPerPlayer);
       const hallGameConfig = await resolveBingoHallGameConfigForRoom(roomCode);
+      const ticketsPerPlayer =
+        requestedTicketsPerPlayer ??
+        Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
       assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
       await engine.startGame({
         roomCode,
