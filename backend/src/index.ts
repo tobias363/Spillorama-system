@@ -182,6 +182,10 @@ const bingoSelfExclusionMinMs = Math.max(
   365 * 24 * 60 * 60 * 1000,
   parsePositiveIntEnv(process.env.BINGO_SELF_EXCLUSION_MIN_MS, 365 * 24 * 60 * 60 * 1000)
 );
+const bingoMaxDrawsPerRound = Math.min(
+  75,
+  Math.max(1, parsePositiveIntEnv(process.env.BINGO_MAX_DRAWS_PER_ROUND, 30))
+);
 
 const isProductionRuntime = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
 const minPlayersFloor = 1;
@@ -247,7 +251,8 @@ const engine = new BingoEngine(new LocalBingoSystemAdapter(), walletAdapter, {
   monthlyLossLimit: bingoMonthlyLossLimit,
   playSessionLimitMs: bingoPlaySessionLimitMs,
   pauseDurationMs: bingoPauseDurationMs,
-  selfExclusionMinMs: bingoSelfExclusionMinMs
+  selfExclusionMinMs: bingoSelfExclusionMinMs,
+  maxDrawsPerRound: bingoMaxDrawsPerRound
 });
 
 const platformService = new PlatformService(walletAdapter, {
@@ -746,6 +751,7 @@ function getCandyManiaAdminSettingsResponse(): Record<string, unknown> {
       forceCandyAutoDraw,
       minRoundIntervalMs: bingoMinRoundIntervalMs,
       minPlayersToStart: bingoMinPlayersToStart,
+      maxDrawsPerRound: bingoMaxDrawsPerRound,
       maxTicketsPerPlayer: 5,
       minPayoutPercent: 0,
       maxPayoutPercent: 100,
@@ -2951,7 +2957,7 @@ hydrateCandyManiaSettingsFromCatalog()
     server.listen(PORT, () => {
       console.log(`Bingo backend kjører på http://localhost:${PORT}`);
       console.log(
-        `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
+        `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} maxDrawsPerRound=${bingoMaxDrawsPerRound} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
       );
       console.log(
         `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} forceAutoStart=${forceCandyAutoStart} forceAutoDraw=${forceCandyAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleCandyRoomPerHall} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`

@@ -432,7 +432,8 @@ test("compliance: enforces databingo prize caps and keeps payout audit", async (
   const wallet = new InMemoryWalletAdapter();
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 20_000,
-    monthlyLossLimit: 20_000
+    monthlyLossLimit: 20_000,
+    maxDrawsPerRound: 75
   });
 
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({

@@ -74,6 +74,7 @@ interface ComplianceOptions {
   playSessionLimitMs?: number;
   pauseDurationMs?: number;
   selfExclusionMinMs?: number;
+  maxDrawsPerRound?: number;
 }
 
 interface LossLimits {
@@ -304,6 +305,8 @@ interface PlayerComplianceSnapshot {
 
 const POLICY_WILDCARD = "*";
 const DEFAULT_SELF_EXCLUSION_MIN_MS = 365 * 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_DRAWS_PER_ROUND = 30;
+const MAX_BINGO_BALLS = 75;
 
 export class BingoEngine {
   private readonly rooms = new Map<string, RoomState>();
@@ -327,6 +330,7 @@ export class BingoEngine {
   private readonly playSessionLimitMs: number;
   private readonly pauseDurationMs: number;
   private readonly selfExclusionMinMs: number;
+  private readonly maxDrawsPerRound: number;
 
   constructor(
     private readonly bingoAdapter: BingoSystemAdapter,
@@ -368,9 +372,22 @@ export class BingoEngine {
         `selfExclusionMinMs må være minst ${DEFAULT_SELF_EXCLUSION_MIN_MS} ms (1 år).`
       );
     }
+    const maxDrawsPerRound = options.maxDrawsPerRound ?? DEFAULT_MAX_DRAWS_PER_ROUND;
+    if (
+      !Number.isFinite(maxDrawsPerRound) ||
+      !Number.isInteger(maxDrawsPerRound) ||
+      maxDrawsPerRound < 1 ||
+      maxDrawsPerRound > MAX_BINGO_BALLS
+    ) {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        `maxDrawsPerRound må være et heltall mellom 1 og ${MAX_BINGO_BALLS}.`
+      );
+    }
     this.playSessionLimitMs = Math.floor(playSessionLimitMs);
     this.pauseDurationMs = Math.floor(pauseDurationMs);
     this.selfExclusionMinMs = Math.floor(selfExclusionMinMs);
+    this.maxDrawsPerRound = Math.floor(maxDrawsPerRound);
 
     this.upsertPrizePolicy({
       gameType: "DATABINGO",
@@ -547,7 +564,7 @@ export class BingoEngine {
       payoutPercent: normalizedPayoutPercent,
       maxPayoutBudget,
       remainingPayoutBudget: maxPayoutBudget,
-      drawBag: makeShuffledBallBag(75),
+      drawBag: makeShuffledBallBag(MAX_BINGO_BALLS),
       drawnNumbers: [],
       tickets,
       marks,
@@ -576,6 +593,14 @@ export class BingoEngine {
     const host = this.requirePlayer(room, input.actorPlayerId);
     this.assertWalletAllowedForGameplay(host.walletId, Date.now());
     const game = this.requireRunningGame(room);
+    if (game.drawnNumbers.length >= this.maxDrawsPerRound) {
+      const endedAt = new Date();
+      game.status = "ENDED";
+      game.endedAt = endedAt.toISOString();
+      game.endedReason = "MAX_DRAWS_REACHED";
+      this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      throw new DomainError("NO_MORE_NUMBERS", `Maks antall trekk (${this.maxDrawsPerRound}) er nådd.`);
+    }
 
     const nextNumber = game.drawBag.shift();
     if (!nextNumber) {
