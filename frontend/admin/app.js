@@ -79,8 +79,11 @@ const elements = {
   candyQuickRoomSelect: document.getElementById("candyQuickRoomSelect"),
   candyQuickEntryFee: document.getElementById("candyQuickEntryFee"),
   candyQuickTicketsPerPlayer: document.getElementById("candyQuickTicketsPerPlayer"),
+  candyQuickStartNowBtn: document.getElementById("candyQuickStartNowBtn"),
   candyQuickCreateStartBtn: document.getElementById("candyQuickCreateStartBtn"),
   candyQuickStartExistingBtn: document.getElementById("candyQuickStartExistingBtn"),
+  candyQuickDrawNextBtn: document.getElementById("candyQuickDrawNextBtn"),
+  candyQuickEndRoomBtn: document.getElementById("candyQuickEndRoomBtn"),
   candyQuickRefreshRoomsBtn: document.getElementById("candyQuickRefreshRoomsBtn"),
   candyQuickStatus: document.getElementById("candyQuickStatus"),
   candySettingsStatus: document.getElementById("candySettingsStatus"),
@@ -443,6 +446,7 @@ function renderHallOptions() {
   setSelectOptions(elements.prizePolicyHallSelect, hallOptionsAll, previousPrizePolicyHall, "Ingen haller");
   setSelectOptions(elements.extraPrizeHallSelect, hallOptionsAll, previousExtraPrizeHall, "Ingen haller");
   setSelectOptions(elements.candyQuickHallSelect, hallOptionsActive, previousCandyQuickHall, "Ingen aktive haller");
+  renderCandyQuickRoomOptions();
 
   renderSelectedHallEditor();
   renderSelectedHallGameConfig();
@@ -1053,9 +1057,30 @@ function formatRoomSummary(room) {
   return `${room.code} | hall=${room.hallId} | players=${room.playerCount} | status=${room.gameStatus}`;
 }
 
+function getCandyQuickFilteredRooms() {
+  const selectedHallId = (elements.candyQuickHallSelect.value || "").trim();
+  if (!selectedHallId) {
+    return Array.isArray(state.rooms) ? state.rooms : [];
+  }
+  return (Array.isArray(state.rooms) ? state.rooms : []).filter((room) => room.hallId === selectedHallId);
+}
+
+function renderCandyQuickRoomOptions(preferredRoomCode) {
+  const previous = preferredRoomCode || elements.candyQuickRoomSelect.value;
+  const filteredRooms = getCandyQuickFilteredRooms();
+  setSelectOptions(
+    elements.candyQuickRoomSelect,
+    filteredRooms.map((room) => ({
+      value: room.code,
+      label: formatRoomSummary(room)
+    })),
+    previous,
+    "Ingen rom i valgt hall"
+  );
+}
+
 function renderRoomOptions() {
   const previous = elements.roomSelect.value;
-  const previousCandyQuickRoom = elements.candyQuickRoomSelect.value;
   setSelectOptions(
     elements.roomSelect,
     state.rooms.map((room) => ({
@@ -1065,16 +1090,7 @@ function renderRoomOptions() {
     previous,
     "Ingen rom"
   );
-
-  setSelectOptions(
-    elements.candyQuickRoomSelect,
-    state.rooms.map((room) => ({
-      value: room.code,
-      label: formatRoomSummary(room)
-    })),
-    previousCandyQuickRoom,
-    "Ingen rom"
-  );
+  renderCandyQuickRoomOptions();
 }
 
 async function loadRooms() {
@@ -1215,7 +1231,7 @@ function getCandyQuickSelectedRoomCode() {
   return roomCode;
 }
 
-function getCandyQuickStartPayload() {
+function getCandyQuickStartPayloadFromForm() {
   let entryFee = Number(elements.candyQuickEntryFee.value || 0);
   if (!Number.isFinite(entryFee) || entryFee < 0) {
     throw new Error("Innsats må være et tall >= 0.");
@@ -1230,10 +1246,70 @@ function getCandyQuickStartPayload() {
   return { entryFee, ticketsPerPlayer };
 }
 
-async function handleCandyQuickCreateAndStart() {
-  const hallId = getCandyQuickSelectedHallId();
-  const startPayload = getCandyQuickStartPayload();
+function getCandyQuickStartPayloadFromDefaults() {
+  const settingsEntryFee = Number(state.candySettings?.autoRoundEntryFee);
+  const settingsTickets = Number(state.candySettings?.autoRoundTicketsPerPlayer);
+  const entryFee = Number.isFinite(settingsEntryFee) && settingsEntryFee >= 0
+    ? Math.round(settingsEntryFee * 100) / 100
+    : 0;
+  const ticketsPerPlayer = Number.isInteger(settingsTickets) && settingsTickets >= 1 && settingsTickets <= 5
+    ? settingsTickets
+    : 4;
+  return { entryFee, ticketsPerPlayer };
+}
 
+async function createAndStartCandyRoom(startPayload) {
+  const hallId = getCandyQuickSelectedHallId();
+  const created = await apiRequest("/api/admin/rooms", {
+    method: "POST",
+    auth: true,
+    body: {
+      hallId,
+      hostName: "Candy Admin"
+    }
+  });
+
+  const started = await apiRequest(`/api/admin/rooms/${encodeURIComponent(created.roomCode)}/start`, {
+    method: "POST",
+    auth: true,
+    body: startPayload
+  });
+
+  await loadRooms();
+  elements.roomSelect.value = created.roomCode;
+  renderCandyQuickRoomOptions(created.roomCode);
+  elements.candyQuickRoomSelect.value = created.roomCode;
+  await showSelectedRoomSnapshot().catch(() => undefined);
+
+  return { created, started, hallId };
+}
+
+async function handleCandyQuickStartNow() {
+  const startPayload = getCandyQuickStartPayloadFromDefaults();
+  setLoading(elements.candyQuickStartNowBtn, true, "Starter Candy...", "Start Candy nå");
+  try {
+    const { created, started, hallId } = await createAndStartCandyRoom(startPayload);
+    setStatus(
+      elements.candyQuickStatus,
+      [
+        `Candy startet med standardinnstillinger.`,
+        `Rom: ${created.roomCode}`,
+        `Hall: ${hallId}`,
+        `Innsats: ${startPayload.entryFee}`,
+        `Bonger/spiller: ${startPayload.ticketsPerPlayer}`,
+        `Status: ${started.snapshot?.currentGame?.status || "-"}`
+      ].join("\n"),
+      "success"
+    );
+  } catch (error) {
+    setStatus(elements.candyQuickStatus, error.message || "Klarte ikke starte Candy nå.", "error");
+  } finally {
+    setLoading(elements.candyQuickStartNowBtn, false, "Starter Candy...", "Start Candy nå");
+  }
+}
+
+async function handleCandyQuickCreateAndStart() {
+  const startPayload = getCandyQuickStartPayloadFromForm();
   setLoading(
     elements.candyQuickCreateStartBtn,
     true,
@@ -1241,32 +1317,15 @@ async function handleCandyQuickCreateAndStart() {
     "Opprett + Start Candy nå"
   );
   try {
-    const created = await apiRequest("/api/admin/rooms", {
-      method: "POST",
-      auth: true,
-      body: {
-        hallId,
-        hostName: "Candy Admin"
-      }
-    });
-
-    const started = await apiRequest(`/api/admin/rooms/${encodeURIComponent(created.roomCode)}/start`, {
-      method: "POST",
-      auth: true,
-      body: startPayload
-    });
-
-    await loadRooms();
-    elements.roomSelect.value = created.roomCode;
-    elements.candyQuickRoomSelect.value = created.roomCode;
-    await showSelectedRoomSnapshot().catch(() => undefined);
-
+    const { created, started, hallId } = await createAndStartCandyRoom(startPayload);
     setStatus(
       elements.candyQuickStatus,
       [
         `Candy rom opprettet + startet: ${created.roomCode}`,
         `Hall: ${hallId}`,
         `Host playerId: ${created.playerId || "-"}`,
+        `Innsats: ${startPayload.entryFee}`,
+        `Bonger/spiller: ${startPayload.ticketsPerPlayer}`,
         `Status: ${started.snapshot?.currentGame?.status || "-"}`,
         `Trukket: ${started.snapshot?.currentGame?.drawnNumbers?.length || 0}`
       ].join("\n"),
@@ -1290,7 +1349,7 @@ async function handleCandyQuickCreateAndStart() {
 
 async function handleCandyQuickStartExisting() {
   const roomCode = getCandyQuickSelectedRoomCode();
-  const startPayload = getCandyQuickStartPayload();
+  const startPayload = getCandyQuickStartPayloadFromForm();
 
   setLoading(
     elements.candyQuickStartExistingBtn,
@@ -1307,6 +1366,7 @@ async function handleCandyQuickStartExisting() {
 
     await loadRooms();
     elements.roomSelect.value = roomCode;
+    renderCandyQuickRoomOptions(roomCode);
     elements.candyQuickRoomSelect.value = roomCode;
     await showSelectedRoomSnapshot().catch(() => undefined);
 
@@ -1314,6 +1374,8 @@ async function handleCandyQuickStartExisting() {
       elements.candyQuickStatus,
       [
         `Candy spill startet i rom: ${roomCode}`,
+        `Innsats: ${startPayload.entryFee}`,
+        `Bonger/spiller: ${startPayload.ticketsPerPlayer}`,
         `Status: ${started.snapshot?.currentGame?.status || "-"}`,
         `Trukket: ${started.snapshot?.currentGame?.drawnNumbers?.length || 0}`
       ].join("\n"),
@@ -1332,6 +1394,67 @@ async function handleCandyQuickStartExisting() {
       "Starter Candy-rom...",
       "Start valgt Candy-rom"
     );
+  }
+}
+
+async function handleCandyQuickDrawNext() {
+  const roomCode = getCandyQuickSelectedRoomCode();
+  setLoading(elements.candyQuickDrawNextBtn, true, "Trekker...", "Trekk neste i valgt rom");
+  try {
+    const result = await apiRequest(`/api/admin/rooms/${encodeURIComponent(roomCode)}/draw-next`, {
+      method: "POST",
+      auth: true
+    });
+    await loadRooms();
+    elements.roomSelect.value = roomCode;
+    renderCandyQuickRoomOptions(roomCode);
+    elements.candyQuickRoomSelect.value = roomCode;
+    await showSelectedRoomSnapshot().catch(() => undefined);
+    setStatus(
+      elements.candyQuickStatus,
+      [
+        `Candy rom: ${roomCode}`,
+        `Neste tall: ${result.number}`,
+        `Trukket totalt: ${result.snapshot?.currentGame?.drawnNumbers?.length || 0}`
+      ].join("\n"),
+      "success"
+    );
+  } catch (error) {
+    setStatus(elements.candyQuickStatus, error.message || "Klarte ikke trekke neste i Candy-rom.", "error");
+  } finally {
+    setLoading(elements.candyQuickDrawNextBtn, false, "Trekker...", "Trekk neste i valgt rom");
+  }
+}
+
+async function handleCandyQuickEndRoom() {
+  const roomCode = getCandyQuickSelectedRoomCode();
+  setLoading(elements.candyQuickEndRoomBtn, true, "Avslutter...", "Avslutt valgt rom");
+  try {
+    const result = await apiRequest(`/api/admin/rooms/${encodeURIComponent(roomCode)}/end`, {
+      method: "POST",
+      auth: true,
+      body: {
+        reason: "Manual end from Candy quick control"
+      }
+    });
+    await loadRooms();
+    elements.roomSelect.value = roomCode;
+    renderCandyQuickRoomOptions(roomCode);
+    elements.candyQuickRoomSelect.value = roomCode;
+    await showSelectedRoomSnapshot().catch(() => undefined);
+    setStatus(
+      elements.candyQuickStatus,
+      [
+        `Candy rom avsluttet: ${roomCode}`,
+        `Status: ${result.snapshot?.currentGame?.status || "-"}`,
+        `Årsak: ${result.snapshot?.currentGame?.endedReason || "-"}`
+      ].join("\n"),
+      "success"
+    );
+  } catch (error) {
+    setStatus(elements.candyQuickStatus, error.message || "Klarte ikke avslutte Candy-rom.", "error");
+  } finally {
+    setLoading(elements.candyQuickEndRoomBtn, false, "Avslutter...", "Avslutt valgt rom");
   }
 }
 
@@ -2119,6 +2242,12 @@ async function bootstrap() {
     });
   });
 
+  elements.candyQuickStartNowBtn.addEventListener("click", () => {
+    handleCandyQuickStartNow().catch((error) => {
+      setStatus(elements.candyQuickStatus, error.message || "Kunne ikke starte Candy nå.", "error");
+    });
+  });
+
   elements.candyQuickCreateStartBtn.addEventListener("click", () => {
     handleCandyQuickCreateAndStart().catch((error) => {
       setStatus(elements.candyQuickStatus, error.message || "Kunne ikke opprette + starte Candy-rom.", "error");
@@ -2129,6 +2258,22 @@ async function bootstrap() {
     handleCandyQuickStartExisting().catch((error) => {
       setStatus(elements.candyQuickStatus, error.message || "Kunne ikke starte valgt Candy-rom.", "error");
     });
+  });
+
+  elements.candyQuickDrawNextBtn.addEventListener("click", () => {
+    handleCandyQuickDrawNext().catch((error) => {
+      setStatus(elements.candyQuickStatus, error.message || "Kunne ikke trekke neste i Candy-rom.", "error");
+    });
+  });
+
+  elements.candyQuickEndRoomBtn.addEventListener("click", () => {
+    handleCandyQuickEndRoom().catch((error) => {
+      setStatus(elements.candyQuickStatus, error.message || "Kunne ikke avslutte Candy-rom.", "error");
+    });
+  });
+
+  elements.candyQuickHallSelect.addEventListener("change", () => {
+    renderCandyQuickRoomOptions();
   });
 
   elements.loadComplianceBtn.addEventListener("click", () => {
@@ -2196,7 +2341,13 @@ async function bootstrap() {
   });
 
   elements.roomSelect.addEventListener("change", () => {
-    elements.candyQuickRoomSelect.value = elements.roomSelect.value;
+    const roomCode = (elements.roomSelect.value || "").trim().toUpperCase();
+    const selectedRoom = state.rooms.find((room) => room.code === roomCode);
+    if (selectedRoom) {
+      elements.candyQuickHallSelect.value = selectedRoom.hallId;
+      renderCandyQuickRoomOptions(roomCode);
+      elements.candyQuickRoomSelect.value = roomCode;
+    }
     showSelectedRoomSnapshot().catch((error) => {
       setStatus(elements.roomStatus, error.message || "Kunne ikke hente romstatus.", "error");
     });
@@ -2206,6 +2357,12 @@ async function bootstrap() {
     const roomCode = (elements.candyQuickRoomSelect.value || "").trim().toUpperCase();
     if (!roomCode) {
       return;
+    }
+    const selectedRoom = state.rooms.find((room) => room.code === roomCode);
+    if (selectedRoom) {
+      elements.candyQuickHallSelect.value = selectedRoom.hallId;
+      renderCandyQuickRoomOptions(roomCode);
+      elements.candyQuickRoomSelect.value = roomCode;
     }
     elements.roomSelect.value = roomCode;
     showSelectedRoomSnapshot().catch((error) => {
