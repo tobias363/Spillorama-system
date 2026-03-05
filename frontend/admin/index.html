@@ -514,6 +514,34 @@
             <button id="candyLoadSettingsBtn" class="secondary">Last fra backend</button>
             <button id="candySaveSettingsBtn">Lagre Candy-drift</button>
           </div>
+          <h3>Start Candy-spill nå (backend)</h3>
+          <p class="muted">
+            Hurtigkontroll for Candy. Opprett og start rom direkte her uten å gå til Romkontroll-seksjonen.
+          </p>
+          <div class="grid">
+            <div class="field">
+              <label for="candyQuickHallSelect">Hall</label>
+              <select id="candyQuickHallSelect"></select>
+            </div>
+            <div class="field">
+              <label for="candyQuickRoomSelect">Eksisterende rom</label>
+              <select id="candyQuickRoomSelect"></select>
+            </div>
+            <div class="field">
+              <label for="candyQuickEntryFee">Innsats (entry fee)</label>
+              <input id="candyQuickEntryFee" type="number" min="0" step="0.01" value="0" />
+            </div>
+            <div class="field">
+              <label for="candyQuickTicketsPerPlayer">Bonger per spiller</label>
+              <input id="candyQuickTicketsPerPlayer" type="number" min="1" max="5" step="1" value="4" />
+            </div>
+          </div>
+          <div class="toolbar">
+            <button id="candyQuickCreateStartBtn">Opprett + Start Candy nå</button>
+            <button id="candyQuickStartExistingBtn" class="secondary">Start valgt Candy-rom</button>
+            <button id="candyQuickRefreshRoomsBtn" class="secondary">Oppdater hall/rom</button>
+          </div>
+          <pre id="candyQuickStatus" class="status">Ingen Candy rom-kjøring startet.</pre>
           <pre id="candySettingsStatus" class="status">Ingen Candy-driftinnstillinger lastet.</pre>
         </article>
 
