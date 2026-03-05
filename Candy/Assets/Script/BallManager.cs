@@ -27,6 +27,7 @@ public class BallManager : MonoBehaviour
     [SerializeField]
     private List<int> ballIndexList = new List<int>();
     [SerializeField] private bool verboseDrawLogging = false;
+    [SerializeField] [Range(0.1f, 1f)] private float testingGlassAnimationSpeedMultiplier = 0.5f;
     private int[] extraBallPosArr = new int[5] { -140, -70, 140, 70, 0 };
     private List<GameObject> instantiatedExtraBall = new List<GameObject>();
     private readonly List<Vector3> realtimeBallLayoutPositions = new List<Vector3>();
@@ -38,6 +39,7 @@ public class BallManager : MonoBehaviour
     private Coroutine ballAnimationRoutine;
     private Coroutine extraBallBatchRoutine;
     private TextMeshProUGUI cachedBigBallText;
+    private Animator cachedGlassAnimator;
 
     private void OnEnable()
     {
@@ -51,6 +53,8 @@ public class BallManager : MonoBehaviour
         CacheBallComponentRefs();
         CacheExtraBallTextRefs();
         cachedBigBallText = ResolveBigBallText();
+        CacheGlassAnimator();
+        ApplyGlassAnimationSpeed();
 
         SetActiveIfChanged(ballOutMachineAnimParent, true);
         SetActiveIfChanged(bigBallImg != null ? bigBallImg.gameObject : null, false);
@@ -61,6 +65,34 @@ public class BallManager : MonoBehaviour
         CacheRealtimeBallLayoutPositions();
 
 
+    }
+
+    private void CacheGlassAnimator()
+    {
+        if (cachedGlassAnimator != null)
+        {
+            return;
+        }
+
+        if (ballOutMachineAnimParent == null)
+        {
+            return;
+        }
+
+        cachedGlassAnimator = ballOutMachineAnimParent.GetComponent<Animator>();
+    }
+
+    private void ApplyGlassAnimationSpeed()
+    {
+        if (cachedGlassAnimator == null)
+        {
+            return;
+        }
+
+        bool isTestingSpeedContext = Time.timeScale > 1f && (Application.isEditor || Debug.isDebugBuild);
+        cachedGlassAnimator.speed = isTestingSpeedContext
+            ? Mathf.Clamp(testingGlassAnimationSpeedMultiplier, 0.1f, 1f)
+            : 1f;
     }
 
     private void OnDisable()
