@@ -2,7 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import type { BingoSystemAdapter } from "../adapters/BingoSystemAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
-import { hasAnyCompleteLine, hasFullBingo, makeRoomCode, makeShuffledBallBag, ticketContainsNumber } from "./ticket.js";
+import {
+  findFirstCompleteLinePatternIndex,
+  hasFullBingo,
+  makeRoomCode,
+  makeShuffledBallBag,
+  ticketContainsNumber
+} from "./ticket.js";
 import type {
   ClaimRecord,
   ClaimType,
@@ -307,6 +313,7 @@ const POLICY_WILDCARD = "*";
 const DEFAULT_SELF_EXCLUSION_MIN_MS = 365 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_DRAWS_PER_ROUND = 30;
 const MAX_BINGO_BALLS = 75;
+const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
 
 export class BingoEngine {
   private readonly rooms = new Map<string, RoomState>();
@@ -678,12 +685,25 @@ export class BingoEngine {
 
     let valid = false;
     let reason: string | undefined;
+    let winningPatternIndex: number | undefined;
 
     if (input.type === "LINE") {
       if (game.lineWinnerId) {
         reason = "LINE_ALREADY_CLAIMED";
       } else {
-        valid = playerTickets.some((ticket, index) => hasAnyCompleteLine(ticket, playerMarks[index]));
+        for (let ticketIndex = 0; ticketIndex < playerTickets.length; ticketIndex += 1) {
+          const resolvedPatternIndex = findFirstCompleteLinePatternIndex(
+            playerTickets[ticketIndex],
+            playerMarks[ticketIndex]
+          );
+          if (resolvedPatternIndex < 0) {
+            continue;
+          }
+
+          valid = true;
+          winningPatternIndex = resolvedPatternIndex;
+          break;
+        }
         if (!valid) {
           reason = "NO_VALID_LINE";
         }
@@ -705,6 +725,10 @@ export class BingoEngine {
       reason,
       createdAt: new Date().toISOString()
     };
+    if (winningPatternIndex !== undefined) {
+      claim.winningPatternIndex = winningPatternIndex;
+      claim.patternIndex = winningPatternIndex;
+    }
     game.claims.push(claim);
     const gameType: LedgerGameType = "DATABINGO";
     const channel: LedgerChannel = "INTERNET";
@@ -775,6 +799,10 @@ export class BingoEngine {
       claim.rtpBudgetBefore = rtpBudgetBefore;
       claim.rtpBudgetAfter = rtpBudgetAfter;
       claim.rtpCapped = payout < requestedAfterPolicyAndPool;
+      claim.bonusTriggered = winningPatternIndex === DEFAULT_BONUS_TRIGGER_PATTERN_INDEX;
+      if (claim.bonusTriggered) {
+        claim.bonusAmount = payout;
+      }
     }
 
     if (valid && input.type === "BINGO") {

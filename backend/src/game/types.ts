@@ -20,6 +20,10 @@ export interface ClaimRecord {
   type: ClaimType;
   valid: boolean;
   reason?: string;
+  winningPatternIndex?: number;
+  patternIndex?: number;
+  bonusTriggered?: boolean;
+  bonusAmount?: number;
   payoutAmount?: number;
   payoutPolicyVersion?: string;
   payoutWasCapped?: boolean;
