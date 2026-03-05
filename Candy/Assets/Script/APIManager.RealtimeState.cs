@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using SimpleJSON;
 using TMPro;
 using UnityEngine;
@@ -9,6 +10,7 @@ public partial class APIManager
 {
     private struct RealtimeClaimInfo
     {
+        public string ClaimId;
         public string ClaimType;
         public JSONNode ClaimNode;
     }
@@ -57,6 +59,7 @@ public partial class APIManager
             }
 
             StopRealtimeNearWinBlinking();
+            ResetRealtimeBonusState(closeBonusPanel: true);
 
             activeGameId = string.Empty;
             processedDrawCount = 0;
@@ -77,6 +80,7 @@ public partial class APIManager
 
         if (!string.Equals(activeGameId, gameId, StringComparison.Ordinal))
         {
+            string previousGameId = activeGameId;
             activeGameId = gameId;
             processedDrawCount = 0;
             currentTicketPage = 0;
@@ -89,6 +93,7 @@ public partial class APIManager
             }
 
             StopRealtimeNearWinBlinking();
+            ResetRealtimeBonusState(closeBonusPanel: true, previousGameId: previousGameId);
         }
 
         ApplyMyTicketToCards(currentGame);
@@ -285,6 +290,7 @@ public partial class APIManager
             generator.ClearPaylineVisuals();
             StopRealtimeNearWinBlinking();
             NumberGenerator.isPrizeMissedByOneCard = false;
+            RefreshRealtimeBonusFlow(currentGame, default, null);
             return;
         }
 
@@ -327,6 +333,7 @@ public partial class APIManager
 
         SyncRealtimeNearWinBlinking(activeNearWinKeys, generator.cardClasses);
         NumberGenerator.isPrizeMissedByOneCard = activeNearWinKeys.Count > 0;
+        RefreshRealtimeBonusFlow(currentGame, latestClaim, winningPatternsByCard);
     }
 
     private RealtimeClaimInfo GetLatestValidClaimForCurrentPlayer(JSONNode currentGame)
@@ -358,10 +365,12 @@ public partial class APIManager
 
             string claimType = claim["type"];
             if (string.Equals(claimType, "LINE", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(claimType, "BINGO", StringComparison.OrdinalIgnoreCase))
+                string.Equals(claimType, "BINGO", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(claimType, "BONUS", StringComparison.OrdinalIgnoreCase))
             {
                 return new RealtimeClaimInfo
                 {
+                    ClaimId = claim["id"],
                     ClaimType = claimType.Trim().ToUpperInvariant(),
                     ClaimNode = claim
                 };
@@ -890,6 +899,339 @@ public partial class APIManager
         HideAllMissingPatternVisuals(cards);
     }
 
+    private void RefreshRealtimeBonusFlow(
+        JSONNode currentGame,
+        RealtimeClaimInfo latestClaim,
+        Dictionary<int, int> winningPatternsByCard)
+    {
+        if (string.IsNullOrWhiteSpace(activeGameId))
+        {
+            return;
+        }
+
+        if (string.Equals(realtimeBonusTriggeredGameId, activeGameId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (!TryResolveRealtimeBonusTrigger(latestClaim, winningPatternsByCard, out string triggerSource))
+        {
+            return;
+        }
+
+        if (!TryResolveRealtimeBonusAmount(currentGame, latestClaim, out int bonusAmount, out string amountSource))
+        {
+            string missingKey = $"{activeGameId}:{latestClaim.ClaimId}";
+            if (!string.Equals(realtimeBonusMissingDataLogKey, missingKey, StringComparison.Ordinal))
+            {
+                realtimeBonusMissingDataLogKey = missingKey;
+                Debug.LogWarning(
+                    $"[APIManager] Realtime bonus-trigger ({triggerSource}) ble funnet i game {activeGameId}, " +
+                    $"men bonusbelop mangler i snapshot/claim. Forventet: claim.bonusAmount / claim.payload.bonusAmount / " +
+                    $"currentGame.bonusByPlayer[playerId] / currentGame.bonusAmount.");
+            }
+            return;
+        }
+
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        if (generator == null)
+        {
+            Debug.LogError($"[APIManager] Realtime bonus-trigger ({triggerSource}) funnet, men NumberGenerator mangler.");
+            return;
+        }
+
+        bonusAMT = bonusAmount;
+        if (!generator.TryOpenRealtimeBonusPanel(bonusAmount, activeGameId, latestClaim.ClaimId))
+        {
+            return;
+        }
+
+        realtimeBonusTriggeredGameId = activeGameId;
+        realtimeBonusTriggeredClaimId = latestClaim.ClaimId ?? string.Empty;
+        realtimeBonusMissingDataLogKey = string.Empty;
+        Debug.Log($"[APIManager] Realtime bonus-trigger aktivert ({triggerSource}). bonusAMT={bonusAmount} ({amountSource}) game={activeGameId} claim={realtimeBonusTriggeredClaimId}");
+    }
+
+    private bool TryResolveRealtimeBonusTrigger(
+        RealtimeClaimInfo latestClaim,
+        Dictionary<int, int> winningPatternsByCard,
+        out string triggerSource)
+    {
+        triggerSource = string.Empty;
+        if (latestClaim.ClaimNode == null || latestClaim.ClaimNode.IsNull)
+        {
+            return false;
+        }
+
+        if (string.Equals(latestClaim.ClaimType, "BONUS", StringComparison.OrdinalIgnoreCase))
+        {
+            triggerSource = "claim.type=BONUS";
+            return true;
+        }
+
+        if (HasTruthyBonusFlag(latestClaim.ClaimNode))
+        {
+            triggerSource = "claim.bonusFlag";
+            return true;
+        }
+
+        if (!string.Equals(latestClaim.ClaimType, "LINE", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (winningPatternsByCard == null)
+        {
+            return false;
+        }
+
+        foreach (KeyValuePair<int, int> cardWin in winningPatternsByCard)
+        {
+            if (cardWin.Value == realtimeBonusPatternIndex)
+            {
+                triggerSource = $"winningPatternIndex={realtimeBonusPatternIndex}";
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool HasTruthyBonusFlag(JSONNode claimNode)
+    {
+        if (claimNode == null || claimNode.IsNull)
+        {
+            return false;
+        }
+
+        if (IsTruthyNode(claimNode["bonusTriggered"]) ||
+            IsTruthyNode(claimNode["hasBonus"]) ||
+            IsTruthyNode(claimNode["isBonus"]))
+        {
+            return true;
+        }
+
+        JSONNode payload = claimNode["payload"];
+        return IsTruthyNode(payload?["bonusTriggered"]) ||
+               IsTruthyNode(payload?["hasBonus"]) ||
+               IsTruthyNode(payload?["isBonus"]);
+    }
+
+    private bool IsTruthyNode(JSONNode node)
+    {
+        if (node == null || node.IsNull)
+        {
+            return false;
+        }
+
+        if (bool.TryParse(node.Value, out bool boolValue))
+        {
+            return boolValue;
+        }
+
+        if (int.TryParse(node.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int intValue))
+        {
+            return intValue != 0;
+        }
+
+        return node.AsBool;
+    }
+
+    private bool TryResolveRealtimeBonusAmount(
+        JSONNode currentGame,
+        RealtimeClaimInfo latestClaim,
+        out int bonusAmount,
+        out string source)
+    {
+        bonusAmount = 0;
+        source = string.Empty;
+
+        if (TryResolveBonusAmountFromNode(latestClaim.ClaimNode, out bonusAmount, out source))
+        {
+            source = $"claim.{source}";
+            return true;
+        }
+
+        JSONNode claimPayload = latestClaim.ClaimNode?["payload"];
+        if (TryResolveBonusAmountFromNode(claimPayload, out bonusAmount, out source))
+        {
+            source = $"claim.payload.{source}";
+            return true;
+        }
+
+        if (TryResolveBonusAmountFromNode(currentGame, out bonusAmount, out source))
+        {
+            source = $"currentGame.{source}";
+            return true;
+        }
+
+        if (TryResolveBonusAmountFromPlayerMap(currentGame?["bonusByPlayer"], out bonusAmount))
+        {
+            source = $"currentGame.bonusByPlayer[{activePlayerId}]";
+            return true;
+        }
+
+        if (TryResolveBonusAmountFromPlayerMap(currentGame?["bonusAmounts"], out bonusAmount))
+        {
+            source = $"currentGame.bonusAmounts[{activePlayerId}]";
+            return true;
+        }
+
+        if (TryResolveBonusAmountFromPlayerMap(currentGame?["bonusAwards"], out bonusAmount))
+        {
+            source = $"currentGame.bonusAwards[{activePlayerId}]";
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveBonusAmountFromNode(JSONNode node, out int bonusAmount, out string source)
+    {
+        bonusAmount = 0;
+        source = string.Empty;
+        if (node == null || node.IsNull)
+        {
+            return false;
+        }
+
+        if (TryParsePositiveAmount(node["bonusAmount"], out bonusAmount))
+        {
+            source = "bonusAmount";
+            return true;
+        }
+
+        if (TryParsePositiveAmount(node["bonusAmt"], out bonusAmount))
+        {
+            source = "bonusAmt";
+            return true;
+        }
+
+        if (TryParsePositiveAmount(node["bonusPayout"], out bonusAmount))
+        {
+            source = "bonusPayout";
+            return true;
+        }
+
+        if (TryParsePositiveAmount(node["bonusValue"], out bonusAmount))
+        {
+            source = "bonusValue";
+            return true;
+        }
+
+        JSONNode bonusNode = node["bonus"];
+        if (TryParseBonusAmountFromGenericNode(bonusNode, out bonusAmount))
+        {
+            source = "bonus";
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveBonusAmountFromPlayerMap(JSONNode mapNode, out int bonusAmount)
+    {
+        bonusAmount = 0;
+        if (mapNode == null || mapNode.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            return false;
+        }
+
+        JSONNode playerNode = mapNode[activePlayerId];
+        return TryParseBonusAmountFromGenericNode(playerNode, out bonusAmount);
+    }
+
+    private bool TryParseBonusAmountFromGenericNode(JSONNode node, out int bonusAmount)
+    {
+        bonusAmount = 0;
+        if (node == null || node.IsNull)
+        {
+            return false;
+        }
+
+        if (TryParsePositiveAmount(node, out bonusAmount))
+        {
+            return true;
+        }
+
+        if (TryParsePositiveAmount(node["amount"], out bonusAmount))
+        {
+            return true;
+        }
+
+        if (TryParsePositiveAmount(node["bonusAmount"], out bonusAmount))
+        {
+            return true;
+        }
+
+        if (TryParsePositiveAmount(node["value"], out bonusAmount))
+        {
+            return true;
+        }
+
+        if (TryParsePositiveAmount(node["payout"], out bonusAmount))
+        {
+            return true;
+        }
+
+        if (TryParsePositiveAmount(node["bonusPayout"], out bonusAmount))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryParsePositiveAmount(JSONNode node, out int value)
+    {
+        value = 0;
+        if (node == null || node.IsNull)
+        {
+            return false;
+        }
+
+        string raw = node.Value;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int intValue))
+        {
+            if (intValue > 0)
+            {
+                value = intValue;
+                return true;
+            }
+
+            return false;
+        }
+
+        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double doubleValue) && doubleValue > 0d)
+        {
+            value = Mathf.RoundToInt((float)doubleValue);
+            return value > 0;
+        }
+
+        return false;
+    }
+
+    private void ResetRealtimeBonusState(bool closeBonusPanel, string previousGameId = null)
+    {
+        bonusAMT = 0;
+        realtimeBonusTriggeredGameId = string.Empty;
+        realtimeBonusTriggeredClaimId = string.Empty;
+        realtimeBonusMissingDataLogKey = string.Empty;
+
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        if (generator == null)
+        {
+            return;
+        }
+
+        generator.ResetRealtimeBonusFlow(closeBonusPanel, previousGameId);
+    }
+
     private int GetCardSlotsCount()
     {
         NumberGenerator generator = GameManager.instance?.numberGenerator;
@@ -915,6 +1257,7 @@ public partial class APIManager
         currentTicketPage = 0;
         activeTicketSets.Clear();
         StopRealtimeNearWinBlinking();
+        ResetRealtimeBonusState(closeBonusPanel: true);
         nextScheduledRoomStateRefreshAt = -1f;
         nextScheduledManualStartAttemptAt = -1f;
 

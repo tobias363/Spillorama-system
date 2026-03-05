@@ -42,6 +42,7 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] [Min(120f)] private float realtimeCountdownMinWidth = 240f;
     [SerializeField] [Min(0f)] private float realtimeCountdownEdgePadding = 32f;
     [SerializeField] [Range(0.1f, 0.6f)] private float realtimeNearWinBlinkInterval = 0.25f;
+    [SerializeField] [Min(0)] private int realtimeBonusPatternIndex = 1;
     [SerializeField] [Range(1, 5)] private int realtimeTicketsPerPlayer = 4;
     [SerializeField] private int realtimeEntryFee = 0;
     [SerializeField] private BallManager ballManager;
@@ -79,6 +80,9 @@ public partial class APIManager : MonoBehaviour
     private readonly RealtimeCountdownPresenter realtimeCountdownPresenter = new();
     private readonly RealtimeRoomConfigurator realtimeRoomConfigurator = new();
     private readonly Dictionary<int, Coroutine> realtimeNearWinBlinkCoroutines = new();
+    private string realtimeBonusTriggeredGameId = string.Empty;
+    private string realtimeBonusTriggeredClaimId = string.Empty;
+    private string realtimeBonusMissingDataLogKey = string.Empty;
 
     public bool UseRealtimeBackend => useRealtimeBackend;
     public string ActiveRoomCode => activeRoomCode;
@@ -112,6 +116,7 @@ public partial class APIManager : MonoBehaviour
     void OnDisable()
     {
         StopRealtimeNearWinBlinking();
+        ResetRealtimeBonusState(closeBonusPanel: true);
 
         if (realtimeClient != null)
         {

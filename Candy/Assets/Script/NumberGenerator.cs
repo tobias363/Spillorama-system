@@ -67,6 +67,8 @@ public class NumberGenerator : MonoBehaviour
     // private float secondsOfARealDay = 24 * 60 * 60;
     public double elapsedRealTime;
     public bool showFreeExtraBalls = false;
+    private string realtimeBonusOpenedGameId = string.Empty;
+    private string realtimeBonusOpenedClaimId = string.Empty;
 
     private void OnEnable()
     {
@@ -94,10 +96,7 @@ public class NumberGenerator : MonoBehaviour
 
         paylineManager = new PaylineManager(this);
         extraBallObj.SetActive(false);
-        if (bonusMainObj != null)
-        {
-            bonusMainObj.SetActive(false);
-        }
+        ResetRealtimeBonusFlow(closeBonusPanel: true);
         autoSpinRemainingPlayText.text = "";
         EventManager.isPlayOver = true;
         totalSelectedPatterns.Clear();
@@ -990,6 +989,57 @@ public class NumberGenerator : MonoBehaviour
 
     bool isBonusSelected;
 
+    public bool TryOpenRealtimeBonusPanel(int resolvedBonusAmount, string gameId, string claimId)
+    {
+        if (resolvedBonusAmount <= 0)
+        {
+            Debug.LogWarning($"[NumberGenerator] Realtime bonus ble trigget uten gyldig bonusbelop: {resolvedBonusAmount}.");
+            return false;
+        }
+
+        if (bonusMainObj == null)
+        {
+            Debug.LogError("[NumberGenerator] bonusMainObj mangler. Kan ikke vise bonuspanel.");
+            return false;
+        }
+
+        string normalizedGameId = string.IsNullOrWhiteSpace(gameId) ? "__UNKNOWN_GAME__" : gameId.Trim();
+        if (string.Equals(realtimeBonusOpenedGameId, normalizedGameId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        APIManager manager = APIManager.instance;
+        if (manager != null)
+        {
+            manager.bonusAMT = resolvedBonusAmount;
+        }
+
+        realtimeBonusOpenedGameId = normalizedGameId;
+        realtimeBonusOpenedClaimId = claimId ?? string.Empty;
+        isBonusSelected = true;
+        bonusMainObj.SetActive(true);
+        return true;
+    }
+
+    public void ResetRealtimeBonusFlow(bool closeBonusPanel, string previousGameId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(previousGameId) &&
+            !string.Equals(realtimeBonusOpenedGameId, previousGameId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        realtimeBonusOpenedGameId = string.Empty;
+        realtimeBonusOpenedClaimId = string.Empty;
+        isBonusSelected = false;
+
+        if (closeBonusPanel && bonusMainObj != null)
+        {
+            bonusMainObj.SetActive(false);
+        }
+    }
+
     void StartBonus()
     {
         bonusMainObj.SetActive(true);
@@ -1006,10 +1056,7 @@ public class NumberGenerator : MonoBehaviour
         if (random.Count != 0) random.Clear();
         if (generatedNO.Count != 0) generatedNO.Clear();
         ClearPaylineVisuals();
-        if (bonusMainObj != null)
-        {
-            bonusMainObj.SetActive(false);
-        }
+        ResetRealtimeBonusFlow(closeBonusPanel: true);
         if (extraBallObj != null)
         {
             extraBallObj.SetActive(false);
