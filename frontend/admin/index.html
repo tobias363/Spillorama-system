@@ -187,8 +187,96 @@
         background: #f3f4f6;
       }
 
+      .admin-nav a.active {
+        background: #111827;
+        border-color: #111827;
+        color: #fff;
+      }
+
+      .admin-section {
+        margin-top: 0;
+      }
+
       .admin-content .card:first-child {
         margin-top: 0;
+      }
+
+      .settings-fields {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .settings-empty {
+        margin: 0;
+        color: #4b5563;
+      }
+
+      .settings-field-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #f9fafb;
+        padding: 12px;
+      }
+
+      .settings-field-card h3 {
+        margin: 0 0 6px;
+        font-size: 15px;
+      }
+
+      .settings-field-description {
+        margin: 0 0 8px;
+        color: #4b5563;
+        font-size: 13px;
+      }
+
+      .settings-field-meta {
+        margin-top: 8px;
+        color: #4b5563;
+        font-size: 12px;
+      }
+
+      .settings-state {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .settings-save-state {
+        border-radius: 999px;
+        padding: 4px 10px;
+        background: #e5e7eb;
+        color: #111827;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .settings-save-state.saving {
+        background: #dbeafe;
+        color: #1e3a8a;
+      }
+
+      .settings-save-state.saved {
+        background: #dcfce7;
+        color: #166534;
+      }
+
+      .settings-save-state.error {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      .field-error {
+        margin: 6px 0 0;
+        min-height: 16px;
+        color: #991b1b;
+        font-size: 12px;
+      }
+
+      .input-error {
+        border-color: #dc2626;
       }
 
       @media (max-width: 980px) {
@@ -246,6 +334,7 @@
           <aside class="card admin-sidebar">
             <h2>Meny</h2>
             <nav class="admin-nav">
+              <a href="#section-game-settings">Spillinnstillinger</a>
               <a href="#section-candy-mania">Candy (spill + drift)</a>
               <a href="#section-games">Spillkatalog (andre spill)</a>
               <a href="#section-halls">Haller</a>
@@ -258,7 +347,44 @@
           </aside>
 
           <div class="admin-content">
-        <article id="section-games" class="card">
+        <article id="section-game-settings" class="card admin-section">
+          <div class="section-header">
+            <h2>Spillinnstillinger</h2>
+            <div class="settings-state">
+              <span id="settingsSaveState" class="settings-save-state">Ikke lagret</span>
+              <span id="settingsDirtyState" class="muted">Ingen ulagrede endringer.</span>
+            </div>
+          </div>
+          <p class="muted">
+            Rediger innstillinger via felter fra settings-katalogen. Rå JSON ligger under avansert modus.
+          </p>
+          <div class="grid">
+            <div class="field full">
+              <label for="settingsGameSelect">Spill</label>
+              <select id="settingsGameSelect"></select>
+            </div>
+          </div>
+          <div id="settingsFields" class="settings-fields">
+            <p class="settings-empty">Ingen katalog lastet.</p>
+          </div>
+          <details>
+            <summary>Avansert JSON (superbruker)</summary>
+            <div class="field full" style="margin-top: 10px">
+              <label for="settingsAdvancedJson">Rå settings JSON</label>
+              <textarea id="settingsAdvancedJson"></textarea>
+            </div>
+            <div class="toolbar">
+              <button id="settingsApplyJsonBtn" class="secondary">Bruk JSON i feltene</button>
+            </div>
+          </details>
+          <div class="toolbar">
+            <button id="settingsSaveBtn">Lagre innstillinger</button>
+            <button id="settingsReloadBtn" class="secondary">Last på nytt</button>
+          </div>
+          <pre id="settingsStatus" class="status">Klar.</pre>
+        </article>
+
+        <article id="section-games" class="card admin-section">
           <div class="section-header">
             <h2>Spillkatalog (andre spill)</h2>
             <p id="adminIdentity" class="muted"></p>
@@ -305,7 +431,7 @@
           <pre id="adminStatus" class="status">Klar.</pre>
         </article>
 
-        <article id="section-halls" class="card">
+        <article id="section-halls" class="card admin-section">
           <h2>Haller</h2>
           <div class="grid">
             <div class="field full">
@@ -344,7 +470,7 @@
           <pre id="hallStatus" class="status">Ingen haller lastet.</pre>
         </article>
 
-        <article id="section-terminals" class="card">
+        <article id="section-terminals" class="card admin-section">
           <h2>Terminaler</h2>
           <div class="grid-3">
             <div class="field">
@@ -383,7 +509,7 @@
           <pre id="terminalStatus" class="status">Ingen terminaler lastet.</pre>
         </article>
 
-        <article id="section-hall-rules" class="card">
+        <article id="section-hall-rules" class="card admin-section">
           <h2>Hall-spillregler</h2>
           <p class="muted">Styr per hall om spillet er aktivt, maks bonger og minimumsintervall mellom runder.</p>
           <div class="grid">
@@ -418,7 +544,7 @@
           <pre id="configStatus" class="status">Ingen konfig lastet.</pre>
         </article>
 
-        <article id="section-candy-mania" class="card">
+        <article id="section-candy-mania" class="card admin-section">
           <h2>Candy (spill + drift)</h2>
           <p class="muted">
             Alt som gjelder Candy styres her: spillkatalog-felt, scheduler, auto-trekk og RTP.
@@ -556,7 +682,7 @@
           <pre id="candySettingsStatus" class="status">Ingen Candy-driftinnstillinger lastet.</pre>
         </article>
 
-        <article id="section-wallet-compliance" class="card">
+        <article id="section-wallet-compliance" class="card admin-section">
           <h2>Wallet Compliance</h2>
           <p class="muted">
             Hent compliance-status for wallet og styr tapsgrenser, pause og selvekskludering.
@@ -600,7 +726,7 @@
           <pre id="extraDrawDenialsStatus" class="status">Ingen denial-data hentet.</pre>
         </article>
 
-        <article id="section-prize-policy" class="card">
+        <article id="section-prize-policy" class="card admin-section">
           <h2>Prize Policy & Extra Prize</h2>
           <p class="muted">
             Se aktiv premiepolicy, oppdater policy og tildel ekstra premie manuelt.
@@ -667,7 +793,7 @@
           <pre id="extraPrizeStatus" class="status">Ingen extra prize sendt.</pre>
         </article>
 
-        <article id="section-room-control" class="card">
+        <article id="section-room-control" class="card admin-section">
           <h2>Romkontroll (Backend)</h2>
           <div class="grid">
             <div class="field">

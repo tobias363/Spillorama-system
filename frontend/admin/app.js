@@ -3,15 +3,16 @@ const CANDY_GAME_SLUG = "candy";
 
 // Chat3: RBAC block start
 const CHAT3_SECTION_ACCESS_RULES = {
-  "section-games": { permissions: ["GAME_CATALOG_READ"], mode: "all" },
-  "section-settings-change-log": { permissions: ["GAME_SETTINGS_CHANGELOG_READ"], mode: "all" },
+  "section-game-settings": { permissions: ["GAME_CATALOG_READ"], mode: "all" },
   "section-candy-mania": { permissions: ["GAME_CATALOG_READ", "ROOM_CONTROL_READ"], mode: "any" },
+  "section-games": { permissions: ["GAME_CATALOG_READ"], mode: "all" },
   "section-halls": { permissions: ["HALL_READ"], mode: "all" },
   "section-terminals": { permissions: ["TERMINAL_READ"], mode: "all" },
   "section-hall-rules": { permissions: ["HALL_GAME_CONFIG_READ"], mode: "all" },
   "section-wallet-compliance": { permissions: ["WALLET_COMPLIANCE_READ"], mode: "all" },
   "section-prize-policy": { permissions: ["PRIZE_POLICY_READ"], mode: "all" },
-  "section-room-control": { permissions: ["ROOM_CONTROL_READ"], mode: "all" }
+  "section-room-control": { permissions: ["ROOM_CONTROL_READ"], mode: "all" },
+  "section-settings-change-log": { permissions: ["GAME_SETTINGS_CHANGELOG_READ"], mode: "all" }
 };
 
 const CHAT3_ACTION_PERMISSION_RULES = {
@@ -35,6 +36,12 @@ const CHAT3_ACTION_PERMISSION_RULES = {
   candyQuickDrawNextBtn: "ROOM_CONTROL_WRITE",
   candyQuickEndRoomBtn: "ROOM_CONTROL_WRITE",
   candyQuickRefreshRoomsBtn: "ROOM_CONTROL_READ",
+  refreshRoomsBtn: "ROOM_CONTROL_READ",
+  createRoomBtn: "ROOM_CONTROL_WRITE",
+  createAndStartRoomBtn: "ROOM_CONTROL_WRITE",
+  startRoomBtn: "ROOM_CONTROL_WRITE",
+  drawNextBtn: "ROOM_CONTROL_WRITE",
+  endRoomBtn: "ROOM_CONTROL_WRITE",
   loadComplianceBtn: "WALLET_COMPLIANCE_READ",
   saveLossLimitsBtn: "WALLET_COMPLIANCE_WRITE",
   setTimedPauseBtn: "WALLET_COMPLIANCE_WRITE",
@@ -45,15 +52,11 @@ const CHAT3_ACTION_PERMISSION_RULES = {
   loadPrizePolicyBtn: "PRIZE_POLICY_READ",
   savePrizePolicyBtn: "PRIZE_POLICY_WRITE",
   awardExtraPrizeBtn: "EXTRA_PRIZE_AWARD",
-  refreshRoomsBtn: "ROOM_CONTROL_READ",
-  createRoomBtn: "ROOM_CONTROL_WRITE",
-  createAndStartRoomBtn: "ROOM_CONTROL_WRITE",
-  startRoomBtn: "ROOM_CONTROL_WRITE",
-  drawNextBtn: "ROOM_CONTROL_WRITE",
-  endRoomBtn: "ROOM_CONTROL_WRITE",
   settingsLogLoadBtn: "GAME_SETTINGS_CHANGELOG_READ"
 };
 // Chat3: RBAC block end
+const SECTION_HASH_PREFIX = "#section-";
+const DEFAULT_ADMIN_SECTION_ID = "section-game-settings";
 
 const elements = {
   loginCard: document.getElementById("loginCard"),
@@ -61,14 +64,22 @@ const elements = {
   loginStatus: document.getElementById("loginStatus"),
   adminStatus: document.getElementById("adminStatus"),
   adminIdentity: document.getElementById("adminIdentity"),
-  // Chat3: RBAC block start
-  adminNavLinks: Array.from(document.querySelectorAll(".admin-nav a[href^='#section-']")),
-  adminSections: Array.from(document.querySelectorAll("article[id^='section-']")),
-  adminSidebar: document.querySelector(".admin-sidebar"),
-  // Chat3: RBAC block end
   email: document.getElementById("email"),
   password: document.getElementById("password"),
   loginBtn: document.getElementById("loginBtn"),
+  adminNavLinks: Array.from(document.querySelectorAll(".admin-nav a[href^='#section-']")),
+  adminSections: Array.from(document.querySelectorAll(".admin-content .admin-section")),
+  adminSidebar: document.querySelector(".admin-sidebar"),
+
+  settingsGameSelect: document.getElementById("settingsGameSelect"),
+  settingsFields: document.getElementById("settingsFields"),
+  settingsSaveState: document.getElementById("settingsSaveState"),
+  settingsDirtyState: document.getElementById("settingsDirtyState"),
+  settingsAdvancedJson: document.getElementById("settingsAdvancedJson"),
+  settingsApplyJsonBtn: document.getElementById("settingsApplyJsonBtn"),
+  settingsSaveBtn: document.getElementById("settingsSaveBtn"),
+  settingsReloadBtn: document.getElementById("settingsReloadBtn"),
+  settingsStatus: document.getElementById("settingsStatus"),
 
   gameSelect: document.getElementById("gameSelect"),
   title: document.getElementById("title"),
@@ -214,6 +225,16 @@ const state = {
   rooms: [],
   hallGameConfigs: [],
   candySettings: null,
+  activeSectionId: "",
+  settingsCatalog: [],
+  settingsCatalogBySlug: {},
+  settingsCurrentGameSlug: "",
+  settingsOriginal: {},
+  settingsDraft: {},
+  settingsFieldErrors: {},
+  settingsFieldInputs: new Map(),
+  settingsDirty: false,
+  settingsSaveState: "Ikke lagret",
   // Chat3: RBAC block start
   adminPermissions: [],
   adminPermissionMap: {},
@@ -353,6 +374,7 @@ function showLogin() {
 function showAdmin() {
   elements.loginCard.classList.add("hidden");
   elements.adminCard.classList.remove("hidden");
+  applyAdminSectionFromHash({ syncHash: true });
 }
 
 // Chat3: RBAC block start
@@ -381,7 +403,7 @@ function chat3EnsureUiExtensions() {
     if (adminContent) {
       const section = document.createElement("article");
       section.id = "section-settings-change-log";
-      section.className = "card";
+      section.className = "card admin-section";
       section.innerHTML = `
         <h2>Settings endringslogg</h2>
         <p class="muted">Viser hvem som endret settings, rolle, tidspunkt, source, effekt fra og payload-sammendrag.</p>
@@ -422,7 +444,7 @@ function chat3EnsureUiExtensions() {
   elements.settingsLogLoadBtn = document.getElementById("settingsLogLoadBtn");
   elements.settingsLogStatus = document.getElementById("settingsLogStatus");
   elements.adminNavLinks = Array.from(document.querySelectorAll(".admin-nav a[href^='#section-']"));
-  elements.adminSections = Array.from(document.querySelectorAll("article[id^='section-']"));
+  elements.adminSections = Array.from(document.querySelectorAll(".admin-content .admin-section"));
 }
 
 function chat3EvaluateSectionAccess(sectionId) {
@@ -482,7 +504,7 @@ function chat3ApplyActionPermissionLocks() {
     }
     delete element.dataset.rbacLocked;
     element.disabled = false;
-    if (element.title.includes("krever")) {
+    if (element.title && element.title.includes("krever")) {
       element.removeAttribute("title");
     }
   }
@@ -583,6 +605,1024 @@ async function chat3LoadAdminPermissions() {
   chat3ApplyRbacUi();
 }
 // Chat3: RBAC block end
+
+// Chat2: Settings UI block start (single-view routing + settings editor)
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function cloneJsonValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneJsonValue(item));
+  }
+  if (isPlainObject(value)) {
+    const next = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      next[key] = cloneJsonValue(nestedValue);
+    }
+    return next;
+  }
+  return value;
+}
+
+function stripUndefinedDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item));
+  }
+  if (isPlainObject(value)) {
+    const next = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      if (nestedValue === undefined) {
+        continue;
+      }
+      next[key] = stripUndefinedDeep(nestedValue);
+    }
+    return next;
+  }
+  return value;
+}
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
+  }
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function deepEqualJson(left, right) {
+  return stableSerialize(stripUndefinedDeep(left)) === stableSerialize(stripUndefinedDeep(right));
+}
+
+function asFiniteNumberOrUndefined(value) {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeAdminSectionIdFromHash(hashValue) {
+  const raw = String(hashValue || "").trim();
+  if (!raw.startsWith(SECTION_HASH_PREFIX)) {
+    return "";
+  }
+  return raw.slice(1);
+}
+
+function resolveDefaultAdminSectionId() {
+  const firstNavHref = elements.adminNavLinks[0]?.getAttribute("href") || "";
+  const fromNav = normalizeAdminSectionIdFromHash(firstNavHref);
+  if (fromNav) {
+    return fromNav;
+  }
+  return elements.adminSections[0]?.id || DEFAULT_ADMIN_SECTION_ID;
+}
+
+function applyAdminSection(sectionId, options = {}) {
+  const sectionIds = elements.adminSections.map((section) => section.id);
+  const targetSectionId = sectionIds.includes(sectionId) ? sectionId : resolveDefaultAdminSectionId();
+  state.activeSectionId = targetSectionId;
+
+  for (const section of elements.adminSections) {
+    const isActive = section.id === targetSectionId;
+    section.hidden = !isActive;
+    section.classList.toggle("hidden", !isActive);
+  }
+
+  for (const link of elements.adminNavLinks) {
+    const linkSectionId = normalizeAdminSectionIdFromHash(link.getAttribute("href"));
+    const isActive = linkSectionId === targetSectionId;
+    link.classList.toggle("active", isActive);
+    if (isActive) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+  }
+
+  if (options.syncHash) {
+    const hash = `#${targetSectionId}`;
+    if (window.location.hash !== hash) {
+      window.history.replaceState(null, "", hash);
+    }
+  }
+}
+
+function applyAdminSectionFromHash(options = {}) {
+  const requestedSectionId = normalizeAdminSectionIdFromHash(window.location.hash);
+  const hasRequestedSection = elements.adminSections.some((section) => section.id === requestedSectionId);
+  applyAdminSection(requestedSectionId, {
+    syncHash: Boolean(options.syncHash) && !hasRequestedSection
+  });
+}
+
+function splitSettingsPath(pathValue) {
+  if (Array.isArray(pathValue)) {
+    return pathValue.map((part) => String(part).trim()).filter(Boolean);
+  }
+  return String(pathValue || "")
+    .split(".")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function getSettingsValueAtPath(source, pathValue) {
+  const parts = splitSettingsPath(pathValue);
+  if (!parts.length) {
+    return undefined;
+  }
+  let cursor = source;
+  for (const part of parts) {
+    if (!isPlainObject(cursor) && !Array.isArray(cursor)) {
+      return undefined;
+    }
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function removeSettingsValueAtPath(target, pathValue) {
+  const parts = splitSettingsPath(pathValue);
+  if (!parts.length) {
+    return;
+  }
+
+  const stack = [];
+  let cursor = target;
+  for (const part of parts) {
+    if (!isPlainObject(cursor) && !Array.isArray(cursor)) {
+      return;
+    }
+    stack.push({ parent: cursor, key: part });
+    cursor = cursor[part];
+  }
+
+  const leaf = stack.pop();
+  if (!leaf) {
+    return;
+  }
+  delete leaf.parent[leaf.key];
+
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    const entry = stack[index];
+    const candidate = entry.parent[entry.key];
+    if (!isPlainObject(candidate)) {
+      break;
+    }
+    if (Object.keys(candidate).length === 0) {
+      delete entry.parent[entry.key];
+      continue;
+    }
+    break;
+  }
+}
+
+function setSettingsValueAtPath(target, pathValue, value) {
+  if (value === undefined) {
+    removeSettingsValueAtPath(target, pathValue);
+    return;
+  }
+  const parts = splitSettingsPath(pathValue);
+  if (!parts.length) {
+    return;
+  }
+  let cursor = target;
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    const part = parts[index];
+    if (!isPlainObject(cursor[part])) {
+      cursor[part] = {};
+    }
+    cursor = cursor[part];
+  }
+  cursor[parts[parts.length - 1]] = value;
+}
+
+function makeOptionValueKey(value) {
+  if (typeof value === "string") {
+    return `string:${value}`;
+  }
+  if (typeof value === "number") {
+    return `number:${String(value)}`;
+  }
+  if (typeof value === "boolean") {
+    return `boolean:${String(value)}`;
+  }
+  return `json:${stableSerialize(value)}`;
+}
+
+function formatSettingsMetaValue(value) {
+  if (value === undefined || value === null || value === "") {
+    return "-";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
+function normalizeSettingsFieldType(rawType, defaultValue) {
+  const normalized = String(rawType || "")
+    .trim()
+    .toLowerCase();
+
+  if (normalized === "int" || normalized === "integer") {
+    return "integer";
+  }
+  if (normalized === "number" || normalized === "float" || normalized === "double" || normalized === "decimal") {
+    return "number";
+  }
+  if (normalized === "bool" || normalized === "boolean") {
+    return "boolean";
+  }
+  if (normalized === "enum" || normalized === "select") {
+    return "enum";
+  }
+  if (normalized === "json" || normalized === "object") {
+    return "json";
+  }
+  if (normalized === "text" || normalized === "textarea" || normalized === "multiline") {
+    return "text";
+  }
+
+  if (typeof defaultValue === "boolean") {
+    return "boolean";
+  }
+  if (typeof defaultValue === "number") {
+    return Number.isInteger(defaultValue) ? "integer" : "number";
+  }
+  if (isPlainObject(defaultValue) || Array.isArray(defaultValue)) {
+    return "json";
+  }
+  return "string";
+}
+
+function normalizeSettingsFieldOptions(rawOptions) {
+  if (Array.isArray(rawOptions)) {
+    return rawOptions
+      .map((option) => {
+        if (isPlainObject(option)) {
+          return {
+            value: option.value,
+            label: String(option.label ?? option.name ?? option.value ?? "")
+          };
+        }
+        return {
+          value: option,
+          label: String(option)
+        };
+      })
+      .filter((option) => option.label !== "");
+  }
+
+  if (isPlainObject(rawOptions)) {
+    return Object.entries(rawOptions).map(([value, label]) => ({
+      value,
+      label: String(label)
+    }));
+  }
+
+  return [];
+}
+
+function normalizeSettingsField(rawField, fallbackKey) {
+  const source = isPlainObject(rawField) ? rawField : {};
+  const path = splitSettingsPath(source.path ?? source.key ?? source.id ?? fallbackKey).join(".");
+  if (!path) {
+    return null;
+  }
+
+  const defaultValue = source.default ?? source.defaultValue;
+  const options = normalizeSettingsFieldOptions(source.options ?? source.enum ?? source.values);
+  let type = normalizeSettingsFieldType(source.type ?? source.valueType, defaultValue);
+  if (options.length > 0 && type !== "boolean") {
+    type = "enum";
+  }
+
+  const rawLock = source.lock ?? source.locked;
+  let isLocked = false;
+  let lockReason = "";
+  if (typeof rawLock === "boolean") {
+    isLocked = rawLock;
+  } else if (typeof rawLock === "string") {
+    isLocked = true;
+    lockReason = rawLock;
+  } else if (isPlainObject(rawLock)) {
+    isLocked = Boolean(rawLock.active ?? rawLock.isLocked ?? true);
+    lockReason = String(rawLock.reason ?? rawLock.message ?? "");
+  }
+  if (!lockReason && typeof source.lockReason === "string") {
+    lockReason = source.lockReason;
+  }
+
+  const readOnly =
+    Boolean(source.readOnly ?? source.readonly ?? source.isReadOnly ?? source.mutable === false) || isLocked;
+
+  return {
+    path,
+    label: String(source.label ?? source.title ?? fallbackKey ?? path),
+    description: String(source.description ?? source.helpText ?? ""),
+    type,
+    min: asFiniteNumberOrUndefined(source.min ?? source.minimum ?? source.constraints?.min),
+    max: asFiniteNumberOrUndefined(source.max ?? source.maximum ?? source.constraints?.max),
+    step: asFiniteNumberOrUndefined(source.step ?? source.increment),
+    unit: String(source.unit ?? source.suffix ?? ""),
+    defaultValue,
+    required: Boolean(source.required),
+    readOnly,
+    isLocked,
+    lockReason,
+    options
+  };
+}
+
+function normalizeSettingsFieldList(rawFields) {
+  if (Array.isArray(rawFields)) {
+    return rawFields
+      .map((field, index) => normalizeSettingsField(field, isPlainObject(field) ? field.key : `field_${index + 1}`))
+      .filter(Boolean);
+  }
+  if (isPlainObject(rawFields)) {
+    return Object.entries(rawFields)
+      .map(([key, field]) => normalizeSettingsField(field, key))
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeSettingsCatalogGame(rawGame, fallbackSlug) {
+  const source = isPlainObject(rawGame) ? rawGame : {};
+  const slug = String(source.slug ?? source.gameSlug ?? source.id ?? fallbackSlug ?? "").trim();
+  if (!slug) {
+    return null;
+  }
+
+  return {
+    slug,
+    title: String(source.title ?? source.label ?? source.name ?? slug),
+    description: String(source.description ?? ""),
+    fields: normalizeSettingsFieldList(
+      source.fields ?? source.settingsFields ?? source.catalogFields ?? source.schema ?? source.catalog
+    )
+  };
+}
+
+function normalizeSettingsCatalogResponse(payload) {
+  let rawGames = [];
+
+  if (Array.isArray(payload)) {
+    rawGames = payload;
+  } else if (Array.isArray(payload?.games)) {
+    rawGames = payload.games;
+  } else if (Array.isArray(payload?.catalog)) {
+    rawGames = payload.catalog;
+  } else if (Array.isArray(payload?.items)) {
+    rawGames = payload.items;
+  } else if (isPlainObject(payload?.games)) {
+    rawGames = Object.entries(payload.games).map(([slug, game]) => ({ ...(isPlainObject(game) ? game : {}), slug }));
+  } else if (isPlainObject(payload)) {
+    rawGames = Object.entries(payload)
+      .filter(([, value]) => isPlainObject(value))
+      .map(([slug, game]) => ({ ...game, slug }));
+  }
+
+  return rawGames
+    .map((rawGame) => normalizeSettingsCatalogGame(rawGame))
+    .filter((game) => game && game.slug);
+}
+
+function normalizeSettingsGameResponse(payload) {
+  if (isPlainObject(payload?.settings)) {
+    return stripUndefinedDeep(cloneJsonValue(payload.settings));
+  }
+  if (isPlainObject(payload?.values)) {
+    return stripUndefinedDeep(cloneJsonValue(payload.values));
+  }
+  if (isPlainObject(payload?.game?.settings)) {
+    return stripUndefinedDeep(cloneJsonValue(payload.game.settings));
+  }
+  if (!isPlainObject(payload)) {
+    return {};
+  }
+
+  const reserved = new Set(["slug", "gameSlug", "title", "description", "updatedAt", "createdAt", "id", "label"]);
+  const candidateKeys = Object.keys(payload).filter((key) => !reserved.has(key));
+  if (!candidateKeys.length) {
+    return {};
+  }
+  if (candidateKeys.length === Object.keys(payload).length) {
+    return stripUndefinedDeep(cloneJsonValue(payload));
+  }
+  const next = {};
+  for (const key of candidateKeys) {
+    next[key] = cloneJsonValue(payload[key]);
+  }
+  return stripUndefinedDeep(next);
+}
+
+function getCurrentSettingsCatalogGame() {
+  const slug = String(elements.settingsGameSelect?.value || "").trim();
+  return state.settingsCatalogBySlug[slug] || null;
+}
+
+function getCurrentSettingsFields() {
+  return getCurrentSettingsCatalogGame()?.fields || [];
+}
+
+function setSettingsSaveState(nextState) {
+  state.settingsSaveState = nextState;
+  if (!elements.settingsSaveState) {
+    return;
+  }
+  elements.settingsSaveState.textContent = nextState;
+  elements.settingsSaveState.classList.remove("saving", "saved", "error");
+  if (nextState === "Lagrer...") {
+    elements.settingsSaveState.classList.add("saving");
+  } else if (nextState === "Lagret") {
+    elements.settingsSaveState.classList.add("saved");
+  } else if (nextState === "Feil") {
+    elements.settingsSaveState.classList.add("error");
+  }
+}
+
+function updateSettingsDirtyIndicator() {
+  if (!elements.settingsDirtyState) {
+    return;
+  }
+  elements.settingsDirtyState.textContent = state.settingsDirty
+    ? "Du har ulagrede endringer."
+    : "Ingen ulagrede endringer.";
+}
+
+function syncSettingsAdvancedJson() {
+  if (!elements.settingsAdvancedJson) {
+    return;
+  }
+  elements.settingsAdvancedJson.value = JSON.stringify(stripUndefinedDeep(cloneJsonValue(state.settingsDraft)), null, 2);
+}
+
+function updateSettingsSaveButtonState() {
+  if (!elements.settingsSaveBtn) {
+    return;
+  }
+  const hasErrors = Object.keys(state.settingsFieldErrors).length > 0;
+  elements.settingsSaveBtn.disabled = !state.settingsCurrentGameSlug || !state.settingsDirty || hasErrors;
+}
+
+function updateSettingsDirtyState() {
+  state.settingsDirty = !deepEqualJson(state.settingsDraft, state.settingsOriginal);
+  updateSettingsDirtyIndicator();
+  updateSettingsSaveButtonState();
+}
+
+function setSingleSettingsFieldValidation(path, errorMessage) {
+  const entry = state.settingsFieldInputs.get(path);
+  if (!entry) {
+    return;
+  }
+  entry.error.textContent = errorMessage || "";
+  entry.input.classList.toggle("input-error", Boolean(errorMessage));
+}
+
+function applySettingsValidationState() {
+  for (const path of state.settingsFieldInputs.keys()) {
+    setSingleSettingsFieldValidation(path, state.settingsFieldErrors[path] || "");
+  }
+}
+
+function validateSettingsField(field) {
+  const value = getSettingsValueAtPath(state.settingsDraft, field.path);
+  const originalValue = getSettingsValueAtPath(state.settingsOriginal, field.path);
+
+  if (field.readOnly && !deepEqualJson(value, originalValue)) {
+    return `${field.label} er låst/readOnly og kan ikke endres.`;
+  }
+  if (value === undefined || value === null || value === "") {
+    return field.required ? `${field.label} er påkrevd.` : "";
+  }
+  if (field.type === "boolean" && typeof value !== "boolean") {
+    return `${field.label} må være Ja eller Nei.`;
+  }
+  if ((field.type === "number" || field.type === "integer") && (typeof value !== "number" || !Number.isFinite(value))) {
+    return `${field.label} må være et gyldig tall.`;
+  }
+  if (field.type === "integer" && !Number.isInteger(value)) {
+    return `${field.label} må være et heltall.`;
+  }
+  if ((field.type === "number" || field.type === "integer") && field.min !== undefined && value < field.min) {
+    return `${field.label} må være minst ${field.min}.`;
+  }
+  if ((field.type === "number" || field.type === "integer") && field.max !== undefined && value > field.max) {
+    return `${field.label} må være maks ${field.max}.`;
+  }
+  if (field.options.length > 0 && !field.options.some((option) => deepEqualJson(option.value, value))) {
+    return `${field.label} har en verdi som ikke finnes i katalogen.`;
+  }
+  if (field.type === "json" && !isPlainObject(value) && !Array.isArray(value)) {
+    return `${field.label} må være gyldig JSON.`;
+  }
+  return "";
+}
+
+function validateAllSettingsFields() {
+  const nextErrors = {};
+  for (const field of getCurrentSettingsFields()) {
+    const error = validateSettingsField(field);
+    if (error) {
+      nextErrors[field.path] = error;
+    }
+  }
+  state.settingsFieldErrors = nextErrors;
+  applySettingsValidationState();
+  updateSettingsSaveButtonState();
+  return Object.keys(nextErrors).length === 0;
+}
+
+function coerceSettingsFieldInputValue(field, rawValue) {
+  const textValue = String(rawValue ?? "");
+  const trimmed = textValue.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (field.type === "boolean") {
+    if (trimmed === "true") {
+      return true;
+    }
+    if (trimmed === "false") {
+      return false;
+    }
+    throw new Error(`${field.label} må være Ja eller Nei.`);
+  }
+
+  if (field.type === "number" || field.type === "integer") {
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`${field.label} må være et gyldig tall.`);
+    }
+    return parsed;
+  }
+
+  if (field.type === "enum") {
+    const match = field.options.find((option) => makeOptionValueKey(option.value) === trimmed);
+    if (!match) {
+      throw new Error(`${field.label} har en verdi som ikke finnes i katalogen.`);
+    }
+    return cloneJsonValue(match.value);
+  }
+
+  if (field.type === "json") {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!isPlainObject(parsed) && !Array.isArray(parsed)) {
+        throw new Error("JSON må være objekt eller array.");
+      }
+      return parsed;
+    } catch (_error) {
+      throw new Error(`${field.label} må være gyldig JSON.`);
+    }
+  }
+
+  return textValue;
+}
+
+function formatSettingsFieldTypeLabel(type) {
+  if (type === "integer") {
+    return "integer";
+  }
+  if (type === "number") {
+    return "number";
+  }
+  if (type === "boolean") {
+    return "boolean";
+  }
+  if (type === "enum") {
+    return "enum";
+  }
+  if (type === "json") {
+    return "json";
+  }
+  if (type === "text") {
+    return "text";
+  }
+  return "string";
+}
+
+function createSettingsInputElement(field, currentValue) {
+  const inputId = `settings-field-${field.path.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  let inputElement;
+
+  if (field.type === "boolean") {
+    inputElement = document.createElement("select");
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = "Ikke satt";
+    inputElement.appendChild(emptyOption);
+    const trueOption = document.createElement("option");
+    trueOption.value = "true";
+    trueOption.textContent = "Ja";
+    inputElement.appendChild(trueOption);
+    const falseOption = document.createElement("option");
+    falseOption.value = "false";
+    falseOption.textContent = "Nei";
+    inputElement.appendChild(falseOption);
+    inputElement.value = typeof currentValue === "boolean" ? String(currentValue) : "";
+  } else if (field.type === "enum") {
+    inputElement = document.createElement("select");
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = "Ikke satt";
+    inputElement.appendChild(emptyOption);
+    for (const option of field.options) {
+      const optionElement = document.createElement("option");
+      optionElement.value = makeOptionValueKey(option.value);
+      optionElement.textContent = option.label;
+      inputElement.appendChild(optionElement);
+    }
+    const selected = currentValue === undefined ? "" : makeOptionValueKey(currentValue);
+    const hasSelected = Array.from(inputElement.options).some((option) => option.value === selected);
+    if (hasSelected) {
+      inputElement.value = selected;
+    } else if (selected) {
+      const customOption = document.createElement("option");
+      customOption.value = selected;
+      customOption.textContent = `Egendefinert: ${formatSettingsMetaValue(currentValue)}`;
+      inputElement.appendChild(customOption);
+      inputElement.value = selected;
+    } else {
+      inputElement.value = "";
+    }
+  } else if (field.type === "text" || field.type === "json") {
+    inputElement = document.createElement("textarea");
+    inputElement.value =
+      currentValue === undefined
+        ? ""
+        : field.type === "json"
+          ? JSON.stringify(currentValue, null, 2)
+          : String(currentValue);
+  } else {
+    inputElement = document.createElement("input");
+    if (field.type === "number" || field.type === "integer") {
+      inputElement.type = "number";
+      if (field.min !== undefined) {
+        inputElement.min = String(field.min);
+      }
+      if (field.max !== undefined) {
+        inputElement.max = String(field.max);
+      }
+      if (field.step !== undefined) {
+        inputElement.step = String(field.step);
+      } else if (field.type === "integer") {
+        inputElement.step = "1";
+      } else {
+        inputElement.step = "any";
+      }
+      inputElement.value = currentValue === undefined ? "" : String(currentValue);
+    } else {
+      inputElement.type = "text";
+      inputElement.value = currentValue === undefined ? "" : String(currentValue);
+    }
+  }
+
+  inputElement.id = inputId;
+  inputElement.disabled = field.readOnly;
+  if (currentValue === undefined && field.defaultValue !== undefined) {
+    inputElement.placeholder = `Standard: ${formatSettingsMetaValue(field.defaultValue)}`;
+  }
+  return inputElement;
+}
+
+function handleSettingsFieldInput(field) {
+  const entry = state.settingsFieldInputs.get(field.path);
+  if (!entry) {
+    return;
+  }
+
+  try {
+    const nextValue = coerceSettingsFieldInputValue(field, entry.input.value);
+    setSettingsValueAtPath(state.settingsDraft, field.path, nextValue);
+    const validationError = validateSettingsField(field);
+    if (validationError) {
+      state.settingsFieldErrors[field.path] = validationError;
+    } else {
+      delete state.settingsFieldErrors[field.path];
+    }
+    setSingleSettingsFieldValidation(field.path, state.settingsFieldErrors[field.path] || "");
+    syncSettingsAdvancedJson();
+    updateSettingsDirtyState();
+    if (Object.keys(state.settingsFieldErrors).length > 0) {
+      setSettingsSaveState("Feil");
+    } else if (state.settingsDirty) {
+      setSettingsSaveState("Ikke lagret");
+    }
+  } catch (error) {
+    state.settingsFieldErrors[field.path] = error.message || "Ugyldig verdi.";
+    setSingleSettingsFieldValidation(field.path, state.settingsFieldErrors[field.path]);
+    updateSettingsSaveButtonState();
+    setSettingsSaveState("Feil");
+  }
+}
+
+function renderSettingsFields() {
+  if (!elements.settingsFields) {
+    return;
+  }
+  elements.settingsFields.innerHTML = "";
+  state.settingsFieldInputs = new Map();
+
+  const game = getCurrentSettingsCatalogGame();
+  if (!game) {
+    const info = document.createElement("p");
+    info.className = "settings-empty";
+    info.textContent = "Velg et spill for å se innstillinger.";
+    elements.settingsFields.appendChild(info);
+    state.settingsFieldErrors = {};
+    updateSettingsSaveButtonState();
+    return;
+  }
+
+  if (!game.fields.length) {
+    const info = document.createElement("p");
+    info.className = "settings-empty";
+    info.textContent = "Katalogen har ingen felt for valgt spill. Bruk Avansert JSON ved behov.";
+    elements.settingsFields.appendChild(info);
+    state.settingsFieldErrors = {};
+    updateSettingsSaveButtonState();
+    return;
+  }
+
+  for (const field of game.fields) {
+    const fieldCard = document.createElement("section");
+    fieldCard.className = "settings-field-card";
+
+    const title = document.createElement("h3");
+    title.textContent = field.label;
+    fieldCard.appendChild(title);
+
+    if (field.description) {
+      const description = document.createElement("p");
+      description.className = "settings-field-description";
+      description.textContent = field.description;
+      fieldCard.appendChild(description);
+    }
+
+    const inputWrapper = document.createElement("div");
+    inputWrapper.className = "field";
+    const inputLabel = document.createElement("label");
+    inputLabel.textContent = "Verdi";
+    const inputElement = createSettingsInputElement(field, getSettingsValueAtPath(state.settingsDraft, field.path));
+    inputLabel.setAttribute("for", inputElement.id);
+    inputWrapper.appendChild(inputLabel);
+    inputWrapper.appendChild(inputElement);
+
+    const errorElement = document.createElement("p");
+    errorElement.className = "field-error";
+    errorElement.textContent = state.settingsFieldErrors[field.path] || "";
+    inputWrapper.appendChild(errorElement);
+
+    fieldCard.appendChild(inputWrapper);
+
+    state.settingsFieldInputs.set(field.path, { input: inputElement, error: errorElement });
+
+    const meta = document.createElement("p");
+    meta.className = "settings-field-meta";
+    const lockText = field.isLocked ? `Ja${field.lockReason ? ` (${field.lockReason})` : ""}` : "Nei";
+    meta.textContent = [
+      `Type: ${formatSettingsFieldTypeLabel(field.type)}`,
+      `Min: ${field.min ?? "-"}`,
+      `Maks: ${field.max ?? "-"}`,
+      `Enhet: ${field.unit || "-"}`,
+      `Default: ${formatSettingsMetaValue(field.defaultValue)}`,
+      `Read only: ${field.readOnly ? "Ja" : "Nei"}`,
+      `Låst: ${lockText}`
+    ].join(" | ");
+    fieldCard.appendChild(meta);
+
+    inputElement.addEventListener(inputElement.tagName === "SELECT" ? "change" : "input", () => {
+      handleSettingsFieldInput(field);
+    });
+
+    elements.settingsFields.appendChild(fieldCard);
+  }
+
+  applySettingsValidationState();
+  updateSettingsSaveButtonState();
+}
+
+function renderSettingsGameOptions() {
+  const previous = state.settingsCurrentGameSlug || elements.settingsGameSelect?.value || "";
+  setSelectOptions(
+    elements.settingsGameSelect,
+    state.settingsCatalog.map((game) => ({
+      value: game.slug,
+      label: `${game.title} (${game.slug})`
+    })),
+    previous,
+    "Ingen spill i settings-katalog"
+  );
+  state.settingsCurrentGameSlug = String(elements.settingsGameSelect?.value || "").trim();
+}
+
+async function loadSettingsForGameSlug(gameSlug) {
+  const slug = String(gameSlug || "").trim();
+  if (!slug) {
+    state.settingsCurrentGameSlug = "";
+    state.settingsOriginal = {};
+    state.settingsDraft = {};
+    state.settingsFieldErrors = {};
+    state.settingsDirty = false;
+    renderSettingsFields();
+    syncSettingsAdvancedJson();
+    setSettingsSaveState("Ikke lagret");
+    updateSettingsDirtyIndicator();
+    setStatus(elements.settingsStatus, "Velg et spill for å laste innstillinger.");
+    return;
+  }
+
+  state.settingsCurrentGameSlug = slug;
+  setLoading(elements.settingsReloadBtn, true, "Laster...", "Last på nytt");
+  setStatus(elements.settingsStatus, `Laster innstillinger for ${slug}...`);
+  try {
+    const payload = await apiRequest(`/api/admin/settings/games/${encodeURIComponent(slug)}`, { auth: true });
+    const normalizedSettings = normalizeSettingsGameResponse(payload);
+    state.settingsOriginal = cloneJsonValue(normalizedSettings);
+    state.settingsDraft = cloneJsonValue(normalizedSettings);
+    state.settingsFieldErrors = {};
+    state.settingsDirty = false;
+    renderSettingsFields();
+    syncSettingsAdvancedJson();
+    setSettingsSaveState("Ikke lagret");
+    updateSettingsDirtyIndicator();
+    setStatus(elements.settingsStatus, `Lastet innstillinger for ${slug}.`, "success");
+  } catch (error) {
+    state.settingsFieldErrors = {};
+    renderSettingsFields();
+    setSettingsSaveState("Feil");
+    setStatus(elements.settingsStatus, error.message || "Kunne ikke laste spillinnstillinger.", "error");
+  } finally {
+    setLoading(elements.settingsReloadBtn, false, "Laster...", "Last på nytt");
+    updateSettingsSaveButtonState();
+  }
+}
+
+async function loadSettingsForSelectedGame() {
+  const slug = String(elements.settingsGameSelect?.value || "").trim();
+  await loadSettingsForGameSlug(slug);
+}
+
+async function loadSettingsCatalog() {
+  setStatus(elements.settingsStatus, "Laster settings-katalog...");
+  try {
+    const payload = await apiRequest("/api/admin/settings/catalog", { auth: true });
+    const catalog = normalizeSettingsCatalogResponse(payload);
+    state.settingsCatalog = catalog;
+    state.settingsCatalogBySlug = Object.fromEntries(catalog.map((game) => [game.slug, game]));
+    renderSettingsGameOptions();
+
+    if (!catalog.length) {
+      state.settingsCurrentGameSlug = "";
+      state.settingsOriginal = {};
+      state.settingsDraft = {};
+      state.settingsFieldErrors = {};
+      state.settingsDirty = false;
+      renderSettingsFields();
+      syncSettingsAdvancedJson();
+      setSettingsSaveState("Ikke lagret");
+      updateSettingsDirtyIndicator();
+      setStatus(elements.settingsStatus, "Ingen spill i settings-katalog.", "error");
+      return;
+    }
+
+    await loadSettingsForSelectedGame();
+  } catch (error) {
+    state.settingsCatalog = [];
+    state.settingsCatalogBySlug = {};
+    state.settingsCurrentGameSlug = "";
+    state.settingsOriginal = {};
+    state.settingsDraft = {};
+    state.settingsFieldErrors = {};
+    state.settingsDirty = false;
+    renderSettingsGameOptions();
+    renderSettingsFields();
+    syncSettingsAdvancedJson();
+    setSettingsSaveState("Feil");
+    updateSettingsDirtyIndicator();
+    setStatus(elements.settingsStatus, error.message || "Kunne ikke laste settings-katalog.", "error");
+  }
+}
+
+function handleSettingsApplyAdvancedJson() {
+  let parsed;
+  try {
+    parsed = JSON.parse(elements.settingsAdvancedJson.value || "{}");
+  } catch (_error) {
+    setSettingsSaveState("Feil");
+    setStatus(elements.settingsStatus, "Avansert JSON er ugyldig JSON.", "error");
+    return;
+  }
+
+  if (!isPlainObject(parsed)) {
+    setSettingsSaveState("Feil");
+    setStatus(elements.settingsStatus, "Avansert JSON må være et objekt.", "error");
+    return;
+  }
+
+  state.settingsDraft = stripUndefinedDeep(cloneJsonValue(parsed));
+  renderSettingsFields();
+  validateAllSettingsFields();
+  syncSettingsAdvancedJson();
+  updateSettingsDirtyState();
+  if (Object.keys(state.settingsFieldErrors).length > 0) {
+    setSettingsSaveState("Feil");
+    setStatus(elements.settingsStatus, "JSON ble brukt, men ett eller flere felt er ugyldige.", "error");
+    return;
+  }
+  if (state.settingsDirty) {
+    setSettingsSaveState("Ikke lagret");
+  }
+  setStatus(elements.settingsStatus, "Avansert JSON brukt i feltene.", "success");
+}
+
+async function saveSettingsPayloadWithFallback(slug, payload) {
+  try {
+    return await apiRequest(`/api/admin/settings/games/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      auth: true,
+      body: {
+        settings: payload
+      }
+    });
+  } catch (firstError) {
+    if (firstError.code && firstError.code !== "REQUEST_FAILED" && firstError.code !== "INVALID_INPUT") {
+      throw firstError;
+    }
+    return apiRequest(`/api/admin/settings/games/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      auth: true,
+      body: payload
+    });
+  }
+}
+
+async function handleSaveGameSettings() {
+  const slug = String(elements.settingsGameSelect?.value || "").trim();
+  if (!slug) {
+    setSettingsSaveState("Feil");
+    setStatus(elements.settingsStatus, "Velg et spill før lagring.", "error");
+    return;
+  }
+
+  if (!validateAllSettingsFields()) {
+    setSettingsSaveState("Feil");
+    setStatus(elements.settingsStatus, "Rett valideringsfeil før lagring.", "error");
+    return;
+  }
+
+  const payload = stripUndefinedDeep(cloneJsonValue(state.settingsDraft));
+  setLoading(elements.settingsSaveBtn, true, "Lagrer...", "Lagre innstillinger");
+  setSettingsSaveState("Lagrer...");
+  setStatus(elements.settingsStatus, `Lagrer innstillinger for ${slug}...`);
+
+  try {
+    const responsePayload = await saveSettingsPayloadWithFallback(slug, payload);
+    const normalizedSettings = normalizeSettingsGameResponse(responsePayload);
+    const nextSettings = Object.keys(normalizedSettings).length > 0 ? normalizedSettings : payload;
+    state.settingsOriginal = cloneJsonValue(nextSettings);
+    state.settingsDraft = cloneJsonValue(nextSettings);
+    state.settingsFieldErrors = {};
+    state.settingsDirty = false;
+    renderSettingsFields();
+    syncSettingsAdvancedJson();
+    updateSettingsDirtyIndicator();
+    updateSettingsSaveButtonState();
+    setSettingsSaveState("Lagret");
+    setStatus(elements.settingsStatus, `Lagret ${slug} kl ${new Date().toLocaleTimeString("nb-NO")}.`, "success");
+
+    const matchingGame = state.games.find((game) => game.slug === slug);
+    if (matchingGame) {
+      matchingGame.settings = cloneJsonValue(nextSettings);
+      if (elements.gameSelect.value === slug) {
+        renderSelectedGame();
+      }
+      if (slug === CANDY_GAME_SLUG) {
+        applyCandyGameToForm(matchingGame);
+      }
+    }
+  } catch (error) {
+    setSettingsSaveState("Feil");
+    setStatus(elements.settingsStatus, error.message || "Lagring av spillinnstillinger feilet.", "error");
+  } finally {
+    setLoading(elements.settingsSaveBtn, false, "Lagrer...", "Lagre innstillinger");
+    updateSettingsSaveButtonState();
+  }
+}
+// Chat2: Settings UI block end
 
 function getSelectedGame() {
   const slug = elements.gameSelect.value;
@@ -2347,6 +3387,18 @@ async function handleLogout() {
     state.rooms = [];
     state.hallGameConfigs = [];
     state.candySettings = null;
+    // Chat2: Settings UI block start (logout reset)
+    state.activeSectionId = "";
+    state.settingsCatalog = [];
+    state.settingsCatalogBySlug = {};
+    state.settingsCurrentGameSlug = "";
+    state.settingsOriginal = {};
+    state.settingsDraft = {};
+    state.settingsFieldErrors = {};
+    state.settingsFieldInputs = new Map();
+    state.settingsDirty = false;
+    state.settingsSaveState = "Ikke lagret";
+    // Chat2: Settings UI block end (logout reset)
     // Chat3: RBAC block start
     state.adminPermissions = [];
     state.adminPermissionMap = {};
@@ -2359,6 +3411,7 @@ async function handleLogout() {
     setStatus(elements.hallStatus, "Ingen haller lastet.");
     setStatus(elements.terminalStatus, "Ingen terminaler lastet.");
     setStatus(elements.configStatus, "Ingen konfig lastet.");
+    setStatus(elements.settingsStatus, "Ingen spillinnstillinger lastet.");
     setStatus(elements.candyGameStatus, "Ingen Candy-spilldata lastet.");
     setStatus(elements.candySettingsStatus, "Ingen Candy-driftinnstillinger lastet.");
     setStatus(elements.candyQuickStatus, "Ingen Candy rom-kjøring startet.");
@@ -2367,6 +3420,13 @@ async function handleLogout() {
     setStatus(elements.prizePolicyStatus, "Ingen policy lastet.");
     setStatus(elements.extraPrizeStatus, "Ingen extra prize sendt.");
     setStatus(elements.roomStatus, "Ingen rom valgt.");
+    // Chat2: Settings UI block start (logout UI reset)
+    renderSettingsGameOptions();
+    renderSettingsFields();
+    syncSettingsAdvancedJson();
+    setSettingsSaveState("Ikke lagret");
+    updateSettingsDirtyIndicator();
+    // Chat2: Settings UI block end (logout UI reset)
     // Chat3: RBAC block start
     setStatus(elements.settingsLogStatus, "Ingen endringslogg lastet.");
     setStatus(elements.policyStatus, "Ingen policydata lastet.");
@@ -2391,6 +3451,18 @@ async function loadAllAdminData() {
     await loadGames();
   }
 
+  // Chat2: Settings UI block start (settings bootstrap load)
+  if (chat3HasPermission("GAME_CATALOG_READ")) {
+    await loadSettingsCatalog().catch((error) => {
+      setSettingsSaveState("Feil");
+      setStatus(elements.settingsStatus, error.message || "Kunne ikke laste spillinnstillinger.", "error");
+    });
+  } else {
+    setSettingsSaveState("Låst");
+    setStatus(elements.settingsStatus, "Låst: mangler GAME_CATALOG_READ.");
+  }
+  // Chat2: Settings UI block end (settings bootstrap load)
+
   const shouldLoadHalls =
     chat3HasPermission("HALL_READ") ||
     chat3HasPermission("TERMINAL_READ") ||
@@ -2401,7 +3473,6 @@ async function loadAllAdminData() {
   if (shouldLoadHalls) {
     await loadHalls();
   }
-
   ensurePrizePolicyEffectiveFromDefault();
   if (chat3HasPermission("HALL_GAME_CONFIG_READ")) {
     await loadHallGameConfigs();
@@ -2426,6 +3497,47 @@ async function bootstrap() {
   // Chat3: RBAC block start
   chat3EnsureUiExtensions();
   // Chat3: RBAC block end
+  // Chat2: Settings UI block start (settings + single-view wiring)
+  setSettingsSaveState("Ikke lagret");
+  updateSettingsDirtyIndicator();
+  renderSettingsGameOptions();
+  renderSettingsFields();
+  syncSettingsAdvancedJson();
+  applyAdminSectionFromHash({ syncHash: true });
+
+  window.addEventListener("hashchange", () => {
+    if (!state.token) {
+      return;
+    }
+    applyAdminSectionFromHash({ syncHash: true });
+  });
+
+  elements.settingsGameSelect.addEventListener("change", () => {
+    loadSettingsForSelectedGame().catch((error) => {
+      setSettingsSaveState("Feil");
+      setStatus(elements.settingsStatus, error.message || "Kunne ikke laste spillinnstillinger.", "error");
+    });
+  });
+
+  elements.settingsReloadBtn.addEventListener("click", () => {
+    loadSettingsForSelectedGame().catch((error) => {
+      setSettingsSaveState("Feil");
+      setStatus(elements.settingsStatus, error.message || "Kunne ikke oppdatere spillinnstillinger.", "error");
+    });
+  });
+
+  elements.settingsSaveBtn.addEventListener("click", () => {
+    handleSaveGameSettings().catch((error) => {
+      setSettingsSaveState("Feil");
+      setStatus(elements.settingsStatus, error.message || "Kunne ikke lagre spillinnstillinger.", "error");
+    });
+  });
+
+  elements.settingsApplyJsonBtn.addEventListener("click", () => {
+    handleSettingsApplyAdvancedJson();
+  });
+  // Chat2: Settings UI block end (settings + single-view wiring)
+
   elements.loginBtn.addEventListener("click", () => {
     handleLogin().catch((error) => {
       setStatus(elements.loginStatus, error.message || "Innlogging feilet.", "error");
