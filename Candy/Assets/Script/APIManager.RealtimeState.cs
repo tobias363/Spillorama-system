@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using SimpleJSON;
+using TMPro;
 using UnityEngine;
 
 public partial class APIManager
@@ -145,6 +146,7 @@ public partial class APIManager
         }
 
         int pageStartIndex = currentTicketPage * cardSlots;
+        TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
 
         for (int cardIndex = 0; cardIndex < generator.cardClasses.Length; cardIndex++)
         {
@@ -202,7 +204,10 @@ public partial class APIManager
 
                 if (cellIndex < card.num_text.Count)
                 {
-                    card.num_text[cellIndex].text = shouldPopulate ? value.ToString() : "-";
+                    RealtimeTextStyleUtils.ApplyCardNumber(
+                        card.num_text[cellIndex],
+                        shouldPopulate ? value.ToString() : "-",
+                        numberFallbackFont);
                 }
             }
         }

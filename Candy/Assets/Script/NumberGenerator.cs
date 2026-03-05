@@ -226,11 +226,15 @@ public class NumberGenerator : MonoBehaviour
         allNumbers = GetFilteredNumbers(generatedNO);
         RandomNumberGenerator();
 
+        TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
         for (int i = 0; i < totalActiveCard; i++)
         {
             for (int a = 0; a < totalNumInEachCard; a++)
             {
-                cardClasses[i].num_text[a].text = cardClasses[i].numb[a].ToString();
+                RealtimeTextStyleUtils.ApplyCardNumber(
+                    cardClasses[i].num_text[a],
+                    cardClasses[i].numb[a].ToString(),
+                    numberFallbackFont);
             }
         }
         Shuffle(generatedNO);

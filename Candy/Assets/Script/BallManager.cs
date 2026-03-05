@@ -98,6 +98,7 @@ public class BallManager : MonoBehaviour
             return;
         }
 
+        TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
         CacheRealtimeBallLayoutPositions();
 
         if (ballMachine != null)
@@ -125,7 +126,7 @@ public class BallManager : MonoBehaviour
                 TextMeshProUGUI tmp = bigBallText.GetComponent<TextMeshProUGUI>();
                 if (tmp != null)
                 {
-                    tmp.text = drawnNumber.ToString();
+                    RealtimeTextStyleUtils.ApplyBallNumber(tmp, drawnNumber.ToString(), numberFallbackFont);
                 }
             }
         }
@@ -152,7 +153,7 @@ public class BallManager : MonoBehaviour
             TextMeshProUGUI tmp = child.GetComponent<TextMeshProUGUI>();
             if (tmp != null)
             {
-                tmp.text = drawnNumber.ToString();
+                RealtimeTextStyleUtils.ApplyBallNumber(tmp, drawnNumber.ToString(), numberFallbackFont);
             }
         }
 
@@ -215,12 +216,14 @@ public class BallManager : MonoBehaviour
 
     void AddRandomBallSprites()
     {
+        TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
         for(int i = 0; i< balls.Count; i++)
         {
             int ballSpriteIndex = Random.Range(0, ballSprite.Count);
             bigBallSpriteSequence.Add(bigBallSprite[ballSpriteIndex]);
 
-            balls[i].transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = ballIndexList[i].ToString();
+            TextMeshProUGUI numberText = balls[i].transform.GetChild(0).GetComponent<TextMeshProUGUI>();
+            RealtimeTextStyleUtils.ApplyBallNumber(numberText, ballIndexList[i].ToString(), numberFallbackFont);
             balls[i].GetComponent<Image>().sprite = ballSprite[ballSpriteIndex];
         }
     }
@@ -229,6 +232,7 @@ public class BallManager : MonoBehaviour
 
     IEnumerator StartBallAnim()
     {
+        TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
         if (!bigBallImg.isActiveAndEnabled)
         {
             ballMachine.SetActive(true);
@@ -238,7 +242,8 @@ public class BallManager : MonoBehaviour
         for (int i = 0; i < balls.Count; i++)
         {
             bigBallImg.sprite = bigBallSpriteSequence[i];
-            bigBallImg.transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = ballIndexList[i].ToString();
+            TextMeshProUGUI bigBallText = bigBallImg.transform.GetChild(0).GetComponent<TextMeshProUGUI>();
+            RealtimeTextStyleUtils.ApplyBallNumber(bigBallText, ballIndexList[i].ToString(), numberFallbackFont);
 
 
             balls[i].transform.localPosition = new Vector2(0, 100);
@@ -299,19 +304,25 @@ public class BallManager : MonoBehaviour
 
     IEnumerator StartExtaBallAnim(List<int> ballIndexList, bool showExtraBall)
     {
+        TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
         if(showExtraBall){
             //Debug.Log("StartExtrBallAnim");
             bigBallImg.sprite = extraBallSprite;
             bigBallImg.transform.GetChild(0).GetComponent<TextMeshProUGUI>().color = Color.white;
             for (int i = 0; i < ballIndexList.Count-30; i++)
             {
-
-                bigBallImg.transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = ballIndexList[30 + i].ToString();
+                TextMeshProUGUI bigBallText = bigBallImg.transform.GetChild(0).GetComponent<TextMeshProUGUI>();
+                RealtimeTextStyleUtils.ApplyBallNumber(bigBallText, ballIndexList[30 + i].ToString(), numberFallbackFont);
+                if (bigBallText != null)
+                {
+                    bigBallText.color = Color.white;
+                }
                 Debug.Log("i : " + i);
                 if (!extraBalls[i].activeInHierarchy)
                 {
                     Debug.Log(ballIndexList[30 + i]);
-                    extraBalls[i].transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = ballIndexList[30 + i].ToString(); //NumberGenerator.generatedNO[30+i]
+                    TextMeshProUGUI extraBallText = extraBalls[i].transform.GetChild(0).GetComponent<TextMeshProUGUI>();
+                    RealtimeTextStyleUtils.ApplyBallNumber(extraBallText, ballIndexList[30 + i].ToString(), numberFallbackFont); //NumberGenerator.generatedNO[30+i]
                     //extraBalls[i].transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = ballIndexList[ballIndexList.Count-1].ToString(); //NumberGenerator.generatedNO[30+i]
 
                     extraBalls[i].transform.localPosition = new Vector2(0, 100);
@@ -382,7 +393,9 @@ public class BallManager : MonoBehaviour
 
     IEnumerator ModifyExtraBallPos(GameObject g, int index)
     {
-        g.transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = ballIndexList[ballIndexList.Count - 1].ToString();
+        TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
+        TextMeshProUGUI extraBallText = g.transform.GetChild(0).GetComponent<TextMeshProUGUI>();
+        RealtimeTextStyleUtils.ApplyBallNumber(extraBallText, ballIndexList[ballIndexList.Count - 1].ToString(), numberFallbackFont);
         g.transform.localPosition = new Vector2(0, 150);
         g.SetActive(true);
 
