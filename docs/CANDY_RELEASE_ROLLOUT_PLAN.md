@@ -18,6 +18,14 @@ npm --prefix backend run build
 ```
 2. Smoke-test etter runbook:
 - `docs/CANDY_SMOKE_RUNBOOK.md`
+3. Preflight for Candy launch API på deploy target:
+```bash
+curl -i -X POST "$CANDY_API_BASE_URL/api/games/candy/launch-token" \
+  -H "Authorization: Bearer $CANDY_TEST_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+Forventet: HTTP `200` + JSON payload med `launchToken`.
 
 ## Merge Order
 1. Opprett PR: `codex/candy-c1-bonus-integration-step1` -> `main`
@@ -48,6 +56,10 @@ git revert -m 1 <merge_commit_sha>
 git push origin main
 ```
 3. Verifiser `/health` + Candy smoke-test etter rollback.
+4. Rollback-eier må dokumentere tidspunkt + deploy-id + resultat av:
+   - `GET /health`
+   - `POST /api/games/candy/launch-token`
+   - `POST /api/games/candy/launch-resolve`
 
 ## Post-release Validation
 1. `/health` returnerer `ok:true`.
