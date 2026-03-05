@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { BingoSystemAdapter } from "../adapters/BingoSystemAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import {
   findFirstCompleteLinePatternIndex,
+  countNearMissLinePattern,
   hasFullBingo,
   makeRoomCode,
   makeShuffledBallBag,
@@ -81,6 +82,39 @@ interface ComplianceOptions {
   pauseDurationMs?: number;
   selfExclusionMinMs?: number;
   maxDrawsPerRound?: number;
+  rtpRollingWindowSize?: number;
+  rtpControllerGain?: number;
+  nearMissBiasEnabled?: boolean;
+  nearMissTargetRate?: number;
+}
+
+interface RoundPerformanceSnapshot {
+  gameId: string;
+  roomCode: string;
+  hallId: string;
+  startedAt: string;
+  endedAt: string;
+  payoutPercentTarget: number;
+  payoutPercentEffective: number;
+  stakeAmount: number;
+  payoutAmount: number;
+  nearMissTickets: number;
+  totalTickets: number;
+  nearMissRate: number;
+}
+
+interface RtpNearMissTelemetry {
+  hallId?: string;
+  roundsConsidered: number;
+  payoutPercentTargetAvg: number;
+  payoutPercentActualAvg: number;
+  nearMissRateAvg: number;
+  payoutAmountSum: number;
+  stakeAmountSum: number;
+  nearMissTickets: number;
+  totalTickets: number;
+  windowSize: number;
+  recentRounds: RoundPerformanceSnapshot[];
 }
 
 interface LossLimits {
@@ -314,6 +348,9 @@ const DEFAULT_SELF_EXCLUSION_MIN_MS = 365 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_DRAWS_PER_ROUND = 30;
 const MAX_BINGO_BALLS = 75;
 const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
+const DEFAULT_RTP_ROLLING_WINDOW_SIZE = 1000;
+const DEFAULT_RTP_CONTROLLER_GAIN = 0.5;
+const DEFAULT_NEAR_MISS_TARGET_RATE = 0.3;
 
 export class BingoEngine {
   private readonly rooms = new Map<string, RoomState>();
@@ -338,6 +375,12 @@ export class BingoEngine {
   private readonly pauseDurationMs: number;
   private readonly selfExclusionMinMs: number;
   private readonly maxDrawsPerRound: number;
+  private readonly rtpRollingWindowSize: number;
+  private readonly rtpControllerGain: number;
+  private readonly nearMissBiasEnabled: boolean;
+  private readonly nearMissTargetRate: number;
+  private readonly roundPerformanceHistory: RoundPerformanceSnapshot[] = [];
+  private readonly roundPerformanceRecorded = new Set<string>();
 
   constructor(
     private readonly bingoAdapter: BingoSystemAdapter,
@@ -395,6 +438,19 @@ export class BingoEngine {
     this.pauseDurationMs = Math.floor(pauseDurationMs);
     this.selfExclusionMinMs = Math.floor(selfExclusionMinMs);
     this.maxDrawsPerRound = Math.floor(maxDrawsPerRound);
+    this.rtpRollingWindowSize = Math.max(
+      10,
+      Math.floor(options.rtpRollingWindowSize ?? DEFAULT_RTP_ROLLING_WINDOW_SIZE)
+    );
+    this.rtpControllerGain = Math.min(
+      2,
+      Math.max(0, options.rtpControllerGain ?? DEFAULT_RTP_CONTROLLER_GAIN)
+    );
+    this.nearMissBiasEnabled = options.nearMissBiasEnabled ?? true;
+    this.nearMissTargetRate = Math.min(
+      0.95,
+      Math.max(0, options.nearMissTargetRate ?? DEFAULT_NEAR_MISS_TARGET_RATE)
+    );
 
     this.upsertPrizePolicy({
       gameType: "DATABINGO",
@@ -561,6 +617,11 @@ export class BingoEngine {
 
     const prizePool = this.roundCurrency(entryFee * players.length);
     const maxPayoutBudget = this.roundCurrency((prizePool * normalizedPayoutPercent) / 100);
+    let drawBag = makeShuffledBallBag(MAX_BINGO_BALLS);
+    if (this.nearMissBiasEnabled && this.nearMissTargetRate > 0) {
+      const adaptiveNearMissRate = this.resolveAdaptiveNearMissRate(room.hallId);
+      drawBag = this.applyNearMissBias(drawBag, tickets, adaptiveNearMissRate);
+    }
     const game: GameState = {
       id: gameId,
       status: "RUNNING",
@@ -571,7 +632,7 @@ export class BingoEngine {
       payoutPercent: normalizedPayoutPercent,
       maxPayoutBudget,
       remainingPayoutBudget: maxPayoutBudget,
-      drawBag: makeShuffledBallBag(MAX_BINGO_BALLS),
+      drawBag,
       drawnNumbers: [],
       tickets,
       marks,
@@ -606,6 +667,7 @@ export class BingoEngine {
       game.endedAt = endedAt.toISOString();
       game.endedReason = "MAX_DRAWS_REACHED";
       this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      this.recordRoundPerformance(room, game);
       throw new DomainError("NO_MORE_NUMBERS", `Maks antall trekk (${this.maxDrawsPerRound}) er nådd.`);
     }
 
@@ -616,6 +678,7 @@ export class BingoEngine {
       game.endedAt = endedAt.toISOString();
       game.endedReason = "DRAW_BAG_EMPTY";
       this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      this.recordRoundPerformance(room, game);
       throw new DomainError("NO_MORE_NUMBERS", "Ingen tall igjen i trekken.");
     }
 
@@ -634,6 +697,7 @@ export class BingoEngine {
       game.endedAt = endedAt.toISOString();
       game.endedReason = "MAX_DRAWS_REACHED";
       this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      this.recordRoundPerformance(room, game);
     }
     return nextNumber;
   }
@@ -868,6 +932,7 @@ export class BingoEngine {
       game.endedAt = endedAt.toISOString();
       game.endedReason = "BINGO_CLAIMED";
       this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      this.recordRoundPerformance(room, game);
       const rtpBudgetAfter = this.roundCurrency(Math.max(0, game.remainingPayoutBudget));
       claim.payoutAmount = payout;
       claim.payoutPolicyVersion = cappedBingoPayout.policy.id;
@@ -903,6 +968,7 @@ export class BingoEngine {
     game.endedAt = endedAt.toISOString();
     game.endedReason = input.reason?.trim() || "MANUAL_END";
     this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+    this.recordRoundPerformance(room, game);
   }
 
   getRoomSnapshot(roomCode: string): RoomSnapshot {
@@ -930,6 +996,340 @@ export class BingoEngine {
         };
       })
       .sort((a, b) => a.code.localeCompare(b.code));
+  }
+
+  resolvePayoutPercentForNextRound(targetPayoutPercent: number, hallId?: string): number {
+    const normalizedTarget = Math.min(100, Math.max(0, this.roundCurrency(targetPayoutPercent)));
+    if (this.rtpControllerGain <= 0) {
+      return normalizedTarget;
+    }
+
+    const telemetry = this.getRtpNearMissTelemetry({
+      hallId,
+      windowSize: this.rtpRollingWindowSize
+    });
+    if (telemetry.roundsConsidered <= 0) {
+      return normalizedTarget;
+    }
+
+    const deviation = normalizedTarget - telemetry.payoutPercentActualAvg;
+    const adjusted = normalizedTarget + deviation * this.rtpControllerGain;
+    return Math.min(100, Math.max(0, this.roundCurrency(adjusted)));
+  }
+
+  getRtpNearMissTelemetry(input: { hallId?: string; windowSize?: number } = {}): RtpNearMissTelemetry {
+    const normalizedHallId = input.hallId?.trim() || undefined;
+    const windowSize = Math.max(1, Math.floor(input.windowSize ?? this.rtpRollingWindowSize));
+    const scoped = normalizedHallId
+      ? this.roundPerformanceHistory.filter((entry) => entry.hallId === normalizedHallId)
+      : this.roundPerformanceHistory;
+    const sliceStart = Math.max(0, scoped.length - windowSize);
+    const recentRounds = scoped.slice(sliceStart);
+
+    let payoutTargetSum = 0;
+    let payoutActualSum = 0;
+    let payoutAmountSum = 0;
+    let stakeAmountSum = 0;
+    let nearMissRateSum = 0;
+    let nearMissTickets = 0;
+    let totalTickets = 0;
+
+    for (const round of recentRounds) {
+      payoutTargetSum += round.payoutPercentTarget;
+      payoutActualSum += round.payoutPercentEffective;
+      payoutAmountSum += round.payoutAmount;
+      stakeAmountSum += round.stakeAmount;
+      nearMissRateSum += round.nearMissRate;
+      nearMissTickets += round.nearMissTickets;
+      totalTickets += round.totalTickets;
+    }
+
+    const roundsCount = recentRounds.length;
+    return {
+      hallId: normalizedHallId,
+      roundsConsidered: roundsCount,
+      payoutPercentTargetAvg: roundsCount > 0 ? this.roundCurrency(payoutTargetSum / roundsCount) : 0,
+      payoutPercentActualAvg: roundsCount > 0 ? this.roundCurrency(payoutActualSum / roundsCount) : 0,
+      nearMissRateAvg: roundsCount > 0 ? this.roundCurrency(nearMissRateSum / roundsCount) : 0,
+      payoutAmountSum: this.roundCurrency(payoutAmountSum),
+      stakeAmountSum: this.roundCurrency(stakeAmountSum),
+      nearMissTickets,
+      totalTickets,
+      windowSize,
+      recentRounds
+    };
+  }
+
+  private resolveAdaptiveNearMissRate(hallId: string): number {
+    const telemetry = this.getRtpNearMissTelemetry({
+      hallId,
+      windowSize: this.rtpRollingWindowSize
+    });
+    if (telemetry.roundsConsidered <= 0) {
+      return this.nearMissTargetRate;
+    }
+
+    const deviation = this.nearMissTargetRate - telemetry.nearMissRateAvg;
+    const adjusted = this.nearMissTargetRate + deviation * Math.max(0.1, this.rtpControllerGain * 0.5);
+    return Math.min(0.95, Math.max(0.05, this.roundCurrency(adjusted)));
+  }
+
+  private applyNearMissBias(drawBag: number[], ticketsByPlayer: Map<string, Ticket[]>, nearMissRate: number): number[] {
+    if (!Array.isArray(drawBag) || drawBag.length === 0) {
+      return drawBag;
+    }
+
+    const drawCap = Math.min(this.maxDrawsPerRound, drawBag.length);
+    if (drawCap >= drawBag.length) {
+      return drawBag;
+    }
+
+    const allTickets: Ticket[] = [];
+    for (const playerTickets of ticketsByPlayer.values()) {
+      allTickets.push(...playerTickets);
+    }
+    if (allTickets.length === 0) {
+      return drawBag;
+    }
+
+    const normalizedTargetRate = Math.min(0.95, Math.max(0, nearMissRate));
+    const targetNearMissTickets = Math.min(
+      allTickets.length,
+      Math.max(1, Math.round(allTickets.length * normalizedTargetRate))
+    );
+    if (targetNearMissTickets <= 0) {
+      return drawBag;
+    }
+
+    const candidateOrder = this.randomizeList(Array.from({ length: allTickets.length }, (_, index) => index));
+    const withheldNumbers = new Set<number>();
+    const promotedNumbers = new Set<number>();
+
+    let nearMissConfigured = 0;
+    for (const ticketIndex of candidateOrder) {
+      if (nearMissConfigured >= targetNearMissTickets) {
+        break;
+      }
+      const ticket = allTickets[ticketIndex];
+      const candidatePatterns = this.extractTicketLinePatterns(ticket);
+      if (candidatePatterns.length === 0) {
+        continue;
+      }
+
+      const chosenPattern = candidatePatterns[randomInt(candidatePatterns.length)];
+      if (chosenPattern.length < 2) {
+        continue;
+      }
+      const missingCellIndex = randomInt(chosenPattern.length);
+      const missingNumber = chosenPattern[missingCellIndex];
+      if (!drawBag.includes(missingNumber)) {
+        continue;
+      }
+
+      withheldNumbers.add(missingNumber);
+      for (let i = 0; i < chosenPattern.length; i += 1) {
+        if (i === missingCellIndex) {
+          continue;
+        }
+        const number = chosenPattern[i];
+        if (drawBag.includes(number)) {
+          promotedNumbers.add(number);
+        }
+      }
+      nearMissConfigured += 1;
+    }
+
+    if (withheldNumbers.size === 0 || promotedNumbers.size === 0) {
+      return drawBag;
+    }
+
+    const randomizedPromotedNumbers = this.randomizeList([...promotedNumbers]).filter(
+      (number) => !withheldNumbers.has(number)
+    );
+    const earlyNumbers: number[] = [];
+    const earlyNumberSet = new Set<number>();
+
+    for (const number of randomizedPromotedNumbers) {
+      if (earlyNumbers.length >= drawCap) {
+        break;
+      }
+      if (!drawBag.includes(number)) {
+        continue;
+      }
+      earlyNumbers.push(number);
+      earlyNumberSet.add(number);
+    }
+
+    for (const number of drawBag) {
+      if (earlyNumbers.length >= drawCap) {
+        break;
+      }
+      if (withheldNumbers.has(number) || earlyNumberSet.has(number)) {
+        continue;
+      }
+      earlyNumbers.push(number);
+      earlyNumberSet.add(number);
+    }
+
+    if (earlyNumbers.length < drawCap) {
+      for (const number of drawBag) {
+        if (earlyNumbers.length >= drawCap) {
+          break;
+        }
+        if (earlyNumberSet.has(number)) {
+          continue;
+        }
+        earlyNumbers.push(number);
+        earlyNumberSet.add(number);
+      }
+    }
+
+    const lateNumbers: number[] = [];
+    for (const number of drawBag) {
+      if (earlyNumberSet.has(number)) {
+        continue;
+      }
+      lateNumbers.push(number);
+    }
+
+    return [...earlyNumbers, ...lateNumbers];
+  }
+
+  private recordRoundPerformance(room: RoomState, game: GameState): void {
+    if (this.roundPerformanceRecorded.has(game.id)) {
+      return;
+    }
+
+    const endedAt = game.endedAt ?? new Date().toISOString();
+    const stakeAmount = this.roundCurrency(game.prizePool);
+    const payoutAmount = this.roundCurrency(Math.max(0, game.prizePool - game.remainingPrizePool));
+    const payoutPercentEffective = stakeAmount > 0 ? this.roundCurrency((payoutAmount / stakeAmount) * 100) : 0;
+
+    let totalTickets = 0;
+    let nearMissTickets = 0;
+    const drawnSet = new Set<number>(game.drawnNumbers);
+    for (const [playerId, tickets] of game.tickets.entries()) {
+      const marksByTicket = game.marks.get(playerId) ?? [];
+      for (let ticketIndex = 0; ticketIndex < tickets.length; ticketIndex += 1) {
+        const ticket = tickets[ticketIndex];
+        totalTickets += 1;
+        const effectiveMarks = new Set<number>();
+
+        for (const row of ticket.grid) {
+          for (const number of row) {
+            if (number > 0 && drawnSet.has(number)) {
+              effectiveMarks.add(number);
+            }
+          }
+        }
+        for (const marked of marksByTicket[ticketIndex] ?? []) {
+          if (marked > 0) {
+            effectiveMarks.add(marked);
+          }
+        }
+
+        if (hasFullBingo(ticket, effectiveMarks)) {
+          continue;
+        }
+        if (findFirstCompleteLinePatternIndex(ticket, effectiveMarks) >= 0) {
+          continue;
+        }
+        if (countNearMissLinePattern(ticket, effectiveMarks) > 0) {
+          nearMissTickets += 1;
+        }
+      }
+    }
+
+    const nearMissRate = totalTickets > 0 ? this.roundCurrency(nearMissTickets / totalTickets) : 0;
+    const snapshot: RoundPerformanceSnapshot = {
+      gameId: game.id,
+      roomCode: room.code,
+      hallId: room.hallId,
+      startedAt: game.startedAt,
+      endedAt,
+      payoutPercentTarget: game.payoutPercent,
+      payoutPercentEffective,
+      stakeAmount,
+      payoutAmount,
+      nearMissTickets,
+      totalTickets,
+      nearMissRate
+    };
+
+    this.roundPerformanceRecorded.add(game.id);
+    this.roundPerformanceHistory.push(snapshot);
+
+    const retentionLimit = Math.max(this.rtpRollingWindowSize * 5, 5_000);
+    while (this.roundPerformanceHistory.length > retentionLimit) {
+      const removed = this.roundPerformanceHistory.shift();
+      if (removed) {
+        this.roundPerformanceRecorded.delete(removed.gameId);
+      }
+    }
+  }
+
+  private extractTicketLinePatterns(ticket: Ticket): number[][] {
+    const patterns: number[][] = [];
+    if (!ticket?.grid || ticket.grid.length === 0) {
+      return patterns;
+    }
+
+    const rows = ticket.grid.length;
+    const cols = ticket.grid[0]?.length ?? 0;
+    if (cols <= 0) {
+      return patterns;
+    }
+
+    for (let row = 0; row < rows; row += 1) {
+      const values = ticket.grid[row].filter((value) => value > 0);
+      if (values.length >= 2) {
+        patterns.push(values);
+      }
+    }
+
+    for (let col = 0; col < cols; col += 1) {
+      const values: number[] = [];
+      for (let row = 0; row < rows; row += 1) {
+        const value = ticket.grid[row]?.[col] ?? 0;
+        if (value > 0) {
+          values.push(value);
+        }
+      }
+      if (values.length >= 2) {
+        patterns.push(values);
+      }
+    }
+
+    const leftDiagonal: number[] = [];
+    const rightDiagonal: number[] = [];
+    const diagonalLength = Math.min(rows, cols);
+    for (let index = 0; index < diagonalLength; index += 1) {
+      const leftValue = ticket.grid[index]?.[index] ?? 0;
+      const rightValue = ticket.grid[index]?.[cols - 1 - index] ?? 0;
+      if (leftValue > 0) {
+        leftDiagonal.push(leftValue);
+      }
+      if (rightValue > 0) {
+        rightDiagonal.push(rightValue);
+      }
+    }
+    if (leftDiagonal.length >= 2) {
+      patterns.push(leftDiagonal);
+    }
+    if (rightDiagonal.length >= 2) {
+      patterns.push(rightDiagonal);
+    }
+
+    return patterns;
+  }
+
+  private randomizeList<T>(values: T[]): T[] {
+    const arr = [...values];
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+      const j = randomInt(i + 1);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
   }
 
   getPlayerCompliance(walletId: string, hallId?: string): PlayerComplianceSnapshot {
