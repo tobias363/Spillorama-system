@@ -244,6 +244,98 @@ function prioritizeDrawNumbers(
   internalRoomState!.currentGame!.drawBag = [...prioritized, ...remainder];
 }
 
+function prioritizeHostTicketForFastWin(engine: BingoEngine, roomCode: string, hostPlayerId: string): void {
+  const internalRoomState = (
+    engine as unknown as {
+      rooms: Map<
+        string,
+        {
+          currentGame?: {
+            drawBag: number[];
+            tickets: Map<string, Ticket[]>;
+          };
+        }
+      >;
+    }
+  ).rooms.get(roomCode);
+  const game = internalRoomState?.currentGame;
+  if (!game) {
+    return;
+  }
+  const hostTicket = game.tickets.get(hostPlayerId)?.[0];
+  if (!hostTicket) {
+    return;
+  }
+
+  const prioritized = hostTicket.grid.flat().filter((value) => value > 0);
+  prioritizeDrawNumbers(engine, roomCode, prioritized);
+}
+
+async function runDeterministicRoundWithClaims(input: {
+  engine: BingoEngine;
+  roomCode: string;
+  hostPlayerId: string;
+  payoutPercent: number;
+  hallId: string;
+}): Promise<void> {
+  const payoutPercent = input.engine.resolvePayoutPercentForNextRound(input.payoutPercent, input.hallId);
+  await input.engine.startGame({
+    roomCode: input.roomCode,
+    actorPlayerId: input.hostPlayerId,
+    entryFee: 100,
+    ticketsPerPlayer: 1,
+    payoutPercent
+  });
+  prioritizeHostTicketForFastWin(input.engine, input.roomCode, input.hostPlayerId);
+
+  let lineClaimed = false;
+  for (let drawCount = 0; drawCount < 75; drawCount += 1) {
+    const number = await input.engine.drawNextNumber({
+      roomCode: input.roomCode,
+      actorPlayerId: input.hostPlayerId
+    });
+    await input.engine.markNumber({
+      roomCode: input.roomCode,
+      playerId: input.hostPlayerId,
+      number
+    });
+
+    if (!lineClaimed && drawCount >= 4) {
+      const lineClaim = await input.engine.submitClaim({
+        roomCode: input.roomCode,
+        playerId: input.hostPlayerId,
+        type: "LINE"
+      });
+      lineClaimed = lineClaim.valid;
+    }
+
+    if (drawCount >= 23) {
+      const bingoClaim = await input.engine.submitClaim({
+        roomCode: input.roomCode,
+        playerId: input.hostPlayerId,
+        type: "BINGO"
+      });
+      if (bingoClaim.valid) {
+        break;
+      }
+    }
+
+    const snapshot = input.engine.getRoomSnapshot(input.roomCode);
+    if (snapshot.currentGame?.status === "ENDED") {
+      break;
+    }
+  }
+
+  const postRoundSnapshot = input.engine.getRoomSnapshot(input.roomCode);
+  if (postRoundSnapshot.currentGame?.status === "RUNNING") {
+    await input.engine.endGame({
+      roomCode: input.roomCode,
+      actorPlayerId: input.hostPlayerId,
+      reason: "test-round-close"
+    });
+  }
+}
+
 test("startGame rejects ticketsPerPlayer below 1", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await assert.rejects(
@@ -458,6 +550,63 @@ test("line claim includes deterministic backend bonus contract fields in claim a
   assert.equal(claimFromSnapshot?.patternIndex, 1);
   assert.equal(claimFromSnapshot?.bonusTriggered, true);
   assert.equal(claimFromSnapshot?.bonusAmount, claim.payoutAmount);
+});
+
+test("adaptive payout telemetry stays within gate for 60/75/90 targets in deterministic simulation", async () => {
+  const originalDateNow = Date.now;
+  try {
+    const roundsPerTarget = 120;
+    const targets = [60, 75, 90];
+    for (const target of targets) {
+      const wallet = new InMemoryWalletAdapter();
+      const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
+        dailyLossLimit: 5_000_000,
+        monthlyLossLimit: 5_000_000,
+        maxDrawsPerRound: 75,
+        nearMissBiasEnabled: false,
+        rtpRollingWindowSize: 500
+      });
+      const hallId = `hall-rtp-gate-${target}`;
+      const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
+        hallId,
+        playerName: "Host",
+        walletId: `wallet-host-rtp-${target}`
+      });
+      await engine.joinRoom({
+        roomCode,
+        hallId,
+        playerName: "Guest",
+        walletId: `wallet-guest-rtp-${target}`
+      });
+      await wallet.topUp(`wallet-host-rtp-${target}`, 5_000_000, "rtp-test-funding");
+      await wallet.topUp(`wallet-guest-rtp-${target}`, 5_000_000, "rtp-test-funding");
+
+      let fakeNowMs = Date.now() + 60_000;
+      Date.now = () => fakeNowMs;
+      for (let round = 0; round < roundsPerTarget; round += 1) {
+        fakeNowMs += 31_000;
+        await runDeterministicRoundWithClaims({
+          engine,
+          roomCode,
+          hostPlayerId,
+          payoutPercent: target,
+          hallId
+        });
+      }
+
+      const telemetry = engine.getRtpNearMissTelemetry({
+        hallId,
+        windowSize: roundsPerTarget
+      });
+      const deviation = Math.abs(telemetry.payoutPercentActualAvg - target);
+      assert.ok(
+        deviation <= 1.0,
+        `target=${target} actual=${telemetry.payoutPercentActualAvg} deviation=${deviation}`
+      );
+    }
+  } finally {
+    Date.now = originalDateNow;
+  }
 });
 
 test("round ends automatically when max draws is reached", async () => {
