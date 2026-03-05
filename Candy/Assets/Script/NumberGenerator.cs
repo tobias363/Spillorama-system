@@ -94,6 +94,10 @@ public class NumberGenerator : MonoBehaviour
 
         paylineManager = new PaylineManager(this);
         extraBallObj.SetActive(false);
+        if (bonusMainObj != null)
+        {
+            bonusMainObj.SetActive(false);
+        }
         autoSpinRemainingPlayText.text = "";
         EventManager.isPlayOver = true;
         totalSelectedPatterns.Clear();
@@ -1003,6 +1007,14 @@ public class NumberGenerator : MonoBehaviour
         if (random.Count != 0) random.Clear();
         if (generatedNO.Count != 0) generatedNO.Clear();
         ClearPaylineVisuals();
+        if (bonusMainObj != null)
+        {
+            bonusMainObj.SetActive(false);
+        }
+        if (extraBallObj != null)
+        {
+            extraBallObj.SetActive(false);
+        }
 
         for (int i = 0; i < cardClasses.Length; i++)
         {
