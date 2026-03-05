@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using SimpleJSON;
 using TMPro;
 using UnityEngine;
 
 public partial class APIManager
 {
+    private readonly Dictionary<int, RealtimeNearWinGuide> activeRealtimeNearWinGuidesByCard = new();
+
     private void HandleRealtimeRoomUpdate(JSONNode snapshot)
     {
         if (snapshot == null || snapshot.IsNull)
@@ -51,11 +52,10 @@ public partial class APIManager
             }
 
             activeGameId = string.Empty;
-            realtimeBonusTriggeredForActiveGame = false;
             processedDrawCount = 0;
             currentTicketPage = 0;
             activeTicketSets.Clear();
-            ApplyWinningAmountToUi(0);
+            ClearRealtimeNearWinGuides();
             RefreshRealtimeCountdownLabel(forceRefresh: true);
             return;
         }
@@ -65,6 +65,7 @@ public partial class APIManager
         string gameId = currentGame["id"];
         if (string.IsNullOrWhiteSpace(gameId))
         {
+            ClearRealtimeNearWinGuides();
             RefreshRealtimeCountdownLabel(forceRefresh: true);
             return;
         }
@@ -72,10 +73,10 @@ public partial class APIManager
         if (!string.Equals(activeGameId, gameId, StringComparison.Ordinal))
         {
             activeGameId = gameId;
-            realtimeBonusTriggeredForActiveGame = false;
             processedDrawCount = 0;
             currentTicketPage = 0;
             activeTicketSets.Clear();
+            ClearRealtimeNearWinGuides();
             ResetRealtimeRoundVisuals();
             NumberGenerator nextRoundGenerator = GameManager.instance?.numberGenerator;
             if (nextRoundGenerator != null)
@@ -86,9 +87,8 @@ public partial class APIManager
 
         ApplyMyTicketToCards(currentGame);
         ApplyDrawnNumbers(currentGame);
+        RefreshRealtimeNearWinGuides(currentGame);
         RefreshRealtimeWinningPatternVisuals(currentGame);
-        TryTriggerRealtimeBonus(currentGame);
-        RefreshRealtimeWinningAmount(currentGame);
         RefreshRealtimeCountdownLabel(forceRefresh: true);
     }
 
@@ -281,6 +281,324 @@ public partial class APIManager
         generator.ShowMatchedPaylinePatternsForCurrentCards(onlyFirstMatchPerCard);
     }
 
+    private void RefreshRealtimeNearWinGuides(JSONNode currentGame)
+    {
+        if (currentGame == null || currentGame.IsNull)
+        {
+            ClearRealtimeNearWinGuides();
+            return;
+        }
+
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        if (generator == null || generator.cardClasses == null || generator.patternList == null || generator.patternList.Count == 0)
+        {
+            ClearRealtimeNearWinGuides();
+            return;
+        }
+
+        List<int> activePatternIndices = ResolveActivePatternIndices(generator);
+        Dictionary<int, RealtimeNearWinGuide> nextGuides = new();
+
+        for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
+        {
+            CardClass card = generator.cardClasses[cardNo];
+            if (card == null || card.payLinePattern == null || card.numb == null)
+            {
+                continue;
+            }
+
+            bool hasCandidate = false;
+            RealtimeNearWinGuide bestGuide = default;
+
+            for (int i = 0; i < activePatternIndices.Count; i++)
+            {
+                int patternIndex = activePatternIndices[i];
+                if (!TryBuildRealtimeNearWinGuide(generator, card, cardNo, patternIndex, out RealtimeNearWinGuide candidateGuide))
+                {
+                    continue;
+                }
+
+                if (!hasCandidate ||
+                    candidateGuide.PrizeValue > bestGuide.PrizeValue ||
+                    (candidateGuide.PrizeValue == bestGuide.PrizeValue && candidateGuide.PatternIndex < bestGuide.PatternIndex))
+                {
+                    bestGuide = candidateGuide;
+                    hasCandidate = true;
+                }
+            }
+
+            if (hasCandidate)
+            {
+                nextGuides[cardNo] = bestGuide;
+            }
+        }
+
+        ApplyRealtimeNearWinGuides(nextGuides);
+    }
+
+    private void ApplyRealtimeNearWinGuides(Dictionary<int, RealtimeNearWinGuide> nextGuides)
+    {
+        foreach (RealtimeNearWinGuide currentGuide in activeRealtimeNearWinGuidesByCard.Values)
+        {
+            if (!nextGuides.TryGetValue(currentGuide.CardNo, out RealtimeNearWinGuide nextGuide) ||
+                !currentGuide.HasSameVisual(nextGuide))
+            {
+                SetRealtimeNearWinGuideActive(currentGuide, false);
+            }
+        }
+
+        foreach (RealtimeNearWinGuide nextGuide in nextGuides.Values)
+        {
+            if (!activeRealtimeNearWinGuidesByCard.TryGetValue(nextGuide.CardNo, out RealtimeNearWinGuide currentGuide) ||
+                !currentGuide.HasSameVisual(nextGuide))
+            {
+                SetRealtimeNearWinGuideActive(nextGuide, true);
+            }
+        }
+
+        activeRealtimeNearWinGuidesByCard.Clear();
+        foreach (var pair in nextGuides)
+        {
+            activeRealtimeNearWinGuidesByCard[pair.Key] = pair.Value;
+        }
+
+        NumberGenerator.isPrizeMissedByOneCard = activeRealtimeNearWinGuidesByCard.Count > 0;
+    }
+
+    private void ClearRealtimeNearWinGuides()
+    {
+        foreach (RealtimeNearWinGuide guide in activeRealtimeNearWinGuidesByCard.Values)
+        {
+            SetRealtimeNearWinGuideActive(guide, false);
+        }
+
+        activeRealtimeNearWinGuidesByCard.Clear();
+        NumberGenerator.isPrizeMissedByOneCard = false;
+    }
+
+    private static void SetRealtimeNearWinGuideActive(RealtimeNearWinGuide guide, bool active)
+    {
+        EventManager.ShowMissingPattern(
+            guide.PatternIndex,
+            guide.MissingCellIndex,
+            active,
+            active ? guide.MissingNumber : 0,
+            guide.CardNo);
+    }
+
+    private static List<int> ResolveActivePatternIndices(NumberGenerator generator)
+    {
+        List<int> active = new();
+        if (generator == null || generator.patternList == null)
+        {
+            return active;
+        }
+
+        int patternCount = generator.patternList.Count;
+        HashSet<int> seen = new();
+
+        if (generator.totalSelectedPatterns != null)
+        {
+            for (int i = 0; i < generator.totalSelectedPatterns.Count; i++)
+            {
+                int patternIndex = generator.totalSelectedPatterns[i];
+                if (patternIndex < 0 || patternIndex >= patternCount || !seen.Add(patternIndex))
+                {
+                    continue;
+                }
+
+                active.Add(patternIndex);
+            }
+        }
+
+        if (active.Count > 0)
+        {
+            return active;
+        }
+
+        for (int patternIndex = 0; patternIndex < patternCount; patternIndex++)
+        {
+            active.Add(patternIndex);
+        }
+
+        return active;
+    }
+
+    private static bool TryBuildRealtimeNearWinGuide(
+        NumberGenerator generator,
+        CardClass card,
+        int cardNo,
+        int patternIndex,
+        out RealtimeNearWinGuide guide)
+    {
+        guide = default;
+
+        if (generator == null || card == null || generator.patternList == null ||
+            patternIndex < 0 || patternIndex >= generator.patternList.Count)
+        {
+            return false;
+        }
+
+        Patterns pattern = generator.patternList[patternIndex];
+        if (pattern == null || pattern.pattern == null)
+        {
+            return false;
+        }
+
+        int requiredCount = ResolvePatternRequiredCellCount(pattern);
+        if (requiredCount <= 0)
+        {
+            return false;
+        }
+
+        int matchedCount = 0;
+        int missingCount = 0;
+        int missingCellIndex = -1;
+
+        int cellCount = Mathf.Min(pattern.pattern.Count, Mathf.Min(card.payLinePattern.Count, card.numb.Count));
+        for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
+        {
+            if (pattern.pattern[cellIndex] != 1)
+            {
+                continue;
+            }
+
+            if (card.payLinePattern[cellIndex] == 1)
+            {
+                matchedCount++;
+            }
+            else
+            {
+                missingCount++;
+                missingCellIndex = cellIndex;
+            }
+        }
+
+        if (matchedCount >= requiredCount)
+        {
+            return false;
+        }
+
+        if (missingCount != 1 || matchedCount != requiredCount - 1)
+        {
+            return false;
+        }
+
+        int missingNumber = missingCellIndex >= 0 && missingCellIndex < card.numb.Count
+            ? card.numb[missingCellIndex]
+            : 0;
+
+        if (missingNumber <= 0)
+        {
+            return false;
+        }
+
+        guide = new RealtimeNearWinGuide(
+            cardNo,
+            patternIndex,
+            missingCellIndex,
+            missingNumber,
+            ResolveRealtimePatternPrizeValue(patternIndex));
+        return true;
+    }
+
+    private static int ResolvePatternRequiredCellCount(Patterns pattern)
+    {
+        if (pattern == null)
+        {
+            return 0;
+        }
+
+        if (pattern.totalCountOfTrue > 0)
+        {
+            return pattern.totalCountOfTrue;
+        }
+
+        if (pattern.pattern == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < pattern.pattern.Count; i++)
+        {
+            if (pattern.pattern[i] == 1)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static int ResolveRealtimePatternPrizeValue(int patternIndex)
+    {
+        List<int> currentWinPoints = GameManager.instance?.currentWinPoints;
+        if (currentWinPoints == null || currentWinPoints.Count == 0)
+        {
+            return 0;
+        }
+
+        int resolvedIndex = ResolveWinPointIndexForPattern(patternIndex, currentWinPoints.Count);
+        if (resolvedIndex < 0 || resolvedIndex >= currentWinPoints.Count)
+        {
+            return 0;
+        }
+
+        return Mathf.Max(0, currentWinPoints[resolvedIndex]);
+    }
+
+    private static int ResolveWinPointIndexForPattern(int patternIndex, int winPointCount)
+    {
+        if (winPointCount <= 0)
+        {
+            return -1;
+        }
+
+        if (patternIndex < 5)
+        {
+            return Mathf.Clamp(patternIndex, 0, winPointCount - 1);
+        }
+
+        if (patternIndex >= 5 && patternIndex <= 7)
+        {
+            return Mathf.Clamp(5, 0, winPointCount - 1);
+        }
+
+        if (patternIndex > 7 && patternIndex < 13)
+        {
+            return Mathf.Clamp(patternIndex - 2, 0, winPointCount - 1);
+        }
+
+        return winPointCount - 1;
+    }
+
+    private readonly struct RealtimeNearWinGuide
+    {
+        public readonly int CardNo;
+        public readonly int PatternIndex;
+        public readonly int MissingCellIndex;
+        public readonly int MissingNumber;
+        public readonly int PrizeValue;
+
+        public RealtimeNearWinGuide(int cardNo, int patternIndex, int missingCellIndex, int missingNumber, int prizeValue)
+        {
+            CardNo = cardNo;
+            PatternIndex = patternIndex;
+            MissingCellIndex = missingCellIndex;
+            MissingNumber = missingNumber;
+            PrizeValue = prizeValue;
+        }
+
+        public bool HasSameVisual(RealtimeNearWinGuide other)
+        {
+            return CardNo == other.CardNo &&
+                   PatternIndex == other.PatternIndex &&
+                   MissingCellIndex == other.MissingCellIndex &&
+                   MissingNumber == other.MissingNumber;
+        }
+    }
+
     private string GetLatestValidClaimTypeForCurrentPlayer(JSONNode currentGame)
     {
         if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
@@ -319,303 +637,6 @@ public partial class APIManager
         return string.Empty;
     }
 
-    private void TryTriggerRealtimeBonus(JSONNode currentGame)
-    {
-        if (realtimeBonusTriggeredForActiveGame || currentGame == null || currentGame.IsNull)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            return;
-        }
-
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator == null || generator.cardClasses == null || generator.patternList == null)
-        {
-            return;
-        }
-
-        if (generator.patternList.Count == 0)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(GetLatestValidClaimTypeForCurrentPlayer(currentGame)))
-        {
-            return;
-        }
-
-        int clampedBonusPatternIndex = Mathf.Clamp(realtimeBonusPatternIndex, 0, generator.patternList.Count - 1);
-        bool bonusMatched = false;
-        for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
-        {
-            CardClass card = generator.cardClasses[cardNo];
-            if (card == null)
-            {
-                continue;
-            }
-
-            if (!RealtimePaylineUtils.IsPatternMatchedOnCard(card, generator.patternList, clampedBonusPatternIndex))
-            {
-                continue;
-            }
-
-            bonusMatched = true;
-            break;
-        }
-
-        if (!bonusMatched)
-        {
-            return;
-        }
-
-        int bonusAmount = ResolveRealtimeBonusAmount(currentGame, generator, clampedBonusPatternIndex);
-        bonusAMT = bonusAmount;
-        generator.TriggerRealtimeBonus(bonusAmount);
-        realtimeBonusTriggeredForActiveGame = true;
-        Debug.Log($"[APIManager] Realtime bonus trigget for game {activeGameId}. bonusAmount={bonusAmount}");
-    }
-
-    private int ResolveRealtimeBonusAmount(JSONNode currentGame, NumberGenerator generator, int bonusPatternIndex)
-    {
-        if (TryExtractBonusAmountFromClaimPayload(currentGame, out int claimBonusAmount))
-        {
-            return claimBonusAmount;
-        }
-
-        if (TryExtractBonusAmountFromTopper(generator, bonusPatternIndex, out int topperBonusAmount))
-        {
-            return topperBonusAmount;
-        }
-
-        return Mathf.Max(1, realtimeDefaultBonusAmount);
-    }
-
-    private bool TryExtractBonusAmountFromClaimPayload(JSONNode currentGame, out int bonusAmount)
-    {
-        bonusAmount = 0;
-        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            return false;
-        }
-
-        JSONNode claims = currentGame["claims"];
-        if (claims == null || claims.IsNull || !claims.IsArray)
-        {
-            return false;
-        }
-
-        for (int i = claims.Count - 1; i >= 0; i--)
-        {
-            JSONNode claim = claims[i];
-            if (claim == null || claim.IsNull || !claim["valid"].AsBool)
-            {
-                continue;
-            }
-
-            string claimPlayerId = claim["playerId"];
-            if (!string.Equals(claimPlayerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (TryGetPositiveIntNodeValue(claim["bonusAmount"], out bonusAmount))
-            {
-                return true;
-            }
-
-            if (TryGetPositiveIntNodeValue(claim["bonusWinAmount"], out bonusAmount))
-            {
-                return true;
-            }
-
-            JSONNode payloadNode = claim["payload"];
-            if (payloadNode != null && !payloadNode.IsNull)
-            {
-                if (TryGetPositiveIntNodeValue(payloadNode["bonusAmount"], out bonusAmount))
-                {
-                    return true;
-                }
-
-                if (TryGetPositiveIntNodeValue(payloadNode["bonusWinAmount"], out bonusAmount))
-                {
-                    return true;
-                }
-
-                JSONNode bonusNode = payloadNode["bonus"];
-                if (bonusNode != null && !bonusNode.IsNull)
-                {
-                    if (TryGetPositiveIntNodeValue(bonusNode["amount"], out bonusAmount))
-                    {
-                        return true;
-                    }
-
-                    if (TryGetPositiveIntNodeValue(bonusNode["winAmount"], out bonusAmount))
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private bool TryExtractBonusAmountFromTopper(NumberGenerator generator, int bonusPatternIndex, out int bonusAmount)
-    {
-        bonusAmount = 0;
-        if (generator == null || generator.topperManager == null || generator.topperManager.prizes == null)
-        {
-            return false;
-        }
-
-        int topperPatternIndex = generator.topperManager.GetPatternIndex(bonusPatternIndex);
-        if (topperPatternIndex < 0 || topperPatternIndex >= generator.topperManager.prizes.Count)
-        {
-            return false;
-        }
-
-        TextMeshProUGUI prizeLabel = generator.topperManager.prizes[topperPatternIndex];
-        if (prizeLabel == null)
-        {
-            return false;
-        }
-
-        return TryParsePositiveIntFromAnyText(prizeLabel.text, out bonusAmount);
-    }
-
-    private bool TryGetPositiveIntNodeValue(JSONNode node, out int value)
-    {
-        value = 0;
-        if (node == null || node.IsNull)
-        {
-            return false;
-        }
-
-        if (int.TryParse(node.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedInt) &&
-            parsedInt > 0)
-        {
-            value = parsedInt;
-            return true;
-        }
-
-        if (double.TryParse(node.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedDouble))
-        {
-            int rounded = (int)Math.Round(parsedDouble, MidpointRounding.AwayFromZero);
-            if (rounded > 0)
-            {
-                value = rounded;
-                return true;
-            }
-        }
-
-        return TryParsePositiveIntFromAnyText(node.Value, out value);
-    }
-
-    private bool TryParsePositiveIntFromAnyText(string raw, out int value)
-    {
-        value = 0;
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return false;
-        }
-
-        char[] digitBuffer = new char[raw.Length];
-        int digitCount = 0;
-        for (int i = 0; i < raw.Length; i++)
-        {
-            char current = raw[i];
-            if (!char.IsDigit(current))
-            {
-                continue;
-            }
-
-            digitBuffer[digitCount] = current;
-            digitCount += 1;
-        }
-
-        if (digitCount == 0)
-        {
-            return false;
-        }
-
-        string numericOnly = new string(digitBuffer, 0, digitCount);
-        if (!int.TryParse(numericOnly, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) || parsed <= 0)
-        {
-            return false;
-        }
-
-        value = parsed;
-        return true;
-    }
-
-    private void RefreshRealtimeWinningAmount(JSONNode currentGame)
-    {
-        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            ApplyWinningAmountToUi(0);
-            return;
-        }
-
-        JSONNode claims = currentGame["claims"];
-        if (claims == null || claims.IsNull || !claims.IsArray)
-        {
-            ApplyWinningAmountToUi(0);
-            return;
-        }
-
-        double totalWinning = 0;
-        for (int i = 0; i < claims.Count; i++)
-        {
-            JSONNode claim = claims[i];
-            if (claim == null || claim.IsNull || !claim["valid"].AsBool)
-            {
-                continue;
-            }
-
-            string claimPlayerId = claim["playerId"];
-            if (!string.Equals(claimPlayerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            string payoutRaw = claim["payoutAmount"];
-            if (!double.TryParse(payoutRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out double payout))
-            {
-                continue;
-            }
-
-            if (double.IsNaN(payout) || double.IsInfinity(payout))
-            {
-                continue;
-            }
-
-            totalWinning += payout;
-        }
-
-        ApplyWinningAmountToUi(totalWinning);
-    }
-
-    private void ApplyWinningAmountToUi(double totalWinning)
-    {
-        GameManager manager = GameManager.instance;
-        if (manager?.winAmtText == null)
-        {
-            return;
-        }
-
-        double rounded = Math.Round(totalWinning, 2, MidpointRounding.AwayFromZero);
-        if (Math.Abs(rounded - Math.Round(rounded)) < 0.005d)
-        {
-            manager.winAmtText.text = Math.Round(rounded).ToString(CultureInfo.InvariantCulture);
-            return;
-        }
-
-        manager.winAmtText.text = rounded.ToString("0.##", CultureInfo.InvariantCulture);
-    }
-
     private int GetCardSlotsCount()
     {
         NumberGenerator generator = GameManager.instance?.numberGenerator;
@@ -640,6 +661,7 @@ public partial class APIManager
         processedDrawCount = 0;
         currentTicketPage = 0;
         activeTicketSets.Clear();
+        ClearRealtimeNearWinGuides();
         nextScheduledRoomStateRefreshAt = -1f;
         nextScheduledManualStartAttemptAt = -1f;
 

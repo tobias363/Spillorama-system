@@ -837,45 +837,75 @@ public class NumberGenerator : MonoBehaviour
 
     public void CheckPayLineMatch(int cardNo)
     {
-        RealtimePaylineUtils.EnsurePaylineIndexCapacity(cardClasses[cardNo], patternList.Count);
+        if (cardNo < 0 || cardNo >= cardClasses.Length || cardClasses[cardNo] == null)
+        {
+            return;
+        }
+
+        CardClass card = cardClasses[cardNo];
+        RealtimePaylineUtils.EnsurePaylineIndexCapacity(card, patternList.Count);
 
         for (int patternIndex = 0; patternIndex < patternList.Count; patternIndex++)
         {
-            if (!cardClasses[cardNo].paylineindex[patternIndex])
+            if (card.paylineindex[patternIndex])
             {
+                continue;
+            }
 
-                int count = 0;
-                if (selectedIndex != null) selectedIndex.Clear();
-                for (int a = 0; a < totalNumInEachCard; a++)
+            Patterns pattern = patternList[patternIndex];
+            if (pattern == null || pattern.pattern == null)
+            {
+                continue;
+            }
+
+            int requiredCount = ResolveRequiredCount(pattern);
+            if (requiredCount <= 0)
+            {
+                continue;
+            }
+
+            int matchedCount = 0;
+            int missingCount = 0;
+            int missingIndex = -1;
+            List<int> matchedIndexes = new List<int>(requiredCount);
+
+            int cellCount = Mathf.Min(totalNumInEachCard, pattern.pattern.Count);
+            for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
+            {
+                if (pattern.pattern[cellIndex] != 1)
                 {
-                    if (patternList[patternIndex].pattern[a] == 1 && cardClasses[cardNo].payLinePattern[a] == 1)
-                    {
-                        count++;
-                        if (!cardClasses[cardNo].selectedPayLineCanBe.ContainsKey(patternIndex))
-                        {
-                            cardClasses[cardNo].selectedPayLineCanBe.Add(patternIndex, count);
-                        }
-                        else
-                        {
-                            cardClasses[cardNo].selectedPayLineCanBe[patternIndex] = count;
-                        }
-                        selectedIndex.Add(a);
-                        selectedCard.Add(cardNo);
-                        if (count == patternList[patternIndex].totalCountOfTrue)
-                        {
-                            PrizeWin(cardNo, patternIndex);
-                        }
-                        else if (count == patternList[patternIndex].totalCountOfTrue - 1)
-                        {
-                            PrizeMissedByOneCard(cardNo, patternIndex);
-                        }
-                        else
-                        {
-                            if (ballAnimSpeed < 0.3f)
-                                ballAnimSpeed += 0.0005f;
-                        }
-                    }
+                    continue;
                 }
+
+                if (card.payLinePattern[cellIndex] == 1)
+                {
+                    matchedCount++;
+                    matchedIndexes.Add(cellIndex);
+                }
+                else
+                {
+                    missingCount++;
+                    missingIndex = cellIndex;
+                }
+            }
+
+            card.selectedPayLineCanBe[patternIndex] = matchedCount;
+
+            if (matchedCount >= requiredCount)
+            {
+                PrizeWin(cardNo, patternIndex, matchedIndexes);
+                continue;
+            }
+
+            if (missingCount == 1 && matchedCount == requiredCount - 1)
+            {
+                PrizeMissedByOneCard(cardNo, patternIndex, missingIndex);
+                continue;
+            }
+
+            if (ballAnimSpeed < 0.3f)
+            {
+                ballAnimSpeed += 0.0005f;
             }
         }
 
@@ -883,7 +913,7 @@ public class NumberGenerator : MonoBehaviour
     }
 
     //Won the Prize
-    public void PrizeWin(int cardNo, int patternIndex)
+    public void PrizeWin(int cardNo, int patternIndex, List<int> matchedIndexes)
     {
         RealtimePaylineUtils.EnsurePaylineIndexCapacity(cardClasses[cardNo], patternIndex + 1);
         cardClasses[cardNo].paylineindex[patternIndex] = true;
@@ -895,13 +925,28 @@ public class NumberGenerator : MonoBehaviour
             true,
             matchedMat,
             unMatchedMat);
+
+        ClearNearWinIndicators(cardNo, patternIndex);
         EventManager.ShowMatchedPattern(patternIndex, true);
-        for (int m = 0; m < selectedIndex.Count; m++)
+
+        if (matchedIndexes != null)
         {
-            cardClasses[cardNo].matchPatternImg[selectedIndex[m]].SetActive(true);
-            ballAnimSpeed = 0.11f;
-            EventManager.ShowMissingPattern(patternIndex, selectedIndex[m], false);
+            for (int m = 0; m < matchedIndexes.Count; m++)
+            {
+                int matchedIndex = matchedIndexes[m];
+                if (matchedIndex < 0 || matchedIndex >= cardClasses[cardNo].matchPatternImg.Count)
+                {
+                    continue;
+                }
+
+                GameObject matchedObject = cardClasses[cardNo].matchPatternImg[matchedIndex];
+                if (matchedObject != null)
+                {
+                    matchedObject.SetActive(true);
+                }
+            }
         }
+        ballAnimSpeed = 0.11f;
 
         if (patternIndex < 10)
         {
@@ -919,46 +964,151 @@ public class NumberGenerator : MonoBehaviour
     }
 
     //Almost Win
-    public void PrizeMissedByOneCard(int cardNo, int patternIndex)
+    public void PrizeMissedByOneCard(int cardNo, int patternIndex, int missingBlockIndex)
     {
-        for (int blockCount = 0; blockCount < totalNumInEachCard; blockCount++)
+        if (missingBlockIndex < 0 || !IsPatternCellRelevant(cardNo, patternIndex, missingBlockIndex))
         {
-            if (patternList[patternIndex].pattern[blockCount] == 1 && cardClasses[cardNo].payLinePattern[blockCount] == 0)
+            return;
+        }
+
+        RealtimePaylineUtils.SetPaylineVisual(
+            cardClasses,
+            cardNo,
+            patternIndex,
+            true,
+            false,
+            matchedMat,
+            unMatchedMat);
+
+        int missingNumber = ResolveMissingNumber(cardNo, missingBlockIndex);
+        EventManager.ShowMissingPattern(patternIndex, missingBlockIndex, true, missingNumber, cardNo);
+
+        if (missingBlockIndex >= 0 && missingBlockIndex < cardClasses[cardNo].missingPatternImg.Count)
+        {
+            GameObject missingCell = cardClasses[cardNo].missingPatternImg[missingBlockIndex];
+            if (missingCell != null)
             {
-                RealtimePaylineUtils.SetPaylineVisual(
-                    cardClasses,
-                    cardNo,
-                    patternIndex,
-                    true,
-                    false,
-                    matchedMat,
-                    unMatchedMat);
-
-                EventManager.ShowMissingPattern(patternIndex, blockCount, true);
-                TextMeshProUGUI missingPatternPrize = cardClasses[cardNo].missingPatternImg[blockCount].transform.GetChild(0).GetComponentInChildren<TextMeshProUGUI>();
-                TextMeshProUGUI patternIndexInTopper = topperManager.prizes[topperManager.GetPatternIndex(patternIndex)];
-                if (cardClasses[cardNo].missingPatternImg[blockCount].activeInHierarchy && !missingPatternPrize.text.Contains(patternIndexInTopper.text))
+                missingCell.SetActive(true);
+                TextMeshProUGUI missingLabel = missingCell.GetComponentInChildren<TextMeshProUGUI>(true);
+                if (missingLabel != null)
                 {
-                    //missingPatternPrize.text += ", " + patternIndexInTopper.text;
-                    //Debug.Log(missingPatternPrize.text + " + " + patternIndexInTopper.text);
-                    int totalLoss = int.Parse(missingPatternPrize.text) + int.Parse(patternIndexInTopper.text);
-                    missingPatternPrize.text = totalLoss.ToString();
-                    // Debug.Log("total : " + missingPatternPrize.text);
+                    missingLabel.text = missingNumber > 0 ? missingNumber.ToString() : string.Empty;
                 }
-                else
-                {
-                    missingPatternPrize.text = patternIndexInTopper.text;
-                    cardClasses[cardNo].missingPatternImg[blockCount].SetActive(true);
-                }
-
-                if (topperManager.GetPatternIndex(patternIndex) < 8)
-                {
-                    showFreeExtraBalls = true;
-                    isMissingPattern = true;
-                }
-
             }
         }
+
+        if (topperManager.GetPatternIndex(patternIndex) < 8)
+        {
+            showFreeExtraBalls = true;
+            isMissingPattern = true;
+        }
+    }
+
+    private void ClearNearWinIndicators(int cardNo, int patternIndex)
+    {
+        if (patternIndex < 0 || patternIndex >= patternList.Count || patternList[patternIndex]?.pattern == null)
+        {
+            return;
+        }
+
+        int maxCells = Mathf.Min(totalNumInEachCard, patternList[patternIndex].pattern.Count);
+        for (int cellIndex = 0; cellIndex < maxCells; cellIndex++)
+        {
+            if (patternList[patternIndex].pattern[cellIndex] != 1)
+            {
+                continue;
+            }
+
+            EventManager.ShowMissingPattern(patternIndex, cellIndex, false, 0, cardNo);
+
+            if (cellIndex < 0 || cellIndex >= cardClasses[cardNo].missingPatternImg.Count)
+            {
+                continue;
+            }
+
+            GameObject missingCell = cardClasses[cardNo].missingPatternImg[cellIndex];
+            if (missingCell == null)
+            {
+                continue;
+            }
+
+            TextMeshProUGUI missingLabel = missingCell.GetComponentInChildren<TextMeshProUGUI>(true);
+            if (missingLabel != null)
+            {
+                missingLabel.text = string.Empty;
+            }
+            missingCell.SetActive(false);
+        }
+    }
+
+    private int ResolveRequiredCount(Patterns pattern)
+    {
+        if (pattern == null)
+        {
+            return 0;
+        }
+
+        if (pattern.totalCountOfTrue > 0)
+        {
+            return pattern.totalCountOfTrue;
+        }
+
+        if (pattern.pattern == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < pattern.pattern.Count; i++)
+        {
+            if (pattern.pattern[i] == 1)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private bool IsPatternCellRelevant(int cardNo, int patternIndex, int cellIndex)
+    {
+        if (patternIndex < 0 || patternIndex >= patternList.Count || patternList[patternIndex]?.pattern == null)
+        {
+            return false;
+        }
+
+        if (cellIndex < 0 || cellIndex >= patternList[patternIndex].pattern.Count)
+        {
+            return false;
+        }
+
+        if (cardClasses == null || cardNo < 0 || cardNo >= cardClasses.Length || cardClasses[cardNo] == null)
+        {
+            return false;
+        }
+
+        if (cellIndex >= cardClasses[cardNo].payLinePattern.Count)
+        {
+            return false;
+        }
+
+        return patternList[patternIndex].pattern[cellIndex] == 1 &&
+               cardClasses[cardNo].payLinePattern[cellIndex] == 0;
+    }
+
+    private int ResolveMissingNumber(int cardNo, int missingBlockIndex)
+    {
+        if (cardNo < 0 || cardNo >= cardClasses.Length || cardClasses[cardNo] == null)
+        {
+            return 0;
+        }
+
+        if (missingBlockIndex < 0 || missingBlockIndex >= cardClasses[cardNo].numb.Count)
+        {
+            return 0;
+        }
+
+        return cardClasses[cardNo].numb[missingBlockIndex];
     }
 
 
@@ -966,9 +1116,7 @@ public class NumberGenerator : MonoBehaviour
     public static bool isPrizeMissedByOneCard;
     
     public float ballAnimSpeed = 0.11f;
-    List<int> selectedIndex = new List<int>();
     public bool isMissingPattern;
-    List<int> selectedCard = new List<int>();
 
 
 
