@@ -30,7 +30,9 @@ git push -u origin codex/wallet-transfer-ui
 3. CI must be green:
    - `CI / backend`
    - `Compliance Gate / compliance`
-4. At least 1 approval is required.
+4. Approval policy is controlled in branch protection script:
+   - full-control mode: `REQUIRED_APPROVALS=0`
+   - stricter mode: `REQUIRED_APPROVALS=1` (or more)
 5. Use **Squash and merge**.
 
 ## 3) Deployment flow

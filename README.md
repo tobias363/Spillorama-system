@@ -92,7 +92,7 @@ Kortversjon:
 - required checks:
   - `CI / backend`
   - `Compliance Gate / compliance`
-- minst 1 godkjenning før merge
+- review-krav styres av branch-protection (`.github/scripts/apply-branch-protection.sh`)
 - squash-merge til `main`
 - Render deploy styres av GitHub Actions:
   - `.github/workflows/deploy-staging.yml`
