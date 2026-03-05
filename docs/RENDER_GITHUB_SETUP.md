@@ -50,8 +50,8 @@ Repo variables (`Settings` -> `Secrets and variables` -> `Actions` -> `Variables
 
 - Branch protection på `main` må være aktiv.
 - Required checks må minst inkludere:
-  - `CI / backend`
-  - `Compliance Gate / compliance`
+  - `backend`
+  - `compliance`
 - Sett GitHub Environment protection for `production` med required reviewers hvis ønskelig.
 
 ## 6) Verifisering etter oppsett

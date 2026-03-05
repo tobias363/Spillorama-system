@@ -90,8 +90,8 @@ Kortversjon:
 - arbeid i `codex/*` brancher
 - PR til `main` (ingen direkte push)
 - required checks:
-  - `CI / backend`
-  - `Compliance Gate / compliance`
+  - `backend`
+  - `compliance`
 - review-krav styres av branch-protection (`.github/scripts/apply-branch-protection.sh`)
 - squash-merge til `main`
 - Render deploy styres av GitHub Actions:

@@ -8,7 +8,7 @@ REQUIRED_APPROVALS="${REQUIRED_APPROVALS:-0}"
 REQUIRE_LAST_PUSH_APPROVAL="${REQUIRE_LAST_PUSH_APPROVAL:-false}"
 
 # Required checks can be overridden with comma separated values.
-REQUIRED_CONTEXTS_CSV="${REQUIRED_CONTEXTS_CSV:-CI / backend,Compliance Gate / compliance}"
+REQUIRED_CONTEXTS_CSV="${REQUIRED_CONTEXTS_CSV:-backend,compliance}"
 IFS=',' read -r -a CONTEXTS <<< "$REQUIRED_CONTEXTS_CSV"
 
 TMP_JSON="$(mktemp)"

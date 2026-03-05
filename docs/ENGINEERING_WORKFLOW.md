@@ -28,8 +28,8 @@ git push -u origin codex/wallet-transfer-ui
 1. Open PR from `codex/*` to `main`.
 2. Fill out `.github/pull_request_template.md`.
 3. CI must be green:
-   - `CI / backend`
-   - `Compliance Gate / compliance`
+   - `backend`
+   - `compliance`
 4. Approval policy is controlled in branch protection script:
    - full-control mode: `REQUIRED_APPROVALS=0`
    - stricter mode: `REQUIRED_APPROVALS=1` (or more)
