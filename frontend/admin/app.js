@@ -606,9 +606,7 @@ function buildCandyManiaPayload() {
   const minRoundIntervalMs = Number.isFinite(constraints.minRoundIntervalMs)
     ? Number(constraints.minRoundIntervalMs)
     : 30000;
-  const minPlayersToStart = Number.isFinite(constraints.minPlayersToStart)
-    ? Number(constraints.minPlayersToStart)
-    : 1;
+  const minPlayersToStart = 1;
   const maxTicketsPerPlayer = Number.isFinite(constraints.maxTicketsPerPlayer)
     ? Number(constraints.maxTicketsPerPlayer)
     : 5;
