@@ -9,6 +9,11 @@ using System;
 public class GameManager : MonoBehaviour
 {
     public static GameManager instance;
+
+    [Header("Testing Speed")]
+    [SerializeField] private bool increaseGameSpeedInTesting = true;
+    [SerializeField] [Range(1f, 5f)] private float testingSpeedMultiplier = 3.5f;
+
     public int extraBallTotal;
     public NumberGenerator numberGenerator;
     public TextMeshProUGUI displayTotalMoney;
@@ -31,6 +36,7 @@ public class GameManager : MonoBehaviour
     public int betlevel;
     public List<int> winList;
     private ThemeMathEngine themeMathEngine;
+    private bool testingSpeedApplied;
     private void OnEnable()
     {
         EventManager.OnPayAmt += ShowWinAmt;
@@ -41,13 +47,14 @@ public class GameManager : MonoBehaviour
     {
         EventManager.OnPayAmt -= ShowWinAmt;
         EventManager.OnPlay -= OnPlay;
+        RestoreTestingSpeedIfApplied();
 
     }
 
     void Awake()
     {
         instance = this;
-        
+        ApplyTestingSpeedIfEnabled();
     }
     // Start is called before the first frame update
     void Start()
@@ -59,6 +66,11 @@ public class GameManager : MonoBehaviour
             cardWin.Add(0);
             displayCardWinPoints[i].text = "WIN - 0";
         }
+    }
+
+    private void OnDestroy()
+    {
+        RestoreTestingSpeedIfApplied();
     }
 
     private void OnPlay()
@@ -167,6 +179,35 @@ public class GameManager : MonoBehaviour
         SetTotalMoney(winList.Sum(x => Convert.ToInt32(x)));
 
        
+    }
+
+    private void ApplyTestingSpeedIfEnabled()
+    {
+        if (!increaseGameSpeedInTesting)
+        {
+            return;
+        }
+
+        if (!Application.isEditor && !Debug.isDebugBuild)
+        {
+            return;
+        }
+
+        float resolvedMultiplier = Mathf.Max(1f, testingSpeedMultiplier);
+        Time.timeScale = resolvedMultiplier;
+        testingSpeedApplied = true;
+        Debug.Log($"[GameManager] Testing speed active: {resolvedMultiplier:0.##}x");
+    }
+
+    private void RestoreTestingSpeedIfApplied()
+    {
+        if (!testingSpeedApplied)
+        {
+            return;
+        }
+
+        testingSpeedApplied = false;
+        Time.timeScale = 1f;
     }
 }
 [System.Serializable]
