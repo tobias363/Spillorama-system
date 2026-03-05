@@ -10,6 +10,10 @@ on:
         description: Optional expected releaseVersion from release.json
         required: false
         type: string
+      expected_release_commit:
+        description: Optional expected releaseCommit from release.json
+        required: false
+        type: string
 
 concurrency:
   group: deploy-candygame
@@ -30,6 +34,8 @@ jobs:
           CANDYGAME_DEPLOY_POLL_INTERVAL_SECONDS: ${{ vars.RENDER_CANDYGAME_POLL_INTERVAL_SECONDS || '10' }}
           CANDYGAME_DEPLOY_CURL_RETRIES: ${{ vars.RENDER_CANDYGAME_CURL_RETRIES || '3' }}
           EXPECTED_RELEASE_VERSION: ${{ inputs.expected_release_version }}
+          EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_release_commit }}
+          GITHUB_HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
@@ -81,4 +87,21 @@ jobs:
           if [[ -n "${EXPECTED_RELEASE_VERSION}" && "${release_version}" != "${EXPECTED_RELEASE_VERSION}" ]]; then
             echo "releaseVersion matcher ikke expected_release_version (${EXPECTED_RELEASE_VERSION})." >&2
             exit 1
+          fi
+
+          resolved_expected_commit="${EXPECTED_RELEASE_COMMIT}"
+          if [[ -z "${resolved_expected_commit}" && -n "${GITHUB_HEAD_SHA}" ]]; then
+            resolved_expected_commit="${GITHUB_HEAD_SHA:0:8}"
+          fi
+
+          if [[ -z "${release_commit}" ]]; then
+            echo "Fant ikke releaseCommit i release.json." >&2
+            exit 1
+          fi
+
+          if [[ -n "${resolved_expected_commit}" ]]; then
+            if [[ "${release_commit}" != "${resolved_expected_commit}" && "${release_commit}" != "${GITHUB_HEAD_SHA}" ]]; then
+              echo "releaseCommit matcher ikke forventet commit (${resolved_expected_commit} / ${GITHUB_HEAD_SHA})." >&2
+              exit 1
+            fi
           fi
