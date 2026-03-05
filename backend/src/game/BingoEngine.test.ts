@@ -222,6 +222,28 @@ async function createRoomWithTwoPlayers(input: {
   };
 }
 
+function prioritizeDrawNumbers(
+  engine: BingoEngine,
+  roomCode: string,
+  preferredNumbers: readonly number[]
+): void {
+  const internalRoomState = (
+    engine as unknown as { rooms: Map<string, { currentGame?: { drawBag: number[] } }> }
+  ).rooms.get(roomCode);
+  const drawBag = internalRoomState?.currentGame?.drawBag;
+  if (!drawBag || drawBag.length === 0) {
+    return;
+  }
+
+  const prioritized = preferredNumbers.filter((value) => drawBag.includes(value));
+  if (prioritized.length === 0) {
+    return;
+  }
+
+  const remainder = drawBag.filter((value) => !prioritized.includes(value));
+  internalRoomState!.currentGame!.drawBag = [...prioritized, ...remainder];
+}
+
 test("startGame rejects ticketsPerPlayer below 1", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await assert.rejects(
@@ -296,6 +318,7 @@ test("rtp payout budget caps total payouts across line and bingo claims", async 
   const bingoNumbers = new Set([
     1, 2, 3, 4, 5, 16, 17, 18, 19, 20, 31, 32, 33, 34, 46, 47, 48, 49, 50, 61, 62, 63, 64, 65
   ]);
+  prioritizeDrawNumbers(engine, roomCode, [...bingoNumbers]);
 
   let drawGuard = 0;
   while (lineNumbers.size > 0 && drawGuard < 75) {
@@ -396,6 +419,7 @@ test("line claim includes deterministic backend bonus contract fields in claim a
   });
 
   const secondRow = new Set([16, 17, 18, 19, 20]);
+  prioritizeDrawNumbers(engine, roomCode, [...secondRow]);
   let drawGuard = 0;
   while (secondRow.size > 0 && drawGuard < 75) {
     const number = await engine.drawNextNumber({
@@ -826,6 +850,7 @@ test("prize policy caps single databingo payouts and stores policy reference", a
   });
 
   const needed = new Set([1, 2, 3, 4, 5]);
+  prioritizeDrawNumbers(engine, roomCode, [...needed]);
   let safety = 0;
   while (needed.size > 0 && safety < 75) {
     const number = await engine.drawNextNumber({
@@ -954,6 +979,7 @@ test("payout audit trail includes immutable hash chain and payout metadata", asy
   });
 
   const needed = new Set([1, 2, 3, 4, 5]);
+  prioritizeDrawNumbers(engine, roomCode, [...needed]);
   let guard = 0;
   while (needed.size > 0 && guard < 75) {
     const number = await engine.drawNextNumber({
