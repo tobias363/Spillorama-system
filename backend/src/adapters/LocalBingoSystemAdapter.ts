@@ -1,4 +1,4 @@
-import { generateTraditional75Ticket } from "../game/ticket.js";
+import { CryptoRngProvider, type RngProvider } from "../game/RngProvider.js";
 import type {
   BingoSystemAdapter,
   ClaimLoggedInput,
@@ -8,8 +8,12 @@ import type {
 } from "./BingoSystemAdapter.js";
 
 export class LocalBingoSystemAdapter implements BingoSystemAdapter {
+  constructor(private readonly rngProvider: RngProvider = new CryptoRngProvider()) {}
+
   async createTicket(_input: CreateTicketInput) {
-    return generateTraditional75Ticket();
+    return this.rngProvider.generateTicket({
+      scope: "local-adapter.create-ticket"
+    });
   }
 
   async onGameStarted(_input: GameStartedInput): Promise<void> {
@@ -24,4 +28,3 @@ export class LocalBingoSystemAdapter implements BingoSystemAdapter {
     // No-op for local development.
   }
 }
-

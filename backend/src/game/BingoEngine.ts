@@ -1,13 +1,13 @@
-import { createHash, randomInt, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { BingoSystemAdapter } from "../adapters/BingoSystemAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import { CryptoRngProvider, type RngProvider } from "./RngProvider.js";
 import {
   findFirstCompleteLinePatternIndex,
   countNearMissLinePattern,
   hasFullBingo,
   makeRoomCode,
-  makeShuffledBallBag,
   ticketContainsNumber
 } from "./ticket.js";
 import type {
@@ -87,6 +87,7 @@ interface ComplianceOptions {
   rtpControllerGain?: number;
   nearMissBiasEnabled?: boolean;
   nearMissTargetRate?: number;
+  rngProvider?: RngProvider;
 }
 
 interface RoundPerformanceSnapshot {
@@ -246,6 +247,32 @@ interface PayoutAuditEvent {
   eventHash: string;
 }
 
+interface RngAuditEvent {
+  id: string;
+  createdAt: string;
+  roundId: string;
+  gameId: string;
+  roomCode: string;
+  hallId: string;
+  rngRequestId: string;
+  providerId: string;
+  algorithmVersion: string;
+  nearMissBiasApplied: boolean;
+  nearMissTargetRate: number;
+  nearMissConfiguredTickets: number;
+  nearMissEligibleTickets: number;
+  chainIndex: number;
+  previousHash: string;
+  eventHash: string;
+}
+
+interface NearMissBiasApplicationResult {
+  drawBag: number[];
+  nearMissConfiguredTickets: number;
+  eligibleTickets: number;
+  applied: boolean;
+}
+
 interface DailyComplianceReportRow {
   hallId: string;
   gameType: LedgerGameType;
@@ -364,10 +391,12 @@ export class BingoEngine {
   private readonly extraPrizeEntriesByScope = new Map<string, ExtraPrizeEntry[]>();
   private readonly extraDrawDenials: ExtraDrawDenialAudit[] = [];
   private readonly payoutAuditTrail: PayoutAuditEvent[] = [];
+  private readonly rngAuditTrail: RngAuditEvent[] = [];
   private readonly complianceLedger: ComplianceLedgerEntry[] = [];
   private readonly dailyReportArchive = new Map<string, DailyComplianceReport>();
   private readonly overskuddBatches = new Map<string, OverskuddDistributionBatch>();
   private lastPayoutAuditHash = "GENESIS";
+  private lastRngAuditHash = "GENESIS";
 
   private readonly minRoundIntervalMs: number;
   private readonly minPlayersToStart: number;
@@ -380,6 +409,7 @@ export class BingoEngine {
   private readonly rtpControllerGain: number;
   private readonly nearMissBiasEnabled: boolean;
   private readonly nearMissTargetRate: number;
+  private readonly rngProvider: RngProvider;
   private readonly roundPerformanceHistory: RoundPerformanceSnapshot[] = [];
   private readonly roundPerformanceRecorded = new Set<string>();
 
@@ -452,6 +482,7 @@ export class BingoEngine {
       0.95,
       Math.max(0, options.nearMissTargetRate ?? DEFAULT_NEAR_MISS_TARGET_RATE)
     );
+    this.rngProvider = options.rngProvider ?? new CryptoRngProvider();
 
     this.upsertPrizePolicy({
       gameType: "DATABINGO",
@@ -480,7 +511,14 @@ export class BingoEngine {
       socketId: input.socketId
     };
 
-    const code = makeRoomCode(new Set(this.rooms.keys()));
+    const code = makeRoomCode(
+      new Set(this.rooms.keys()),
+      (maxExclusive) =>
+        this.rngProvider.randomInt(maxExclusive, {
+          scope: "room-code",
+          hallId
+        })
+    );
     const room: RoomState = {
       code,
       hallId,
@@ -644,13 +682,42 @@ export class BingoEngine {
 
     const prizePool = this.roundCurrency(entryFee * players.length);
     const maxPayoutBudget = this.roundCurrency((prizePool * normalizedPayoutPercent) / 100);
-    let drawBag = makeShuffledBallBag(MAX_BINGO_BALLS);
-    if (this.nearMissBiasEnabled && this.nearMissTargetRate > 0) {
-      const adaptiveNearMissRate = this.resolveAdaptiveNearMissRate(room.hallId);
-      drawBag = this.applyNearMissBias(drawBag, tickets, adaptiveNearMissRate);
+    const roundId = gameId;
+    const rngRound = this.rngProvider.getRoundDrawBag({
+      roundId,
+      gameId,
+      roomCode: room.code,
+      maxNumber: MAX_BINGO_BALLS
+    });
+
+    const adaptiveNearMissRate =
+      this.nearMissBiasEnabled && this.nearMissTargetRate > 0 ? this.resolveAdaptiveNearMissRate(room.hallId) : 0;
+    const nearMissResult = this.applyNearMissBias(rngRound.drawBag, tickets, adaptiveNearMissRate);
+    const drawBag = nearMissResult.drawBag;
+
+    this.appendRngAuditEvent({
+      roundId,
+      gameId,
+      roomCode: room.code,
+      hallId: room.hallId,
+      rngRequestId: rngRound.requestId,
+      providerId: rngRound.providerId,
+      algorithmVersion: rngRound.algorithmVersion,
+      nearMissBiasApplied: nearMissResult.applied,
+      nearMissTargetRate: adaptiveNearMissRate,
+      nearMissConfiguredTickets: nearMissResult.nearMissConfiguredTickets,
+      nearMissEligibleTickets: nearMissResult.eligibleTickets
+    });
+
+    if (nearMissResult.applied) {
+      console.info(
+        `[rng] near-miss bias applied roundId=${roundId} gameId=${gameId} requestId=${rngRound.requestId} targetRate=${adaptiveNearMissRate} configuredTickets=${nearMissResult.nearMissConfiguredTickets} eligibleTickets=${nearMissResult.eligibleTickets}`
+      );
     }
+
     const game: GameState = {
       id: gameId,
+      roundId,
       status: "RUNNING",
       entryFee,
       ticketsPerPlayer,
@@ -660,6 +727,12 @@ export class BingoEngine {
       maxPayoutBudget,
       remainingPayoutBudget: maxPayoutBudget,
       drawBag,
+      rngRequestId: rngRound.requestId,
+      rngProviderId: rngRound.providerId,
+      rngAlgorithmVersion: rngRound.algorithmVersion,
+      nearMissBiasApplied: nearMissResult.applied,
+      nearMissTargetRate: adaptiveNearMissRate,
+      nearMissConfiguredTickets: nearMissResult.nearMissConfiguredTickets,
       drawnNumbers: [],
       tickets,
       marks,
@@ -1101,14 +1174,29 @@ export class BingoEngine {
     return Math.min(0.95, Math.max(0.05, this.roundCurrency(adjusted)));
   }
 
-  private applyNearMissBias(drawBag: number[], ticketsByPlayer: Map<string, Ticket[]>, nearMissRate: number): number[] {
+  private applyNearMissBias(
+    drawBag: number[],
+    ticketsByPlayer: Map<string, Ticket[]>,
+    nearMissRate: number
+  ): NearMissBiasApplicationResult {
+    const noChange = (eligibleTickets: number, configuredTickets: number): NearMissBiasApplicationResult => ({
+      drawBag,
+      eligibleTickets,
+      nearMissConfiguredTickets: configuredTickets,
+      applied: false
+    });
+
     if (!Array.isArray(drawBag) || drawBag.length === 0) {
-      return drawBag;
+      return noChange(0, 0);
+    }
+
+    if (nearMissRate <= 0) {
+      return noChange(0, 0);
     }
 
     const drawCap = Math.min(this.maxDrawsPerRound, drawBag.length);
     if (drawCap >= drawBag.length) {
-      return drawBag;
+      return noChange(0, 0);
     }
 
     const allTickets: Ticket[] = [];
@@ -1116,7 +1204,7 @@ export class BingoEngine {
       allTickets.push(...playerTickets);
     }
     if (allTickets.length === 0) {
-      return drawBag;
+      return noChange(0, 0);
     }
 
     const normalizedTargetRate = Math.min(0.95, Math.max(0, nearMissRate));
@@ -1125,7 +1213,7 @@ export class BingoEngine {
       Math.max(1, Math.round(allTickets.length * normalizedTargetRate))
     );
     if (targetNearMissTickets <= 0) {
-      return drawBag;
+      return noChange(allTickets.length, 0);
     }
 
     const candidateOrder = this.randomizeList(Array.from({ length: allTickets.length }, (_, index) => index));
@@ -1143,11 +1231,17 @@ export class BingoEngine {
         continue;
       }
 
-      const chosenPattern = candidatePatterns[randomInt(candidatePatterns.length)];
+      const chosenPattern = candidatePatterns[
+        this.rngProvider.randomInt(candidatePatterns.length, {
+          scope: "near-miss.chosen-pattern"
+        })
+      ];
       if (chosenPattern.length < 2) {
         continue;
       }
-      const missingCellIndex = randomInt(chosenPattern.length);
+      const missingCellIndex = this.rngProvider.randomInt(chosenPattern.length, {
+        scope: "near-miss.missing-cell-index"
+      });
       const missingNumber = chosenPattern[missingCellIndex];
       if (!drawBag.includes(missingNumber)) {
         continue;
@@ -1167,7 +1261,7 @@ export class BingoEngine {
     }
 
     if (withheldNumbers.size === 0 || promotedNumbers.size === 0) {
-      return drawBag;
+      return noChange(allTickets.length, nearMissConfigured);
     }
 
     const randomizedPromotedNumbers = this.randomizeList([...promotedNumbers]).filter(
@@ -1219,7 +1313,12 @@ export class BingoEngine {
       lateNumbers.push(number);
     }
 
-    return [...earlyNumbers, ...lateNumbers];
+    return {
+      drawBag: [...earlyNumbers, ...lateNumbers],
+      nearMissConfiguredTickets: nearMissConfigured,
+      eligibleTickets: allTickets.length,
+      applied: true
+    };
   }
 
   private recordRoundPerformance(room: RoomState, game: GameState): void {
@@ -1353,7 +1452,9 @@ export class BingoEngine {
   private randomizeList<T>(values: T[]): T[] {
     const arr = [...values];
     for (let i = arr.length - 1; i > 0; i -= 1) {
-      const j = randomInt(i + 1);
+      const j = this.rngProvider.randomInt(i + 1, {
+        scope: "engine.randomize-list"
+      });
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
@@ -1857,6 +1958,39 @@ export class BingoEngine {
       .map((event) => ({ ...event, txIds: [...event.txIds] }));
   }
 
+  listRngAuditTrail(input?: {
+    limit?: number;
+    hallId?: string;
+    gameId?: string;
+    roundId?: string;
+    rngRequestId?: string;
+  }): RngAuditEvent[] {
+    const limit = Number.isFinite(input?.limit) ? Math.max(1, Math.min(500, Math.floor(input!.limit!))) : 100;
+    const hallId = input?.hallId?.trim();
+    const gameId = input?.gameId?.trim();
+    const roundId = input?.roundId?.trim();
+    const rngRequestId = input?.rngRequestId?.trim();
+
+    return this.rngAuditTrail
+      .filter((event) => {
+        if (hallId && event.hallId !== hallId) {
+          return false;
+        }
+        if (gameId && event.gameId !== gameId) {
+          return false;
+        }
+        if (roundId && event.roundId !== roundId) {
+          return false;
+        }
+        if (rngRequestId && event.rngRequestId !== rngRequestId) {
+          return false;
+        }
+        return true;
+      })
+      .slice(0, limit)
+      .map((event) => ({ ...event }));
+  }
+
   listComplianceLedgerEntries(input?: {
     limit?: number;
     dateFrom?: string;
@@ -2259,6 +2393,7 @@ export class BingoEngine {
 
   private archiveIfEnded(room: RoomState): void {
     if (room.currentGame?.status === "ENDED") {
+      this.rngProvider.releaseRound(room.currentGame.roundId || room.currentGame.id);
       room.gameHistory.push(this.serializeGame(room.currentGame));
       room.currentGame = undefined;
     }
@@ -2723,6 +2858,73 @@ export class BingoEngine {
     }
   }
 
+  private appendRngAuditEvent(input: {
+    roundId: string;
+    gameId: string;
+    roomCode: string;
+    hallId: string;
+    rngRequestId: string;
+    providerId: string;
+    algorithmVersion: string;
+    nearMissBiasApplied: boolean;
+    nearMissTargetRate: number;
+    nearMissConfiguredTickets: number;
+    nearMissEligibleTickets: number;
+  }): void {
+    const now = new Date().toISOString();
+    const normalizedRoundId = input.roundId.trim();
+    const normalizedGameId = input.gameId.trim();
+    const normalizedRoomCode = input.roomCode.trim().toUpperCase();
+    const normalizedHallId = this.assertHallId(input.hallId);
+    const normalizedRequestId = input.rngRequestId.trim();
+    const normalizedProviderId = input.providerId.trim();
+    const normalizedAlgorithmVersion = input.algorithmVersion.trim();
+    const nearMissTargetRate = Math.min(1, Math.max(0, this.roundCurrency(input.nearMissTargetRate)));
+    const nearMissConfiguredTickets = Math.max(0, Math.floor(input.nearMissConfiguredTickets));
+    const nearMissEligibleTickets = Math.max(0, Math.floor(input.nearMissEligibleTickets));
+    const chainIndex = this.rngAuditTrail.length + 1;
+    const hashPayload = JSON.stringify({
+      roundId: normalizedRoundId,
+      gameId: normalizedGameId,
+      roomCode: normalizedRoomCode,
+      hallId: normalizedHallId,
+      rngRequestId: normalizedRequestId,
+      providerId: normalizedProviderId,
+      algorithmVersion: normalizedAlgorithmVersion,
+      nearMissBiasApplied: Boolean(input.nearMissBiasApplied),
+      nearMissTargetRate,
+      nearMissConfiguredTickets,
+      nearMissEligibleTickets,
+      createdAt: now,
+      previousHash: this.lastRngAuditHash,
+      chainIndex
+    });
+    const eventHash = createHash("sha256").update(hashPayload).digest("hex");
+    const event: RngAuditEvent = {
+      id: randomUUID(),
+      createdAt: now,
+      roundId: normalizedRoundId,
+      gameId: normalizedGameId,
+      roomCode: normalizedRoomCode,
+      hallId: normalizedHallId,
+      rngRequestId: normalizedRequestId,
+      providerId: normalizedProviderId,
+      algorithmVersion: normalizedAlgorithmVersion,
+      nearMissBiasApplied: Boolean(input.nearMissBiasApplied),
+      nearMissTargetRate,
+      nearMissConfiguredTickets,
+      nearMissEligibleTickets,
+      chainIndex,
+      previousHash: this.lastRngAuditHash,
+      eventHash
+    };
+    this.rngAuditTrail.unshift(event);
+    this.lastRngAuditHash = eventHash;
+    if (this.rngAuditTrail.length > 10_000) {
+      this.rngAuditTrail.length = 10_000;
+    }
+  }
+
   private getRestrictionState(walletId: string, nowMs: number): RestrictionState {
     const existing = this.restrictionsByWallet.get(walletId) ?? {};
     const next: RestrictionState = { ...existing };
@@ -3075,6 +3277,7 @@ export class BingoEngine {
 
     return {
       id: game.id,
+      roundId: game.roundId,
       status: game.status,
       entryFee: game.entryFee,
       ticketsPerPlayer: game.ticketsPerPlayer,
@@ -3083,6 +3286,12 @@ export class BingoEngine {
       payoutPercent: game.payoutPercent,
       maxPayoutBudget: game.maxPayoutBudget,
       remainingPayoutBudget: game.remainingPayoutBudget,
+      rngRequestId: game.rngRequestId,
+      rngProviderId: game.rngProviderId,
+      rngAlgorithmVersion: game.rngAlgorithmVersion,
+      nearMissBiasApplied: game.nearMissBiasApplied,
+      nearMissTargetRate: game.nearMissTargetRate,
+      nearMissConfiguredTickets: game.nearMissConfiguredTickets,
       drawnNumbers: [...game.drawnNumbers],
       remainingNumbers: game.drawBag.length,
       lineWinnerId: game.lineWinnerId,

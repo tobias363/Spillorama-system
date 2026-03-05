@@ -2,42 +2,48 @@ import { randomInt } from "node:crypto";
 import type { Ticket } from "./types.js";
 
 const BOARD_SIZE = 5;
+type RandomIntFn = (maxExclusive: number) => number;
 
-function shuffle<T>(values: T[]): T[] {
+function shuffle<T>(values: T[], rngInt: RandomIntFn = randomInt): T[] {
   const arr = [...values];
   for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = randomInt(i + 1);
+    const j = rngInt(i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
 }
 
-function pickUniqueInRange(start: number, end: number, count: number): number[] {
+function pickUniqueInRange(start: number, end: number, count: number, rngInt: RandomIntFn = randomInt): number[] {
   const values = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-  return shuffle(values).slice(0, count).sort((a, b) => a - b);
+  return shuffle(values, rngInt)
+    .slice(0, count)
+    .sort((a, b) => a - b);
 }
 
-export function makeRoomCode(existingCodes: Set<string>): string {
+export function makeRoomCode(existingCodes: Set<string>, rngInt: RandomIntFn = randomInt): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   while (true) {
-    const code = Array.from({ length: 6 }, () => alphabet[randomInt(alphabet.length)]).join("");
+    const code = Array.from({ length: 6 }, () => alphabet[rngInt(alphabet.length)]).join("");
     if (!existingCodes.has(code)) {
       return code;
     }
   }
 }
 
-export function makeShuffledBallBag(maxNumber = 75): number[] {
-  return shuffle(Array.from({ length: maxNumber }, (_, i) => i + 1));
+export function makeShuffledBallBag(maxNumber = 75, rngInt: RandomIntFn = randomInt): number[] {
+  return shuffle(
+    Array.from({ length: maxNumber }, (_, i) => i + 1),
+    rngInt
+  );
 }
 
-export function generateTraditional75Ticket(): Ticket {
+export function generateTraditional75Ticket(rngInt: RandomIntFn = randomInt): Ticket {
   const columns = [
-    pickUniqueInRange(1, 15, BOARD_SIZE),
-    pickUniqueInRange(16, 30, BOARD_SIZE),
-    pickUniqueInRange(31, 45, BOARD_SIZE - 1),
-    pickUniqueInRange(46, 60, BOARD_SIZE),
-    pickUniqueInRange(61, 75, BOARD_SIZE)
+    pickUniqueInRange(1, 15, BOARD_SIZE, rngInt),
+    pickUniqueInRange(16, 30, BOARD_SIZE, rngInt),
+    pickUniqueInRange(31, 45, BOARD_SIZE - 1, rngInt),
+    pickUniqueInRange(46, 60, BOARD_SIZE, rngInt),
+    pickUniqueInRange(61, 75, BOARD_SIZE, rngInt)
   ];
 
   const grid: number[][] = [];

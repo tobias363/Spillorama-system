@@ -35,6 +35,7 @@ export interface ClaimRecord {
 
 export interface GameState {
   id: string;
+  roundId: string;
   status: GameStatus;
   entryFee: number;
   ticketsPerPlayer: number;
@@ -44,6 +45,12 @@ export interface GameState {
   maxPayoutBudget: number;
   remainingPayoutBudget: number;
   drawBag: number[];
+  rngRequestId: string;
+  rngProviderId: string;
+  rngAlgorithmVersion: string;
+  nearMissBiasApplied: boolean;
+  nearMissTargetRate: number;
+  nearMissConfiguredTickets: number;
   drawnNumbers: number[];
   tickets: Map<string, Ticket[]>;
   marks: Map<string, Set<number>[]>;
@@ -67,6 +74,7 @@ export interface RoomState {
 
 export interface GameSnapshot {
   id: string;
+  roundId: string;
   status: GameStatus;
   entryFee: number;
   ticketsPerPlayer: number;
@@ -75,6 +83,12 @@ export interface GameSnapshot {
   payoutPercent: number;
   maxPayoutBudget: number;
   remainingPayoutBudget: number;
+  rngRequestId: string;
+  rngProviderId: string;
+  rngAlgorithmVersion: string;
+  nearMissBiasApplied: boolean;
+  nearMissTargetRate: number;
+  nearMissConfiguredTickets: number;
   drawnNumbers: number[];
   remainingNumbers: number;
   lineWinnerId?: string;

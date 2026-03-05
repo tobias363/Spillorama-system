@@ -10,6 +10,7 @@ import { LocalBingoSystemAdapter } from "./adapters/LocalBingoSystemAdapter.js";
 import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
+import { CryptoRngProvider } from "./game/RngProvider.js";
 import type { ClaimType, RoomSnapshot, RoomSummary } from "./game/types.js";
 import { CandyLaunchTokenStore } from "./launch/CandyLaunchTokenStore.js";
 import {
@@ -253,7 +254,9 @@ const bingoRtpControllerGain = Math.min(
   2,
   Math.max(0, parseNonNegativeNumberEnv(process.env.BINGO_RTP_CONTROLLER_GAIN, 0.5))
 );
-const bingoNearMissBiasEnabled = parseBooleanEnv(process.env.BINGO_NEAR_MISS_BIAS_ENABLED, true);
+const bingoComplianceMode = parseBooleanEnv(process.env.BINGO_COMPLIANCE_MODE, false);
+const requestedNearMissBiasEnabled = parseBooleanEnv(process.env.BINGO_NEAR_MISS_BIAS_ENABLED, true);
+const bingoNearMissBiasEnabled = bingoComplianceMode ? false : requestedNearMissBiasEnabled;
 const bingoNearMissTargetRate = parseRatioEnv(process.env.BINGO_NEAR_MISS_TARGET_RATE, 0.3);
 
 const isProductionRuntime = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
@@ -312,8 +315,12 @@ if (isProductionRuntime && !autoplayAllowed && (requestedAutoRoundStartEnabled |
     "[scheduler] Autoplay er deaktivert i production (sett BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION=true for aa tillate AUTO_ROUND_START_ENABLED/AUTO_DRAW_ENABLED)."
   );
 }
+if (bingoComplianceMode && requestedNearMissBiasEnabled) {
+  console.warn("[rng] BINGO_COMPLIANCE_MODE=true overstyrer near-miss bias til disabled.");
+}
 
-const engine = new BingoEngine(new LocalBingoSystemAdapter(), walletAdapter, {
+const rngProvider = new CryptoRngProvider();
+const engine = new BingoEngine(new LocalBingoSystemAdapter(rngProvider), walletAdapter, {
   minRoundIntervalMs: bingoMinRoundIntervalMs,
   minPlayersToStart: bingoMinPlayersToStart,
   dailyLossLimit: bingoDailyLossLimit,
@@ -325,7 +332,8 @@ const engine = new BingoEngine(new LocalBingoSystemAdapter(), walletAdapter, {
   rtpRollingWindowSize: bingoRtpRollingWindowSize,
   rtpControllerGain: bingoRtpControllerGain,
   nearMissBiasEnabled: bingoNearMissBiasEnabled,
-  nearMissTargetRate: bingoNearMissTargetRate
+  nearMissTargetRate: bingoNearMissTargetRate,
+  rngProvider
 });
 
 const platformService = new PlatformService(walletAdapter, {
@@ -2774,6 +2782,27 @@ app.get("/api/admin/payout-audit", async (req, res) => {
   }
 });
 
+app.get("/api/admin/rng-audit", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "PAYOUT_AUDIT_READ");
+    const limit = parseLimit(req.query.limit, 100);
+    const hallId = typeof req.query.hallId === "string" ? req.query.hallId.trim() : undefined;
+    const gameId = typeof req.query.gameId === "string" ? req.query.gameId.trim() : undefined;
+    const roundId = typeof req.query.roundId === "string" ? req.query.roundId.trim() : undefined;
+    const rngRequestId = typeof req.query.rngRequestId === "string" ? req.query.rngRequestId.trim() : undefined;
+    const events = engine.listRngAuditTrail({
+      limit,
+      hallId,
+      gameId,
+      roundId,
+      rngRequestId
+    });
+    apiSuccess(res, events);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
 app.get("/api/admin/ledger/entries", async (req, res) => {
   try {
     await requireAdminPermissionUser(req, "LEDGER_READ");
@@ -3488,7 +3517,7 @@ hydrateCandyManiaSettingsFromCatalog()
         `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} maxDrawsPerRound=${bingoMaxDrawsPerRound} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
       );
       console.log(
-        `[rtp] rollingWindow=${bingoRtpRollingWindowSize} controllerGain=${bingoRtpControllerGain} nearMissBias=${bingoNearMissBiasEnabled} nearMissTargetRate=${bingoNearMissTargetRate}`
+        `[rtp] rollingWindow=${bingoRtpRollingWindowSize} controllerGain=${bingoRtpControllerGain} nearMissBias=${bingoNearMissBiasEnabled} nearMissTargetRate=${bingoNearMissTargetRate} complianceMode=${bingoComplianceMode}`
       );
       console.log(
         `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} forceAutoStart=${forceCandyAutoStart} forceAutoDraw=${forceCandyAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleCandyRoomPerHall} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`

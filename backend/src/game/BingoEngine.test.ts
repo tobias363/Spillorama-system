@@ -1371,3 +1371,28 @@ test("overskudd distribution enforces minimum percentages and links transfers to
   assert.equal(fetchedBatch.id, batch.id);
   assert.equal(fetchedBatch.date, date);
 });
+
+test("startGame records RNG metadata and audit trail", async () => {
+  const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
+
+  await engine.startGame({
+    roomCode,
+    actorPlayerId: hostPlayerId,
+    ticketsPerPlayer: 1
+  });
+
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  assert.ok(snapshot.currentGame);
+  assert.equal(snapshot.currentGame?.roundId, snapshot.currentGame?.id);
+  assert.ok(snapshot.currentGame?.rngRequestId);
+  assert.ok(snapshot.currentGame?.rngProviderId);
+  assert.ok(snapshot.currentGame?.rngAlgorithmVersion);
+  assert.equal(typeof snapshot.currentGame?.nearMissBiasApplied, "boolean");
+  assert.ok(Number.isFinite(snapshot.currentGame?.nearMissConfiguredTickets));
+
+  const events = engine.listRngAuditTrail({ gameId: snapshot.currentGame?.id });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].gameId, snapshot.currentGame?.id);
+  assert.equal(events[0].roundId, snapshot.currentGame?.roundId);
+  assert.equal(events[0].rngRequestId, snapshot.currentGame?.rngRequestId);
+});
