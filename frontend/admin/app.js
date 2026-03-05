@@ -525,6 +525,13 @@ function chat3ApplyActionPermissionLocks() {
       element.dataset.rbacLocked = "true";
       element.disabled = true;
       element.title = `Låst for rollen ${state.user?.role || "ukjent"} (krever ${permission}).`;
+      if (elementKey === "candyLoadSettingsBtn") {
+        setStatus(
+          elements.candySettingsStatus,
+          `Låst: mangler ${permission}. Knappen "Last fra backend" krever denne tillatelsen.`,
+          "error"
+        );
+      }
       continue;
     }
     delete element.dataset.rbacLocked;
@@ -3521,6 +3528,8 @@ async function loadAllAdminData() {
   if (chat3HasPermission("ROOM_CONTROL_READ")) {
     await loadCandyManiaSettings();
     await loadRooms();
+  } else {
+    setStatus(elements.candySettingsStatus, "Låst: mangler ROOM_CONTROL_READ.", "error");
   }
   if (chat3HasPermission("TERMINAL_READ")) {
     await loadTerminals();
@@ -3731,13 +3740,19 @@ async function bootstrap() {
   });
 
   elements.candyLoadSettingsBtn.addEventListener("click", () => {
-    loadCandyManiaSettings().catch((error) => {
-      setStatus(
-        elements.candySettingsStatus,
-        error.message || "Kunne ikke hente Candy-driftinnstillinger.",
-        "error"
-      );
-    });
+    setLoading(elements.candyLoadSettingsBtn, true, "Laster...", "Last fra backend");
+    setStatus(elements.candySettingsStatus, "Laster Candy-driftinnstillinger fra backend...");
+    loadCandyManiaSettings()
+      .catch((error) => {
+        setStatus(
+          elements.candySettingsStatus,
+          error.message || "Kunne ikke hente Candy-driftinnstillinger.",
+          "error"
+        );
+      })
+      .finally(() => {
+        setLoading(elements.candyLoadSettingsBtn, false, "Laster...", "Last fra backend");
+      });
   });
 
   elements.candySaveSettingsBtn.addEventListener("click", () => {

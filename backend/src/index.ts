@@ -135,11 +135,26 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 const frontendDir = path.resolve(__dirname, "../../frontend");
 const adminFrontendFile = path.resolve(frontendDir, "admin/index.html");
+const adminFrontendDir = path.resolve(frontendDir, "admin");
 const projectDir = path.resolve(__dirname, "../..");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(
+  "/admin",
+  express.static(adminFrontendDir, {
+    setHeaders: (res, filePath) => {
+      // Avoid stale admin UI JS/HTML after deploys.
+      if (filePath.endsWith(".html") || filePath.endsWith(".js")) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        res.setHeader("Surrogate-Control", "no-store");
+      }
+    }
+  })
+);
 app.use(express.static(frontendDir));
 
 const server = http.createServer(app);
@@ -3249,6 +3264,10 @@ io.on("connection", (socket: Socket) => {
 
 app.get("*", (_req, res) => {
   if (_req.path === "/admin" || _req.path === "/admin/") {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     res.sendFile(adminFrontendFile);
     return;
   }
