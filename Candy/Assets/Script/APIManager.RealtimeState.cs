@@ -185,23 +185,23 @@ public partial class APIManager
 
             for (int i = 0; i < card.selectionImg.Count; i++)
             {
-                card.selectionImg[i].SetActive(false);
+                SetActiveIfChanged(card.selectionImg[i], false);
             }
 
             for (int i = 0; i < card.missingPatternImg.Count; i++)
             {
-                card.missingPatternImg[i].SetActive(false);
+                SetActiveIfChanged(card.missingPatternImg[i], false);
             }
 
             for (int i = 0; i < card.matchPatternImg.Count; i++)
             {
-                card.matchPatternImg[i].SetActive(false);
+                SetActiveIfChanged(card.matchPatternImg[i], false);
             }
 
             int paylineCount = card.paylineObj != null ? card.paylineObj.Count : 0;
             for (int i = 0; i < paylineCount; i++)
             {
-                card.paylineObj[i].SetActive(false);
+                SetActiveIfChanged(card.paylineObj[i], false);
             }
 
             List<int> sourceTicket = null;
@@ -231,7 +231,10 @@ public partial class APIManager
             }
         }
 
-        Debug.Log($"[APIManager] Applied ticket page {currentTicketPage + 1}/{pageCount} ({ticketSets.Count} total ticket(s)) for player {activePlayerId}. Room {activeRoomCode}, game {activeGameId}");
+        if (logBootstrapEvents)
+        {
+            Debug.Log($"[APIManager] Applied ticket page {currentTicketPage + 1}/{pageCount} ({ticketSets.Count} total ticket(s)) for player {activePlayerId}. Room {activeRoomCode}, game {activeGameId}");
+        }
     }
 
     private void ApplyDrawnNumbers(JSONNode currentGame)
@@ -656,7 +659,7 @@ public partial class APIManager
         {
             if (card.matchPatternImg[i] != null)
             {
-                card.matchPatternImg[i].SetActive(false);
+                SetActiveIfChanged(card.matchPatternImg[i], false);
             }
         }
 
@@ -782,20 +785,21 @@ public partial class APIManager
     private IEnumerator BlinkRealtimeNearWinCell(int blinkKey, GameObject nearWinCell)
     {
         bool visible = false;
+        WaitForSeconds wait = new WaitForSeconds(realtimeNearWinBlinkInterval);
         while (realtimeNearWinBlinkCoroutines.ContainsKey(blinkKey))
         {
             visible = !visible;
             if (nearWinCell != null)
             {
-                nearWinCell.SetActive(visible);
+                SetActiveIfChanged(nearWinCell, visible);
             }
 
-            yield return new WaitForSeconds(realtimeNearWinBlinkInterval);
+            yield return wait;
         }
 
         if (nearWinCell != null)
         {
-            nearWinCell.SetActive(false);
+            SetActiveIfChanged(nearWinCell, false);
         }
     }
 
@@ -843,7 +847,7 @@ public partial class APIManager
                 GameObject missingCell = card.missingPatternImg[cellIndex];
                 if (missingCell != null)
                 {
-                    missingCell.SetActive(false);
+                    SetActiveIfChanged(missingCell, false);
                 }
             }
         }
@@ -877,7 +881,15 @@ public partial class APIManager
         GameObject missingCell = card.missingPatternImg[cellIndex];
         if (missingCell != null)
         {
-            missingCell.SetActive(active);
+            SetActiveIfChanged(missingCell, active);
+        }
+    }
+
+    private static void SetActiveIfChanged(GameObject target, bool active)
+    {
+        if (target != null && target.activeSelf != active)
+        {
+            target.SetActive(active);
         }
     }
 

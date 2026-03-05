@@ -35,10 +35,19 @@ public class BonusControl : MonoBehaviour
     int currentReward;
     int chocPlace = 0;
     bool bonusPayoutApplied;
+    private MoveText[] cachedMoveTextComponents;
+    private TextMeshProUGUI[] cachedRollingLabels;
+    private GameObject[] cachedDisplayMarkers;
 
     
+    private void Awake()
+    {
+        CacheComponentRefs();
+    }
+
     private void OnEnable()
     {
+        CacheComponentRefs();
         ctr = 2;
         stopMoving = false;
         currentSpins = 0;
@@ -70,14 +79,19 @@ public class BonusControl : MonoBehaviour
         {
             if (allObj[i].activeSelf)
             {
-                allObj[i].GetComponent<MoveText>().finalTarget = -120;
-                allObj[i].GetComponent<MoveText>().isFinalObje = false;
-                // allObj[i].GetComponent<MoveText>().enabled = true;
-                allObj[i].GetComponent<MoveText>().Move();
+                MoveText move = cachedMoveTextComponents[i];
+                if (move == null)
+                {
+                    continue;
+                }
+
+                move.finalTarget = -120;
+                move.isFinalObje = false;
+                move.Move();
             }
         }
 
-        Invoke("Stop", 3f);
+        Invoke(nameof(Stop), 3f);
     }
 
     void Stop()
@@ -101,46 +115,53 @@ public class BonusControl : MonoBehaviour
         }
 
         allObj[no].transform.localPosition = instaPoint.localPosition;
-        allObj[no].GetComponent<MoveText>().onlyOnce = false;
+        MoveText moveText = cachedMoveTextComponents[no];
+        TextMeshProUGUI rollingLabel = cachedRollingLabels[no];
+        if (moveText == null || rollingLabel == null)
+        {
+            return;
+        }
+
+        moveText.onlyOnce = false;
 
         if (!stopMoving)
         {
 
-            allObj[no].GetComponent<MoveText>().isFinalObje = false;
-            allObj[no].GetComponent<MoveText>().finalTarget = -120;
+            moveText.isFinalObje = false;
+            moveText.finalTarget = -120;
             if (Random.Range(0, 5) != 2)
             {
-                allObj[no].GetComponent<TextMeshProUGUI>().text = Random.Range(1, 9).ToString();
+                rollingLabel.text = Random.Range(1, 9).ToString();
             }
             else
             {
-                allObj[no].GetComponent<TextMeshProUGUI>().text = "STOP";
+                rollingLabel.text = "STOP";
                
             }
         }
         else
         {
-            allObj[no].GetComponent<MoveText>().isFinalObje = true;
-            allObj[no].GetComponent<MoveText>().finalTarget = finalPos[ctr];
+            moveText.isFinalObje = true;
+            moveText.finalTarget = finalPos[ctr];
 
             currentReward = turns[currentSpins];
             if (ctr == 1)
             {
                 if (turns[currentSpins] != -1)
                 {
-                    allObj[no].GetComponent<TextMeshProUGUI>().text = (turns[currentSpins]).ToString();
+                    rollingLabel.text = turns[currentSpins].ToString();
                 }
                 else
                 {
-                    allObj[no].GetComponent<TextMeshProUGUI>().text = "STOP";
+                    rollingLabel.text = "STOP";
                     
                 }
             }
             ctr--;
         }
 
-        allObj[no].SetActive(true);
-        allObj[no].GetComponent<MoveText>().Move();
+        SetActiveIfChanged(allObj[no], true);
+        moveText.Move();
     }
 
     public void WhenReached()
@@ -152,7 +173,6 @@ public class BonusControl : MonoBehaviour
         }
         else
         {
-            Debug.Log("currentReward : " + currentReward);
             Invoke(nameof(EndGame), 2);
             //End Bonus
         }
@@ -163,12 +183,16 @@ public class BonusControl : MonoBehaviour
     {
         yield return new WaitForSeconds(1f);
 
-        displayBox[chocPlace].transform.GetChild(0).gameObject.SetActive(false);
+        if (chocPlace >= 0 && chocPlace < cachedDisplayMarkers.Length)
+        {
+            SetActiveIfChanged(cachedDisplayMarkers[chocPlace], false);
+        }
 
         // Ensure the loop doesn't exceed the array bounds
         int targetIndex = Mathf.Min(chocPlace + currentReward + 1, displayBox.Length);
         for (int i = chocPlace + 1; i < targetIndex; i++)
         {
+            displayBox[i].transform.DOKill(false);
             displayBox[i].transform.DOPunchScale(new Vector3(1.2f, 1.2f, 1.2f), 0.5f, 1, 1);
             yield return new WaitForSeconds(0.5f);
         }
@@ -177,9 +201,11 @@ public class BonusControl : MonoBehaviour
         
         // Ensure chocPlace doesn't exceed the array bounds
         chocPlace = Mathf.Min(chocPlace, displayBox.Length - 1);
-        displayBox[chocPlace].transform.GetChild(0).gameObject.SetActive(true);
+        if (chocPlace >= 0 && chocPlace < cachedDisplayMarkers.Length)
+        {
+            SetActiveIfChanged(cachedDisplayMarkers[chocPlace], true);
+        }
         displayWin.text = displayBox[chocPlace].text.ToString();
-        Debug.Log("winAmt : " + winAmt);
         if (!int.TryParse(displayBox[chocPlace].text, out int awardedAmount))
         {
             Debug.LogError($"[BonusControl] Ugyldig bonusverdi i displayBox[{chocPlace}]: {displayBox[chocPlace].text}");
@@ -196,7 +222,6 @@ public class BonusControl : MonoBehaviour
             Debug.LogWarning("[BonusControl] Bonus payout var allerede registrert i denne runden. Hopper over duplikat.");
         }
         displayCredit.text = gameManager.displayTotalMoney.text;
-        Debug.Log("current reward : " + currentReward);
         Invoke(nameof(EndGame), 2);
         // if (currentReward != -1)
         // {
@@ -260,7 +285,6 @@ public class BonusControl : MonoBehaviour
             winPlace = Mathf.Clamp(winPlace, 1, Mathf.Max(1, allpoints.Length));
         }
         int[] removepoints = { 100, 150, 200, 250 };
-        Debug.Log(allpoints.Length);
 
         //allpoints[winPlace - 1] = winningMoney;
        
@@ -346,7 +370,8 @@ public class BonusControl : MonoBehaviour
         yield return new WaitForSeconds(0.5f);
         for (int i = 1; i < displayBox.Length; i++)
         {
-            displayBox[i].gameObject.SetActive(true);
+            SetActiveIfChanged(displayBox[i] != null ? displayBox[i].gameObject : null, true);
+            displayBox[i].transform.DOKill(false);
             displayBox[i].transform.DOPunchScale(new Vector3(1.2f, 1.2f, 1.2f), 0.5f, 1, 1);
             yield return new WaitForSeconds(0.1f);
 
@@ -354,5 +379,45 @@ public class BonusControl : MonoBehaviour
         yield return new WaitForSeconds(1f);
 
         playBtn.interactable = true;
+    }
+
+    private void CacheComponentRefs()
+    {
+        int rollingCount = allObj != null ? allObj.Length : 0;
+        cachedMoveTextComponents = new MoveText[rollingCount];
+        cachedRollingLabels = new TextMeshProUGUI[rollingCount];
+
+        for (int i = 0; i < rollingCount; i++)
+        {
+            GameObject obj = allObj[i];
+            if (obj == null)
+            {
+                continue;
+            }
+
+            cachedMoveTextComponents[i] = obj.GetComponent<MoveText>();
+            cachedRollingLabels[i] = obj.GetComponent<TextMeshProUGUI>();
+        }
+
+        int displayCount = displayBox != null ? displayBox.Length : 0;
+        cachedDisplayMarkers = new GameObject[displayCount];
+        for (int i = 0; i < displayCount; i++)
+        {
+            TextMeshProUGUI box = displayBox[i];
+            if (box == null || box.transform.childCount == 0)
+            {
+                continue;
+            }
+
+            cachedDisplayMarkers[i] = box.transform.GetChild(0).gameObject;
+        }
+    }
+
+    private static void SetActiveIfChanged(GameObject target, bool active)
+    {
+        if (target != null && target.activeSelf != active)
+        {
+            target.SetActive(active);
+        }
     }
 }
