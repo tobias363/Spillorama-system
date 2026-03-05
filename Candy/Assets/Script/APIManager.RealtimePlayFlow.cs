@@ -260,6 +260,13 @@ public partial class APIManager
             return;
         }
 
+        if (processedDrawCount >= realtimeClientMaxDrawsPerRound)
+        {
+            Debug.LogWarning($"[APIManager] Hopper over draw: runden har naadd draw-cap ({realtimeClientMaxDrawsPerRound}).");
+            RequestRealtimeState();
+            return;
+        }
+
         realtimeClient.DrawNext(activeRoomCode, activePlayerId, (drawAck) =>
         {
             if (drawAck == null || !drawAck.ok)

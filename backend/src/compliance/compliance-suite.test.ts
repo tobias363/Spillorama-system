@@ -432,7 +432,8 @@ test("compliance: enforces databingo prize caps and keeps payout audit", async (
   const wallet = new InMemoryWalletAdapter();
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 20_000,
-    monthlyLossLimit: 20_000
+    monthlyLossLimit: 20_000,
+    maxDrawsPerRound: 75
   });
 
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
@@ -463,6 +464,19 @@ test("compliance: enforces databingo prize caps and keeps payout audit", async (
     entryFee: 3000,
     ticketsPerPlayer: 1
   });
+
+  // Make draw order deterministic for this test to avoid flakiness where a required
+  // line number can be the final ball and the round ends before markNumber().
+  const internalRoomState = (engine as unknown as { rooms: Map<string, { currentGame?: { drawBag: number[] } }> }).rooms.get(
+    roomCode
+  );
+  const drawBag = internalRoomState?.currentGame?.drawBag;
+  if (drawBag) {
+    const requiredLineNumbers = [1, 2, 3, 4, 5];
+    const prioritized = requiredLineNumbers.filter((value) => drawBag.includes(value));
+    const remainder = drawBag.filter((value) => !prioritized.includes(value));
+    internalRoomState!.currentGame!.drawBag = [...prioritized, ...remainder];
+  }
 
   const needed = new Set([1, 2, 3, 4, 5]);
   let guard = 0;

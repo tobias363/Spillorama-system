@@ -27,6 +27,8 @@ const elements = {
   candyGameDescription: document.getElementById("candyGameDescription"),
   candyGameSortOrder: document.getElementById("candyGameSortOrder"),
   candyGameEnabled: document.getElementById("candyGameEnabled"),
+  candyGameLaunchUrl: document.getElementById("candyGameLaunchUrl"),
+  candyGameApiBaseUrl: document.getElementById("candyGameApiBaseUrl"),
   candyGameSettingsJson: document.getElementById("candyGameSettingsJson"),
   candyLoadGameBtn: document.getElementById("candyLoadGameBtn"),
   candySaveGameBtn: document.getElementById("candySaveGameBtn"),
@@ -243,6 +245,29 @@ function requireNonEmptyInput(value, label) {
   return trimmed;
 }
 
+function parseAbsoluteHttpUrl(value, label, required = false) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    if (required) {
+      throw new Error(`${label} må fylles ut.`);
+    }
+    return "";
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch (_error) {
+    throw new Error(`${label} må være en gyldig URL.`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${label} må starte med http:// eller https://.`);
+  }
+
+  return parsed.toString();
+}
+
 async function apiRequest(path, options) {
   const requestOptions = options || {};
   const headers = {
@@ -326,16 +351,21 @@ function applyCandyGameToForm(game) {
     elements.candyGameDescription.value = "";
     elements.candyGameSortOrder.value = "0";
     elements.candyGameEnabled.value = "false";
+    elements.candyGameLaunchUrl.value = "";
+    elements.candyGameApiBaseUrl.value = "";
     elements.candyGameSettingsJson.value = "{}";
     return;
   }
 
+  const settings = getSettingsObject(game);
   elements.candyGameTitle.value = game.title || "";
   elements.candyGameRoute.value = game.route || "";
   elements.candyGameDescription.value = game.description || "";
   elements.candyGameSortOrder.value = String(game.sortOrder ?? 0);
   elements.candyGameEnabled.value = game.isEnabled ? "true" : "false";
-  elements.candyGameSettingsJson.value = JSON.stringify(getSettingsObject(game), null, 2);
+  elements.candyGameLaunchUrl.value = String(settings.launchUrl || "");
+  elements.candyGameApiBaseUrl.value = String(settings.apiBaseUrl || "");
+  elements.candyGameSettingsJson.value = JSON.stringify(settings, null, 2);
 }
 
 function formatCandyGame(game) {
@@ -349,6 +379,8 @@ function formatCandyGame(game) {
     `route: ${game.route || "-"}`,
     `enabled: ${game.isEnabled ? "Ja" : "Nei"}`,
     `sortOrder: ${game.sortOrder ?? "-"}`,
+    `launchUrl: ${String(game.settings?.launchUrl || "-")}`,
+    `apiBaseUrl: ${String(game.settings?.apiBaseUrl || "-")}`,
     `updatedAt: ${game.updatedAt || "-"}`
   ].join("\n");
 }
@@ -1661,6 +1693,15 @@ function buildCandyGameUpdatePayload() {
   const sortOrder = Number.parseInt(elements.candyGameSortOrder.value || "0", 10);
   if (!Number.isFinite(sortOrder)) {
     throw new Error("Candy sortering må være et tall.");
+  }
+
+  const launchUrl = parseAbsoluteHttpUrl(elements.candyGameLaunchUrl.value, "Candy launch URL", true);
+  const apiBaseUrl = parseAbsoluteHttpUrl(elements.candyGameApiBaseUrl.value, "Candy API Base URL", false);
+  parsedSettings.launchUrl = launchUrl;
+  if (apiBaseUrl) {
+    parsedSettings.apiBaseUrl = apiBaseUrl;
+  } else {
+    delete parsedSettings.apiBaseUrl;
   }
 
   return {

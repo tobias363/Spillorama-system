@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using SimpleJSON;
-using UnityEngine;
 
 public static class RealtimeTicketSetUtils
 {
@@ -83,11 +82,7 @@ public static class RealtimeTicketSetUtils
         List<int> numbers = source == null ? new List<int>() : new List<int>(source);
         while (numbers.Count < 15)
         {
-            int fallback = Random.Range(1, 76);
-            if (!numbers.Contains(fallback))
-            {
-                numbers.Add(fallback);
-            }
+            numbers.Add(0);
         }
 
         if (numbers.Count > 15)

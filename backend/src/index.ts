@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import { Server, type Socket } from "socket.io";
 import { createWalletAdapter } from "./adapters/createWalletAdapter.js";
 import { LocalBingoSystemAdapter } from "./adapters/LocalBingoSystemAdapter.js";
@@ -11,6 +11,7 @@ import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
 import type { ClaimType, RoomSnapshot, RoomSummary } from "./game/types.js";
+import { CandyLaunchTokenStore } from "./launch/CandyLaunchTokenStore.js";
 import { assertAdminPermission, type AdminPermission } from "./platform/AdminAccessPolicy.js";
 import { APP_USER_ROLES, PlatformService, type PublicAppUser, type UserRole } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
@@ -89,6 +90,15 @@ interface CandyManiaSchedulerSettings {
 interface PendingCandyManiaSettingsUpdate {
   effectiveFromMs: number;
   settings: CandyManiaSchedulerSettings;
+}
+
+interface CandyLaunchSettings {
+  launchUrl?: string;
+  apiBaseUrl?: string;
+}
+
+interface NormalizeGameSettingsOptions {
+  requireCandyLaunchUrl?: boolean;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -172,6 +182,10 @@ const bingoSelfExclusionMinMs = Math.max(
   365 * 24 * 60 * 60 * 1000,
   parsePositiveIntEnv(process.env.BINGO_SELF_EXCLUSION_MIN_MS, 365 * 24 * 60 * 60 * 1000)
 );
+const bingoMaxDrawsPerRound = Math.min(
+  75,
+  Math.max(1, parsePositiveIntEnv(process.env.BINGO_MAX_DRAWS_PER_ROUND, 30))
+);
 
 const isProductionRuntime = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
 const minPlayersFloor = 1;
@@ -219,6 +233,10 @@ const dailyReportJobIntervalMs = Math.max(
   60_000,
   parsePositiveIntEnv(process.env.DAILY_REPORT_JOB_INTERVAL_MS, 60 * 60 * 1000)
 );
+const candyLaunchTokenTtlMs = Math.max(
+  15_000,
+  parsePositiveIntEnv(process.env.CANDY_LAUNCH_TOKEN_TTL_SECONDS, 120) * 1000
+);
 
 if (isProductionRuntime && !autoplayAllowed && (requestedAutoRoundStartEnabled || requestedAutoDrawEnabled)) {
   console.warn(
@@ -233,7 +251,8 @@ const engine = new BingoEngine(new LocalBingoSystemAdapter(), walletAdapter, {
   monthlyLossLimit: bingoMonthlyLossLimit,
   playSessionLimitMs: bingoPlaySessionLimitMs,
   pauseDurationMs: bingoPauseDurationMs,
-  selfExclusionMinMs: bingoSelfExclusionMinMs
+  selfExclusionMinMs: bingoSelfExclusionMinMs,
+  maxDrawsPerRound: bingoMaxDrawsPerRound
 });
 
 const platformService = new PlatformService(walletAdapter, {
@@ -262,6 +281,9 @@ const swedbankPayService = new SwedbankPayService(walletAdapter, {
   cancelUrl: process.env.SWEDBANK_PAY_CANCEL_URL,
   termsOfServiceUrl: process.env.SWEDBANK_PAY_TERMS_URL,
   requestTimeoutMs: parsePositiveIntEnv(process.env.SWEDBANK_PAY_REQUEST_TIMEOUT_MS, 10000)
+});
+const candyLaunchTokenStore = new CandyLaunchTokenStore({
+  ttlMs: candyLaunchTokenTtlMs
 });
 
 function ackSuccess<T>(callback: (response: AckResponse<T>) => void, data: T): void {
@@ -388,9 +410,71 @@ function parseTicketsPerPlayerInput(value: unknown): number {
   return parsed;
 }
 
+function normalizeAbsoluteHttpUrl(rawValue: string, fieldName: string, errorCode: string): string {
+  const candidate = rawValue.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new DomainError(errorCode, `${fieldName} må være en gyldig http/https URL.`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new DomainError(errorCode, `${fieldName} må starte med http:// eller https://.`);
+  }
+
+  return parsed.toString();
+}
+
+function parseOptionalAbsoluteHttpUrl(
+  value: unknown,
+  fieldName: string,
+  errorCode: string
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new DomainError(errorCode, `${fieldName} må være tekst.`);
+  }
+  if (!value.trim()) {
+    return undefined;
+  }
+  return normalizeAbsoluteHttpUrl(value, fieldName, errorCode);
+}
+
+function readCandyLaunchSettings(
+  settings: Record<string, unknown>,
+  options: { requireLaunchUrl: boolean }
+): CandyLaunchSettings {
+  const launchUrl = parseOptionalAbsoluteHttpUrl(
+    settings.launchUrl,
+    "launchUrl",
+    "INVALID_CANDY_LAUNCH_URL"
+  );
+  const apiBaseUrl = parseOptionalAbsoluteHttpUrl(
+    settings.apiBaseUrl,
+    "apiBaseUrl",
+    "INVALID_CANDY_API_BASE_URL"
+  );
+
+  if (options.requireLaunchUrl && !launchUrl) {
+    throw new DomainError(
+      "INVALID_CANDY_LAUNCH_URL",
+      "Candy launchUrl må settes og være en gyldig http/https URL."
+    );
+  }
+
+  return {
+    launchUrl,
+    apiBaseUrl
+  };
+}
+
 function normalizeGameSettingsForUpdate(
   gameSlug: string,
-  settings: Record<string, unknown> | undefined
+  settings: Record<string, unknown> | undefined,
+  options: NormalizeGameSettingsOptions = {}
 ): Record<string, unknown> | undefined {
   if (!settings) {
     return undefined;
@@ -402,6 +486,20 @@ function normalizeGameSettingsForUpdate(
   }
 
   const nextSettings: Record<string, unknown> = { ...settings };
+  const launchSettings = readCandyLaunchSettings(nextSettings, {
+    requireLaunchUrl: options.requireCandyLaunchUrl === true
+  });
+  if (launchSettings.launchUrl) {
+    nextSettings.launchUrl = launchSettings.launchUrl;
+  } else {
+    delete nextSettings.launchUrl;
+  }
+  if (launchSettings.apiBaseUrl) {
+    nextSettings.apiBaseUrl = launchSettings.apiBaseUrl;
+  } else {
+    delete nextSettings.apiBaseUrl;
+  }
+
   const payoutRaw = nextSettings.payoutPercent;
 
   if (payoutRaw === undefined || payoutRaw === null || payoutRaw === "") {
@@ -653,6 +751,7 @@ function getCandyManiaAdminSettingsResponse(): Record<string, unknown> {
       forceCandyAutoDraw,
       minRoundIntervalMs: bingoMinRoundIntervalMs,
       minPlayersToStart: bingoMinPlayersToStart,
+      maxDrawsPerRound: bingoMaxDrawsPerRound,
       maxTicketsPerPlayer: 5,
       minPayoutPercent: 0,
       maxPayoutPercent: 100,
@@ -692,6 +791,52 @@ async function hydrateCandyManiaSettingsFromCatalog(): Promise<void> {
   } catch (error) {
     console.warn("[candy-mania] Klarte ikke laste scheduler settings fra game-catalog. Bruker env/default.", error);
   }
+}
+
+function readForwardedHeaderValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value[0] : "";
+  }
+  return typeof value === "string" ? value.split(",")[0].trim() : "";
+}
+
+function deriveRequestApiBaseUrl(req: express.Request): string {
+  const forwardedProto = readForwardedHeaderValue(req.headers["x-forwarded-proto"]);
+  const forwardedHost = readForwardedHeaderValue(req.headers["x-forwarded-host"]);
+  const protocolCandidate = (forwardedProto || req.protocol || "https").trim().toLowerCase();
+  const protocol = protocolCandidate === "http" || protocolCandidate === "https" ? protocolCandidate : "https";
+  const host = (forwardedHost || req.get("host") || "").trim();
+
+  if (!host) {
+    throw new DomainError("INVALID_CONFIG", "Kunne ikke utlede apiBaseUrl fra request.");
+  }
+
+  return normalizeAbsoluteHttpUrl(`${protocol}://${host}`, "apiBaseUrl", "INVALID_CANDY_API_BASE_URL");
+}
+
+async function resolveCandyLaunchHallId(inputHallId: unknown): Promise<string> {
+  if (typeof inputHallId === "string" && inputHallId.trim()) {
+    const hall = await platformService.requireActiveHall(inputHallId);
+    return hall.id;
+  }
+
+  const halls = await platformService.listHalls({ includeInactive: false });
+  if (halls.length === 0) {
+    throw new DomainError("HALL_NOT_FOUND", "Fant ingen aktiv hall for Candy-launch.");
+  }
+
+  return halls[0].id;
+}
+
+async function getCandyLaunchSettingsForRuntime(requireLaunchUrl = true): Promise<CandyLaunchSettings> {
+  const candyGame = await platformService.getGame("candy");
+  const settings = normalizeGameSettingsForUpdate("candy", candyGame.settings ?? {}, {
+    requireCandyLaunchUrl: requireLaunchUrl
+  });
+  if (!settings) {
+    throw new DomainError("INVALID_CANDY_LAUNCH_URL", "Candy settings mangler.");
+  }
+  return readCandyLaunchSettings(settings, { requireLaunchUrl });
 }
 
 function getAccessTokenFromRequest(req: express.Request): string {
@@ -1429,6 +1574,52 @@ app.get("/api/games", async (req, res) => {
   }
 });
 
+app.post("/api/games/candy/launch-token", async (req, res) => {
+  try {
+    const accessToken = getAccessTokenFromRequest(req);
+    const user = await platformService.getUserFromAccessToken(accessToken);
+    platformService.assertUserEligibleForGameplay(user);
+    engine.assertWalletAllowedForGameplay(user.walletId);
+
+    const launchSettings = await getCandyLaunchSettingsForRuntime(true);
+    const hallId = await resolveCandyLaunchHallId(req.body?.hallId);
+    const apiBaseUrl = launchSettings.apiBaseUrl || deriveRequestApiBaseUrl(req);
+    const issued = candyLaunchTokenStore.issue({
+      accessToken,
+      hallId,
+      playerName: user.displayName,
+      walletId: user.walletId,
+      apiBaseUrl
+    });
+
+    apiSuccess(res, {
+      launchToken: issued.launchToken,
+      issuedAt: issued.issuedAt,
+      expiresAt: issued.expiresAt,
+      launchUrl: launchSettings.launchUrl
+    });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.post("/api/games/candy/launch-resolve", async (req, res) => {
+  try {
+    const launchToken = mustBeNonEmptyString(req.body?.launchToken, "launchToken");
+    const resolved = candyLaunchTokenStore.consume(launchToken);
+    if (!resolved) {
+      throw new DomainError(
+        "INVALID_LAUNCH_TOKEN",
+        "Launch-token er ugyldig eller utløpt. Start spillet på nytt fra portalen."
+      );
+    }
+
+    apiSuccess(res, resolved);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
 app.get("/api/admin/games", async (req, res) => {
   try {
     await requireAdminPermissionUser(req, "GAME_CATALOG_READ");
@@ -1463,7 +1654,9 @@ app.put("/api/admin/games/:slug", async (req, res) => {
       route: typeof req.body?.route === "string" ? req.body.route : undefined,
       isEnabled: typeof req.body?.isEnabled === "boolean" ? req.body.isEnabled : undefined,
       sortOrder: Number.isFinite(req.body?.sortOrder) ? Number(req.body.sortOrder) : undefined,
-      settings: normalizeGameSettingsForUpdate(slug, rawSettings)
+      settings: normalizeGameSettingsForUpdate(slug, rawSettings, {
+        requireCandyLaunchUrl: normalizedSlug === "candy"
+      })
     });
     if (normalizedSlug === "candy") {
       const previous: CandyManiaSchedulerSettings = { ...runtimeCandyManiaSettings };
@@ -2764,7 +2957,7 @@ hydrateCandyManiaSettingsFromCatalog()
     server.listen(PORT, () => {
       console.log(`Bingo backend kjører på http://localhost:${PORT}`);
       console.log(
-        `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
+        `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} maxDrawsPerRound=${bingoMaxDrawsPerRound} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
       );
       console.log(
         `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} forceAutoStart=${forceCandyAutoStart} forceAutoDraw=${forceCandyAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleCandyRoomPerHall} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`

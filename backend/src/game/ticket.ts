@@ -73,28 +73,36 @@ function isMarked(ticket: Ticket, marks: Set<number>, row: number, col: number):
   return marks.has(cell);
 }
 
-export function hasAnyCompleteLine(ticket: Ticket, marks: Set<number>): boolean {
+export function findFirstCompleteLinePatternIndex(ticket: Ticket, marks: Set<number>): number {
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     const complete = Array.from({ length: BOARD_SIZE }, (_, col) => isMarked(ticket, marks, row, col)).every(Boolean);
     if (complete) {
-      return true;
+      return row;
     }
   }
 
   for (let col = 0; col < BOARD_SIZE; col += 1) {
     const complete = Array.from({ length: BOARD_SIZE }, (_, row) => isMarked(ticket, marks, row, col)).every(Boolean);
     if (complete) {
-      return true;
+      return BOARD_SIZE + col;
     }
   }
 
   const leftDiagonal = Array.from({ length: BOARD_SIZE }, (_, i) => isMarked(ticket, marks, i, i)).every(Boolean);
   if (leftDiagonal) {
-    return true;
+    return BOARD_SIZE * 2;
   }
 
   const rightDiagonal = Array.from({ length: BOARD_SIZE }, (_, i) => isMarked(ticket, marks, i, BOARD_SIZE - 1 - i)).every(Boolean);
-  return rightDiagonal;
+  if (rightDiagonal) {
+    return BOARD_SIZE * 2 + 1;
+  }
+
+  return -1;
+}
+
+export function hasAnyCompleteLine(ticket: Ticket, marks: Set<number>): boolean {
+  return findFirstCompleteLinePatternIndex(ticket, marks) >= 0;
 }
 
 export function hasFullBingo(ticket: Ticket, marks: Set<number>): boolean {
@@ -107,4 +115,3 @@ export function hasFullBingo(ticket: Ticket, marks: Set<number>): boolean {
   }
   return true;
 }
-

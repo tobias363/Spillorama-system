@@ -604,6 +604,23 @@ function resolveGameLaunchUrl(game) {
   return "";
 }
 
+function appendLaunchTokenToUrl(launchUrl, launchToken) {
+  const token = String(launchToken ?? "").trim();
+  if (!token) {
+    throw new Error("Mangler launch-token.");
+  }
+
+  const hashIndex = launchUrl.indexOf("#");
+  if (hashIndex === -1) {
+    return `${launchUrl}#lt=${encodeURIComponent(token)}`;
+  }
+
+  const beforeHash = launchUrl.slice(0, hashIndex);
+  const existingHash = launchUrl.slice(hashIndex + 1);
+  const separator = existingHash.length > 0 ? "&" : "";
+  return `${beforeHash}#${existingHash}${separator}lt=${encodeURIComponent(token)}`;
+}
+
 function parseCandyPayoutPercent(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
@@ -1156,8 +1173,8 @@ function renderCandyCard() {
     `Slug: ${game.slug}`,
     `Route: ${game.route}`,
     `Aktivt: ${game.isEnabled ? "Ja" : "Nei"}`,
-    "Spill nå åpner URL fra game.settings.launchUrl.",
-    "Sett launchUrl i /admin > Games > Settings JSON for Candy.",
+    "Spill nå oppretter one-time launch-token og åpner game.settings.launchUrl.",
+    "Sett launchUrl i /admin > Candy (spill + drift).",
     "",
     game.description || "Ingen beskrivelse.",
     "",
@@ -1166,29 +1183,54 @@ function renderCandyCard() {
   setStatusBox(els.candyStatus, lines.join("\n"));
 }
 
-function onCandyPlay() {
+async function onCandyPlay() {
   const game = getCandyGame() || currentGame();
   if (!game) {
     setStatusBox(els.candyStatus, "Fant ikke spilldata for Candy.", "error");
     return;
   }
 
-  const launchUrl = resolveGameLaunchUrl(game);
-  if (!launchUrl) {
+  if (els.candyPlayBtn) {
+    els.candyPlayBtn.disabled = true;
+  }
+
+  setStatusBox(els.candyStatus, "Forbereder sikker Candy-launch...", "success");
+
+  try {
+    const requestedHallId = String(state.selectedHallId ?? "").trim();
+    const launchSession = await api("/api/games/candy/launch-token", {
+      method: "POST",
+      body: {
+        hallId: requestedHallId || undefined
+      }
+    });
+
+    const launchToken = String(launchSession?.launchToken ?? "").trim();
+    const launchUrl = String(launchSession?.launchUrl ?? resolveGameLaunchUrl(game)).trim();
+    if (!launchUrl) {
+      throw new Error("Mangler launchUrl for Candy.");
+    }
+    if (!launchToken) {
+      throw new Error("Mangler launch-token fra backend.");
+    }
+
+    const targetUrl = appendLaunchTokenToUrl(launchUrl, launchToken);
+    setStatusBox(els.candyStatus, `Starter Candy fra ${launchUrl}`, "success");
+    window.location.assign(targetUrl);
+  } catch (error) {
     setStatusBox(
       els.candyStatus,
       [
-        "Mangler launchUrl for Candy.",
-        "Gå til /admin > Games > Candy > Settings JSON og sett f.eks.:",
-        '{ "launchUrl": "https://din-candy-url.no" }'
+        error?.message || "Klarte ikke starte Candy.",
+        "Kontroller launchUrl i /admin > Candy (spill + drift)."
       ].join("\n"),
       "error"
     );
-    return;
+  } finally {
+    if (els.candyPlayBtn) {
+      els.candyPlayBtn.disabled = !game;
+    }
   }
-
-  setStatusBox(els.candyStatus, `Starter Candy fra ${launchUrl}`, "success");
-  window.location.assign(launchUrl);
 }
 
 function renderWalletMini() {

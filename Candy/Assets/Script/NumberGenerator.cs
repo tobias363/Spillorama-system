@@ -59,14 +59,20 @@ public class NumberGenerator : MonoBehaviour
     public UIManager uiManager;
 
     public bool isInitialApiCalled;
-     [SerializeField]
+    [SerializeField]
     int extraballMatchingNo;
+    [SerializeField] private bool verboseRuntimeLogs = false;
+    [SerializeField] [Min(1)] private int roundDrawCap = 30;
+    [SerializeField] private bool allowExtraBallsAfterRoundCap = false;
     int randomSkipIndex;
     float startingGameTime;
     DateTime startingGameDate;
     // private float secondsOfARealDay = 24 * 60 * 60;
     public double elapsedRealTime;
     public bool showFreeExtraBalls = false;
+    private string realtimeBonusOpenedGameId = string.Empty;
+    private string realtimeBonusOpenedClaimId = string.Empty;
+    private readonly Dictionary<GameObject, TextMeshProUGUI> missingPatternLabelCache = new Dictionary<GameObject, TextMeshProUGUI>();
 
     private void OnEnable()
     {
@@ -94,6 +100,7 @@ public class NumberGenerator : MonoBehaviour
 
         paylineManager = new PaylineManager(this);
         extraBallObj.SetActive(false);
+        ResetRealtimeBonusFlow(closeBonusPanel: true);
         autoSpinRemainingPlayText.text = "";
         EventManager.isPlayOver = true;
         totalSelectedPatterns.Clear();
@@ -656,7 +663,10 @@ public class NumberGenerator : MonoBehaviour
     }
     public void ShowExtraBallOnTap(int extraballCount)
     {
-        Debug.Log("-------showFreeExtraBalls : " + showFreeExtraBalls);
+        if (verboseRuntimeLogs)
+        {
+            Debug.Log("-------showFreeExtraBalls : " + showFreeExtraBalls);
+        }
         //if (isExtraBallDone) { return; }
         totalExtraBallCount = extraballCount;
 
@@ -745,30 +755,37 @@ public class NumberGenerator : MonoBehaviour
 
     public void CheckSelectedNumb(int num)
     {
+        if (generatedNO == null || num < 0 || num >= generatedNO.Count)
+        {
+            return;
+        }
+
+        int drawnNumber = generatedNO[num];
         for (int i = 0; i < totalActiveCard; i++)
         {
-            if (cardClasses[i].numb.Contains(generatedNO[num]))
+            int index = cardClasses[i].numb.IndexOf(drawnNumber);
+            if (index >= 0)
             {
-                int index = cardClasses[i].numb.IndexOf(generatedNO[num]);
-                cardClasses[i].selectionImg[index].SetActive(true);
+                SetActiveIfChanged(cardClasses[i].selectionImg[index], true);
                 cardClasses[i].payLinePattern[index] = 1;
                 CheckPayLineMatch(i);
             }
-            if (num == 29)
+        }
+
+        int capIndex = Mathf.Max(0, roundDrawCap - 1);
+        if (num == capIndex)
+        {
+            bool canShowExtraBalls = allowExtraBallsAfterRoundCap && isPrizeMissedByOneCard;
+            if (canShowExtraBalls)
             {
-
-                if (isPrizeMissedByOneCard)
-                {
-                    //Invoke(nameof(ShowExtraBalls), 1);
-                    Invoke(nameof(StartExtraBallScreen), 2);
-                }
-                else
-                {
-                    EventManager.AutoSpinOver(true);
-                    EndGame();
-                    isExtraBallDone = true;
-                }
-
+                //Invoke(nameof(ShowExtraBalls), 1);
+                Invoke(nameof(StartExtraBallScreen), 2);
+            }
+            else
+            {
+                EventManager.AutoSpinOver(true);
+                EndGame();
+                isExtraBallDone = true;
             }
         }
     }
@@ -777,15 +794,14 @@ public class NumberGenerator : MonoBehaviour
     {
         if (isExtraBallDone) { return; }
         //Debug.Log("isMissingPattern ------------>>>> " + isMissingPattern);
-        Invoke("ShowExtraBallSlotMachine", 2);
         if (!showFreeExtraBalls && !isBonusSelected)
         {
-            Invoke("ShowExtraBallSlotMachine", 2);
+            Invoke(nameof(ShowExtraBallSlotMachine), 2);
 
         }
         else if (showFreeExtraBalls && !isBonusSelected && totalExtraBallCount != 0)
         {
-            Invoke("DropBallsFromExtraBallBank", 2);
+            Invoke(nameof(DropBallsFromExtraBallBank), 2);
         }
         EndGame();
         isExtraBallDone = true;
@@ -797,11 +813,11 @@ public class NumberGenerator : MonoBehaviour
         if (totalExtraBallCount < 50)
         {
            // Debug.Log("totalExtraBallCount is  < 50");
-            extraBallObj.SetActive(true);
+            SetActiveIfChanged(extraBallObj, true);
         }
         else
         {
-             extraBallObj.SetActive(false);
+             SetActiveIfChanged(extraBallObj, false);
            //  Debug.Log("totalExtraBallCount is  > Greater 50");
         }
 
@@ -898,7 +914,6 @@ public class NumberGenerator : MonoBehaviour
         EventManager.ShowMatchedPattern(patternIndex, true);
         for (int m = 0; m < selectedIndex.Count; m++)
         {
-            cardClasses[cardNo].matchPatternImg[selectedIndex[m]].SetActive(true);
             ballAnimSpeed = 0.11f;
             EventManager.ShowMissingPattern(patternIndex, selectedIndex[m], false);
         }
@@ -935,9 +950,15 @@ public class NumberGenerator : MonoBehaviour
                     unMatchedMat);
 
                 EventManager.ShowMissingPattern(patternIndex, blockCount, true);
-                TextMeshProUGUI missingPatternPrize = cardClasses[cardNo].missingPatternImg[blockCount].transform.GetChild(0).GetComponentInChildren<TextMeshProUGUI>();
+                GameObject missingPatternCell = cardClasses[cardNo].missingPatternImg[blockCount];
+                TextMeshProUGUI missingPatternPrize = ResolveMissingPatternPrizeLabel(missingPatternCell);
                 TextMeshProUGUI patternIndexInTopper = topperManager.prizes[topperManager.GetPatternIndex(patternIndex)];
-                if (cardClasses[cardNo].missingPatternImg[blockCount].activeInHierarchy && !missingPatternPrize.text.Contains(patternIndexInTopper.text))
+                if (missingPatternPrize == null || patternIndexInTopper == null)
+                {
+                    continue;
+                }
+
+                if (missingPatternCell.activeInHierarchy && !missingPatternPrize.text.Contains(patternIndexInTopper.text))
                 {
                     //missingPatternPrize.text += ", " + patternIndexInTopper.text;
                     //Debug.Log(missingPatternPrize.text + " + " + patternIndexInTopper.text);
@@ -948,7 +969,7 @@ public class NumberGenerator : MonoBehaviour
                 else
                 {
                     missingPatternPrize.text = patternIndexInTopper.text;
-                    cardClasses[cardNo].missingPatternImg[blockCount].SetActive(true);
+                    SetActiveIfChanged(missingPatternCell, true);
                 }
 
                 if (topperManager.GetPatternIndex(patternIndex) < 8)
@@ -987,9 +1008,60 @@ public class NumberGenerator : MonoBehaviour
 
     bool isBonusSelected;
 
+    public bool TryOpenRealtimeBonusPanel(int resolvedBonusAmount, string gameId, string claimId)
+    {
+        if (resolvedBonusAmount <= 0)
+        {
+            Debug.LogWarning($"[NumberGenerator] Realtime bonus ble trigget uten gyldig bonusbelop: {resolvedBonusAmount}.");
+            return false;
+        }
+
+        if (bonusMainObj == null)
+        {
+            Debug.LogError("[NumberGenerator] bonusMainObj mangler. Kan ikke vise bonuspanel.");
+            return false;
+        }
+
+        string normalizedGameId = string.IsNullOrWhiteSpace(gameId) ? "__UNKNOWN_GAME__" : gameId.Trim();
+        if (string.Equals(realtimeBonusOpenedGameId, normalizedGameId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        APIManager manager = APIManager.instance;
+        if (manager != null)
+        {
+            manager.bonusAMT = resolvedBonusAmount;
+        }
+
+        realtimeBonusOpenedGameId = normalizedGameId;
+        realtimeBonusOpenedClaimId = claimId ?? string.Empty;
+        isBonusSelected = true;
+        SetActiveIfChanged(bonusMainObj, true);
+        return true;
+    }
+
+    public void ResetRealtimeBonusFlow(bool closeBonusPanel, string previousGameId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(previousGameId) &&
+            !string.Equals(realtimeBonusOpenedGameId, previousGameId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        realtimeBonusOpenedGameId = string.Empty;
+        realtimeBonusOpenedClaimId = string.Empty;
+        isBonusSelected = false;
+
+        if (closeBonusPanel && bonusMainObj != null)
+        {
+            SetActiveIfChanged(bonusMainObj, false);
+        }
+    }
+
     void StartBonus()
     {
-        bonusMainObj.SetActive(true);
+        SetActiveIfChanged(bonusMainObj, true);
     }
 
 
@@ -1000,16 +1072,33 @@ public class NumberGenerator : MonoBehaviour
         showFreeExtraBalls = false;
         isMissingPattern = false;
         StopAllCoroutines();
+        missingPatternLabelCache.Clear();
         if (random.Count != 0) random.Clear();
         if (generatedNO.Count != 0) generatedNO.Clear();
         ClearPaylineVisuals();
+        ResetRealtimeBonusFlow(closeBonusPanel: true);
+        if (extraBallObj != null)
+        {
+            SetActiveIfChanged(extraBallObj, false);
+        }
 
         for (int i = 0; i < cardClasses.Length; i++)
         {
             if (cardClasses[i].numb.Count != 0) cardClasses[i].numb.Clear();
-            cardClasses[i].selectionImg.ForEach(p => p.SetActive(false));
-            cardClasses[i].missingPatternImg.ForEach(p => p.SetActive(false));
-            cardClasses[i].matchPatternImg.ForEach(p => p.SetActive(false));
+            for (int s = 0; s < cardClasses[i].selectionImg.Count; s++)
+            {
+                SetActiveIfChanged(cardClasses[i].selectionImg[s], false);
+            }
+
+            for (int m = 0; m < cardClasses[i].missingPatternImg.Count; m++)
+            {
+                SetActiveIfChanged(cardClasses[i].missingPatternImg[m], false);
+            }
+
+            for (int mp = 0; mp < cardClasses[i].matchPatternImg.Count; mp++)
+            {
+                SetActiveIfChanged(cardClasses[i].matchPatternImg[mp], false);
+            }
             if (cardClasses[i].paylineindex.Count != 0) cardClasses[i].paylineindex.Clear();
 
             for (int j = 0; j < cardClasses[i].payLinePattern.Count; j++)
@@ -1024,6 +1113,37 @@ public class NumberGenerator : MonoBehaviour
         ballAnimSpeed = 0.1f;
         isExtraBallDone = false;
         //EventManager.Play();
+    }
+
+    private TextMeshProUGUI ResolveMissingPatternPrizeLabel(GameObject missingCell)
+    {
+        if (missingCell == null)
+        {
+            return null;
+        }
+
+        if (missingPatternLabelCache.TryGetValue(missingCell, out TextMeshProUGUI cachedLabel) &&
+            cachedLabel != null)
+        {
+            return cachedLabel;
+        }
+
+        if (missingCell.transform.childCount == 0)
+        {
+            return null;
+        }
+
+        TextMeshProUGUI label = missingCell.transform.GetChild(0).GetComponentInChildren<TextMeshProUGUI>();
+        missingPatternLabelCache[missingCell] = label;
+        return label;
+    }
+
+    private static void SetActiveIfChanged(GameObject target, bool active)
+    {
+        if (target != null && target.activeSelf != active)
+        {
+            target.SetActive(active);
+        }
     }
 
 
