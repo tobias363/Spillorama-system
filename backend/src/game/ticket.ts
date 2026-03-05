@@ -105,6 +105,54 @@ export function hasAnyCompleteLine(ticket: Ticket, marks: Set<number>): boolean 
   return findFirstCompleteLinePatternIndex(ticket, marks) >= 0;
 }
 
+export function countNearMissLinePattern(ticket: Ticket, marks: Set<number>): number {
+  let nearMissCount = 0;
+
+  const countMissingInPattern = (cells: Array<{ row: number; col: number }>): number => {
+    let missing = 0;
+    for (const cell of cells) {
+      if (!isMarked(ticket, marks, cell.row, cell.col)) {
+        missing += 1;
+      }
+    }
+    return missing;
+  };
+
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    const missing = countMissingInPattern(
+      Array.from({ length: BOARD_SIZE }, (_, col) => ({ row, col }))
+    );
+    if (missing === 1) {
+      nearMissCount += 1;
+    }
+  }
+
+  for (let col = 0; col < BOARD_SIZE; col += 1) {
+    const missing = countMissingInPattern(
+      Array.from({ length: BOARD_SIZE }, (_, row) => ({ row, col }))
+    );
+    if (missing === 1) {
+      nearMissCount += 1;
+    }
+  }
+
+  const leftDiagonalMissing = countMissingInPattern(
+    Array.from({ length: BOARD_SIZE }, (_, i) => ({ row: i, col: i }))
+  );
+  if (leftDiagonalMissing === 1) {
+    nearMissCount += 1;
+  }
+
+  const rightDiagonalMissing = countMissingInPattern(
+    Array.from({ length: BOARD_SIZE }, (_, i) => ({ row: i, col: BOARD_SIZE - 1 - i }))
+  );
+  if (rightDiagonalMissing === 1) {
+    nearMissCount += 1;
+  }
+
+  return nearMissCount;
+}
+
 export function hasFullBingo(ticket: Ticket, marks: Set<number>): boolean {
   for (let row = 0; row < ticket.grid.length; row += 1) {
     for (let col = 0; col < ticket.grid[row].length; col += 1) {

@@ -260,9 +260,10 @@ public partial class APIManager
             return;
         }
 
-        if (processedDrawCount >= realtimeClientMaxDrawsPerRound)
+        int drawCountCap = ResolveRealtimeDrawCountCap();
+        if (processedDrawCount >= drawCountCap)
         {
-            Debug.LogWarning($"[APIManager] Hopper over draw: runden har naadd draw-cap ({realtimeClientMaxDrawsPerRound}).");
+            Debug.LogWarning($"[APIManager] Hopper over draw: runden har naadd draw-cap ({drawCountCap}).");
             RequestRealtimeState();
             return;
         }

@@ -49,28 +49,23 @@ public partial class APIManager
             realtimeScheduler.SetCurrentGameStatus("NONE");
             if (!string.IsNullOrWhiteSpace(activeGameId))
             {
+                ScheduleDelayedOverlayReset(activeGameId);
                 ResetRealtimeRoundVisuals();
             }
 
-            NumberGenerator endedRoundGenerator = GameManager.instance?.numberGenerator;
-            if (endedRoundGenerator != null)
-            {
-                endedRoundGenerator.ClearPaylineVisuals();
-            }
-
-            StopRealtimeNearWinBlinking();
-            ResetRealtimeBonusState(closeBonusPanel: true);
-
             activeGameId = string.Empty;
             processedDrawCount = 0;
+            renderedDrawCount = 0;
             currentTicketPage = 0;
             activeTicketSets.Clear();
+            overlaysClearedForEndedGameId = string.Empty;
             GameManager.instance?.SetRoundWinningTotalFromRealtime(0);
             RefreshRealtimeCountdownLabel(forceRefresh: true);
             return;
         }
 
-        realtimeScheduler.SetCurrentGameStatus(currentGame["status"]);
+        string currentGameStatus = currentGame["status"];
+        realtimeScheduler.SetCurrentGameStatus(currentGameStatus);
 
         string gameId = currentGame["id"];
         if (string.IsNullOrWhiteSpace(gameId))
@@ -84,8 +79,10 @@ public partial class APIManager
             string previousGameId = activeGameId;
             activeGameId = gameId;
             processedDrawCount = 0;
+            renderedDrawCount = 0;
             currentTicketPage = 0;
             activeTicketSets.Clear();
+            overlaysClearedForEndedGameId = string.Empty;
             GameManager.instance?.SetRoundWinningTotalFromRealtime(0);
             ResetRealtimeRoundVisuals();
             NumberGenerator nextRoundGenerator = GameManager.instance?.numberGenerator;
@@ -94,12 +91,27 @@ public partial class APIManager
                 nextRoundGenerator.ClearPaylineVisuals();
             }
 
+            CancelDelayedOverlayReset();
             StopRealtimeNearWinBlinking();
             ResetRealtimeBonusState(closeBonusPanel: true, previousGameId: previousGameId);
         }
 
+        bool isRunning = string.Equals(currentGameStatus, "RUNNING", StringComparison.OrdinalIgnoreCase);
+        bool isEnded = string.Equals(currentGameStatus, "ENDED", StringComparison.OrdinalIgnoreCase);
+
+        if (isRunning)
+        {
+            CancelDelayedOverlayReset();
+            overlaysClearedForEndedGameId = string.Empty;
+        }
+        else if (isEnded)
+        {
+            ScheduleDelayedOverlayReset(gameId);
+        }
+
         ApplyMyTicketToCards(currentGame);
-        ApplyDrawnNumbers(currentGame);
+        bool skipCardMarking = string.Equals(overlaysClearedForEndedGameId, gameId, StringComparison.Ordinal);
+        ApplyDrawnNumbers(currentGame, skipCardMarking);
         RefreshRealtimeRoundWinning(currentGame);
         RefreshRealtimeWinningPatternVisuals(currentGame);
         RefreshRealtimeCountdownLabel(forceRefresh: true);
@@ -115,12 +127,22 @@ public partial class APIManager
         JSONNode tickets = currentGame["tickets"];
         if (tickets == null || tickets.IsNull)
         {
+            if (preserveTicketNumbersOnTransientSnapshotGaps && cachedStableTicketSets.Count > 0 && activeTicketSets.Count == 0)
+            {
+                activeTicketSets = RealtimeTicketSetUtils.CloneTicketSets(cachedStableTicketSets);
+                ApplyTicketSetsToCards(activeTicketSets, preserveExistingNumbers: true);
+            }
             return;
         }
 
         JSONNode myTicketsNode = tickets[activePlayerId];
         if (myTicketsNode == null || myTicketsNode.IsNull)
         {
+            if (preserveTicketNumbersOnTransientSnapshotGaps && cachedStableTicketSets.Count > 0 && activeTicketSets.Count == 0)
+            {
+                activeTicketSets = RealtimeTicketSetUtils.CloneTicketSets(cachedStableTicketSets);
+                ApplyTicketSetsToCards(activeTicketSets, preserveExistingNumbers: true);
+            }
             return;
         }
 
@@ -136,10 +158,13 @@ public partial class APIManager
         }
 
         activeTicketSets = RealtimeTicketSetUtils.CloneTicketSets(ticketSets);
-        ApplyTicketSetsToCards(activeTicketSets);
+        cachedStableTicketSets = RealtimeTicketSetUtils.CloneTicketSets(ticketSets);
+        ApplyTicketSetsToCards(
+            activeTicketSets,
+            preserveExistingNumbers: preserveTicketNumbersOnTransientSnapshotGaps);
     }
 
-    private void ApplyTicketSetsToCards(List<List<int>> ticketSets)
+    private void ApplyTicketSetsToCards(List<List<int>> ticketSets, bool preserveExistingNumbers = true)
     {
         if (ticketSets == null || ticketSets.Count == 0)
         {
@@ -177,6 +202,7 @@ public partial class APIManager
                 continue;
             }
 
+            List<int> previousNumbers = new List<int>(card.numb);
             card.numb.Clear();
             card.selectedPayLineCanBe.Clear();
             card.paylineindex.Clear();
@@ -221,7 +247,10 @@ public partial class APIManager
             bool shouldPopulate = sourceTicket != null;
             for (int cellIndex = 0; cellIndex < 15; cellIndex++)
             {
-                int value = shouldPopulate ? sourceTicket[cellIndex] : 0;
+                int previousValue = cellIndex < previousNumbers.Count ? previousNumbers[cellIndex] : 0;
+                int value = shouldPopulate
+                    ? sourceTicket[cellIndex]
+                    : (preserveExistingNumbers && previousValue > 0 ? previousValue : 0);
                 card.numb.Add(value);
 
                 if (cellIndex < card.num_text.Count)
@@ -240,7 +269,7 @@ public partial class APIManager
         }
     }
 
-    private void ApplyDrawnNumbers(JSONNode currentGame)
+    private void ApplyDrawnNumbers(JSONNode currentGame, bool skipCardMarking)
     {
         JSONNode drawnNumbers = currentGame["drawnNumbers"];
         if (drawnNumbers == null || drawnNumbers.IsNull || !drawnNumbers.IsArray)
@@ -254,21 +283,32 @@ public partial class APIManager
             return;
         }
 
-        int drawCountCap = Mathf.Max(1, realtimeClientMaxDrawsPerRound);
+        int drawCountCap = ResolveRealtimeDrawCountCap();
         int cappedDrawCount = Mathf.Min(drawnNumbers.Count, drawCountCap);
-        int previousProcessedDrawCount = Mathf.Clamp(processedDrawCount, 0, drawCountCap);
+        int previousRenderedDrawCount = Mathf.Clamp(renderedDrawCount, 0, drawCountCap);
+        int nextRenderedDrawCount = previousRenderedDrawCount;
 
         for (int drawIndex = 0; drawIndex < cappedDrawCount; drawIndex++)
         {
             int drawnNumber = drawnNumbers[drawIndex].AsInt;
-            RealtimeTicketSetUtils.MarkDrawnNumberOnCards(generator, drawnNumber);
+            if (!skipCardMarking)
+            {
+                RealtimeTicketSetUtils.MarkDrawnNumberOnCards(generator, drawnNumber);
+            }
 
-            if (drawIndex < previousProcessedDrawCount)
+            if (drawIndex < previousRenderedDrawCount)
             {
                 continue;
             }
 
-            ShowRealtimeDrawBall(drawIndex, drawnNumber);
+            bool rendered = ShowRealtimeDrawBall(drawIndex, drawnNumber);
+            if (!rendered)
+            {
+                QueueDrawResync($"draw-render-missing:{drawIndex}");
+                break;
+            }
+
+            nextRenderedDrawCount = drawIndex + 1;
 
             if (autoMarkDrawnNumbers &&
                 RealtimeTicketSetUtils.TicketContainsInAnyTicketSet(activeTicketSets, drawnNumber) &&
@@ -289,6 +329,12 @@ public partial class APIManager
         }
 
         processedDrawCount = cappedDrawCount;
+        renderedDrawCount = Mathf.Clamp(nextRenderedDrawCount, 0, drawCountCap);
+
+        if (renderedDrawCount < cappedDrawCount)
+        {
+            QueueDrawResync("draw-render-lag");
+        }
     }
 
     private void RefreshRealtimeRoundWinning(JSONNode currentGame)
@@ -1470,6 +1516,7 @@ public partial class APIManager
     private void ResetActiveRoomState(bool clearDesiredRoomCode)
     {
         ClearJoinOrCreatePending();
+        CancelDelayedOverlayReset();
         activeRoomCode = string.Empty;
         activePlayerId = string.Empty;
         activeHostPlayerId = string.Empty;
@@ -1478,8 +1525,12 @@ public partial class APIManager
         realtimeRoomConfigurator.ResetWarningState();
         realtimeCountdownPresenter.ResetLayoutCache();
         processedDrawCount = 0;
+        renderedDrawCount = 0;
         currentTicketPage = 0;
         activeTicketSets.Clear();
+        cachedStableTicketSets.Clear();
+        overlaysClearedForEndedGameId = string.Empty;
+        nextDrawResyncAt = -1f;
         StopRealtimeNearWinBlinking();
         ResetRealtimeBonusState(closeBonusPanel: true);
         nextScheduledRoomStateRefreshAt = -1f;
@@ -1516,5 +1567,157 @@ public partial class APIManager
         }
 
         return (Time.realtimeSinceStartup - joinOrCreateIssuedAtRealtime) > 8f;
+    }
+
+    private void QueueDrawResync(string reason)
+    {
+        if (!useRealtimeBackend)
+        {
+            return;
+        }
+
+        if (nextDrawResyncAt < 0f || nextDrawResyncAt > Time.unscaledTime + 0.25f)
+        {
+            nextDrawResyncAt = Time.unscaledTime + Mathf.Max(0.25f, realtimeDrawResyncIntervalSeconds);
+        }
+
+        if (logBootstrapEvents)
+        {
+            Debug.Log($"[APIManager] Queue draw resync ({reason}) room={activeRoomCode} game={activeGameId}");
+        }
+    }
+
+    private void TickDrawRenderResync()
+    {
+        if (nextDrawResyncAt < 0f || Time.unscaledTime < nextDrawResyncAt)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            nextDrawResyncAt = -1f;
+            return;
+        }
+
+        BindRealtimeClient();
+        if (realtimeClient == null || !realtimeClient.IsReady)
+        {
+            nextDrawResyncAt = Time.unscaledTime + Mathf.Max(0.25f, realtimeDrawResyncIntervalSeconds);
+            return;
+        }
+
+        nextDrawResyncAt = -1f;
+        realtimeClient.RequestRoomState(activeRoomCode, (ack) =>
+        {
+            if (ack == null || !ack.ok)
+            {
+                QueueDrawResync("draw-resync-ack-failed");
+                return;
+            }
+
+            JSONNode snapshot = ack.data?["snapshot"];
+            if (snapshot != null && !snapshot.IsNull)
+            {
+                HandleRealtimeRoomUpdate(snapshot);
+            }
+        });
+    }
+
+    private void CancelDelayedOverlayReset()
+    {
+        if (delayedOverlayResetCoroutine != null)
+        {
+            StopCoroutine(delayedOverlayResetCoroutine);
+            delayedOverlayResetCoroutine = null;
+        }
+        delayedOverlayResetGameId = string.Empty;
+    }
+
+    private void ScheduleDelayedOverlayReset(string gameId)
+    {
+        if (string.IsNullOrWhiteSpace(gameId))
+        {
+            return;
+        }
+
+        if (string.Equals(overlaysClearedForEndedGameId, gameId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (string.Equals(delayedOverlayResetGameId, gameId, StringComparison.Ordinal) && delayedOverlayResetCoroutine != null)
+        {
+            return;
+        }
+
+        CancelDelayedOverlayReset();
+        delayedOverlayResetGameId = gameId;
+        delayedOverlayResetCoroutine = StartCoroutine(DelayedOverlayResetRoutine(gameId));
+    }
+
+    private IEnumerator DelayedOverlayResetRoutine(string gameId)
+    {
+        float delay = Mathf.Max(0f, realtimeRoundOverlayResetDelaySeconds);
+        if (delay > 0f)
+        {
+            yield return new WaitForSecondsRealtime(delay);
+        }
+
+        if (!string.IsNullOrWhiteSpace(activeGameId) &&
+            !string.Equals(activeGameId, gameId, StringComparison.Ordinal))
+        {
+            delayedOverlayResetCoroutine = null;
+            delayedOverlayResetGameId = string.Empty;
+            yield break;
+        }
+
+        ClearRealtimeCardOverlaysKeepTicketNumbers();
+        overlaysClearedForEndedGameId = gameId;
+        delayedOverlayResetCoroutine = null;
+        delayedOverlayResetGameId = string.Empty;
+    }
+
+    private void ClearRealtimeCardOverlaysKeepTicketNumbers()
+    {
+        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        if (generator == null || generator.cardClasses == null)
+        {
+            return;
+        }
+
+        foreach (CardClass card in generator.cardClasses)
+        {
+            if (card == null)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < card.selectionImg.Count; i++)
+            {
+                SetActiveIfChanged(card.selectionImg[i], false);
+            }
+
+            for (int i = 0; i < card.missingPatternImg.Count; i++)
+            {
+                SetActiveIfChanged(card.missingPatternImg[i], false);
+            }
+
+            for (int i = 0; i < card.matchPatternImg.Count; i++)
+            {
+                SetActiveIfChanged(card.matchPatternImg[i], false);
+            }
+
+            card.selectedPayLineCanBe.Clear();
+            for (int i = 0; i < card.payLinePattern.Count; i++)
+            {
+                card.payLinePattern[i] = 0;
+            }
+        }
+
+        generator.ClearPaylineVisuals();
+        StopRealtimeNearWinBlinking();
+        ResetRealtimeBonusState(closeBonusPanel: true);
+        NumberGenerator.isPrizeMissedByOneCard = false;
     }
 }

@@ -233,11 +233,37 @@ public class BallManager : MonoBehaviour
         }
     }
 
-    public void ShowRealtimeDrawBall(int drawIndex, int drawnNumber)
+    private int ResolveRealtimeDrawSlotIndex(int drawIndex)
     {
-        if (balls == null || drawIndex < 0 || drawIndex >= balls.Count)
+        if (balls == null || balls.Count == 0)
         {
-            return;
+            return -1;
+        }
+
+        if (drawIndex < 0)
+        {
+            return 0;
+        }
+
+        if (drawIndex < balls.Count)
+        {
+            return drawIndex;
+        }
+
+        return drawIndex % balls.Count;
+    }
+
+    public bool ShowRealtimeDrawBall(int drawIndex, int drawnNumber)
+    {
+        bool anyVisualUpdate = false;
+        int slotIndex = ResolveRealtimeDrawSlotIndex(drawIndex);
+
+        if (slotIndex < 0)
+        {
+            if (bigBallImg == null)
+            {
+                return false;
+            }
         }
 
         TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
@@ -260,37 +286,46 @@ public class BallManager : MonoBehaviour
             {
                 RealtimeTextStyleUtils.ApplyBallNumber(bigBallText, drawnNumber.ToString(), numberFallbackFont);
             }
+
+            anyVisualUpdate = true;
         }
 
-        GameObject ballObject = balls[drawIndex];
+        if (slotIndex < 0 || slotIndex >= balls.Count)
+        {
+            return anyVisualUpdate;
+        }
+
+        GameObject ballObject = balls[slotIndex];
         if (ballObject == null)
         {
-            return;
+            return anyVisualUpdate;
         }
 
         int spriteIndex = (ballSprite != null && ballSprite.Count > 0) ? Random.Range(0, ballSprite.Count) : -1;
         if (spriteIndex >= 0)
         {
-            Image img = drawIndex < cachedBallImages.Count ? cachedBallImages[drawIndex] : ballObject.GetComponent<Image>();
+            Image img = slotIndex < cachedBallImages.Count ? cachedBallImages[slotIndex] : ballObject.GetComponent<Image>();
             if (img != null)
             {
                 img.sprite = ballSprite[spriteIndex];
             }
         }
 
-        TextMeshProUGUI tmp = drawIndex < cachedBallTexts.Count ? cachedBallTexts[drawIndex] : null;
+        TextMeshProUGUI tmp = slotIndex < cachedBallTexts.Count ? cachedBallTexts[slotIndex] : null;
         if (tmp != null)
         {
             RealtimeTextStyleUtils.ApplyBallNumber(tmp, drawnNumber.ToString(), numberFallbackFont);
         }
 
-        Transform ballTransform = drawIndex < cachedBallTransforms.Count ? cachedBallTransforms[drawIndex] : ballObject.transform;
-        if (drawIndex < realtimeBallLayoutPositions.Count)
+        Transform ballTransform = slotIndex < cachedBallTransforms.Count ? cachedBallTransforms[slotIndex] : ballObject.transform;
+        if (slotIndex < realtimeBallLayoutPositions.Count)
         {
-            ballTransform.localPosition = realtimeBallLayoutPositions[drawIndex];
+            ballTransform.localPosition = realtimeBallLayoutPositions[slotIndex];
         }
 
         SetActiveIfChanged(ballObject, true);
+        anyVisualUpdate = true;
+        return anyVisualUpdate;
     }
 
     void GenerateBall(List<int> _ballIndexList)

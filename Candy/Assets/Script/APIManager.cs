@@ -27,6 +27,7 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] private bool autoMarkDrawnNumbers = true;
     [SerializeField] private bool duplicateTicketAcrossAllCards = true;
     [SerializeField] private bool enableTicketPaging = true;
+    [SerializeField] private bool preserveTicketNumbersOnTransientSnapshotGaps = true;
     [SerializeField] private bool triggerAutoLoginWhenAuthMissing = true;
     [SerializeField] private bool logBootstrapEvents = false;
     [SerializeField] private bool playButtonStartsAndDrawsRealtime = true;
@@ -47,6 +48,8 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] private int realtimeEntryFee = 0;
     [SerializeField] [Min(1)] private int realtimeClientMaxDrawsPerRound = 30;
     [SerializeField] [Min(1)] private int realtimeDefaultBonusAmount = 150;
+    [SerializeField] [Min(0f)] private float realtimeRoundOverlayResetDelaySeconds = 10f;
+    [SerializeField] [Min(0.1f)] private float realtimeDrawResyncIntervalSeconds = 0.75f;
     [SerializeField] private bool enableLaunchTokenBootstrap = true;
     [SerializeField] private string launchResolveBaseUrl = "https://bingosystem-3.onrender.com";
     [SerializeField] private BallManager ballManager;
@@ -72,8 +75,10 @@ public partial class APIManager : MonoBehaviour
     private string activeHostPlayerId = "";
     private string activeGameId = "";
     private int processedDrawCount = 0;
+    private int renderedDrawCount = 0;
     private int currentTicketPage = 0;
     private List<List<int>> activeTicketSets = new();
+    private List<List<int>> cachedStableTicketSets = new();
     private bool realtimeBonusTriggeredForActiveGame = false;
     private bool isJoinOrCreatePending = false;
     private float joinOrCreateIssuedAtRealtime = -1f;
@@ -81,6 +86,10 @@ public partial class APIManager : MonoBehaviour
     private float nextScheduledRoomStateRefreshAt = -1f;
     private float nextScheduledManualStartAttemptAt = -1f;
     private float nextScheduledHeartbeatAt = -1f;
+    private float nextDrawResyncAt = -1f;
+    private Coroutine delayedOverlayResetCoroutine;
+    private string delayedOverlayResetGameId = string.Empty;
+    private string overlaysClearedForEndedGameId = string.Empty;
     private readonly RealtimeSchedulerState realtimeScheduler = new();
     private readonly RealtimeCountdownPresenter realtimeCountdownPresenter = new();
     private readonly RealtimeRoomConfigurator realtimeRoomConfigurator = new();
@@ -166,7 +175,14 @@ public partial class APIManager : MonoBehaviour
 
     void Update()
     {
-        if (!useRealtimeBackend || !realtimeScheduledRounds)
+        if (!useRealtimeBackend)
+        {
+            return;
+        }
+
+        TickDrawRenderResync();
+
+        if (!realtimeScheduledRounds)
         {
             return;
         }
@@ -230,15 +246,24 @@ public partial class APIManager : MonoBehaviour
         resolved.ResetBalls();
     }
 
-    private void ShowRealtimeDrawBall(int drawIndex, int drawnNumber)
+    private bool ShowRealtimeDrawBall(int drawIndex, int drawnNumber)
     {
         BallManager resolved = ResolveBallManager();
         if (resolved == null)
         {
-            return;
+            return false;
         }
 
-        resolved.ShowRealtimeDrawBall(drawIndex, drawnNumber);
+        return resolved.ShowRealtimeDrawBall(drawIndex, drawnNumber);
+    }
+
+    private int ResolveRealtimeDrawCountCap()
+    {
+        int schedulerCap = realtimeScheduler.DrawCapacity > 0
+            ? realtimeScheduler.DrawCapacity
+            : realtimeClientMaxDrawsPerRound;
+
+        return Mathf.Max(1, Mathf.Min(realtimeClientMaxDrawsPerRound, schedulerCap));
     }
 
     private BingoAutoLogin ResolveAutoLogin()

@@ -11,6 +11,7 @@ public sealed class RealtimeSchedulerState
     public bool CanStartNow { get; private set; }
     public int MinPlayers { get; private set; } = 1;
     public int PlayerCount { get; private set; }
+    public int DrawCapacity { get; private set; } = 30;
     public bool IsGameRunning =>
         string.Equals(LatestGameStatus, "RUNNING", StringComparison.OrdinalIgnoreCase);
 
@@ -22,6 +23,7 @@ public sealed class RealtimeSchedulerState
         CanStartNow = false;
         MinPlayers = 1;
         PlayerCount = 0;
+        DrawCapacity = 30;
     }
 
     public void ApplySchedulerSnapshot(JSONNode snapshot)
@@ -31,6 +33,7 @@ public sealed class RealtimeSchedulerState
         CanStartNow = false;
         MinPlayers = 1;
         PlayerCount = 0;
+        DrawCapacity = 30;
 
         if (snapshot == null || snapshot.IsNull)
         {
@@ -53,6 +56,7 @@ public sealed class RealtimeSchedulerState
         CanStartNow = scheduler["canStartNow"].AsBool;
         MinPlayers = Math.Max(1, scheduler["minPlayers"].AsInt);
         PlayerCount = Math.Max(PlayerCount, scheduler["playerCount"].AsInt);
+        DrawCapacity = Math.Max(1, scheduler["drawCapacity"].AsInt > 0 ? scheduler["drawCapacity"].AsInt : DrawCapacity);
 
         string nextStartAtRaw = scheduler["nextStartAt"];
         if (!string.IsNullOrWhiteSpace(nextStartAtRaw) &&

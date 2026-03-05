@@ -211,6 +211,20 @@ function parseNonNegativeNumberEnv(value: string | undefined, fallback: number):
   return parsed;
 }
 
+function parseRatioEnv(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim().length === 0) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  if (parsed <= 1) {
+    return Math.max(0, Math.min(1, parsed));
+  }
+  return Math.max(0, Math.min(1, parsed / 100));
+}
+
 const bingoMinRoundIntervalMs = Math.max(
   30000,
   parsePositiveIntEnv(process.env.BINGO_MIN_ROUND_INTERVAL_MS, 30000)
@@ -230,6 +244,13 @@ const bingoMaxDrawsPerRound = Math.min(
   75,
   Math.max(1, parsePositiveIntEnv(process.env.BINGO_MAX_DRAWS_PER_ROUND, 30))
 );
+const bingoRtpRollingWindowSize = Math.max(10, parsePositiveIntEnv(process.env.BINGO_RTP_ROLLING_WINDOW_SIZE, 1000));
+const bingoRtpControllerGain = Math.min(
+  2,
+  Math.max(0, parseNonNegativeNumberEnv(process.env.BINGO_RTP_CONTROLLER_GAIN, 0.5))
+);
+const bingoNearMissBiasEnabled = parseBooleanEnv(process.env.BINGO_NEAR_MISS_BIAS_ENABLED, true);
+const bingoNearMissTargetRate = parseRatioEnv(process.env.BINGO_NEAR_MISS_TARGET_RATE, 0.3);
 
 const isProductionRuntime = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
 const minPlayersFloor = 1;
@@ -296,7 +317,11 @@ const engine = new BingoEngine(new LocalBingoSystemAdapter(), walletAdapter, {
   playSessionLimitMs: bingoPlaySessionLimitMs,
   pauseDurationMs: bingoPauseDurationMs,
   selfExclusionMinMs: bingoSelfExclusionMinMs,
-  maxDrawsPerRound: bingoMaxDrawsPerRound
+  maxDrawsPerRound: bingoMaxDrawsPerRound,
+  rtpRollingWindowSize: bingoRtpRollingWindowSize,
+  rtpControllerGain: bingoRtpControllerGain,
+  nearMissBiasEnabled: bingoNearMissBiasEnabled,
+  nearMissTargetRate: bingoNearMissTargetRate
 });
 
 const platformService = new PlatformService(walletAdapter, {
@@ -1263,11 +1288,17 @@ function setRoomConfiguredEntryFee(roomCode: string, entryFee: number): number {
   return normalized;
 }
 
+function resolveAdaptivePayoutPercent(hallId: string): number {
+  return engine.resolvePayoutPercentForNextRound(runtimeCandyManiaSettings.payoutPercent, hallId);
+}
+
 function buildRoomSchedulerState(snapshot: RoomSnapshot, nowMs: number): Record<string, unknown> {
   const nextStartAtMs = runtimeCandyManiaSettings.autoRoundStartEnabled
     ? normalizeRoomNextAutoStartAt(snapshot.code, nowMs)
     : null;
   const millisUntilNextStart = nextStartAtMs === null ? null : Math.max(0, nextStartAtMs - nowMs);
+  const currentDrawCount = snapshot.currentGame?.drawnNumbers?.length ?? 0;
+  const drawCapacity = Math.max(1, bingoMaxDrawsPerRound);
   const canStartNow =
     runtimeCandyManiaSettings.autoRoundStartEnabled &&
     snapshot.currentGame?.status !== "RUNNING" &&
@@ -1281,7 +1312,10 @@ function buildRoomSchedulerState(snapshot: RoomSnapshot, nowMs: number): Record<
     minPlayers: runtimeCandyManiaSettings.autoRoundMinPlayers,
     playerCount: snapshot.players.length,
     entryFee: getRoomConfiguredEntryFee(snapshot.code),
-    payoutPercent: runtimeCandyManiaSettings.payoutPercent,
+    payoutPercent: resolveAdaptivePayoutPercent(snapshot.hallId),
+    drawCapacity,
+    currentDrawCount,
+    remainingDrawCapacity: Math.max(0, drawCapacity - currentDrawCount),
     nextStartAt: nextStartAtMs === null ? null : new Date(nextStartAtMs).toISOString(),
     millisUntilNextStart,
     canStartNow,
@@ -1437,12 +1471,13 @@ async function processAutoStart(summary: ReturnType<typeof engine.listRoomSummar
     }
 
     try {
+      const adaptivePayoutPercent = resolveAdaptivePayoutPercent(summary.hallId);
       await engine.startGame({
         roomCode,
         actorPlayerId: latestSnapshot.hostPlayerId,
         entryFee: getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer: runtimeCandyManiaSettings.autoRoundTicketsPerPlayer,
-        payoutPercent: runtimeCandyManiaSettings.payoutPercent
+        payoutPercent: adaptivePayoutPercent
       });
     } catch (error) {
       if (
@@ -2272,12 +2307,13 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
       Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
     assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
     const beforeStartSnapshot = engine.getRoomSnapshot(roomCode);
+    const adaptivePayoutPercent = resolveAdaptivePayoutPercent(beforeStartSnapshot.hallId);
     await engine.startGame({
       roomCode,
       actorPlayerId: beforeStartSnapshot.hostPlayerId,
       entryFee,
       ticketsPerPlayer,
-      payoutPercent: runtimeCandyManiaSettings.payoutPercent
+      payoutPercent: adaptivePayoutPercent
     });
     const snapshot = await emitRoomUpdate(roomCode);
     apiSuccess(res, {
@@ -2597,6 +2633,35 @@ app.post("/api/admin/wallets/:walletId/extra-prize", async (req, res) => {
     });
     await emitWalletRoomUpdates([walletId]);
     apiSuccess(res, result);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/candy-mania/rtp-near-miss", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "PAYOUT_AUDIT_READ");
+    const hallId =
+      typeof req.query.hallId === "string" && req.query.hallId.trim().length > 0
+        ? req.query.hallId.trim()
+        : undefined;
+    const windowSize = parseOptionalPositiveInteger(req.query.windowSize, "windowSize");
+    const includeRecentRounds = parseBooleanQueryValue(req.query.includeRecentRounds, true);
+    const telemetry = engine.getRtpNearMissTelemetry({
+      hallId,
+      windowSize
+    });
+
+    if (includeRecentRounds) {
+      apiSuccess(res, telemetry);
+      return;
+    }
+
+    const { recentRounds, ...summary } = telemetry;
+    apiSuccess(res, {
+      ...summary,
+      recentRoundsCount: recentRounds.length
+    });
   } catch (error) {
     apiFailure(res, error);
   }
@@ -3149,12 +3214,14 @@ io.on("connection", (socket: Socket) => {
         requestedTicketsPerPlayer ??
         Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
       assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
+      const roomSnapshotForPayout = engine.getRoomSnapshot(roomCode);
+      const adaptivePayoutPercent = resolveAdaptivePayoutPercent(roomSnapshotForPayout.hallId);
       await engine.startGame({
         roomCode,
         actorPlayerId: playerId,
         entryFee: payload?.entryFee ?? getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer,
-        payoutPercent: runtimeCandyManiaSettings.payoutPercent
+        payoutPercent: adaptivePayoutPercent
       });
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { snapshot });
@@ -3284,6 +3351,9 @@ hydrateCandyManiaSettingsFromCatalog()
       console.log(`Bingo backend kjører på http://localhost:${PORT}`);
       console.log(
         `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} maxDrawsPerRound=${bingoMaxDrawsPerRound} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
+      );
+      console.log(
+        `[rtp] rollingWindow=${bingoRtpRollingWindowSize} controllerGain=${bingoRtpControllerGain} nearMissBias=${bingoNearMissBiasEnabled} nearMissTargetRate=${bingoNearMissTargetRate}`
       );
       console.log(
         `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} forceAutoStart=${forceCandyAutoStart} forceAutoDraw=${forceCandyAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleCandyRoomPerHall} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`
