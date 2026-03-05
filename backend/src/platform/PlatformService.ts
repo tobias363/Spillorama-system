@@ -127,6 +127,30 @@ export interface UpsertHallGameConfigInput {
   minRoundIntervalMs?: number;
 }
 
+export interface GameSettingsChangeContext {
+  userId: string;
+  displayName: string;
+  role: UserRole;
+}
+
+export interface ListGameSettingsChangeLogOptions {
+  gameSlug?: string;
+  limit?: number;
+}
+
+export interface GameSettingsChangeLogEntry {
+  id: string;
+  gameSlug: string;
+  changedByUserId?: string;
+  changedByDisplayName: string;
+  changedByRole: string;
+  source: string;
+  effectiveFrom?: string;
+  payloadSummary: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
 interface PlatformServiceOptions {
   connectionString: string;
   schema?: string;
@@ -191,6 +215,19 @@ interface HallGameConfigRow {
   min_round_interval_ms: number;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+interface GameSettingsChangeLogRow {
+  id: string;
+  game_slug: string;
+  changed_by_user_id: string | null;
+  changed_by_display_name: string;
+  changed_by_role: string;
+  source: string;
+  effective_from: Date | string | null;
+  payload_summary: string;
+  payload_json: Record<string, unknown>;
+  created_at: Date | string;
 }
 
 function asIso(value: Date | string): string {
@@ -431,44 +468,125 @@ export class PlatformService {
     return this.mapGame(row);
   }
 
-  async updateGame(slug: string, update: UpdateGameInput): Promise<GameDefinition> {
+  async updateGame(
+    slug: string,
+    update: UpdateGameInput,
+    options?: {
+      changedBy?: GameSettingsChangeContext;
+      source?: string;
+      effectiveFrom?: string;
+    }
+  ): Promise<GameDefinition> {
     await this.ensureInitialized();
     const normalizedSlug = this.assertGameSlug(slug);
-    const current = await this.getGame(normalizedSlug);
+    const client = await this.pool.connect();
 
-    const nextTitle = update.title !== undefined ? this.assertTitle(update.title) : current.title;
-    const nextDescription =
-      update.description !== undefined ? this.assertDescription(update.description) : current.description;
-    const nextRoute = update.route !== undefined ? this.assertRoute(update.route) : current.route;
-    const nextEnabled =
-      update.isEnabled !== undefined ? Boolean(update.isEnabled) : current.isEnabled;
-    const nextSortOrder =
-      update.sortOrder !== undefined ? this.assertSortOrder(update.sortOrder) : current.sortOrder;
-    const nextSettings =
-      update.settings !== undefined ? this.assertSettings(update.settings) : current.settings;
+    try {
+      await client.query("BEGIN");
+      const { rows: currentRows } = await client.query<GameRow>(
+        `SELECT slug, title, description, route, is_enabled, sort_order, settings_json, created_at, updated_at
+         FROM ${this.gamesTable()}
+         WHERE slug = $1
+         FOR UPDATE`,
+        [normalizedSlug]
+      );
+      const currentRow = currentRows[0];
+      if (!currentRow) {
+        throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke.");
+      }
+      const current = this.mapGame(currentRow);
 
-    const { rows } = await this.pool.query<GameRow>(
-      `UPDATE ${this.gamesTable()}
-       SET title = $2,
-           description = $3,
-           route = $4,
-           is_enabled = $5,
-           sort_order = $6,
-           settings_json = $7::jsonb,
-           updated_at = now()
-       WHERE slug = $1
-       RETURNING slug, title, description, route, is_enabled, sort_order, settings_json, created_at, updated_at`,
-      [
-        normalizedSlug,
-        nextTitle,
-        nextDescription,
-        nextRoute,
-        nextEnabled,
-        nextSortOrder,
-        JSON.stringify(nextSettings)
-      ]
+      const nextTitle = update.title !== undefined ? this.assertTitle(update.title) : current.title;
+      const nextDescription =
+        update.description !== undefined ? this.assertDescription(update.description) : current.description;
+      const nextRoute = update.route !== undefined ? this.assertRoute(update.route) : current.route;
+      const nextEnabled =
+        update.isEnabled !== undefined ? Boolean(update.isEnabled) : current.isEnabled;
+      const nextSortOrder =
+        update.sortOrder !== undefined ? this.assertSortOrder(update.sortOrder) : current.sortOrder;
+      const nextSettings =
+        update.settings !== undefined ? this.assertSettings(update.settings) : current.settings;
+
+      const { rows } = await client.query<GameRow>(
+        `UPDATE ${this.gamesTable()}
+         SET title = $2,
+             description = $3,
+             route = $4,
+             is_enabled = $5,
+             sort_order = $6,
+             settings_json = $7::jsonb,
+             updated_at = now()
+         WHERE slug = $1
+         RETURNING slug, title, description, route, is_enabled, sort_order, settings_json, created_at, updated_at`,
+        [
+          normalizedSlug,
+          nextTitle,
+          nextDescription,
+          nextRoute,
+          nextEnabled,
+          nextSortOrder,
+          JSON.stringify(nextSettings)
+        ]
+      );
+
+      if (
+        update.settings !== undefined &&
+        this.areSettingsDifferent(current.settings, nextSettings)
+      ) {
+        await this.insertGameSettingsChangeLog(client, {
+          gameSlug: normalizedSlug,
+          previousSettings: current.settings,
+          nextSettings,
+          changedBy: options?.changedBy,
+          source: options?.source ?? "ADMIN_API",
+          effectiveFrom: options?.effectiveFrom
+        });
+      }
+
+      await client.query("COMMIT");
+      return this.mapGame(rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  async listGameSettingsChangeLog(
+    options?: ListGameSettingsChangeLogOptions
+  ): Promise<GameSettingsChangeLogEntry[]> {
+    await this.ensureInitialized();
+    const limit = this.assertAuditLimit(options?.limit ?? 50);
+    const gameSlug = options?.gameSlug ? this.assertGameSlug(options.gameSlug) : undefined;
+
+    const values: unknown[] = [];
+    const whereParts: string[] = [];
+    if (gameSlug) {
+      values.push(gameSlug);
+      whereParts.push(`game_slug = $${values.length}`);
+    }
+    values.push(limit);
+
+    const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const { rows } = await this.pool.query<GameSettingsChangeLogRow>(
+      `SELECT id,
+              game_slug,
+              changed_by_user_id,
+              changed_by_display_name,
+              changed_by_role,
+              source,
+              effective_from,
+              payload_summary,
+              payload_json,
+              created_at
+       FROM ${this.gameSettingsChangeLogTable()}
+       ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${values.length}`,
+      values
     );
-    return this.mapGame(rows[0]);
+    return rows.map((row) => this.mapGameSettingsChangeLogEntry(row));
   }
 
   async listHalls(options?: { includeInactive?: boolean }): Promise<HallDefinition[]> {
@@ -1003,6 +1121,129 @@ export class PlatformService {
     };
   }
 
+  private mapGameSettingsChangeLogEntry(row: GameSettingsChangeLogRow): GameSettingsChangeLogEntry {
+    return {
+      id: row.id,
+      gameSlug: row.game_slug,
+      changedByUserId: row.changed_by_user_id ?? undefined,
+      changedByDisplayName: row.changed_by_display_name,
+      changedByRole: row.changed_by_role,
+      source: row.source,
+      effectiveFrom: row.effective_from ? asIso(row.effective_from) : undefined,
+      payloadSummary: row.payload_summary,
+      payload: row.payload_json ?? {},
+      createdAt: asIso(row.created_at)
+    };
+  }
+
+  private areSettingsDifferent(
+    previousSettings: Record<string, unknown>,
+    nextSettings: Record<string, unknown>
+  ): boolean {
+    return this.stableJsonStringify(previousSettings) !== this.stableJsonStringify(nextSettings);
+  }
+
+  private stableJsonStringify(value: unknown): string {
+    return JSON.stringify(this.sortJsonValue(value));
+  }
+
+  private sortJsonValue(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((entry) => this.sortJsonValue(entry));
+    }
+    if (!value || typeof value !== "object") {
+      return value;
+    }
+    const record = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort((a, b) => a.localeCompare(b))) {
+      sorted[key] = this.sortJsonValue(record[key]);
+    }
+    return sorted;
+  }
+
+  private extractChangedTopLevelKeys(
+    previousSettings: Record<string, unknown>,
+    nextSettings: Record<string, unknown>
+  ): string[] {
+    const keys = new Set<string>([...Object.keys(previousSettings), ...Object.keys(nextSettings)]);
+    const changed: string[] = [];
+    for (const key of [...keys].sort((a, b) => a.localeCompare(b))) {
+      if (this.stableJsonStringify(previousSettings[key]) !== this.stableJsonStringify(nextSettings[key])) {
+        changed.push(key);
+      }
+    }
+    return changed;
+  }
+
+  private pickSettingsKeys(
+    settings: Record<string, unknown>,
+    keys: string[]
+  ): Record<string, unknown> {
+    const picked: Record<string, unknown> = {};
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(settings, key)) {
+        picked[key] = settings[key];
+      }
+    }
+    return picked;
+  }
+
+  private buildSettingsChangeSummary(changedKeys: string[]): string {
+    if (changedKeys.length === 0) {
+      return "Ingen settings-endring registrert.";
+    }
+    const preview = changedKeys.slice(0, 6).join(", ");
+    if (changedKeys.length <= 6) {
+      return `Endret ${changedKeys.length} felt: ${preview}.`;
+    }
+    return `Endret ${changedKeys.length} felt: ${preview} (+${changedKeys.length - 6} til).`;
+  }
+
+  private async insertGameSettingsChangeLog(
+    client: PoolClient,
+    input: {
+      gameSlug: string;
+      previousSettings: Record<string, unknown>;
+      nextSettings: Record<string, unknown>;
+      changedBy?: GameSettingsChangeContext;
+      source: string;
+      effectiveFrom?: string;
+    }
+  ): Promise<void> {
+    const changedKeys = this.extractChangedTopLevelKeys(input.previousSettings, input.nextSettings);
+    const payload = {
+      changedKeys,
+      previous: this.pickSettingsKeys(input.previousSettings, changedKeys),
+      next: this.pickSettingsKeys(input.nextSettings, changedKeys)
+    };
+
+    const changedByDisplayName = this.assertAuditDisplayName(input.changedBy?.displayName ?? "System");
+    const changedByRole = this.assertAuditActorRole(input.changedBy?.role);
+    const source = this.assertAuditSource(input.source);
+    const effectiveFrom =
+      input.effectiveFrom !== undefined
+        ? this.assertOptionalIsoDate(input.effectiveFrom, "effectiveFrom")
+        : null;
+
+    await client.query(
+      `INSERT INTO ${this.gameSettingsChangeLogTable()}
+        (id, game_slug, changed_by_user_id, changed_by_display_name, changed_by_role, source, effective_from, payload_summary, payload_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+      [
+        randomUUID(),
+        input.gameSlug,
+        input.changedBy?.userId ?? null,
+        changedByDisplayName,
+        changedByRole,
+        source,
+        effectiveFrom,
+        this.buildSettingsChangeSummary(changedKeys),
+        JSON.stringify(payload)
+      ]
+    );
+  }
+
   private async resolveHallRowByReference(hallReference: string): Promise<HallRow | undefined> {
     const normalizedReference = this.assertEntityReference(hallReference, "hallId");
     const normalizedSlug = normalizedReference.toLowerCase();
@@ -1140,6 +1381,21 @@ export class PlatformService {
       );
 
       await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.gameSettingsChangeLogTable()} (
+          id TEXT PRIMARY KEY,
+          game_slug TEXT NOT NULL REFERENCES ${this.gamesTable()}(slug) ON DELETE CASCADE,
+          changed_by_user_id TEXT NULL REFERENCES ${this.usersTable()}(id) ON DELETE SET NULL,
+          changed_by_display_name TEXT NOT NULL,
+          changed_by_role TEXT NOT NULL,
+          source TEXT NOT NULL,
+          effective_from TIMESTAMPTZ NULL,
+          payload_summary TEXT NOT NULL,
+          payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`
+      );
+
+      await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.hallsTable()} (
           id TEXT PRIMARY KEY,
           slug TEXT UNIQUE NOT NULL,
@@ -1191,6 +1447,14 @@ export class PlatformService {
         `CREATE INDEX IF NOT EXISTS idx_app_hall_game_config_game_slug
          ON ${this.hallGameConfigTable()} (game_slug)`
       );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_app_game_settings_change_log_created_at
+         ON ${this.gameSettingsChangeLogTable()} (created_at DESC)`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_app_game_settings_change_log_game_slug_created_at
+         ON ${this.gameSettingsChangeLogTable()} (game_slug, created_at DESC)`
+      );
 
       await client.query(
         `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
@@ -1200,6 +1464,11 @@ export class PlatformService {
       await client.query(
         `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
          VALUES ('bingo', 'Bingo', 'Multiplayer bingo i web-klienten.', '/bingo', true, 2, '{}'::jsonb)
+         ON CONFLICT (slug) DO NOTHING`
+      );
+      await client.query(
+        `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
+         VALUES ('roma', 'Roma', 'Roma-spillet (Unity) med samme realtime-logikk som Candy.', '/roma', true, 3, '{}'::jsonb)
          ON CONFLICT (slug) DO NOTHING`
       );
 
@@ -1229,6 +1498,10 @@ export class PlatformService {
 
   private gamesTable(): string {
     return `"${this.schema}"."app_games"`;
+  }
+
+  private gameSettingsChangeLogTable(): string {
+    return `"${this.schema}"."app_game_settings_change_log"`;
   }
 
   private hallsTable(): string {
@@ -1424,6 +1697,36 @@ export class PlatformService {
       throw new DomainError("INVALID_MIN_ROUND_INTERVAL", "minRoundIntervalMs må være minst 30000.");
     }
     return Math.floor(value);
+  }
+
+  private assertAuditLimit(value: number): number {
+    if (!Number.isFinite(value) || value <= 0) {
+      return 50;
+    }
+    return Math.max(1, Math.min(200, Math.floor(value)));
+  }
+
+  private assertAuditSource(sourceInput: string): string {
+    const source = sourceInput.trim().toUpperCase();
+    if (!source || source.length > 80) {
+      throw new DomainError("INVALID_INPUT", "source må være 1-80 tegn.");
+    }
+    return source;
+  }
+
+  private assertAuditDisplayName(displayNameInput: string): string {
+    const displayName = displayNameInput.trim();
+    if (!displayName || displayName.length > 120) {
+      throw new DomainError("INVALID_INPUT", "changedByDisplayName må være 1-120 tegn.");
+    }
+    return displayName;
+  }
+
+  private assertAuditActorRole(roleInput: UserRole | undefined): string {
+    if (!roleInput) {
+      return "SYSTEM";
+    }
+    return this.assertUserRole(roleInput);
   }
 
   private async ensureUserRoleConstraint(client: PoolClient): Promise<void> {

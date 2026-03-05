@@ -12,9 +12,28 @@ import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
 import type { ClaimType, RoomSnapshot, RoomSummary } from "./game/types.js";
 import { CandyLaunchTokenStore } from "./launch/CandyLaunchTokenStore.js";
-import { assertAdminPermission, type AdminPermission } from "./platform/AdminAccessPolicy.js";
-import { APP_USER_ROLES, PlatformService, type PublicAppUser, type UserRole } from "./platform/PlatformService.js";
+import {
+  ADMIN_ACCESS_POLICY,
+  assertAdminPermission,
+  canAccessAdminPermission,
+  getAdminPermissionMap,
+  listAdminPermissionsForRole,
+  type AdminPermission
+} from "./platform/AdminAccessPolicy.js";
+import {
+  APP_USER_ROLES,
+  PlatformService,
+  type GameDefinition,
+  type PublicAppUser,
+  type UserRole
+} from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
+import {
+  buildCandySettingsDefinition,
+  buildDefaultGameSettingsDefinition,
+  type AdminSettingsCatalog,
+  type GameSettingsDefinition
+} from "./admin/settingsCatalog.js";
 
 interface AckResponse<T> {
   ok: boolean;
@@ -90,6 +109,16 @@ interface CandyManiaSchedulerSettings {
 interface PendingCandyManiaSettingsUpdate {
   effectiveFromMs: number;
   settings: CandyManiaSchedulerSettings;
+}
+
+interface PersistCandySettingsOptions {
+  changedBy?: {
+    userId: string;
+    displayName: string;
+    role: UserRole;
+  };
+  source?: string;
+  effectiveFromMs?: number;
 }
 
 interface CandyLaunchSettings {
@@ -763,7 +792,95 @@ function getCandyManiaAdminSettingsResponse(): Record<string, unknown> {
   };
 }
 
-async function persistCandyManiaSettingsToCatalog(): Promise<void> {
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function extractAdminGameSettingsPayload(
+  body: unknown
+): { settings: Record<string, unknown>; effectiveFromMs?: number } {
+  if (!isRecordObject(body)) {
+    throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+  }
+  const effectiveFromMs = parseOptionalIsoTimestampMs(body.effectiveFrom, "effectiveFrom");
+
+  if (body.settings !== undefined) {
+    if (!isRecordObject(body.settings)) {
+      throw new DomainError("INVALID_INPUT", "settings må være et objekt.");
+    }
+    return {
+      settings: body.settings,
+      effectiveFromMs
+    };
+  }
+
+  const { effectiveFrom: _ignoredEffectiveFrom, ...directSettings } = body;
+  return {
+    settings: directSettings,
+    effectiveFromMs
+  };
+}
+
+function buildAdminSettingsDefinitionForGame(game: GameDefinition): GameSettingsDefinition {
+  if (game.slug === "candy") {
+    return buildCandySettingsDefinition({
+      minRoundIntervalMs: bingoMinRoundIntervalMs,
+      minPlayersToStart: bingoMinPlayersToStart,
+      maxTicketsPerPlayer: 5,
+      forceAutoStart: forceCandyAutoStart,
+      forceAutoDraw: forceCandyAutoDraw,
+      runningRoundLockActive: hasAnyRunningCandyManiaRound()
+    });
+  }
+  return buildDefaultGameSettingsDefinition(game);
+}
+
+function buildAdminSettingsCatalogResponse(games: GameDefinition[]): AdminSettingsCatalog {
+  return {
+    generatedAt: new Date().toISOString(),
+    games: games.map((game) => buildAdminSettingsDefinitionForGame(game))
+  };
+}
+
+function buildAdminGameSettingsResponse(game: GameDefinition): Record<string, unknown> {
+  if (game.slug !== "candy") {
+    return {
+      slug: game.slug,
+      title: game.title,
+      description: game.description,
+      updatedAt: game.updatedAt,
+      settings: { ...(game.settings ?? {}) },
+      locks: {
+        runningRoundLockActive: false
+      }
+    };
+  }
+
+  const candySettings = getCandyManiaAdminSettingsResponse();
+  const {
+    effectiveFrom,
+    pendingUpdate,
+    constraints,
+    locks,
+    schedulerTickMs,
+    ...typedSettings
+  } = candySettings;
+
+  return {
+    slug: game.slug,
+    title: game.title,
+    description: game.description,
+    updatedAt: game.updatedAt,
+    settings: typedSettings,
+    effectiveFrom,
+    pendingUpdate,
+    schedulerTickMs,
+    constraints,
+    locks
+  };
+}
+
+async function persistCandyManiaSettingsToCatalog(options?: PersistCandySettingsOptions): Promise<void> {
   const candyGame = await platformService.getGame("candy");
   const nextSettings = normalizeGameSettingsForUpdate("candy", {
     ...(candyGame.settings ?? {}),
@@ -771,6 +888,13 @@ async function persistCandyManiaSettingsToCatalog(): Promise<void> {
   });
   await platformService.updateGame("candy", {
     settings: nextSettings
+  }, {
+    changedBy: options?.changedBy,
+    source: options?.source ?? "CANDY_SETTINGS_SYNC",
+    effectiveFrom:
+      options?.effectiveFromMs !== undefined
+        ? new Date(options.effectiveFromMs).toISOString()
+        : new Date(candyManiaSettingsEffectiveFromMs).toISOString()
   });
 }
 
@@ -879,12 +1003,19 @@ async function requireAdminPermissionUser(
   return user;
 }
 
-async function requireAdminOnlyUser(req: express.Request, message?: string): Promise<PublicAppUser> {
+async function requireAdminPanelUser(req: express.Request, message?: string): Promise<PublicAppUser> {
   const user = await getAuthenticatedUser(req);
-  if (user.role !== "ADMIN") {
-    throw new DomainError("FORBIDDEN", message ?? "Kun ADMIN har tilgang til dette endepunktet.");
-  }
+  assertAdminPermission(user.role, "ADMIN_PANEL_ACCESS", message);
   return user;
+}
+
+function buildAdminPermissionResponse(user: PublicAppUser): Record<string, unknown> {
+  return {
+    role: user.role,
+    permissions: listAdminPermissionsForRole(user.role),
+    permissionMap: getAdminPermissionMap(user.role),
+    policy: ADMIN_ACCESS_POLICY
+  };
 }
 
 function parseUserRoleInput(value: unknown): UserRole {
@@ -1236,7 +1367,10 @@ async function applyPendingCandyManiaSettingsIfDue(
   syncSchedulerStateAfterCandySettingsChange(previous);
 
   try {
-    await persistCandyManiaSettingsToCatalog();
+    await persistCandyManiaSettingsToCatalog({
+      source: "CANDY_SETTINGS_AUTO_APPLY",
+      effectiveFromMs: pendingToApply.effectiveFromMs
+    });
   } catch (error) {
     Object.assign(runtimeCandyManiaSettings, previous);
     candyManiaSettingsEffectiveFromMs = previousEffectiveFromMs;
@@ -1467,11 +1601,11 @@ app.post("/api/admin/auth/login", async (req, res) => {
       email,
       password
     });
-    if (session.user.role !== "ADMIN") {
+    if (!canAccessAdminPermission(session.user.role, "ADMIN_PANEL_ACCESS")) {
       await platformService.logout(session.accessToken);
       throw new DomainError(
         "FORBIDDEN",
-        "Kun ADMIN-brukere kan logge inn i admin-panelet."
+        `Rollen ${session.user.role} har ikke tilgang til admin-panelet.`
       );
     }
     apiSuccess(res, session);
@@ -1492,7 +1626,7 @@ app.post("/api/auth/logout", async (req, res) => {
 
 app.post("/api/admin/auth/logout", async (req, res) => {
   try {
-    await requireAdminOnlyUser(req);
+    await requireAdminPanelUser(req);
     const accessToken = getAccessTokenFromRequest(req);
     await platformService.logout(accessToken);
     apiSuccess(res, { loggedOut: true });
@@ -1512,8 +1646,17 @@ app.get("/api/auth/me", async (req, res) => {
 
 app.get("/api/admin/auth/me", async (req, res) => {
   try {
-    const user = await requireAdminOnlyUser(req);
+    const user = await requireAdminPanelUser(req);
     apiSuccess(res, user);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/permissions", async (req, res) => {
+  try {
+    const user = await requireAdminPanelUser(req);
+    apiSuccess(res, buildAdminPermissionResponse(user));
   } catch (error) {
     apiFailure(res, error);
   }
@@ -1630,9 +1773,141 @@ app.get("/api/admin/games", async (req, res) => {
   }
 });
 
+app.get("/api/admin/settings/catalog", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "GAME_CATALOG_READ");
+    const games = await platformService.listGames({ includeDisabled: true });
+    apiSuccess(res, buildAdminSettingsCatalogResponse(games));
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/settings/games/:slug", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "GAME_CATALOG_READ");
+    const slug = mustBeNonEmptyString(req.params.slug, "slug");
+    const game = await platformService.getGame(slug);
+    apiSuccess(res, buildAdminGameSettingsResponse(game));
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.put("/api/admin/settings/games/:slug", async (req, res) => {
+  try {
+    const adminUser = await requireAdminPermissionUser(req, "GAME_CATALOG_WRITE");
+    const slug = mustBeNonEmptyString(req.params.slug, "slug");
+    const normalizedSlug = slug.trim().toLowerCase();
+    const { settings, effectiveFromMs } = extractAdminGameSettingsPayload(req.body);
+
+    if (normalizedSlug !== "candy") {
+      const updated = await platformService.updateGame(slug, {
+        settings: normalizeGameSettingsForUpdate(slug, settings)
+      }, {
+        changedBy: {
+          userId: adminUser.id,
+          displayName: adminUser.displayName,
+          role: adminUser.role
+        },
+        source: "ADMIN_TYPED_GAME_SETTINGS_WRITE",
+        effectiveFrom:
+          effectiveFromMs !== undefined
+            ? new Date(effectiveFromMs).toISOString()
+            : new Date().toISOString()
+      });
+      apiSuccess(res, buildAdminGameSettingsResponse(updated));
+      return;
+    }
+
+    const patch = parseCandyManiaSettingsPatch(settings);
+    const nowMs = Date.now();
+    const wantsFutureActivation = effectiveFromMs !== undefined && effectiveFromMs > nowMs;
+    if (wantsFutureActivation) {
+      const baseSettings = pendingCandyManiaSettingsUpdate?.settings ?? runtimeCandyManiaSettings;
+      const scheduledSettings = normalizeCandyManiaSchedulerSettings(baseSettings, patch);
+      pendingCandyManiaSettingsUpdate = {
+        effectiveFromMs,
+        settings: scheduledSettings
+      };
+      await persistCandyManiaSettingsToCatalog({
+        changedBy: {
+          userId: adminUser.id,
+          displayName: adminUser.displayName,
+          role: adminUser.role
+        },
+        source: "ADMIN_TYPED_CANDY_SETTINGS_SCHEDULED",
+        effectiveFromMs
+      });
+      const refreshed = await platformService.getGame("candy");
+      apiSuccess(res, buildAdminGameSettingsResponse(refreshed));
+      return;
+    }
+
+    const runningSummaries = engine.listRoomSummaries();
+    if (Object.keys(patch).length > 0 && hasAnyRunningCandyManiaRound(runningSummaries)) {
+      throw new DomainError(
+        "CANDY_SETTINGS_LOCKED_DURING_RUNNING_GAME",
+        "Kan ikke endre Candy-innstillinger mens en runde kjører. Bruk effectiveFrom for planlagt aktivering."
+      );
+    }
+
+    const previous: CandyManiaSchedulerSettings = { ...runtimeCandyManiaSettings };
+    const previousEffectiveFromMs = candyManiaSettingsEffectiveFromMs;
+    const previousPending = pendingCandyManiaSettingsUpdate
+      ? { ...pendingCandyManiaSettingsUpdate, settings: { ...pendingCandyManiaSettingsUpdate.settings } }
+      : null;
+    const next = normalizeCandyManiaSchedulerSettings(runtimeCandyManiaSettings, patch);
+
+    pendingCandyManiaSettingsUpdate = null;
+    Object.assign(runtimeCandyManiaSettings, next);
+    candyManiaSettingsEffectiveFromMs = effectiveFromMs ?? nowMs;
+    syncSchedulerStateAfterCandySettingsChange(previous);
+
+    try {
+      await persistCandyManiaSettingsToCatalog({
+        changedBy: {
+          userId: adminUser.id,
+          displayName: adminUser.displayName,
+          role: adminUser.role
+        },
+        source: "ADMIN_TYPED_CANDY_SETTINGS_APPLIED",
+        effectiveFromMs: candyManiaSettingsEffectiveFromMs
+      });
+    } catch (error) {
+      Object.assign(runtimeCandyManiaSettings, previous);
+      candyManiaSettingsEffectiveFromMs = previousEffectiveFromMs;
+      pendingCandyManiaSettingsUpdate = previousPending;
+      syncSchedulerStateAfterCandySettingsChange(next);
+      throw error;
+    }
+
+    await emitManyRoomUpdates(engine.getAllRoomCodes());
+    const refreshed = await platformService.getGame("candy");
+    apiSuccess(res, buildAdminGameSettingsResponse(refreshed));
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/game-settings/change-log", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "GAME_SETTINGS_CHANGELOG_READ");
+    const gameSlug = typeof req.query.gameSlug === "string" ? req.query.gameSlug.trim() : undefined;
+    const limit = parseLimit(req.query.limit, 50);
+    const log = await platformService.listGameSettingsChangeLog({
+      gameSlug: gameSlug || undefined,
+      limit
+    });
+    apiSuccess(res, log);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
 app.put("/api/admin/games/:slug", async (req, res) => {
   try {
-    await requireAdminPermissionUser(req, "GAME_CATALOG_WRITE");
+    const adminUser = await requireAdminPermissionUser(req, "GAME_CATALOG_WRITE");
     const slug = mustBeNonEmptyString(req.params.slug, "slug");
     const normalizedSlug = slug.trim().toLowerCase();
     const rawSettings =
@@ -1657,6 +1932,14 @@ app.put("/api/admin/games/:slug", async (req, res) => {
       settings: normalizeGameSettingsForUpdate(slug, rawSettings, {
         requireCandyLaunchUrl: normalizedSlug === "candy"
       })
+    }, {
+      changedBy: {
+        userId: adminUser.id,
+        displayName: adminUser.displayName,
+        role: adminUser.role
+      },
+      source: "ADMIN_GAME_CATALOG_WRITE",
+      effectiveFrom: new Date().toISOString()
     });
     if (normalizedSlug === "candy") {
       const previous: CandyManiaSchedulerSettings = { ...runtimeCandyManiaSettings };
@@ -1666,7 +1949,15 @@ app.put("/api/admin/games/:slug", async (req, res) => {
       Object.assign(runtimeCandyManiaSettings, next);
       candyManiaSettingsEffectiveFromMs = Date.now();
       syncSchedulerStateAfterCandySettingsChange(previous);
-      await persistCandyManiaSettingsToCatalog();
+      await persistCandyManiaSettingsToCatalog({
+        changedBy: {
+          userId: adminUser.id,
+          displayName: adminUser.displayName,
+          role: adminUser.role
+        },
+        source: "ADMIN_CANDY_SYNC_AFTER_GAME_WRITE",
+        effectiveFromMs: candyManiaSettingsEffectiveFromMs
+      });
     }
     apiSuccess(res, updated);
   } catch (error) {
@@ -1825,7 +2116,7 @@ app.get("/api/admin/candy-mania/settings", async (req, res) => {
 
 app.put("/api/admin/candy-mania/settings", async (req, res) => {
   try {
-    await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
+    const adminUser = await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
     const patch = parseCandyManiaSettingsPatch(req.body);
     const effectiveFromMs = parseOptionalIsoTimestampMs(req.body?.effectiveFrom, "effectiveFrom");
     const nowMs = Date.now();
@@ -1838,7 +2129,15 @@ app.put("/api/admin/candy-mania/settings", async (req, res) => {
         effectiveFromMs,
         settings: scheduledSettings
       };
-      await persistCandyManiaSettingsToCatalog();
+      await persistCandyManiaSettingsToCatalog({
+        changedBy: {
+          userId: adminUser.id,
+          displayName: adminUser.displayName,
+          role: adminUser.role
+        },
+        source: "ADMIN_CANDY_SETTINGS_SCHEDULED",
+        effectiveFromMs
+      });
       apiSuccess(res, getCandyManiaAdminSettingsResponse());
       return;
     }
@@ -1864,7 +2163,15 @@ app.put("/api/admin/candy-mania/settings", async (req, res) => {
     syncSchedulerStateAfterCandySettingsChange(previous);
 
     try {
-      await persistCandyManiaSettingsToCatalog();
+      await persistCandyManiaSettingsToCatalog({
+        changedBy: {
+          userId: adminUser.id,
+          displayName: adminUser.displayName,
+          role: adminUser.role
+        },
+        source: "ADMIN_CANDY_SETTINGS_APPLIED",
+        effectiveFromMs: candyManiaSettingsEffectiveFromMs
+      });
     } catch (error) {
       Object.assign(runtimeCandyManiaSettings, previous);
       candyManiaSettingsEffectiveFromMs = previousEffectiveFromMs;
