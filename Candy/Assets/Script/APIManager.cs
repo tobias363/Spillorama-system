@@ -10,6 +10,7 @@ public partial class APIManager : MonoBehaviour
     public static APIManager instance;
 
     private const string BASE_URL = "https://bingoapi.codehabbit.com/";
+    private const string DEFAULT_REALTIME_BACKEND_BASE_URL = "https://bingosystem-3.onrender.com";
 
     [Header("Realtime Multiplayer (Skeleton backend)")]
     [SerializeField] private bool useRealtimeBackend = true;
@@ -42,6 +43,7 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] private string playerName = "Player";
     [SerializeField] private string walletId = "";
     [SerializeField] private string accessToken = "";
+    [SerializeField] private string realtimeBackendBaseUrl = DEFAULT_REALTIME_BACKEND_BASE_URL;
 
     [Header("Legacy Slot API (Fallback)")]
     [SerializeField] private bool legacyStartCallEnabled = true;
@@ -62,6 +64,7 @@ public partial class APIManager : MonoBehaviour
     private int currentTicketPage = 0;
     private List<List<int>> activeTicketSets = new();
     private bool isJoinOrCreatePending = false;
+    private bool pendingJoinOrCreateAfterLaunchResolve = false;
     private float joinOrCreateIssuedAtRealtime = -1f;
     private float nextCountdownRefreshAt = -1f;
     private float nextScheduledRoomStateRefreshAt = -1f;
@@ -90,6 +93,7 @@ public partial class APIManager : MonoBehaviour
     void Awake()
     {
         instance = this;
+        realtimeBackendBaseUrl = NormalizeRealtimeBackendBaseUrl(realtimeBackendBaseUrl);
     }
 
     void OnEnable()
@@ -117,6 +121,11 @@ public partial class APIManager : MonoBehaviour
             BindRealtimeClient();
             if (joinOrCreateOnStart)
             {
+                if (ShouldDeferRealtimeBootstrapForLaunchContext("oppstart", markPendingForLater: true))
+                {
+                    return;
+                }
+
                 if (NeedsAuthBootstrap())
                 {
                     TryStartAutoLogin("Oppstart uten accessToken/hallId.");
@@ -137,6 +146,11 @@ public partial class APIManager : MonoBehaviour
 
     void Update()
     {
+        if (useRealtimeBackend)
+        {
+            TryRunDeferredJoinOrCreateAfterLaunchResolve();
+        }
+
         if (!useRealtimeBackend || !realtimeScheduledRounds)
         {
             return;
@@ -176,6 +190,7 @@ public partial class APIManager : MonoBehaviour
         realtimeClient.OnConnectionChanged += HandleRealtimeConnectionChanged;
         realtimeClient.OnRoomUpdate += HandleRealtimeRoomUpdate;
         realtimeClient.OnError += HandleRealtimeError;
+        realtimeClient.SetBackendBaseUrl(realtimeBackendBaseUrl);
         realtimeClient.SetAccessToken(accessToken);
     }
 
@@ -216,17 +231,20 @@ public partial class APIManager : MonoBehaviour
     {
         if (autoLogin != null)
         {
+            autoLogin.SetBackendBaseUrl(realtimeBackendBaseUrl);
             return autoLogin;
         }
 
         autoLogin = FindObjectOfType<BingoAutoLogin>();
         if (autoLogin != null)
         {
+            autoLogin.SetBackendBaseUrl(realtimeBackendBaseUrl);
             return autoLogin;
         }
 
         GameObject autoLoginObject = new("BingoAutoLogin_Auto");
         autoLogin = autoLoginObject.AddComponent<BingoAutoLogin>();
+        autoLogin.SetBackendBaseUrl(realtimeBackendBaseUrl);
         LogBootstrap("BingoAutoLogin manglet i scenen. Opprettet runtime auto-login med default credentials.");
         return autoLogin;
     }
@@ -238,12 +256,30 @@ public partial class APIManager : MonoBehaviour
             return false;
         }
 
+        if (CandyLaunchBootstrap.HasLaunchContextInUrl)
+        {
+            if (CandyLaunchBootstrap.IsResolvingLaunchContext)
+            {
+                LogBootstrap("Launch-resolve pågår. Hopper over auto-login fallback.");
+            }
+            else if (CandyLaunchBootstrap.HasLaunchResolveError)
+            {
+                Debug.LogError("[APIManager] Auto-login fallback blokkert fordi launch-resolve feilet: " + BuildLaunchResolveErrorSummary());
+            }
+            else
+            {
+                LogBootstrap("Launch-context aktiv. Auto-login fallback er deaktivert.");
+            }
+            return false;
+        }
+
         BingoAutoLogin loginBootstrap = ResolveAutoLogin();
         if (loginBootstrap == null)
         {
             return false;
         }
 
+        loginBootstrap.SetBackendBaseUrl(realtimeBackendBaseUrl);
         if (!string.IsNullOrWhiteSpace(reason))
         {
             LogBootstrap($"{reason} Starter auto-login.");
@@ -259,8 +295,92 @@ public partial class APIManager : MonoBehaviour
             return false;
         }
 
+        if (CandyLaunchBootstrap.HasLaunchContextInUrl)
+        {
+            return false;
+        }
+
         return string.IsNullOrWhiteSpace((accessToken ?? string.Empty).Trim()) ||
                string.IsNullOrWhiteSpace((hallId ?? string.Empty).Trim());
+    }
+
+    private bool ShouldDeferRealtimeBootstrapForLaunchContext(string operation, bool markPendingForLater = false)
+    {
+        if (!CandyLaunchBootstrap.HasLaunchContextInUrl)
+        {
+            return false;
+        }
+
+        if (CandyLaunchBootstrap.IsResolvingLaunchContext)
+        {
+            if (markPendingForLater)
+            {
+                pendingJoinOrCreateAfterLaunchResolve = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(operation))
+            {
+                LogBootstrap($"Venter på launch-resolve før {operation}.");
+            }
+            return true;
+        }
+
+        if (CandyLaunchBootstrap.HasLaunchResolveError)
+        {
+            pendingJoinOrCreateAfterLaunchResolve = false;
+            Debug.LogError("[APIManager] Launch-resolve feilet. " + BuildLaunchResolveErrorSummary());
+            return true;
+        }
+
+        return false;
+    }
+
+    private void TryRunDeferredJoinOrCreateAfterLaunchResolve()
+    {
+        if (!pendingJoinOrCreateAfterLaunchResolve || !joinOrCreateOnStart)
+        {
+            return;
+        }
+
+        if (ShouldDeferRealtimeBootstrapForLaunchContext("utsatt oppstart"))
+        {
+            return;
+        }
+
+        pendingJoinOrCreateAfterLaunchResolve = false;
+        if (NeedsAuthBootstrap())
+        {
+            if (!TryStartAutoLogin("Oppstart etter launch-resolve mangler accessToken/hallId."))
+            {
+                Debug.LogError("[APIManager] accessToken/hallId mangler etter launch-resolve.");
+            }
+            return;
+        }
+
+        JoinOrCreateRoom();
+    }
+
+    private static string BuildLaunchResolveErrorSummary()
+    {
+        string code = (CandyLaunchBootstrap.LastLaunchErrorCode ?? string.Empty).Trim();
+        string message = (CandyLaunchBootstrap.LastLaunchErrorMessage ?? string.Empty).Trim();
+
+        if (!string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(message))
+        {
+            return $"{code}: {message}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            return message;
+        }
+
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            return code;
+        }
+
+        return "Ukjent launch-feil.";
     }
 
     private void LogBootstrap(string message)
@@ -320,6 +440,34 @@ public partial class APIManager : MonoBehaviour
     {
         playerName = string.IsNullOrWhiteSpace(newPlayerName) ? "Player" : newPlayerName.Trim();
         walletId = (newWalletId ?? string.Empty).Trim();
+    }
+
+    public void ConfigureBackendBaseUrl(string newBackendBaseUrl)
+    {
+        realtimeBackendBaseUrl = NormalizeRealtimeBackendBaseUrl(newBackendBaseUrl);
+
+        if (realtimeClient != null)
+        {
+            realtimeClient.SetBackendBaseUrl(realtimeBackendBaseUrl);
+        }
+
+        if (autoLogin != null)
+        {
+            autoLogin.SetBackendBaseUrl(realtimeBackendBaseUrl);
+        }
+    }
+
+    public void ApplyLaunchRuntimeContext(
+        string newBackendBaseUrl,
+        string token,
+        string newHallId,
+        string newPlayerName,
+        string newWalletId)
+    {
+        ConfigureBackendBaseUrl(newBackendBaseUrl);
+        ConfigureAccessToken(token);
+        ConfigureHall(newHallId);
+        ConfigurePlayer(newPlayerName, newWalletId);
     }
 
     public void ConfigureHall(string newHallId)
@@ -590,6 +738,11 @@ public partial class APIManager : MonoBehaviour
             return;
         }
 
+        if (ShouldDeferRealtimeBootstrapForLaunchContext("join/create"))
+        {
+            return;
+        }
+
         BindRealtimeClient();
         if (realtimeClient == null)
         {
@@ -599,6 +752,12 @@ public partial class APIManager : MonoBehaviour
         string desiredAccessToken = (accessToken ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(desiredAccessToken))
         {
+            if (CandyLaunchBootstrap.HasLaunchContextInUrl)
+            {
+                Debug.LogError("[APIManager] Launch-resolve returnerte ikke accessToken. Avbryter realtime oppstart.");
+                return;
+            }
+
             if (!TryStartAutoLogin("accessToken mangler. Login kreves for realtime gameplay."))
             {
                 Debug.LogError("[APIManager] accessToken mangler. Login kreves for realtime gameplay.");
@@ -610,6 +769,12 @@ public partial class APIManager : MonoBehaviour
         string desiredHallId = (hallId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(desiredHallId))
         {
+            if (CandyLaunchBootstrap.HasLaunchContextInUrl)
+            {
+                Debug.LogError("[APIManager] Launch-resolve returnerte ikke hallId. Avbryter realtime oppstart.");
+                return;
+            }
+
             if (!TryStartAutoLogin("hallId mangler. Forsoker a hente hall via auto-login."))
             {
                 Debug.LogError("[APIManager] hallId mangler. Sett hallId før realtime gameplay.");
@@ -739,6 +904,11 @@ public partial class APIManager : MonoBehaviour
             return;
         }
 
+        if (ShouldDeferRealtimeBootstrapForLaunchContext("room:state"))
+        {
+            return;
+        }
+
         BindRealtimeClient();
         if (realtimeClient == null)
         {
@@ -748,6 +918,12 @@ public partial class APIManager : MonoBehaviour
         string desiredAccessToken = (accessToken ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(desiredAccessToken))
         {
+            if (CandyLaunchBootstrap.HasLaunchContextInUrl)
+            {
+                Debug.LogError("[APIManager] Launch-resolve returnerte ikke accessToken. Kan ikke hente room:state.");
+                return;
+            }
+
             if (!TryStartAutoLogin("accessToken mangler. Login kreves for realtime gameplay."))
             {
                 Debug.LogError("[APIManager] accessToken mangler. Login kreves for realtime gameplay.");
@@ -798,6 +974,23 @@ public partial class APIManager : MonoBehaviour
                 HandleRealtimeRoomUpdate(snapshot);
             }
         });
+    }
+
+    private static string NormalizeRealtimeBackendBaseUrl(string rawBaseUrl)
+    {
+        string normalized = (rawBaseUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = DEFAULT_REALTIME_BACKEND_BASE_URL;
+        }
+
+        if (!normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "https://" + normalized;
+        }
+
+        return normalized.TrimEnd('/');
     }
 
     private void HandleRecoverExistingRoomStateAck(SocketAck ack)

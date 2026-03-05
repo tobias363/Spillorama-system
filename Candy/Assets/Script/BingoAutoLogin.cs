@@ -8,6 +8,8 @@ using SimpleJSON;
 
 public class BingoAutoLogin : MonoBehaviour
 {
+    private const string DefaultBackendBaseUrl = "https://bingosystem-3.onrender.com";
+
     [SerializeField] private APIManager apiManager;
     [SerializeField] private BingoRealtimeControls realtimeControls;
 
@@ -53,6 +55,7 @@ public class BingoAutoLogin : MonoBehaviour
     private void Start()
     {
         ResolveReferences();
+        backendBaseUrl = NormalizeBaseUrl(backendBaseUrl);
         ApplyDefaultInputValues();
         if (autoLoginOnStart)
         {
@@ -63,6 +66,11 @@ public class BingoAutoLogin : MonoBehaviour
     [ContextMenu("Start Auto Login")]
     public void StartAutoLogin()
     {
+        if (ShouldBlockAutoLoginFromLaunchContext())
+        {
+            return;
+        }
+
         if (isBusy)
         {
             return;
@@ -73,6 +81,26 @@ public class BingoAutoLogin : MonoBehaviour
     public void OnLoginButtonClicked()
     {
         StartAutoLogin();
+    }
+
+    public void SetBackendBaseUrl(string newBackendBaseUrl)
+    {
+        backendBaseUrl = NormalizeBaseUrl(newBackendBaseUrl);
+    }
+
+    public void SetDisplayName(string newDisplayName)
+    {
+        if (string.IsNullOrWhiteSpace(newDisplayName))
+        {
+            return;
+        }
+
+        displayName = newDisplayName.Trim();
+    }
+
+    public void SetExternalStatus(string message)
+    {
+        SetStatus(message);
     }
 
     private IEnumerator LoginAndApplyRoutine()
@@ -471,6 +499,32 @@ public class BingoAutoLogin : MonoBehaviour
         }
     }
 
+    private bool ShouldBlockAutoLoginFromLaunchContext()
+    {
+        if (!CandyLaunchBootstrap.HasLaunchContextInUrl)
+        {
+            return false;
+        }
+
+        if (CandyLaunchBootstrap.IsResolvingLaunchContext)
+        {
+            SetStatus("Venter på launch-token validering...");
+            return true;
+        }
+
+        if (CandyLaunchBootstrap.HasLaunchResolveError)
+        {
+            string code = (CandyLaunchBootstrap.LastLaunchErrorCode ?? string.Empty).Trim();
+            string message = (CandyLaunchBootstrap.LastLaunchErrorMessage ?? string.Empty).Trim();
+            string details = string.IsNullOrWhiteSpace(code) ? message : $"{code}: {message}";
+            SetStatus("Launch feilet: " + details);
+            return true;
+        }
+
+        SetStatus("Launch-context aktiv. Hopper over auto-login fallback.");
+        return true;
+    }
+
     private void ApplyDefaultInputValues()
     {
         if (emailInput != null && string.IsNullOrWhiteSpace(emailInput.text))
@@ -520,15 +574,19 @@ public class BingoAutoLogin : MonoBehaviour
     private static string NormalizeBaseUrl(string baseUrl)
     {
         string normalized = (baseUrl ?? string.Empty).Trim();
+        bool hasLaunchContext = CandyLaunchBootstrap.HasLaunchContextInUrl;
+
         if (string.IsNullOrWhiteSpace(normalized))
         {
-            normalized = "http://localhost:4000";
+            normalized = hasLaunchContext ? DefaultBackendBaseUrl : "http://localhost:4000";
         }
+
         if (!normalized.StartsWith("http://", System.StringComparison.OrdinalIgnoreCase) &&
             !normalized.StartsWith("https://", System.StringComparison.OrdinalIgnoreCase))
         {
-            normalized = "http://" + normalized;
+            normalized = (hasLaunchContext ? "https://" : "http://") + normalized;
         }
+
         return normalized.TrimEnd('/');
     }
 
