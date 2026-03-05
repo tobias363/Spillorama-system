@@ -78,6 +78,30 @@ Denne dekker nå kjernekrav for:
 
 CI-gate er lagt i `.github/workflows/compliance-gate.yml` og krever grønn `test:compliance`.
 
+## Engineering workflow (GitHub + Render)
+
+Standardisert arbeidsflyt er dokumentert i:
+
+- `docs/ENGINEERING_WORKFLOW.md`
+
+Kortversjon:
+
+- arbeid i `codex/*` brancher
+- PR til `main` (ingen direkte push)
+- required checks:
+  - `CI / backend`
+  - `Compliance Gate / compliance`
+- minst 1 godkjenning før merge
+- squash-merge til `main`
+- Render deploy fra `main` til produksjon
+- produksjonsrelease tagges (`vYYYY.MM.DD.N`)
+
+Automatisk branch-protection kan settes via:
+
+```bash
+bash .github/scripts/apply-branch-protection.sh
+```
+
 ## Rask kvalitets-sjekk (backend + Unity)
 
 Kjør alle basiskontroller med:
@@ -91,6 +115,46 @@ Dette kjører:
 - backend typecheck
 - compliance-suite
 - Unity batch compile-check (`scripts/unity-compile-check.sh`)
+
+## Robust release-oppsett (backend + Candy)
+
+Scriptene under `scripts/` er satt opp for en robust releaseflyt med:
+
+- versjonert Candy WebGL-build (`release.json`, checksums, zip, manifest)
+- valgfri publish til `local`, `rsync` eller `s3`
+- valgfri Render deploy-hook + health-wait
+- felles `releaseVersion`/`commit` for backend og Candy
+
+### 1) Opprett release-env
+
+```bash
+cp scripts/release.env.example scripts/release.env
+```
+
+Alle release-script (`deploy-backend`, `unity-webgl-build`, `release-candy`, `release-all`) laster automatisk `scripts/release.env` hvis filen finnes.
+
+### 2) Standardkommandoer
+
+```bash
+# Trigger kun backend deploy-hook
+npm run deploy:backend
+
+# Bygg kun Candy WebGL (ingen publish)
+npm run build:candy:webgl
+
+# Full Candy release (build + checksum + manifest + valgfri publish)
+npm run release:candy
+
+# Full release-sekvens (backend check/deploy + candy release)
+npm run release:all
+```
+
+### 3) Anbefalt produksjonsmønster
+
+- `CANDY_PUBLISH_MODE=s3` eller `rsync` med versjonerte paths
+- `CANDY_PROMOTE_LIVE=true` kun etter verifisert release
+- `RENDER_DEPLOY_WAIT_FOR_HEALTH=true` med `RENDER_HEALTHCHECK_URL=/health`
+- `RUN_ROOT_CHECK_ALL=true` ved full release-gate
 
 ## Hall pilot runbook (BG-027)
 
@@ -129,6 +193,7 @@ Samlet release-dokumentasjon for pilotleveransen:
 - `RELEASE_PACKAGE_WAVE1.md`
 - `CHANGELOG.md`
 - `RELEASE_NOTES_WAVE1.md`
+- `docs/DEPLOY_LOG_TEMPLATE.md`
 
 ## Automatisk rundestart (hver 30. sekund)
 

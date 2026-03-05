@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a new feature or significant improvement.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / opportunity
+      description: What business or user problem are we solving?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe behavior, API/UI impact, and acceptance criteria.
+    validations:
+      required: true
+
+  - type: textarea
+    id: compliance
+    attributes:
+      label: Compliance / regulatory impact
+      description: Any impact on KYC, pauses, loss limits, or other controls.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rollout
+    attributes:
+      label: Rollout and tracking
+      description: How this should be deployed and measured.
+      placeholder: staging -> production, feature flag, KPI, monitoring
+    validations:
+      required: true
