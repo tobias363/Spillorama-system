@@ -128,16 +128,15 @@ jobs:
           chmod +x scripts/qa/test3-e2e-smoke.sh
 
       - name: Build Candy WebGL from commit
-        uses: game-ci/unity-builder@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          CANDY_BUILD_DIR: ${{ steps.meta.outputs.build_dir }}
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+          EXPECTED_RELEASE_COMMIT: ${{ steps.meta.outputs.expected_release_commit }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
-          projectPath: Candy
-          targetPlatform: WebGL
-          buildMethod: WebGLBuild.BuildWebGLFromCommandLine
-          customParameters: -customBuildPath "${{ steps.meta.outputs.build_dir }}" -releaseVersion "${{ steps.meta.outputs.release_version }}" -releaseCommit "${{ steps.meta.outputs.expected_release_commit }}"
+        run: |
+          set -euo pipefail
+          scripts/ci/build-candy-webgl.sh
 
       - name: Verify WebGL build contract
         id: verify_build
