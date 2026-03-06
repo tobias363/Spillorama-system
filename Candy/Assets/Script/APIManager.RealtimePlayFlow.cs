@@ -1,6 +1,9 @@
 using System;
+using System.Collections;
+using System.Text;
 using SimpleJSON;
 using UnityEngine;
+using UnityEngine.Networking;
 
 public partial class APIManager
 {
@@ -94,6 +97,27 @@ public partial class APIManager
             return;
         }
 
+        if (pendingRealtimeBetArmRequest && realtimeBetArmAwaitingAck)
+        {
+            return;
+        }
+
+        if (treatBetArmAsUnsupported)
+        {
+            if (IsActivePlayerHost())
+            {
+                StartRealtimeGameFromPlayButton();
+            }
+            else
+            {
+                RequestRealtimeState();
+            }
+            return;
+        }
+
+        LogRealtimeLifecycleEvent(
+            "play_realtime_round_requested",
+            $"roomCode={activeRoomCode} playerId={activePlayerId} tokenPresent={!string.IsNullOrWhiteSpace(accessToken)}");
         pendingRealtimeBetArmRequest = true;
         SyncRealtimeEntryFeeWithCurrentBet();
         PushRealtimeRoomConfiguration();
@@ -147,6 +171,11 @@ public partial class APIManager
             return;
         }
 
+        if (realtimeBetArmAwaitingAck)
+        {
+            return;
+        }
+
         BindRealtimeClient();
         if (realtimeClient == null)
         {
@@ -182,15 +211,36 @@ public partial class APIManager
             return;
         }
 
+        if (treatBetArmAsUnsupported)
+        {
+            pendingRealtimeBetArmRequest = false;
+            if (IsActivePlayerHost())
+            {
+                StartRealtimeGameFromPlayButton();
+            }
+            return;
+        }
+
+        LogRealtimeLifecycleEvent(
+            "bet_arm_request",
+            $"roomCode={activeRoomCode} playerId={activePlayerId} entryFee={realtimeEntryFee}");
+        realtimeBetArmAwaitingAck = true;
+        realtimeBetArmRequestedAt = Time.unscaledTime;
         realtimeClient.ArmBet(activeRoomCode, activePlayerId, true, (ack) =>
         {
+            realtimeBetArmAwaitingAck = false;
+            realtimeBetArmRequestedAt = -1f;
             if (ack == null)
             {
+                pendingRealtimeBetArmRequest = false;
+                Debug.LogError("[APIManager] bet:arm feilet uten ack.");
+                TryFallbackArmBetViaHttp("socket_ack_null");
                 return;
             }
 
             if (!ack.ok)
             {
+                pendingRealtimeBetArmRequest = false;
                 if (RealtimeRoomStateUtils.IsRoomNotFound(ack))
                 {
                     ResetActiveRoomState(clearDesiredRoomCode: true);
@@ -199,17 +249,216 @@ public partial class APIManager
                 }
 
                 Debug.LogError($"[APIManager] bet:arm failed: {ack.errorCode} {ack.errorMessage}");
+                TryFallbackArmBetViaHttp($"socket_ack_error:{ack.errorCode}");
                 return;
             }
 
             pendingRealtimeBetArmRequest = false;
+            treatBetArmAsUnsupported = false;
             realtimeBetArmedForNextRound = true;
+            LogRealtimeLifecycleEvent("bet_arm_ack_ok", $"roomCode={activeRoomCode} playerId={activePlayerId}");
             JSONNode snapshot = ack.data?["snapshot"];
             if (snapshot != null && !snapshot.IsNull)
             {
                 HandleRealtimeRoomUpdate(snapshot);
             }
         });
+    }
+
+    private void TickRealtimeBetArmTimeout()
+    {
+        if (!pendingRealtimeBetArmRequest || !realtimeBetArmAwaitingAck)
+        {
+            return;
+        }
+
+        float timeout = Mathf.Max(0.25f, betArmAckTimeoutSeconds);
+        if (Time.unscaledTime < realtimeBetArmRequestedAt + timeout)
+        {
+            return;
+        }
+
+        realtimeBetArmAwaitingAck = false;
+        realtimeBetArmRequestedAt = -1f;
+        pendingRealtimeBetArmRequest = false;
+        treatBetArmAsUnsupported = true;
+        Debug.LogWarning("[APIManager] bet:arm ack-timeout. Faller tilbake til direkte game:start.");
+        TryFallbackArmBetViaHttp("socket_ack_timeout");
+
+        if (realtimeScheduler.IsGameRunning)
+        {
+            return;
+        }
+
+        if (IsActivePlayerHost())
+        {
+            StartRealtimeGameFromPlayButton();
+            return;
+        }
+
+        RequestRealtimeState();
+    }
+
+    private void TryFallbackArmBetViaHttp(string reason)
+    {
+        if (!enableHttpBetArmFallback)
+        {
+            return;
+        }
+
+        if (!useRealtimeBackend)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(activeRoomCode) ||
+            string.IsNullOrWhiteSpace(activePlayerId) ||
+            string.IsNullOrWhiteSpace(accessToken))
+        {
+            return;
+        }
+
+        if (realtimeBetArmHttpFallbackInFlight)
+        {
+            return;
+        }
+
+        if (Time.unscaledTime < nextRealtimeBetArmHttpFallbackAt)
+        {
+            return;
+        }
+
+        nextRealtimeBetArmHttpFallbackAt = Time.unscaledTime + Mathf.Max(0.25f, betArmHttpFallbackCooldownSeconds);
+        StartCoroutine(ArmBetViaHttpFallbackRoutine(reason));
+    }
+
+    private IEnumerator ArmBetViaHttpFallbackRoutine(string reason)
+    {
+        realtimeBetArmHttpFallbackInFlight = true;
+
+        string normalizedBaseUrl = NormalizeRealtimeBackendBaseUrl(realtimeBackendBaseUrl);
+        string roomCodeUpper = (activeRoomCode ?? string.Empty).Trim().ToUpperInvariant();
+        string escapedRoomCode = UnityWebRequest.EscapeURL(roomCodeUpper);
+        string[] candidateEndpoints =
+        {
+            $"{normalizedBaseUrl}/api/rooms/{escapedRoomCode}/bet-arm",
+            $"{normalizedBaseUrl}/api/admin/rooms/{escapedRoomCode}/bet-arm"
+        };
+
+        JSONNode root = null;
+        bool success = false;
+        long lastResponseCode = 0;
+        string lastError = string.Empty;
+        bool lastEndpointNotFound = false;
+        string usedEndpoint = string.Empty;
+
+        for (int endpointIndex = 0; endpointIndex < candidateEndpoints.Length; endpointIndex += 1)
+        {
+            string endpoint = candidateEndpoints[endpointIndex];
+            JSONObject payload = new();
+            payload["actorPlayerId"] = activePlayerId ?? string.Empty;
+            payload["playerId"] = activePlayerId ?? string.Empty;
+            payload["armed"] = true;
+
+            using (UnityWebRequest request = new UnityWebRequest(endpoint, UnityWebRequest.kHttpVerbPOST))
+            {
+                byte[] body = Encoding.UTF8.GetBytes(payload.ToString());
+                request.uploadHandler = new UploadHandlerRaw(body);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                request.SetRequestHeader("Authorization", "Bearer " + accessToken.Trim());
+
+                yield return request.SendWebRequest();
+
+                lastResponseCode = request.responseCode;
+                lastError = request.error ?? string.Empty;
+                string bodyText = request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
+                root = SafeParseRealtimeFallbackJson(bodyText);
+
+                bool endpointNotFound =
+                    request.result != UnityWebRequest.Result.Success &&
+                    request.responseCode == 404;
+                lastEndpointNotFound = endpointNotFound;
+
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    if (endpointNotFound && endpointIndex + 1 < candidateEndpoints.Length)
+                    {
+                        continue;
+                    }
+
+                    break;
+                }
+
+                bool ok = root != null && !root.IsNull && (root["ok"] == null || root["ok"].AsBool);
+                if (!ok)
+                {
+                    // Ugyldig JSON eller eksplisitt API-feil: avbryt fallback-flyten.
+                    break;
+                }
+
+                success = true;
+                usedEndpoint = endpoint;
+                break;
+            }
+        }
+
+        realtimeBetArmHttpFallbackInFlight = false;
+        if (!success)
+        {
+            if (root == null || root.IsNull)
+            {
+                if (lastEndpointNotFound)
+                {
+                    Debug.LogError(
+                        $"[APIManager] HTTP bet-arm fallback fant ingen kompatibel endpoint ({reason}). Siste status={lastResponseCode} error={lastError}");
+                }
+                else
+                {
+                    Debug.LogError($"[APIManager] HTTP bet-arm fallback returnerte ugyldig JSON ({reason}).");
+                }
+            }
+            else
+            {
+                string code = root["error"]?["code"];
+                string message = root["error"]?["message"];
+                Debug.LogError($"[APIManager] HTTP bet-arm fallback failed ({reason}): {code} {message}");
+            }
+            yield break;
+        }
+
+        pendingRealtimeBetArmRequest = false;
+        realtimeBetArmAwaitingAck = false;
+        realtimeBetArmRequestedAt = -1f;
+        realtimeBetArmedForNextRound = true;
+        Debug.Log($"[APIManager] HTTP bet-arm fallback ok via {usedEndpoint}");
+
+        JSONNode snapshotNode = root["data"]?["snapshot"];
+        if (snapshotNode != null && !snapshotNode.IsNull)
+        {
+            HandleRealtimeRoomUpdate(snapshotNode);
+        }
+        else
+        {
+            RequestRealtimeState();
+        }
+    }
+
+    private static JSONNode SafeParseRealtimeFallbackJson(string bodyText)
+    {
+        if (string.IsNullOrWhiteSpace(bodyText))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JSON.Parse(bodyText);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void RequestRealtimeStateForScheduledPlay()

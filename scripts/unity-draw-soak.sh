@@ -15,6 +15,10 @@ SOAK_TIMEOUT_SECONDS="${CANDY_SOAK_TIMEOUT_SECONDS:-1800}"
 SOAK_PLAY_PRESS_INTERVAL_SECONDS="${CANDY_SOAK_PLAY_PRESS_INTERVAL_SECONDS:-0.9}"
 SOAK_TOPUP_AMOUNT="${CANDY_SOAK_TOPUP_AMOUNT:-40000}"
 
+if [[ -z "${CANDY_SOAK_EMAIL:-}" ]]; then
+  SOAK_EMAIL="demo-soak-$(date -u +%Y%m%d%H%M%S)@bingo.local"
+fi
+
 if [[ -z "$UNITY_BIN" ]]; then
   PROJECT_VERSION_FILE="$PROJECT_PATH/ProjectSettings/ProjectVersion.txt"
   DETECTED_UNITY_VERSION=""
@@ -63,6 +67,7 @@ fi
 
 echo "[draw-soak] Running realtime soak..."
 echo "[draw-soak] scene=$SOAK_SCENE targetDraws=$SOAK_TARGET_DRAWS timeoutSeconds=$SOAK_TIMEOUT_SECONDS"
+echo "[draw-soak] email=$SOAK_EMAIL"
 echo "[draw-soak] log=$LOG_FILE"
 
 "$UNITY_BIN" \

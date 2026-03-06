@@ -1438,7 +1438,7 @@ function buildRoomSchedulerState(snapshot: RoomSnapshot, nowMs: number): Record<
   const canStartNow =
     runtimeCandyManiaSettings.autoRoundStartEnabled &&
     snapshot.currentGame?.status !== "RUNNING" &&
-    armedPlayerCount >= runtimeCandyManiaSettings.autoRoundMinPlayers &&
+    snapshot.players.length >= runtimeCandyManiaSettings.autoRoundMinPlayers &&
     millisUntilNextStart !== null &&
     millisUntilNextStart <= Math.max(1000, schedulerTickMs * 2);
 
@@ -1647,7 +1647,7 @@ async function processAutoStart(summary: ReturnType<typeof engine.listRoomSummar
       return;
     }
     const armedPlayerIds = getArmedPlayerIdsForSnapshot(latestSnapshot);
-    if (armedPlayerIds.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
+    if (latestSnapshot.players.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
       setNextRoundForRoom(roomCode, Date.now());
       return;
     }
@@ -1660,7 +1660,8 @@ async function processAutoStart(summary: ReturnType<typeof engine.listRoomSummar
         entryFee: getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer: runtimeCandyManiaSettings.autoRoundTicketsPerPlayer,
         payoutPercent: adaptivePayoutPercent,
-        participantPlayerIds: armedPlayerIds
+        participantPlayerIds: armedPlayerIds,
+        allowEmptyRound: true
       });
     } catch (error) {
       if (
@@ -2542,10 +2543,10 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
     assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
     const beforeStartSnapshot = engine.getRoomSnapshot(roomCode);
     const armedPlayerIds = getArmedPlayerIdsForSnapshot(beforeStartSnapshot);
-    if (armedPlayerIds.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
+    if (beforeStartSnapshot.players.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
       throw new DomainError(
         "NOT_ENOUGH_PLAYERS",
-        `For faa spillere med registrert innsats (${armedPlayerIds.length}/${runtimeCandyManiaSettings.autoRoundMinPlayers}).`
+        `For faa spillere i rommet (${beforeStartSnapshot.players.length}/${runtimeCandyManiaSettings.autoRoundMinPlayers}).`
       );
     }
     const adaptivePayoutPercent = resolveAdaptivePayoutPercent(beforeStartSnapshot.hallId);
@@ -2555,7 +2556,8 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
       entryFee,
       ticketsPerPlayer,
       payoutPercent: adaptivePayoutPercent,
-      participantPlayerIds: armedPlayerIds
+      participantPlayerIds: armedPlayerIds,
+      allowEmptyRound: true
     });
     clearArmedPlayers(roomCode);
     const snapshot = await emitRoomUpdate(roomCode);
@@ -3641,10 +3643,10 @@ io.on("connection", (socket: Socket) => {
       assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
       const roomSnapshotForPayout = engine.getRoomSnapshot(roomCode);
       const armedPlayerIds = getArmedPlayerIdsForSnapshot(roomSnapshotForPayout);
-      if (armedPlayerIds.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
+      if (roomSnapshotForPayout.players.length < runtimeCandyManiaSettings.autoRoundMinPlayers) {
         throw new DomainError(
           "NOT_ENOUGH_PLAYERS",
-          `For faa spillere med registrert innsats (${armedPlayerIds.length}/${runtimeCandyManiaSettings.autoRoundMinPlayers}).`
+          `For faa spillere i rommet (${roomSnapshotForPayout.players.length}/${runtimeCandyManiaSettings.autoRoundMinPlayers}).`
         );
       }
       const adaptivePayoutPercent = resolveAdaptivePayoutPercent(roomSnapshotForPayout.hallId);
@@ -3654,7 +3656,8 @@ io.on("connection", (socket: Socket) => {
         entryFee: payload?.entryFee ?? getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer,
         payoutPercent: adaptivePayoutPercent,
-        participantPlayerIds: armedPlayerIds
+        participantPlayerIds: armedPlayerIds,
+        allowEmptyRound: true
       });
       clearArmedPlayers(roomCode);
       const snapshot = await emitRoomUpdate(roomCode);

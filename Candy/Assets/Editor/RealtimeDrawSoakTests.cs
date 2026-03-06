@@ -92,6 +92,10 @@ public static class RealtimeDrawSoakTests
         apiBaseUrl = string.IsNullOrWhiteSpace(requestedApiBaseUrl) ? DefaultApiBaseUrl : requestedApiBaseUrl.Trim();
         loginEmail = string.IsNullOrWhiteSpace(requestedEmail) ? DefaultEmail : requestedEmail.Trim();
         loginPassword = string.IsNullOrWhiteSpace(requestedPassword) ? DefaultPassword : requestedPassword;
+        if (string.Equals(loginEmail, DefaultEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            loginEmail = BuildEphemeralEmail(DefaultEmail);
+        }
         targetDraws = Mathf.Max(1, requestedTargetDraws);
         timeoutSeconds = Mathf.Max(60, requestedTimeoutSeconds);
         playPressIntervalSeconds = Math.Max(0.2, requestedPlayPressIntervalSeconds);
@@ -125,7 +129,7 @@ public static class RealtimeDrawSoakTests
 
         Debug.Log(
             $"[DrawSoak] START targetDraws={targetDraws} timeoutSeconds={timeoutSeconds} " +
-            $"scene={scenePath} apiBaseUrl={apiBaseUrl}");
+            $"scene={scenePath} apiBaseUrl={apiBaseUrl} email={loginEmail}");
 
         EditorApplication.isPlaying = true;
     }
@@ -413,6 +417,20 @@ public static class RealtimeDrawSoakTests
         {
             property.boolValue = value;
         }
+    }
+
+    private static string BuildEphemeralEmail(string originalEmail)
+    {
+        string normalized = (originalEmail ?? string.Empty).Trim().ToLowerInvariant();
+        int atIndex = normalized.IndexOf('@');
+        string localPart = atIndex > 0 ? normalized.Substring(0, atIndex) : "demo";
+        string domain = atIndex > 0 && atIndex + 1 < normalized.Length
+            ? normalized.Substring(atIndex + 1)
+            : "bingo.local";
+
+        string safeLocal = localPart.Replace("+", "-").Replace(" ", "-");
+        string suffix = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        return $"{safeLocal}-soak-{suffix}@{domain}";
     }
 
     private static string GetCommandLineArgValue(string name, string fallback)

@@ -303,6 +303,15 @@ public partial class APIManager
             return;
         }
 
+        generator.ApplyExplicitRealtimeCardViewBindingsFromComponent();
+        CandyCardViewBindingSet cardBindingSet = generator.GetComponent<CandyCardViewBindingSet>();
+        if (cardBindingSet != null && !cardBindingSet.TryApplyTo(generator, out string bindingError))
+        {
+            PublishRuntimeStatus("Card bindings er ugyldige i Theme1. " + bindingError, asError: true);
+            RegisterRealtimeTicketRender(ticketSets.Count, 0);
+            return;
+        }
+
         StopRealtimeNearWinBlinking();
 
         int cardSlots = Mathf.Max(1, generator.cardClasses.Length);
@@ -320,6 +329,7 @@ public partial class APIManager
         int pageStartIndex = currentTicketPage * cardSlots;
         TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
         int populatedCards = 0;
+        int renderedCardCells = 0;
 
         for (int cardIndex = 0; cardIndex < generator.cardClasses.Length; cardIndex++)
         {
@@ -384,13 +394,21 @@ public partial class APIManager
 
                 if (cellIndex < card.num_text.Count)
                 {
+                    TextMeshProUGUI cardLabel = card.num_text[cellIndex];
                     RealtimeTextStyleUtils.ApplyCardNumber(
-                        card.num_text[cellIndex],
+                        cardLabel,
                         value > 0 ? value.ToString() : "-",
                         numberFallbackFont);
+                    if (cardLabel != null)
+                    {
+                        renderedCardCells += 1;
+                        RegisterRealtimeCardTarget(cardLabel);
+                    }
                 }
             }
         }
+
+        RegisterRealtimeTicketRender(ticketSets.Count, renderedCardCells);
 
         int expectedCardsWithTickets = Mathf.Min(cardSlots, Mathf.Max(1, realtimeTicketsPerPlayer));
         if (populatedCards < expectedCardsWithTickets)
@@ -507,6 +525,7 @@ public partial class APIManager
                 continue;
             }
 
+            RegisterRealtimeDrawObserved(drawnNumbers.Count, drawnNumber);
             ShowRealtimeDrawBall(drawIndex, drawnNumber);
 
             if (shouldTrace)

@@ -119,22 +119,12 @@ public sealed class RealtimeSchedulerState
             return $"Venter på spillere {PlayerCount}/{MinPlayers}\n{minutes:00}:{seconds:00}";
         }
 
-        if (ArmedPlayerCount < MinPlayers)
-        {
-            return $"Venter på innsats {ArmedPlayerCount}/{MinPlayers}\n{minutes:00}:{seconds:00}";
-        }
-
         return $"Neste runde\n{minutes:00}:{seconds:00}";
     }
 
     public bool ShouldAttemptClientStart(long nowMs)
     {
         if (IsGameRunning)
-        {
-            return false;
-        }
-
-        if (ArmedPlayerCount < MinPlayers)
         {
             return false;
         }

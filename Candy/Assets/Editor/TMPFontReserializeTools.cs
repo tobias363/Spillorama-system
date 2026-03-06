@@ -13,7 +13,10 @@ public static class TMPFontReserializeTools
         "Assets/TextMesh Pro/Examples _ Extras/Resources/Fonts _ Materials/Bangers SDF.asset",
         "Assets/TextMesh Pro/Examples _ Extras/Resources/Fonts _ Materials/Electronic Highway Sign SDF.asset",
         "Assets/TextMesh Pro/Examples _ Extras/Resources/Fonts _ Materials/Oswald Bold SDF.asset",
-        "Assets/TextMesh Pro/Examples _ Extras/Resources/Fonts _ Materials/Roboto-Bold SDF.asset"
+        "Assets/TextMesh Pro/Examples _ Extras/Resources/Fonts _ Materials/Roboto-Bold SDF.asset",
+        "Assets/UI/UI_Theme1/Font/FredokaOne-Regular SDF.asset",
+        "Assets/UI/UI_Theme1/Font/impact SDF.asset",
+        "Assets/UI/UI_Theme1/Font/Impacted SDF.asset"
     };
 
     [MenuItem("Tools/Candy/TMP/Reserialize Units Per EM Fonts")]
