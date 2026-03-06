@@ -29,6 +29,7 @@ public class BallManager : MonoBehaviour
     [SerializeField] private bool verboseDrawLogging = false;
     [SerializeField] [Min(0.1f)] private float drawIntervalSeconds = 5f;
     [SerializeField] [Min(0.1f)] private float ballAnimationSpeedMultiplier = 3f;
+    [SerializeField] [Range(0.1f, 1f)] private float glassAnimationSpeedMultiplier = 0.59f;
     private int[] extraBallPosArr = new int[5] { -140, -70, 140, 70, 0 };
     private List<GameObject> instantiatedExtraBall = new List<GameObject>();
     private readonly List<Vector3> realtimeBallLayoutPositions = new List<Vector3>();
@@ -40,6 +41,8 @@ public class BallManager : MonoBehaviour
     private Coroutine ballAnimationRoutine;
     private Coroutine extraBallBatchRoutine;
     private TextMeshProUGUI cachedBigBallText;
+    private readonly List<Animator> cachedGlassAnimators = new List<Animator>();
+    private float appliedGlassAnimatorSpeed = -1f;
 
     private void OnEnable()
     {
@@ -53,6 +56,8 @@ public class BallManager : MonoBehaviour
         CacheBallComponentRefs();
         CacheExtraBallTextRefs();
         cachedBigBallText = ResolveBigBallText();
+        CacheGlassAnimator();
+        ApplyGlassAnimationSpeed(force: true);
 
         SetActiveIfChanged(ballOutMachineAnimParent, true);
         SetActiveIfChanged(bigBallImg != null ? bigBallImg.gameObject : null, false);
@@ -63,6 +68,74 @@ public class BallManager : MonoBehaviour
         CacheRealtimeBallLayoutPositions();
 
 
+    }
+
+    private void Start()
+    {
+        // Ensure speed sync after all Awake calls and scene activation.
+        ApplyGlassAnimationSpeed(force: true);
+    }
+
+    private void Update()
+    {
+        ApplyGlassAnimationSpeed();
+    }
+
+    private void CacheGlassAnimator()
+    {
+        if (cachedGlassAnimators.Count > 0)
+        {
+            return;
+        }
+
+        if (ballOutMachineAnimParent == null)
+        {
+            return;
+        }
+
+        Animator[] animators = ballOutMachineAnimParent.GetComponentsInChildren<Animator>(true);
+        if (animators == null || animators.Length == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < animators.Length; i++)
+        {
+            Animator animator = animators[i];
+            if (animator != null)
+            {
+                cachedGlassAnimators.Add(animator);
+            }
+        }
+    }
+
+    private void ApplyGlassAnimationSpeed(bool force = false)
+    {
+        if (cachedGlassAnimators.Count == 0)
+        {
+            return;
+        }
+
+        // Keep a stable visual speed even when global testing Time.timeScale is > 1.
+        float visualSpeed = Mathf.Clamp(glassAnimationSpeedMultiplier, 0.1f, 1f);
+        float timeScaleCompensation = Mathf.Max(0.01f, Time.timeScale);
+        float desiredSpeed = visualSpeed / timeScaleCompensation;
+
+        if (!force && Mathf.Abs(appliedGlassAnimatorSpeed - desiredSpeed) < 0.001f)
+        {
+            return;
+        }
+
+        for (int i = 0; i < cachedGlassAnimators.Count; i++)
+        {
+            Animator animator = cachedGlassAnimators[i];
+            if (animator != null)
+            {
+                animator.speed = desiredSpeed;
+            }
+        }
+
+        appliedGlassAnimatorSpeed = desiredSpeed;
     }
 
     private void OnDisable()
