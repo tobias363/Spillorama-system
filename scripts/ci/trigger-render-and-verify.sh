@@ -61,13 +61,13 @@ while true; do
 
     if [[ "${live_release_commit}" == "${expected_release_commit}" ]]; then
       if [[ -n "${EXPECTED_RELEASE_VERSION}" && "${live_release_version}" != "${EXPECTED_RELEASE_VERSION}" ]]; then
-        echo "[candygame-render] releaseVersion mismatch. expected=${EXPECTED_RELEASE_VERSION} actual=${live_release_version}" >&2
-        exit 1
+        echo "[candygame-render] releaseCommit matches, waiting for releaseVersion update. expected=${EXPECTED_RELEASE_VERSION} actual=${live_release_version}"
+      else
+        break
       fi
-      break
+    else
+      echo "[candygame-render] releaseCommit not updated yet. expected=${expected_release_commit} actual=${live_release_commit}"
     fi
-
-    echo "[candygame-render] releaseCommit not updated yet. expected=${expected_release_commit} actual=${live_release_commit}"
   fi
 
   now_ts="$(date +%s)"
