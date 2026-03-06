@@ -20,10 +20,12 @@ public class SocketAck
 public class BingoRealtimeClient : MonoBehaviour
 {
     public static BingoRealtimeClient instance;
-    private const string DefaultBackendBaseUrl = "https://bingosystem-3.onrender.com";
+    private const string DefaultBackendBaseUrl = "https://bingosystem-staging.onrender.com";
+    private const string ProductionBackendBaseUrl = "https://bingosystem-3.onrender.com";
+    private const bool AllowDirectProductionBackend = false;
 
     [Header("Backend")]
-    [SerializeField] private string backendBaseUrl = "https://bingosystem-3.onrender.com";
+    [SerializeField] private string backendBaseUrl = DefaultBackendBaseUrl;
     [SerializeField] private bool autoConnectOnStart = false;
     [SerializeField] private bool autoReconnect = true;
     [SerializeField] private float reconnectDelaySeconds = 2f;
@@ -357,6 +359,10 @@ public class BingoRealtimeClient : MonoBehaviour
         packet.Add(eventName);
         packet.Add(payloadWithToken);
 
+        if (verboseLogging)
+        {
+            Debug.Log($"[BingoRealtime] emit ack event={eventName} ackId={ackId}");
+        }
         _ = SendRawAsync($"42{ackId}{packet}");
     }
 
@@ -513,10 +519,19 @@ public class BingoRealtimeClient : MonoBehaviour
 
     private void HandleAckPacket(string packet)
     {
+        if (verboseLogging)
+        {
+            Debug.Log($"[BingoRealtime] raw ack packet: {packet}");
+        }
+
         int index = 2;
         int ackId = ReadOptionalInteger(packet, ref index);
         if (ackId < 0)
         {
+            if (verboseLogging)
+            {
+                Debug.LogWarning($"[BingoRealtime] klarte ikke lese ackId fra packet: {packet}");
+            }
             return;
         }
 
@@ -545,10 +560,18 @@ public class BingoRealtimeClient : MonoBehaviour
 
         if (ackHandler == null)
         {
+            if (verboseLogging)
+            {
+                Debug.LogWarning($"[BingoRealtime] ack without handler. ackId={ackId}");
+            }
             return;
         }
 
         SocketAck ack = ParseAck(responseNode);
+        if (verboseLogging)
+        {
+            Debug.Log($"[BingoRealtime] ack received ackId={ackId} ok={ack.ok} code={ack.errorCode}");
+        }
         QueueOnMainThread(() => ackHandler.Invoke(ack));
     }
 
@@ -789,7 +812,19 @@ public class BingoRealtimeClient : MonoBehaviour
             normalized = "https://" + normalized;
         }
 
-        return normalized.TrimEnd('/');
+        normalized = normalized.TrimEnd('/');
+
+        if (!AllowDirectProductionBackend &&
+            Uri.TryCreate(normalized, UriKind.Absolute, out Uri parsed) &&
+            Uri.TryCreate(ProductionBackendBaseUrl, UriKind.Absolute, out Uri prodParsed) &&
+            string.Equals(parsed.Host, prodParsed.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            Debug.LogWarning(
+                $"[BingoRealtime] Blokkerer direkte backend mot prod ({prodParsed.Host}). Bruker staging i stedet.");
+            return DefaultBackendBaseUrl;
+        }
+
+        return normalized;
     }
 
     private void QueueError(string message)

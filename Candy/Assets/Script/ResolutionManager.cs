@@ -62,11 +62,7 @@ public class ResolutionManager : MonoBehaviour
             return;
         }
 
-#if UNITY_2022_2_OR_NEWER
         QualitySettings.globalTextureMipmapLimit = 0;
-#else
-        QualitySettings.masterTextureLimit = 0;
-#endif
         QualitySettings.anisotropicFiltering = anisotropicFiltering;
 
         int targetAntiAliasing = ResolveSupportedAntiAliasingLevel(minimumAntiAliasing);

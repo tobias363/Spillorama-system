@@ -5,6 +5,9 @@ Dette er felles QA-område for de tre parallelle testsporene:
 1. `TEST1_CORE_REPORT.md` (Chat 1)
 2. `TEST2_UI_PERFORMANCE_REPORT.md` (Chat 2)
 3. `TEST3_E2E_OPS_REPORT.md` (Chat 3)
+4. `CANDY_BASELINE_FREEZE_2026-03-06.md` (baseline freeze)
+5. `CANDY_HARD_GATE_LOCAL.md` (lokal hard-gate)
+6. `CANDY_CODE_INVENTORY.md` (ACTIVE/LEGACY/REMOVE_CANDIDATE)
 
 ## Harde go-live gates
 
@@ -24,15 +27,18 @@ Følgende må være dokumentert som bestått før merge til `main`:
 Core test (chat 1):
 
 ```bash
-bash scripts/qa/test1-core.sh
+bash scripts/qa/candy-hard-gate.sh
 ```
 
-Prod/staging API-kontrakt (valgfritt under chat 1):
+Prod/staging API-kontrakt + E2E (valgfritt under chat 1/3):
 
 ```bash
+CANDY_GATE_RUN_E2E=true \
 CANDY_API_BASE_URL=https://bingosystem-3.onrender.com \
 CANDY_TEST_ACCESS_TOKEN=<token> \
-bash scripts/qa/test1-core.sh
+CANDY_ADMIN_EMAIL=<admin-email> \
+CANDY_ADMIN_PASSWORD=<admin-password> \
+bash scripts/qa/candy-hard-gate.sh
 ```
 
 E2E smoke for chat 3:

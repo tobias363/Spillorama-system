@@ -158,22 +158,223 @@ public static class RealtimeTicketSetUtils
 
         if (myTicketsNode.IsArray)
         {
+            // Backward-compatible support:
+            // 1) flat [n1,n2,...]
+            // 2) grid [[...],[...],...]
+            // 3) list of ticket objects [{grid:[...]}...]
+            if (LooksLikeFlatNumberArray(myTicketsNode))
+            {
+                List<int> directFlat = NormalizeTicketNumbers(ExtractFlatNumbers(myTicketsNode));
+                if (directFlat.Count > 0)
+                {
+                    ticketSets.Add(directFlat);
+                }
+                return ticketSets;
+            }
+
+            if (LooksLikeGridArray(myTicketsNode))
+            {
+                List<int> flatGrid = NormalizeTicketNumbers(FlattenTicketGrid(myTicketsNode));
+                if (flatGrid.Count > 0)
+                {
+                    ticketSets.Add(flatGrid);
+                }
+                return ticketSets;
+            }
+
             for (int i = 0; i < myTicketsNode.Count; i++)
             {
-                List<int> flat = FlattenTicketGrid(myTicketsNode[i]?["grid"]);
+                List<int> flat = ExtractSingleTicketNumbers(myTicketsNode[i]);
                 if (flat.Count > 0)
                 {
-                    ticketSets.Add(flat);
+                    ticketSets.Add(NormalizeTicketNumbers(flat));
                 }
             }
             return ticketSets;
         }
 
-        List<int> single = FlattenTicketGrid(myTicketsNode["grid"]);
+        List<int> single = NormalizeTicketNumbers(ExtractSingleTicketNumbers(myTicketsNode));
         if (single.Count > 0)
         {
             ticketSets.Add(single);
         }
         return ticketSets;
+    }
+
+    private static List<int> ExtractSingleTicketNumbers(JSONNode ticketNode)
+    {
+        if (ticketNode == null || ticketNode.IsNull)
+        {
+            return new List<int>();
+        }
+
+        if (ticketNode.IsArray)
+        {
+            if (LooksLikeFlatNumberArray(ticketNode))
+            {
+                return ExtractFlatNumbers(ticketNode);
+            }
+
+            if (LooksLikeGridArray(ticketNode))
+            {
+                return FlattenTicketGrid(ticketNode);
+            }
+
+            for (int i = 0; i < ticketNode.Count; i++)
+            {
+                List<int> nested = ExtractSingleTicketNumbers(ticketNode[i]);
+                if (nested.Count > 0)
+                {
+                    return nested;
+                }
+            }
+
+            return new List<int>();
+        }
+
+        List<int> byGrid = FlattenTicketGrid(ticketNode["grid"]);
+        if (byGrid.Count > 0)
+        {
+            return byGrid;
+        }
+
+        JSONNode numbersNode = ticketNode["numbers"];
+        if (numbersNode != null && !numbersNode.IsNull && numbersNode.IsArray)
+        {
+            List<int> byNumbers = ExtractFlatNumbers(numbersNode);
+            if (byNumbers.Count > 0)
+            {
+                return byNumbers;
+            }
+        }
+
+        JSONNode valuesNode = ticketNode["values"];
+        if (valuesNode != null && !valuesNode.IsNull && valuesNode.IsArray)
+        {
+            List<int> byValues = ExtractFlatNumbers(valuesNode);
+            if (byValues.Count > 0)
+            {
+                return byValues;
+            }
+        }
+
+        JSONNode nestedTicketNode = ticketNode["ticket"];
+        if (nestedTicketNode != null && !nestedTicketNode.IsNull)
+        {
+            List<int> nestedTicket = ExtractSingleTicketNumbers(nestedTicketNode);
+            if (nestedTicket.Count > 0)
+            {
+                return nestedTicket;
+            }
+        }
+
+        return new List<int>();
+    }
+
+    private static List<int> ExtractFlatNumbers(JSONNode node)
+    {
+        List<int> values = new();
+        if (node == null || node.IsNull || !node.IsArray)
+        {
+            return values;
+        }
+
+        for (int i = 0; i < node.Count; i++)
+        {
+            if (TryParsePositiveInt(node[i], out int parsed) && !values.Contains(parsed))
+            {
+                values.Add(parsed);
+            }
+        }
+
+        return values;
+    }
+
+    private static bool LooksLikeFlatNumberArray(JSONNode node)
+    {
+        if (node == null || node.IsNull || !node.IsArray || node.Count == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < node.Count; i++)
+        {
+            JSONNode entry = node[i];
+            if (entry == null || entry.IsNull || entry.IsArray || entry.IsObject)
+            {
+                return false;
+            }
+
+            if (!TryParsePositiveInt(entry, out _))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool LooksLikeGridArray(JSONNode node)
+    {
+        if (node == null || node.IsNull || !node.IsArray || node.Count == 0)
+        {
+            return false;
+        }
+
+        bool hasAtLeastOneRow = false;
+        for (int row = 0; row < node.Count; row++)
+        {
+            JSONNode rowNode = node[row];
+            if (rowNode == null || rowNode.IsNull || !rowNode.IsArray)
+            {
+                return false;
+            }
+
+            hasAtLeastOneRow = true;
+            for (int col = 0; col < rowNode.Count; col++)
+            {
+                JSONNode cellNode = rowNode[col];
+                if (cellNode == null || cellNode.IsNull || cellNode.IsArray || cellNode.IsObject)
+                {
+                    return false;
+                }
+
+                string raw = cellNode.Value;
+                if (!string.IsNullOrWhiteSpace(raw) && !int.TryParse(raw, out _))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return hasAtLeastOneRow;
+    }
+
+    private static bool TryParsePositiveInt(JSONNode node, out int value)
+    {
+        value = 0;
+        if (node == null || node.IsNull)
+        {
+            return false;
+        }
+
+        string raw = node.Value;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        if (!int.TryParse(raw, out int parsed))
+        {
+            return false;
+        }
+
+        if (parsed <= 0)
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
     }
 }

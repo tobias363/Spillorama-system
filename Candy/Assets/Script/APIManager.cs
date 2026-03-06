@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.UI;
 using SimpleJSON;
 using TMPro;
 
@@ -33,7 +34,9 @@ public partial class APIManager : MonoBehaviour
     public static APIManager instance;
 
     private const string BASE_URL = "https://bingoapi.codehabbit.com/";
-    private const string DEFAULT_REALTIME_BACKEND_BASE_URL = "https://bingosystem-3.onrender.com";
+    private const string DEFAULT_REALTIME_BACKEND_BASE_URL = "https://bingosystem-staging.onrender.com";
+    private const string PRODUCTION_REALTIME_BACKEND_BASE_URL = "https://bingosystem-3.onrender.com";
+    private const bool ALLOW_DIRECT_PRODUCTION_BACKEND = false;
 
     [Header("Realtime Multiplayer (Skeleton backend)")]
     [SerializeField] private bool useRealtimeBackend = true;
@@ -51,7 +54,14 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] private bool playButtonStartsAndDrawsRealtime = true;
     [SerializeField] private bool realtimeScheduledRounds = true;
     [SerializeField] private bool drawImmediatelyAfterManualStart = true;
-    [SerializeField] private bool allowEditorLocalFallbackWhenRealtimeUnavailable = true;
+    [SerializeField] [Min(0.25f)] private float betArmAckTimeoutSeconds = 1.5f;
+    [SerializeField] private bool enableHttpBetArmFallback = true;
+    [SerializeField] [Min(0.25f)] private float betArmHttpFallbackCooldownSeconds = 1.25f;
+    [SerializeField] private bool allowEditorLocalFallbackWhenRealtimeUnavailable = false;
+    [SerializeField] private bool allowEditorRuntimeAutoCreateRealtimeClient = true;
+    [SerializeField] private bool allowEditorRuntimeAutoCreateAutoLogin = true;
+    [SerializeField] private bool enableEditorLocalRoundFallback = false;
+    [SerializeField] private bool strictRuntimeDependencyValidation = true;
     [SerializeField] private bool scheduledModeManualStartFallback = false;
     [SerializeField] [Min(0.5f)] private float scheduledRoomStateHeartbeatSeconds = 2f;
     [SerializeField] private bool syncRealtimeEntryFeeWithBetSelector = true;
@@ -76,10 +86,14 @@ public partial class APIManager : MonoBehaviour
     [SerializeField] [Min(0.05f)] private float realtimeDrawReplayNormalIntervalSeconds = 0.28f;
     [SerializeField] [Min(1)] private int realtimeDrawBacklogCatchupThreshold = 4;
     [SerializeField] private bool logRealtimeDrawMetrics = true;
+    [SerializeField] private bool logRealtimeDrawTrace = true;
     [SerializeField] [Min(1)] private int realtimeBonusPatternPositionFromRight = 2;
-    [SerializeField] private bool enableLaunchTokenBootstrap = true;
-    [SerializeField] private string launchResolveBaseUrl = "https://bingosystem-3.onrender.com";
+    [SerializeField] private string launchResolveBaseUrl = DEFAULT_REALTIME_BACKEND_BASE_URL;
     [SerializeField] private BallManager ballManager;
+    [Header("Runtime diagnostics")]
+    [SerializeField] private bool logRuntimeDiagnostics = true;
+    [SerializeField] [Min(2f)] private float runtimeDiagnosticsLogIntervalSeconds = 8f;
+    [SerializeField] private bool showRealtimeDebugOverlayInEditor = true;
     [Header("Realtime UI")]
     [SerializeField] private TextMeshProUGUI realtimeRoomPlayerCountText;
     [SerializeField] private string realtimeRoomPlayerCountPrefix = "Spillere i rommet:";
@@ -131,6 +145,7 @@ public partial class APIManager : MonoBehaviour
     private readonly RealtimeRoomConfigurator realtimeRoomConfigurator = new();
     private readonly Dictionary<int, Coroutine> realtimeNearWinBlinkCoroutines = new();
     private readonly Dictionary<int, RealtimeNearWinMeta> realtimeNearWinMetaByKey = new();
+    private readonly Dictionary<int, RealtimeNearWinState> realtimeNearWinStates = new();
     private string realtimeBonusTriggeredGameId = string.Empty;
     private string realtimeBonusTriggeredClaimId = string.Empty;
     private string realtimeBonusMissingDataLogKey = string.Empty;
@@ -146,9 +161,40 @@ public partial class APIManager : MonoBehaviour
     private string drawMetricsGameId = string.Empty;
     private bool realtimeBetArmedForNextRound = false;
     private bool pendingRealtimeBetArmRequest = false;
+    private bool treatBetArmAsUnsupported = false;
+    private bool realtimeBetArmAwaitingAck = false;
+    private float realtimeBetArmRequestedAt = -1f;
+    private bool realtimeBetArmHttpFallbackInFlight = false;
+    private float nextRealtimeBetArmHttpFallbackAt = -1f;
     private bool realtimeRerollRequestPending = false;
     private readonly HashSet<string> realtimeClaimAttemptKeys = new();
     private bool hasTriggeredEditorLocalFallback = false;
+    private bool hasLoggedMissingRealtimeNumberGenerator = false;
+    private float nextRuntimeDiagnosticsLogAt = 0f;
+    private string lastRuntimeDiagnosticsSnapshot = string.Empty;
+    private string lastPatternConfigurationIssue = string.Empty;
+    private int lastObservedTicketSetCount = 0;
+    private int lastRenderedCardCellCount = 0;
+    private string lastRenderedCardTargetName = string.Empty;
+    private string lastRenderedCardValue = string.Empty;
+    private string lastRenderedCardHealth = string.Empty;
+    private int lastObservedDrawCount = 0;
+    private int lastObservedDrawNumber = 0;
+    private int lastRenderedDrawNumber = 0;
+    private int lastRenderedBallSlotIndex = -1;
+    private string lastRenderedBallTargetName = string.Empty;
+    private string lastRenderedBigBallTargetName = string.Empty;
+    private string lastRenderedBallHealth = string.Empty;
+    private string lastRenderedBigBallHealth = string.Empty;
+    private string lastRenderedCountdownValue = string.Empty;
+    private string lastRenderedPlayerCountValue = string.Empty;
+    private string lastRenderedCountdownHealth = string.Empty;
+    private string lastRenderedPlayerCountHealth = string.Empty;
+    private string lastRealtimeRenderMismatch = string.Empty;
+    private bool hasLoggedFirstRealtimeCardRender = false;
+    private bool hasLoggedFirstRealtimeBallRender = false;
+    private TextMeshProUGUI realtimeDebugOverlayText;
+    private Image realtimeDebugOverlayBackground;
 
     public bool UseRealtimeBackend => useRealtimeBackend;
     public string ActiveRoomCode => activeRoomCode;
@@ -172,9 +218,16 @@ public partial class APIManager : MonoBehaviour
         // V4 policy: aldri fall tilbake til gratis buy-in ved INSUFFICIENT_FUNDS.
         fallbackToZeroEntryFeeOnInsufficientFunds = false;
         disableEntryFeeSyncAfterInsufficientFundsFallback = false;
-        // V4 policy: server-scheduler er autoritativ for rundestart i realtime.
-        scheduledModeManualStartFallback = false;
         realtimeBackendBaseUrl = NormalizeRealtimeBackendBaseUrl(realtimeBackendBaseUrl);
+        launchResolveBaseUrl = NormalizeRealtimeBackendBaseUrl(launchResolveBaseUrl);
+#if UNITY_EDITOR
+        if (!enableEditorLocalRoundFallback)
+        {
+            allowEditorLocalFallbackWhenRealtimeUnavailable = false;
+        }
+#else
+        allowEditorLocalFallbackWhenRealtimeUnavailable = false;
+#endif
     }
 
     void OnEnable()
@@ -204,6 +257,7 @@ public partial class APIManager : MonoBehaviour
     {
         if (useRealtimeBackend)
         {
+            ApplyExplicitRealtimeHudBindingsFromComponent();
             BindRealtimeClient();
             StartCoroutine(BootstrapRealtimeStartupRoutine());
             return;
@@ -217,7 +271,10 @@ public partial class APIManager : MonoBehaviour
 
     private IEnumerator BootstrapRealtimeStartupRoutine()
     {
-        yield return ResolveLaunchContextFromUrlIfPresent();
+        if (ShouldDeferRealtimeBootstrapForLaunchContext("oppstart", markPendingForLater: true))
+        {
+            yield break;
+        }
 
         if (!joinOrCreateOnStart)
         {
@@ -242,6 +299,9 @@ public partial class APIManager : MonoBehaviour
 
         TickDrawRenderResync();
         TryRunDeferredJoinOrCreateAfterLaunchResolve();
+        TickRealtimeBetArmTimeout();
+        TickRuntimeDiagnostics();
+        RefreshRealtimeDebugOverlay();
 
         if (!realtimeScheduledRounds)
         {
@@ -258,6 +318,7 @@ public partial class APIManager : MonoBehaviour
 
     private void BindRealtimeClient()
     {
+        ApplyExplicitRealtimeHudBindingsFromComponent();
         if (realtimeClient == null)
         {
             realtimeClient = BingoRealtimeClient.instance;
@@ -270,9 +331,19 @@ public partial class APIManager : MonoBehaviour
 
         if (realtimeClient == null)
         {
-            GameObject clientObject = new("BingoRealtimeClient_Auto");
-            realtimeClient = clientObject.AddComponent<BingoRealtimeClient>();
-            LogBootstrap("BingoRealtimeClient manglet i scenen. Opprettet automatisk runtime-klient.");
+            if (CanAutoCreateRealtimeClientInEditor())
+            {
+                GameObject clientObject = new("BingoRealtimeClient_Auto");
+                realtimeClient = clientObject.AddComponent<BingoRealtimeClient>();
+                LogBootstrap("BingoRealtimeClient manglet i scenen. Opprettet runtime-klient i editor-dev mode.");
+            }
+            else
+            {
+                ReportMissingRuntimeDependency(
+                    "BingoRealtimeClient",
+                    "Legg komponenten i Theme1 og bind den i APIManager før du tester realtime.");
+                return;
+            }
         }
 
         realtimeClient.OnConnectionChanged -= HandleRealtimeConnectionChanged;
@@ -286,6 +357,215 @@ public partial class APIManager : MonoBehaviour
         realtimeClient.SetAccessToken(accessToken);
     }
 
+    public void ApplyExplicitRealtimeHudBindings(TextMeshProUGUI countdownText, TextMeshProUGUI roomPlayerCountLabel)
+    {
+        NumberGenerator generator = ResolveNumberGenerator();
+        if (generator != null && countdownText != null)
+        {
+            generator.autoSpinRemainingPlayText = countdownText;
+        }
+
+        realtimeRoomPlayerCountText = roomPlayerCountLabel;
+    }
+
+    private void ApplyExplicitRealtimeHudBindingsFromComponent()
+    {
+        CandyTheme1HudBindingSet hudBindings = GetComponent<CandyTheme1HudBindingSet>();
+        if (hudBindings == null)
+        {
+            return;
+        }
+
+        if (!hudBindings.TryApplyTo(ResolveNumberGenerator(), this, out string error))
+        {
+            PublishRuntimeStatus("HUD bindings er ugyldige i Theme1. " + error, asError: true);
+        }
+    }
+
+    private bool CanAutoCreateRealtimeClientInEditor()
+    {
+#if UNITY_EDITOR
+        return allowEditorRuntimeAutoCreateRealtimeClient;
+#else
+        return false;
+#endif
+    }
+
+    private bool CanAutoCreateAutoLoginInEditor()
+    {
+#if UNITY_EDITOR
+        return allowEditorRuntimeAutoCreateAutoLogin;
+#else
+        return false;
+#endif
+    }
+
+    private void ReportMissingRuntimeDependency(string dependencyName, string remediation)
+    {
+        if (!strictRuntimeDependencyValidation)
+        {
+            return;
+        }
+
+        string message =
+            $"[APIManager] Mangler runtime-avhengighet: {dependencyName}. {remediation}";
+        Debug.LogError(message);
+        BingoAutoLogin login = autoLogin != null ? autoLogin : FindObjectOfType<BingoAutoLogin>();
+        if (login != null)
+        {
+            login.SetExternalStatus(message);
+        }
+    }
+
+    private void PublishRuntimeStatus(string message, bool asError = false)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        if (asError)
+        {
+            Debug.LogError("[APIManager] " + message);
+        }
+        else
+        {
+            Debug.LogWarning("[APIManager] " + message);
+        }
+
+        BingoAutoLogin login = autoLogin != null ? autoLogin : FindObjectOfType<BingoAutoLogin>();
+        if (login != null)
+        {
+            login.SetExternalStatus(message);
+        }
+    }
+
+    public void ReportLegacyVisualWriteAttempt(string source)
+    {
+        if (!useRealtimeBackend || string.IsNullOrWhiteSpace(source))
+        {
+            return;
+        }
+
+        ReportRealtimeRenderMismatch($"legacy writer attempted in realtime mode: {source}", asError: false);
+    }
+
+    public void ReportRealtimeRenderMismatch(string message, bool asError)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        if (string.Equals(lastRealtimeRenderMismatch, message, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lastRealtimeRenderMismatch = message;
+        PublishRuntimeStatus(message, asError);
+    }
+
+    public void RegisterRealtimeTicketRender(int ticketSetCount, int renderedCardCellCount)
+    {
+        lastObservedTicketSetCount = Mathf.Max(0, ticketSetCount);
+        lastRenderedCardCellCount = Mathf.Max(0, renderedCardCellCount);
+        if (lastObservedTicketSetCount > 0 && lastRenderedCardCellCount <= 0)
+        {
+            ReportRealtimeRenderMismatch("tickets received but 0 rendered card labels", asError: true);
+        }
+    }
+
+    public void RegisterRealtimeCardTarget(TextMeshProUGUI target)
+    {
+        lastRenderedCardTargetName = target != null && target.gameObject != null && !string.IsNullOrWhiteSpace(target.gameObject.name)
+            ? target.gameObject.name.Trim()
+            : "unknown-card-target";
+        lastRenderedCardValue = target != null ? (target.text ?? string.Empty) : string.Empty;
+        lastRenderedCardHealth = RealtimeTextStyleUtils.BuildHealthSummary(target);
+        if (!hasLoggedFirstRealtimeCardRender && target != null && !string.IsNullOrWhiteSpace(lastRenderedCardValue))
+        {
+            hasLoggedFirstRealtimeCardRender = true;
+            Debug.Log($"[candy-render] first-card target={lastRenderedCardTargetName} health={lastRenderedCardHealth}");
+        }
+    }
+
+    public void RegisterRealtimeDrawObserved(int drawCount, int drawnNumber)
+    {
+        lastObservedDrawCount = Mathf.Max(0, drawCount);
+        lastObservedDrawNumber = drawnNumber;
+    }
+
+    public void RegisterRealtimeBallRendered(
+        int drawnNumber,
+        int slotIndex,
+        int renderedTextTargetCount,
+        TextMeshProUGUI slotTarget,
+        TextMeshProUGUI bigBallTarget)
+    {
+        lastRenderedDrawNumber = drawnNumber;
+        lastRenderedBallSlotIndex = slotIndex;
+        lastRenderedBallTargetName = slotTarget != null && slotTarget.gameObject != null && !string.IsNullOrWhiteSpace(slotTarget.gameObject.name)
+            ? slotTarget.gameObject.name.Trim()
+            : "unknown-ball-target";
+        lastRenderedBigBallTargetName = bigBallTarget != null && bigBallTarget.gameObject != null && !string.IsNullOrWhiteSpace(bigBallTarget.gameObject.name)
+            ? bigBallTarget.gameObject.name.Trim()
+            : "unknown-big-ball-target";
+        lastRenderedBallHealth = RealtimeTextStyleUtils.BuildHealthSummary(slotTarget);
+        lastRenderedBigBallHealth = RealtimeTextStyleUtils.BuildHealthSummary(bigBallTarget);
+        if (!hasLoggedFirstRealtimeBallRender && (slotTarget != null || bigBallTarget != null))
+        {
+            hasLoggedFirstRealtimeBallRender = true;
+            Debug.Log(
+                $"[candy-render] first-ball slot={lastRenderedBallSlotIndex} target={lastRenderedBallTargetName} " +
+                $"ballHealth={lastRenderedBallHealth} bigBallHealth={lastRenderedBigBallHealth}");
+        }
+        if (renderedTextTargetCount <= 0)
+        {
+            ReportRealtimeRenderMismatch("draw received but no ball text target", asError: true);
+        }
+    }
+
+    public void RegisterRealtimeCountdownRendered(TextMeshProUGUI target)
+    {
+        lastRenderedCountdownValue = target != null ? (target.text ?? string.Empty) : string.Empty;
+        lastRenderedCountdownHealth = RealtimeTextStyleUtils.BuildHealthSummary(target);
+    }
+
+    public void RegisterRealtimePlayerCountRendered(TextMeshProUGUI target)
+    {
+        lastRenderedPlayerCountValue = target != null ? (target.text ?? string.Empty) : string.Empty;
+        lastRenderedPlayerCountHealth = RealtimeTextStyleUtils.BuildHealthSummary(target);
+    }
+
+    private bool ValidatePatternConfigurationForRealtime()
+    {
+        NumberGenerator generator = ResolveNumberGenerator();
+        if (generator == null)
+        {
+            return true;
+        }
+
+        if (generator.ValidateRealtimePatternConfiguration(out string errorMessage))
+        {
+            lastPatternConfigurationIssue = string.Empty;
+            return true;
+        }
+
+        if (!string.Equals(lastPatternConfigurationIssue, errorMessage, StringComparison.Ordinal))
+        {
+            lastPatternConfigurationIssue = errorMessage;
+            PublishRuntimeStatus(errorMessage, asError: true);
+        }
+
+        return false;
+    }
+
+    public bool ShouldLogRealtimeDrawTrace()
+    {
+        return logRealtimeDrawTrace;
+    }
+
     private BallManager ResolveBallManager()
     {
         if (ballManager != null)
@@ -294,7 +574,43 @@ public partial class APIManager : MonoBehaviour
         }
 
         ballManager = FindObjectOfType<BallManager>();
+        if (ballManager != null)
+        {
+            return ballManager;
+        }
+
+        BallManager[] allManagers = FindObjectsOfType<BallManager>(true);
+        if (allManagers != null && allManagers.Length > 0)
+        {
+            ballManager = allManagers[0];
+        }
+
         return ballManager;
+    }
+
+    private NumberGenerator ResolveNumberGenerator()
+    {
+        NumberGenerator generatorFromManager = GameManager.instance != null ? GameManager.instance.numberGenerator : null;
+        if (generatorFromManager != null)
+        {
+            hasLoggedMissingRealtimeNumberGenerator = false;
+            return generatorFromManager;
+        }
+
+        NumberGenerator fallbackGenerator = FindObjectOfType<NumberGenerator>();
+        if (fallbackGenerator != null)
+        {
+            hasLoggedMissingRealtimeNumberGenerator = false;
+            return fallbackGenerator;
+        }
+
+        if (!hasLoggedMissingRealtimeNumberGenerator)
+        {
+            Debug.LogWarning("[APIManager] Fant ikke NumberGenerator i Theme1. Tegner baller videre, men hopper over kort-markering til referansen er tilgjengelig.");
+            hasLoggedMissingRealtimeNumberGenerator = true;
+        }
+
+        return null;
     }
 
     private void ResetRealtimeRoundVisuals()
@@ -316,7 +632,40 @@ public partial class APIManager : MonoBehaviour
             return false;
         }
 
-        return resolved.ShowRealtimeDrawBall(drawIndex, drawnNumber);
+        resolved.ShowRealtimeDrawBall(drawIndex, drawnNumber);
+        return true;
+    }
+
+    // Compatibility shim for branches that do not use draw replay queues.
+    private void TickDrawRenderResync()
+    {
+    }
+
+    // Compatibility shim for branches that render draws directly in room updates.
+    private void ResetRealtimeDrawReplayState(bool clearMetrics)
+    {
+        if (realtimeDrawReplayCoroutine != null)
+        {
+            StopCoroutine(realtimeDrawReplayCoroutine);
+            realtimeDrawReplayCoroutine = null;
+        }
+
+        pendingRealtimeDrawQueue.Clear();
+        pendingRealtimeDrawKeys.Clear();
+
+        if (!clearMetrics)
+        {
+            return;
+        }
+
+        hasLoggedFirstRealtimeCardRender = false;
+        hasLoggedFirstRealtimeBallRender = false;
+        drawMetricEnqueued = 0;
+        drawMetricRendered = 0;
+        drawMetricFallbackRendered = 0;
+        drawMetricSkipped = 0;
+        drawMetricsGameId = string.Empty;
+        lastRealtimeDrawRenderAt = -1f;
     }
 
     private int ResolveRealtimeDrawCountCap()
@@ -343,10 +692,18 @@ public partial class APIManager : MonoBehaviour
             return autoLogin;
         }
 
-        GameObject autoLoginObject = new("BingoAutoLogin_Auto");
-        autoLogin = autoLoginObject.AddComponent<BingoAutoLogin>();
-        autoLogin.SetBackendBaseUrl(realtimeBackendBaseUrl);
-        LogBootstrap("BingoAutoLogin manglet i scenen. Opprettet runtime auto-login med default credentials.");
+        if (CanAutoCreateAutoLoginInEditor())
+        {
+            GameObject autoLoginObject = new("BingoAutoLogin_Auto");
+            autoLogin = autoLoginObject.AddComponent<BingoAutoLogin>();
+            autoLogin.SetBackendBaseUrl(realtimeBackendBaseUrl);
+            LogBootstrap("BingoAutoLogin manglet i scenen. Opprettet runtime auto-login i editor-dev mode.");
+            return autoLogin;
+        }
+
+        ReportMissingRuntimeDependency(
+            "BingoAutoLogin",
+            "Legg komponenten i Theme1 og bind den i APIManager hvis auto-login skal brukes.");
         return autoLogin;
     }
 
@@ -505,6 +862,307 @@ public partial class APIManager : MonoBehaviour
         Debug.Log($"[candy-observe] {eventName}{resolvedDetails}");
     }
 
+    private void TickRuntimeDiagnostics()
+    {
+        if (!logRuntimeDiagnostics)
+        {
+            return;
+        }
+
+        if (Time.unscaledTime < nextRuntimeDiagnosticsLogAt)
+        {
+            return;
+        }
+
+        nextRuntimeDiagnosticsLogAt = Time.unscaledTime + Mathf.Max(2f, runtimeDiagnosticsLogIntervalSeconds);
+        string snapshot = BuildRuntimeDiagnosticsSnapshot();
+        if (string.Equals(lastRuntimeDiagnosticsSnapshot, snapshot, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lastRuntimeDiagnosticsSnapshot = snapshot;
+        Debug.Log("[candy-runtime] " + snapshot);
+    }
+
+    private void RefreshRealtimeDebugOverlay()
+    {
+        if (!ShouldShowRealtimeDebugOverlay())
+        {
+            if (realtimeDebugOverlayBackground != null)
+            {
+                realtimeDebugOverlayBackground.enabled = false;
+            }
+
+            if (realtimeDebugOverlayText != null)
+            {
+                realtimeDebugOverlayText.enabled = false;
+            }
+            return;
+        }
+
+        EnsureRealtimeDebugOverlay();
+        if (realtimeDebugOverlayText == null)
+        {
+            return;
+        }
+
+        realtimeDebugOverlayText.enabled = true;
+        if (realtimeDebugOverlayBackground != null)
+        {
+            realtimeDebugOverlayBackground.enabled = true;
+        }
+
+        realtimeDebugOverlayText.text = BuildRealtimeDebugOverlayText();
+    }
+
+    private bool ShouldShowRealtimeDebugOverlay()
+    {
+        if (!useRealtimeBackend || !showRealtimeDebugOverlayInEditor)
+        {
+            return false;
+        }
+
+#if UNITY_EDITOR
+        return true;
+#else
+        return Debug.isDebugBuild;
+#endif
+    }
+
+    private void EnsureRealtimeDebugOverlay()
+    {
+        if (realtimeDebugOverlayText != null)
+        {
+            return;
+        }
+
+        Canvas[] canvases = FindObjectsOfType<Canvas>(true);
+        Canvas rootCanvas = null;
+        for (int i = 0; i < canvases.Length; i++)
+        {
+            Canvas candidate = canvases[i];
+            if (candidate == null || !candidate.isRootCanvas)
+            {
+                continue;
+            }
+
+            if (candidate.renderMode == RenderMode.WorldSpace)
+            {
+                continue;
+            }
+
+            rootCanvas = candidate;
+            break;
+        }
+
+        if (rootCanvas == null)
+        {
+            return;
+        }
+
+        Transform existing = rootCanvas.transform.Find("CandyRealtimeDebugOverlay");
+        GameObject overlayObject = existing != null ? existing.gameObject : new GameObject("CandyRealtimeDebugOverlay");
+        if (overlayObject.transform.parent != rootCanvas.transform)
+        {
+            overlayObject.transform.SetParent(rootCanvas.transform, false);
+        }
+
+        RectTransform rect = overlayObject.GetComponent<RectTransform>();
+        if (rect == null)
+        {
+            rect = overlayObject.AddComponent<RectTransform>();
+        }
+
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(20f, -20f);
+        rect.sizeDelta = new Vector2(520f, 240f);
+
+        realtimeDebugOverlayBackground = overlayObject.GetComponent<Image>();
+        if (realtimeDebugOverlayBackground == null)
+        {
+            realtimeDebugOverlayBackground = overlayObject.AddComponent<Image>();
+        }
+        realtimeDebugOverlayBackground.color = new Color(0.05f, 0.08f, 0.16f, 0.86f);
+        realtimeDebugOverlayBackground.raycastTarget = false;
+
+        Transform labelTransform = overlayObject.transform.Find("Label");
+        GameObject labelObject = labelTransform != null ? labelTransform.gameObject : new GameObject("Label");
+        if (labelObject.transform.parent != overlayObject.transform)
+        {
+            labelObject.transform.SetParent(overlayObject.transform, false);
+        }
+
+        RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+        if (labelRect == null)
+        {
+            labelRect = labelObject.AddComponent<RectTransform>();
+        }
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = new Vector2(14f, 14f);
+        labelRect.offsetMax = new Vector2(-14f, -14f);
+
+        realtimeDebugOverlayText = labelObject.GetComponent<TextMeshProUGUI>();
+        if (realtimeDebugOverlayText == null)
+        {
+            realtimeDebugOverlayText = labelObject.AddComponent<TextMeshProUGUI>();
+        }
+
+        RealtimeTextStyleUtils.ApplyReadableTypography(realtimeDebugOverlayText, minFontSize: 14f, maxFontSize: 22f);
+        realtimeDebugOverlayText.color = Color.white;
+        realtimeDebugOverlayText.alignment = TextAlignmentOptions.TopLeft;
+        realtimeDebugOverlayText.enableWordWrapping = true;
+        realtimeDebugOverlayText.overflowMode = TextOverflowModes.Overflow;
+        realtimeDebugOverlayText.raycastTarget = false;
+    }
+
+    private string BuildRealtimeDebugOverlayText()
+    {
+        return
+            $"Mode: {(useRealtimeBackend ? "realtime" : "legacy")}\n" +
+            $"Room: {(string.IsNullOrWhiteSpace(activeRoomCode) ? "none" : activeRoomCode)} Player: {(string.IsNullOrWhiteSpace(activePlayerId) ? "none" : activePlayerId)}\n" +
+            $"Tickets: {lastObservedTicketSetCount} RenderedCells: {lastRenderedCardCellCount} CardTarget: {lastRenderedCardTargetName} Value: {lastRenderedCardValue}\n" +
+            $"CardHealth: {lastRenderedCardHealth}\n" +
+            $"DrawObserved: {lastObservedDrawNumber}/{lastObservedDrawCount} BallTarget: {lastRenderedBallTargetName} BigBall: {lastRenderedBigBallTargetName} Rendered: {lastRenderedDrawNumber}\n" +
+            $"BallHealth: {lastRenderedBallHealth}\n" +
+            $"BigBallHealth: {lastRenderedBigBallHealth}\n" +
+            $"Countdown: {lastRenderedCountdownValue}\n" +
+            $"CountdownHealth: {lastRenderedCountdownHealth}\n" +
+            $"PlayersLabel: {lastRenderedPlayerCountValue}\n" +
+            $"PlayersHealth: {lastRenderedPlayerCountHealth}\n" +
+            $"Mismatch: {(string.IsNullOrWhiteSpace(lastRealtimeRenderMismatch) ? "none" : lastRealtimeRenderMismatch)}";
+    }
+
+    private string BuildRuntimeDiagnosticsSnapshot()
+    {
+        string activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+        string url = Application.absoluteURL ?? string.Empty;
+        string releaseHint = ResolveUrlParameter(url, "v");
+        if (string.IsNullOrWhiteSpace(releaseHint))
+        {
+            releaseHint = ResolveUrlParameter(url, "release");
+        }
+
+        string launchState = CandyLaunchBootstrap.IsLaunchContextResolved
+            ? "resolved"
+            : CandyLaunchBootstrap.IsResolvingLaunchContext
+                ? "resolving"
+                : CandyLaunchBootstrap.HasLaunchResolveError
+                    ? "error"
+                    : CandyLaunchBootstrap.HasLaunchContextInUrl
+                        ? "pending"
+                        : "none";
+
+        string tokenState = string.IsNullOrWhiteSpace((accessToken ?? string.Empty).Trim())
+            ? "missing"
+            : "present";
+
+        string roomState = string.IsNullOrWhiteSpace(activeRoomCode)
+            ? "none"
+            : activeRoomCode;
+        string playerState = string.IsNullOrWhiteSpace(activePlayerId)
+            ? "none"
+            : activePlayerId;
+        string mode = useRealtimeBackend ? "realtime" : "legacy";
+
+        bool realtimeReady = realtimeClient != null && realtimeClient.IsReady;
+        string backend = string.IsNullOrWhiteSpace(realtimeBackendBaseUrl)
+            ? "unset"
+            : realtimeBackendBaseUrl;
+        string releaseTag = string.IsNullOrWhiteSpace(releaseHint) ? "none" : releaseHint;
+        string mismatch = string.IsNullOrWhiteSpace(lastRealtimeRenderMismatch)
+            ? "none"
+            : lastRealtimeRenderMismatch;
+
+        return
+            $"scene={activeScene} mode={mode} backend={backend} launch={launchState} token={tokenState} " +
+            $"room={roomState} player={playerState} realtimeReady={realtimeReady} " +
+            $"tickets={lastObservedTicketSetCount} renderedCardCells={lastRenderedCardCellCount} " +
+            $"cardTarget={lastRenderedCardTargetName}:{lastRenderedCardValue} " +
+            $"drawCount={lastObservedDrawCount} drawObserved={lastObservedDrawNumber} drawRendered={lastRenderedDrawNumber} " +
+            $"ballSlot={lastRenderedBallSlotIndex} ballTarget={lastRenderedBallTargetName} bigBallTarget={lastRenderedBigBallTargetName} " +
+            $"countdown={lastRenderedCountdownValue} playerCountLabel={lastRenderedPlayerCountValue} " +
+            $"cardHealth={lastRenderedCardHealth} ballHealth={lastRenderedBallHealth} bigBallHealth={lastRenderedBigBallHealth} " +
+            $"countdownHealth={lastRenderedCountdownHealth} playerCountHealth={lastRenderedPlayerCountHealth} " +
+            $"mismatch={mismatch} releaseHint={releaseTag}";
+    }
+
+    private static string ResolveUrlParameter(string absoluteUrl, string key)
+    {
+        if (string.IsNullOrWhiteSpace(absoluteUrl) || string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(absoluteUrl, UriKind.Absolute, out Uri uri))
+        {
+            return string.Empty;
+        }
+
+        string query = uri.Query;
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            string queryValue = ResolveFormEncodedValue(query, key);
+            if (!string.IsNullOrWhiteSpace(queryValue))
+            {
+                return queryValue;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(uri.Fragment))
+        {
+            return string.Empty;
+        }
+
+        return ResolveFormEncodedValue(uri.Fragment, key);
+    }
+
+    private static string ResolveFormEncodedValue(string rawSection, string key)
+    {
+        if (string.IsNullOrWhiteSpace(rawSection) || string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        string section = rawSection.Trim();
+        if (section.StartsWith("?") || section.StartsWith("#"))
+        {
+            section = section.Substring(1);
+        }
+
+        if (section.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        string[] pairs = section.Split('&');
+        for (int i = 0; i < pairs.Length; i++)
+        {
+            string pair = pairs[i];
+            if (string.IsNullOrWhiteSpace(pair))
+            {
+                continue;
+            }
+
+            int separatorIndex = pair.IndexOf('=');
+            string rawKey = separatorIndex >= 0 ? pair.Substring(0, separatorIndex) : pair;
+            if (!string.Equals(Uri.UnescapeDataString(rawKey), key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string rawValue = separatorIndex >= 0 && separatorIndex + 1 < pair.Length
+                ? pair.Substring(separatorIndex + 1)
+                : string.Empty;
+            return Uri.UnescapeDataString(rawValue.Replace('+', ' ')).Trim();
+        }
+
+        return string.Empty;
+    }
+
     private void LogSchedulerSnapshotIfChanged(string source)
     {
         if (!logRealtimeLifecycleEvents)
@@ -636,213 +1294,6 @@ public partial class APIManager : MonoBehaviour
         }
     }
 
-    private IEnumerator ResolveLaunchContextFromUrlIfPresent()
-    {
-        if (!enableLaunchTokenBootstrap)
-        {
-            yield break;
-        }
-
-        string absoluteUrl = Application.absoluteURL;
-        if (!TryExtractLaunchTokenFromAbsoluteUrl(absoluteUrl, out string launchToken))
-        {
-            yield break;
-        }
-
-        string launchUrlForLog = absoluteUrl;
-        if (Uri.TryCreate(absoluteUrl, UriKind.Absolute, out Uri launchUriForLog))
-        {
-            launchUrlForLog = launchUriForLog.GetLeftPart(UriPartial.Path);
-        }
-        LogRealtimeLifecycleEvent("launch_token_detected", $"sourceUrl={launchUrlForLog}");
-
-        string resolveBaseUrl = ResolveLaunchApiBaseUrlFromAbsoluteUrl(absoluteUrl);
-        if (string.IsNullOrWhiteSpace(resolveBaseUrl))
-        {
-            Debug.LogError("[APIManager] Fant ikke gyldig base URL for launch-resolve.");
-            LogRealtimeLifecycleEvent("launch_resolve_failed", "reason=invalid_base_url");
-            yield break;
-        }
-
-        string endpoint = resolveBaseUrl + "/api/games/candy/launch-resolve";
-        LogRealtimeLifecycleEvent("launch_resolve_request", $"endpoint={endpoint}");
-        JSONObject payload = new();
-        payload["launchToken"] = launchToken;
-
-        using UnityWebRequest request = new UnityWebRequest(endpoint, UnityWebRequest.kHttpVerbPOST);
-        byte[] body = System.Text.Encoding.UTF8.GetBytes(payload.ToString());
-        request.uploadHandler = new UploadHandlerRaw(body);
-        request.downloadHandler = new DownloadHandlerBuffer();
-        request.SetRequestHeader("Content-Type", "application/json");
-
-        yield return request.SendWebRequest();
-
-        if (request.result != UnityWebRequest.Result.Success)
-        {
-            Debug.LogError("[APIManager] launch-resolve feilet: " + BuildTransportError(request));
-            LogRealtimeLifecycleEvent("launch_resolve_failed", $"reason=transport status={request.responseCode}");
-            yield break;
-        }
-
-        JSONNode root = SafeParseJsonNode(request.downloadHandler.text);
-        if (root == null)
-        {
-            Debug.LogError("[APIManager] launch-resolve returnerte ugyldig JSON.");
-            LogRealtimeLifecycleEvent("launch_resolve_failed", "reason=invalid_json");
-            yield break;
-        }
-
-        bool ok = root["ok"] == null || root["ok"].AsBool;
-        if (!ok)
-        {
-            string code = FirstNonEmptyValue(root["error"]?["code"], "INVALID_LAUNCH_TOKEN");
-            string message = FirstNonEmptyValue(root["error"]?["message"], "Ukjent launch-resolve-feil.");
-            Debug.LogError($"[APIManager] launch-resolve avvist ({code}): {message}");
-            LogRealtimeLifecycleEvent("launch_resolve_failed", $"reason=api_error code={code}");
-            yield break;
-        }
-
-        JSONNode data = root["data"];
-        if (data == null || data.IsNull)
-        {
-            Debug.LogError("[APIManager] launch-resolve mangler data.");
-            LogRealtimeLifecycleEvent("launch_resolve_failed", "reason=missing_data");
-            yield break;
-        }
-
-        string resolvedApiBaseUrl = NormalizeAbsoluteHttpUrlForRuntime(
-            FirstNonEmptyValue(data["apiBaseUrl"], resolveBaseUrl),
-            resolveBaseUrl);
-        ConfigureBackendBaseUrl(resolvedApiBaseUrl);
-
-        string resolvedAccessToken = FirstNonEmptyValue(data["accessToken"], accessToken);
-        string resolvedHallId = FirstNonEmptyValue(data["hallId"], hallId);
-        string resolvedPlayerName = FirstNonEmptyValue(data["playerName"], playerName);
-        string resolvedWalletId = FirstNonEmptyValue(data["walletId"], walletId);
-
-        ConfigureAccessToken(resolvedAccessToken);
-        ConfigureHall(resolvedHallId);
-        ConfigurePlayer(resolvedPlayerName, resolvedWalletId);
-        LogRealtimeLifecycleEvent(
-            "launch_resolve_ok",
-            $"hallId={resolvedHallId} walletId={resolvedWalletId} apiBaseUrl={resolvedApiBaseUrl}");
-
-        if (logBootstrapEvents)
-        {
-            Debug.Log($"[APIManager] Launch bootstrap OK. hall={resolvedHallId}, player={resolvedPlayerName}, wallet={resolvedWalletId}");
-        }
-    }
-
-    private string ResolveLaunchApiBaseUrlFromAbsoluteUrl(string absoluteUrl)
-    {
-        if (TryExtractUrlParamFromAbsoluteUrl(absoluteUrl, "apiBaseUrl", out string apiBaseFromUrl) ||
-            TryExtractUrlParamFromAbsoluteUrl(absoluteUrl, "apiBase", out apiBaseFromUrl))
-        {
-            return NormalizeAbsoluteHttpUrlForRuntime(apiBaseFromUrl, launchResolveBaseUrl);
-        }
-
-        if (realtimeClient != null && !string.IsNullOrWhiteSpace(realtimeClient.BackendBaseUrl))
-        {
-            return NormalizeAbsoluteHttpUrlForRuntime(realtimeClient.BackendBaseUrl, launchResolveBaseUrl);
-        }
-
-        BingoAutoLogin login = autoLogin != null ? autoLogin : FindObjectOfType<BingoAutoLogin>();
-        if (login != null && !string.IsNullOrWhiteSpace(login.BackendBaseUrl))
-        {
-            return NormalizeAbsoluteHttpUrlForRuntime(login.BackendBaseUrl, launchResolveBaseUrl);
-        }
-
-        return NormalizeAbsoluteHttpUrlForRuntime(launchResolveBaseUrl, "https://bingosystem-3.onrender.com");
-    }
-
-    private static bool TryExtractLaunchTokenFromAbsoluteUrl(string absoluteUrl, out string launchToken)
-    {
-        if (TryExtractUrlParamFromAbsoluteUrl(absoluteUrl, "lt", out launchToken))
-        {
-            return !string.IsNullOrWhiteSpace(launchToken);
-        }
-
-        launchToken = string.Empty;
-        return false;
-    }
-
-    private static bool TryExtractUrlParamFromAbsoluteUrl(string absoluteUrl, string key, out string value)
-    {
-        value = string.Empty;
-        if (string.IsNullOrWhiteSpace(absoluteUrl) || string.IsNullOrWhiteSpace(key))
-        {
-            return false;
-        }
-
-        string trimmedKey = key.Trim();
-        if (Uri.TryCreate(absoluteUrl, UriKind.Absolute, out Uri uri))
-        {
-            string queryValue = ParseFormEncodedKey(uri.Query, trimmedKey);
-            if (!string.IsNullOrWhiteSpace(queryValue))
-            {
-                value = queryValue;
-                return true;
-            }
-        }
-
-        int hashIndex = absoluteUrl.IndexOf('#');
-        if (hashIndex >= 0 && hashIndex + 1 < absoluteUrl.Length)
-        {
-            string fragmentValue = ParseFormEncodedKey(absoluteUrl.Substring(hashIndex + 1), trimmedKey);
-            if (!string.IsNullOrWhiteSpace(fragmentValue))
-            {
-                value = fragmentValue;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string ParseFormEncodedKey(string rawSection, string key)
-    {
-        if (string.IsNullOrWhiteSpace(rawSection) || string.IsNullOrWhiteSpace(key))
-        {
-            return string.Empty;
-        }
-
-        string section = rawSection.Trim();
-        if (section.StartsWith("?") || section.StartsWith("#"))
-        {
-            section = section.Substring(1);
-        }
-
-        if (section.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        string[] pairs = section.Split('&');
-        for (int i = 0; i < pairs.Length; i++)
-        {
-            string pair = pairs[i];
-            if (string.IsNullOrWhiteSpace(pair))
-            {
-                continue;
-            }
-
-            int separatorIndex = pair.IndexOf('=');
-            string rawKey = separatorIndex >= 0 ? pair.Substring(0, separatorIndex) : pair;
-            if (!string.Equals(Uri.UnescapeDataString(rawKey), key, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            string rawValue = separatorIndex >= 0 && separatorIndex + 1 < pair.Length
-                ? pair.Substring(separatorIndex + 1)
-                : string.Empty;
-            string decoded = Uri.UnescapeDataString(rawValue.Replace('+', ' ')).Trim();
-            return decoded;
-        }
-
-        return string.Empty;
-    }
-
     private static string NormalizeAbsoluteHttpUrlForRuntime(string value, string fallback)
     {
         string candidate = FirstNonEmptyValue(value, fallback);
@@ -868,7 +1319,7 @@ public partial class APIManager : MonoBehaviour
             return string.Empty;
         }
 
-        return candidate.TrimEnd('/');
+        return ApplyBackendRoutingPolicy(candidate.TrimEnd('/'));
     }
 
     private static string FirstNonEmptyValue(params string[] values)
@@ -888,36 +1339,6 @@ public partial class APIManager : MonoBehaviour
         }
 
         return string.Empty;
-    }
-
-    private static JSONNode SafeParseJsonNode(string jsonText)
-    {
-        if (string.IsNullOrWhiteSpace(jsonText))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JSON.Parse(jsonText);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string BuildTransportError(UnityWebRequest request)
-    {
-        string status = request.responseCode > 0 ? $"HTTP {request.responseCode}" : "No HTTP status";
-        string body = request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
-        string error = string.IsNullOrWhiteSpace(request.error) ? "Ukjent transportfeil." : request.error;
-        if (!string.IsNullOrWhiteSpace(body))
-        {
-            return $"{status}: {error}. Body: {body}";
-        }
-
-        return $"{status}: {error}";
     }
 
     public void SetRoomCode(string newRoomCode)
@@ -976,6 +1397,9 @@ public partial class APIManager : MonoBehaviour
     private void ApplySchedulerMetadata(JSONNode snapshot)
     {
         realtimeScheduler.ApplySchedulerSnapshot(snapshot);
+        realtimeBetArmedForNextRound =
+            !string.IsNullOrWhiteSpace(activePlayerId) &&
+            realtimeScheduler.ArmedPlayerIds.Contains(activePlayerId);
         LogSchedulerSnapshotIfChanged("room-update");
     }
 
@@ -986,8 +1410,15 @@ public partial class APIManager : MonoBehaviour
             return;
         }
 
+        // Theme1 bruker eksplisitte HUD-targets. Behold scene-layouten stabil når bindingen finnes,
+        // ellers blir countdown/player-count flyttet rundt av runtime-kode.
+        if (GetComponent<CandyTheme1HudBindingSet>() != null)
+        {
+            return;
+        }
+
         realtimeCountdownPresenter.PositionUnderBalls(
-            GameManager.instance?.numberGenerator,
+            ResolveNumberGenerator(),
             ResolveBallManager(),
             realtimeCountdownOffset,
             realtimeCountdownWidthMultiplier,
@@ -998,9 +1429,11 @@ public partial class APIManager : MonoBehaviour
 
     private void RefreshRealtimeCountdownLabel(bool forceRefresh = false)
     {
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
+        ApplyExplicitRealtimeHudBindingsFromComponent();
+        NumberGenerator generator = ResolveNumberGenerator();
         if (generator == null || generator.autoSpinRemainingPlayText == null)
         {
+            ReportRealtimeRenderMismatch("HUD countdownText mangler i Theme1.", asError: true);
             return;
         }
 
@@ -1012,54 +1445,39 @@ public partial class APIManager : MonoBehaviour
 
         PositionRealtimeCountdownBelowBalls();
         long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        generator.autoSpinRemainingPlayText.text = realtimeScheduler.BuildCountdownLabel(nowMs);
+        string countdownLabel = realtimeScheduler.BuildCountdownLabel(nowMs);
+        RealtimeTextStyleUtils.ApplyHudText(generator.autoSpinRemainingPlayText, countdownLabel);
+        RegisterRealtimeCountdownRendered(generator.autoSpinRemainingPlayText);
         RefreshRealtimeRoomPlayerCountLabel();
     }
 
     private void EnsureRealtimeRoomPlayerCountLabel()
     {
-        if (!useRealtimeBackend || realtimeRoomPlayerCountText != null)
+        if (!useRealtimeBackend)
         {
             return;
         }
 
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator == null || generator.autoSpinRemainingPlayText == null)
+        ApplyExplicitRealtimeHudBindingsFromComponent();
+        if (realtimeRoomPlayerCountText == null)
+        {
+            NumberGenerator generator = ResolveNumberGenerator();
+            if (generator != null && generator.autoSpinRemainingPlayText != null)
+            {
+                realtimeRoomPlayerCountText = CandyTheme1HudBindingSet.FindExistingPlayerCountText(generator.autoSpinRemainingPlayText);
+                if (realtimeRoomPlayerCountText == null)
+                {
+                    realtimeRoomPlayerCountText = CreateRuntimeRealtimeRoomPlayerCountText(generator.autoSpinRemainingPlayText);
+                }
+            }
+        }
+
+        if (realtimeRoomPlayerCountText != null)
         {
             return;
         }
 
-        RectTransform countdownRect = generator.autoSpinRemainingPlayText.rectTransform;
-        RectTransform parentRect = countdownRect != null ? countdownRect.parent as RectTransform : null;
-        if (parentRect == null)
-        {
-            return;
-        }
-
-        GameObject labelObject = new("RealtimeRoomPlayerCountText");
-        labelObject.transform.SetParent(parentRect, false);
-        RectTransform rect = labelObject.AddComponent<RectTransform>();
-        rect.anchorMin = countdownRect.anchorMin;
-        rect.anchorMax = countdownRect.anchorMax;
-        rect.pivot = countdownRect.pivot;
-        rect.anchoredPosition = countdownRect.anchoredPosition + realtimeRoomPlayerCountOffset;
-        rect.sizeDelta = new Vector2(
-            Mathf.Max(realtimeRoomPlayerCountMinWidth, countdownRect.rect.width),
-            Mathf.Max(30f, countdownRect.rect.height * 0.52f));
-
-        TextMeshProUGUI label = labelObject.AddComponent<TextMeshProUGUI>();
-        label.alignment = TextAlignmentOptions.Center;
-        label.enableAutoSizing = true;
-        label.fontSizeMin = 16f;
-        label.fontSizeMax = 30f;
-        label.fontSize = Mathf.Max(18f, generator.autoSpinRemainingPlayText.fontSize * 0.42f);
-        label.color = generator.autoSpinRemainingPlayText.color;
-        if (generator.autoSpinRemainingPlayText.font != null)
-        {
-            label.font = generator.autoSpinRemainingPlayText.font;
-        }
-
-        realtimeRoomPlayerCountText = label;
+        ReportRealtimeRenderMismatch("HUD roomPlayerCountText mangler i Theme1.", asError: true);
     }
 
     private void RefreshRealtimeRoomPlayerCountLabel()
@@ -1071,7 +1489,45 @@ public partial class APIManager : MonoBehaviour
         }
 
         int playerCount = Mathf.Max(0, realtimeScheduler.PlayerCount);
-        realtimeRoomPlayerCountText.text = $"{realtimeRoomPlayerCountPrefix} {playerCount}";
+        string labelValue = $"{realtimeRoomPlayerCountPrefix} {playerCount}";
+        RealtimeTextStyleUtils.ApplyHudText(realtimeRoomPlayerCountText, labelValue);
+        RegisterRealtimePlayerCountRendered(realtimeRoomPlayerCountText);
+    }
+
+    private TextMeshProUGUI CreateRuntimeRealtimeRoomPlayerCountText(TextMeshProUGUI countdownText)
+    {
+        if (countdownText == null || countdownText.transform.parent == null)
+        {
+            return null;
+        }
+
+        Transform parent = countdownText.transform.parent;
+        GameObject labelObject = new GameObject("RealtimeRoomPlayerCountText");
+        labelObject.transform.SetParent(parent, false);
+
+        RectTransform rect = labelObject.AddComponent<RectTransform>();
+        rect.anchorMin = countdownText.rectTransform.anchorMin;
+        rect.anchorMax = countdownText.rectTransform.anchorMax;
+        rect.pivot = countdownText.rectTransform.pivot;
+        rect.anchoredPosition = countdownText.rectTransform.anchoredPosition + realtimeRoomPlayerCountOffset;
+        rect.sizeDelta = new Vector2(
+            Mathf.Max(realtimeRoomPlayerCountMinWidth, countdownText.rectTransform.rect.width),
+            Mathf.Max(24f, countdownText.rectTransform.rect.height * 0.5f));
+
+        TextMeshProUGUI label = labelObject.AddComponent<TextMeshProUGUI>();
+        label.alignment = TextAlignmentOptions.Center;
+        label.raycastTarget = false;
+        label.font = countdownText.font;
+        label.fontSharedMaterial = countdownText.fontSharedMaterial != null
+            ? countdownText.fontSharedMaterial
+            : countdownText.font != null ? countdownText.font.material : null;
+        label.fontSize = Mathf.Max(18f, countdownText.fontSize * 0.42f);
+        label.color = countdownText.color;
+        label.enableWordWrapping = false;
+        label.text = $"{realtimeRoomPlayerCountPrefix} 0";
+
+        ReportRealtimeRenderMismatch("HUD roomPlayerCountText manglet i Theme1. Opprettet midlertidig runtime-label.", asError: false);
+        return label;
     }
 
     private void TickScheduledRoundStateRefresh()
@@ -1242,7 +1698,7 @@ public partial class APIManager : MonoBehaviour
             return;
         }
 
-        if (ShouldDeferRealtimeBootstrapForLaunchContext("join/create"))
+        if (ShouldDeferRealtimeBootstrapForLaunchContext("join/create", markPendingForLater: true))
         {
             return;
         }
@@ -1250,6 +1706,9 @@ public partial class APIManager : MonoBehaviour
         BindRealtimeClient();
         if (realtimeClient == null)
         {
+            ReportMissingRuntimeDependency(
+                "BingoRealtimeClient",
+                "Kan ikke bli med i rom uten realtime-klient.");
             return;
         }
 
@@ -1424,7 +1883,7 @@ public partial class APIManager : MonoBehaviour
             return;
         }
 
-        if (ShouldDeferRealtimeBootstrapForLaunchContext("room:state"))
+        if (ShouldDeferRealtimeBootstrapForLaunchContext("room:state", markPendingForLater: true))
         {
             return;
         }
@@ -1432,6 +1891,9 @@ public partial class APIManager : MonoBehaviour
         BindRealtimeClient();
         if (realtimeClient == null)
         {
+            ReportMissingRuntimeDependency(
+                "BingoRealtimeClient",
+                "Kan ikke hente room:state uten realtime-klient.");
             TryRunEditorLocalRoundFallback("realtimeClient mangler");
             return;
         }
@@ -1503,6 +1965,11 @@ public partial class APIManager : MonoBehaviour
     private bool TryRunEditorLocalRoundFallback(string reason)
     {
 #if UNITY_EDITOR
+        if (!enableEditorLocalRoundFallback)
+        {
+            return false;
+        }
+
         if (!allowEditorLocalFallbackWhenRealtimeUnavailable || hasTriggeredEditorLocalFallback)
         {
             return false;
@@ -1549,7 +2016,39 @@ public partial class APIManager : MonoBehaviour
             normalized = "https://" + normalized;
         }
 
-        return normalized.TrimEnd('/');
+        return ApplyBackendRoutingPolicy(normalized.TrimEnd('/'));
+    }
+
+    private static string ApplyBackendRoutingPolicy(string normalizedUrl)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            return DEFAULT_REALTIME_BACKEND_BASE_URL;
+        }
+
+        if (ALLOW_DIRECT_PRODUCTION_BACKEND)
+        {
+            return normalizedUrl;
+        }
+
+        if (!Uri.TryCreate(normalizedUrl, UriKind.Absolute, out Uri parsed))
+        {
+            return DEFAULT_REALTIME_BACKEND_BASE_URL;
+        }
+
+        if (!Uri.TryCreate(PRODUCTION_REALTIME_BACKEND_BASE_URL, UriKind.Absolute, out Uri productionParsed))
+        {
+            return normalizedUrl;
+        }
+
+        if (string.Equals(parsed.Host, productionParsed.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            Debug.LogWarning(
+                $"[APIManager] Blokkerer direkte backend mot prod ({productionParsed.Host}). Bruker staging i stedet.");
+            return DEFAULT_REALTIME_BACKEND_BASE_URL;
+        }
+
+        return normalizedUrl;
     }
 
     private void HandleRecoverExistingRoomStateAck(SocketAck ack)
@@ -1672,6 +2171,12 @@ public partial class APIManager : MonoBehaviour
 
     public void StartGameWithBet()
     {
+        if (useRealtimeBackend)
+        {
+            ReportLegacyVisualWriteAttempt("APIManager.StartGameWithBet");
+            return;
+        }
+
         if (GameManager.instance != null)
         {
             if (isSlotDataFetched)

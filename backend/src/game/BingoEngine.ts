@@ -49,6 +49,7 @@ interface StartGameInput {
   ticketsPerPlayer?: number;
   payoutPercent?: number;
   participantPlayerIds?: string[];
+  allowEmptyRound?: boolean;
 }
 
 interface RerollTicketsInput {
@@ -584,11 +585,10 @@ export class BingoEngine {
     }
     const normalizedPayoutPercent = Math.round(payoutPercent * 100) / 100;
 
-    const requestedParticipants = Array.isArray(input.participantPlayerIds)
-      ? input.participantPlayerIds
-      : [];
+    const hasExplicitParticipantSelection = Array.isArray(input.participantPlayerIds);
+    const requestedParticipants = hasExplicitParticipantSelection ? input.participantPlayerIds ?? [] : [];
     const players: Player[] = [];
-    if (requestedParticipants.length > 0) {
+    if (hasExplicitParticipantSelection) {
       const seenPlayerIds = new Set<string>();
       for (const participantPlayerId of requestedParticipants) {
         const normalizedPlayerId = participantPlayerId?.trim();
@@ -611,7 +611,12 @@ export class BingoEngine {
       players.push(...room.players.values());
     }
 
-    if (players.length < this.minPlayersToStart) {
+    const allowEmptyRound =
+      input.allowEmptyRound === true &&
+      hasExplicitParticipantSelection &&
+      players.length === 0;
+
+    if (players.length < this.minPlayersToStart && !allowEmptyRound) {
       throw new DomainError(
         "NOT_ENOUGH_PLAYERS",
         `Du trenger minst ${this.minPlayersToStart} spiller${this.minPlayersToStart == 1 ? "" : "e"} for å starte.`

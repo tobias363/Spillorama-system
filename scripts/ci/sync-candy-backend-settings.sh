@@ -16,6 +16,8 @@ ADMIN_EMAIL="${CANDY_ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${CANDY_ADMIN_PASSWORD:-}"
 CANDYGAME_PUBLIC_URL="${CANDYGAME_PUBLIC_URL:-https://candygame-9q3h.onrender.com}"
 CANDY_API_BASE_URL="${CANDY_API_BASE_URL:-${BACKEND_BASE_URL}}"
+CANDY_ALLOW_PRODUCTION_API_BASE_URL="${CANDY_ALLOW_PRODUCTION_API_BASE_URL:-false}"
+PRODUCTION_CANDY_API_BASE_URL="https://bingosystem-3.onrender.com"
 
 if [[ -z "${BACKEND_BASE_URL}" ]]; then
   echo "[candy-backend-sync] Missing CANDY_BACKEND_BASE_URL." >&2
@@ -33,6 +35,16 @@ fi
 BASE_URL="${BACKEND_BASE_URL%/}"
 launch_url="${CANDYGAME_PUBLIC_URL%/}"
 api_base_url="${CANDY_API_BASE_URL%/}"
+
+allow_production_api_base_url="$(printf '%s' "${CANDY_ALLOW_PRODUCTION_API_BASE_URL}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${allow_production_api_base_url}" != "true" ]]; then
+  if [[ "${BASE_URL}" == "${PRODUCTION_CANDY_API_BASE_URL}" || "${api_base_url}" == "${PRODUCTION_CANDY_API_BASE_URL}" ]]; then
+    echo "[candy-backend-sync] Refusing direct production target (${PRODUCTION_CANDY_API_BASE_URL})." >&2
+    echo "[candy-backend-sync] Set CANDY_ALLOW_PRODUCTION_API_BASE_URL=true only when promoting staging-validated release." >&2
+    exit 1
+  fi
+fi
+
 COOKIE_JAR="$(mktemp)"
 trap 'rm -f "${COOKIE_JAR}"' EXIT
 

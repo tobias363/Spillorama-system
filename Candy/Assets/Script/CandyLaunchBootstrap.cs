@@ -8,7 +8,9 @@ using UnityEngine.Networking;
 [DefaultExecutionOrder(-10000)]
 public sealed class CandyLaunchBootstrap : MonoBehaviour
 {
-    private const string DefaultBackendBaseUrl = "https://bingosystem-3.onrender.com";
+    private const string DefaultBackendBaseUrl = "https://bingosystem-staging.onrender.com";
+    private const string ProductionBackendBaseUrl = "https://bingosystem-3.onrender.com";
+    private const bool AllowDirectProductionBackend = false;
     private const string LaunchResolvePath = "/api/games/candy/launch-resolve";
 
     private static CandyLaunchBootstrap instance;
@@ -364,7 +366,19 @@ public sealed class CandyLaunchBootstrap : MonoBehaviour
             normalized = "https://" + normalized;
         }
 
-        return normalized.TrimEnd('/');
+        normalized = normalized.TrimEnd('/');
+
+        if (!AllowDirectProductionBackend &&
+            Uri.TryCreate(normalized, UriKind.Absolute, out Uri parsed) &&
+            Uri.TryCreate(ProductionBackendBaseUrl, UriKind.Absolute, out Uri prodParsed) &&
+            string.Equals(parsed.Host, prodParsed.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            Debug.LogWarning(
+                $"[CandyLaunchBootstrap] Blokkerer direkte backend mot prod ({prodParsed.Host}). Bruker staging i stedet.");
+            return DefaultBackendBaseUrl;
+        }
+
+        return normalized;
     }
 
     private static string SafeUrlDecode(string value)

@@ -79,6 +79,7 @@ public class NumberGenerator : MonoBehaviour
     private bool hasLoggedMissingExtraBallObj;
     private bool hasLoggedMissingNumberManager;
     private bool hasLoggedMissingApiManager;
+    private CandyCardViewBindingSet runtimeCardViewBindings;
 
     private void OnEnable()
     {
@@ -107,12 +108,19 @@ public class NumberGenerator : MonoBehaviour
         {
             paylineManager = new PaylineManager(this);
             ResolveOptionalSceneReferences();
+            ApplyExplicitRealtimeCardViewBindingsFromComponent();
             SetActiveIfChanged(extraBallObj, false);
             ResetRealtimeBonusFlow(closeBonusPanel: true);
-            TrySetAutoSpinRemainingPlayText(string.Empty);
+            if (APIManager.instance == null || !APIManager.instance.UseRealtimeBackend)
+            {
+                TrySetAutoSpinRemainingPlayText(string.Empty);
+            }
             EventManager.isPlayOver = true;
             InitializeSelectedPatterns();
-            ApplyReadableTypographyToBoard();
+            if (APIManager.instance == null || !APIManager.instance.UseRealtimeBackend)
+            {
+                ApplyReadableTypographyToBoard();
+            }
         }
         catch (Exception ex)
         {
@@ -152,7 +160,10 @@ public class NumberGenerator : MonoBehaviour
     void CheckRemainingPlay()
     {
         EventManager.isPlayOver = true;
-        TrySetAutoSpinRemainingPlayText(string.Empty);
+        if (APIManager.instance == null || !APIManager.instance.UseRealtimeBackend)
+        {
+            TrySetAutoSpinRemainingPlayText(string.Empty);
+        }
         autoSpinCount -= 1;
         if (isShowTimer)
         {
@@ -176,7 +187,10 @@ public class NumberGenerator : MonoBehaviour
         {
             EventManager.isAutoSpinStart = false;
 
-            TrySetAutoSpinRemainingPlayText(string.Empty);
+            if (APIManager.instance == null || !APIManager.instance.UseRealtimeBackend)
+            {
+                TrySetAutoSpinRemainingPlayText(string.Empty);
+            }
 
             return;
         }
@@ -201,6 +215,14 @@ public class NumberGenerator : MonoBehaviour
 
     private void StartGame()
     {
+        if (APIManager.instance != null && APIManager.instance.UseRealtimeBackend)
+        {
+            if (!ValidateRealtimePatternConfiguration(out string patternError))
+            {
+                Debug.LogError("[NumberGenerator] " + patternError);
+                return;
+            }
+        }
 
         //totalSelectedPatterns.Clear();
         foreach (var wrapper in mainSelectedIndexes)
@@ -235,6 +257,12 @@ public class NumberGenerator : MonoBehaviour
 
     public void PlaceBallAsPerFetch()
     {
+        if (APIManager.instance != null && APIManager.instance.UseRealtimeBackend)
+        {
+            APIManager.instance.ReportLegacyVisualWriteAttempt("NumberGenerator.PlaceBallAsPerFetch");
+            return;
+        }
+
         InitializeAllNumbers();
 
         for (int i = 0; i < totalSelectedPatterns.Count; i++)
@@ -795,6 +823,12 @@ public class NumberGenerator : MonoBehaviour
 
     public void CheckSelectedNumb(int num)
     {
+        if (APIManager.instance != null && APIManager.instance.UseRealtimeBackend)
+        {
+            APIManager.instance.ReportLegacyVisualWriteAttempt("NumberGenerator.CheckSelectedNumb");
+            return;
+        }
+
         if (generatedNO == null || num < 0 || num >= generatedNO.Count)
         {
             return;
@@ -1281,12 +1315,6 @@ public class NumberGenerator : MonoBehaviour
                 return;
             }
 
-            if (totalSelectedPatterns.Count == 0)
-            {
-                // Legacy Theme2 mangler ofte NumberManager-binding; behold en enkel default pattern.
-                totalSelectedPatterns.Add(1);
-            }
-
             if (!hasLoggedMissingNumberManager)
             {
                 if (NumberManager.instance == null)
@@ -1315,8 +1343,39 @@ public class NumberGenerator : MonoBehaviour
         }
     }
 
+    public bool ValidateRealtimePatternConfiguration(out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (totalSelectedPatterns == null || totalSelectedPatterns.Count == 0)
+        {
+            errorMessage = "Mangler aktivt mønster for realtime-runden. Sett totalSelectedPatterns/currentPatternIndex før start.";
+            return false;
+        }
+
+        if (patternList == null || patternList.Count == 0)
+        {
+            errorMessage = "patternList er tom. Kan ikke starte realtime-runde uten mønsterdefinisjoner.";
+            return false;
+        }
+
+        for (int i = 0; i < totalSelectedPatterns.Count; i++)
+        {
+            int patternIndex = totalSelectedPatterns[i];
+            if (patternIndex < 0 || patternIndex >= patternList.Count)
+            {
+                errorMessage =
+                    $"Ugyldig patternIndex {patternIndex} i totalSelectedPatterns (patternList.Count={patternList.Count}).";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void ResolveOptionalSceneReferences()
     {
+        runtimeCardViewBindings = GetComponent<CandyCardViewBindingSet>();
+
         if (extraBallObj == null)
         {
             extraBallObj = GameObject.Find("ExtraBalls");
@@ -1342,8 +1401,31 @@ public class NumberGenerator : MonoBehaviour
         }
     }
 
+    public void ApplyExplicitRealtimeCardViewBindingsFromComponent()
+    {
+        runtimeCardViewBindings = runtimeCardViewBindings != null
+            ? runtimeCardViewBindings
+            : GetComponent<CandyCardViewBindingSet>();
+
+        if (runtimeCardViewBindings == null)
+        {
+            return;
+        }
+
+        if (!runtimeCardViewBindings.TryApplyTo(this, out string error))
+        {
+            Debug.LogError("[NumberGenerator] Klarte ikke anvende CandyCardViewBindingSet. " + error);
+        }
+    }
+
     private void TrySetAutoSpinRemainingPlayText(string value)
     {
+        if (APIManager.instance != null && APIManager.instance.UseRealtimeBackend)
+        {
+            APIManager.instance.ReportLegacyVisualWriteAttempt("NumberGenerator.TrySetAutoSpinRemainingPlayText");
+            return;
+        }
+
         if (autoSpinRemainingPlayText != null)
         {
             autoSpinRemainingPlayText.text = value;

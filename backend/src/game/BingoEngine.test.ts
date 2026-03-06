@@ -422,6 +422,42 @@ test("startGame can include only bet-armed participants", async () => {
   assert.equal(guestPlayer.balance, 1000);
 });
 
+test("startGame allows empty observer round when explicit participant selection is empty", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minPlayersToStart: 1
+  });
+  const { roomCode, hostPlayerId } = await createRoomWithTwoPlayers({
+    engine,
+    hallId: "hall-1",
+    hostName: "Host",
+    hostWalletId: "wallet-host",
+    guestName: "Guest",
+    guestWalletId: "wallet-guest"
+  });
+
+  await engine.startGame({
+    roomCode,
+    actorPlayerId: hostPlayerId,
+    entryFee: 100,
+    ticketsPerPlayer: 1,
+    participantPlayerIds: [],
+    allowEmptyRound: true
+  });
+
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  assert.ok(snapshot.currentGame);
+  assert.equal(snapshot.currentGame?.status, "RUNNING");
+  assert.deepEqual(Object.keys(snapshot.currentGame?.tickets ?? {}), []);
+  assert.equal(snapshot.players.find((player) => player.id === hostPlayerId)?.balance, 1000);
+
+  const drawnNumber = await engine.drawNextNumber({ roomCode, actorPlayerId: hostPlayerId });
+  assert.ok(Number.isFinite(drawnNumber));
+
+  const runningSnapshot = engine.getRoomSnapshot(roomCode);
+  assert.equal(runningSnapshot.currentGame?.status, "RUNNING");
+  assert.equal(runningSnapshot.currentGame?.drawnNumbers.length, 1);
+});
+
 test("rerollTicketsForPlayer keeps pre-round tickets and startGame reuses them", async () => {
   const engine = new BingoEngine(new SequenceTicketBingoAdapter(), new InMemoryWalletAdapter(), {
     minPlayersToStart: 2
