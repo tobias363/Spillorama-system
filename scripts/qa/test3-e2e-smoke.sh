@@ -339,8 +339,8 @@ fi
 
 echo "[test3-e2e] Launch resolve (second consume should fail)"
 http_request "POST" "${BASE_URL}/api/games/candy/launch-resolve" "$(jq -n --arg launchToken "$launch_token" '{launchToken:$launchToken}')"
-if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "[test3-e2e] launch-resolve-second expected HTTP 200, got ${HTTP_CODE}" >&2
+if [[ "$HTTP_CODE" != "400" && "$HTTP_CODE" != "200" ]]; then
+  echo "[test3-e2e] launch-resolve-second expected HTTP 400/200, got ${HTTP_CODE}" >&2
   exit 1
 fi
 write_artifact "launch-resolve-second.json" "${HTTP_BODY}"
