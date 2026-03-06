@@ -15,9 +15,21 @@ public partial class APIManager
         public JSONNode ClaimNode;
     }
 
-    private int hardFallbackDrawNumber = -1;
-    private float hardFallbackDrawVisibleUntil = -1f;
-    private GUIStyle hardFallbackDrawGuiStyle;
+    private readonly struct RealtimeNearWinState
+    {
+        public readonly int PatternIndex;
+        public readonly int CardNo;
+        public readonly int CellIndex;
+        public readonly int MissingNumber;
+
+        public RealtimeNearWinState(int patternIndex, int cardNo, int cellIndex, int missingNumber)
+        {
+            PatternIndex = patternIndex;
+            CardNo = cardNo;
+            CellIndex = cellIndex;
+            MissingNumber = missingNumber;
+        }
+    }
 
     private void HandleRealtimeRoomUpdate(JSONNode snapshot)
     {
@@ -46,41 +58,34 @@ public partial class APIManager
         }
 
         ApplySchedulerMetadata(snapshot);
-        RefreshRealtimePlayerContext(snapshot);
-        TrySendPendingRealtimeBetArm();
 
         JSONNode currentGame = snapshot["currentGame"];
         if (currentGame == null || currentGame.IsNull)
         {
             realtimeScheduler.SetCurrentGameStatus("NONE");
-            bool appliedPreRoundTickets = TryApplyPreRoundTicketsFromSnapshot(snapshot);
             if (!string.IsNullOrWhiteSpace(activeGameId))
             {
-                ScheduleDelayedOverlayReset(activeGameId);
                 ResetRealtimeRoundVisuals();
-                LogRealtimeDrawMetrics(activeGameId, "no-current-game");
             }
+
+            NumberGenerator endedRoundGenerator = GameManager.instance?.numberGenerator;
+            if (endedRoundGenerator != null)
+            {
+                endedRoundGenerator.ClearPaylineVisuals();
+            }
+
+            StopRealtimeNearWinBlinking();
+            ResetRealtimeBonusState(closeBonusPanel: true);
 
             activeGameId = string.Empty;
             processedDrawCount = 0;
-            renderedDrawCount = 0;
-            realtimeBetArmedForNextRound = false;
-            realtimeRerollRequestPending = false;
-            realtimeClaimAttemptKeys.Clear();
-            if (!appliedPreRoundTickets)
-            {
-                currentTicketPage = 0;
-                activeTicketSets.Clear();
-            }
-            overlaysClearedForEndedGameId = string.Empty;
-            GameManager.instance?.SetRoundWinningTotalFromRealtime(0);
-            ResetRealtimeDrawReplayState(clearMetrics: true);
+            currentTicketPage = 0;
+            activeTicketSets.Clear();
             RefreshRealtimeCountdownLabel(forceRefresh: true);
             return;
         }
 
-        string currentGameStatus = currentGame["status"];
-        realtimeScheduler.SetCurrentGameStatus(currentGameStatus);
+        realtimeScheduler.SetCurrentGameStatus(currentGame["status"]);
 
         string gameId = currentGame["id"];
         if (string.IsNullOrWhiteSpace(gameId))
@@ -92,19 +97,10 @@ public partial class APIManager
         if (!string.Equals(activeGameId, gameId, StringComparison.Ordinal))
         {
             string previousGameId = activeGameId;
-            if (!string.IsNullOrWhiteSpace(previousGameId))
-            {
-                LogRealtimeDrawMetrics(previousGameId, "game-transition");
-            }
             activeGameId = gameId;
             processedDrawCount = 0;
-            renderedDrawCount = 0;
-            realtimeClaimAttemptKeys.Clear();
-            ResetRealtimeDrawReplayState(clearMetrics: true);
             currentTicketPage = 0;
             activeTicketSets.Clear();
-            overlaysClearedForEndedGameId = string.Empty;
-            GameManager.instance?.SetRoundWinningTotalFromRealtime(0);
             ResetRealtimeRoundVisuals();
             NumberGenerator nextRoundGenerator = GameManager.instance?.numberGenerator;
             if (nextRoundGenerator != null)
@@ -112,161 +108,14 @@ public partial class APIManager
                 nextRoundGenerator.ClearPaylineVisuals();
             }
 
-            CancelDelayedOverlayReset();
             StopRealtimeNearWinBlinking();
             ResetRealtimeBonusState(closeBonusPanel: true, previousGameId: previousGameId);
         }
 
-        bool isRunning = string.Equals(currentGameStatus, "RUNNING", StringComparison.OrdinalIgnoreCase);
-        bool isEnded = string.Equals(currentGameStatus, "ENDED", StringComparison.OrdinalIgnoreCase);
-
-        if (isRunning)
-        {
-            CancelDelayedOverlayReset();
-            overlaysClearedForEndedGameId = string.Empty;
-        }
-        else if (isEnded)
-        {
-            ScheduleDelayedOverlayReset(gameId);
-            LogRealtimeDrawMetrics(gameId, "game-ended");
-        }
-
-        bool hasPreRoundTickets = !isRunning && TryApplyPreRoundTicketsFromSnapshot(snapshot);
-        if (!hasPreRoundTickets)
-        {
-            ApplyMyTicketToCards(currentGame);
-        }
-        bool skipCardMarking = string.Equals(overlaysClearedForEndedGameId, gameId, StringComparison.Ordinal);
-        ApplyDrawnNumbers(currentGame, skipCardMarking);
-        TryAutoSubmitClaimsFromRealtime(currentGame);
-        RefreshRealtimeRoundWinning(currentGame);
+        ApplyMyTicketToCards(currentGame);
+        ApplyDrawnNumbers(currentGame);
         RefreshRealtimeWinningPatternVisuals(currentGame);
         RefreshRealtimeCountdownLabel(forceRefresh: true);
-    }
-
-    private void RefreshRealtimePlayerContext(JSONNode snapshot)
-    {
-        if (snapshot == null || snapshot.IsNull)
-        {
-            return;
-        }
-
-        JSONNode players = snapshot["players"];
-        if (!string.IsNullOrWhiteSpace(activePlayerId) &&
-            players != null &&
-            !players.IsNull &&
-            players.IsArray)
-        {
-            for (int i = 0; i < players.Count; i++)
-            {
-                JSONNode player = players[i];
-                if (player == null || player.IsNull)
-                {
-                    continue;
-                }
-
-                string playerId = player["id"];
-                if (!string.Equals(playerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (TryParseNonNegativeRoundedAmount(player["balance"], out int resolvedBalance))
-                {
-                    GameManager.instance?.SetTotalMoneyAbsoluteFromRealtime(resolvedBalance);
-                }
-
-                break;
-            }
-        }
-
-        realtimeBetArmedForNextRound = false;
-        JSONNode scheduler = snapshot["scheduler"];
-        if (scheduler == null || scheduler.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            return;
-        }
-
-        JSONNode armedPlayerIds = scheduler["armedPlayerIds"];
-        if (armedPlayerIds == null || armedPlayerIds.IsNull || !armedPlayerIds.IsArray)
-        {
-            return;
-        }
-
-        for (int i = 0; i < armedPlayerIds.Count; i++)
-        {
-            string armedPlayerId = armedPlayerIds[i];
-            if (string.Equals(armedPlayerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
-            {
-                realtimeBetArmedForNextRound = true;
-                return;
-            }
-        }
-    }
-
-    private static bool TryParseNonNegativeRoundedAmount(JSONNode node, out int roundedAmount)
-    {
-        roundedAmount = 0;
-        if (node == null || node.IsNull)
-        {
-            return false;
-        }
-
-        string raw = node.Value;
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return false;
-        }
-
-        if (!float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed))
-        {
-            return false;
-        }
-
-        if (float.IsNaN(parsed) || float.IsInfinity(parsed) || parsed < 0f)
-        {
-            return false;
-        }
-
-        roundedAmount = Mathf.RoundToInt(parsed);
-        return true;
-    }
-
-    private bool TryApplyPreRoundTicketsFromSnapshot(JSONNode snapshot)
-    {
-        if (snapshot == null || snapshot.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            return false;
-        }
-
-        JSONNode preRoundTicketsNode = snapshot["preRoundTickets"];
-        if (preRoundTicketsNode == null || preRoundTicketsNode.IsNull)
-        {
-            return false;
-        }
-
-        JSONNode myPreRoundTicketsNode = preRoundTicketsNode[activePlayerId];
-        if (myPreRoundTicketsNode == null || myPreRoundTicketsNode.IsNull)
-        {
-            return false;
-        }
-
-        List<List<int>> ticketSets = RealtimeTicketSetUtils.ExtractTicketSets(myPreRoundTicketsNode);
-        if (ticketSets == null || ticketSets.Count == 0)
-        {
-            return false;
-        }
-
-        if (RealtimeTicketSetUtils.AreTicketSetsEqual(activeTicketSets, ticketSets))
-        {
-            return true;
-        }
-
-        currentTicketPage = 0;
-        activeTicketSets = RealtimeTicketSetUtils.CloneTicketSets(ticketSets);
-        cachedStableTicketSets = RealtimeTicketSetUtils.CloneTicketSets(ticketSets);
-        ApplyTicketSetsToCards(activeTicketSets, preserveExistingNumbers: false);
-        return true;
     }
 
     private void ApplyMyTicketToCards(JSONNode currentGame)
@@ -279,22 +128,12 @@ public partial class APIManager
         JSONNode tickets = currentGame["tickets"];
         if (tickets == null || tickets.IsNull)
         {
-            if (preserveTicketNumbersOnTransientSnapshotGaps && cachedStableTicketSets.Count > 0 && activeTicketSets.Count == 0)
-            {
-                activeTicketSets = RealtimeTicketSetUtils.CloneTicketSets(cachedStableTicketSets);
-                ApplyTicketSetsToCards(activeTicketSets, preserveExistingNumbers: true);
-            }
             return;
         }
 
         JSONNode myTicketsNode = tickets[activePlayerId];
         if (myTicketsNode == null || myTicketsNode.IsNull)
         {
-            if (preserveTicketNumbersOnTransientSnapshotGaps && cachedStableTicketSets.Count > 0 && activeTicketSets.Count == 0)
-            {
-                activeTicketSets = RealtimeTicketSetUtils.CloneTicketSets(cachedStableTicketSets);
-                ApplyTicketSetsToCards(activeTicketSets, preserveExistingNumbers: true);
-            }
             return;
         }
 
@@ -310,13 +149,10 @@ public partial class APIManager
         }
 
         activeTicketSets = RealtimeTicketSetUtils.CloneTicketSets(ticketSets);
-        cachedStableTicketSets = RealtimeTicketSetUtils.CloneTicketSets(ticketSets);
-        ApplyTicketSetsToCards(
-            activeTicketSets,
-            preserveExistingNumbers: preserveTicketNumbersOnTransientSnapshotGaps);
+        ApplyTicketSetsToCards(activeTicketSets);
     }
 
-    private void ApplyTicketSetsToCards(List<List<int>> ticketSets, bool preserveExistingNumbers = true)
+    private void ApplyTicketSetsToCards(List<List<int>> ticketSets)
     {
         if (ticketSets == null || ticketSets.Count == 0)
         {
@@ -354,7 +190,6 @@ public partial class APIManager
                 continue;
             }
 
-            List<int> previousNumbers = new List<int>(card.numb);
             card.numb.Clear();
             card.selectedPayLineCanBe.Clear();
             card.paylineindex.Clear();
@@ -399,10 +234,7 @@ public partial class APIManager
             bool shouldPopulate = sourceTicket != null;
             for (int cellIndex = 0; cellIndex < 15; cellIndex++)
             {
-                int previousValue = cellIndex < previousNumbers.Count ? previousNumbers[cellIndex] : 0;
-                int value = shouldPopulate
-                    ? sourceTicket[cellIndex]
-                    : (preserveExistingNumbers && previousValue > 0 ? previousValue : 0);
+                int value = shouldPopulate ? sourceTicket[cellIndex] : 0;
                 card.numb.Add(value);
 
                 if (cellIndex < card.num_text.Count)
@@ -421,7 +253,7 @@ public partial class APIManager
         }
     }
 
-    private void ApplyDrawnNumbers(JSONNode currentGame, bool skipCardMarking)
+    private void ApplyDrawnNumbers(JSONNode currentGame)
     {
         JSONNode drawnNumbers = currentGame["drawnNumbers"];
         if (drawnNumbers == null || drawnNumbers.IsNull || !drawnNumbers.IsArray)
@@ -435,18 +267,18 @@ public partial class APIManager
             return;
         }
 
-        string drawGameId = FirstNonEmptyValue(currentGame["id"], activeGameId);
-        int drawCountCap = ResolveRealtimeDrawCountCap();
-        int cappedDrawCount = Mathf.Min(drawnNumbers.Count, drawCountCap);
-        for (int drawIndex = 0; drawIndex < cappedDrawCount; drawIndex++)
+        int previousProcessedDrawCount = Mathf.Max(0, processedDrawCount);
+        for (int drawIndex = 0; drawIndex < drawnNumbers.Count; drawIndex++)
         {
             int drawnNumber = drawnNumbers[drawIndex].AsInt;
-            if (!skipCardMarking)
+            RealtimeTicketSetUtils.MarkDrawnNumberOnCards(generator, drawnNumber);
+
+            if (drawIndex < previousProcessedDrawCount)
             {
-                RealtimeTicketSetUtils.MarkDrawnNumberOnCards(generator, drawnNumber);
+                continue;
             }
 
-            EnqueueRealtimeDrawForReplay(drawGameId, drawIndex, drawnNumber);
+            ShowRealtimeDrawBall(drawIndex, drawnNumber);
 
             if (autoMarkDrawnNumbers &&
                 RealtimeTicketSetUtils.TicketContainsInAnyTicketSet(activeTicketSets, drawnNumber) &&
@@ -459,533 +291,7 @@ public partial class APIManager
             }
         }
 
-        if (drawnNumbers.Count > cappedDrawCount)
-        {
-            Debug.LogWarning(
-                $"[APIManager] Mottok {drawnNumbers.Count} trekk i snapshot, men klient-cap er {drawCountCap}. " +
-                "Ekstra trekk ignoreres i UI.");
-        }
-
-        processedDrawCount = cappedDrawCount;
-        renderedDrawCount = Mathf.Clamp(renderedDrawCount, 0, drawCountCap);
-
-        if (renderedDrawCount < cappedDrawCount && pendingRealtimeDrawQueue.Count == 0)
-        {
-            QueueDrawResync("draw-replay-empty-lag");
-        }
-    }
-
-    private void EnqueueRealtimeDrawForReplay(string gameId, int drawIndex, int drawnNumber)
-    {
-        if (string.IsNullOrWhiteSpace(gameId) || drawIndex < 0)
-        {
-            return;
-        }
-
-        if (drawIndex < renderedDrawCount)
-        {
-            return;
-        }
-
-        string drawKey = $"{gameId}:{drawIndex}";
-        if (pendingRealtimeDrawKeys.Contains(drawKey))
-        {
-            return;
-        }
-
-        pendingRealtimeDrawQueue.Enqueue(new RealtimeDrawRenderItem
-        {
-            GameId = gameId,
-            DrawIndex = drawIndex,
-            DrawnNumber = drawnNumber
-        });
-        pendingRealtimeDrawKeys.Add(drawKey);
-        drawMetricEnqueued += 1;
-
-        if (drawMetricsGameId != gameId)
-        {
-            drawMetricsGameId = gameId;
-        }
-
-        if (logRealtimeDrawMetrics)
-        {
-            Debug.Log($"[draw] draw_enqueued game={gameId} idx={drawIndex} no={drawnNumber} backlog={pendingRealtimeDrawQueue.Count}");
-        }
-
-        StartRealtimeDrawReplayLoop();
-    }
-
-    private void StartRealtimeDrawReplayLoop()
-    {
-        if (realtimeDrawReplayCoroutine != null)
-        {
-            return;
-        }
-
-        realtimeDrawReplayCoroutine = StartCoroutine(ReplayPendingRealtimeDraws());
-    }
-
-    private IEnumerator ReplayPendingRealtimeDraws()
-    {
-        while (pendingRealtimeDrawQueue.Count > 0)
-        {
-            RealtimeDrawRenderItem nextDraw = pendingRealtimeDrawQueue.Dequeue();
-            pendingRealtimeDrawKeys.Remove($"{nextDraw.GameId}:{nextDraw.DrawIndex}");
-
-            if (!string.Equals(nextDraw.GameId, activeGameId, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            bool rendered = ShowRealtimeDrawBall(nextDraw.DrawIndex, nextDraw.DrawnNumber);
-            bool fallbackRendered = false;
-            if (!rendered)
-            {
-                fallbackRendered = TryShowRealtimeDrawFallback(nextDraw.DrawnNumber);
-                if (fallbackRendered)
-                {
-                    drawMetricFallbackRendered += 1;
-                    if (logRealtimeDrawMetrics)
-                    {
-                        Debug.Log($"[draw] draw_fallback_rendered game={nextDraw.GameId} idx={nextDraw.DrawIndex} no={nextDraw.DrawnNumber}");
-                    }
-                }
-                else
-                {
-                    drawMetricSkipped += 1;
-                    Debug.LogError($"[draw] draw_skipped game={nextDraw.GameId} idx={nextDraw.DrawIndex} no={nextDraw.DrawnNumber}");
-                }
-
-                QueueDrawResync($"draw-render-missing:{nextDraw.DrawIndex}");
-            }
-            else
-            {
-                drawMetricRendered += 1;
-                if (logRealtimeDrawMetrics)
-                {
-                    Debug.Log($"[draw] draw_rendered game={nextDraw.GameId} idx={nextDraw.DrawIndex} no={nextDraw.DrawnNumber}");
-                }
-            }
-
-            renderedDrawCount = Mathf.Max(renderedDrawCount, nextDraw.DrawIndex + 1);
-            lastRealtimeDrawRenderAt = Time.unscaledTime;
-
-            float interval = ResolveRealtimeDrawReplayIntervalSeconds(pendingRealtimeDrawQueue.Count);
-            if (interval > 0f)
-            {
-                yield return new WaitForSecondsRealtime(interval);
-            }
-            else
-            {
-                yield return null;
-            }
-        }
-
-        realtimeDrawReplayCoroutine = null;
-    }
-
-    private float ResolveRealtimeDrawReplayIntervalSeconds(int backlogCount)
-    {
-        float normalInterval = Mathf.Max(0.05f, realtimeDrawReplayNormalIntervalSeconds);
-        float minInterval = Mathf.Clamp(realtimeDrawReplayMinIntervalSeconds, 0.02f, normalInterval);
-        int catchupThreshold = Mathf.Max(1, realtimeDrawBacklogCatchupThreshold);
-        if (backlogCount <= 0)
-        {
-            return normalInterval;
-        }
-
-        if (backlogCount <= catchupThreshold)
-        {
-            return normalInterval;
-        }
-
-        float catchupRatio = Mathf.Clamp01((backlogCount - catchupThreshold) / (float)(catchupThreshold * 2));
-        return Mathf.Lerp(normalInterval, minInterval, catchupRatio);
-    }
-
-    private bool TryShowRealtimeDrawFallback(int drawnNumber)
-    {
-        SetHardRealtimeDrawFallback(drawnNumber);
-
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator == null || generator.autoSpinRemainingPlayText == null)
-        {
-            return true;
-        }
-
-        generator.autoSpinRemainingPlayText.text = $"Trekk: {drawnNumber}";
-        return true;
-    }
-
-    private void SetHardRealtimeDrawFallback(int drawnNumber)
-    {
-        hardFallbackDrawNumber = drawnNumber;
-        hardFallbackDrawVisibleUntil = Time.unscaledTime + Mathf.Max(0.75f, realtimeDrawReplayNormalIntervalSeconds * 2f);
-    }
-
-    private void OnGUI()
-    {
-        if (!useRealtimeBackend)
-        {
-            return;
-        }
-
-        if (hardFallbackDrawNumber <= 0 || Time.unscaledTime > hardFallbackDrawVisibleUntil)
-        {
-            return;
-        }
-
-        if (hardFallbackDrawGuiStyle == null)
-        {
-            hardFallbackDrawGuiStyle = new GUIStyle(GUI.skin.label)
-            {
-                alignment = TextAnchor.MiddleCenter,
-                fontSize = Mathf.Clamp(Mathf.RoundToInt(Screen.height * 0.03f), 22, 44),
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = Color.white }
-            };
-        }
-
-        float width = Mathf.Clamp(Screen.width * 0.24f, 220f, 340f);
-        float height = Mathf.Clamp(Screen.height * 0.08f, 54f, 88f);
-        float x = (Screen.width - width) * 0.5f;
-        float y = Mathf.Clamp(Screen.height * 0.13f, 18f, Screen.height - height - 18f);
-        Rect drawRect = new Rect(x, y, width, height);
-        GUI.Box(drawRect, GUIContent.none);
-        GUI.Label(drawRect, $"TREKK {hardFallbackDrawNumber}", hardFallbackDrawGuiStyle);
-    }
-
-    private void ResetRealtimeDrawReplayState(bool clearMetrics)
-    {
-        if (realtimeDrawReplayCoroutine != null)
-        {
-            StopCoroutine(realtimeDrawReplayCoroutine);
-            realtimeDrawReplayCoroutine = null;
-        }
-
-        pendingRealtimeDrawQueue.Clear();
-        pendingRealtimeDrawKeys.Clear();
-        lastRealtimeDrawRenderAt = -1f;
-        hardFallbackDrawNumber = -1;
-        hardFallbackDrawVisibleUntil = -1f;
-
-        if (!clearMetrics)
-        {
-            return;
-        }
-
-        drawMetricEnqueued = 0;
-        drawMetricRendered = 0;
-        drawMetricFallbackRendered = 0;
-        drawMetricSkipped = 0;
-        drawMetricsGameId = string.Empty;
-    }
-
-    private void LogRealtimeDrawMetrics(string gameId, string reason)
-    {
-        if (!logRealtimeDrawMetrics || string.IsNullOrWhiteSpace(gameId))
-        {
-            return;
-        }
-
-        if (!string.Equals(drawMetricsGameId, gameId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        Debug.Log(
-            $"[draw] summary game={gameId} reason={reason} " +
-            $"draw_enqueued={drawMetricEnqueued} draw_rendered={drawMetricRendered} " +
-            $"draw_fallback_rendered={drawMetricFallbackRendered} draw_skipped={drawMetricSkipped}");
-
-        drawMetricEnqueued = 0;
-        drawMetricRendered = 0;
-        drawMetricFallbackRendered = 0;
-        drawMetricSkipped = 0;
-        drawMetricsGameId = string.Empty;
-    }
-
-    private void RefreshRealtimeRoundWinning(JSONNode currentGame)
-    {
-        GameManager manager = GameManager.instance;
-        if (manager == null)
-        {
-            return;
-        }
-
-        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            manager.SetRoundWinningTotalFromRealtime(0);
-            return;
-        }
-
-        JSONNode claims = currentGame["claims"];
-        if (claims == null || claims.IsNull || !claims.IsArray)
-        {
-            manager.SetRoundWinningTotalFromRealtime(0);
-            return;
-        }
-
-        int resolvedRoundWinning = 0;
-        for (int i = 0; i < claims.Count; i++)
-        {
-            JSONNode claim = claims[i];
-            if (claim == null || claim.IsNull || !claim["valid"].AsBool)
-            {
-                continue;
-            }
-
-            string claimPlayerId = claim["playerId"];
-            if (!string.Equals(claimPlayerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (TryResolveClaimPayoutAmount(claim, out int claimPayout))
-            {
-                resolvedRoundWinning += claimPayout;
-            }
-        }
-
-        manager.SetRoundWinningTotalFromRealtime(resolvedRoundWinning);
-    }
-
-    private void TryAutoSubmitClaimsFromRealtime(JSONNode currentGame)
-    {
-        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activeGameId))
-        {
-            return;
-        }
-
-        if (!CanSendClaim(logWarnings: false))
-        {
-            return;
-        }
-
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator == null || generator.cardClasses == null || generator.patternList == null)
-        {
-            return;
-        }
-
-        if (HasValidClaimForCurrentPlayer(currentGame, "BINGO"))
-        {
-            return;
-        }
-
-        if (HasAnyRealtimeFullBingo(generator.cardClasses))
-        {
-            TrySubmitRealtimeClaimOnce("BINGO");
-            return;
-        }
-
-        if (HasValidClaimForCurrentPlayer(currentGame, "LINE"))
-        {
-            return;
-        }
-
-        List<int> activePatternIndexes = GetActivePatternIndexes(generator);
-        if (HasAnyRealtimeLineWin(generator, activePatternIndexes))
-        {
-            TrySubmitRealtimeClaimOnce("LINE");
-        }
-    }
-
-    private bool HasValidClaimForCurrentPlayer(JSONNode currentGame, string claimType)
-    {
-        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            return false;
-        }
-
-        JSONNode claims = currentGame["claims"];
-        if (claims == null || claims.IsNull || !claims.IsArray)
-        {
-            return false;
-        }
-
-        for (int i = claims.Count - 1; i >= 0; i--)
-        {
-            JSONNode claim = claims[i];
-            if (claim == null || claim.IsNull || !claim["valid"].AsBool)
-            {
-                continue;
-            }
-
-            string claimPlayerId = claim["playerId"];
-            if (!string.Equals(claimPlayerId?.Trim(), activePlayerId, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (string.Equals(claim["type"], claimType, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool HasAnyRealtimeLineWin(NumberGenerator generator, List<int> activePatternIndexes)
-    {
-        if (generator == null || generator.cardClasses == null || generator.patternList == null)
-        {
-            return false;
-        }
-
-        for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
-        {
-            CardClass card = generator.cardClasses[cardNo];
-            if (card == null)
-            {
-                continue;
-            }
-
-            int matchedPatternIndex = FindFirstMatchedPatternIndex(card, generator.patternList, activePatternIndexes);
-            if (matchedPatternIndex >= 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool HasAnyRealtimeFullBingo(CardClass[] cards)
-    {
-        if (cards == null || cards.Length == 0)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < cards.Length; i++)
-        {
-            CardClass card = cards[i];
-            if (card == null || card.numb == null || card.payLinePattern == null)
-            {
-                continue;
-            }
-
-            bool isFullBingo = true;
-            int cellCount = Mathf.Min(card.numb.Count, card.payLinePattern.Count);
-            for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
-            {
-                int value = card.numb[cellIndex];
-                if (value <= 0)
-                {
-                    continue;
-                }
-
-                if (card.payLinePattern[cellIndex] != 1)
-                {
-                    isFullBingo = false;
-                    break;
-                }
-            }
-
-            if (isFullBingo)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private void TrySubmitRealtimeClaimOnce(string claimType)
-    {
-        if (string.IsNullOrWhiteSpace(activeGameId) ||
-            string.IsNullOrWhiteSpace(claimType) ||
-            realtimeClient == null ||
-            !realtimeClient.IsReady)
-        {
-            return;
-        }
-
-        string normalizedType = claimType.Trim().ToUpperInvariant();
-        string claimAttemptKey = $"{activeGameId}:{normalizedType}";
-        if (realtimeClaimAttemptKeys.Contains(claimAttemptKey))
-        {
-            return;
-        }
-
-        realtimeClaimAttemptKeys.Add(claimAttemptKey);
-        realtimeClient.SubmitClaim(activeRoomCode, activePlayerId, normalizedType, (ack) =>
-        {
-            if (ack == null)
-            {
-                realtimeClaimAttemptKeys.Remove(claimAttemptKey);
-                return;
-            }
-
-            if (!ack.ok)
-            {
-                bool retryable =
-                    string.Equals(ack.errorCode, "NO_VALID_LINE", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(ack.errorCode, "NO_VALID_BINGO", StringComparison.OrdinalIgnoreCase);
-                if (retryable)
-                {
-                    realtimeClaimAttemptKeys.Remove(claimAttemptKey);
-                }
-
-                Debug.LogWarning($"[APIManager] Auto-claim {normalizedType} feilet: {ack.errorCode} {ack.errorMessage}");
-                return;
-            }
-
-            JSONNode snapshot = ack.data?["snapshot"];
-            if (snapshot != null && !snapshot.IsNull)
-            {
-                HandleRealtimeRoomUpdate(snapshot);
-            }
-        });
-    }
-
-    private bool TryResolveClaimPayoutAmount(JSONNode claimNode, out int payoutAmount)
-    {
-        payoutAmount = 0;
-        if (claimNode == null || claimNode.IsNull)
-        {
-            return false;
-        }
-
-        if (TryParsePositiveAmount(claimNode["payoutAmount"], out payoutAmount))
-        {
-            return true;
-        }
-
-        if (TryParsePositiveAmount(claimNode["amount"], out payoutAmount))
-        {
-            return true;
-        }
-
-        if (TryParsePositiveAmount(claimNode["payout"], out payoutAmount))
-        {
-            return true;
-        }
-
-        JSONNode payload = claimNode["payload"];
-        if (payload == null || payload.IsNull)
-        {
-            return false;
-        }
-
-        if (TryParsePositiveAmount(payload["payoutAmount"], out payoutAmount))
-        {
-            return true;
-        }
-
-        if (TryParsePositiveAmount(payload["amount"], out payoutAmount))
-        {
-            return true;
-        }
-
-        if (TryParsePositiveAmount(payload["payout"], out payoutAmount))
-        {
-            return true;
-        }
-
-        return false;
+        processedDrawCount = drawnNumbers.Count;
     }
 
     private void RefreshRealtimeWinningPatternVisuals(JSONNode currentGame)
@@ -1022,7 +328,7 @@ public partial class APIManager
 
         HideAllMissingPatternVisuals(generator.cardClasses);
 
-        HashSet<int> activeNearWinKeys = new();
+        Dictionary<int, RealtimeNearWinState> activeNearWinStates = new();
         for (int cardNo = 0; cardNo < generator.cardClasses.Length; cardNo++)
         {
             CardClass card = generator.cardClasses[cardNo];
@@ -1041,11 +347,11 @@ public partial class APIManager
                 activePatternIndexes,
                 wonPatternIndex,
                 allowNearWin: !hasAnyWonPattern,
-                activeNearWinKeys);
+                activeNearWinStates);
         }
 
-        SyncRealtimeNearWinBlinking(activeNearWinKeys, generator.cardClasses);
-        NumberGenerator.isPrizeMissedByOneCard = activeNearWinKeys.Count > 0;
+        SyncRealtimeNearWinBlinking(activeNearWinStates, generator.cardClasses);
+        NumberGenerator.isPrizeMissedByOneCard = activeNearWinStates.Count > 0;
         RefreshRealtimeBonusFlow(currentGame, latestClaim, winningPatternsByCard);
     }
 
@@ -1352,7 +658,7 @@ public partial class APIManager
         List<int> activePatternIndexes,
         int wonPatternIndex,
         bool allowNearWin,
-        HashSet<int> activeNearWinKeys)
+        Dictionary<int, RealtimeNearWinState> activeNearWinStates)
     {
         if (generator == null || generator.cardClasses == null || cardNo < 0 || cardNo >= generator.cardClasses.Length)
         {
@@ -1418,22 +724,22 @@ public partial class APIManager
             ApplyTicketPatternState(
                 card,
                 cardNo,
-                patternIndex,
                 generator.patternList[patternIndex].pattern,
                 state,
+                patternIndex,
                 missingCellIndex,
-                activeNearWinKeys);
+                activeNearWinStates);
         }
     }
 
     private void ApplyTicketPatternState(
         CardClass card,
         int cardNo,
-        int patternIndex,
         List<byte> mask,
         TicketUiState state,
+        int patternIndex,
         int missingCellIndex,
-        HashSet<int> activeNearWinKeys)
+        Dictionary<int, RealtimeNearWinState> activeNearWinStates)
     {
         if (card == null || mask == null)
         {
@@ -1453,32 +759,13 @@ public partial class APIManager
             return;
         }
 
-        int blinkKey = BuildNearWinBlinkKey(cardNo, missingCellIndex);
-        activeNearWinKeys.Add(blinkKey);
-        int missingNumber = (card.numb != null && missingCellIndex >= 0 && missingCellIndex < card.numb.Count)
-            ? Mathf.Max(0, card.numb[missingCellIndex])
-            : 0;
-        RealtimeNearWinMeta nextMeta = new RealtimeNearWinMeta
+        int nearWinKey = BuildNearWinKey(cardNo, patternIndex, missingCellIndex);
+        int missingNumber = ResolveNearWinMissingNumber(card, missingCellIndex);
+        if (!activeNearWinStates.ContainsKey(nearWinKey))
         {
-            PatternIndex = patternIndex,
-            CellIndex = missingCellIndex,
-            CardNo = cardNo,
-            MissingNumber = missingNumber
-        };
-        if (realtimeNearWinMetaByKey.TryGetValue(blinkKey, out RealtimeNearWinMeta previousMeta))
-        {
-            if (previousMeta.PatternIndex != nextMeta.PatternIndex || previousMeta.CardNo != nextMeta.CardNo)
-            {
-                EventManager.ShowMissingPattern(previousMeta.PatternIndex, previousMeta.CellIndex, false, 0, previousMeta.CardNo);
-            }
-        }
-        realtimeNearWinMetaByKey[blinkKey] = nextMeta;
-        EventManager.ShowMissingPattern(patternIndex, missingCellIndex, true, missingNumber, cardNo);
-
-        if (!realtimeNearWinBlinkCoroutines.ContainsKey(blinkKey))
-        {
-            Coroutine blinkRoutine = StartCoroutine(BlinkRealtimeNearWinCell(blinkKey, card.missingPatternImg[missingCellIndex]));
-            realtimeNearWinBlinkCoroutines[blinkKey] = blinkRoutine;
+            activeNearWinStates.Add(
+                nearWinKey,
+                new RealtimeNearWinState(patternIndex, cardNo, missingCellIndex, missingNumber));
         }
     }
 
@@ -1514,33 +801,27 @@ public partial class APIManager
         return requiredCount > 0 && matchedCount == requiredCount - 1 && missingCellIndex >= 0;
     }
 
-    private IEnumerator BlinkRealtimeNearWinCell(int blinkKey, GameObject nearWinCell)
+    private int ResolveNearWinMissingNumber(CardClass card, int missingCellIndex)
     {
-        bool visible = false;
-        WaitForSeconds wait = new WaitForSeconds(realtimeNearWinBlinkInterval);
-        while (realtimeNearWinBlinkCoroutines.ContainsKey(blinkKey))
+        if (card == null || card.numb == null || missingCellIndex < 0 || missingCellIndex >= card.numb.Count)
         {
-            visible = !visible;
-            if (nearWinCell != null)
-            {
-                SetActiveIfChanged(nearWinCell, visible);
-            }
-
-            yield return wait;
+            return 0;
         }
 
-        if (nearWinCell != null)
-        {
-            SetActiveIfChanged(nearWinCell, false);
-        }
+        return Mathf.Max(0, card.numb[missingCellIndex]);
     }
 
-    private void SyncRealtimeNearWinBlinking(HashSet<int> activeNearWinKeys, CardClass[] cards)
+    private int BuildNearWinKey(int cardNo, int patternIndex, int cellIndex)
     {
-        List<int> keysToStop = new();
-        foreach (int key in realtimeNearWinBlinkCoroutines.Keys)
+        return (cardNo * 10000) + (patternIndex * 100) + cellIndex;
+    }
+
+    private void SyncRealtimeNearWinBlinking(Dictionary<int, RealtimeNearWinState> activeNearWinStates, CardClass[] cards)
+    {
+        List<int> keysToStop = new List<int>();
+        foreach (int key in realtimeNearWinStates.Keys)
         {
-            if (!activeNearWinKeys.Contains(key))
+            if (!activeNearWinStates.ContainsKey(key))
             {
                 keysToStop.Add(key);
             }
@@ -1549,18 +830,40 @@ public partial class APIManager
         for (int i = 0; i < keysToStop.Count; i++)
         {
             int key = keysToStop[i];
-            if (realtimeNearWinBlinkCoroutines.TryGetValue(key, out Coroutine routine) && routine != null)
+            if (realtimeNearWinStates.TryGetValue(key, out RealtimeNearWinState nearWinState))
             {
-                StopCoroutine(routine);
+                EventManager.ShowMissingPattern(
+                    nearWinState.PatternIndex,
+                    nearWinState.CellIndex,
+                    false,
+                    0,
+                    nearWinState.CardNo);
+
+                SetNearWinCellActive(cards, nearWinState.CardNo, nearWinState.CellIndex, false);
             }
 
-            realtimeNearWinBlinkCoroutines.Remove(key);
-            SetNearWinCellActive(cards, key, false);
-            if (realtimeNearWinMetaByKey.TryGetValue(key, out RealtimeNearWinMeta meta))
+            realtimeNearWinStates.Remove(key);
+        }
+
+        foreach (KeyValuePair<int, RealtimeNearWinState> entry in activeNearWinStates)
+        {
+            int key = entry.Key;
+            RealtimeNearWinState state = entry.Value;
+
+            bool shouldNotify = !realtimeNearWinStates.TryGetValue(key, out RealtimeNearWinState previousState) ||
+                                previousState.MissingNumber != state.MissingNumber;
+
+            if (shouldNotify)
             {
-                EventManager.ShowMissingPattern(meta.PatternIndex, meta.CellIndex, false, 0, meta.CardNo);
-                realtimeNearWinMetaByKey.Remove(key);
+                EventManager.ShowMissingPattern(
+                    state.PatternIndex,
+                    state.CellIndex,
+                    true,
+                    state.MissingNumber,
+                    state.CardNo);
             }
+
+            realtimeNearWinStates[key] = state;
         }
     }
 
@@ -1590,20 +893,8 @@ public partial class APIManager
         }
     }
 
-    private int BuildNearWinBlinkKey(int cardNo, int cellIndex)
+    private void SetNearWinCellActive(CardClass[] cards, int cardNo, int cellIndex, bool active)
     {
-        return (cardNo * 100) + cellIndex;
-    }
-
-    private void DecodeNearWinBlinkKey(int key, out int cardNo, out int cellIndex)
-    {
-        cardNo = key / 100;
-        cellIndex = key % 100;
-    }
-
-    private void SetNearWinCellActive(CardClass[] cards, int blinkKey, bool active)
-    {
-        DecodeNearWinBlinkKey(blinkKey, out int cardNo, out int cellIndex);
         if (cards == null || cardNo < 0 || cardNo >= cards.Length)
         {
             return;
@@ -1633,23 +924,14 @@ public partial class APIManager
     private void StopRealtimeNearWinBlinking()
     {
         CardClass[] cards = GameManager.instance?.numberGenerator?.cardClasses;
-
-        foreach (KeyValuePair<int, Coroutine> entry in realtimeNearWinBlinkCoroutines)
+        foreach (KeyValuePair<int, RealtimeNearWinState> entry in realtimeNearWinStates)
         {
-            if (entry.Value != null)
-            {
-                StopCoroutine(entry.Value);
-            }
-
-            SetNearWinCellActive(cards, entry.Key, false);
-            if (realtimeNearWinMetaByKey.TryGetValue(entry.Key, out RealtimeNearWinMeta meta))
-            {
-                EventManager.ShowMissingPattern(meta.PatternIndex, meta.CellIndex, false, 0, meta.CardNo);
-            }
+            RealtimeNearWinState state = entry.Value;
+            EventManager.ShowMissingPattern(state.PatternIndex, state.CellIndex, false, 0, state.CardNo);
+            SetNearWinCellActive(cards, state.CardNo, state.CellIndex, false);
         }
 
-        realtimeNearWinBlinkCoroutines.Clear();
-        realtimeNearWinMetaByKey.Clear();
+        realtimeNearWinStates.Clear();
         HideAllMissingPatternVisuals(cards);
     }
 
@@ -1749,48 +1031,15 @@ public partial class APIManager
 
         foreach (KeyValuePair<int, int> cardWin in winningPatternsByCard)
         {
-            if (IsConfiguredBonusWinningPattern(cardWin.Value))
+            if (cardWin.Value == realtimeBonusPatternIndex)
             {
-                triggerSource = $"winningPatternTopIndex={ResolveConfiguredBonusTopPatternIndex()}";
+                triggerSource = $"winningPatternIndex={realtimeBonusPatternIndex}";
                 LogBonusFallbackUsed("trigger", triggerSource, latestClaim.ClaimId);
                 return true;
             }
         }
 
         return false;
-    }
-
-    private bool IsConfiguredBonusWinningPattern(int winningPatternIndex)
-    {
-        if (winningPatternIndex < 0)
-        {
-            return false;
-        }
-
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        TopperManager topperManager = generator?.topperManager;
-        if (topperManager == null)
-        {
-            return winningPatternIndex == realtimeBonusPatternIndex;
-        }
-
-        int mappedTopPatternIndex = topperManager.GetPatternIndex(winningPatternIndex);
-        return mappedTopPatternIndex == ResolveConfiguredBonusTopPatternIndex();
-    }
-
-    private int ResolveConfiguredBonusTopPatternIndex()
-    {
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        TopperManager topperManager = generator?.topperManager;
-        int prizeCount = topperManager != null && topperManager.prizes != null ? topperManager.prizes.Count : 0;
-        if (prizeCount <= 0)
-        {
-            return Mathf.Max(0, realtimeBonusPatternIndex);
-        }
-
-        int offsetFromRight = Mathf.Max(1, realtimeBonusPatternPositionFromRight);
-        int resolvedIndex = prizeCount - offsetFromRight;
-        return Mathf.Clamp(resolvedIndex, 0, prizeCount - 1);
     }
 
     private bool TryResolveBackendBonusTrigger(JSONNode claimNode, out bool bonusTriggered, out string source)
@@ -2140,7 +1389,6 @@ public partial class APIManager
     private void ResetActiveRoomState(bool clearDesiredRoomCode)
     {
         ClearJoinOrCreatePending();
-        CancelDelayedOverlayReset();
         activeRoomCode = string.Empty;
         activePlayerId = string.Empty;
         activeHostPlayerId = string.Empty;
@@ -2149,32 +1397,16 @@ public partial class APIManager
         realtimeRoomConfigurator.ResetWarningState();
         realtimeCountdownPresenter.ResetLayoutCache();
         processedDrawCount = 0;
-        renderedDrawCount = 0;
         currentTicketPage = 0;
         activeTicketSets.Clear();
-        cachedStableTicketSets.Clear();
-        overlaysClearedForEndedGameId = string.Empty;
-        nextDrawResyncAt = -1f;
         StopRealtimeNearWinBlinking();
         ResetRealtimeBonusState(closeBonusPanel: true);
         nextScheduledRoomStateRefreshAt = -1f;
         nextScheduledManualStartAttemptAt = -1f;
-        nextInsufficientFundsWarningAt = -1f;
-        hasAppliedZeroEntryFeeFallbackForRoom = false;
-        realtimeBetArmedForNextRound = false;
-        pendingRealtimeBetArmRequest = false;
-        realtimeRerollRequestPending = false;
-        realtimeClaimAttemptKeys.Clear();
-        ResetRealtimeDrawReplayState(clearMetrics: true);
 
         if (clearDesiredRoomCode)
         {
             roomCode = string.Empty;
-        }
-
-        if (realtimeRoomPlayerCountText != null)
-        {
-            realtimeRoomPlayerCountText.text = $"{realtimeRoomPlayerCountPrefix} 0";
         }
     }
 
@@ -2203,169 +1435,5 @@ public partial class APIManager
         }
 
         return (Time.realtimeSinceStartup - joinOrCreateIssuedAtRealtime) > 8f;
-    }
-
-    private void QueueDrawResync(string reason)
-    {
-        if (!useRealtimeBackend)
-        {
-            return;
-        }
-
-        if (nextDrawResyncAt < 0f || nextDrawResyncAt > Time.unscaledTime + 0.25f)
-        {
-            nextDrawResyncAt = Time.unscaledTime + Mathf.Max(0.25f, realtimeDrawResyncIntervalSeconds);
-        }
-
-        if (logBootstrapEvents)
-        {
-            Debug.Log($"[APIManager] Queue draw resync ({reason}) room={activeRoomCode} game={activeGameId}");
-        }
-    }
-
-    private void TickDrawRenderResync()
-    {
-        if (nextDrawResyncAt < 0f || Time.unscaledTime < nextDrawResyncAt)
-        {
-            return;
-        }
-
-        if (pendingRealtimeDrawQueue.Count > 0)
-        {
-            float idleSeconds = lastRealtimeDrawRenderAt < 0f
-                ? 0f
-                : Time.unscaledTime - lastRealtimeDrawRenderAt;
-            if (idleSeconds < Mathf.Max(0.25f, realtimeDrawReplayNormalIntervalSeconds * 2f))
-            {
-                nextDrawResyncAt = Time.unscaledTime + Mathf.Max(0.25f, realtimeDrawResyncIntervalSeconds);
-                return;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(activeRoomCode) || string.IsNullOrWhiteSpace(activePlayerId))
-        {
-            nextDrawResyncAt = -1f;
-            return;
-        }
-
-        BindRealtimeClient();
-        if (realtimeClient == null || !realtimeClient.IsReady)
-        {
-            nextDrawResyncAt = Time.unscaledTime + Mathf.Max(0.25f, realtimeDrawResyncIntervalSeconds);
-            return;
-        }
-
-        nextDrawResyncAt = -1f;
-        realtimeClient.RequestRoomState(activeRoomCode, (ack) =>
-        {
-            if (ack == null || !ack.ok)
-            {
-                QueueDrawResync("draw-resync-ack-failed");
-                return;
-            }
-
-            JSONNode snapshot = ack.data?["snapshot"];
-            if (snapshot != null && !snapshot.IsNull)
-            {
-                HandleRealtimeRoomUpdate(snapshot);
-            }
-        });
-    }
-
-    private void CancelDelayedOverlayReset()
-    {
-        if (delayedOverlayResetCoroutine != null)
-        {
-            StopCoroutine(delayedOverlayResetCoroutine);
-            delayedOverlayResetCoroutine = null;
-        }
-        delayedOverlayResetGameId = string.Empty;
-    }
-
-    private void ScheduleDelayedOverlayReset(string gameId)
-    {
-        if (string.IsNullOrWhiteSpace(gameId))
-        {
-            return;
-        }
-
-        if (string.Equals(overlaysClearedForEndedGameId, gameId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        if (string.Equals(delayedOverlayResetGameId, gameId, StringComparison.Ordinal) && delayedOverlayResetCoroutine != null)
-        {
-            return;
-        }
-
-        CancelDelayedOverlayReset();
-        delayedOverlayResetGameId = gameId;
-        delayedOverlayResetCoroutine = StartCoroutine(DelayedOverlayResetRoutine(gameId));
-    }
-
-    private IEnumerator DelayedOverlayResetRoutine(string gameId)
-    {
-        float delay = Mathf.Max(0f, realtimeRoundOverlayResetDelaySeconds);
-        if (delay > 0f)
-        {
-            yield return new WaitForSecondsRealtime(delay);
-        }
-
-        if (!string.IsNullOrWhiteSpace(activeGameId) &&
-            !string.Equals(activeGameId, gameId, StringComparison.Ordinal))
-        {
-            delayedOverlayResetCoroutine = null;
-            delayedOverlayResetGameId = string.Empty;
-            yield break;
-        }
-
-        ClearRealtimeCardOverlaysKeepTicketNumbers();
-        overlaysClearedForEndedGameId = gameId;
-        delayedOverlayResetCoroutine = null;
-        delayedOverlayResetGameId = string.Empty;
-    }
-
-    private void ClearRealtimeCardOverlaysKeepTicketNumbers()
-    {
-        NumberGenerator generator = GameManager.instance?.numberGenerator;
-        if (generator == null || generator.cardClasses == null)
-        {
-            return;
-        }
-
-        foreach (CardClass card in generator.cardClasses)
-        {
-            if (card == null)
-            {
-                continue;
-            }
-
-            for (int i = 0; i < card.selectionImg.Count; i++)
-            {
-                SetActiveIfChanged(card.selectionImg[i], false);
-            }
-
-            for (int i = 0; i < card.missingPatternImg.Count; i++)
-            {
-                SetActiveIfChanged(card.missingPatternImg[i], false);
-            }
-
-            for (int i = 0; i < card.matchPatternImg.Count; i++)
-            {
-                SetActiveIfChanged(card.matchPatternImg[i], false);
-            }
-
-            card.selectedPayLineCanBe.Clear();
-            for (int i = 0; i < card.payLinePattern.Count; i++)
-            {
-                card.payLinePattern[i] = 0;
-            }
-        }
-
-        generator.ClearPaylineVisuals();
-        StopRealtimeNearWinBlinking();
-        ResetRealtimeBonusState(closeBonusPanel: true);
-        NumberGenerator.isPrizeMissedByOneCard = false;
     }
 }

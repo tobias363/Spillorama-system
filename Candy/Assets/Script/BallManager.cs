@@ -27,8 +27,6 @@ public class BallManager : MonoBehaviour
     [SerializeField]
     private List<int> ballIndexList = new List<int>();
     [SerializeField] private bool verboseDrawLogging = false;
-    [SerializeField] [Min(0.1f)] private float drawIntervalSeconds = 5f;
-    [SerializeField] [Min(0.1f)] private float ballAnimationSpeedMultiplier = 3f;
     [SerializeField] [Range(0.1f, 1f)] private float glassAnimationSpeedMultiplier = 0.59f;
     private int[] extraBallPosArr = new int[5] { -140, -70, 140, 70, 0 };
     private List<GameObject> instantiatedExtraBall = new List<GameObject>();
@@ -269,23 +267,6 @@ public class BallManager : MonoBehaviour
         }
     }
 
-    private float ResolveBallAnimDuration()
-    {
-        float baseDuration = ballAnimSpeed;
-        if (numberGenerator != null)
-        {
-            baseDuration = Mathf.Max(0.01f, numberGenerator.ballAnimSpeed);
-        }
-
-        float speedMultiplier = Mathf.Max(0.1f, ballAnimationSpeedMultiplier);
-        return Mathf.Max(0.01f, baseDuration / speedMultiplier);
-    }
-
-    private float ResolveDrawIntervalSeconds()
-    {
-        return Mathf.Max(0.1f, drawIntervalSeconds);
-    }
-
     void CacheRealtimeBallLayoutPositions()
     {
         if (balls == null || balls.Count == 0)
@@ -306,37 +287,11 @@ public class BallManager : MonoBehaviour
         }
     }
 
-    private int ResolveRealtimeDrawSlotIndex(int drawIndex)
+    public void ShowRealtimeDrawBall(int drawIndex, int drawnNumber)
     {
-        if (balls == null || balls.Count == 0)
+        if (balls == null || drawIndex < 0 || drawIndex >= balls.Count)
         {
-            return -1;
-        }
-
-        if (drawIndex < 0)
-        {
-            return 0;
-        }
-
-        if (drawIndex < balls.Count)
-        {
-            return drawIndex;
-        }
-
-        return drawIndex % balls.Count;
-    }
-
-    public bool ShowRealtimeDrawBall(int drawIndex, int drawnNumber)
-    {
-        bool anyVisualUpdate = false;
-        int slotIndex = ResolveRealtimeDrawSlotIndex(drawIndex);
-
-        if (slotIndex < 0)
-        {
-            if (bigBallImg == null)
-            {
-                return false;
-            }
+            return;
         }
 
         TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
@@ -359,46 +314,37 @@ public class BallManager : MonoBehaviour
             {
                 RealtimeTextStyleUtils.ApplyBallNumber(bigBallText, drawnNumber.ToString(), numberFallbackFont);
             }
-
-            anyVisualUpdate = true;
         }
 
-        if (slotIndex < 0 || slotIndex >= balls.Count)
-        {
-            return anyVisualUpdate;
-        }
-
-        GameObject ballObject = balls[slotIndex];
+        GameObject ballObject = balls[drawIndex];
         if (ballObject == null)
         {
-            return anyVisualUpdate;
+            return;
         }
 
         int spriteIndex = (ballSprite != null && ballSprite.Count > 0) ? Random.Range(0, ballSprite.Count) : -1;
         if (spriteIndex >= 0)
         {
-            Image img = slotIndex < cachedBallImages.Count ? cachedBallImages[slotIndex] : ballObject.GetComponent<Image>();
+            Image img = drawIndex < cachedBallImages.Count ? cachedBallImages[drawIndex] : ballObject.GetComponent<Image>();
             if (img != null)
             {
                 img.sprite = ballSprite[spriteIndex];
             }
         }
 
-        TextMeshProUGUI tmp = slotIndex < cachedBallTexts.Count ? cachedBallTexts[slotIndex] : null;
+        TextMeshProUGUI tmp = drawIndex < cachedBallTexts.Count ? cachedBallTexts[drawIndex] : null;
         if (tmp != null)
         {
             RealtimeTextStyleUtils.ApplyBallNumber(tmp, drawnNumber.ToString(), numberFallbackFont);
         }
 
-        Transform ballTransform = slotIndex < cachedBallTransforms.Count ? cachedBallTransforms[slotIndex] : ballObject.transform;
-        if (slotIndex < realtimeBallLayoutPositions.Count)
+        Transform ballTransform = drawIndex < cachedBallTransforms.Count ? cachedBallTransforms[drawIndex] : ballObject.transform;
+        if (drawIndex < realtimeBallLayoutPositions.Count)
         {
-            ballTransform.localPosition = realtimeBallLayoutPositions[slotIndex];
+            ballTransform.localPosition = realtimeBallLayoutPositions[drawIndex];
         }
 
         SetActiveIfChanged(ballObject, true);
-        anyVisualUpdate = true;
-        return anyVisualUpdate;
     }
 
     void GenerateBall(List<int> _ballIndexList)
@@ -502,8 +448,6 @@ public class BallManager : MonoBehaviour
         int count = Mathf.Min(balls.Count, ballIndexList.Count);
         for (int i = 0; i < count; i++)
         {
-            float drawStartedAt = Time.realtimeSinceStartup;
-            float animDuration = ResolveBallAnimDuration();
             bigBallImg.sprite = bigBallSpriteSequence[i];
             RealtimeTextStyleUtils.ApplyBallNumber(bigBallText, ballIndexList[i].ToString(), numberFallbackFont);
 
@@ -511,12 +455,12 @@ public class BallManager : MonoBehaviour
             Transform ballTransform = i < cachedBallTransforms.Count ? cachedBallTransforms[i] : balls[i].transform;
             ballTransform.localPosition = new Vector2(0, 100);
             SetActiveIfChanged(balls[i], true);
-            yield return new WaitForSeconds(animDuration);
+            yield return new WaitForSeconds(numberGenerator.ballAnimSpeed);
             KillTransformTweens(ballTransform);
             if (i < 15)
-                ballTransform.DOLocalMoveY(-350, animDuration);
+                ballTransform.DOLocalMoveY(-350, numberGenerator.ballAnimSpeed);
             else
-                ballTransform.DOLocalMoveY(-280, animDuration);
+                ballTransform.DOLocalMoveY(-280, numberGenerator.ballAnimSpeed);
             
             EventManager.ShowBallOnCard(i);
 
@@ -527,55 +471,45 @@ public class BallManager : MonoBehaviour
             else {
                 if (i <= 21)
                 {
-                    yield return new WaitForSeconds(animDuration);
+                    yield return new WaitForSeconds(numberGenerator.ballAnimSpeed);
                     if (i < 7)
                     {
                         KillTransformTweens(ballTransform);
-                        ballTransform.DOLocalMoveX(70 * ((i % 7) - 7), animDuration);
+                        ballTransform.DOLocalMoveX(70 * ((i % 7) - 7), numberGenerator.ballAnimSpeed);
                     }
                     else if (i >= 7 && i < 14)
                     {
                         KillTransformTweens(ballTransform);
-                        ballTransform.DOLocalMoveX(70 * (7 - (i % 7)), animDuration);
+                        ballTransform.DOLocalMoveX(70 * (7 - (i % 7)), numberGenerator.ballAnimSpeed);
                     }
                     else if ((i > 14 && i <= 21))
                     {
                         if (i == 21)
                         {
                             KillTransformTweens(ballTransform);
-                            ballTransform.DOLocalMoveX(-70, animDuration);
+                            ballTransform.DOLocalMoveX(-70, numberGenerator.ballAnimSpeed);
                         }
                         else
                         {
                             KillTransformTweens(ballTransform);
-                            ballTransform.DOLocalMoveX(70 * ((i % 7) - 7 - 1), animDuration);
+                            ballTransform.DOLocalMoveX(70 * ((i % 7) - 7 - 1), numberGenerator.ballAnimSpeed);
                         }
                     }
                 }
                 else
                 {
-                    yield return new WaitForSeconds(animDuration);
+                    yield return new WaitForSeconds(numberGenerator.ballAnimSpeed);
                     if (i == 28)
                     {
                         KillTransformTweens(ballTransform);
-                        ballTransform.DOLocalMoveX(70, animDuration);
+                        ballTransform.DOLocalMoveX(70, numberGenerator.ballAnimSpeed);
                     }
                     else
                     {
                         KillTransformTweens(ballTransform);
-                        ballTransform.DOLocalMoveX(70 * (7 + 1 - (i % 7)), animDuration);
+                        ballTransform.DOLocalMoveX(70 * (7 + 1 - (i % 7)), numberGenerator.ballAnimSpeed);
                     }
 
-                }
-            }
-
-            if (i < count - 1)
-            {
-                float elapsed = Time.realtimeSinceStartup - drawStartedAt;
-                float remaining = ResolveDrawIntervalSeconds() - elapsed;
-                if (remaining > 0f)
-                {
-                    yield return new WaitForSecondsRealtime(remaining);
                 }
             }
         }
@@ -596,7 +530,6 @@ public class BallManager : MonoBehaviour
             }
             for (int i = 0; i < ballIndexList.Count-30; i++)
             {
-                float animDuration = ResolveBallAnimDuration();
                 RealtimeTextStyleUtils.ApplyBallNumber(bigBallText, ballIndexList[30 + i].ToString(), numberFallbackFont);
                 if (bigBallText != null)
                 {
@@ -613,18 +546,10 @@ public class BallManager : MonoBehaviour
                     extraBalls[i].transform.localPosition = new Vector2(0, 100);
                     SetActiveIfChanged(extraBalls[i], true);
                     KillTransformTweens(extraBalls[i].transform);
-                    extraBalls[i].transform.DOLocalMove(extraBaStartPos[i], animDuration);
-
-                    if (numberGenerator != null)
-                    {
-                        numberGenerator.totalExtraBallCount--;
-                        if (numberGenerator.extraBallCountText != null)
-                        {
-                            numberGenerator.extraBallCountText.text = numberGenerator.totalExtraBallCount.ToString();
-                        }
-                    }
-
-                    yield return new WaitForSeconds(animDuration + 0.5f);
+                    extraBalls[i].transform.DOLocalMove(extraBaStartPos[i], ballAnimSpeed);
+                    numberGenerator.totalExtraBallCount--;
+                    numberGenerator.extraBallCountText.text = numberGenerator.totalExtraBallCount.ToString();
+                    yield return new WaitForSeconds(ballAnimSpeed + 0.5f);
                     EventManager.ShowBallOnCard(30 + i);
                 }
             }
@@ -707,7 +632,6 @@ public class BallManager : MonoBehaviour
 
     IEnumerator ModifyExtraBallPos(GameObject g, int index)
     {
-        float animDuration = ResolveBallAnimDuration();
         TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
         CacheExtraBallText(g);
         TextMeshProUGUI extraBallText = cachedExtraBallTexts.TryGetValue(g, out TextMeshProUGUI cachedText) ? cachedText : null;
@@ -719,15 +643,15 @@ public class BallManager : MonoBehaviour
 
         KillTransformTweens(g.transform);
         if (index < 5)
-            g.transform.DOLocalMoveY(-235 + 100, animDuration);
+            g.transform.DOLocalMoveY(-235 + 100, numberGenerator.ballAnimSpeed);
         else if (index < 10)
-            g.transform.DOLocalMoveY(-165 + 100, animDuration);
+            g.transform.DOLocalMoveY(-165 + 100, numberGenerator.ballAnimSpeed);
         else if (index < 15)
-            g.transform.DOLocalMoveY(-95 + 100, animDuration);
+            g.transform.DOLocalMoveY(-95 + 100, numberGenerator.ballAnimSpeed);
         else
-            g.transform.DOLocalMoveY(-25 + 100, animDuration);
+            g.transform.DOLocalMoveY(-25 + 100, numberGenerator.ballAnimSpeed);
 
-        yield return new WaitForSeconds(animDuration);
+        yield return new WaitForSeconds(numberGenerator.ballAnimSpeed);
         //Debug.Log(g.transform.localPosition.y);
         if ((index + 1) % 5 == 0)
         {
@@ -736,10 +660,10 @@ public class BallManager : MonoBehaviour
         else
         {
             KillTransformTweens(g.transform);
-            g.transform.DOLocalMoveX(extraBallPosArr[index % 5], animDuration);
+            g.transform.DOLocalMoveX(extraBallPosArr[index % 5], numberGenerator.ballAnimSpeed);
 
         }
-        yield return new WaitForSeconds(animDuration);
+        yield return new WaitForSeconds(numberGenerator.ballAnimSpeed);
         EventManager.ShowBallOnCard(ballIndexList.Count - 1);
         extraBallMoveRoutines.Remove(g);
     }

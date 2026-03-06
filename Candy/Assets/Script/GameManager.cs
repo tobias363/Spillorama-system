@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
+using System.Linq;
+using System;
 
 public class GameManager : MonoBehaviour
 {
@@ -31,8 +33,6 @@ public class GameManager : MonoBehaviour
     public int currentBet;
     public static int winAmt;
     private List<int> cardWin = new List<int>();
-    private int roundBonusTotal = 0;
-    private int creditedRoundWinTotal = 0;
     public int betlevel;
     public List<int> winList;
     private ThemeMathEngine themeMathEngine;
@@ -61,45 +61,9 @@ public class GameManager : MonoBehaviour
     {
         SetTotalMoney(1000);
         SetCurrentBets(betlevel);
-        EnsureRoundStateCollections();
-        ResetRoundWinState();
-        ApplyReadableTypographyProfile();
-    }
-
-    private void EnsureRoundStateCollections()
-    {
-        if (winList == null)
-        {
-            winList = new List<int>();
-        }
-
-        if (cardWin == null)
-        {
-            cardWin = new List<int>();
-        }
-
-        while (cardWin.Count < displayCardWinPoints.Count)
-        {
-            cardWin.Add(0);
-        }
-    }
-
-    private void ResetRoundWinState()
-    {
-        EnsureRoundStateCollections();
-
-        winAmt = 0;
-        roundBonusTotal = 0;
-        creditedRoundWinTotal = 0;
-        winList.Clear();
-        if (winAmtText != null)
-        {
-            winAmtText.text = "0";
-        }
-
         for (int i = 0; i < displayCardWinPoints.Count; i++)
         {
-            cardWin[i] = 0;
+            cardWin.Add(0);
             displayCardWinPoints[i].text = "WIN - 0";
         }
     }
@@ -111,17 +75,23 @@ public class GameManager : MonoBehaviour
 
     private void OnPlay()
     {
-        if (!IsRealtimeCreditAuthoritative())
+        SetTotalMoney(-currentBet);
+        winAmt = 0;
+        if (winList == null)
         {
-            SetTotalMoney(-currentBet);
+            winList = new List<int>();
+        }
+        else if (winList.Count > 0)
+        {
+            winList.Clear();
         }
 
-        ResetRoundWinState();
-    }
-
-    private bool IsRealtimeCreditAuthoritative()
-    {
-        return APIManager.instance != null && APIManager.instance.UseRealtimeBackend;
+        winAmtText.text = "0";
+        for (int i = 0; i < displayCardWinPoints.Count; i++)
+        {
+            cardWin[i] = 0;
+            displayCardWinPoints[i].text = "WIN - 0";
+        }
     }
     public void BetUp()
     {
@@ -169,15 +139,6 @@ public class GameManager : MonoBehaviour
         displayTotalMoney.text = totalMoney.ToString() ;
     }
 
-    public void SetTotalMoneyAbsoluteFromRealtime(int amount)
-    {
-        totalMoney = Mathf.Max(0, amount);
-        if (displayTotalMoney != null)
-        {
-            displayTotalMoney.text = totalMoney.ToString();
-        }
-    }
-
     void SetCurrentBets(int lvl)
     {
         currentBet = totalBets[lvl];
@@ -205,110 +166,54 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        roundBonusTotal += bonusAmount;
-        RefreshRoundWinningTotals();
-    }
+        if (winList == null)
+        {
+            winList = new List<int>();
+        }
 
+        winList.Add(bonusAmount);
+        int totalWin = winList.Sum(x => Convert.ToInt32(x));
+        winAmt = totalWin;
+        winAmtText.text = totalWin.ToString();
+        SetTotalMoney(bonusAmount);
+    }
+    
     void ShowWinAmt(int cardNo, int index)
     {
-        EnsureRoundStateCollections();
-        if (cardNo < 0 || cardNo >= cardWin.Count)
+        if (winList == null)
         {
-            return;
+            winList = new List<int>();
         }
 
-        int resolvedWin = ResolvePatternWinAmount(index);
-        if (resolvedWin <= cardWin[cardNo])
+        if (index < 5) //other
         {
-            return;
+            winAmt = currentWinPoints[index];
+        }
+        else if (index >= 5 && index <= 7) //For 2L
+        {
+            winAmt = currentWinPoints[5];
+        }
+        else if (index > 7 && index < 13)
+        {
+            winAmt = currentWinPoints[index - 2];
+        }
+        else if (index >= 13) //For 1L
+        {
+            winAmt = currentWinPoints[currentWinPoints.Count - 1]; 
         }
 
-        cardWin[cardNo] = resolvedWin;
-        if (cardNo < displayCardWinPoints.Count && displayCardWinPoints[cardNo] != null)
-        {
-            displayCardWinPoints[cardNo].text = "WIN - " + cardWin[cardNo];
-        }
+        cardWin[cardNo] += winAmt;
 
-        RefreshRoundWinningTotals();
-    }
+        displayCardWinPoints[cardNo].text = "WIN - "+ cardWin[cardNo].ToString() ;
 
-    private int ResolvePatternWinAmount(int patternIndex)
-    {
-        if (currentWinPoints == null || currentWinPoints.Count == 0)
-        {
-            return 0;
-        }
+        winList.Add(winAmt);
+        int totalRoundWin = winList.Sum(x => Convert.ToInt32(x));
+        winAmtText.text = totalRoundWin.ToString();
 
-        if (patternIndex < 5)
-        {
-            return currentWinPoints[Mathf.Clamp(patternIndex, 0, currentWinPoints.Count - 1)];
-        }
+        // Keep credit updates incremental to avoid double counting the full round sum.
+        SetTotalMoney(winAmt);
 
-        if (patternIndex >= 5 && patternIndex <= 7)
-        {
-            return currentWinPoints[Mathf.Clamp(5, 0, currentWinPoints.Count - 1)];
-        }
-
-        if (patternIndex > 7 && patternIndex < 13)
-        {
-            return currentWinPoints[Mathf.Clamp(patternIndex - 2, 0, currentWinPoints.Count - 1)];
-        }
-
-        return currentWinPoints[currentWinPoints.Count - 1];
-    }
-
-    private void RefreshRoundWinningTotals()
-    {
-        EnsureRoundStateCollections();
-
-        int cardTotal = 0;
-        for (int i = 0; i < cardWin.Count; i++)
-        {
-            cardTotal += Mathf.Max(0, cardWin[i]);
-        }
-
-        int totalRoundWinning = Mathf.Max(0, cardTotal + roundBonusTotal);
-        winAmt = totalRoundWinning;
-        if (winAmtText != null)
-        {
-            winAmtText.text = totalRoundWinning.ToString();
-        }
-
-        winList.Clear();
-        winList.Add(totalRoundWinning);
-
-        int delta = totalRoundWinning - creditedRoundWinTotal;
-        if (delta > 0 && !IsRealtimeCreditAuthoritative())
-        {
-            SetTotalMoney(delta);
-            creditedRoundWinTotal = totalRoundWinning;
-        }
-        else
-        {
-            creditedRoundWinTotal = totalRoundWinning;
-        }
-    }
-
-    public void SetRoundWinningTotalFromRealtime(int totalRoundWinning)
-    {
-        totalRoundWinning = Mathf.Max(0, totalRoundWinning);
-        roundBonusTotal = 0;
-        winAmt = totalRoundWinning;
-        if (winAmtText != null)
-        {
-            winAmtText.text = totalRoundWinning.ToString();
-        }
-
-        EnsureRoundStateCollections();
-        winList.Clear();
-        winList.Add(totalRoundWinning);
-
-        int delta = totalRoundWinning - creditedRoundWinTotal;
-        if (delta > 0 && !IsRealtimeCreditAuthoritative())
-        {
-            SetTotalMoney(delta);
-        }
-        creditedRoundWinTotal = totalRoundWinning;
+       
     }
 
     private void ApplyTestingSpeedIfEnabled()
@@ -338,29 +243,6 @@ public class GameManager : MonoBehaviour
 
         testingSpeedApplied = false;
         Time.timeScale = 1f;
-    }
-
-    private void ApplyReadableTypographyProfile()
-    {
-        TMP_FontAsset preferredFont = RealtimeTextStyleUtils.ResolvePreferredGameFont();
-        RealtimeTextStyleUtils.ApplyReadableTypography(displayTotalMoney, preferredFont, minFontSize: 22f, maxFontSize: 60f);
-        RealtimeTextStyleUtils.ApplyReadableTypography(displayCurrentBets, preferredFont, minFontSize: 22f, maxFontSize: 60f);
-        RealtimeTextStyleUtils.ApplyReadableTypography(winAmtText, preferredFont, minFontSize: 22f, maxFontSize: 60f);
-
-        for (int i = 0; i < CardBets.Count; i++)
-        {
-            RealtimeTextStyleUtils.ApplyReadableTypography(CardBets[i], preferredFont, minFontSize: 18f, maxFontSize: 42f);
-        }
-
-        for (int i = 0; i < displayCurrentPoints.Count; i++)
-        {
-            RealtimeTextStyleUtils.ApplyReadableTypography(displayCurrentPoints[i], preferredFont, minFontSize: 16f, maxFontSize: 40f);
-        }
-
-        for (int i = 0; i < displayCardWinPoints.Count; i++)
-        {
-            RealtimeTextStyleUtils.ApplyReadableTypography(displayCardWinPoints[i], preferredFont, minFontSize: 16f, maxFontSize: 40f);
-        }
     }
 }
 [System.Serializable]
