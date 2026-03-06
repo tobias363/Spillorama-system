@@ -1,10 +1,6 @@
 name: Deploy Candygame
 
 on:
-  push:
-    branches:
-      - staging
-      - main
   workflow_dispatch:
     inputs:
       target_environment:
@@ -31,7 +27,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.ref_name == 'staging' || github.ref_name == 'main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     environment: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || (github.ref_name == 'main' && 'production' || 'staging') }}
     permissions:
       contents: read
