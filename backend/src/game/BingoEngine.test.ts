@@ -493,7 +493,7 @@ test("rerollTicketsForPlayer keeps pre-round tickets and startGame reuses them",
   assert.ok(runningSnapshot.currentGame);
   assert.equal(runningSnapshot.currentGame?.status, "RUNNING");
   assert.deepEqual(runningSnapshot.currentGame?.tickets[hostPlayerId], preroundTickets);
-  assert.equal(runningSnapshot.preRoundTickets, undefined);
+  assert.equal(runningSnapshot.preRoundTickets?.[hostPlayerId]?.length, 4);
 });
 
 test("rerollTicketsForPlayer blocks reroll while round is running", async () => {
@@ -530,7 +530,7 @@ test("rerollTicketsForPlayer blocks reroll while round is running", async () => 
 
 test("rerollTicketsForPlayer blocks preround reroll for observers while another player's round is running", async () => {
   const engine = new BingoEngine(new SequenceTicketBingoAdapter(), new InMemoryWalletAdapter(), {
-    minPlayersToStart: 2
+    minPlayersToStart: 1
   });
   const { roomCode, hostPlayerId, guestPlayerId } = await createRoomWithTwoPlayers({
     engine,

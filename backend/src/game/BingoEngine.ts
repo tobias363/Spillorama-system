@@ -548,7 +548,21 @@ export class BingoEngine {
       return existingTickets.map((ticket) => this.cloneTicket(ticket));
     }
 
-    return this.rerollTicketsForPlayer(input);
+    const pseudoGameId = `preround-${randomUUID()}`;
+    const tickets: Ticket[] = [];
+    for (let ticketIndex = 0; ticketIndex < ticketsPerPlayer; ticketIndex += 1) {
+      const ticket = await this.bingoAdapter.createTicket({
+        roomCode: room.code,
+        gameId: pseudoGameId,
+        player,
+        ticketIndex,
+        ticketsPerPlayer
+      });
+      tickets.push(this.cloneTicket(ticket));
+    }
+
+    room.preRoundTicketsByPlayer.set(player.id, tickets);
+    return tickets.map((ticket) => this.cloneTicket(ticket));
   }
 
   async rerollTicketsForPlayer(input: RerollTicketsInput): Promise<Ticket[]> {
@@ -696,34 +710,38 @@ export class BingoEngine {
     for (const player of players) {
       const playerTickets: Ticket[] = [];
       const playerMarks: Set<number>[] = [];
-      const preRoundTickets = room.preRoundTicketsByPlayer.get(player.id);
-      const canReusePreRoundTickets =
-        Array.isArray(preRoundTickets) &&
-        preRoundTickets.length === ticketsPerPlayer;
+      const preRoundTickets = await this.ensurePreRoundTicketsForPlayer({
+        roomCode: room.code,
+        playerId: player.id,
+        ticketsPerPlayer
+      });
 
-      if (canReusePreRoundTickets) {
-        for (const ticket of preRoundTickets) {
-          playerTickets.push(this.cloneTicket(ticket));
-          playerMarks.push(new Set<number>());
-        }
-      } else {
-        for (let ticketIndex = 0; ticketIndex < ticketsPerPlayer; ticketIndex += 1) {
-          const ticket = await this.bingoAdapter.createTicket({
-            roomCode: room.code,
-            gameId,
-            player,
-            ticketIndex,
-            ticketsPerPlayer
-          });
-          playerTickets.push(ticket);
-          playerMarks.push(new Set<number>());
-        }
+      for (const ticket of preRoundTickets) {
+        playerTickets.push(this.cloneTicket(ticket));
+        playerMarks.push(new Set<number>());
       }
 
       tickets.set(player.id, playerTickets);
       marks.set(player.id, playerMarks);
     }
-    room.preRoundTicketsByPlayer.clear();
+
+    const participantIds = new Set(players.map((player) => player.id));
+    for (const roomPlayer of room.players.values()) {
+      if (participantIds.has(roomPlayer.id)) {
+        await this.rerollTicketsForPlayer({
+          roomCode: room.code,
+          playerId: roomPlayer.id,
+          ticketsPerPlayer
+        });
+        continue;
+      }
+
+      await this.ensurePreRoundTicketsForPlayer({
+        roomCode: room.code,
+        playerId: roomPlayer.id,
+        ticketsPerPlayer
+      });
+    }
 
     const prizePool = this.roundCurrency(entryFee * players.length);
     const maxPayoutBudget = this.roundCurrency((prizePool * normalizedPayoutPercent) / 100);
