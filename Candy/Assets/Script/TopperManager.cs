@@ -39,6 +39,7 @@ public class TopperManager : MonoBehaviour
     public List<TextMeshProUGUI> prizes;
 
     [Header("Missing Pattern Blink")]
+    [SerializeField] private Color missingPatternBaseColor = new Color(1f, 0.56f, 0.12f, 0.92f);
     [SerializeField] private Color missingPatternBlinkColor = new Color(1f, 0.87f, 0.22f, 1f);
     [SerializeField] private Color missingPrizeBlinkColor = new Color(1f, 0.92f, 0.3f, 1f);
     [SerializeField] private float missingPatternBlinkInterval = 0.2f;
@@ -215,17 +216,19 @@ public class TopperManager : MonoBehaviour
     {
         Dictionary<int, ActiveNearWinState> headerNearWinsBySlot = BuildHeaderNearWinsBySlot();
         Dictionary<(int cardNo, int colIndex), ActiveNearWinState> cardNearWinsByCell = BuildCardNearWinsByCell();
-        bool showNearWinVisuals = missingBlinkVisible && activeNearWins.Count > 0;
+        bool hasNearWinVisuals = activeNearWins.Count > 0;
+        Color activeNearWinColor = ResolveMissingPatternPulseColor();
 
         HideAllHeaderMissingPatternVisuals();
         HideAllCardMissingPatternVisuals();
 
-        if (showNearWinVisuals)
+        if (hasNearWinVisuals)
         {
             foreach (KeyValuePair<int, ActiveNearWinState> entry in headerNearWinsBySlot)
             {
                 if (TryGetMissingCell(entry.Value.HeaderSlotIndex, entry.Value.ColIndex, out GameObject headerMissingCell))
                 {
+                    ConfigureHeaderMissingCell(headerMissingCell, activeNearWinColor);
                     SetActiveIfChanged(headerMissingCell, true);
                 }
             }
@@ -238,12 +241,12 @@ public class TopperManager : MonoBehaviour
                     continue;
                 }
 
-                ConfigureCardMissingCell(cardMissingCell, entry.Value);
+                ConfigureCardMissingCell(cardMissingCell, entry.Value, activeNearWinColor);
                 SetActiveIfChanged(cardMissingCell, true);
             }
         }
 
-        ApplyPrizePresentation(headerNearWinsBySlot, showNearWinVisuals);
+        ApplyPrizePresentation(headerNearWinsBySlot, hasNearWinVisuals && missingBlinkVisible);
     }
 
     private Dictionary<int, ActiveNearWinState> BuildHeaderNearWinsBySlot()
@@ -369,12 +372,42 @@ public class TopperManager : MonoBehaviour
                 }
 
                 SetActiveIfChanged(missingCell, false);
+                Image missingCellImage = missingCell.GetComponent<Image>();
+                if (missingCellImage != null)
+                {
+                    missingCellImage.color = missingPatternBaseColor;
+                }
+
                 TextMeshProUGUI label = ResolveMissingCellLabel(missingCell);
                 if (label != null)
                 {
                     label.text = string.Empty;
                 }
             }
+        }
+    }
+
+    private Color ResolveMissingPatternPulseColor()
+    {
+        if (!missingBlinkVisible)
+        {
+            return missingPatternBaseColor;
+        }
+
+        return missingPatternBlinkColor;
+    }
+
+    private void ConfigureHeaderMissingCell(GameObject headerMissingCell, Color color)
+    {
+        if (headerMissingCell == null)
+        {
+            return;
+        }
+
+        Image cellImage = headerMissingCell.GetComponent<Image>();
+        if (cellImage != null)
+        {
+            cellImage.color = color;
         }
     }
 
@@ -448,7 +481,7 @@ public class TopperManager : MonoBehaviour
         return card.missingPatternImg[colIndex];
     }
 
-    private void ConfigureCardMissingCell(GameObject cardMissingCell, ActiveNearWinState state)
+    private void ConfigureCardMissingCell(GameObject cardMissingCell, ActiveNearWinState state, Color color)
     {
         if (cardMissingCell == null)
         {
@@ -458,7 +491,7 @@ public class TopperManager : MonoBehaviour
         Image cellImage = cardMissingCell.GetComponent<Image>();
         if (cellImage != null)
         {
-            cellImage.color = missingPatternBlinkColor;
+            cellImage.color = color;
         }
 
         TextMeshProUGUI label = ResolveMissingCellLabel(cardMissingCell);
