@@ -120,15 +120,15 @@ public sealed class Theme1DisplayPresenter
         ApplyRequiredHudValue(
             view.CreditText,
             state.CreditLabel,
-            gameManager != null ? gameManager.CreditBalance.ToString() : "0");
+            gameManager != null ? GameManager.FormatWholeNumber(gameManager.CreditBalance) : "0");
         ApplyRequiredHudValue(
             view.WinningsText,
             state.WinningsLabel,
-            gameManager != null ? gameManager.RoundWinnings.ToString() : "0");
+            gameManager != null ? GameManager.FormatWholeNumber(gameManager.RoundWinnings) : "0");
         ApplyRequiredHudValue(
             view.BetText,
             state.BetLabel,
-            gameManager != null ? gameManager.currentBet.ToString() : "0");
+            gameManager != null ? GameManager.FormatWholeNumber(gameManager.currentBet) : "0");
     }
 
     private static void RenderTopper(Theme1GameplayViewRoot root, Theme1TopperRenderState state)

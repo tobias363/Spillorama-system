@@ -101,10 +101,12 @@ public partial class APIManager
             return;
         }
 
+        bool startedNewGame = false;
         if (!string.Equals(activeGameId, gameId, StringComparison.Ordinal))
         {
             string previousGameId = activeGameId;
             activeGameId = gameId;
+            startedNewGame = true;
             ClearPreservedTheme1RoundDisplayState();
             processedDrawCount = 0;
             currentTicketPage = 0;
@@ -117,6 +119,10 @@ public partial class APIManager
 
         bool isActiveRoundParticipant = ApplyVisibleTicketSetsForCurrentSnapshotDedicated(currentGame, snapshot);
         realtimePlayerParticipatingInCurrentRound = isActiveRoundParticipant;
+        if (startedNewGame)
+        {
+            SyncRealtimeFinancialsForRoundStart(isActiveRoundParticipant);
+        }
         ProcessRealtimeDrawUpdatesDedicated(currentGame, isActiveRoundParticipant);
         RefreshRealtimeCountdownLabel(forceRefresh: true);
 
@@ -356,6 +362,14 @@ public partial class APIManager
         Dictionary<int, HashSet<int>> winningPatternsByCard =
             ResolveDedicatedWinningPatternsByCard(renderState, currentGame, latestClaim, patternMasks);
         ApplyWinningPatternsToDedicatedState(renderState, winningPatternsByCard, patternMasks);
+        GameManager resolvedGameManager = ResolveGameManager();
+        resolvedGameManager?.SyncRealtimePatternWinnings(winningPatternsByCard);
+        if (resolvedGameManager != null && renderState.Hud != null)
+        {
+            renderState.Hud.CreditLabel = GameManager.FormatWholeNumber(resolvedGameManager.CreditBalance);
+            renderState.Hud.WinningsLabel = GameManager.FormatWholeNumber(resolvedGameManager.RoundWinnings);
+            renderState.Hud.BetLabel = GameManager.FormatWholeNumber(resolvedGameManager.currentBet);
+        }
 
         theme1DisplayPresenter.Render(viewRoot, renderState);
         RegisterDedicatedTheme1RenderMetrics(viewRoot, renderState);
@@ -391,13 +405,13 @@ public partial class APIManager
             CountdownLabel = ReadText(viewRoot.HudBar?.CountdownText),
             PlayerCountLabel = ReadText(viewRoot.HudBar?.RoomPlayerCountText),
             CreditLabel = ResolveDedicatedHudValue(
-                GameManager.instance != null ? GameManager.instance.CreditBalance.ToString() : string.Empty,
+                GameManager.instance != null ? GameManager.FormatWholeNumber(GameManager.instance.CreditBalance) : string.Empty,
                 viewRoot.HudBar?.CreditText),
             WinningsLabel = ResolveDedicatedHudValue(
-                GameManager.instance != null ? GameManager.instance.RoundWinnings.ToString() : string.Empty,
+                GameManager.instance != null ? GameManager.FormatWholeNumber(GameManager.instance.RoundWinnings) : string.Empty,
                 viewRoot.HudBar?.WinningsText),
             BetLabel = ResolveDedicatedHudValue(
-                GameManager.instance != null ? GameManager.instance.currentBet.ToString() : string.Empty,
+                GameManager.instance != null ? GameManager.FormatWholeNumber(GameManager.instance.currentBet) : string.Empty,
                 viewRoot.HudBar?.BetText)
         };
 

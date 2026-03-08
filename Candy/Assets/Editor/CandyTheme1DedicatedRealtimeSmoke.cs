@@ -292,6 +292,12 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             return false;
         }
 
+        if (!HasExpectedTopperPrizeLabels(dedicatedState, out string topperError))
+        {
+            error = topperError;
+            return false;
+        }
+
         if (!HasExpectedCardLabels(dedicatedState, out string labelError))
         {
             error = labelError;
@@ -738,9 +744,9 @@ public static class CandyTheme1DedicatedRealtimeSmoke
     {
         error = string.Empty;
         GameManager gameManager = GameManager.instance;
-        string expectedCredit = gameManager != null ? gameManager.CreditBalance.ToString(CultureInfo.InvariantCulture) : "0";
-        string expectedWinnings = gameManager != null ? gameManager.RoundWinnings.ToString(CultureInfo.InvariantCulture) : "0";
-        string expectedBet = gameManager != null ? gameManager.currentBet.ToString(CultureInfo.InvariantCulture) : "0";
+        string expectedCredit = gameManager != null ? GameManager.FormatWholeNumber(gameManager.CreditBalance) : "0";
+        string expectedWinnings = gameManager != null ? GameManager.FormatWholeNumber(gameManager.RoundWinnings) : "0";
+        string expectedBet = gameManager != null ? GameManager.FormatWholeNumber(gameManager.currentBet) : "0";
 
         if (state?.Hud == null)
         {
@@ -913,6 +919,39 @@ public static class CandyTheme1DedicatedRealtimeSmoke
         return true;
     }
 
+    private static bool HasExpectedTopperPrizeLabels(Theme1RoundRenderState state, out string error)
+    {
+        error = string.Empty;
+        if (state?.Topper?.Slots == null || state.Topper.Slots.Length == 0)
+        {
+            error = "[Theme1DedicatedSmoke] Dedicated view mangler topper prize-state.";
+            return false;
+        }
+
+        GameManager gameManager = GameManager.instance;
+        for (int slotIndex = 0; slotIndex < state.Topper.Slots.Length; slotIndex++)
+        {
+            Theme1TopperSlotRenderState slot = state.Topper.Slots[slotIndex];
+            string expected = gameManager != null && gameManager.TryGetFormattedPayoutLabel(slotIndex, out string runtimeLabel)
+                ? runtimeLabel
+                : string.Empty;
+            string actual = slot != null ? slot.PrizeLabel : string.Empty;
+            if (string.IsNullOrWhiteSpace(expected))
+            {
+                continue;
+            }
+
+            if (!string.Equals(actual, expected, StringComparison.Ordinal))
+            {
+                error =
+                    $"[Theme1DedicatedSmoke] Topper slot {slotIndex + 1} prize='{actual}' expected='{expected}'.";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool ValidateTheme1BuilderRejectsNumbersAbove60(out string error)
     {
         error = string.Empty;
@@ -931,7 +970,7 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             CardWinLabels = new[] { string.Empty },
             TopperPrizeLabels = Array.Empty<string>(),
             TopperPayoutAmounts = Array.Empty<int>(),
-            CreditLabel = "1000",
+            CreditLabel = "1 000",
             WinningsLabel = "0",
             BetLabel = "4"
         };
@@ -940,6 +979,16 @@ public static class CandyTheme1DedicatedRealtimeSmoke
         if (!HasOnlyValidTheme1Numbers(state, out error))
         {
             error = "[Theme1DedicatedSmoke] Theme1StateBuilder tillot tall over 60.\n" + error;
+            return false;
+        }
+
+        if (state.Cards == null ||
+            state.Cards.Length == 0 ||
+            !string.Equals(state.Cards[0].BetLabel, "Innsats - 1 kr", StringComparison.Ordinal))
+        {
+            error =
+                "[Theme1DedicatedSmoke] Theme1StateBuilder viser ikke innsats per bong. " +
+                $"expected='Innsats - 1 kr' actual='{state?.Cards?[0]?.BetLabel}'.";
             return false;
         }
 
@@ -987,7 +1036,7 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             CardWinLabels = new[] { string.Empty },
             TopperPrizeLabels = new[] { "200 kr" },
             TopperPayoutAmounts = new[] { 200 },
-            CreditLabel = "1000",
+            CreditLabel = "1 000",
             WinningsLabel = "0",
             BetLabel = "4"
         };
@@ -1043,7 +1092,7 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             CardWinLabels = new[] { string.Empty, string.Empty, string.Empty, string.Empty },
             TopperPrizeLabels = new[] { "200 kr" },
             TopperPayoutAmounts = new[] { 200 },
-            CreditLabel = "1000",
+            CreditLabel = "1 000",
             WinningsLabel = "0",
             BetLabel = "4"
         };

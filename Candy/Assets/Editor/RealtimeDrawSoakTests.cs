@@ -639,9 +639,9 @@ public static class RealtimeDrawSoakTests
             return true;
         }
 
-        string expectedCredit = gameManager.CreditBalance.ToString(CultureInfo.InvariantCulture);
-        string expectedWinnings = gameManager.RoundWinnings.ToString(CultureInfo.InvariantCulture);
-        string expectedBet = gameManager.currentBet.ToString(CultureInfo.InvariantCulture);
+        string expectedCredit = GameManager.FormatWholeNumber(gameManager.CreditBalance);
+        string expectedWinnings = GameManager.FormatWholeNumber(gameManager.RoundWinnings);
+        string expectedBet = GameManager.FormatWholeNumber(gameManager.currentBet);
 
         if (!string.Equals(state.Hud.CreditLabel, expectedCredit, StringComparison.Ordinal) ||
             !string.Equals(state.Hud.WinningsLabel, expectedWinnings, StringComparison.Ordinal) ||

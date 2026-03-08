@@ -732,6 +732,23 @@ public partial class APIManager : MonoBehaviour
         return theme1GameManager;
     }
 
+    private void SyncRealtimeFinancialsForRoundStart(bool isActiveRoundParticipant)
+    {
+        GameManager resolvedGameManager = ResolveGameManager();
+        if (resolvedGameManager == null)
+        {
+            return;
+        }
+
+        if (isActiveRoundParticipant)
+        {
+            resolvedGameManager.HandleRealtimeRoundStarted();
+            return;
+        }
+
+        resolvedGameManager.SyncRealtimeBetReservation(false, 0);
+    }
+
     private TopperManager ResolveTopperManager()
     {
         if (theme1TopperManager != null)
@@ -1549,6 +1566,14 @@ public partial class APIManager : MonoBehaviour
         if (!realtimeBetArmAwaitingAck && !pendingRealtimeBetArmRequest)
         {
             desiredRealtimeBetArmedForNextRound = armedForNextRound;
+        }
+        if (!realtimeScheduler.IsGameRunning &&
+            !realtimeBetArmAwaitingAck &&
+            !pendingRealtimeBetArmRequest)
+        {
+            ResolveGameManager()?.SyncRealtimeBetReservation(
+                armedForNextRound,
+                Mathf.Max(0, realtimeEntryFee));
         }
         LogSchedulerSnapshotIfChanged("room-update");
     }

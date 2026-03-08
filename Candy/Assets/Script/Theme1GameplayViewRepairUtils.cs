@@ -363,6 +363,91 @@ public static class Theme1GameplayViewRepairUtils
         ApplyOverlayLabelDefault(gameManager.displayCurrentBets, gameManager.currentBet.ToString());
     }
 
+    public static void EnsureTopperPrizeTargets(TopperManager topperManager, GameManager gameManager)
+    {
+        if (topperManager?.prizes == null)
+        {
+            return;
+        }
+
+        List<TextMeshProUGUI> dedicatedLabels = new List<TextMeshProUGUI>(topperManager.prizes.Count);
+        for (int i = 0; i < topperManager.prizes.Count; i++)
+        {
+            TextMeshProUGUI template = topperManager.prizes[i];
+            string defaultText = gameManager != null && gameManager.TryGetFormattedPayoutLabel(i, out string payoutLabel)
+                ? payoutLabel
+                : ReadText(template, "0 kr");
+            Transform labelParent = ResolveTopperPrizeParent(topperManager, i, template);
+            Color preferredColor = template != null && template.color.a > 0f
+                ? template.color
+                : Color.white;
+            if (Mathf.Approximately(preferredColor.a, 0f))
+            {
+                preferredColor.a = 1f;
+            }
+
+            TextMeshProUGUI dedicated = EnsureDedicatedOverlayLabel(
+                labelParent,
+                $"RealtimeTopperPrizeLabel_{i + 1}",
+                template,
+                defaultText,
+                GameplayTextSurface.TopperValue,
+                preferredColor,
+                fallbackSize: new Vector2(168f, 36f));
+            ApplyOverlayLabelDefault(dedicated, defaultText);
+            if (dedicated != null)
+            {
+                DeactivateSiblingTextTargets(dedicated.transform.parent, dedicated);
+            }
+
+            dedicatedLabels.Add(dedicated);
+        }
+
+        topperManager.prizes = dedicatedLabels;
+        if (gameManager != null)
+        {
+            gameManager.displayCurrentPoints = new List<TextMeshProUGUI>(dedicatedLabels);
+            gameManager.ReapplyTheme1TopperPayoutState();
+        }
+    }
+
+    private static Transform ResolveTopperPrizeParent(TopperManager topperManager, int slotIndex, TextMeshProUGUI template)
+    {
+        if (template != null && template.transform.parent != null)
+        {
+            return template.transform.parent;
+        }
+
+        if (topperManager?.patterns != null &&
+            slotIndex >= 0 &&
+            slotIndex < topperManager.patterns.Count &&
+            topperManager.patterns[slotIndex] != null &&
+            topperManager.patterns[slotIndex].transform.parent != null)
+        {
+            return topperManager.patterns[slotIndex].transform.parent;
+        }
+
+        if (topperManager?.matchedPatterns != null &&
+            slotIndex >= 0 &&
+            slotIndex < topperManager.matchedPatterns.Count &&
+            topperManager.matchedPatterns[slotIndex] != null &&
+            topperManager.matchedPatterns[slotIndex].transform.parent != null)
+        {
+            return topperManager.matchedPatterns[slotIndex].transform.parent;
+        }
+
+        if (topperManager?.missedPattern != null &&
+            slotIndex >= 0 &&
+            slotIndex < topperManager.missedPattern.Count &&
+            topperManager.missedPattern[slotIndex] != null &&
+            topperManager.missedPattern[slotIndex].transform.parent != null)
+        {
+            return topperManager.missedPattern[slotIndex].transform.parent;
+        }
+
+        return null;
+    }
+
     public static TextMeshProUGUI FindDedicatedCardNumberLabel(GameObject selectionOverlay)
     {
         RectTransform cellRoot = ResolveCardCellRoot(selectionOverlay);

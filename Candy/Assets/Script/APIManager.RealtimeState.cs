@@ -167,10 +167,12 @@ public partial class APIManager
             return;
         }
 
+        bool startedNewGame = false;
         if (!string.Equals(activeGameId, gameId, StringComparison.Ordinal))
         {
             string previousGameId = activeGameId;
             activeGameId = gameId;
+            startedNewGame = true;
             processedDrawCount = 0;
             currentTicketPage = 0;
             activeTicketSets.Clear();
@@ -197,6 +199,10 @@ public partial class APIManager
 
         bool isActiveRoundParticipant = ApplyVisibleTicketSetsForCurrentSnapshot(currentGame, snapshot);
         realtimePlayerParticipatingInCurrentRound = isActiveRoundParticipant;
+        if (startedNewGame)
+        {
+            SyncRealtimeFinancialsForRoundStart(isActiveRoundParticipant);
+        }
         ApplyDrawnNumbers(currentGame, isActiveRoundParticipant);
         if (isActiveRoundParticipant)
         {
@@ -1114,6 +1120,7 @@ public partial class APIManager
             currentGame);
 
         LogRealtimeWinningPatternResolution(currentGame, latestClaim, winningPatternsByCard);
+        ResolveGameManager()?.SyncRealtimePatternWinnings(winningPatternsByCard);
 
         SyncRealtimeMatchedPatternVisuals(winningPatternsByCard);
 
@@ -2645,6 +2652,7 @@ public partial class APIManager
     private void ResetActiveRoomState(bool clearDesiredRoomCode)
     {
         ClearJoinOrCreatePending();
+        ResolveGameManager()?.SyncRealtimeBetReservation(false, 0);
         activeRoomCode = string.Empty;
         activePlayerId = string.Empty;
         activeHostPlayerId = string.Empty;

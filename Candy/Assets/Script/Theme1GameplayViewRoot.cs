@@ -778,6 +778,7 @@ public sealed class Theme1GameplayViewRoot : MonoBehaviour
 
         if (topperManager != null)
         {
+            Theme1GameplayViewRepairUtils.EnsureTopperPrizeTargets(topperManager, gameManager);
             topperStrip ??= new Theme1TopperStripView();
             topperStrip.PullFrom(topperManager);
         }
