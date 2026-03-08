@@ -18,7 +18,7 @@ public class EventManager : MonoBehaviour
     public static Action<bool> OnTapForExtraBall;
     public static Action<int, bool> OnExtraBallCompletion;
 
-    public static Action<int, bool> OnMatchedPattern;
+    public static Action<int, int, bool> OnMatchedPattern;
     public static Action<int, int, bool, int, int> OnMissingPattern;
 
     public static Action OnBonusOver;
@@ -75,9 +75,9 @@ public class EventManager : MonoBehaviour
     {
         OnExtraBallCompletion?.Invoke(cardNo, isExtraBallDone);
     }
-    public static void ShowMatchedPattern(int index, bool active)
+    public static void ShowMatchedPattern(int index, int cardNo, bool active)
     {
-        OnMatchedPattern?.Invoke(index, active);
+        OnMatchedPattern?.Invoke(index, cardNo, active);
     }
     public static void ShowMissingPattern(int patternIndex, int colIndex, bool active, int missingNumber = 0, int cardNo = -1)
     {

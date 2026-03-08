@@ -70,10 +70,38 @@ public sealed class CandyTypographyRuntimeInstaller : MonoBehaviour
                 continue;
             }
 
+            if (ContainsDedicatedTheme1Presentation(activeScene))
+            {
+                yield return null;
+                continue;
+            }
+
             CandyTypographySystem.ApplyToScene(activeScene);
             ApplyDynamicButtonLabels();
             yield return null;
         }
+    }
+
+    private static bool ContainsDedicatedTheme1Presentation(Scene scene)
+    {
+        if (!scene.IsValid() || !scene.isLoaded)
+        {
+            return false;
+        }
+
+        GameObject[] roots = scene.GetRootGameObjects();
+        for (int i = 0; i < roots.Length; i++)
+        {
+            Theme1GameplayViewRoot viewRoot = roots[i].GetComponentInChildren<Theme1GameplayViewRoot>(true);
+            if (viewRoot == null)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private static void ApplyDynamicButtonLabels()
@@ -94,6 +122,11 @@ public sealed class CandyTypographyRuntimeInstaller : MonoBehaviour
             }
 
             if (Theme1ManagedTypographyRegistry.Contains(label))
+            {
+                continue;
+            }
+
+            if (Theme1ManagedTypographyRegistry.BelongsToTheme1Presentation(label))
             {
                 continue;
             }

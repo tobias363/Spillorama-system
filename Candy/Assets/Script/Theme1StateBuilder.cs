@@ -4,23 +4,7 @@ using UnityEngine;
 
 public sealed class Theme1StateBuilder
 {
-    private readonly struct NearWinCandidate
-    {
-        public NearWinCandidate(int rawPatternIndex, int slotIndex, int cardIndex, int cellIndex, int payoutAmount)
-        {
-            RawPatternIndex = rawPatternIndex;
-            SlotIndex = slotIndex;
-            CardIndex = cardIndex;
-            CellIndex = cellIndex;
-            PayoutAmount = payoutAmount;
-        }
-
-        public int RawPatternIndex { get; }
-        public int SlotIndex { get; }
-        public int CardIndex { get; }
-        public int CellIndex { get; }
-        public int PayoutAmount { get; }
-    }
+    private readonly Theme1PatternEngine patternEngine = new Theme1PatternEngine();
 
     public Theme1RoundRenderState Build(Theme1StateBuildInput input)
     {
@@ -37,32 +21,14 @@ public sealed class Theme1StateBuilder
 
         state.GameId = input.GameId ?? string.Empty;
         int[] validDrawnNumbers = ExtractValidDrawnNumbers(input.DrawnNumbers);
-        HashSet<int> drawnNumbers = BuildDrawnNumberSet(validDrawnNumbers);
         int[][] visibleTickets = ResolveVisibleTickets(input);
-
-        HashSet<int>[] matchedPatternsByCard = BuildMatchedPatternsByCard(
+        Theme1PatternEngine.Evaluation patternEvaluation = patternEngine.Evaluate(
             visibleTickets,
-            drawnNumbers,
+            validDrawnNumbers,
             input.ActivePatternIndexes,
-            input.PatternMasks);
-
-        Dictionary<(int cardIndex, int cellIndex), NearWinCandidate> nearWinsByCardCell =
-            BuildNearWinsByCardCell(
-                visibleTickets,
-                drawnNumbers,
-                input.ActivePatternIndexes,
-                input.PatternMasks,
-                input.TopperPayoutAmounts,
-                topperCount);
-
-        Dictionary<int, NearWinCandidate> nearWinsByTopperSlot =
-            BuildNearWinsByTopperSlot(
-                visibleTickets,
-                drawnNumbers,
-                input.ActivePatternIndexes,
-                input.PatternMasks,
-                input.TopperPayoutAmounts,
-                topperCount);
+            input.PatternMasks,
+            input.TopperPayoutAmounts,
+            topperCount);
 
         for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
         {
@@ -70,9 +36,10 @@ public sealed class Theme1StateBuilder
             cardState.PaylinesActive = new bool[input.PatternMasks != null ? input.PatternMasks.Length : 0];
 
             int[] ticket = cardIndex < visibleTickets.Length ? visibleTickets[cardIndex] : null;
-            HashSet<int> matchedPatterns = cardIndex < matchedPatternsByCard.Length
-                ? matchedPatternsByCard[cardIndex]
+            Theme1PatternEngine.CardResult patternState = patternEvaluation.Cards != null && cardIndex < patternEvaluation.Cards.Length
+                ? patternEvaluation.Cards[cardIndex]
                 : null;
+            HashSet<int> matchedPatterns = patternState?.MatchedPatternIndexes;
             int cardWinAmount = ResolveCardWinAmount(matchedPatterns, input.TopperPayoutAmounts);
             cardState.HeaderLabel = GetNonEmptyString(
                 input.CardHeaderLabels,
@@ -92,22 +59,26 @@ public sealed class Theme1StateBuilder
                 int number = ticket != null && cellIndex < ticket.Length
                     ? NormalizeTheme1Number(ticket[cellIndex])
                     : 0;
-                bool isSelected = number > 0 && drawnNumbers.Contains(number);
+                bool isSelected = number > 0 && Array.IndexOf(validDrawnNumbers, number) >= 0;
                 bool isMatched = IsCellMatched(cellIndex, matchedPatterns, input.PatternMasks);
-                bool isMissing = nearWinsByCardCell.TryGetValue((cardIndex, cellIndex), out NearWinCandidate nearWinCandidate);
+                bool isMissing = TryGetCellNearWins(patternState, cellIndex, out List<Theme1PatternEngine.NearWinResult> nearWins);
+                int[] nearWinPatternIndexes = ExtractNearWinPatternIndexes(nearWins);
+                int missingNumber = ResolveMissingNumber(number, nearWins);
+
                 cardState.Cells[cellIndex] = new Theme1CardCellRenderState(
                     number > 0 ? number.ToString() : "-",
                     isSelected,
                     isMissing,
                     isMatched,
-                    isMissing ? nearWinCandidate.RawPatternIndex : -1,
-                    isMissing ? number : 0);
+                    nearWinPatternIndexes.Length > 0 ? nearWinPatternIndexes[0] : -1,
+                    missingNumber,
+                    nearWinPatternIndexes);
             }
 
             for (int patternListIndex = 0; patternListIndex < cardState.PaylinesActive.Length; patternListIndex++)
             {
-                int rawPatternIndex = patternListIndex;
-                cardState.PaylinesActive[patternListIndex] = matchedPatterns != null && matchedPatterns.Contains(rawPatternIndex);
+                cardState.PaylinesActive[patternListIndex] =
+                    matchedPatterns != null && matchedPatterns.Contains(patternListIndex);
             }
 
             if (matchedPatterns != null && matchedPatterns.Count > 0)
@@ -126,8 +97,58 @@ public sealed class Theme1StateBuilder
 
         PopulateBallRack(state.BallRack, validDrawnNumbers, input.BallSlotCount);
         PopulateHud(state.Hud, input);
-        PopulateTopper(state.Topper, input, matchedPatternsByCard, nearWinsByTopperSlot);
+        PopulateTopper(state.Topper, input, patternEvaluation);
         return state;
+    }
+
+    private static bool TryGetCellNearWins(
+        Theme1PatternEngine.CardResult patternState,
+        int cellIndex,
+        out List<Theme1PatternEngine.NearWinResult> nearWins)
+    {
+        nearWins = null;
+        return patternState != null &&
+               patternState.NearWinsByCell != null &&
+               patternState.NearWinsByCell.TryGetValue(cellIndex, out nearWins) &&
+               nearWins != null &&
+               nearWins.Count > 0;
+    }
+
+    private static int[] ExtractNearWinPatternIndexes(List<Theme1PatternEngine.NearWinResult> nearWins)
+    {
+        if (nearWins == null || nearWins.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        HashSet<int> unique = new HashSet<int>();
+        for (int i = 0; i < nearWins.Count; i++)
+        {
+            unique.Add(nearWins[i].RawPatternIndex);
+        }
+
+        int[] values = new int[unique.Count];
+        unique.CopyTo(values);
+        Array.Sort(values);
+        return values;
+    }
+
+    private static int ResolveMissingNumber(int fallbackNumber, List<Theme1PatternEngine.NearWinResult> nearWins)
+    {
+        if (nearWins == null || nearWins.Count == 0)
+        {
+            return fallbackNumber;
+        }
+
+        for (int i = 0; i < nearWins.Count; i++)
+        {
+            if (nearWins[i].MissingNumber > 0)
+            {
+                return nearWins[i].MissingNumber;
+            }
+        }
+
+        return fallbackNumber;
     }
 
     private static int ResolveCardWinAmount(IReadOnlyCollection<int> matchedPatterns, IReadOnlyList<int> payoutAmounts)
@@ -175,26 +196,6 @@ public sealed class Theme1StateBuilder
         return validValues.ToArray();
     }
 
-    private static HashSet<int> BuildDrawnNumberSet(IReadOnlyList<int> drawnNumbers)
-    {
-        HashSet<int> values = new HashSet<int>();
-        if (drawnNumbers == null)
-        {
-            return values;
-        }
-
-        for (int i = 0; i < drawnNumbers.Count; i++)
-        {
-            int value = NormalizeTheme1Number(drawnNumbers[i]);
-            if (value > 0)
-            {
-                values.Add(value);
-            }
-        }
-
-        return values;
-    }
-
     private static int[][] ResolveVisibleTickets(Theme1StateBuildInput input)
     {
         int cardCount = Mathf.Max(0, input.CardSlotCount);
@@ -238,221 +239,7 @@ public sealed class Theme1StateBuilder
         return normalized;
     }
 
-    private static HashSet<int>[] BuildMatchedPatternsByCard(
-        int[][] visibleTickets,
-        HashSet<int> drawnNumbers,
-        IReadOnlyList<int> activePatternIndexes,
-        IReadOnlyList<byte[]> patternMasks)
-    {
-        HashSet<int>[] results = new HashSet<int>[visibleTickets.Length];
-        for (int cardIndex = 0; cardIndex < results.Length; cardIndex++)
-        {
-            results[cardIndex] = new HashSet<int>();
-        }
-
-        if (activePatternIndexes == null || patternMasks == null)
-        {
-            return results;
-        }
-
-        for (int i = 0; i < activePatternIndexes.Count; i++)
-        {
-            int rawPatternIndex = activePatternIndexes[i];
-            if (rawPatternIndex < 0 || rawPatternIndex >= patternMasks.Count)
-            {
-                continue;
-            }
-
-            byte[] mask = patternMasks[rawPatternIndex];
-            if (mask == null || mask.Length == 0)
-            {
-                continue;
-            }
-
-            for (int cardIndex = 0; cardIndex < visibleTickets.Length; cardIndex++)
-            {
-                int[] ticket = visibleTickets[cardIndex];
-                if (ticket == null)
-                {
-                    continue;
-                }
-
-                if (IsPatternMatched(ticket, drawnNumbers, mask))
-                {
-                    results[cardIndex].Add(rawPatternIndex);
-                }
-            }
-        }
-
-        return results;
-    }
-
-    private static Dictionary<(int cardIndex, int cellIndex), NearWinCandidate> BuildNearWinsByCardCell(
-        int[][] visibleTickets,
-        HashSet<int> drawnNumbers,
-        IReadOnlyList<int> activePatternIndexes,
-        IReadOnlyList<byte[]> patternMasks,
-        IReadOnlyList<int> payoutAmounts,
-        int topperCount)
-    {
-        Dictionary<(int cardIndex, int cellIndex), NearWinCandidate> results = new Dictionary<(int cardIndex, int cellIndex), NearWinCandidate>();
-        if (activePatternIndexes == null || patternMasks == null)
-        {
-            return results;
-        }
-
-        for (int i = 0; i < activePatternIndexes.Count; i++)
-        {
-            int rawPatternIndex = activePatternIndexes[i];
-            if (rawPatternIndex < 0 || rawPatternIndex >= patternMasks.Count)
-            {
-                continue;
-            }
-
-            byte[] mask = patternMasks[rawPatternIndex];
-            if (!TryResolveNearWinCell(mask, visibleTickets, drawnNumbers, rawPatternIndex, payoutAmounts, topperCount, out NearWinCandidate[] candidates))
-            {
-                continue;
-            }
-
-            for (int candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
-            {
-                NearWinCandidate candidate = candidates[candidateIndex];
-                var key = (candidate.CardIndex, candidate.CellIndex);
-                if (!results.TryGetValue(key, out NearWinCandidate existing) ||
-                    IsBetterNearWinCandidate(candidate, existing))
-                {
-                    results[key] = candidate;
-                }
-            }
-        }
-
-        return results;
-    }
-
-    private static Dictionary<int, NearWinCandidate> BuildNearWinsByTopperSlot(
-        int[][] visibleTickets,
-        HashSet<int> drawnNumbers,
-        IReadOnlyList<int> activePatternIndexes,
-        IReadOnlyList<byte[]> patternMasks,
-        IReadOnlyList<int> payoutAmounts,
-        int topperCount)
-    {
-        Dictionary<int, NearWinCandidate> results = new Dictionary<int, NearWinCandidate>();
-        if (activePatternIndexes == null || patternMasks == null)
-        {
-            return results;
-        }
-
-        for (int i = 0; i < activePatternIndexes.Count; i++)
-        {
-            int rawPatternIndex = activePatternIndexes[i];
-            if (rawPatternIndex < 0 || rawPatternIndex >= patternMasks.Count)
-            {
-                continue;
-            }
-
-            byte[] mask = patternMasks[rawPatternIndex];
-            if (!TryResolveNearWinCell(mask, visibleTickets, drawnNumbers, rawPatternIndex, payoutAmounts, topperCount, out NearWinCandidate[] candidates))
-            {
-                continue;
-            }
-
-            for (int candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
-            {
-                NearWinCandidate candidate = candidates[candidateIndex];
-                if (!results.TryGetValue(candidate.SlotIndex, out NearWinCandidate existing) ||
-                    IsBetterNearWinCandidate(candidate, existing))
-                {
-                    results[candidate.SlotIndex] = candidate;
-                }
-            }
-        }
-
-        return results;
-    }
-
-    private static bool TryResolveNearWinCell(
-        byte[] mask,
-        int[][] visibleTickets,
-        HashSet<int> drawnNumbers,
-        int rawPatternIndex,
-        IReadOnlyList<int> payoutAmounts,
-        int topperCount,
-        out NearWinCandidate[] candidates)
-    {
-        List<NearWinCandidate> resolved = new List<NearWinCandidate>();
-        for (int cardIndex = 0; cardIndex < visibleTickets.Length; cardIndex++)
-        {
-            int[] ticket = visibleTickets[cardIndex];
-            if (ticket == null || !TryResolveNearWinCell(ticket, drawnNumbers, mask, out int missingCellIndex))
-            {
-                continue;
-            }
-
-            int slotIndex = GameManager.ResolvePayoutSlotIndex(rawPatternIndex, topperCount);
-            int payoutAmount = GetValue(payoutAmounts, slotIndex, 0);
-            resolved.Add(new NearWinCandidate(rawPatternIndex, slotIndex, cardIndex, missingCellIndex, payoutAmount));
-        }
-
-        candidates = resolved.ToArray();
-        return candidates.Length > 0;
-    }
-
-    private static bool TryResolveNearWinCell(int[] ticket, HashSet<int> drawnNumbers, byte[] mask, out int missingCellIndex)
-    {
-        missingCellIndex = -1;
-        if (ticket == null || mask == null)
-        {
-            return false;
-        }
-
-        int requiredCount = 0;
-        int matchedCount = 0;
-        int cellCount = Mathf.Min(ticket.Length, mask.Length);
-        for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
-        {
-            if (mask[cellIndex] != 1)
-            {
-                continue;
-            }
-
-            requiredCount++;
-            int number = ticket[cellIndex];
-            if (number > 0 && drawnNumbers.Contains(number))
-            {
-                matchedCount++;
-            }
-            else if (missingCellIndex < 0)
-            {
-                missingCellIndex = cellIndex;
-            }
-        }
-
-        return requiredCount > 0 && matchedCount == requiredCount - 1 && missingCellIndex >= 0;
-    }
-
-    private static bool IsPatternMatched(int[] ticket, HashSet<int> drawnNumbers, byte[] mask)
-    {
-        int cellCount = Mathf.Min(ticket.Length, mask.Length);
-        for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
-        {
-            if (mask[cellIndex] != 1)
-            {
-                continue;
-            }
-
-            int number = ticket[cellIndex];
-            if (number <= 0 || !drawnNumbers.Contains(number))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool IsCellMatched(int cellIndex, HashSet<int> matchedPatterns, IReadOnlyList<byte[]> patternMasks)
+    private static bool IsCellMatched(int cellIndex, IReadOnlyCollection<int> matchedPatterns, IReadOnlyList<byte[]> patternMasks)
     {
         if (matchedPatterns == null || matchedPatterns.Count == 0 || patternMasks == null)
         {
@@ -522,8 +309,7 @@ public sealed class Theme1StateBuilder
     private static void PopulateTopper(
         Theme1TopperRenderState topper,
         Theme1StateBuildInput input,
-        IReadOnlyList<HashSet<int>> matchedPatternsByCard,
-        IReadOnlyDictionary<int, NearWinCandidate> nearWinsByTopperSlot)
+        Theme1PatternEngine.Evaluation patternEvaluation)
     {
         if (topper == null || input == null)
         {
@@ -532,24 +318,41 @@ public sealed class Theme1StateBuilder
 
         int slotCount = input.TopperPrizeLabels != null ? input.TopperPrizeLabels.Length : 0;
         topper.Slots = new Theme1TopperSlotRenderState[slotCount];
-        HashSet<int> matchedSlotIndexes = new HashSet<int>();
-        if (matchedPatternsByCard != null)
+
+        Dictionary<int, HashSet<int>> matchedCardsBySlot = new Dictionary<int, HashSet<int>>();
+        Dictionary<int, HashSet<int>> matchedPatternsBySlot = new Dictionary<int, HashSet<int>>();
+        if (patternEvaluation?.Cards != null)
         {
-            for (int cardIndex = 0; cardIndex < matchedPatternsByCard.Count; cardIndex++)
+            for (int cardIndex = 0; cardIndex < patternEvaluation.Cards.Length; cardIndex++)
             {
-                HashSet<int> matchedPatterns = matchedPatternsByCard[cardIndex];
-                if (matchedPatterns == null)
+                Theme1PatternEngine.CardResult card = patternEvaluation.Cards[cardIndex];
+                if (card?.MatchedPatternIndexes == null)
                 {
                     continue;
                 }
 
-                foreach (int rawPatternIndex in matchedPatterns)
+                foreach (int rawPatternIndex in card.MatchedPatternIndexes)
                 {
                     int slotIndex = GameManager.ResolvePayoutSlotIndex(rawPatternIndex, slotCount);
-                    if (slotIndex >= 0)
+                    if (slotIndex < 0)
                     {
-                        matchedSlotIndexes.Add(slotIndex);
+                        continue;
                     }
+
+                    if (!matchedCardsBySlot.TryGetValue(slotIndex, out HashSet<int> matchedCards))
+                    {
+                        matchedCards = new HashSet<int>();
+                        matchedCardsBySlot[slotIndex] = matchedCards;
+                    }
+
+                    if (!matchedPatternsBySlot.TryGetValue(slotIndex, out HashSet<int> matchedPatterns))
+                    {
+                        matchedPatterns = new HashSet<int>();
+                        matchedPatternsBySlot[slotIndex] = matchedPatterns;
+                    }
+
+                    matchedCards.Add(cardIndex);
+                    matchedPatterns.Add(rawPatternIndex);
                 }
             }
         }
@@ -560,51 +363,109 @@ public sealed class Theme1StateBuilder
             {
                 PrizeLabel = GetValue(input.TopperPrizeLabels, slotIndex, string.Empty),
                 ShowPattern = true,
-                ShowMatchedPattern = matchedSlotIndexes.Contains(slotIndex),
+                ShowMatchedPattern = matchedCardsBySlot.ContainsKey(slotIndex),
                 PrizeVisualState = Theme1PrizeVisualState.Normal
             };
+
+            if (matchedCardsBySlot.TryGetValue(slotIndex, out HashSet<int> matchedCards))
+            {
+                slotState.ActiveCardIndexes = ToSortedArray(matchedCards);
+            }
+
+            if (matchedPatternsBySlot.TryGetValue(slotIndex, out HashSet<int> matchedPatterns))
+            {
+                slotState.ActivePatternIndexes = ToSortedArray(matchedPatterns);
+            }
 
             if (slotState.ShowMatchedPattern)
             {
                 slotState.PrizeVisualState = Theme1PrizeVisualState.Matched;
+                slotState.MissingCellsVisible = Array.Empty<bool>();
             }
-            else if (nearWinsByTopperSlot != null && nearWinsByTopperSlot.TryGetValue(slotIndex, out NearWinCandidate nearWin))
+            else if (patternEvaluation != null &&
+                     patternEvaluation.NearWinsByTopperSlot.TryGetValue(slotIndex, out List<Theme1PatternEngine.NearWinResult> nearWins) &&
+                     nearWins != null &&
+                     nearWins.Count > 0)
             {
-                int cellCount = 15;
-                slotState.MissingCellsVisible = new bool[cellCount];
-                if (nearWin.CellIndex >= 0 && nearWin.CellIndex < cellCount)
-                {
-                    slotState.MissingCellsVisible[nearWin.CellIndex] = true;
-                }
+                slotState.MissingCellsVisible = BuildTopperMissingCells(nearWins);
                 slotState.PrizeVisualState = Theme1PrizeVisualState.NearWin;
+                slotState.ActivePatternIndexes = ExtractActivePatternIndexes(nearWins);
+                slotState.ActiveCardIndexes = ExtractActiveCardIndexes(nearWins);
             }
             else
             {
                 slotState.MissingCellsVisible = Array.Empty<bool>();
+                slotState.ActivePatternIndexes = Array.Empty<int>();
+                slotState.ActiveCardIndexes = Array.Empty<int>();
             }
 
             topper.Slots[slotIndex] = slotState;
         }
     }
 
-    private static bool IsBetterNearWinCandidate(NearWinCandidate candidate, NearWinCandidate current)
+    private static bool[] BuildTopperMissingCells(IReadOnlyList<Theme1PatternEngine.NearWinResult> nearWins)
     {
-        if (candidate.PayoutAmount != current.PayoutAmount)
+        bool[] visible = new bool[15];
+        if (nearWins == null)
         {
-            return candidate.PayoutAmount > current.PayoutAmount;
+            return visible;
         }
 
-        if (candidate.RawPatternIndex != current.RawPatternIndex)
+        for (int i = 0; i < nearWins.Count; i++)
         {
-            return candidate.RawPatternIndex < current.RawPatternIndex;
+            int cellIndex = nearWins[i].CellIndex;
+            if (cellIndex >= 0 && cellIndex < visible.Length)
+            {
+                visible[cellIndex] = true;
+            }
         }
 
-        if (candidate.CardIndex != current.CardIndex)
+        return visible;
+    }
+
+    private static int[] ExtractActivePatternIndexes(IReadOnlyList<Theme1PatternEngine.NearWinResult> nearWins)
+    {
+        if (nearWins == null || nearWins.Count == 0)
         {
-            return candidate.CardIndex < current.CardIndex;
+            return Array.Empty<int>();
         }
 
-        return candidate.CellIndex < current.CellIndex;
+        HashSet<int> values = new HashSet<int>();
+        for (int i = 0; i < nearWins.Count; i++)
+        {
+            values.Add(nearWins[i].RawPatternIndex);
+        }
+
+        return ToSortedArray(values);
+    }
+
+    private static int[] ExtractActiveCardIndexes(IReadOnlyList<Theme1PatternEngine.NearWinResult> nearWins)
+    {
+        if (nearWins == null || nearWins.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        HashSet<int> values = new HashSet<int>();
+        for (int i = 0; i < nearWins.Count; i++)
+        {
+            values.Add(nearWins[i].CardIndex);
+        }
+
+        return ToSortedArray(values);
+    }
+
+    private static int[] ToSortedArray(HashSet<int> values)
+    {
+        if (values == null || values.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        int[] array = new int[values.Count];
+        values.CopyTo(array);
+        Array.Sort(array);
+        return array;
     }
 
     private static T GetValue<T>(IReadOnlyList<T> values, int index, T fallback)

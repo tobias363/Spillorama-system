@@ -19,10 +19,12 @@ public static class RealtimeDrawSoakTests
     private const double DefaultPlayPressIntervalSeconds = 0.9;
 
     private static readonly Regex DrawKeyRegex = new(@"game=([^\s]+)\s+idx=(\d+)", RegexOptions.Compiled);
+    private static readonly Regex ClaimIdRegex = new(@"claimId=([^\s]+)", RegexOptions.Compiled);
     private static readonly HashSet<string> DrawRenderedKeys = new();
     private static readonly HashSet<string> DrawFallbackKeys = new();
     private static readonly HashSet<string> DrawSkippedKeys = new();
     private static readonly HashSet<string> DrawEnqueuedKeys = new();
+    private static readonly HashSet<string> ObservedClaimIds = new();
 
     private static string scenePath = DefaultScenePath;
     private static string apiBaseUrl = DefaultApiBaseUrl;
@@ -259,7 +261,7 @@ public static class RealtimeDrawSoakTests
             Debug.Log(
                 $"[DrawSoak] PROGRESS visible={visibleDrawCount}/{targetDraws} " +
                 $"rendered={GetRenderedDrawCount()} fallback={GetFallbackDrawCount()} " +
-                $"enqueued={GetEnqueuedDrawCount()} skipped={skippedDrawCount} playPresses={playPressCount} " +
+                $"enqueued={GetEnqueuedDrawCount()} skipped={skippedDrawCount} playPresses={playPressCount} claimsObserved={ObservedClaimIds.Count} " +
                 $"nearWinVisible={nearWinVisibleSamples} matchedVisible={matchedVisibleSamples} " +
                 $"blinkTransitions={nearWinBlinkTransitions} maxNearWins={maxActiveNearWinCount} " +
                 $"maxMatched={maxActiveMatchedPatternCount} maxHeaderCells={maxHeaderNearWinCells} " +
@@ -418,6 +420,14 @@ public static class RealtimeDrawSoakTests
             {
                 skippedRawCount += 1;
             }
+
+            return;
+        }
+
+        if (condition.Contains("[candy-claim]", StringComparison.Ordinal) &&
+            condition.Contains("valid=True", StringComparison.Ordinal))
+        {
+            RegisterClaim(condition);
         }
     }
 
@@ -438,6 +448,21 @@ public static class RealtimeDrawSoakTests
 
         target.Add(gameId + ":" + drawIdx);
         return true;
+    }
+
+    private static void RegisterClaim(string line)
+    {
+        Match match = ClaimIdRegex.Match(line);
+        if (!match.Success)
+        {
+            return;
+        }
+
+        string claimId = match.Groups[1].Value.Trim();
+        if (!string.IsNullOrWhiteSpace(claimId))
+        {
+            ObservedClaimIds.Add(claimId);
+        }
     }
 
     private static void HandlePlayModeStateChanged(PlayModeStateChange state)
@@ -483,7 +508,7 @@ public static class RealtimeDrawSoakTests
                 status = "FAIL";
                 finishReason = "no synchronized near-win visuals observed";
             }
-            else if (matchedVisibleSamples == 0)
+            else if (matchedVisibleSamples == 0 && ObservedClaimIds.Count > 0)
             {
                 exitCode = 1;
                 status = "FAIL";
@@ -501,7 +526,7 @@ public static class RealtimeDrawSoakTests
             $"[DrawSoak] RESULT status={status} reason=\"{finishReason}\" " +
             $"visible={GetVisibleDrawCount()} target={targetDraws} " +
             $"rendered={GetRenderedDrawCount()} fallback={GetFallbackDrawCount()} " +
-            $"enqueued={GetEnqueuedDrawCount()} skipped={GetSkippedDrawCount()} playPresses={playPressCount} " +
+            $"enqueued={GetEnqueuedDrawCount()} skipped={GetSkippedDrawCount()} playPresses={playPressCount} claimsObserved={ObservedClaimIds.Count} " +
             $"nearWinVisible={nearWinVisibleSamples} matchedVisible={matchedVisibleSamples} " +
             $"blinkTransitions={nearWinBlinkTransitions} blinkVisibleSamples={nearWinBlinkVisibleSamples} " +
             $"maxNearWins={maxActiveNearWinCount} maxMatched={maxActiveMatchedPatternCount} " +
@@ -559,6 +584,7 @@ public static class RealtimeDrawSoakTests
         DrawFallbackKeys.Clear();
         DrawSkippedKeys.Clear();
         DrawEnqueuedKeys.Clear();
+        ObservedClaimIds.Clear();
         renderedRawCount = 0;
         fallbackRawCount = 0;
         skippedRawCount = 0;

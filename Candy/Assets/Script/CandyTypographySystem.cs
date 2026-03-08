@@ -412,6 +412,11 @@ public static class CandyTypographySystem
                     continue;
                 }
 
+                if (Theme1ManagedTypographyRegistry.BelongsToTheme1Presentation(text))
+                {
+                    continue;
+                }
+
                 ApplyGameplayRole(text, Classify(text), RealtimeTextStyleUtils.ClassifyGameplaySurface(text));
                 updatedCount += 1;
             }

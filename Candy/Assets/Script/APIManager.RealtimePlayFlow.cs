@@ -148,6 +148,11 @@ public partial class APIManager
 
     private void QueueRealtimeBetArmState(bool armed, string reason, Action onSynced = null)
     {
+        if (armed)
+        {
+            ClearPreservedTheme1RoundDisplayState();
+        }
+
         desiredRealtimeBetArmedForNextRound = armed;
         realtimeBetArmMutationVersion += 1;
         pendingRealtimeBetArmRequest = true;

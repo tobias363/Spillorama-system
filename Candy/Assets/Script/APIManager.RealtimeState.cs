@@ -522,7 +522,12 @@ public partial class APIManager
             return;
         }
 
-        generator.ApplyExplicitRealtimeCardViewBindingsFromComponent();
+        if (!BootstrapRealtimeCardBindings(generator, out string bootstrapError))
+        {
+            PublishRuntimeStatus("Card bindings er ugyldige i Theme1. " + bootstrapError, asError: true);
+            return;
+        }
+
         TMP_FontAsset numberFallbackFont = RealtimeTextStyleUtils.ResolveFallbackFont();
         for (int cardIndex = 0; cardIndex < generator.cardClasses.Length; cardIndex++)
         {
@@ -663,9 +668,7 @@ public partial class APIManager
             return;
         }
 
-        generator.ApplyExplicitRealtimeCardViewBindingsFromComponent();
-        CandyCardViewBindingSet cardBindingSet = generator.GetComponent<CandyCardViewBindingSet>();
-        if (cardBindingSet != null && !cardBindingSet.TryApplyTo(generator, out string bindingError))
+        if (!BootstrapRealtimeCardBindings(generator, out string bindingError))
         {
             PublishRuntimeStatus("Card bindings er ugyldige i Theme1. " + bindingError, asError: true);
             RegisterRealtimeTicketRender(ticketSets.Count, 0);
@@ -782,6 +785,72 @@ public partial class APIManager
         {
             Debug.Log($"[APIManager] Applied ticket page {currentTicketPage + 1}/{pageCount} ({ticketSets.Count} total ticket(s)) for player {activePlayerId}. Room {activeRoomCode}, game {activeGameId}");
         }
+    }
+
+    private bool BootstrapRealtimeCardBindings(NumberGenerator generator, out string error)
+    {
+        error = string.Empty;
+        if (generator == null)
+        {
+            error = "NumberGenerator mangler.";
+            return false;
+        }
+
+        if (NeedsRealtimeCardBindingBootstrap(generator))
+        {
+            generator.ApplyExplicitRealtimeCardViewBindingsFromComponent();
+            CandyCardViewBindingSet cardBindingSet = generator.GetComponent<CandyCardViewBindingSet>();
+            if (cardBindingSet == null)
+            {
+                cardBindingSet = UnityEngine.Object.FindFirstObjectByType<CandyCardViewBindingSet>(FindObjectsInactive.Include);
+            }
+
+            if (cardBindingSet != null && !cardBindingSet.TryApplyTo(generator, out error))
+            {
+                return false;
+            }
+        }
+
+        Theme1GameplayViewRepairUtils.EnsureCardNumberTargets(generator);
+        return true;
+    }
+
+    private static bool NeedsRealtimeCardBindingBootstrap(NumberGenerator generator)
+    {
+        if (generator?.cardClasses == null || generator.cardClasses.Length == 0)
+        {
+            return true;
+        }
+
+        for (int cardIndex = 0; cardIndex < generator.cardClasses.Length; cardIndex++)
+        {
+            CardClass card = generator.cardClasses[cardIndex];
+            if (card == null ||
+                card.num_text == null ||
+                card.selectionImg == null ||
+                card.missingPatternImg == null ||
+                card.matchPatternImg == null ||
+                card.num_text.Count < 15 ||
+                card.selectionImg.Count < 15 ||
+                card.missingPatternImg.Count < 15 ||
+                card.matchPatternImg.Count < 15)
+            {
+                return true;
+            }
+
+            for (int cellIndex = 0; cellIndex < 15; cellIndex++)
+            {
+                if (card.num_text[cellIndex] == null ||
+                    card.selectionImg[cellIndex] == null ||
+                    card.missingPatternImg[cellIndex] == null ||
+                    card.matchPatternImg[cellIndex] == null)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static void EnsureRealtimeCardBindings(CardClass card)
@@ -1948,9 +2017,24 @@ public partial class APIManager
         return (cardNo * 10000) + (patternIndex * 100) + cellIndex;
     }
 
+    private static long BuildMatchedPatternKey(int cardNo, int patternIndex)
+    {
+        return ((long)(cardNo + 1) << 32) | (uint)patternIndex;
+    }
+
+    private static int ExtractMatchedPatternIndex(long key)
+    {
+        return unchecked((int)(key & 0xFFFFFFFF));
+    }
+
+    private static int ExtractMatchedPatternCardNo(long key)
+    {
+        return unchecked((int)((key >> 32) - 1L));
+    }
+
     private void SyncRealtimeMatchedPatternVisuals(Dictionary<int, HashSet<int>> winningPatternsByCard)
     {
-        HashSet<int> activeMatchedPatterns = new();
+        HashSet<long> activeMatchedPatterns = new();
         if (winningPatternsByCard != null)
         {
             foreach (KeyValuePair<int, HashSet<int>> entry in winningPatternsByCard)
@@ -1962,32 +2046,38 @@ public partial class APIManager
 
                 foreach (int patternIndex in entry.Value)
                 {
-                    activeMatchedPatterns.Add(patternIndex);
+                    activeMatchedPatterns.Add(BuildMatchedPatternKey(entry.Key, patternIndex));
                 }
             }
         }
 
-        List<int> patternsToDisable = new();
-        foreach (int patternIndex in realtimeMatchedPatternIndexes)
+        List<long> patternsToDisable = new();
+        foreach (long matchedPatternKey in realtimeMatchedPatternIndexes)
         {
-            if (!activeMatchedPatterns.Contains(patternIndex))
+            if (!activeMatchedPatterns.Contains(matchedPatternKey))
             {
-                patternsToDisable.Add(patternIndex);
+                patternsToDisable.Add(matchedPatternKey);
             }
         }
 
         for (int i = 0; i < patternsToDisable.Count; i++)
         {
-            int patternIndex = patternsToDisable[i];
-            EventManager.ShowMatchedPattern(patternIndex, false);
-            realtimeMatchedPatternIndexes.Remove(patternIndex);
+            long matchedPatternKey = patternsToDisable[i];
+            EventManager.ShowMatchedPattern(
+                ExtractMatchedPatternIndex(matchedPatternKey),
+                ExtractMatchedPatternCardNo(matchedPatternKey),
+                false);
+            realtimeMatchedPatternIndexes.Remove(matchedPatternKey);
         }
 
-        foreach (int patternIndex in activeMatchedPatterns)
+        foreach (long matchedPatternKey in activeMatchedPatterns)
         {
-            if (realtimeMatchedPatternIndexes.Add(patternIndex))
+            if (realtimeMatchedPatternIndexes.Add(matchedPatternKey))
             {
-                EventManager.ShowMatchedPattern(patternIndex, true);
+                EventManager.ShowMatchedPattern(
+                    ExtractMatchedPatternIndex(matchedPatternKey),
+                    ExtractMatchedPatternCardNo(matchedPatternKey),
+                    true);
             }
         }
     }
@@ -2082,9 +2172,12 @@ public partial class APIManager
 
     private void StopRealtimeMatchedPatternVisuals()
     {
-        foreach (int patternIndex in realtimeMatchedPatternIndexes)
+        foreach (long matchedPatternKey in realtimeMatchedPatternIndexes)
         {
-            EventManager.ShowMatchedPattern(patternIndex, false);
+            EventManager.ShowMatchedPattern(
+                ExtractMatchedPatternIndex(matchedPatternKey),
+                ExtractMatchedPatternCardNo(matchedPatternKey),
+                false);
         }
 
         realtimeMatchedPatternIndexes.Clear();

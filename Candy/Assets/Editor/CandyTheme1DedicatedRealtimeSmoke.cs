@@ -212,6 +212,24 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             return false;
         }
 
+        if (!ValidateTheme1BuilderKeepsPatternsPerCard(out string perCardPatternError))
+        {
+            error = perCardPatternError;
+            return false;
+        }
+
+        if (!ValidateDedicatedPreservesCompletedRound(viewRoot, out string preservedRoundError))
+        {
+            error = preservedRoundError;
+            return false;
+        }
+
+        if (!ValidateDedicatedShowsDrawBallsWithoutParticipation(out string spectatorError))
+        {
+            error = spectatorError;
+            return false;
+        }
+
         return true;
     }
 
@@ -406,7 +424,31 @@ public static class CandyTheme1DedicatedRealtimeSmoke
         return root;
     }
 
-    private static JSONArray BuildPlayersNode()
+    private static JSONNode BuildEndedSnapshot()
+    {
+        JSONObject root = new JSONObject();
+        root["code"] = "SMOKE";
+        root["hallId"] = "hall-smoke";
+        root["hostPlayerId"] = PlayerId;
+        root["players"] = BuildPlayersNode();
+        root["preRoundTickets"] = BuildTicketsNode();
+        root["currentGame"] = JSONNull.CreateOrGet();
+        return root;
+    }
+
+    private static JSONNode BuildSpectatorSnapshot(string gameId, IReadOnlyList<int> draws)
+    {
+        JSONObject root = new JSONObject();
+        root["code"] = "SMOKE";
+        root["hallId"] = "hall-smoke";
+        root["hostPlayerId"] = PlayerId;
+        root["players"] = BuildPlayersNode(includeOtherPlayer: true);
+        root["preRoundTickets"] = BuildTicketsNode();
+        root["currentGame"] = BuildCurrentGameNode(gameId, draws, BuildTicketsNodeForPlayer("other-player"));
+        return root;
+    }
+
+    private static JSONArray BuildPlayersNode(bool includeOtherPlayer = false)
     {
         JSONArray players = new JSONArray();
         JSONObject player = new JSONObject();
@@ -414,15 +456,25 @@ public static class CandyTheme1DedicatedRealtimeSmoke
         player["walletId"] = "wallet-smoke";
         player["displayName"] = "Smoke";
         players.Add(player);
+
+        if (includeOtherPlayer)
+        {
+            JSONObject otherPlayer = new JSONObject();
+            otherPlayer["id"] = "other-player";
+            otherPlayer["walletId"] = "wallet-other";
+            otherPlayer["displayName"] = "Other";
+            players.Add(otherPlayer);
+        }
+
         return players;
     }
 
-    private static JSONObject BuildCurrentGameNode(string gameId, IReadOnlyList<int> draws)
+    private static JSONObject BuildCurrentGameNode(string gameId, IReadOnlyList<int> draws, JSONNode ticketsOverride = null)
     {
         JSONObject currentGame = new JSONObject();
         currentGame["id"] = gameId;
         currentGame["status"] = "RUNNING";
-        currentGame["tickets"] = BuildTicketsNode();
+        currentGame["tickets"] = ticketsOverride ?? BuildTicketsNode();
 
         JSONArray drawnNumbers = new JSONArray();
         for (int i = 0; draws != null && i < draws.Count; i++)
@@ -435,6 +487,11 @@ public static class CandyTheme1DedicatedRealtimeSmoke
     }
 
     private static JSONObject BuildTicketsNode()
+    {
+        return BuildTicketsNodeForPlayer(PlayerId);
+    }
+
+    private static JSONObject BuildTicketsNodeForPlayer(string playerId)
     {
         JSONArray tickets = new JSONArray();
         for (int i = 0; i < TicketSets.Count; i++)
@@ -451,8 +508,139 @@ public static class CandyTheme1DedicatedRealtimeSmoke
         }
 
         JSONObject byPlayer = new JSONObject();
-        byPlayer[PlayerId] = tickets;
+        byPlayer[playerId] = tickets;
         return byPlayer;
+    }
+
+    private static bool ValidateDedicatedPreservesCompletedRound(Theme1GameplayViewRoot viewRoot, out string error)
+    {
+        error = string.Empty;
+        if (!TryCaptureDedicatedStateFromSnapshot("GAME-PRESERVE", MatchedDraws, BuildSnapshot("GAME-PRESERVE", MatchedDraws), out Theme1RoundRenderState liveState, out error))
+        {
+            return false;
+        }
+
+        if (!TryCaptureDedicatedStateFromSnapshot("GAME-PRESERVE", MatchedDraws, BuildEndedSnapshot(), out Theme1RoundRenderState endedState, out error))
+        {
+            return false;
+        }
+
+        if (!HasVisibleTicketNumbers(endedState))
+        {
+            error = "[Theme1DedicatedSmoke] Theme1 nullstilte bongene med en gang runden var ferdig i stedet for å bevare siste state.";
+            return false;
+        }
+
+        if (!string.Equals(endedState?.BallRack?.BigBallNumber, liveState?.BallRack?.BigBallNumber, StringComparison.Ordinal))
+        {
+            error =
+                "[Theme1DedicatedSmoke] Theme1 bevarte ikke siste synlige trekk etter rundeslutt. " +
+                $"running='{liveState?.BallRack?.BigBallNumber}' ended='{endedState?.BallRack?.BigBallNumber}'.";
+            return false;
+        }
+
+        if (CountSelectedCells(endedState) < CountSelectedCells(liveState))
+        {
+            error =
+                "[Theme1DedicatedSmoke] Theme1 mistet markerte celler etter rundeslutt før ny runde eller nytt bet. " +
+                $"running={CountSelectedCells(liveState)} ended={CountSelectedCells(endedState)}.";
+            return false;
+        }
+
+        if (!HasExpectedHudValues(endedState, viewRoot, out error))
+        {
+            error = "[Theme1DedicatedSmoke] Theme1 HUD ble ikke bevart etter rundeslutt.\n" + error;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ValidateDedicatedShowsDrawBallsWithoutParticipation(out string error)
+    {
+        error = string.Empty;
+        if (!TryCaptureDedicatedStateFromSnapshot(
+                "GAME-SPECTATOR",
+                NearWinDraws,
+                BuildSpectatorSnapshot("GAME-SPECTATOR", NearWinDraws),
+                out Theme1RoundRenderState spectatorState,
+                out error))
+        {
+            return false;
+        }
+
+        if (!HasVisibleBallNumbers(spectatorState))
+        {
+            error = "[Theme1DedicatedSmoke] Theme1 skjulte trekkballene for spiller uten aktiv innsats.";
+            return false;
+        }
+
+        string expectedBigBall = NearWinDraws[NearWinDraws.Length - 1].ToString(CultureInfo.InvariantCulture);
+        if (!string.Equals(spectatorState.BallRack?.BigBallNumber, expectedBigBall, StringComparison.Ordinal))
+        {
+            error =
+                "[Theme1DedicatedSmoke] Theme1 viste ikke siste trekk for tilskuer uten innsats. " +
+                $"expected='{expectedBigBall}' actual='{spectatorState.BallRack?.BigBallNumber}'.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryCaptureDedicatedStateFromSnapshot(
+        string gameId,
+        IReadOnlyList<int> draws,
+        JSONNode snapshot,
+        out Theme1RoundRenderState state,
+        out string error)
+    {
+        state = null;
+        error = string.Empty;
+
+        APIManager apiManager = UnityEngine.Object.FindFirstObjectByType<APIManager>(FindObjectsInactive.Include);
+        Theme1GameplayViewRoot viewRoot = UnityEngine.Object.FindFirstObjectByType<Theme1GameplayViewRoot>(FindObjectsInactive.Include);
+        if (apiManager == null || viewRoot == null)
+        {
+            error = "[Theme1DedicatedSmoke] APIManager eller Theme1GameplayViewRoot mangler i play mode.";
+            return false;
+        }
+
+        ResetVisualState();
+        theme1RealtimeViewModeField.SetValue(apiManager, Enum.ToObject(theme1RealtimeViewModeField.FieldType, 2));
+        activePlayerIdField.SetValue(apiManager, PlayerId);
+        processedDrawCountField.SetValue(apiManager, 0);
+        activeTicketSetsField.SetValue(apiManager, new List<List<int>>());
+        handleRealtimeRoomUpdateMethod.Invoke(apiManager, new object[] { snapshot });
+        state = viewRoot.CaptureRenderedState();
+        return state != null;
+    }
+
+    private static int CountSelectedCells(Theme1RoundRenderState state)
+    {
+        int count = 0;
+        if (state?.Cards == null)
+        {
+            return 0;
+        }
+
+        for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
+        {
+            Theme1CardCellRenderState[] cells = state.Cards[cardIndex]?.Cells;
+            if (cells == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+            {
+                if (cells[cellIndex].IsSelected)
+                {
+                    count += 1;
+                }
+            }
+        }
+
+        return count;
     }
 
     private static bool HasVisibleTicketNumbers(Theme1RoundRenderState state)
@@ -811,6 +999,77 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             !string.Equals(winState.Cards[0].WinLabel, GameManager.FormatTheme1CardWinLabel(200), StringComparison.Ordinal))
         {
             error = "[Theme1DedicatedSmoke] Theme1StateBuilder bruker ikke 'Gevinst - {win} kr' ved positiv gevinst.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ValidateTheme1BuilderKeepsPatternsPerCard(out string error)
+    {
+        error = string.Empty;
+        Theme1StateBuildInput input = new Theme1StateBuildInput
+        {
+            GameId = "GAME-PER-CARD",
+            CardSlotCount = 4,
+            BallSlotCount = 8,
+            TicketSets = new[]
+            {
+                new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+                new[] { 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 },
+                new[] { 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45 },
+                new[] { 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60 }
+            },
+            DrawnNumbers = new[] { 1, 4, 7, 10, 13, 16, 19, 22, 25 },
+            ActivePatternIndexes = new[] { 0 },
+            PatternMasks = new[]
+            {
+                new byte[] { 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0 }
+            },
+            CardHeaderLabels = new[]
+            {
+                GameManager.FormatTheme1CardHeaderLabel(0),
+                GameManager.FormatTheme1CardHeaderLabel(1),
+                GameManager.FormatTheme1CardHeaderLabel(2),
+                GameManager.FormatTheme1CardHeaderLabel(3)
+            },
+            CardBetLabels = new[]
+            {
+                GameManager.FormatTheme1CardStakeLabel(4),
+                GameManager.FormatTheme1CardStakeLabel(4),
+                GameManager.FormatTheme1CardStakeLabel(4),
+                GameManager.FormatTheme1CardStakeLabel(4)
+            },
+            CardWinLabels = new[] { string.Empty, string.Empty, string.Empty, string.Empty },
+            TopperPrizeLabels = new[] { "200 kr" },
+            TopperPayoutAmounts = new[] { 200 },
+            CreditLabel = "1000",
+            WinningsLabel = "0",
+            BetLabel = "4"
+        };
+
+        Theme1RoundRenderState state = new Theme1StateBuilder().Build(input);
+        if (state.Cards == null || state.Cards.Length < 4)
+        {
+            error = "[Theme1DedicatedSmoke] Theme1StateBuilder returnerte ikke 4 kort i per-bong-test.";
+            return false;
+        }
+
+        if (!state.Cards[0].PaylinesActive[0] ||
+            state.Cards[1].PaylinesActive[0] ||
+            state.Cards[2].PaylinesActive[0] ||
+            state.Cards[3].PaylinesActive[0])
+        {
+            error = "[Theme1DedicatedSmoke] Theme1StateBuilder lekker matched pattern mellom bonger.";
+            return false;
+        }
+
+        if (!state.Cards[1].Cells[12].IsMissing ||
+            state.Cards[0].Cells[12].IsMissing ||
+            state.Cards[2].Cells[12].IsMissing ||
+            state.Cards[3].Cells[12].IsMissing)
+        {
+            error = "[Theme1DedicatedSmoke] Theme1StateBuilder lekker near-win mellom bonger.";
             return false;
         }
 

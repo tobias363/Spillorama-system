@@ -58,7 +58,7 @@ public sealed class Theme1CardRenderState
 public readonly struct Theme1CardCellRenderState
 {
     public static readonly Theme1CardCellRenderState Empty =
-        new Theme1CardCellRenderState("-", false, false, false, -1, 0);
+        new Theme1CardCellRenderState("-", false, false, false, -1, 0, Array.Empty<int>());
 
     public Theme1CardCellRenderState(
         string numberLabel,
@@ -66,13 +66,23 @@ public readonly struct Theme1CardCellRenderState
         bool isMissing,
         bool isMatched,
         int nearWinPatternIndex = -1,
-        int missingNumber = 0)
+        int missingNumber = 0,
+        int[] nearWinPatternIndexes = null)
     {
         NumberLabel = numberLabel ?? string.Empty;
         IsSelected = isSelected;
         IsMissing = isMissing;
         IsMatched = isMatched;
-        NearWinPatternIndex = nearWinPatternIndex;
+        if (nearWinPatternIndexes != null && nearWinPatternIndexes.Length > 0)
+        {
+            NearWinPatternIndexes = (int[])nearWinPatternIndexes.Clone();
+            NearWinPatternIndex = NearWinPatternIndexes[0];
+        }
+        else
+        {
+            NearWinPatternIndexes = nearWinPatternIndex >= 0 ? new[] { nearWinPatternIndex } : Array.Empty<int>();
+            NearWinPatternIndex = nearWinPatternIndex;
+        }
         MissingNumber = missingNumber;
     }
 
@@ -81,6 +91,7 @@ public readonly struct Theme1CardCellRenderState
     public bool IsMissing { get; }
     public bool IsMatched { get; }
     public int NearWinPatternIndex { get; }
+    public int[] NearWinPatternIndexes { get; }
     public int MissingNumber { get; }
 }
 
@@ -161,6 +172,8 @@ public sealed class Theme1TopperSlotRenderState
     public bool ShowMatchedPattern;
     public bool[] MissingCellsVisible = Array.Empty<bool>();
     public Theme1PrizeVisualState PrizeVisualState = Theme1PrizeVisualState.Normal;
+    public int[] ActivePatternIndexes = Array.Empty<int>();
+    public int[] ActiveCardIndexes = Array.Empty<int>();
 }
 
 public sealed class Theme1StateBuildInput

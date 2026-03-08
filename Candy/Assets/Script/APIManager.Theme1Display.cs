@@ -2,6 +2,28 @@ using UnityEngine;
 
 public partial class APIManager
 {
+    private void PreserveTheme1RoundDisplayState(Theme1DisplayState source)
+    {
+        if (source == null || !HasRenderableTheme1TicketNumbers(source))
+        {
+            return;
+        }
+
+        preservedTheme1RoundDisplayState = Theme1DisplayState.FromRoundRenderState(source.ToRoundRenderState());
+    }
+
+    private Theme1DisplayState GetPreservedTheme1RoundDisplayState()
+    {
+        return preservedTheme1RoundDisplayState != null
+            ? Theme1DisplayState.FromRoundRenderState(preservedTheme1RoundDisplayState.ToRoundRenderState())
+            : null;
+    }
+
+    private void ClearPreservedTheme1RoundDisplayState()
+    {
+        preservedTheme1RoundDisplayState = null;
+    }
+
     private void TryRenderTheme1IdleDisplayState()
     {
         if (hasRenderedTheme1IdleState)
@@ -82,5 +104,33 @@ public partial class APIManager
         }
 
         return hasHud && hasTopper;
+    }
+
+    private static bool HasRenderableTheme1TicketNumbers(Theme1DisplayState state)
+    {
+        if (state?.Cards == null)
+        {
+            return false;
+        }
+
+        for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
+        {
+            Theme1CardCellRenderState[] cells = state.Cards[cardIndex]?.Cells;
+            if (cells == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+            {
+                string label = cells[cellIndex].NumberLabel;
+                if (!string.IsNullOrWhiteSpace(label) && label != "-")
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

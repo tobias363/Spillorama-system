@@ -34,4 +34,9 @@ public static class Theme1ManagedTypographyRegistry
     {
         return target != null && ManagedTextIds.Contains(target.GetInstanceID());
     }
+
+    public static bool BelongsToTheme1Presentation(TMP_Text target)
+    {
+        return target != null && target.GetComponentInParent<Theme1GameplayViewRoot>(true) != null;
+    }
 }

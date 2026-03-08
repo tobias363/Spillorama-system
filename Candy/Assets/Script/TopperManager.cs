@@ -52,7 +52,7 @@ public class TopperManager : MonoBehaviour
 
     private readonly Dictionary<(int patternIndex, int colIndex, int cardNo), ActiveNearWinState> activeNearWins =
         new Dictionary<(int patternIndex, int colIndex, int cardNo), ActiveNearWinState>();
-    private readonly HashSet<int> activeMatchedPatternIndexes = new HashSet<int>();
+    private readonly HashSet<long> activeMatchedPatternIndexes = new HashSet<long>();
     private readonly Dictionary<GameObject, TextMeshProUGUI> missingCellLabelCache =
         new Dictionary<GameObject, TextMeshProUGUI>();
     private readonly List<Color> defaultPrizeColors = new List<Color>();
@@ -147,20 +147,21 @@ public class TopperManager : MonoBehaviour
         SetActiveIfChanged(patterns[index], active);
     }
 
-    private void ShowMatchedPattern(int index, bool active)
+    private void ShowMatchedPattern(int index, int cardNo, bool active)
     {
         if (index < 0 || index >= matchedPatterns.Count)
         {
             return;
         }
 
+        long key = BuildMatchedPatternKey(index, cardNo);
         if (active)
         {
-            activeMatchedPatternIndexes.Add(index);
+            activeMatchedPatternIndexes.Add(key);
         }
         else
         {
-            activeMatchedPatternIndexes.Remove(index);
+            activeMatchedPatternIndexes.Remove(key);
         }
 
         RefreshVisualState();
@@ -248,7 +249,7 @@ public class TopperManager : MonoBehaviour
 
     private void ApplyNearWinVisuals()
     {
-        Dictionary<int, ActiveNearWinState> headerNearWinsBySlot = BuildHeaderNearWinsBySlot();
+        Dictionary<int, List<ActiveNearWinState>> headerNearWinsBySlot = BuildHeaderNearWinsBySlot();
         Dictionary<(int cardNo, int colIndex), ActiveNearWinState> cardNearWinsByCell = BuildCardNearWinsByCell();
         bool hasNearWinVisuals = activeNearWins.Count > 0;
         Color activeNearWinColor = ResolveMissingPatternPulseColor();
@@ -258,12 +259,16 @@ public class TopperManager : MonoBehaviour
 
         if (hasNearWinVisuals)
         {
-            foreach (KeyValuePair<int, ActiveNearWinState> entry in headerNearWinsBySlot)
+            foreach (KeyValuePair<int, List<ActiveNearWinState>> entry in headerNearWinsBySlot)
             {
-                if (TryGetMissingCell(entry.Value.HeaderSlotIndex, entry.Value.ColIndex, out GameObject headerMissingCell))
+                for (int i = 0; i < entry.Value.Count; i++)
                 {
-                    ConfigureHeaderMissingCell(headerMissingCell, activeNearWinColor);
-                    SetActiveIfChanged(headerMissingCell, true);
+                    ActiveNearWinState state = entry.Value[i];
+                    if (TryGetMissingCell(state.HeaderSlotIndex, state.ColIndex, out GameObject headerMissingCell))
+                    {
+                        ConfigureHeaderMissingCell(headerMissingCell, activeNearWinColor);
+                        SetActiveIfChanged(headerMissingCell, true);
+                    }
                 }
             }
 
@@ -283,9 +288,9 @@ public class TopperManager : MonoBehaviour
         ApplyPrizePresentation(headerNearWinsBySlot, hasNearWinVisuals && missingBlinkVisible);
     }
 
-    private Dictionary<int, ActiveNearWinState> BuildHeaderNearWinsBySlot()
+    private Dictionary<int, List<ActiveNearWinState>> BuildHeaderNearWinsBySlot()
     {
-        Dictionary<int, ActiveNearWinState> headerNearWinsBySlot = new Dictionary<int, ActiveNearWinState>();
+        Dictionary<int, List<ActiveNearWinState>> headerNearWinsBySlot = new Dictionary<int, List<ActiveNearWinState>>();
         foreach (ActiveNearWinState state in activeNearWins.Values)
         {
             if (state.HeaderSlotIndex < 0 || state.HeaderSlotIndex >= missedPattern.Count)
@@ -293,15 +298,31 @@ public class TopperManager : MonoBehaviour
                 continue;
             }
 
-            if (HasMatchedPatternInSlot(state.HeaderSlotIndex))
+            if (IsPatternMatchedOnCard(state.PatternIndex, state.CardNo))
             {
                 continue;
             }
 
-            if (!headerNearWinsBySlot.TryGetValue(state.HeaderSlotIndex, out ActiveNearWinState currentState) ||
-                IsBetterNearWinCandidate(state, currentState))
+            if (!headerNearWinsBySlot.TryGetValue(state.HeaderSlotIndex, out List<ActiveNearWinState> slotStates))
             {
-                headerNearWinsBySlot[state.HeaderSlotIndex] = state;
+                slotStates = new List<ActiveNearWinState>();
+                headerNearWinsBySlot[state.HeaderSlotIndex] = slotStates;
+            }
+
+            bool alreadyAdded = false;
+            for (int i = 0; i < slotStates.Count; i++)
+            {
+                ActiveNearWinState existing = slotStates[i];
+                if (existing.ColIndex == state.ColIndex && existing.CardNo == state.CardNo && existing.PatternIndex == state.PatternIndex)
+                {
+                    alreadyAdded = true;
+                    break;
+                }
+            }
+
+            if (!alreadyAdded)
+            {
+                slotStates.Add(state);
             }
         }
 
@@ -315,7 +336,7 @@ public class TopperManager : MonoBehaviour
 
         foreach (ActiveNearWinState state in activeNearWins.Values)
         {
-            if (state.CardNo < 0 || activeMatchedPatternIndexes.Contains(state.PatternIndex))
+            if (state.CardNo < 0 || IsPatternMatchedOnCard(state.PatternIndex, state.CardNo))
             {
                 continue;
             }
@@ -353,9 +374,9 @@ public class TopperManager : MonoBehaviour
 
     private bool HasMatchedPatternInSlot(int slotIndex)
     {
-        foreach (int matchedPatternIndex in activeMatchedPatternIndexes)
+        foreach (long matchedPatternKey in activeMatchedPatternIndexes)
         {
-            if (GetPatternIndex(matchedPatternIndex) == slotIndex)
+            if (GetPatternIndex(ExtractPatternIndex(matchedPatternKey)) == slotIndex)
             {
                 return true;
             }
@@ -446,7 +467,7 @@ public class TopperManager : MonoBehaviour
     }
 
     private void ApplyPrizePresentation(
-        Dictionary<int, ActiveNearWinState> headerNearWinsBySlot,
+        Dictionary<int, List<ActiveNearWinState>> headerNearWinsBySlot,
         bool showNearWinVisuals)
     {
         for (int slotIndex = 0; slotIndex < prizes.Count; slotIndex++)
@@ -472,6 +493,21 @@ public class TopperManager : MonoBehaviour
                 prizeLabel.color = GetDefaultPrizeColor(slotIndex);
             }
         }
+    }
+
+    private bool IsPatternMatchedOnCard(int patternIndex, int cardNo)
+    {
+        return activeMatchedPatternIndexes.Contains(BuildMatchedPatternKey(patternIndex, cardNo));
+    }
+
+    private static long BuildMatchedPatternKey(int patternIndex, int cardNo)
+    {
+        return ((long)(cardNo + 1) << 32) | (uint)patternIndex;
+    }
+
+    private static int ExtractPatternIndex(long key)
+    {
+        return unchecked((int)(key & 0xFFFFFFFF));
     }
 
     private bool TryGetMissingCell(int patternIndex, int colIndex, out GameObject missingCell)

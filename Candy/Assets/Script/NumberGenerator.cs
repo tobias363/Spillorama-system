@@ -81,6 +81,7 @@ public class NumberGenerator : MonoBehaviour
     private bool hasLoggedMissingApiManager;
     private CandyCardViewBindingSet runtimeCardViewBindings;
     private bool roundCompletionPendingAfterExtraBall;
+    private readonly Dictionary<int, List<int>> patternIndexesByCell = new Dictionary<int, List<int>>();
 
     private void OnEnable()
     {
@@ -108,6 +109,7 @@ public class NumberGenerator : MonoBehaviour
         try
         {
             paylineManager = new PaylineManager(this);
+            RebuildPatternLookupByCell();
             ResolveOptionalSceneReferences();
             ApplyExplicitRealtimeCardViewBindingsFromComponent();
             SetActiveIfChanged(extraBallObj, false);
@@ -845,7 +847,7 @@ public class NumberGenerator : MonoBehaviour
             {
                 SetActiveIfChanged(cardClasses[i].selectionImg[index], true);
                 cardClasses[i].payLinePattern[index] = 1;
-                CheckPayLineMatch(i);
+                CheckPayLineMatch(i, index);
             }
         }
 
@@ -933,12 +935,18 @@ public class NumberGenerator : MonoBehaviour
         RealtimePaylineUtils.ClearPaylineVisuals(cardClasses);
     }
 
-    public void CheckPayLineMatch(int cardNo)
+    public void CheckPayLineMatch(int cardNo, int impactedCellIndex = -1)
     {
         RealtimePaylineUtils.EnsurePaylineIndexCapacity(cardClasses[cardNo], patternList.Count);
-
-        for (int patternIndex = 0; patternIndex < patternList.Count; patternIndex++)
+        IReadOnlyList<int> impactedPatternIndexes = ResolveImpactedPatternIndexes(impactedCellIndex);
+        for (int impactedIndex = 0; impactedIndex < impactedPatternIndexes.Count; impactedIndex++)
         {
+            int patternIndex = impactedPatternIndexes[impactedIndex];
+            if (patternIndex < 0 || patternIndex >= patternList.Count)
+            {
+                continue;
+            }
+
             if (!cardClasses[cardNo].paylineindex[patternIndex])
             {
 
@@ -980,6 +988,63 @@ public class NumberGenerator : MonoBehaviour
 
     }
 
+    private IReadOnlyList<int> ResolveImpactedPatternIndexes(int impactedCellIndex)
+    {
+        if (impactedCellIndex < 0)
+        {
+            List<int> allIndexes = new List<int>(patternList != null ? patternList.Count : 0);
+            for (int i = 0; patternList != null && i < patternList.Count; i++)
+            {
+                allIndexes.Add(i);
+            }
+
+            return allIndexes;
+        }
+
+        if (patternIndexesByCell.TryGetValue(impactedCellIndex, out List<int> patternIndexes) &&
+            patternIndexes != null &&
+            patternIndexes.Count > 0)
+        {
+            return patternIndexes;
+        }
+
+        return Array.Empty<int>();
+    }
+
+    private void RebuildPatternLookupByCell()
+    {
+        patternIndexesByCell.Clear();
+        if (patternList == null)
+        {
+            return;
+        }
+
+        for (int patternIndex = 0; patternIndex < patternList.Count; patternIndex++)
+        {
+            List<byte> mask = patternList[patternIndex] != null ? patternList[patternIndex].pattern : null;
+            if (mask == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < mask.Count; cellIndex++)
+            {
+                if (mask[cellIndex] != 1)
+                {
+                    continue;
+                }
+
+                if (!patternIndexesByCell.TryGetValue(cellIndex, out List<int> indexes))
+                {
+                    indexes = new List<int>();
+                    patternIndexesByCell[cellIndex] = indexes;
+                }
+
+                indexes.Add(patternIndex);
+            }
+        }
+    }
+
     //Won the Prize
     public void PrizeWin(int cardNo, int patternIndex)
     {
@@ -993,11 +1058,11 @@ public class NumberGenerator : MonoBehaviour
             true,
             matchedMat,
             unMatchedMat);
-        EventManager.ShowMatchedPattern(patternIndex, true);
+        EventManager.ShowMatchedPattern(patternIndex, cardNo, true);
         for (int m = 0; m < selectedIndex.Count; m++)
         {
             ballAnimSpeed = 0.11f;
-            EventManager.ShowMissingPattern(patternIndex, selectedIndex[m], false);
+            EventManager.ShowMissingPattern(patternIndex, selectedIndex[m], false, 0, cardNo);
         }
 
         if (patternIndex < 10)
@@ -1031,7 +1096,8 @@ public class NumberGenerator : MonoBehaviour
                     matchedMat,
                     unMatchedMat);
 
-                EventManager.ShowMissingPattern(patternIndex, blockCount, true);
+                int missingNumber = ResolveNearWinMissingNumber(cardClasses[cardNo], blockCount);
+                EventManager.ShowMissingPattern(patternIndex, blockCount, true, missingNumber, cardNo);
                 GameObject missingPatternCell = cardClasses[cardNo].missingPatternImg[blockCount];
                 TextMeshProUGUI missingPatternPrize = ResolveMissingPatternPrizeLabel(missingPatternCell);
                 TextMeshProUGUI patternIndexInTopper = topperManager.prizes[topperManager.GetPatternIndex(patternIndex)];
@@ -1071,6 +1137,16 @@ public class NumberGenerator : MonoBehaviour
 
             }
         }
+    }
+
+    private int ResolveNearWinMissingNumber(CardClass card, int missingCellIndex)
+    {
+        if (card == null || card.numb == null || missingCellIndex < 0 || missingCellIndex >= card.numb.Count)
+        {
+            return 0;
+        }
+
+        return Mathf.Max(0, card.numb[missingCellIndex]);
     }
 
 

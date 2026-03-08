@@ -75,7 +75,19 @@ public partial class APIManager
 
             ResetRealtimeBonusState(closeBonusPanel: true, previousGameId: previousGameId);
             RefreshRealtimeCountdownLabel(forceRefresh: true);
-            RenderDedicatedTheme1State(viewRoot, currentGame: null);
+            StopRealtimeMatchedPatternVisuals();
+            StopRealtimeNearWinBlinking();
+
+            Theme1DisplayState preservedState = GetPreservedTheme1RoundDisplayState();
+            if (preservedState != null)
+            {
+                theme1DisplayPresenter.Render(viewRoot, preservedState);
+                RegisterDedicatedTheme1RenderMetrics(viewRoot, preservedState);
+            }
+            else
+            {
+                RenderDedicatedTheme1State(viewRoot, currentGame: null);
+            }
             return;
         }
 
@@ -93,6 +105,7 @@ public partial class APIManager
         {
             string previousGameId = activeGameId;
             activeGameId = gameId;
+            ClearPreservedTheme1RoundDisplayState();
             processedDrawCount = 0;
             currentTicketPage = 0;
             activeTicketSets.Clear();
@@ -107,15 +120,12 @@ public partial class APIManager
         ProcessRealtimeDrawUpdatesDedicated(currentGame, isActiveRoundParticipant);
         RefreshRealtimeCountdownLabel(forceRefresh: true);
 
-        if (isActiveRoundParticipant)
-        {
-            RenderDedicatedTheme1State(viewRoot, currentGame);
-        }
-        else
+        if (!isActiveRoundParticipant)
         {
             ResetRealtimeBonusState(closeBonusPanel: true);
-            RenderDedicatedTheme1State(viewRoot, currentGame: null);
         }
+
+        RenderDedicatedTheme1State(viewRoot, currentGame);
     }
 
     private bool ApplyVisibleTicketSetsForCurrentSnapshotDedicated(JSONNode currentGame, JSONNode snapshot)
@@ -349,6 +359,7 @@ public partial class APIManager
 
         theme1DisplayPresenter.Render(viewRoot, renderState);
         RegisterDedicatedTheme1RenderMetrics(viewRoot, renderState);
+        PreserveTheme1RoundDisplayState(renderState);
 
         Dictionary<int, RealtimeNearWinState> activeNearWinStates = BuildNearWinStates(renderState);
         SyncLegacyTheme1MatchedPaylines(winningPatternsByCard);
@@ -948,7 +959,8 @@ public partial class APIManager
                     cell.IsMissing,
                     isMatched,
                     cell.NearWinPatternIndex,
-                    cell.MissingNumber);
+                    cell.MissingNumber,
+                    cell.NearWinPatternIndexes);
             }
         }
 
@@ -996,6 +1008,30 @@ public partial class APIManager
             slotState.ShowMatchedPattern = true;
             slotState.MissingCellsVisible = Array.Empty<bool>();
             slotState.PrizeVisualState = Theme1PrizeVisualState.Matched;
+            if (winningPatternsByCard != null)
+            {
+                HashSet<int> activeCardIndexes = new HashSet<int>();
+                HashSet<int> activePatternIndexes = new HashSet<int>();
+                foreach (KeyValuePair<int, HashSet<int>> entry in winningPatternsByCard)
+                {
+                    if (entry.Value == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (int patternIndex in entry.Value)
+                    {
+                        if (GameManager.ResolvePayoutSlotIndex(patternIndex, renderState.Topper.Slots.Length) == slotIndex)
+                        {
+                            activeCardIndexes.Add(entry.Key);
+                            activePatternIndexes.Add(patternIndex);
+                        }
+                    }
+                }
+
+                slotState.ActiveCardIndexes = ToSortedArray(activeCardIndexes);
+                slotState.ActivePatternIndexes = ToSortedArray(activePatternIndexes);
+            }
         }
     }
 
@@ -1083,7 +1119,7 @@ public partial class APIManager
             for (int cellIndex = 0; cellIndex < card.Cells.Length; cellIndex++)
             {
                 Theme1CardCellRenderState cell = card.Cells[cellIndex];
-                if (!cell.IsMissing || cell.NearWinPatternIndex < 0)
+                if (!cell.IsMissing || cell.NearWinPatternIndexes == null || cell.NearWinPatternIndexes.Length == 0)
                 {
                     continue;
                 }
@@ -1091,13 +1127,35 @@ public partial class APIManager
                 int missingNumber = cell.MissingNumber > 0
                     ? cell.MissingNumber
                     : TryParsePositiveInt(cell.NumberLabel);
-                int key = BuildNearWinKey(cardIndex, cell.NearWinPatternIndex, cellIndex);
-                activeNearWinStates[key] =
-                    new RealtimeNearWinState(cell.NearWinPatternIndex, cardIndex, cellIndex, missingNumber);
+                for (int nearWinIndex = 0; nearWinIndex < cell.NearWinPatternIndexes.Length; nearWinIndex++)
+                {
+                    int rawPatternIndex = cell.NearWinPatternIndexes[nearWinIndex];
+                    if (rawPatternIndex < 0)
+                    {
+                        continue;
+                    }
+
+                    int key = BuildNearWinKey(cardIndex, rawPatternIndex, cellIndex);
+                    activeNearWinStates[key] =
+                        new RealtimeNearWinState(rawPatternIndex, cardIndex, cellIndex, missingNumber);
+                }
             }
         }
 
         return activeNearWinStates;
+    }
+
+    private static int[] ToSortedArray(HashSet<int> values)
+    {
+        if (values == null || values.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        int[] result = new int[values.Count];
+        values.CopyTo(result);
+        Array.Sort(result);
+        return result;
     }
 
     private static int TryParsePositiveInt(string value)

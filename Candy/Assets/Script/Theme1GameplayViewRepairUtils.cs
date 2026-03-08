@@ -46,9 +46,14 @@ public static class Theme1GameplayViewRepairUtils
     private const string CardNumberLayerName = "RealtimeCardNumbers";
     private const string CardNumberHostPrefix = "RealtimeCardCell_";
     private const string CardNumberLabelName = "RealtimeCardNumberLabel";
+    private const string CardNumberVisibleLabelName = "RealtimeCardNumberVisibleLabel";
     private const string SelectionMarkerName = "RealtimeSelectionMarker";
     private const string MissingOverlayName = "RealtimeMissingOverlay";
     private const string MatchedOverlayName = "RealtimeMatchedOverlay";
+    private const string CreditValueLabelName = "RealtimeCreditValueLabel";
+    private const string WinningsValueLabelName = "RealtimeWinningsValueLabel";
+    private const string BetValueLabelName = "RealtimeBetValueLabel";
+    private const string VisibleLabelSuffix = "_Visible";
     private const string BallNumberLabelName = "RealtimeBallNumberLabel";
     private const string BigBallNumberLabelName = "RealtimeBigBallNumberLabel";
     private const string CardBackgroundName = "CardBg";
@@ -60,6 +65,13 @@ public static class Theme1GameplayViewRepairUtils
     private const float CardGridHeightRatio = 0.5292969f;
     private const float CardGridOffsetXRatio = 0f;
     private const float CardGridOffsetYRatio = -0.03076172f;
+
+    private enum RuntimeCardLabelKind
+    {
+        CardIndex,
+        Stake,
+        Win
+    }
 
     public static void EnsureCardNumberTargets(NumberGenerator generator)
     {
@@ -117,6 +129,7 @@ public static class Theme1GameplayViewRepairUtils
                 }
 
                 PlaceCardNumberLabel(label.rectTransform, cellRoot);
+                EnsureVisibleTextMirror(label, CardNumberVisibleLabelName, new Color32(184, 51, 99, 255), hideWhenBlank: false);
                 DeactivateLegacyTextLabels(cellRoot, label);
                 GameObject selectionMarker = EnsureCardCellOverlay(
                     cellRoot,
@@ -208,6 +221,146 @@ public static class Theme1GameplayViewRepairUtils
                 DeactivateLegacyTextLabels(ballManager.bigBallImg.transform, label);
             }
         }
+    }
+
+    public static void EnsureCardDisplayTextBindings(CandyCardViewBindingSet cardBindings, GameManager gameManager)
+    {
+        if (cardBindings?.Cards == null)
+        {
+            return;
+        }
+
+        List<TextMeshProUGUI> resolvedBetLabels = new List<TextMeshProUGUI>(cardBindings.Cards.Count);
+        List<TextMeshProUGUI> resolvedWinLabels = new List<TextMeshProUGUI>(cardBindings.Cards.Count);
+
+        for (int cardIndex = 0; cardIndex < cardBindings.Cards.Count; cardIndex++)
+        {
+            CandyCardViewBinding binding = cardBindings.Cards[cardIndex];
+            if (binding == null)
+            {
+                resolvedBetLabels.Add(null);
+                resolvedWinLabels.Add(null);
+                continue;
+            }
+
+            Transform cardRoot = ResolveCardRoot(binding);
+            TextMeshProUGUI header = EnsureDedicatedCardLabel(
+                cardRoot,
+                $"RealtimeCardHeaderLabel_{cardIndex + 1}",
+                RuntimeCardLabelKind.CardIndex,
+                gameManager != null ? gameManager.GetCardIndexLabel(cardIndex) : $"Bong - {cardIndex + 1}");
+            TextMeshProUGUI bet = EnsureDedicatedCardLabel(
+                cardRoot,
+                $"RealtimeCardBetLabel_{cardIndex + 1}",
+                RuntimeCardLabelKind.Stake,
+                gameManager != null ? gameManager.GetCardStakeLabel() : "Innsats - 0 kr");
+            TextMeshProUGUI win = EnsureDedicatedCardLabel(
+                cardRoot,
+                $"RealtimeCardWinLabel_{cardIndex + 1}",
+                RuntimeCardLabelKind.Win,
+                gameManager != null ? gameManager.FormatCardWinLabel(0) : "Gevinst - 0 kr");
+
+            ApplyOverlayLabelDefault(header, gameManager != null ? gameManager.GetCardIndexLabel(cardIndex) : $"Bong - {cardIndex + 1}");
+            ApplyOverlayLabelDefault(bet, gameManager != null ? gameManager.GetCardStakeLabel() : "Innsats - 0 kr");
+            ApplyOverlayLabelDefault(win, gameManager != null ? gameManager.FormatCardWinLabel(0) : "Gevinst - 0 kr");
+            if (win != null)
+            {
+                win.gameObject.SetActive(false);
+            }
+
+            DeactivateLegacyCardLabelContainers(cardRoot, header, bet, win);
+            binding.SetDisplayTexts(header, bet, win);
+            resolvedBetLabels.Add(bet);
+            resolvedWinLabels.Add(win);
+        }
+
+        if (gameManager != null)
+        {
+            gameManager.CardBets = resolvedBetLabels;
+            gameManager.displayCardWinPoints = resolvedWinLabels;
+        }
+    }
+
+    public static CandyCardViewBinding BuildDedicatedCardBinding(CardClass card, int cardIndex, GameManager gameManager)
+    {
+        if (card == null)
+        {
+            return null;
+        }
+
+        CandyCardViewBinding binding = new CandyCardViewBinding();
+        binding.CopyFrom(card, $"Card {cardIndex + 1}");
+
+        Transform cardRoot = ResolveCardRoot(card);
+        if (cardRoot == null)
+        {
+            return binding;
+        }
+
+        string headerText = gameManager != null
+            ? gameManager.GetCardIndexLabel(cardIndex)
+            : GameManager.FormatTheme1CardHeaderLabel(cardIndex);
+        string betText = gameManager != null
+            ? gameManager.GetCardStakeLabel()
+            : GameManager.FormatTheme1CardStakeLabel(0);
+        int cardWinAmount = gameManager != null ? gameManager.GetCardWinAmount(cardIndex) : 0;
+        string winText = gameManager != null
+            ? gameManager.FormatCardWinLabel(cardWinAmount)
+            : GameManager.FormatTheme1CardWinLabel(cardWinAmount);
+
+        TextMeshProUGUI header = EnsureDedicatedCardLabel(
+            cardRoot,
+            $"RealtimeCardHeaderLabel_{cardIndex + 1}",
+            RuntimeCardLabelKind.CardIndex,
+            headerText);
+        TextMeshProUGUI bet = EnsureDedicatedCardLabel(
+            cardRoot,
+            $"RealtimeCardBetLabel_{cardIndex + 1}",
+            RuntimeCardLabelKind.Stake,
+            betText);
+        TextMeshProUGUI win = EnsureDedicatedCardLabel(
+            cardRoot,
+            $"RealtimeCardWinLabel_{cardIndex + 1}",
+            RuntimeCardLabelKind.Win,
+            winText);
+
+        ApplyOverlayLabelDefault(header, headerText);
+        ApplyOverlayLabelDefault(bet, betText);
+        ApplyOverlayLabelDefault(win, winText);
+        if (win != null)
+        {
+            win.gameObject.SetActive(cardWinAmount > 0);
+        }
+
+        DeactivateLegacyCardLabelContainers(cardRoot, header, bet, win);
+        binding.SetDisplayTexts(header, bet, win);
+        card.win = win;
+        return binding;
+    }
+
+    public static void EnsureHudValueTargets(GameManager gameManager)
+    {
+        if (gameManager == null)
+        {
+            return;
+        }
+
+        gameManager.displayTotalMoney = EnsureDedicatedHudValueTarget(
+            gameManager.displayTotalMoney,
+            CreditValueLabelName,
+            gameManager.CreditBalance.ToString());
+        gameManager.winAmtText = EnsureDedicatedHudValueTarget(
+            gameManager.winAmtText,
+            WinningsValueLabelName,
+            gameManager.RoundWinnings.ToString());
+        gameManager.displayCurrentBets = EnsureDedicatedHudValueTarget(
+            gameManager.displayCurrentBets,
+            BetValueLabelName,
+            gameManager.currentBet.ToString());
+
+        ApplyOverlayLabelDefault(gameManager.displayTotalMoney, gameManager.CreditBalance.ToString());
+        ApplyOverlayLabelDefault(gameManager.winAmtText, gameManager.RoundWinnings.ToString());
+        ApplyOverlayLabelDefault(gameManager.displayCurrentBets, gameManager.currentBet.ToString());
     }
 
     public static TextMeshProUGUI FindDedicatedCardNumberLabel(GameObject selectionOverlay)
@@ -335,6 +488,42 @@ public static class Theme1GameplayViewRepairUtils
         return null;
     }
 
+    private static Transform ResolveCardRoot(CandyCardViewBinding binding)
+    {
+        if (binding == null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<GameObject> selectionOverlays = binding.SelectionOverlays;
+        if (selectionOverlays != null)
+        {
+            for (int i = 0; i < selectionOverlays.Count; i++)
+            {
+                Transform resolved = ResolveCardRoot(selectionOverlays[i] != null ? selectionOverlays[i].transform : null);
+                if (resolved != null)
+                {
+                    return resolved;
+                }
+            }
+        }
+
+        IReadOnlyList<TextMeshProUGUI> numberTexts = binding.NumberTexts;
+        if (numberTexts != null)
+        {
+            for (int i = 0; i < numberTexts.Count; i++)
+            {
+                Transform resolved = ResolveCardRoot(numberTexts[i] != null ? numberTexts[i].transform : null);
+                if (resolved != null)
+                {
+                    return resolved;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static Transform ResolveCardRoot(GameObject selectionOverlay)
     {
         return ResolveCardRoot(selectionOverlay != null ? selectionOverlay.transform : null);
@@ -440,11 +629,6 @@ public static class Theme1GameplayViewRepairUtils
             return;
         }
 
-        while (gridRoot.childCount > 0)
-        {
-            DestroyGameObjectImmediate(gridRoot.GetChild(gridRoot.childCount - 1).gameObject);
-        }
-
         Vector2 gridSize = gridRoot.rect.width > 1f && gridRoot.rect.height > 1f
             ? gridRoot.rect.size
             : new Vector2(520f, 191f);
@@ -453,11 +637,34 @@ public static class Theme1GameplayViewRepairUtils
 
         for (int cellIndex = 0; cellIndex < TotalCardCellCount; cellIndex++)
         {
-            GameObject cellObject = new GameObject(CardNumberHostPrefix + (cellIndex + 1).ToString("00"), typeof(RectTransform));
-            cellObject.layer = gridRoot.gameObject.layer;
-            cellObject.transform.SetParent(gridRoot, false);
-            RectTransform cellRoot = cellObject.GetComponent<RectTransform>();
+            RectTransform cellRoot = cellIndex < gridRoot.childCount
+                ? gridRoot.GetChild(cellIndex) as RectTransform
+                : null;
+            if (cellRoot == null)
+            {
+                GameObject cellObject = new GameObject(CardNumberHostPrefix + (cellIndex + 1).ToString("00"), typeof(RectTransform));
+                cellObject.layer = gridRoot.gameObject.layer;
+                cellObject.transform.SetParent(gridRoot, false);
+                cellRoot = cellObject.GetComponent<RectTransform>();
+            }
+
+            if (cellRoot == null)
+            {
+                continue;
+            }
+
+            cellRoot.gameObject.name = CardNumberHostPrefix + (cellIndex + 1).ToString("00");
+            cellRoot.gameObject.layer = gridRoot.gameObject.layer;
             ConfigureDedicatedCellRoot(cellRoot, cellIndex, cellWidth, cellHeight, gridSize);
+        }
+
+        for (int childIndex = TotalCardCellCount; childIndex < gridRoot.childCount; childIndex++)
+        {
+            Transform extraChild = gridRoot.GetChild(childIndex);
+            if (extraChild != null)
+            {
+                extraChild.gameObject.SetActive(false);
+            }
         }
     }
 
@@ -749,6 +956,297 @@ public static class Theme1GameplayViewRepairUtils
         visibleGrid.gameObject.SetActive(true);
     }
 
+    private static TextMeshProUGUI EnsureDedicatedHudValueTarget(TextMeshProUGUI template, string objectName, string defaultText)
+    {
+        Transform parent = template != null ? template.transform.parent : null;
+        TextMeshProUGUI target = EnsureDedicatedOverlayLabel(
+            parent,
+            objectName,
+            template,
+            defaultText,
+            GameplayTextSurface.HudLabel,
+            Color.white,
+            fallbackSize: new Vector2(200f, 50f));
+        if (target != null)
+        {
+            DeactivateSiblingTextTargets(parent, target);
+        }
+
+        return target ?? template;
+    }
+
+    private static TextMeshProUGUI EnsureDedicatedOverlayLabel(
+        Transform parent,
+        string objectName,
+        TextMeshProUGUI template,
+        string defaultText,
+        GameplayTextSurface surface,
+        Color fallbackColor,
+        Vector2 fallbackSize)
+    {
+        if (parent == null)
+        {
+            return template;
+        }
+
+        TextMeshProUGUI label = FindNamedTextLabel(parent, objectName);
+        if (label == null)
+        {
+            GameObject labelObject = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
+            labelObject.transform.SetParent(parent, false);
+            labelObject.layer = parent.gameObject.layer;
+            label = labelObject.GetComponent<TextMeshProUGUI>();
+        }
+
+        if (label == null)
+        {
+            return template;
+        }
+
+        RectTransform rect = label.rectTransform;
+        if (template != null)
+        {
+            CopyRectTransform(template.rectTransform, rect, fallbackSize);
+            label.color = template.color;
+            label.fontSize = template.fontSize;
+            label.enableAutoSizing = template.enableAutoSizing;
+            label.fontSizeMin = template.fontSizeMin;
+            label.fontSizeMax = template.fontSizeMax;
+            label.alignment = template.alignment;
+            label.fontStyle = template.fontStyle;
+            label.fontWeight = template.fontWeight;
+        }
+        else
+        {
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = fallbackSize;
+            label.color = fallbackColor;
+            label.enableAutoSizing = true;
+            label.fontSizeMin = 18f;
+            label.fontSizeMax = 48f;
+            label.alignment = TextAlignmentOptions.Center;
+        }
+
+        label.gameObject.name = objectName;
+        label.gameObject.layer = parent.gameObject.layer;
+        label.gameObject.SetActive(true);
+        label.enabled = true;
+        label.raycastTarget = false;
+        label.alpha = 1f;
+        label.text = !string.IsNullOrWhiteSpace(ReadText(label, string.Empty))
+            ? ReadText(label, string.Empty)
+            : (!string.IsNullOrWhiteSpace(ReadText(template, string.Empty)) ? ReadText(template, string.Empty) : defaultText);
+        label.transform.SetAsLastSibling();
+        DeactivateNestedDuplicateLabels(parent, objectName, label);
+        RealtimeTextStyleUtils.ApplyGameplayTextPresentation(label, CandyTypographyRole.Label, surface);
+        EnsureVisibleTextMirror(label, objectName + VisibleLabelSuffix, fallbackColor, hideWhenBlank: false);
+        return label;
+    }
+
+    private static void ApplyOverlayLabelDefault(TextMeshProUGUI label, string value)
+    {
+        if (label == null)
+        {
+            return;
+        }
+
+        label.text = value ?? string.Empty;
+        label.alpha = 1f;
+        label.enabled = true;
+        if (!label.gameObject.activeSelf)
+        {
+            label.gameObject.SetActive(true);
+        }
+
+        SyncVisibleTextMirror(label);
+    }
+
+    private static TextMeshProUGUI EnsureDedicatedCardLabel(
+        Transform cardRoot,
+        string objectName,
+        RuntimeCardLabelKind labelKind,
+        string defaultText)
+    {
+        if (!(cardRoot is RectTransform))
+        {
+            return null;
+        }
+
+        TextMeshProUGUI label = FindNamedTextLabel(cardRoot, objectName);
+        if (label == null)
+        {
+            GameObject labelObject = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
+            labelObject.layer = cardRoot.gameObject.layer;
+            labelObject.transform.SetParent(cardRoot, false);
+            label = labelObject.GetComponent<TextMeshProUGUI>();
+        }
+
+        if (label == null)
+        {
+            return null;
+        }
+
+        RectTransform cardBackground = ResolveCardBackgroundRect(cardRoot);
+        Vector2 baseSize = cardBackground != null && cardBackground.rect.width > 1f && cardBackground.rect.height > 1f
+            ? cardBackground.rect.size
+            : new Vector2(585f, 325f);
+        Vector2 basePosition = cardBackground != null ? cardBackground.anchoredPosition : new Vector2(2f, -5f);
+        RectTransform rect = label.rectTransform;
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.localScale = Vector3.one;
+        rect.localRotation = Quaternion.identity;
+
+        label.gameObject.name = objectName;
+        label.gameObject.layer = cardRoot.gameObject.layer;
+        label.gameObject.SetActive(true);
+        label.enabled = true;
+        label.raycastTarget = false;
+        label.alpha = 1f;
+        label.enableAutoSizing = true;
+        label.fontSizeMin = 18f;
+        label.fontSizeMax = 56f;
+        label.fontWeight = FontWeight.SemiBold;
+        label.fontStyle = FontStyles.Normal;
+        label.color = Color.white;
+        label.text = defaultText;
+
+        switch (labelKind)
+        {
+            case RuntimeCardLabelKind.Stake:
+                rect.anchoredPosition = new Vector2(
+                    basePosition.x - (baseSize.x * 0.18f),
+                    basePosition.y + (baseSize.y * 0.405f));
+                rect.sizeDelta = new Vector2(Mathf.Max(180f, baseSize.x * 0.34f), 38f);
+                label.alignment = TextAlignmentOptions.Center;
+                RealtimeTextStyleUtils.ApplyGameplayTextPresentation(label, CandyTypographyRole.Label, GameplayTextSurface.HudLabel);
+                break;
+            case RuntimeCardLabelKind.Win:
+                rect.anchoredPosition = new Vector2(
+                    basePosition.x + (baseSize.x * 0.245f),
+                    basePosition.y + (baseSize.y * 0.405f));
+                rect.sizeDelta = new Vector2(Mathf.Max(180f, baseSize.x * 0.34f), 38f);
+                label.alignment = TextAlignmentOptions.Center;
+                RealtimeTextStyleUtils.ApplyGameplayTextPresentation(label, CandyTypographyRole.Label, GameplayTextSurface.HudLabel);
+                break;
+            default:
+                rect.anchoredPosition = new Vector2(
+                    basePosition.x,
+                    basePosition.y - (baseSize.y * 0.44f));
+                rect.sizeDelta = new Vector2(Mathf.Max(180f, baseSize.x * 0.34f), 38f);
+                label.alignment = TextAlignmentOptions.Center;
+                RealtimeTextStyleUtils.ApplyGameplayTextPresentation(label, CandyTypographyRole.Label, GameplayTextSurface.CardHeader);
+                break;
+        }
+
+        EnsureVisibleTextMirror(
+            label,
+            objectName + VisibleLabelSuffix,
+            Color.white,
+            hideWhenBlank: labelKind == RuntimeCardLabelKind.Win);
+        label.transform.SetAsLastSibling();
+        DeactivateNestedDuplicateLabels(cardRoot, objectName, label);
+        return label;
+    }
+
+    private static void DeactivateLegacyCardLabelContainers(Transform cardRoot, params TextMeshProUGUI[] keepLabels)
+    {
+        if (cardRoot == null)
+        {
+            return;
+        }
+
+        HashSet<Transform> keepTransforms = new HashSet<Transform>();
+        for (int keepIndex = 0; keepIndex < keepLabels.Length; keepIndex++)
+        {
+            if (keepLabels[keepIndex] != null)
+            {
+                keepTransforms.Add(keepLabels[keepIndex].transform);
+            }
+        }
+
+        for (int childIndex = 0; childIndex < cardRoot.childCount; childIndex++)
+        {
+            Transform child = cardRoot.GetChild(childIndex);
+            if (child == null || keepTransforms.Contains(child))
+            {
+                continue;
+            }
+
+            TextMeshProUGUI directLabel = child.GetComponent<TextMeshProUGUI>();
+            if (directLabel == null)
+            {
+                continue;
+            }
+
+            child.gameObject.SetActive(false);
+        }
+    }
+
+    private static void DeactivateSiblingTextTargets(Transform parent, TextMeshProUGUI keepLabel)
+    {
+        if (parent == null || keepLabel == null)
+        {
+            return;
+        }
+
+        TextMeshProUGUI[] labels = parent.GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int i = 0; i < labels.Length; i++)
+        {
+            TextMeshProUGUI candidate = labels[i];
+            if (candidate == null || candidate == keepLabel)
+            {
+                continue;
+            }
+
+            if (candidate.transform.parent != parent)
+            {
+                continue;
+            }
+
+            candidate.gameObject.SetActive(false);
+        }
+    }
+
+    private static void DeactivateNestedDuplicateLabels(Transform parent, string objectName, TextMeshProUGUI keepLabel)
+    {
+        if (parent == null || string.IsNullOrWhiteSpace(objectName) || keepLabel == null)
+        {
+            return;
+        }
+
+        TextMeshProUGUI[] labels = parent.GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int i = 0; i < labels.Length; i++)
+        {
+            TextMeshProUGUI candidate = labels[i];
+            if (candidate == null || candidate == keepLabel)
+            {
+                continue;
+            }
+
+            if (!string.Equals(candidate.gameObject.name, objectName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            candidate.gameObject.SetActive(false);
+        }
+    }
+
+    private static string ReadText(TMP_Text target, string fallback)
+    {
+        if (target == null)
+        {
+            return fallback ?? string.Empty;
+        }
+
+        return string.IsNullOrWhiteSpace(target.text) ? (fallback ?? string.Empty) : target.text;
+    }
+
     private static void DestroyGameObjectImmediate(GameObject target)
     {
         if (target == null)
@@ -1026,5 +1524,87 @@ public static class Theme1GameplayViewRepairUtils
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.anchoredPosition = Vector2.zero;
         rect.sizeDelta = preferredSize;
+    }
+
+    private static void EnsureVisibleTextMirror(TMP_Text source, string mirrorName, Color preferredColor, bool hideWhenBlank)
+    {
+        if (source == null || source.transform.parent == null || string.IsNullOrWhiteSpace(mirrorName))
+        {
+            return;
+        }
+
+        Transform parent = source.transform.parent;
+        Theme1VisibleTextBridge bridge = parent.Find(mirrorName)?.GetComponent<Theme1VisibleTextBridge>();
+        if (bridge == null)
+        {
+            GameObject mirrorObject = new GameObject(mirrorName, typeof(RectTransform), typeof(Text), typeof(Theme1VisibleTextBridge));
+            mirrorObject.layer = parent.gameObject.layer;
+            mirrorObject.transform.SetParent(parent, false);
+            bridge = mirrorObject.GetComponent<Theme1VisibleTextBridge>();
+        }
+
+        if (bridge == null)
+        {
+            return;
+        }
+
+        RectTransform sourceRect = source.rectTransform;
+        RectTransform mirrorRect = bridge.GetComponent<RectTransform>();
+        mirrorRect.anchorMin = sourceRect.anchorMin;
+        mirrorRect.anchorMax = sourceRect.anchorMax;
+        mirrorRect.pivot = sourceRect.pivot;
+        mirrorRect.anchoredPosition = sourceRect.anchoredPosition;
+        mirrorRect.sizeDelta = sourceRect.sizeDelta;
+        mirrorRect.localScale = Vector3.one;
+        mirrorRect.localRotation = Quaternion.identity;
+        bridge.Bind(source, hideWhenBlank, preferredColor);
+        PositionVisibleTextMirror(parent, bridge.transform, source.transform);
+    }
+
+    private static void SyncVisibleTextMirror(TMP_Text source)
+    {
+        if (source == null || source.transform.parent == null)
+        {
+            return;
+        }
+
+        Theme1VisibleTextBridge[] bridges = source.transform.parent.GetComponentsInChildren<Theme1VisibleTextBridge>(true);
+        for (int i = 0; i < bridges.Length; i++)
+        {
+            if (bridges[i] != null && bridges[i].Source == source)
+            {
+                bridges[i].SyncNow();
+            }
+        }
+    }
+
+    private static void PositionVisibleTextMirror(Transform parent, Transform mirror, Transform source)
+    {
+        if (parent == null || mirror == null || source == null)
+        {
+            return;
+        }
+
+        int targetIndex = source.GetSiblingIndex();
+        for (int childIndex = 0; childIndex < parent.childCount; childIndex++)
+        {
+            Transform child = parent.GetChild(childIndex);
+            if (child == null)
+            {
+                continue;
+            }
+
+            bool isOverlay =
+                string.Equals(child.name, SelectionMarkerName, StringComparison.Ordinal) ||
+                string.Equals(child.name, MissingOverlayName, StringComparison.Ordinal) ||
+                string.Equals(child.name, MatchedOverlayName, StringComparison.Ordinal);
+            if (isOverlay)
+            {
+                targetIndex = Mathf.Min(targetIndex, childIndex);
+                break;
+            }
+        }
+
+        mirror.SetSiblingIndex(Mathf.Clamp(targetIndex, 0, Mathf.Max(0, parent.childCount - 1)));
     }
 }

@@ -155,7 +155,7 @@ public partial class APIManager : MonoBehaviour
     private readonly RealtimeSchedulerState realtimeScheduler = new();
     private readonly RealtimeCountdownPresenter realtimeCountdownPresenter = new();
     private readonly RealtimeRoomConfigurator realtimeRoomConfigurator = new();
-    private readonly HashSet<int> realtimeMatchedPatternIndexes = new();
+    private readonly HashSet<long> realtimeMatchedPatternIndexes = new();
     private readonly Dictionary<int, Coroutine> realtimeNearWinBlinkCoroutines = new();
     private readonly Dictionary<int, RealtimeNearWinMeta> realtimeNearWinMetaByKey = new();
     private readonly Dictionary<int, RealtimeNearWinState> realtimeNearWinStates = new();
@@ -211,6 +211,7 @@ public partial class APIManager : MonoBehaviour
     private readonly Theme1RealtimeStateAdapter theme1RealtimeStateAdapter = new();
     private readonly Theme1LocalStateAdapter theme1LocalStateAdapter = new();
     private readonly Theme1DisplayPresenter theme1DisplayPresenter = new();
+    private Theme1DisplayState preservedTheme1RoundDisplayState;
     private bool hasLoggedFirstRealtimeCardRender = false;
     private bool hasLoggedFirstRealtimeBallRender = false;
     private bool hasRenderedTheme1IdleState;
@@ -1491,6 +1492,7 @@ public partial class APIManager : MonoBehaviour
 
         if (useRealtimeBackend && previousEntryFee != realtimeEntryFee)
         {
+            ClearPreservedTheme1RoundDisplayState();
             InvalidateRealtimeBetCommitForPreRoundEdit(
                 "entry_fee_changed",
                 "Tall eller innsats ble endret. Trykk Plasser innsats på nytt for å bli med i neste runde.");
