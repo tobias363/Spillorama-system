@@ -246,6 +246,14 @@ public partial class APIManager
                 continue;
             }
 
+            if (!GameManager.IsValidTheme1BallNumber(drawnNumber))
+            {
+                PublishRuntimeStatus(
+                    $"Ignorerer ugyldig Theme1 draw-nummer {drawnNumber}. Theme1 tillater kun 1-{GameManager.Theme1MaxBallNumber}.",
+                    asError: true);
+                continue;
+            }
+
             RegisterRealtimeDrawObserved(drawnNumbersNode.Count, drawnNumber);
 
             if (shouldTrace)
@@ -285,7 +293,11 @@ public partial class APIManager
         int count = Mathf.Min(drawCount, drawnNumbersNode.Count);
         for (int i = 0; i < count; i++)
         {
-            drawnNumbers.Add(drawnNumbersNode[i].AsInt);
+            int normalized = GameManager.NormalizeTheme1BallNumber(drawnNumbersNode[i].AsInt);
+            if (normalized > 0)
+            {
+                drawnNumbers.Add(normalized);
+            }
         }
 
         if (activeTicketSets == null || activeTicketSets.Count == 0)
@@ -318,14 +330,32 @@ public partial class APIManager
     private void RenderDedicatedTheme1State(Theme1GameplayViewRoot viewRoot, JSONNode currentGame)
     {
         Theme1DisplayState renderState = BuildDedicatedTheme1DisplayState(currentGame, viewRoot);
+        if (currentGame == null || currentGame.IsNull)
+        {
+            theme1DisplayPresenter.Render(viewRoot, renderState);
+            RegisterDedicatedTheme1RenderMetrics(viewRoot, renderState);
+            SyncLegacyTheme1MatchedPaylines(null);
+            StopRealtimeMatchedPatternVisuals();
+            StopRealtimeNearWinBlinking();
+            NumberGenerator.isPrizeMissedByOneCard = false;
+            return;
+        }
+
+        RealtimeClaimInfo latestClaim = GetLatestValidClaimForCurrentPlayer(currentGame);
+        byte[][] patternMasks = CollectPatternMasks();
+        Dictionary<int, HashSet<int>> winningPatternsByCard =
+            ResolveDedicatedWinningPatternsByCard(renderState, currentGame, latestClaim, patternMasks);
+        ApplyWinningPatternsToDedicatedState(renderState, winningPatternsByCard, patternMasks);
+
         theme1DisplayPresenter.Render(viewRoot, renderState);
         RegisterDedicatedTheme1RenderMetrics(viewRoot, renderState);
 
-        if (currentGame != null && !currentGame.IsNull)
-        {
-            Dictionary<int, HashSet<int>> winningPatternsByCard = BuildWinningPatternsByCard(renderState);
-            RefreshRealtimeBonusFlow(currentGame, GetLatestValidClaimForCurrentPlayer(currentGame), winningPatternsByCard);
-        }
+        Dictionary<int, RealtimeNearWinState> activeNearWinStates = BuildNearWinStates(renderState);
+        SyncLegacyTheme1MatchedPaylines(winningPatternsByCard);
+        SyncRealtimeMatchedPatternVisuals(winningPatternsByCard);
+        SyncRealtimeNearWinBlinking(activeNearWinStates);
+        NumberGenerator.isPrizeMissedByOneCard = activeNearWinStates.Count > 0;
+        RefreshRealtimeBonusFlow(currentGame, latestClaim, winningPatternsByCard);
     }
 
     private Theme1DisplayState BuildDedicatedTheme1DisplayState(JSONNode currentGame, Theme1GameplayViewRoot viewRoot)
@@ -349,23 +379,34 @@ public partial class APIManager
             TopperPayoutAmounts = CollectTopperPayoutAmounts(viewRoot),
             CountdownLabel = ReadText(viewRoot.HudBar?.CountdownText),
             PlayerCountLabel = ReadText(viewRoot.HudBar?.RoomPlayerCountText),
-            CreditLabel = ResolveDedicatedHudValue(viewRoot.HudBar?.CreditText, GameManager.instance != null ? GameManager.instance.CreditBalance.ToString() : "0"),
-            WinningsLabel = ResolveDedicatedHudValue(viewRoot.HudBar?.WinningsText, GameManager.instance != null ? GameManager.instance.RoundWinnings.ToString() : "0"),
-            BetLabel = ResolveDedicatedHudValue(viewRoot.HudBar?.BetText, GameManager.instance != null ? GameManager.instance.currentBet.ToString() : "0")
+            CreditLabel = ResolveDedicatedHudValue(
+                GameManager.instance != null ? GameManager.instance.CreditBalance.ToString() : string.Empty,
+                viewRoot.HudBar?.CreditText),
+            WinningsLabel = ResolveDedicatedHudValue(
+                GameManager.instance != null ? GameManager.instance.RoundWinnings.ToString() : string.Empty,
+                viewRoot.HudBar?.WinningsText),
+            BetLabel = ResolveDedicatedHudValue(
+                GameManager.instance != null ? GameManager.instance.currentBet.ToString() : string.Empty,
+                viewRoot.HudBar?.BetText)
         };
 
         return theme1RealtimeStateAdapter.Build(input);
     }
 
-    private static string ResolveDedicatedHudValue(TMP_Text target, string fallback)
+    private static string ResolveDedicatedHudValue(string authoritativeValue, TMP_Text target)
     {
+        if (!string.IsNullOrWhiteSpace(authoritativeValue))
+        {
+            return authoritativeValue;
+        }
+
         string value = ReadText(target);
         if (!string.IsNullOrWhiteSpace(value))
         {
             return value;
         }
 
-        return fallback ?? string.Empty;
+        return "0";
     }
 
     private int[] CollectActivePatternIndexes()
@@ -420,23 +461,22 @@ public partial class APIManager
         int[] values = new int[drawnNumbersNode.Count];
         for (int i = 0; i < drawnNumbersNode.Count; i++)
         {
-            values[i] = drawnNumbersNode[i].AsInt;
+            values[i] = GameManager.NormalizeTheme1BallNumber(drawnNumbersNode[i].AsInt);
         }
 
-        return values;
+        return FilterValidTheme1Numbers(values);
     }
 
     private string[] CollectCardHeaderLabels(Theme1GameplayViewRoot viewRoot)
     {
         int cardCount = viewRoot.Cards != null ? viewRoot.Cards.Length : 0;
         string[] labels = new string[cardCount];
+        GameManager gameManager = GameManager.instance;
         for (int i = 0; i < cardCount; i++)
         {
-            labels[i] = ReadText(viewRoot.Cards[i]?.HeaderLabel);
-            if (string.IsNullOrWhiteSpace(labels[i]))
-            {
-                labels[i] = $"Card -{i + 1}";
-            }
+            labels[i] = gameManager != null
+                ? gameManager.GetCardIndexLabel(i)
+                : GameManager.FormatTheme1CardHeaderLabel(i);
         }
 
         return labels;
@@ -446,13 +486,12 @@ public partial class APIManager
     {
         int cardCount = viewRoot.Cards != null ? viewRoot.Cards.Length : 0;
         string[] labels = new string[cardCount];
+        GameManager gameManager = GameManager.instance;
         for (int i = 0; i < cardCount; i++)
         {
-            labels[i] = ReadText(viewRoot.Cards[i]?.BetLabel);
-            if (string.IsNullOrWhiteSpace(labels[i]))
-            {
-                labels[i] = "BET - 0";
-            }
+            labels[i] = gameManager != null
+                ? gameManager.GetCardStakeLabel()
+                : GameManager.FormatTheme1CardStakeLabel(0);
         }
 
         return labels;
@@ -462,13 +501,15 @@ public partial class APIManager
     {
         int cardCount = viewRoot.Cards != null ? viewRoot.Cards.Length : 0;
         string[] labels = new string[cardCount];
+        GameManager gameManager = GameManager.instance;
         for (int i = 0; i < cardCount; i++)
         {
-            labels[i] = ReadText(viewRoot.Cards[i]?.WinLabel);
-            if (string.IsNullOrWhiteSpace(labels[i]))
-            {
-                labels[i] = "WIN - 0";
-            }
+            int winAmount = gameManager != null ? gameManager.GetCardWinAmount(i) : 0;
+            labels[i] = winAmount > 0
+                ? (gameManager != null
+                    ? gameManager.FormatCardWinLabel(winAmount)
+                    : GameManager.FormatTheme1CardWinLabel(winAmount))
+                : string.Empty;
         }
 
         return labels;
@@ -505,6 +546,26 @@ public partial class APIManager
         }
 
         return payoutAmounts;
+    }
+
+    private static int[] FilterValidTheme1Numbers(IReadOnlyList<int> values)
+    {
+        if (values == null || values.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        List<int> filtered = new List<int>(values.Count);
+        for (int i = 0; i < values.Count; i++)
+        {
+            int normalized = GameManager.NormalizeTheme1BallNumber(values[i]);
+            if (normalized > 0)
+            {
+                filtered.Add(normalized);
+            }
+        }
+
+        return filtered.ToArray();
     }
 
     private void RegisterDedicatedTheme1RenderMetrics(Theme1GameplayViewRoot viewRoot, Theme1DisplayState renderState)
@@ -578,7 +639,17 @@ public partial class APIManager
         {
             Theme1CardRenderState card = renderState.Cards[cardIndex];
             HashSet<int> matched = new HashSet<int>();
-            if (card?.PaylinesActive != null)
+            if (card?.MatchedPatternIndexes != null && card.MatchedPatternIndexes.Length > 0)
+            {
+                for (int i = 0; i < card.MatchedPatternIndexes.Length; i++)
+                {
+                    if (card.MatchedPatternIndexes[i] >= 0)
+                    {
+                        matched.Add(card.MatchedPatternIndexes[i]);
+                    }
+                }
+            }
+            else if (card?.PaylinesActive != null)
             {
                 for (int paylineIndex = 0; paylineIndex < card.PaylinesActive.Length; paylineIndex++)
                 {
@@ -593,6 +664,445 @@ public partial class APIManager
         }
 
         return winningPatterns;
+    }
+
+    private Dictionary<int, HashSet<int>> ResolveDedicatedWinningPatternsByCard(
+        Theme1DisplayState renderState,
+        JSONNode currentGame,
+        RealtimeClaimInfo latestClaim,
+        byte[][] patternMasks)
+    {
+        Dictionary<int, HashSet<int>> winningPatterns = BuildWinningPatternsByCard(renderState);
+        if (renderState?.Cards == null || currentGame == null || currentGame.IsNull)
+        {
+            return winningPatterns;
+        }
+
+        HashSet<int> drawnNumbers = ExtractPositiveIntSet(currentGame["drawnNumbers"]);
+        JSONNode visibleTicketNodes = ResolveCurrentPlayerVisibleTicketNodes(currentGame, renderState.Cards.Length);
+        if (visibleTicketNodes == null || visibleTicketNodes.IsNull || !visibleTicketNodes.IsArray)
+        {
+            return winningPatterns;
+        }
+
+        HashSet<int> claimPatternIndexes = ExtractWinningPatternIndexes(
+            latestClaim.ClaimNode,
+            Math.Max(32, (patternMasks?.Length ?? 0) + 16));
+        if (claimPatternIndexes.Count == 0)
+        {
+            return winningPatterns;
+        }
+
+        for (int cardIndex = 0; cardIndex < renderState.Cards.Length; cardIndex++)
+        {
+            JSONNode ticketNode = ResolveVisibleTicketNodeForCard(visibleTicketNodes, cardIndex, renderState.Cards.Length);
+            if (ticketNode == null || ticketNode.IsNull)
+            {
+                continue;
+            }
+
+            Theme1CardRenderState cardState = renderState.Cards[cardIndex];
+            if (cardState == null)
+            {
+                continue;
+            }
+
+            if (!winningPatterns.TryGetValue(cardIndex, out HashSet<int> matchedPatterns) || matchedPatterns == null)
+            {
+                matchedPatterns = new HashSet<int>();
+                winningPatterns[cardIndex] = matchedPatterns;
+            }
+
+            foreach (int claimPatternIndex in claimPatternIndexes)
+            {
+                List<int> claimNumbers = ExtractBackendClaimPatternNumbers(ticketNode["grid"], claimPatternIndex);
+                if (claimNumbers.Count == 0)
+                {
+                    continue;
+                }
+
+                int localPatternIndex = FindBestLocalPatternIndexForClaim(cardState, claimNumbers, patternMasks, drawnNumbers);
+                if (localPatternIndex >= 0)
+                {
+                    matchedPatterns.Add(localPatternIndex);
+                }
+            }
+        }
+
+        return winningPatterns;
+    }
+
+    private JSONNode ResolveCurrentPlayerVisibleTicketNodes(JSONNode currentGame, int visibleCardCount)
+    {
+        if (currentGame == null || currentGame.IsNull || string.IsNullOrWhiteSpace(activePlayerId))
+        {
+            return null;
+        }
+
+        JSONNode playerTickets = currentGame["tickets"]?[activePlayerId];
+        if (playerTickets == null || playerTickets.IsNull || !playerTickets.IsArray)
+        {
+            return null;
+        }
+
+        return playerTickets;
+    }
+
+    private JSONNode ResolveVisibleTicketNodeForCard(JSONNode playerTicketsNode, int cardIndex, int cardSlots)
+    {
+        if (playerTicketsNode == null || playerTicketsNode.IsNull || !playerTicketsNode.IsArray || cardIndex < 0)
+        {
+            return null;
+        }
+
+        int resolvedCardSlots = Mathf.Max(1, cardSlots);
+        int pageStartIndex = Mathf.Max(0, currentTicketPage) * resolvedCardSlots;
+        int ticketIndex = pageStartIndex + cardIndex;
+        if (ticketIndex < playerTicketsNode.Count)
+        {
+            return playerTicketsNode[ticketIndex];
+        }
+
+        if (duplicateTicketAcrossAllCards && playerTicketsNode.Count == 1)
+        {
+            return playerTicketsNode[0];
+        }
+
+        return null;
+    }
+
+    private static int FindBestLocalPatternIndexForClaim(
+        Theme1CardRenderState cardState,
+        IReadOnlyList<int> claimNumbers,
+        IReadOnlyList<byte[]> patternMasks,
+        HashSet<int> drawnNumbers)
+    {
+        if (cardState?.Cells == null || claimNumbers == null || claimNumbers.Count == 0 || patternMasks == null)
+        {
+            return -1;
+        }
+
+        int[] cardNumbers = ExtractPositiveCardNumbers(cardState);
+        HashSet<int> claimNumberSet = new HashSet<int>(claimNumbers);
+        int bestPatternIndex = -1;
+        int bestScore = int.MinValue;
+
+        for (int patternIndex = 0; patternIndex < patternMasks.Count; patternIndex++)
+        {
+            List<int> localPatternNumbers = ExtractPatternNumbers(cardNumbers, patternMasks[patternIndex]);
+            if (localPatternNumbers.Count == 0)
+            {
+                continue;
+            }
+
+            int overlap = 0;
+            bool allDrawn = true;
+            HashSet<int> localPatternSet = new HashSet<int>();
+            for (int i = 0; i < localPatternNumbers.Count; i++)
+            {
+                int number = localPatternNumbers[i];
+                localPatternSet.Add(number);
+                if (claimNumberSet.Contains(number))
+                {
+                    overlap += 1;
+                }
+
+                if (number <= 0 || drawnNumbers == null || !drawnNumbers.Contains(number))
+                {
+                    allDrawn = false;
+                }
+            }
+
+            if (overlap <= 0)
+            {
+                continue;
+            }
+
+            bool exact = localPatternSet.SetEquals(claimNumberSet);
+            int sizeDelta = Math.Abs(localPatternSet.Count - claimNumberSet.Count);
+            int score = 0;
+            if (exact)
+            {
+                score += 10000;
+            }
+
+            if (allDrawn)
+            {
+                score += 1000;
+            }
+
+            score += overlap * 100;
+            score -= sizeDelta * 10;
+            score -= patternIndex;
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestPatternIndex = patternIndex;
+            }
+        }
+
+        return bestPatternIndex;
+    }
+
+    private static int[] ExtractPositiveCardNumbers(Theme1CardRenderState cardState)
+    {
+        int[] values = new int[cardState?.Cells != null ? cardState.Cells.Length : 0];
+        if (cardState?.Cells == null)
+        {
+            return values;
+        }
+
+        for (int cellIndex = 0; cellIndex < cardState.Cells.Length; cellIndex++)
+        {
+            values[cellIndex] = TryParsePositiveInt(cardState.Cells[cellIndex].NumberLabel);
+        }
+
+        return values;
+    }
+
+    private static List<int> ExtractPatternNumbers(int[] cardNumbers, byte[] mask)
+    {
+        List<int> numbers = new List<int>();
+        if (cardNumbers == null || mask == null)
+        {
+            return numbers;
+        }
+
+        int cellCount = Mathf.Min(cardNumbers.Length, mask.Length);
+        for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
+        {
+            if (mask[cellIndex] != 1)
+            {
+                continue;
+            }
+
+            int number = cardNumbers[cellIndex];
+            if (number > 0)
+            {
+                numbers.Add(number);
+            }
+        }
+
+        return numbers;
+    }
+
+    private static void ApplyWinningPatternsToDedicatedState(
+        Theme1DisplayState renderState,
+        Dictionary<int, HashSet<int>> winningPatternsByCard,
+        IReadOnlyList<byte[]> patternMasks)
+    {
+        if (renderState?.Cards == null || winningPatternsByCard == null)
+        {
+            return;
+        }
+
+        for (int cardIndex = 0; cardIndex < renderState.Cards.Length; cardIndex++)
+        {
+            Theme1CardRenderState cardState = renderState.Cards[cardIndex];
+            if (cardState == null ||
+                !winningPatternsByCard.TryGetValue(cardIndex, out HashSet<int> matchedPatterns) ||
+                matchedPatterns == null ||
+                matchedPatterns.Count == 0)
+            {
+                continue;
+            }
+
+            int paylineCount = Mathf.Max(cardState.PaylinesActive != null ? cardState.PaylinesActive.Length : 0, patternMasks != null ? patternMasks.Count : 0);
+            bool[] paylines = new bool[paylineCount];
+            if (cardState.PaylinesActive != null && cardState.PaylinesActive.Length > 0)
+            {
+                Array.Copy(cardState.PaylinesActive, paylines, Mathf.Min(cardState.PaylinesActive.Length, paylines.Length));
+            }
+
+            foreach (int patternIndex in matchedPatterns)
+            {
+                if (patternIndex >= 0 && patternIndex < paylines.Length)
+                {
+                    paylines[patternIndex] = true;
+                }
+            }
+
+            cardState.PaylinesActive = paylines;
+            cardState.MatchedPatternIndexes = new int[matchedPatterns.Count];
+            matchedPatterns.CopyTo(cardState.MatchedPatternIndexes);
+            Array.Sort(cardState.MatchedPatternIndexes);
+
+            if (cardState.Cells == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < cardState.Cells.Length; cellIndex++)
+            {
+                Theme1CardCellRenderState cell = cardState.Cells[cellIndex];
+                bool isMatched = cell.IsMatched || IsCellMatchedByPatternMasks(cellIndex, matchedPatterns, patternMasks);
+                if (isMatched == cell.IsMatched)
+                {
+                    continue;
+                }
+
+                cardState.Cells[cellIndex] = new Theme1CardCellRenderState(
+                    cell.NumberLabel,
+                    cell.IsSelected,
+                    cell.IsMissing,
+                    isMatched,
+                    cell.NearWinPatternIndex,
+                    cell.MissingNumber);
+            }
+        }
+
+        if (renderState.Topper?.Slots == null)
+        {
+            return;
+        }
+
+        for (int slotIndex = 0; slotIndex < renderState.Topper.Slots.Length; slotIndex++)
+        {
+            Theme1TopperSlotRenderState slotState = renderState.Topper.Slots[slotIndex];
+            if (slotState == null)
+            {
+                continue;
+            }
+
+            bool isMatched = false;
+            foreach (KeyValuePair<int, HashSet<int>> entry in winningPatternsByCard)
+            {
+                if (entry.Value == null)
+                {
+                    continue;
+                }
+
+                foreach (int patternIndex in entry.Value)
+                {
+                    if (GameManager.ResolvePayoutSlotIndex(patternIndex, renderState.Topper.Slots.Length) == slotIndex)
+                    {
+                        isMatched = true;
+                        break;
+                    }
+                }
+
+                if (isMatched)
+                {
+                    break;
+                }
+            }
+
+            if (!isMatched)
+            {
+                continue;
+            }
+
+            slotState.ShowMatchedPattern = true;
+            slotState.MissingCellsVisible = Array.Empty<bool>();
+            slotState.PrizeVisualState = Theme1PrizeVisualState.Matched;
+        }
+    }
+
+    private void SyncLegacyTheme1MatchedPaylines(Dictionary<int, HashSet<int>> winningPatternsByCard)
+    {
+        NumberGenerator generator = ResolveNumberGenerator();
+        if (generator?.cardClasses == null)
+        {
+            return;
+        }
+
+        for (int cardIndex = 0; cardIndex < generator.cardClasses.Length; cardIndex++)
+        {
+            CardClass card = generator.cardClasses[cardIndex];
+            if (card == null || card.paylineObj == null)
+            {
+                continue;
+            }
+
+            RealtimePaylineUtils.EnsurePaylineIndexCapacity(card, card.paylineObj.Count);
+            bool[] activeFlags = new bool[card.paylineObj.Count];
+            if (winningPatternsByCard != null && winningPatternsByCard.TryGetValue(cardIndex, out HashSet<int> matchedPatterns) && matchedPatterns != null)
+            {
+                foreach (int patternIndex in matchedPatterns)
+                {
+                    if (patternIndex >= 0 && patternIndex < activeFlags.Length)
+                    {
+                        activeFlags[patternIndex] = true;
+                    }
+                }
+            }
+
+            for (int patternIndex = 0; patternIndex < card.paylineObj.Count; patternIndex++)
+            {
+                bool active = activeFlags[patternIndex];
+                card.paylineindex[patternIndex] = active;
+                SetActiveIfChanged(card.paylineObj[patternIndex], active);
+            }
+        }
+    }
+
+    private static bool IsCellMatchedByPatternMasks(
+        int cellIndex,
+        HashSet<int> matchedPatterns,
+        IReadOnlyList<byte[]> patternMasks)
+    {
+        if (cellIndex < 0 || matchedPatterns == null || matchedPatterns.Count == 0 || patternMasks == null)
+        {
+            return false;
+        }
+
+        foreach (int patternIndex in matchedPatterns)
+        {
+            if (patternIndex < 0 || patternIndex >= patternMasks.Count)
+            {
+                continue;
+            }
+
+            byte[] mask = patternMasks[patternIndex];
+            if (mask != null && cellIndex < mask.Length && mask[cellIndex] == 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private Dictionary<int, RealtimeNearWinState> BuildNearWinStates(Theme1DisplayState renderState)
+    {
+        Dictionary<int, RealtimeNearWinState> activeNearWinStates = new Dictionary<int, RealtimeNearWinState>();
+        if (renderState?.Cards == null)
+        {
+            return activeNearWinStates;
+        }
+
+        for (int cardIndex = 0; cardIndex < renderState.Cards.Length; cardIndex++)
+        {
+            Theme1CardRenderState card = renderState.Cards[cardIndex];
+            if (card?.Cells == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < card.Cells.Length; cellIndex++)
+            {
+                Theme1CardCellRenderState cell = card.Cells[cellIndex];
+                if (!cell.IsMissing || cell.NearWinPatternIndex < 0)
+                {
+                    continue;
+                }
+
+                int missingNumber = cell.MissingNumber > 0
+                    ? cell.MissingNumber
+                    : TryParsePositiveInt(cell.NumberLabel);
+                int key = BuildNearWinKey(cardIndex, cell.NearWinPatternIndex, cellIndex);
+                activeNearWinStates[key] =
+                    new RealtimeNearWinState(cell.NearWinPatternIndex, cardIndex, cellIndex, missingNumber);
+            }
+        }
+
+        return activeNearWinStates;
+    }
+
+    private static int TryParsePositiveInt(string value)
+    {
+        return int.TryParse(value, out int parsed) && parsed > 0 ? parsed : 0;
     }
 
     private static string ReadText(TMP_Text label)

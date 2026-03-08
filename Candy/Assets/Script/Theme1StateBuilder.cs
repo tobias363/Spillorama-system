@@ -36,7 +36,8 @@ public sealed class Theme1StateBuilder
         }
 
         state.GameId = input.GameId ?? string.Empty;
-        HashSet<int> drawnNumbers = BuildDrawnNumberSet(input.DrawnNumbers);
+        int[] validDrawnNumbers = ExtractValidDrawnNumbers(input.DrawnNumbers);
+        HashSet<int> drawnNumbers = BuildDrawnNumberSet(validDrawnNumbers);
         int[][] visibleTickets = ResolveVisibleTickets(input);
 
         HashSet<int>[] matchedPatternsByCard = BuildMatchedPatternsByCard(
@@ -66,27 +67,41 @@ public sealed class Theme1StateBuilder
         for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
         {
             Theme1CardRenderState cardState = Theme1CardRenderState.CreateEmpty();
-            cardState.HeaderLabel = GetValue(input.CardHeaderLabels, cardIndex, $"Card -{cardIndex + 1}");
-            cardState.BetLabel = GetValue(input.CardBetLabels, cardIndex, "BET - 0");
-            cardState.WinLabel = GetValue(input.CardWinLabels, cardIndex, "WIN - 0");
             cardState.PaylinesActive = new bool[input.PatternMasks != null ? input.PatternMasks.Length : 0];
 
             int[] ticket = cardIndex < visibleTickets.Length ? visibleTickets[cardIndex] : null;
             HashSet<int> matchedPatterns = cardIndex < matchedPatternsByCard.Length
                 ? matchedPatternsByCard[cardIndex]
                 : null;
+            int cardWinAmount = ResolveCardWinAmount(matchedPatterns, input.TopperPayoutAmounts);
+            cardState.HeaderLabel = GetNonEmptyString(
+                input.CardHeaderLabels,
+                cardIndex,
+                GameManager.FormatTheme1CardHeaderLabel(cardIndex));
+            cardState.BetLabel = GetNonEmptyString(
+                input.CardBetLabels,
+                cardIndex,
+                GameManager.FormatTheme1CardStakeLabel(0));
+            cardState.WinLabel = cardWinAmount > 0
+                ? FormatCardWinLabel(cardWinAmount)
+                : GetNonEmptyString(input.CardWinLabels, cardIndex, string.Empty);
+            cardState.ShowWinLabel = cardWinAmount > 0;
 
             for (int cellIndex = 0; cellIndex < cardState.Cells.Length; cellIndex++)
             {
-                int number = ticket != null && cellIndex < ticket.Length ? Mathf.Max(0, ticket[cellIndex]) : 0;
+                int number = ticket != null && cellIndex < ticket.Length
+                    ? NormalizeTheme1Number(ticket[cellIndex])
+                    : 0;
                 bool isSelected = number > 0 && drawnNumbers.Contains(number);
                 bool isMatched = IsCellMatched(cellIndex, matchedPatterns, input.PatternMasks);
-                bool isMissing = nearWinsByCardCell.ContainsKey((cardIndex, cellIndex));
+                bool isMissing = nearWinsByCardCell.TryGetValue((cardIndex, cellIndex), out NearWinCandidate nearWinCandidate);
                 cardState.Cells[cellIndex] = new Theme1CardCellRenderState(
                     number > 0 ? number.ToString() : "-",
                     isSelected,
                     isMissing,
-                    isMatched);
+                    isMatched,
+                    isMissing ? nearWinCandidate.RawPatternIndex : -1,
+                    isMissing ? number : 0);
             }
 
             for (int patternListIndex = 0; patternListIndex < cardState.PaylinesActive.Length; patternListIndex++)
@@ -95,13 +110,69 @@ public sealed class Theme1StateBuilder
                 cardState.PaylinesActive[patternListIndex] = matchedPatterns != null && matchedPatterns.Contains(rawPatternIndex);
             }
 
+            if (matchedPatterns != null && matchedPatterns.Count > 0)
+            {
+                cardState.MatchedPatternIndexes = new int[matchedPatterns.Count];
+                matchedPatterns.CopyTo(cardState.MatchedPatternIndexes);
+                Array.Sort(cardState.MatchedPatternIndexes);
+            }
+            else
+            {
+                cardState.MatchedPatternIndexes = Array.Empty<int>();
+            }
+
             state.Cards[cardIndex] = cardState;
         }
 
-        PopulateBallRack(state.BallRack, input.DrawnNumbers, input.BallSlotCount);
+        PopulateBallRack(state.BallRack, validDrawnNumbers, input.BallSlotCount);
         PopulateHud(state.Hud, input);
         PopulateTopper(state.Topper, input, matchedPatternsByCard, nearWinsByTopperSlot);
         return state;
+    }
+
+    private static int ResolveCardWinAmount(IReadOnlyCollection<int> matchedPatterns, IReadOnlyList<int> payoutAmounts)
+    {
+        if (matchedPatterns == null || matchedPatterns.Count == 0 || payoutAmounts == null || payoutAmounts.Count == 0)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        foreach (int rawPatternIndex in matchedPatterns)
+        {
+            int slotIndex = GameManager.ResolvePayoutSlotIndex(rawPatternIndex, payoutAmounts.Count);
+            if (slotIndex >= 0 && slotIndex < payoutAmounts.Count)
+            {
+                total += Mathf.Max(0, payoutAmounts[slotIndex]);
+            }
+        }
+
+        return total;
+    }
+
+    private static string FormatCardWinLabel(int amount)
+    {
+        return GameManager.FormatTheme1CardWinLabel(amount);
+    }
+
+    private static int[] ExtractValidDrawnNumbers(IReadOnlyList<int> drawnNumbers)
+    {
+        if (drawnNumbers == null || drawnNumbers.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        List<int> validValues = new List<int>(drawnNumbers.Count);
+        for (int i = 0; i < drawnNumbers.Count; i++)
+        {
+            int normalized = NormalizeTheme1Number(drawnNumbers[i]);
+            if (normalized > 0)
+            {
+                validValues.Add(normalized);
+            }
+        }
+
+        return validValues.ToArray();
     }
 
     private static HashSet<int> BuildDrawnNumberSet(IReadOnlyList<int> drawnNumbers)
@@ -114,7 +185,7 @@ public sealed class Theme1StateBuilder
 
         for (int i = 0; i < drawnNumbers.Count; i++)
         {
-            int value = drawnNumbers[i];
+            int value = NormalizeTheme1Number(drawnNumbers[i]);
             if (value > 0)
             {
                 values.Add(value);
@@ -161,7 +232,7 @@ public sealed class Theme1StateBuilder
         int limit = Mathf.Min(15, source.Length);
         for (int i = 0; i < limit; i++)
         {
-            normalized[i] = Mathf.Max(0, source[i]);
+            normalized[i] = NormalizeTheme1Number(source[i]);
         }
 
         return normalized;
@@ -443,9 +514,9 @@ public sealed class Theme1StateBuilder
 
         hud.CountdownLabel = input.CountdownLabel ?? string.Empty;
         hud.PlayerCountLabel = input.PlayerCountLabel ?? string.Empty;
-        hud.CreditLabel = input.CreditLabel ?? string.Empty;
-        hud.WinningsLabel = input.WinningsLabel ?? string.Empty;
-        hud.BetLabel = input.BetLabel ?? string.Empty;
+        hud.CreditLabel = string.IsNullOrWhiteSpace(input.CreditLabel) ? "0" : input.CreditLabel;
+        hud.WinningsLabel = string.IsNullOrWhiteSpace(input.WinningsLabel) ? "0" : input.WinningsLabel;
+        hud.BetLabel = string.IsNullOrWhiteSpace(input.BetLabel) ? "0" : input.BetLabel;
     }
 
     private static void PopulateTopper(
@@ -544,5 +615,16 @@ public sealed class Theme1StateBuilder
         }
 
         return values[index];
+    }
+
+    private static string GetNonEmptyString(IReadOnlyList<string> values, int index, string fallback)
+    {
+        string value = GetValue(values, index, string.Empty);
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
+
+    private static int NormalizeTheme1Number(int value)
+    {
+        return GameManager.NormalizeTheme1BallNumber(value);
     }
 }

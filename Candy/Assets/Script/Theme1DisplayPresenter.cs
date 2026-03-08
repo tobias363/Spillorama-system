@@ -1,3 +1,4 @@
+using System;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -33,7 +34,19 @@ public sealed class Theme1DisplayPresenter
 
             ApplyHudText(view?.HeaderLabel, state.HeaderLabel);
             ApplyHudText(view?.BetLabel, state.BetLabel);
-            ApplyHudText(view?.WinLabel, state.WinLabel);
+            if (view?.WinLabel != null)
+            {
+                if (state.ShowWinLabel && !string.IsNullOrWhiteSpace(state.WinLabel))
+                {
+                    ApplyHudText(view.WinLabel, state.WinLabel);
+                }
+                else
+                {
+                    ApplyRawText(view.WinLabel, string.Empty);
+                }
+
+                SetActive(view.WinLabel.gameObject, state.ShowWinLabel);
+            }
 
             int cellCount = view?.Cells != null ? view.Cells.Length : 0;
             for (int cellIndex = 0; cellIndex < cellCount; cellIndex++)
@@ -101,11 +114,21 @@ public sealed class Theme1DisplayPresenter
             return;
         }
 
+        GameManager gameManager = GameManager.instance;
         ApplyHudText(view.CountdownText, state.CountdownLabel);
         ApplyHudText(view.RoomPlayerCountText, state.PlayerCountLabel);
-        ApplyHudText(view.CreditText, state.CreditLabel);
-        ApplyHudText(view.WinningsText, state.WinningsLabel);
-        ApplyHudText(view.BetText, state.BetLabel);
+        ApplyRequiredHudValue(
+            view.CreditText,
+            state.CreditLabel,
+            gameManager != null ? gameManager.CreditBalance.ToString() : "0");
+        ApplyRequiredHudValue(
+            view.WinningsText,
+            state.WinningsLabel,
+            gameManager != null ? gameManager.RoundWinnings.ToString() : "0");
+        ApplyRequiredHudValue(
+            view.BetText,
+            state.BetLabel,
+            gameManager != null ? gameManager.currentBet.ToString() : "0");
     }
 
     private static void RenderTopper(Theme1GameplayViewRoot root, Theme1TopperRenderState state)
@@ -169,6 +192,16 @@ public sealed class Theme1DisplayPresenter
         }
 
         ApplyRawText(target, value);
+    }
+
+    private static void ApplyRequiredHudValue(TMP_Text target, string value, string authoritativeFallback)
+    {
+        string resolvedValue = !string.IsNullOrWhiteSpace(value)
+            ? value
+            : (!string.IsNullOrWhiteSpace(authoritativeFallback)
+                ? authoritativeFallback
+                : (!string.IsNullOrWhiteSpace(target?.text) ? target.text : "0"));
+        ApplyHudText(target, resolvedValue);
     }
 
     private static void ApplyTopperText(TMP_Text target, string value, Color defaultColor)

@@ -573,7 +573,7 @@ public partial class APIManager
 
             if (card.win != null)
             {
-                RealtimeTextStyleUtils.ApplyHudText(card.win, "WIN - 0");
+                SetActiveIfChanged(card.win.gameObject, false);
             }
         }
 
@@ -591,7 +591,7 @@ public partial class APIManager
                 {
                     if (gameManager.displayCardWinPoints[i] != null)
                     {
-                        RealtimeTextStyleUtils.ApplyHudText(gameManager.displayCardWinPoints[i], "WIN - 0");
+                        SetActiveIfChanged(gameManager.displayCardWinPoints[i].gameObject, false);
                     }
                 }
             }
@@ -866,13 +866,22 @@ public partial class APIManager
         for (int drawIndex = 0; drawIndex < drawnNumbers.Count; drawIndex++)
         {
             int drawnNumber = drawnNumbers[drawIndex].AsInt;
-            if (canMarkCards)
+            bool isValidTheme1Number = GameManager.IsValidTheme1BallNumber(drawnNumber);
+            if (canMarkCards && isValidTheme1Number)
             {
                 RealtimeTicketSetUtils.MarkDrawnNumberOnCards(generator, drawnNumber);
             }
 
             if (drawIndex < previousProcessedDrawCount)
             {
+                continue;
+            }
+
+            if (!isValidTheme1Number)
+            {
+                PublishRuntimeStatus(
+                    $"Ignorerer ugyldig Theme1 draw-nummer {drawnNumber}. Theme1 tillater kun 1-{GameManager.Theme1MaxBallNumber}.",
+                    asError: true);
                 continue;
             }
 
@@ -955,7 +964,7 @@ public partial class APIManager
 
             if (card.win != null)
             {
-                RealtimeTextStyleUtils.ApplyHudText(card.win, "WIN - 0");
+                SetActiveIfChanged(card.win.gameObject, false);
             }
         }
 
@@ -974,7 +983,7 @@ public partial class APIManager
         {
             if (gameManager.displayCardWinPoints[i] != null)
             {
-                RealtimeTextStyleUtils.ApplyHudText(gameManager.displayCardWinPoints[i], "WIN - 0");
+                SetActiveIfChanged(gameManager.displayCardWinPoints[i].gameObject, false);
             }
         }
     }

@@ -30,6 +30,12 @@ public static class Theme1RoundRenderStateComparer
 
             if (!TryCompareValue(left?.HeaderLabel, right?.HeaderLabel, $"cards[{cardIndex}].headerLabel", builder) ||
                 !TryCompareValue(left?.BetLabel, right?.BetLabel, $"cards[{cardIndex}].betLabel", builder) ||
+                !TryCompareValue(left?.ShowWinLabel ?? false, right?.ShowWinLabel ?? false, $"cards[{cardIndex}].showWinLabel", builder))
+            {
+                isValid = false;
+            }
+
+            if ((left?.ShowWinLabel ?? false) &&
                 !TryCompareValue(left?.WinLabel, right?.WinLabel, $"cards[{cardIndex}].winLabel", builder))
             {
                 isValid = false;

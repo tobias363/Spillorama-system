@@ -19,6 +19,10 @@ public static class CandyTheme1BindingTools
     private const float RealtimeBallSpacingX = 86f;
     private const float RealtimeBallRowTopY = -350f;
     private const float RealtimeBallRowBottomY = -258f;
+    private const string CardBackgroundName = "CardBg";
+    private const string LegacyCardNameObject = "Name";
+    private const string LegacyCardBetObject = "Bet";
+    private const string LegacyCardWinObject = "Win";
 
     static CandyTheme1BindingTools()
     {
@@ -70,6 +74,17 @@ public static class CandyTheme1BindingTools
         Scene activeScene = SceneManager.GetActiveScene();
         if (!string.Equals(activeScene.path, Theme1ScenePath, StringComparison.Ordinal))
         {
+            return;
+        }
+
+        try
+        {
+            InstallOrRefreshTheme1Bindings(openSceneIfNeeded: false, saveScene: true, logSummary: false);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"{ValidationPrefix} Klarte ikke auto-refreshe Theme1 før Play Mode. {ex}");
+            EditorApplication.isPlaying = false;
             return;
         }
 
@@ -391,45 +406,35 @@ public static class CandyTheme1BindingTools
                 continue;
             }
 
-            TextMeshProUGUI anchor = ResolveFirstNumberLabel(binding);
             Transform cardRoot = ResolveCardRoot(binding);
-            TextMeshProUGUI headerTemplate = ResolveNearestText(
-                anchor,
-                candidate => (candidate.text ?? string.Empty).Trim().StartsWith("Card", StringComparison.OrdinalIgnoreCase));
-            TextMeshProUGUI betTemplate = ResolveByIndex(gameManager != null ? gameManager.CardBets : null, cardIndex) ??
-                                          ResolveNearestText(
-                                              anchor,
-                                              candidate =>
-                                                  (candidate.text ?? string.Empty).Trim().StartsWith("BET", StringComparison.OrdinalIgnoreCase) ||
-                                                  (candidate.text ?? string.Empty).IndexOf("Innsats", StringComparison.OrdinalIgnoreCase) >= 0);
-            TextMeshProUGUI runtimeWinLabel = ResolveByIndex(gameManager != null ? gameManager.displayCardWinPoints : null, cardIndex);
-            TextMeshProUGUI winTemplate = runtimeWinLabel != null ? runtimeWinLabel : binding.WinningText;
-
-            TextMeshProUGUI header = EnsureDedicatedOverlayLabel(
+            TextMeshProUGUI header = EnsureDedicatedCardLabel(
                 cardRoot,
                 $"RealtimeCardHeaderLabel_{cardIndex + 1}",
-                headerTemplate,
-                $"Card -{cardIndex + 1}",
-                GameplayTextSurface.CardHeader,
-                Color.white,
-                fallbackSize: new Vector2(92f, 24f));
-            TextMeshProUGUI bet = EnsureDedicatedOverlayLabel(
+                CardLabelKind.CardIndex,
+                $"Bong - {cardIndex + 1}");
+            TextMeshProUGUI bet = EnsureDedicatedCardLabel(
                 cardRoot,
                 $"RealtimeCardBetLabel_{cardIndex + 1}",
-                betTemplate,
-                "Innsats - 0 kr",
-                GameplayTextSurface.HudLabel,
-                Color.white,
-                fallbackSize: new Vector2(144f, 30f));
-            TextMeshProUGUI win = EnsureDedicatedOverlayLabel(
+                CardLabelKind.Stake,
+                "Innsats - 0 kr");
+            TextMeshProUGUI win = EnsureDedicatedCardLabel(
                 cardRoot,
                 $"RealtimeCardWinLabel_{cardIndex + 1}",
-                winTemplate,
-                "WIN - 0",
-                GameplayTextSurface.HudLabel,
-                Color.white,
-                fallbackSize: new Vector2(116f, 30f));
+                CardLabelKind.Win,
+                "Gevinst - 0 kr");
 
+            string headerText = gameManager != null ? gameManager.GetCardIndexLabel(cardIndex) : $"Bong - {cardIndex + 1}";
+            string betText = gameManager != null ? gameManager.GetCardStakeLabel() : "Innsats - 0 kr";
+            string winText = gameManager != null ? gameManager.FormatCardWinLabel(0) : "Gevinst - 0 kr";
+            ApplyOverlayLabelDefault(header, headerText);
+            ApplyOverlayLabelDefault(bet, betText);
+            ApplyOverlayLabelDefault(win, winText);
+            if (win != null)
+            {
+                win.gameObject.SetActive(false);
+            }
+
+            DeactivateLegacyCardLabelContainers(cardRoot, header, bet, win);
             binding.SetDisplayTexts(header, bet, win);
             resolvedBetLabels.Add(bet);
             resolvedWinLabels.Add(win);
@@ -441,55 +446,6 @@ public static class CandyTheme1BindingTools
             gameManager.displayCardWinPoints = resolvedWinLabels;
             EditorUtility.SetDirty(gameManager);
         }
-    }
-
-    private static TextMeshProUGUI ResolveFirstNumberLabel(CandyCardViewBinding binding)
-    {
-        if (binding?.NumberTexts == null)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < binding.NumberTexts.Count; i++)
-        {
-            if (binding.NumberTexts[i] != null)
-            {
-                return binding.NumberTexts[i];
-            }
-        }
-
-        return null;
-    }
-
-    private static TextMeshProUGUI ResolveNearestText(TextMeshProUGUI anchor, Func<TextMeshProUGUI, bool> predicate)
-    {
-        if (anchor == null || predicate == null)
-        {
-            return null;
-        }
-
-        TextMeshProUGUI[] labels = UnityEngine.Object.FindObjectsByType<TextMeshProUGUI>(
-            FindObjectsInactive.Include,
-            FindObjectsSortMode.None);
-        TextMeshProUGUI nearest = null;
-        float nearestDistance = float.MaxValue;
-        for (int i = 0; i < labels.Length; i++)
-        {
-            TextMeshProUGUI candidate = labels[i];
-            if (candidate == null || candidate.gameObject.scene != anchor.gameObject.scene || !predicate(candidate))
-            {
-                continue;
-            }
-
-            float distance = Vector3.Distance(anchor.transform.position, candidate.transform.position);
-            if (distance < nearestDistance)
-            {
-                nearestDistance = distance;
-                nearest = candidate;
-            }
-        }
-
-        return nearest;
     }
 
     private static TextMeshProUGUI ResolveByIndex(IReadOnlyList<TextMeshProUGUI> labels, int index)
@@ -581,10 +537,13 @@ public static class CandyTheme1BindingTools
                     continue;
                 }
 
+                RectTransform cellRoot = target.transform.parent as RectTransform;
                 grid ??= target.transform.parent != null
-                    ? target.transform.parent.GetComponent<GridLayoutGroup>()
+                    ? target.transform.parent.GetComponentInParent<GridLayoutGroup>()
                     : null;
-                Vector2 preferredSize = grid != null ? grid.cellSize : new Vector2(96f, 72f);
+                Vector2 preferredSize = cellRoot != null && cellRoot.rect.width > 1f && cellRoot.rect.height > 1f
+                    ? cellRoot.rect.size
+                    : (grid != null ? grid.cellSize : new Vector2(96f, 72f));
                 NormalizeTextTarget(target, preferredSize, minWidth: 72f, minHeight: 52f);
             }
 
@@ -714,6 +673,24 @@ public static class CandyTheme1BindingTools
                 gameManager.displayCurrentBets,
                 "RealtimeBetValueLabel",
                 gameManager.currentBet.ToString());
+            ApplyOverlayLabelDefault(gameManager.displayTotalMoney, gameManager.totalMoney.ToString());
+            ApplyOverlayLabelDefault(gameManager.winAmtText, GameManager.winAmt.ToString());
+            ApplyOverlayLabelDefault(gameManager.displayCurrentBets, gameManager.currentBet.ToString());
+            if (gameManager.displayTotalMoney != null)
+            {
+                gameManager.displayTotalMoney.gameObject.SetActive(true);
+                DeactivateSiblingTextTargets(gameManager.displayTotalMoney.transform.parent, gameManager.displayTotalMoney);
+            }
+            if (gameManager.winAmtText != null)
+            {
+                gameManager.winAmtText.gameObject.SetActive(true);
+                DeactivateSiblingTextTargets(gameManager.winAmtText.transform.parent, gameManager.winAmtText);
+            }
+            if (gameManager.displayCurrentBets != null)
+            {
+                gameManager.displayCurrentBets.gameObject.SetActive(true);
+                DeactivateSiblingTextTargets(gameManager.displayCurrentBets.transform.parent, gameManager.displayCurrentBets);
+            }
             EditorUtility.SetDirty(gameManager);
         }
     }
@@ -756,7 +733,7 @@ public static class CandyTheme1BindingTools
     private static TextMeshProUGUI EnsureDedicatedHudValueTarget(TextMeshProUGUI template, string objectName, string defaultText)
     {
         Transform parent = template != null ? template.transform.parent : null;
-        return EnsureDedicatedOverlayLabel(
+        TextMeshProUGUI target = EnsureDedicatedOverlayLabel(
             parent,
             objectName,
             template,
@@ -764,6 +741,12 @@ public static class CandyTheme1BindingTools
             GameplayTextSurface.HudLabel,
             Color.white,
             fallbackSize: new Vector2(200f, 50f));
+        if (target != null)
+        {
+            DeactivateSiblingTextTargets(parent, target);
+        }
+
+        return target;
     }
 
     private static TextMeshProUGUI EnsureDedicatedOverlayLabel(
@@ -786,6 +769,7 @@ public static class CandyTheme1BindingTools
             GameObject labelObject = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
             Undo.RegisterCreatedObjectUndo(labelObject, $"Create {objectName}");
             labelObject.transform.SetParent(parent, false);
+            labelObject.layer = parent.gameObject.layer;
             label = labelObject.GetComponent<TextMeshProUGUI>();
         }
 
@@ -822,6 +806,7 @@ public static class CandyTheme1BindingTools
         }
 
         label.gameObject.name = objectName;
+        label.gameObject.layer = parent.gameObject.layer;
         label.enabled = true;
         label.raycastTarget = false;
         label.alpha = 1f;
@@ -829,6 +814,7 @@ public static class CandyTheme1BindingTools
             ? ReadText(label, string.Empty)
             : (!string.IsNullOrWhiteSpace(ReadText(template, string.Empty)) ? ReadText(template, string.Empty) : defaultText);
         label.transform.SetAsLastSibling();
+        DeactivateNestedDuplicateLabels(parent, objectName, label);
         RealtimeTextStyleUtils.ApplyGameplayTextPresentation(
             label,
             surface == GameplayTextSurface.CardHeader ? CandyTypographyRole.Label : CandyTypographyRole.Label,
@@ -839,29 +825,160 @@ public static class CandyTheme1BindingTools
         return label;
     }
 
+    private static void ApplyOverlayLabelDefault(TextMeshProUGUI label, string value)
+    {
+        if (label == null)
+        {
+            return;
+        }
+
+        label.text = value ?? string.Empty;
+        EditorUtility.SetDirty(label);
+    }
+
     private static Transform ResolveCardRoot(CandyCardViewBinding binding)
     {
-        if (binding?.SelectionOverlays == null)
+        if (binding == null)
         {
             return null;
         }
 
-        for (int i = 0; i < binding.SelectionOverlays.Count; i++)
+        if (binding.SelectionOverlays != null)
         {
-            GameObject overlay = binding.SelectionOverlays[i];
-            if (overlay == null)
+            for (int i = 0; i < binding.SelectionOverlays.Count; i++)
             {
-                continue;
+                Transform resolved = ResolveCardRoot(binding.SelectionOverlays[i] != null ? binding.SelectionOverlays[i].transform : null);
+                if (resolved != null)
+                {
+                    return resolved;
+                }
             }
+        }
 
-            Transform selectedGrid = overlay.transform.parent;
-            if (selectedGrid != null && selectedGrid.parent != null)
+        if (binding.NumberTexts != null)
+        {
+            for (int i = 0; i < binding.NumberTexts.Count; i++)
             {
-                return selectedGrid.parent;
+                Transform resolved = ResolveCardRoot(binding.NumberTexts[i] != null ? binding.NumberTexts[i].transform : null);
+                if (resolved != null)
+                {
+                    return resolved;
+                }
             }
         }
 
         return null;
+    }
+
+    private static Transform ResolveCardRoot(Transform source)
+    {
+        Transform current = source;
+        while (current != null)
+        {
+            if (string.Equals(current.name, "RealtimeCardNumbers", StringComparison.Ordinal) && current.parent != null)
+            {
+                return current.parent;
+            }
+
+            if (current.GetComponent<GridLayoutGroup>() != null && current.parent != null)
+            {
+                return current.parent;
+            }
+
+            current = current.parent;
+        }
+
+        return null;
+    }
+
+    private enum CardLabelKind
+    {
+        CardIndex,
+        Stake,
+        Win
+    }
+
+    private static TextMeshProUGUI EnsureDedicatedCardLabel(Transform cardRoot, string objectName, CardLabelKind labelKind, string defaultText)
+    {
+        if (!(cardRoot is RectTransform))
+        {
+            return null;
+        }
+
+        TextMeshProUGUI label = FindNamedTextLabel(cardRoot, objectName);
+        if (label == null)
+        {
+            GameObject labelObject = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
+            Undo.RegisterCreatedObjectUndo(labelObject, $"Create {objectName}");
+            labelObject.layer = cardRoot.gameObject.layer;
+            labelObject.transform.SetParent(cardRoot, false);
+            label = labelObject.GetComponent<TextMeshProUGUI>();
+        }
+
+        if (label == null)
+        {
+            return null;
+        }
+
+        RectTransform cardBackground = ResolveDirectChildRect(cardRoot, CardBackgroundName);
+        Vector2 baseSize = cardBackground != null && cardBackground.rect.width > 1f && cardBackground.rect.height > 1f
+            ? cardBackground.rect.size
+            : new Vector2(585f, 325f);
+        Vector2 basePosition = cardBackground != null ? cardBackground.anchoredPosition : new Vector2(2f, -5f);
+        RectTransform rect = label.rectTransform;
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.localScale = Vector3.one;
+        rect.localRotation = Quaternion.identity;
+
+        label.gameObject.name = objectName;
+        label.gameObject.layer = cardRoot.gameObject.layer;
+        label.gameObject.SetActive(true);
+        label.enabled = true;
+        label.raycastTarget = false;
+        label.alpha = 1f;
+        label.enableAutoSizing = true;
+        label.fontSizeMin = 18f;
+        label.fontSizeMax = 56f;
+        label.fontWeight = FontWeight.SemiBold;
+        label.fontStyle = FontStyles.Normal;
+        label.color = Color.white;
+        label.text = defaultText;
+
+        switch (labelKind)
+        {
+            case CardLabelKind.Stake:
+                rect.anchoredPosition = new Vector2(
+                    basePosition.x - (baseSize.x * 0.18f),
+                    basePosition.y + (baseSize.y * 0.405f));
+                rect.sizeDelta = new Vector2(Mathf.Max(180f, baseSize.x * 0.34f), 38f);
+                label.alignment = TextAlignmentOptions.Center;
+                RealtimeTextStyleUtils.ApplyGameplayTextPresentation(label, CandyTypographyRole.Label, GameplayTextSurface.HudLabel);
+                break;
+            case CardLabelKind.Win:
+                rect.anchoredPosition = new Vector2(
+                    basePosition.x + (baseSize.x * 0.245f),
+                    basePosition.y + (baseSize.y * 0.405f));
+                rect.sizeDelta = new Vector2(Mathf.Max(180f, baseSize.x * 0.34f), 38f);
+                label.alignment = TextAlignmentOptions.Center;
+                RealtimeTextStyleUtils.ApplyGameplayTextPresentation(label, CandyTypographyRole.Label, GameplayTextSurface.HudLabel);
+                break;
+            default:
+                rect.anchoredPosition = new Vector2(
+                    basePosition.x,
+                    basePosition.y - (baseSize.y * 0.44f));
+                rect.sizeDelta = new Vector2(Mathf.Max(180f, baseSize.x * 0.34f), 38f);
+                label.alignment = TextAlignmentOptions.Center;
+                RealtimeTextStyleUtils.ApplyGameplayTextPresentation(label, CandyTypographyRole.Label, GameplayTextSurface.CardHeader);
+                break;
+        }
+
+        label.transform.SetAsLastSibling();
+        DeactivateNestedDuplicateLabels(cardRoot, objectName, label);
+        EditorUtility.SetDirty(label);
+        EditorUtility.SetDirty(rect);
+        return label;
     }
 
     private static TextMeshProUGUI FindNamedTextLabel(Transform parent, string objectName)
@@ -873,6 +990,104 @@ public static class CandyTheme1BindingTools
 
         Transform child = parent.Find(objectName);
         return child != null ? child.GetComponent<TextMeshProUGUI>() : null;
+    }
+
+    private static RectTransform ResolveDirectChildRect(Transform parent, string childName)
+    {
+        if (parent == null || string.IsNullOrWhiteSpace(childName))
+        {
+            return null;
+        }
+
+        return parent.Find(childName) as RectTransform;
+    }
+
+    private static void DeactivateLegacyCardLabelContainers(Transform cardRoot, params TextMeshProUGUI[] keepLabels)
+    {
+        if (cardRoot == null)
+        {
+            return;
+        }
+
+        HashSet<Transform> keepTransforms = new HashSet<Transform>();
+        for (int keepIndex = 0; keepIndex < keepLabels.Length; keepIndex++)
+        {
+            if (keepLabels[keepIndex] != null)
+            {
+                keepTransforms.Add(keepLabels[keepIndex].transform);
+            }
+        }
+
+        for (int childIndex = 0; childIndex < cardRoot.childCount; childIndex++)
+        {
+            Transform child = cardRoot.GetChild(childIndex);
+            if (child == null || keepTransforms.Contains(child))
+            {
+                continue;
+            }
+
+            TextMeshProUGUI directLabel = child.GetComponent<TextMeshProUGUI>();
+            if (directLabel == null)
+            {
+                continue;
+            }
+
+            directLabel.text = string.Empty;
+            directLabel.enabled = false;
+            child.gameObject.SetActive(false);
+        }
+    }
+
+    private static void DeactivateNestedDuplicateLabels(Transform parent, string objectName, TextMeshProUGUI keepLabel)
+    {
+        if (parent == null || string.IsNullOrWhiteSpace(objectName))
+        {
+            return;
+        }
+
+        TextMeshProUGUI[] labels = parent.GetComponentsInChildren<TextMeshProUGUI>(true);
+        for (int i = 0; i < labels.Length; i++)
+        {
+            TextMeshProUGUI candidate = labels[i];
+            if (candidate == null || candidate == keepLabel || !string.Equals(candidate.gameObject.name, objectName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (candidate.transform.parent != parent)
+            {
+                candidate.text = string.Empty;
+                candidate.enabled = false;
+                candidate.gameObject.SetActive(false);
+            }
+        }
+    }
+
+    private static void DeactivateSiblingTextTargets(Transform parent, TextMeshProUGUI keepLabel)
+    {
+        if (parent == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            Transform child = parent.GetChild(i);
+            if (child == null)
+            {
+                continue;
+            }
+
+            TextMeshProUGUI siblingLabel = child.GetComponent<TextMeshProUGUI>();
+            if (siblingLabel == null || siblingLabel == keepLabel)
+            {
+                continue;
+            }
+
+            siblingLabel.text = string.Empty;
+            siblingLabel.enabled = false;
+            child.gameObject.SetActive(false);
+        }
     }
 
     private static void CopyRectTransform(RectTransform source, RectTransform target, Vector2 fallbackSize)

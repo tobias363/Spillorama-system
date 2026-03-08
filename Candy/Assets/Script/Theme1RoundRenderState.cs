@@ -38,8 +38,10 @@ public sealed class Theme1CardRenderState
     public string HeaderLabel = string.Empty;
     public string BetLabel = string.Empty;
     public string WinLabel = string.Empty;
+    public bool ShowWinLabel;
     public Theme1CardCellRenderState[] Cells = new Theme1CardCellRenderState[15];
     public bool[] PaylinesActive = Array.Empty<bool>();
+    public int[] MatchedPatternIndexes = Array.Empty<int>();
 
     public static Theme1CardRenderState CreateEmpty()
     {
@@ -55,20 +57,31 @@ public sealed class Theme1CardRenderState
 
 public readonly struct Theme1CardCellRenderState
 {
-    public static readonly Theme1CardCellRenderState Empty = new Theme1CardCellRenderState("-", false, false, false);
+    public static readonly Theme1CardCellRenderState Empty =
+        new Theme1CardCellRenderState("-", false, false, false, -1, 0);
 
-    public Theme1CardCellRenderState(string numberLabel, bool isSelected, bool isMissing, bool isMatched)
+    public Theme1CardCellRenderState(
+        string numberLabel,
+        bool isSelected,
+        bool isMissing,
+        bool isMatched,
+        int nearWinPatternIndex = -1,
+        int missingNumber = 0)
     {
         NumberLabel = numberLabel ?? string.Empty;
         IsSelected = isSelected;
         IsMissing = isMissing;
         IsMatched = isMatched;
+        NearWinPatternIndex = nearWinPatternIndex;
+        MissingNumber = missingNumber;
     }
 
     public string NumberLabel { get; }
     public bool IsSelected { get; }
     public bool IsMissing { get; }
     public bool IsMatched { get; }
+    public int NearWinPatternIndex { get; }
+    public int MissingNumber { get; }
 }
 
 public sealed class Theme1BallRackRenderState

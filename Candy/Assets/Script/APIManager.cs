@@ -461,7 +461,10 @@ public partial class APIManager : MonoBehaviour
                 out string error))
         {
             PublishRuntimeStatus("HUD bindings er ugyldige i Theme1. " + error, asError: true);
+            return;
         }
+
+        ResolveGameManager()?.ReapplyTheme1HudState();
     }
 
     private bool CanAutoCreateRealtimeClientInEditor()
@@ -655,12 +658,7 @@ public partial class APIManager : MonoBehaviour
             return ballManager;
         }
 
-#if UNITY_EDITOR
-        if (!Application.isPlaying)
-        {
-            ballManager = FindObjectOfType<BallManager>(true);
-        }
-#endif
+        ballManager = FindSceneObject<BallManager>();
         return ballManager;
     }
 
@@ -668,6 +666,12 @@ public partial class APIManager : MonoBehaviour
     {
         if (theme1NumberGenerator != null)
         {
+            GameManager resolvedManager = ResolveGameManager();
+            if (resolvedManager != null && resolvedManager.numberGenerator == null)
+            {
+                resolvedManager.numberGenerator = theme1NumberGenerator;
+            }
+
             hasLoggedMissingRealtimeNumberGenerator = false;
             return theme1NumberGenerator;
         }
@@ -681,18 +685,25 @@ public partial class APIManager : MonoBehaviour
             return generatorFromManager;
         }
 
-#if UNITY_EDITOR
-        if (!Application.isPlaying)
+        NumberGenerator fallbackGenerator = FindSceneObject<NumberGenerator>();
+        if (fallbackGenerator != null)
         {
-            NumberGenerator fallbackGenerator = FindObjectOfType<NumberGenerator>(true);
-            if (fallbackGenerator != null)
+            theme1NumberGenerator = fallbackGenerator;
+            if (resolvedGameManager != null && resolvedGameManager.numberGenerator == null)
             {
-                theme1NumberGenerator = fallbackGenerator;
-                hasLoggedMissingRealtimeNumberGenerator = false;
-                return fallbackGenerator;
+                resolvedGameManager.numberGenerator = fallbackGenerator;
             }
+
+            hasLoggedMissingRealtimeNumberGenerator = false;
+            return fallbackGenerator;
         }
-#endif
+
+        if (Application.isPlaying &&
+            ShouldUseDedicatedTheme1RealtimeView() &&
+            theme1GameplayViewRoot != null)
+        {
+            return null;
+        }
 
         if (!hasLoggedMissingRealtimeNumberGenerator)
         {
@@ -716,12 +727,7 @@ public partial class APIManager : MonoBehaviour
             return theme1GameManager;
         }
 
-#if UNITY_EDITOR
-        if (!Application.isPlaying)
-        {
-            theme1GameManager = FindObjectOfType<GameManager>(true);
-        }
-#endif
+        theme1GameManager = FindSceneObject<GameManager>();
         return theme1GameManager;
     }
 
@@ -732,13 +738,13 @@ public partial class APIManager : MonoBehaviour
             return theme1TopperManager;
         }
 
-#if UNITY_EDITOR
-        if (!Application.isPlaying)
-        {
-            theme1TopperManager = FindObjectOfType<TopperManager>(true);
-        }
-#endif
+        theme1TopperManager = FindSceneObject<TopperManager>();
         return theme1TopperManager;
+    }
+
+    private static T FindSceneObject<T>() where T : UnityEngine.Object
+    {
+        return UnityEngine.Object.FindFirstObjectByType<T>(FindObjectsInactive.Include);
     }
 
     private void ResetRealtimeRoundVisuals()

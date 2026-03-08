@@ -1,4 +1,4 @@
-using System.Linq;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 
@@ -15,14 +15,14 @@ public sealed class Theme1LocalStateAdapter
         int topperCount = viewRoot?.TopperStrip?.Slots != null ? viewRoot.TopperStrip.Slots.Length : 0;
         Theme1DisplayState state = Theme1DisplayState.CreateEmpty(cardCount, ballSlotCount, topperCount);
 
-        PopulateCards(state, viewRoot, generator);
+        PopulateCards(state, viewRoot, generator, gameManager);
         PopulateHud(state, viewRoot, generator, gameManager);
         PopulateTopper(state, viewRoot, gameManager);
         PopulateBallRack(state, viewRoot, generator);
         return state;
     }
 
-    private static void PopulateCards(Theme1DisplayState state, Theme1GameplayViewRoot viewRoot, NumberGenerator generator)
+    private static void PopulateCards(Theme1DisplayState state, Theme1GameplayViewRoot viewRoot, NumberGenerator generator, GameManager gameManager)
     {
         CardClass[] cards = generator != null ? generator.cardClasses : null;
         for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
@@ -32,10 +32,20 @@ public sealed class Theme1LocalStateAdapter
                 : null;
             CardClass legacyCard = cards != null && cardIndex < cards.Length ? cards[cardIndex] : null;
 
+            int winAmount = gameManager != null ? gameManager.GetCardWinAmount(cardIndex) : 0;
             Theme1CardRenderState cardState = Theme1CardRenderState.CreateEmpty();
-            cardState.HeaderLabel = ReadText(contractCard?.HeaderLabel, $"Card -{cardIndex + 1}");
-            cardState.BetLabel = ReadText(contractCard?.BetLabel, "BET - 0");
-            cardState.WinLabel = ReadText(contractCard?.WinLabel, "WIN - 0");
+            cardState.HeaderLabel = gameManager != null
+                ? gameManager.GetCardIndexLabel(cardIndex)
+                : GameManager.FormatTheme1CardHeaderLabel(cardIndex);
+            cardState.BetLabel = gameManager != null
+                ? gameManager.GetCardStakeLabel()
+                : GameManager.FormatTheme1CardStakeLabel(0);
+            cardState.WinLabel = winAmount > 0
+                ? (gameManager != null
+                    ? gameManager.FormatCardWinLabel(winAmount)
+                    : GameManager.FormatTheme1CardWinLabel(winAmount))
+                : ReadHiddenWinLabel(contractCard?.WinLabel);
+            cardState.ShowWinLabel = winAmount > 0;
 
             int paylineCount = contractCard?.PaylineObjects != null ? contractCard.PaylineObjects.Length : 0;
             cardState.PaylinesActive = new bool[paylineCount];
@@ -50,7 +60,7 @@ public sealed class Theme1LocalStateAdapter
                 int number = legacyCard != null &&
                              legacyCard.numb != null &&
                              cellIndex < legacyCard.numb.Count
-                    ? Mathf.Max(0, legacyCard.numb[cellIndex])
+                    ? GameManager.NormalizeTheme1BallNumber(legacyCard.numb[cellIndex])
                     : 0;
 
                 Theme1CardCellView contractCell = contractCard?.Cells != null && cellIndex < contractCard.Cells.Length
@@ -73,9 +83,9 @@ public sealed class Theme1LocalStateAdapter
         Theme1HudBarView hud = viewRoot?.HudBar;
         state.Hud.CountdownLabel = ReadText(generator != null ? generator.autoSpinRemainingPlayText : null, ReadText(hud?.CountdownText, string.Empty));
         state.Hud.PlayerCountLabel = ReadText(hud?.RoomPlayerCountText, string.Empty);
-        state.Hud.CreditLabel = ReadText(gameManager != null ? gameManager.displayTotalMoney : null, ReadText(hud?.CreditText, "0"));
-        state.Hud.WinningsLabel = ReadText(gameManager != null ? gameManager.winAmtText : null, ReadText(hud?.WinningsText, "0"));
-        state.Hud.BetLabel = ReadText(gameManager != null ? gameManager.displayCurrentBets : null, ReadText(hud?.BetText, "0"));
+        state.Hud.CreditLabel = ReadHudValue(gameManager != null ? gameManager.displayTotalMoney : null, hud?.CreditText);
+        state.Hud.WinningsLabel = ReadHudValue(gameManager != null ? gameManager.winAmtText : null, hud?.WinningsText);
+        state.Hud.BetLabel = ReadHudValue(gameManager != null ? gameManager.displayCurrentBets : null, hud?.BetText);
     }
 
     private static void PopulateTopper(Theme1DisplayState state, Theme1GameplayViewRoot viewRoot, GameManager gameManager)
@@ -119,9 +129,7 @@ public sealed class Theme1LocalStateAdapter
         state.BallRack.ShowBallOutMachine = rack?.BallOutMachineAnimParent == null || rack.BallOutMachineAnimParent.activeSelf;
         state.BallRack.ShowBigBall = rack?.BigBallImage != null && rack.BigBallImage.gameObject.activeSelf;
 
-        int[] drawnNumbers = generator != null && generator.generatedNO != null
-            ? generator.generatedNO.ToArray()
-            : System.Array.Empty<int>();
+        int[] drawnNumbers = ExtractValidDrawnNumbers(generator);
         int lastVisibleDrawIndex = -1;
 
         int slotCount = state.BallRack.Slots != null ? state.BallRack.Slots.Length : 0;
@@ -133,13 +141,13 @@ public sealed class Theme1LocalStateAdapter
                              rack.Slots[slotIndex].Root != null &&
                              rack.Slots[slotIndex].Root.activeSelf;
             int ballNumber = slotIndex < drawnNumbers.Length ? drawnNumbers[slotIndex] : 0;
-            if (isVisible)
+            if (isVisible && ballNumber > 0)
             {
                 lastVisibleDrawIndex = slotIndex;
             }
 
             state.BallRack.Slots[slotIndex] = new Theme1BallSlotRenderState(
-                isVisible,
+                isVisible && ballNumber > 0,
                 ballNumber > 0 ? ballNumber.ToString() : string.Empty);
         }
 
@@ -173,5 +181,41 @@ public sealed class Theme1LocalStateAdapter
     {
         string value = target != null ? (target.text ?? string.Empty) : string.Empty;
         return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
+
+    private static string ReadHiddenWinLabel(TMP_Text target)
+    {
+        if (target == null || !target.gameObject.activeSelf)
+        {
+            return string.Empty;
+        }
+
+        return ReadText(target, string.Empty);
+    }
+
+    private static string ReadHudValue(TMP_Text primary, TMP_Text fallback)
+    {
+        string value = ReadText(primary, ReadText(fallback, string.Empty));
+        return string.IsNullOrWhiteSpace(value) ? "0" : value;
+    }
+
+    private static int[] ExtractValidDrawnNumbers(NumberGenerator generator)
+    {
+        if (generator?.generatedNO == null || generator.generatedNO.Count == 0)
+        {
+            return System.Array.Empty<int>();
+        }
+
+        List<int> values = new List<int>(generator.generatedNO.Count);
+        for (int i = 0; i < generator.generatedNO.Count; i++)
+        {
+            int normalized = GameManager.NormalizeTheme1BallNumber(generator.generatedNO[i]);
+            if (normalized > 0)
+            {
+                values.Add(normalized);
+            }
+        }
+
+        return values.ToArray();
     }
 }

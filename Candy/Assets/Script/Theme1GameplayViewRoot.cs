@@ -7,20 +7,24 @@ using UnityEngine.UI;
 [Serializable]
 public sealed class Theme1CardCellView
 {
+    [SerializeField] private RectTransform cellRoot;
     [SerializeField] private TextMeshProUGUI numberLabel;
-    [SerializeField] private GameObject selectionOverlay;
+    [SerializeField] private GameObject selectionMarker;
     [SerializeField] private GameObject missingOverlay;
     [SerializeField] private GameObject matchedOverlay;
 
+    public RectTransform CellRoot => cellRoot;
     public TextMeshProUGUI NumberLabel => numberLabel;
-    public GameObject SelectionOverlay => selectionOverlay;
+    public GameObject SelectionMarker => selectionMarker;
+    public GameObject SelectionOverlay => selectionMarker;
     public GameObject MissingOverlay => missingOverlay;
     public GameObject MatchedOverlay => matchedOverlay;
 
-    public void PullFrom(TextMeshProUGUI label, GameObject selection, GameObject missing, GameObject matched)
+    public void PullFrom(RectTransform root, TextMeshProUGUI label, GameObject selection, GameObject missing, GameObject matched)
     {
+        cellRoot = root;
         numberLabel = label;
-        selectionOverlay = selection;
+        selectionMarker = selection;
         missingOverlay = missing;
         matchedOverlay = matched;
     }
@@ -38,6 +42,9 @@ public sealed class Theme1CardGridView
     public TextMeshProUGUI HeaderLabel => headerLabel;
     public TextMeshProUGUI BetLabel => betLabel;
     public TextMeshProUGUI WinLabel => winLabel;
+    public TextMeshProUGUI CardIndexLabel => headerLabel;
+    public TextMeshProUGUI StakeLabel => betLabel;
+    public TextMeshProUGUI CardWinLabel => winLabel;
     public Theme1CardCellView[] Cells => cells;
     public GameObject[] PaylineObjects => paylineObjects;
 
@@ -52,8 +59,10 @@ public sealed class Theme1CardGridView
         for (int i = 0; i < cellCount; i++)
         {
             cells[i] = new Theme1CardCellView();
+            TextMeshProUGUI numberLabel = binding != null && i < binding.NumberTexts.Count ? binding.NumberTexts[i] : null;
             cells[i].PullFrom(
-                binding != null && i < binding.NumberTexts.Count ? binding.NumberTexts[i] : null,
+                numberLabel != null ? numberLabel.transform.parent as RectTransform : null,
+                numberLabel,
                 binding != null && i < binding.SelectionOverlays.Count ? binding.SelectionOverlays[i] : null,
                 binding != null && i < binding.MissingPatternOverlays.Count ? binding.MissingPatternOverlays[i] : null,
                 binding != null && i < binding.MatchedPatternOverlays.Count ? binding.MatchedPatternOverlays[i] : null);
@@ -210,6 +219,8 @@ public sealed class Theme1TopperStripView
 
 public sealed class Theme1GameplayViewRoot : MonoBehaviour
 {
+    private const int Theme1CardCellCount = 15;
+    private const int Theme1VisibleCardCellCount = 15;
     [SerializeField] private Theme1CardGridView[] cards = new Theme1CardGridView[4];
     [SerializeField] private Theme1BallRackView ballRack = new Theme1BallRackView();
     [SerializeField] private Theme1HudBarView hudBar = new Theme1HudBarView();
@@ -303,7 +314,7 @@ public sealed class Theme1GameplayViewRoot : MonoBehaviour
                     isValid = false;
                 }
 
-                if (card.Cells == null || card.Cells.Length != 15)
+                if (card.Cells == null || card.Cells.Length != Theme1CardCellCount)
                 {
                     errors.Add($"cards[{cardIndex}].cells har feil lengde. Fikk {card.Cells?.Length ?? 0}.");
                     isValid = false;
@@ -320,8 +331,15 @@ public sealed class Theme1GameplayViewRoot : MonoBehaviour
                             continue;
                         }
 
-                        if (!ValidateText(cell.NumberLabel, $"cards[{cardIndex}].cells[{cellIndex}].numberLabel", errors, requireActive: true))
+                        bool requireVisibleCell = cellIndex < Theme1VisibleCardCellCount;
+                        if (!ValidateText(cell.NumberLabel, $"cards[{cardIndex}].cells[{cellIndex}].numberLabel", errors, requireActive: requireVisibleCell))
                         {
+                            isValid = false;
+                        }
+
+                        if (cell.CellRoot == null)
+                        {
+                            errors.Add($"cards[{cardIndex}].cells[{cellIndex}].cellRoot mangler.");
                             isValid = false;
                         }
 
@@ -331,9 +349,9 @@ public sealed class Theme1GameplayViewRoot : MonoBehaviour
                             isValid = false;
                         }
 
-                        if (cell.SelectionOverlay == null)
+                        if (cell.SelectionMarker == null)
                         {
-                            errors.Add($"cards[{cardIndex}].cells[{cellIndex}].selectionOverlay mangler.");
+                            errors.Add($"cards[{cardIndex}].cells[{cellIndex}].selectionMarker mangler.");
                             isValid = false;
                         }
 
@@ -466,6 +484,7 @@ public sealed class Theme1GameplayViewRoot : MonoBehaviour
             cardState.HeaderLabel = ReadText(card?.HeaderLabel);
             cardState.BetLabel = ReadText(card?.BetLabel);
             cardState.WinLabel = ReadText(card?.WinLabel);
+            cardState.ShowWinLabel = card?.WinLabel != null && card.WinLabel.gameObject.activeSelf;
             int paylineCount = card?.PaylineObjects != null ? card.PaylineObjects.Length : 0;
             cardState.PaylinesActive = new bool[paylineCount];
             for (int paylineIndex = 0; paylineIndex < paylineCount; paylineIndex++)

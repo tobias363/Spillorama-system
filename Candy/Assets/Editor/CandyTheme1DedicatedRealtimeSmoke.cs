@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using SimpleJSON;
 using TMPro;
@@ -205,6 +206,12 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             return false;
         }
 
+        if (!ValidateTheme1BuilderRejectsNumbersAbove60(out string builderError))
+        {
+            error = builderError;
+            return false;
+        }
+
         return true;
     }
 
@@ -223,6 +230,7 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             return false;
         }
 
+        Theme1GameplayViewRoot viewRoot = UnityEngine.Object.FindFirstObjectByType<Theme1GameplayViewRoot>(FindObjectsInactive.Include);
         if (!Theme1RoundRenderStateComparer.TryCompare(legacyState, dedicatedState, out string mismatch))
         {
             string actionableMismatch = FilterIgnorableLegacyMismatch(mismatch);
@@ -259,9 +267,22 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             return false;
         }
 
-        if (!HasVisibleHudValues(dedicatedState))
+        Theme1GameplayViewRoot currentViewRoot = UnityEngine.Object.FindFirstObjectByType<Theme1GameplayViewRoot>(FindObjectsInactive.Include);
+        if (!HasExpectedHudValues(dedicatedState, currentViewRoot, out string hudError))
         {
-            error = "[Theme1DedicatedSmoke] Dedicated view rendret ikke synlige credit/winnings/bet-verdier.";
+            error = hudError;
+            return false;
+        }
+
+        if (!HasExpectedCardLabels(dedicatedState, out string labelError))
+        {
+            error = labelError;
+            return false;
+        }
+
+        if (!HasOnlyValidTheme1Numbers(dedicatedState, out string invalidNumberError))
+        {
+            error = invalidNumberError;
             return false;
         }
 
@@ -525,12 +546,275 @@ public static class CandyTheme1DedicatedRealtimeSmoke
         return color.r < 0.95f || color.g < 0.95f || color.b < 0.95f;
     }
 
-    private static bool HasVisibleHudValues(Theme1RoundRenderState state)
+    private static bool HasExpectedHudValues(Theme1RoundRenderState state, Theme1GameplayViewRoot viewRoot, out string error)
     {
-        return state?.Hud != null &&
-               !string.IsNullOrWhiteSpace(state.Hud.CreditLabel) &&
-               !string.IsNullOrWhiteSpace(state.Hud.WinningsLabel) &&
-            !string.IsNullOrWhiteSpace(state.Hud.BetLabel);
+        error = string.Empty;
+        GameManager gameManager = GameManager.instance;
+        string expectedCredit = gameManager != null ? gameManager.CreditBalance.ToString(CultureInfo.InvariantCulture) : "0";
+        string expectedWinnings = gameManager != null ? gameManager.RoundWinnings.ToString(CultureInfo.InvariantCulture) : "0";
+        string expectedBet = gameManager != null ? gameManager.currentBet.ToString(CultureInfo.InvariantCulture) : "0";
+
+        if (state?.Hud == null)
+        {
+            error = "[Theme1DedicatedSmoke] Dedicated view mangler HUD-state.";
+            return false;
+        }
+
+        if (!string.Equals(state.Hud.CreditLabel, expectedCredit, StringComparison.Ordinal) ||
+            !string.Equals(state.Hud.WinningsLabel, expectedWinnings, StringComparison.Ordinal) ||
+            !string.Equals(state.Hud.BetLabel, expectedBet, StringComparison.Ordinal))
+        {
+            error =
+                "[Theme1DedicatedSmoke] Dedicated view rendret feil HUD-verdier. " +
+                $"credit='{state.Hud.CreditLabel}' winnings='{state.Hud.WinningsLabel}' bet='{state.Hud.BetLabel}' " +
+                $"expected credit='{expectedCredit}' winnings='{expectedWinnings}' bet='{expectedBet}'.";
+            return false;
+        }
+
+        if (!HasVisibleHudLabel(viewRoot?.HudBar?.CreditText, expectedCredit, "credit", out error) ||
+            !HasVisibleHudLabel(viewRoot?.HudBar?.WinningsText, expectedWinnings, "winnings", out error) ||
+            !HasVisibleHudLabel(viewRoot?.HudBar?.BetText, expectedBet, "bet", out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasVisibleHudLabel(TMP_Text label, string expectedValue, string labelName, out string error)
+    {
+        error = string.Empty;
+        if (label == null)
+        {
+            error = $"[Theme1DedicatedSmoke] Theme1 HUD mangler TMP for {labelName}.";
+            return false;
+        }
+
+        label.ForceMeshUpdate(ignoreActiveState: true, forceTextReparsing: false);
+        int characterCount = label.textInfo != null ? label.textInfo.characterCount : 0;
+        bool isVisible =
+            label.gameObject.activeInHierarchy &&
+            label.enabled &&
+            label.alpha > 0f &&
+            label.color.a > 0f &&
+            !string.IsNullOrWhiteSpace(label.text) &&
+            characterCount > 0;
+
+        if (!string.Equals(label.text, expectedValue, StringComparison.Ordinal) || !isVisible)
+        {
+            error =
+                $"[Theme1DedicatedSmoke] Theme1 HUD {labelName} er ikke synlig/riktig rendret. " +
+                $"expected='{expectedValue}' actual='{label.text}'. " +
+                RealtimeTextStyleUtils.BuildHealthSummary(label as TextMeshProUGUI);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasExpectedCardLabels(Theme1RoundRenderState state, out string error)
+    {
+        error = string.Empty;
+        if (state?.Cards == null || state.Cards.Length != 4)
+        {
+            error = "[Theme1DedicatedSmoke] Dedicated view rendret ikke 4 kort.";
+            return false;
+        }
+
+        GameManager gameManager = GameManager.instance;
+        string expectedBetLabel = gameManager != null
+            ? gameManager.GetCardStakeLabel()
+            : GameManager.FormatTheme1CardStakeLabel(0);
+
+        for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
+        {
+            Theme1CardRenderState card = state.Cards[cardIndex];
+            if (card == null)
+            {
+                error = $"[Theme1DedicatedSmoke] Dedicated view mangler card-state {cardIndex + 1}.";
+                return false;
+            }
+
+            string expectedHeader = GameManager.FormatTheme1CardHeaderLabel(cardIndex);
+            if (!string.Equals(card.HeaderLabel, expectedHeader, StringComparison.Ordinal))
+            {
+                error = $"[Theme1DedicatedSmoke] Card {cardIndex + 1} header='{card.HeaderLabel}' expected='{expectedHeader}'.";
+                return false;
+            }
+
+            if (!string.Equals(card.BetLabel, expectedBetLabel, StringComparison.Ordinal))
+            {
+                error = $"[Theme1DedicatedSmoke] Card {cardIndex + 1} bet='{card.BetLabel}' expected='{expectedBetLabel}'.";
+                return false;
+            }
+
+            if (card.ShowWinLabel)
+            {
+                error = $"[Theme1DedicatedSmoke] Card {cardIndex + 1} viste Gevinst-label selv om smoke-snapshotet skal ha zero-win.";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(card.WinLabel))
+            {
+                error = $"[Theme1DedicatedSmoke] Card {cardIndex + 1} skjuler ikke zero-win label. Fikk '{card.WinLabel}'.";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool HasOnlyValidTheme1Numbers(Theme1RoundRenderState state, out string error)
+    {
+        error = string.Empty;
+        if (state == null)
+        {
+            error = "[Theme1DedicatedSmoke] Dedicated state mangler.";
+            return false;
+        }
+
+        for (int cardIndex = 0; state.Cards != null && cardIndex < state.Cards.Length; cardIndex++)
+        {
+            Theme1CardCellRenderState[] cells = state.Cards[cardIndex]?.Cells;
+            if (cells == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+            {
+                string numberLabel = cells[cellIndex].NumberLabel;
+                if (numberLabel == "-" || string.IsNullOrWhiteSpace(numberLabel))
+                {
+                    continue;
+                }
+
+                if (!int.TryParse(numberLabel, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ||
+                    !GameManager.IsValidTheme1BallNumber(parsed))
+                {
+                    error = $"[Theme1DedicatedSmoke] Card {cardIndex + 1} cell {cellIndex + 1} viser ugyldig Theme1-tall '{numberLabel}'.";
+                    return false;
+                }
+            }
+        }
+
+        for (int slotIndex = 0; state.BallRack?.Slots != null && slotIndex < state.BallRack.Slots.Length; slotIndex++)
+        {
+            Theme1BallSlotRenderState slot = state.BallRack.Slots[slotIndex];
+            if (!slot.IsVisible)
+            {
+                continue;
+            }
+
+            if (!int.TryParse(slot.NumberLabel, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ||
+                !GameManager.IsValidTheme1BallNumber(parsed))
+            {
+                error = $"[Theme1DedicatedSmoke] Ballslot {slotIndex + 1} viser ugyldig Theme1-tall '{slot.NumberLabel}'.";
+                return false;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.BallRack?.BigBallNumber) &&
+            (!int.TryParse(state.BallRack.BigBallNumber, NumberStyles.Integer, CultureInfo.InvariantCulture, out int bigBallNumber) ||
+             !GameManager.IsValidTheme1BallNumber(bigBallNumber)))
+        {
+            error = $"[Theme1DedicatedSmoke] Big ball viser ugyldig Theme1-tall '{state.BallRack.BigBallNumber}'.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ValidateTheme1BuilderRejectsNumbersAbove60(out string error)
+    {
+        error = string.Empty;
+        Theme1StateBuildInput input = new Theme1StateBuildInput
+        {
+            GameId = "GAME-INVALID",
+            CardSlotCount = 1,
+            BallSlotCount = 4,
+            TicketSets = new[]
+            {
+                new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 61 }
+            },
+            DrawnNumbers = new[] { 1, 61, 4, 75 },
+            CardHeaderLabels = new[] { GameManager.FormatTheme1CardHeaderLabel(0) },
+            CardBetLabels = new[] { GameManager.FormatTheme1CardStakeLabel(4) },
+            CardWinLabels = new[] { string.Empty },
+            TopperPrizeLabels = Array.Empty<string>(),
+            TopperPayoutAmounts = Array.Empty<int>(),
+            CreditLabel = "1000",
+            WinningsLabel = "0",
+            BetLabel = "4"
+        };
+
+        Theme1RoundRenderState state = new Theme1StateBuilder().Build(input);
+        if (!HasOnlyValidTheme1Numbers(state, out error))
+        {
+            error = "[Theme1DedicatedSmoke] Theme1StateBuilder tillot tall over 60.\n" + error;
+            return false;
+        }
+
+        if (state.Cards == null ||
+            state.Cards.Length == 0 ||
+            state.Cards[0] == null ||
+            state.Cards[0].Cells == null ||
+            state.Cards[0].Cells.Length < 15 ||
+            !string.Equals(state.Cards[0].Cells[14].NumberLabel, "-", StringComparison.Ordinal))
+        {
+            error = "[Theme1DedicatedSmoke] Theme1StateBuilder filtrerte ikke ut ugyldig ticket-tall > 60.";
+            return false;
+        }
+
+        if (state.BallRack == null ||
+            state.BallRack.Slots == null ||
+            state.BallRack.Slots.Length < 2 ||
+            !state.BallRack.Slots[0].IsVisible ||
+            !string.Equals(state.BallRack.Slots[0].NumberLabel, "1", StringComparison.Ordinal) ||
+            !state.BallRack.Slots[1].IsVisible ||
+            !string.Equals(state.BallRack.Slots[1].NumberLabel, "4", StringComparison.Ordinal) ||
+            !string.Equals(state.BallRack.BigBallNumber, "4", StringComparison.Ordinal))
+        {
+            error = "[Theme1DedicatedSmoke] Theme1StateBuilder beholdt ugyldige draw-nummer over 60 i ballrack.";
+            return false;
+        }
+
+        Theme1StateBuildInput winInput = new Theme1StateBuildInput
+        {
+            GameId = "GAME-WIN-FORMAT",
+            CardSlotCount = 1,
+            BallSlotCount = 5,
+            TicketSets = new[]
+            {
+                new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 }
+            },
+            DrawnNumbers = new[] { 1, 4, 7, 10, 13 },
+            ActivePatternIndexes = new[] { 0 },
+            PatternMasks = new[]
+            {
+                new byte[] { 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0 }
+            },
+            CardHeaderLabels = new[] { GameManager.FormatTheme1CardHeaderLabel(0) },
+            CardBetLabels = new[] { GameManager.FormatTheme1CardStakeLabel(4) },
+            CardWinLabels = new[] { string.Empty },
+            TopperPrizeLabels = new[] { "200 kr" },
+            TopperPayoutAmounts = new[] { 200 },
+            CreditLabel = "1000",
+            WinningsLabel = "0",
+            BetLabel = "4"
+        };
+
+        Theme1RoundRenderState winState = new Theme1StateBuilder().Build(winInput);
+        if (winState.Cards == null ||
+            winState.Cards.Length == 0 ||
+            !winState.Cards[0].ShowWinLabel ||
+            !string.Equals(winState.Cards[0].WinLabel, GameManager.FormatTheme1CardWinLabel(200), StringComparison.Ordinal))
+        {
+            error = "[Theme1DedicatedSmoke] Theme1StateBuilder bruker ikke 'Gevinst - {win} kr' ved positiv gevinst.";
+            return false;
+        }
+
+        return true;
     }
 
     private static bool ValidateDedicatedVisibleContract(Theme1GameplayViewRoot viewRoot, out string error)
@@ -571,6 +855,17 @@ public static class CandyTheme1DedicatedRealtimeSmoke
                     !string.Equals(label.transform.parent.parent.name, "RealtimeCardNumbers", StringComparison.Ordinal))
                 {
                     error = $"[Theme1DedicatedSmoke] Card {cardIndex + 1} cell {cellIndex + 1} peker ikke til dedikert RealtimeCardNumbers-lag.";
+                    return false;
+                }
+
+                if (card.Cells[cellIndex]?.SelectionOverlay == null ||
+                    card.Cells[cellIndex].SelectionOverlay.transform.parent != label.transform.parent ||
+                    card.Cells[cellIndex]?.MissingOverlay == null ||
+                    card.Cells[cellIndex].MissingOverlay.transform.parent != label.transform.parent ||
+                    card.Cells[cellIndex]?.MatchedOverlay == null ||
+                    card.Cells[cellIndex].MatchedOverlay.transform.parent != label.transform.parent)
+                {
+                    error = $"[Theme1DedicatedSmoke] Card {cardIndex + 1} cell {cellIndex + 1} har ikke alle overlays bundet til samme celle-root.";
                     return false;
                 }
 

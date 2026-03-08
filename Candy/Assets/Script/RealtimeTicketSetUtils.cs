@@ -22,7 +22,7 @@ public static class RealtimeTicketSetUtils
 
     public static void MarkDrawnNumberOnCards(NumberGenerator generator, int drawnNumber)
     {
-        if (generator == null || generator.cardClasses == null)
+        if (generator == null || generator.cardClasses == null || !GameManager.IsValidTheme1BallNumber(drawnNumber))
         {
             return;
         }
@@ -90,15 +90,19 @@ public static class RealtimeTicketSetUtils
 
     public static List<int> NormalizeTicketNumbers(List<int> source)
     {
-        List<int> numbers = source == null ? new List<int>() : new List<int>(source);
+        List<int> numbers = new List<int>();
+        if (source != null)
+        {
+            int limit = source.Count > 15 ? 15 : source.Count;
+            for (int i = 0; i < limit; i++)
+            {
+                numbers.Add(GameManager.NormalizeTheme1BallNumber(source[i]));
+            }
+        }
+
         while (numbers.Count < 15)
         {
             numbers.Add(0);
-        }
-
-        if (numbers.Count > 15)
-        {
-            numbers = numbers.GetRange(0, 15);
         }
 
         return numbers;

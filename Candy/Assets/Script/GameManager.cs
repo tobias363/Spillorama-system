@@ -11,6 +11,7 @@ public class GameManager : MonoBehaviour
     private const int BetStep = 4;
     private const int MaxBet = 20;
     private const int DefaultCardCount = 4;
+    public const int Theme1MaxBallNumber = 60;
     private static readonly int[] BasePatternPayouts =
     {
         200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400
@@ -56,6 +57,8 @@ public class GameManager : MonoBehaviour
         EventManager.OnPayAmt += ShowWinAmt;
         EventManager.OnPlay += OnPlay;
         EventManager.OnRoundComplete += SettleRoundWinnings;
+        EnsureRuntimeReferences();
+        ReapplyTheme1HudState();
     }
 
     private void OnDisable()
@@ -70,6 +73,7 @@ public class GameManager : MonoBehaviour
     void Awake()
     {
         instance = this;
+        EnsureRuntimeReferences();
         EnsureLegacyBetTables();
         EnsureCardWinCapacity(DefaultCardCount);
         InitializeDisplayStateIfNeeded();
@@ -78,6 +82,8 @@ public class GameManager : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        EnsureRuntimeReferences();
+        ReapplyTheme1HudState();
         InitializeDisplayStateIfNeeded();
         SetPerCardWinLabelVisibility(!hidePerCardWinLabels);
     }
@@ -118,6 +124,7 @@ public class GameManager : MonoBehaviour
 
     public void ApplyBetLevel(int lvl)
     {
+        EnsureRuntimeReferences();
         EnsureLegacyBetTables();
         if (APIManager.instance != null &&
             APIManager.instance.UseRealtimeBackend &&
@@ -131,10 +138,7 @@ public class GameManager : MonoBehaviour
         int maxLevel = Mathf.Max(0, totalBets.Count - 1);
         betlevel = Mathf.Clamp(lvl, 0, maxLevel);
         currentBet = totalBets.Count > 0 ? totalBets[betlevel] : 0;
-        if (displayCurrentBets != null)
-        {
-            RealtimeTextStyleUtils.ApplyHudText(displayCurrentBets, currentBet.ToString());
-        }
+        ReapplyTheme1HudState();
 
         APIManager.instance?.SetRealtimeEntryFeeFromGameUI(currentBet);
         for (int i = 0; i < CardBets.Count; i++)
@@ -315,8 +319,10 @@ public class GameManager : MonoBehaviour
 
     private void InitializeDisplayStateIfNeeded()
     {
+        EnsureRuntimeReferences();
         if (displayStateInitialized)
         {
+            ReapplyTheme1HudState();
             return;
         }
 
@@ -324,15 +330,13 @@ public class GameManager : MonoBehaviour
         SetCreditBalance(DefaultStartingCredit);
         ApplyBetLevel(betlevel);
         ResetRoundTracking(clearDisplayedWinnings: true);
+        ReapplyTheme1HudState();
     }
 
     private void SetCreditBalance(int amount)
     {
         totalMoney = amount;
-        if (displayTotalMoney != null)
-        {
-            RealtimeTextStyleUtils.ApplyHudText(displayTotalMoney, totalMoney.ToString());
-        }
+        ApplyHudValue(displayTotalMoney, totalMoney);
     }
 
     private void AdjustCreditBalance(int amountDelta)
@@ -367,10 +371,15 @@ public class GameManager : MonoBehaviour
 
     private void UpdateWinningsDisplay()
     {
-        if (winAmtText != null)
-        {
-            RealtimeTextStyleUtils.ApplyHudText(winAmtText, winAmt.ToString());
-        }
+        ApplyHudValue(winAmtText, winAmt);
+    }
+
+    public void ReapplyTheme1HudState()
+    {
+        EnsureRuntimeReferences();
+        ApplyHudValue(displayTotalMoney, totalMoney);
+        ApplyHudValue(displayCurrentBets, currentBet);
+        ApplyHudValue(winAmtText, winAmt);
     }
 
     private void EnsureCardWinCapacity(int requiredCount)
@@ -388,17 +397,71 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        RealtimeTextStyleUtils.ApplyHudText(
-            displayCardWinPoints[cardNo],
-            $"WIN - {cardWin[cardNo]}",
-            preferredColor: displayCardWinPoints[cardNo].color);
+        int amount = GetCardWinAmount(cardNo);
+        if (amount > 0)
+        {
+            RealtimeTextStyleUtils.ApplyHudText(
+                displayCardWinPoints[cardNo],
+                FormatCardWinLabel(amount),
+                preferredColor: displayCardWinPoints[cardNo].color);
+        }
+
+        displayCardWinPoints[cardNo].gameObject.SetActive(amount > 0);
+    }
+
+    public string GetCardIndexLabel(int cardIndex)
+    {
+        return FormatTheme1CardHeaderLabel(cardIndex);
+    }
+
+    public string GetCardStakeLabel()
+    {
+        return FormatTheme1CardStakeLabel(currentBet);
+    }
+
+    public int GetCardWinAmount(int cardIndex)
+    {
+        if (cardIndex < 0 || cardIndex >= cardWin.Count)
+        {
+            return 0;
+        }
+
+        return Mathf.Max(0, cardWin[cardIndex]);
+    }
+
+    public string FormatCardWinLabel(int amount)
+    {
+        return FormatTheme1CardWinLabel(amount);
     }
 
     private string FormatCardStakeLabel()
     {
-        int cardCount = Mathf.Max(1, CardBets != null && CardBets.Count > 0 ? CardBets.Count : DefaultCardCount);
-        int perCardStake = Mathf.Max(0, currentBet / cardCount);
-        return $"Innsats - {perCardStake} kr";
+        return GetCardStakeLabel();
+    }
+
+    public static bool IsValidTheme1BallNumber(int value)
+    {
+        return value > 0 && value <= Theme1MaxBallNumber;
+    }
+
+    public static int NormalizeTheme1BallNumber(int value)
+    {
+        return IsValidTheme1BallNumber(value) ? value : 0;
+    }
+
+    public static string FormatTheme1CardHeaderLabel(int cardIndex)
+    {
+        return $"Bong - {Mathf.Max(0, cardIndex) + 1}";
+    }
+
+    public static string FormatTheme1CardStakeLabel(int betAmount)
+    {
+        return $"Innsats - {Mathf.Max(0, betAmount)} kr";
+    }
+
+    public static string FormatTheme1CardWinLabel(int amount)
+    {
+        return $"Gevinst - {Mathf.Max(0, amount)} kr";
     }
 
     private void SetPerCardWinLabelVisibility(bool visible)
@@ -415,8 +478,44 @@ public class GameManager : MonoBehaviour
                 continue;
             }
 
-            displayCardWinPoints[i].gameObject.SetActive(visible);
+            displayCardWinPoints[i].gameObject.SetActive(visible && GetCardWinAmount(i) > 0);
         }
+    }
+
+    private void EnsureRuntimeReferences()
+    {
+        if (numberGenerator == null)
+        {
+            numberGenerator = UnityEngine.Object.FindFirstObjectByType<NumberGenerator>(FindObjectsInactive.Include);
+        }
+
+        if (displayTotalMoney != null &&
+            displayCurrentBets != null &&
+            winAmtText != null)
+        {
+            return;
+        }
+
+        CandyTheme1HudBindingSet hudBindings =
+            UnityEngine.Object.FindFirstObjectByType<CandyTheme1HudBindingSet>(FindObjectsInactive.Include);
+        if (hudBindings == null)
+        {
+            return;
+        }
+
+        displayTotalMoney = displayTotalMoney != null ? displayTotalMoney : hudBindings.CreditText;
+        displayCurrentBets = displayCurrentBets != null ? displayCurrentBets : hudBindings.BetText;
+        winAmtText = winAmtText != null ? winAmtText : hudBindings.WinningsText;
+    }
+
+    private static void ApplyHudValue(TextMeshProUGUI target, int value)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        RealtimeTextStyleUtils.ApplyHudText(target, value.ToString());
     }
 
     private void ApplyTestingSpeedIfEnabled()

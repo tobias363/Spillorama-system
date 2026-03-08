@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -53,6 +54,7 @@ public static class RealtimeDrawSoakTests
     private static int maxCardNearWinCells;
     private static int maxActivePaylines;
     private static int maxActiveMatchedHeaders;
+    private static int theme1ContractValidationSamples;
 
     private static readonly Dictionary<Type, Dictionary<string, FieldInfo>> FieldCache = new();
 
@@ -243,6 +245,13 @@ public static class RealtimeDrawSoakTests
         if (EditorApplication.isPlaying)
         {
             PollPatternVisualState();
+            if (!PollTheme1ContractState(out string contractError))
+            {
+                exitCode = 1;
+                finishReason = contractError;
+                RequestFinish();
+                return;
+            }
         }
 
         if (now >= nextProgressLogAt)
@@ -255,6 +264,7 @@ public static class RealtimeDrawSoakTests
                 $"blinkTransitions={nearWinBlinkTransitions} maxNearWins={maxActiveNearWinCount} " +
                 $"maxMatched={maxActiveMatchedPatternCount} maxHeaderCells={maxHeaderNearWinCells} " +
                 $"maxCardCells={maxCardNearWinCells} maxMatchedHeaders={maxActiveMatchedHeaders} " +
+                $"contractSamples={theme1ContractValidationSamples} " +
                 $"maxPaylines={maxActivePaylines}");
             nextProgressLogAt = now + 15.0;
         }
@@ -264,16 +274,14 @@ public static class RealtimeDrawSoakTests
     {
         TopperManager topperManager = UnityEngine.Object.FindObjectOfType<TopperManager>(true);
         NumberGenerator numberGenerator = UnityEngine.Object.FindObjectOfType<NumberGenerator>(true);
-        if (topperManager == null || numberGenerator == null)
-        {
-            return;
-        }
+        Theme1GameplayViewRoot viewRoot = UnityEngine.Object.FindObjectOfType<Theme1GameplayViewRoot>(true);
+        Theme1RoundRenderState renderedState = viewRoot != null ? viewRoot.CaptureRenderedState() : null;
 
-        int activeNearWinCount = GetPrivateCollectionCount(topperManager, "activeNearWins");
-        int activeMatchedPatternCount = GetPrivateCollectionCount(topperManager, "activeMatchedPatternIndexes");
-        bool missingBlinkVisible = GetPrivateBoolField(topperManager, "missingBlinkVisible");
+        int legacyNearWinCount = GetPrivateCollectionCount(topperManager, "activeNearWins");
+        int legacyMatchedPatternCount = GetPrivateCollectionCount(topperManager, "activeMatchedPatternIndexes");
+        bool missingBlinkVisible = legacyNearWinCount > 0 && GetPrivateBoolField(topperManager, "missingBlinkVisible");
 
-        if (activeNearWinCount > 0)
+        if (legacyNearWinCount > 0)
         {
             if (previousMissingBlinkVisible.HasValue && previousMissingBlinkVisible.Value != missingBlinkVisible)
             {
@@ -286,12 +294,14 @@ public static class RealtimeDrawSoakTests
             }
         }
 
-        previousMissingBlinkVisible = activeNearWinCount > 0 ? missingBlinkVisible : null;
+        previousMissingBlinkVisible = legacyNearWinCount > 0 ? missingBlinkVisible : null;
 
-        int activeHeaderNearWinCells = CountActiveHeaderNearWinCells(topperManager);
-        int activeCardNearWinCells = CountActiveCardNearWinCells(numberGenerator);
-        int activeMatchedHeaderPatterns = CountActiveObjects(topperManager.matchedPatterns);
-        int activePaylines = CountActivePaylines(numberGenerator);
+        int activeNearWinCount = Math.Max(legacyNearWinCount, CountRenderedNearWinPatterns(renderedState));
+        int activeMatchedPatternCount = Math.Max(legacyMatchedPatternCount, CountRenderedMatchedPatterns(renderedState));
+        int activeHeaderNearWinCells = Math.Max(CountActiveHeaderNearWinCells(topperManager), CountRenderedHeaderNearWinCells(renderedState));
+        int activeCardNearWinCells = Math.Max(CountActiveCardNearWinCells(numberGenerator), CountRenderedCardNearWinCells(renderedState));
+        int activeMatchedHeaderPatterns = Math.Max(CountActiveObjects(topperManager != null ? topperManager.matchedPatterns : null), CountRenderedMatchedHeaderPatterns(renderedState));
+        int activePaylines = Math.Max(CountActivePaylines(numberGenerator), CountRenderedPaylines(renderedState));
 
         maxActiveNearWinCount = Math.Max(maxActiveNearWinCount, activeNearWinCount);
         maxActiveMatchedPatternCount = Math.Max(maxActiveMatchedPatternCount, activeMatchedPatternCount);
@@ -300,12 +310,22 @@ public static class RealtimeDrawSoakTests
         maxActivePaylines = Math.Max(maxActivePaylines, activePaylines);
         maxActiveMatchedHeaders = Math.Max(maxActiveMatchedHeaders, activeMatchedHeaderPatterns);
 
-        if (activeNearWinCount > 0 && missingBlinkVisible && activeHeaderNearWinCells > 0 && activeCardNearWinCells > 0)
+        bool hasSynchronizedNearWinVisuals =
+            (legacyNearWinCount > 0 && missingBlinkVisible && activeHeaderNearWinCells > 0 && activeCardNearWinCells > 0) ||
+            (CountRenderedNearWinPatterns(renderedState) > 0 &&
+             CountRenderedHeaderNearWinCells(renderedState) > 0 &&
+             CountRenderedCardNearWinCells(renderedState) > 0);
+        if (hasSynchronizedNearWinVisuals)
         {
             nearWinVisibleSamples += 1;
         }
 
-        if (activeMatchedPatternCount > 0 && activeMatchedHeaderPatterns > 0 && activePaylines > 0)
+        bool hasSynchronizedMatchedVisuals =
+            (legacyMatchedPatternCount > 0 && activeMatchedHeaderPatterns > 0 && activePaylines > 0) ||
+            (CountRenderedMatchedPatterns(renderedState) > 0 &&
+             CountRenderedMatchedHeaderPatterns(renderedState) > 0 &&
+             CountRenderedPaylines(renderedState) > 0);
+        if (hasSynchronizedMatchedVisuals)
         {
             matchedVisibleSamples += 1;
         }
@@ -486,7 +506,8 @@ public static class RealtimeDrawSoakTests
             $"blinkTransitions={nearWinBlinkTransitions} blinkVisibleSamples={nearWinBlinkVisibleSamples} " +
             $"maxNearWins={maxActiveNearWinCount} maxMatched={maxActiveMatchedPatternCount} " +
             $"maxHeaderCells={maxHeaderNearWinCells} maxCardCells={maxCardNearWinCells} " +
-            $"maxMatchedHeaders={maxActiveMatchedHeaders} maxPaylines={maxActivePaylines}");
+            $"maxMatchedHeaders={maxActiveMatchedHeaders} contractSamples={theme1ContractValidationSamples} " +
+            $"maxPaylines={maxActivePaylines}");
 
         CleanupAndExit(exitCode);
     }
@@ -553,6 +574,359 @@ public static class RealtimeDrawSoakTests
         maxCardNearWinCells = 0;
         maxActivePaylines = 0;
         maxActiveMatchedHeaders = 0;
+        theme1ContractValidationSamples = 0;
+    }
+
+    private static bool PollTheme1ContractState(out string error)
+    {
+        error = string.Empty;
+
+        Theme1GameplayViewRoot viewRoot = UnityEngine.Object.FindObjectOfType<Theme1GameplayViewRoot>(true);
+        GameManager gameManager = GameManager.instance;
+        if (viewRoot == null || gameManager == null)
+        {
+            return true;
+        }
+
+        if (gameManager.currentBet <= 0 && GetVisibleDrawCount() == 0)
+        {
+            return true;
+        }
+
+        Theme1RoundRenderState state = viewRoot.CaptureRenderedState();
+        if (!ValidateHudContract(state, viewRoot, gameManager, out error) ||
+            !ValidateCardContract(state, gameManager, out error) ||
+            !ValidateTheme1NumberBounds(state, out error))
+        {
+            return false;
+        }
+
+        theme1ContractValidationSamples += 1;
+        return true;
+    }
+
+    private static bool ValidateHudContract(Theme1RoundRenderState state, Theme1GameplayViewRoot viewRoot, GameManager gameManager, out string error)
+    {
+        error = string.Empty;
+        if (state?.Hud == null || gameManager == null)
+        {
+            return true;
+        }
+
+        string expectedCredit = gameManager.CreditBalance.ToString(CultureInfo.InvariantCulture);
+        string expectedWinnings = gameManager.RoundWinnings.ToString(CultureInfo.InvariantCulture);
+        string expectedBet = gameManager.currentBet.ToString(CultureInfo.InvariantCulture);
+
+        if (!string.Equals(state.Hud.CreditLabel, expectedCredit, StringComparison.Ordinal) ||
+            !string.Equals(state.Hud.WinningsLabel, expectedWinnings, StringComparison.Ordinal) ||
+            !string.Equals(state.Hud.BetLabel, expectedBet, StringComparison.Ordinal))
+        {
+            error =
+                $"Theme1 HUD contract mismatch: credit='{state.Hud.CreditLabel}' winnings='{state.Hud.WinningsLabel}' bet='{state.Hud.BetLabel}' " +
+                $"expected credit='{expectedCredit}' winnings='{expectedWinnings}' bet='{expectedBet}'.";
+            return false;
+        }
+
+        if (!ValidateHudLabelVisibility(viewRoot?.HudBar?.CreditText, expectedCredit, "credit", out error) ||
+            !ValidateHudLabelVisibility(viewRoot?.HudBar?.WinningsText, expectedWinnings, "winnings", out error) ||
+            !ValidateHudLabelVisibility(viewRoot?.HudBar?.BetText, expectedBet, "bet", out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ValidateHudLabelVisibility(TMP_Text label, string expectedValue, string labelName, out string error)
+    {
+        error = string.Empty;
+        if (label == null)
+        {
+            return true;
+        }
+
+        label.ForceMeshUpdate(ignoreActiveState: true, forceTextReparsing: false);
+        int characterCount = label.textInfo != null ? label.textInfo.characterCount : 0;
+        bool isVisible =
+            label.gameObject.activeInHierarchy &&
+            label.enabled &&
+            label.alpha > 0f &&
+            label.color.a > 0f &&
+            !string.IsNullOrWhiteSpace(label.text) &&
+            characterCount > 0;
+
+        if (!string.Equals(label.text, expectedValue, StringComparison.Ordinal) || !isVisible)
+        {
+            error =
+                $"Theme1 HUD {labelName} is not visibly rendered. expected='{expectedValue}' actual='{label.text}'. " +
+                RealtimeTextStyleUtils.BuildHealthSummary(label as TextMeshProUGUI);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ValidateCardContract(Theme1RoundRenderState state, GameManager gameManager, out string error)
+    {
+        error = string.Empty;
+        if (state?.Cards == null)
+        {
+            return true;
+        }
+
+        string expectedBetLabel = gameManager != null
+            ? gameManager.GetCardStakeLabel()
+            : GameManager.FormatTheme1CardStakeLabel(0);
+        for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
+        {
+            Theme1CardRenderState card = state.Cards[cardIndex];
+            if (card == null)
+            {
+                continue;
+            }
+
+            string expectedHeader = GameManager.FormatTheme1CardHeaderLabel(cardIndex);
+            if (!string.Equals(card.HeaderLabel, expectedHeader, StringComparison.Ordinal))
+            {
+                error = $"Theme1 card header mismatch on card {cardIndex + 1}: '{card.HeaderLabel}' expected '{expectedHeader}'.";
+                return false;
+            }
+
+            if (!string.Equals(card.BetLabel, expectedBetLabel, StringComparison.Ordinal))
+            {
+                error = $"Theme1 card bet mismatch on card {cardIndex + 1}: '{card.BetLabel}' expected '{expectedBetLabel}'.";
+                return false;
+            }
+
+            if (card.ShowWinLabel)
+            {
+                if (!TryParseWinLabel(card.WinLabel, out int amount) ||
+                    amount <= 0 ||
+                    !string.Equals(card.WinLabel, GameManager.FormatTheme1CardWinLabel(amount), StringComparison.Ordinal))
+                {
+                    error = $"Theme1 card win mismatch on card {cardIndex + 1}: '{card.WinLabel}'.";
+                    return false;
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(card.WinLabel))
+            {
+                error = $"Theme1 zero-win label should be hidden/blank on card {cardIndex + 1}, got '{card.WinLabel}'.";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ValidateTheme1NumberBounds(Theme1RoundRenderState state, out string error)
+    {
+        error = string.Empty;
+        if (state == null)
+        {
+            return true;
+        }
+
+        for (int cardIndex = 0; state.Cards != null && cardIndex < state.Cards.Length; cardIndex++)
+        {
+            Theme1CardCellRenderState[] cells = state.Cards[cardIndex]?.Cells;
+            if (cells == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+            {
+                string label = cells[cellIndex].NumberLabel;
+                if (label == "-" || string.IsNullOrWhiteSpace(label))
+                {
+                    continue;
+                }
+
+                if (!int.TryParse(label, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ||
+                    !GameManager.IsValidTheme1BallNumber(parsed))
+                {
+                    error = $"Theme1 card number out of bounds at card {cardIndex + 1}, cell {cellIndex + 1}: '{label}'.";
+                    return false;
+                }
+            }
+        }
+
+        for (int slotIndex = 0; state.BallRack?.Slots != null && slotIndex < state.BallRack.Slots.Length; slotIndex++)
+        {
+            Theme1BallSlotRenderState slot = state.BallRack.Slots[slotIndex];
+            if (!slot.IsVisible)
+            {
+                continue;
+            }
+
+            if (!int.TryParse(slot.NumberLabel, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ||
+                !GameManager.IsValidTheme1BallNumber(parsed))
+            {
+                error = $"Theme1 ball number out of bounds in slot {slotIndex + 1}: '{slot.NumberLabel}'.";
+                return false;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.BallRack?.BigBallNumber) &&
+            (!int.TryParse(state.BallRack.BigBallNumber, NumberStyles.Integer, CultureInfo.InvariantCulture, out int bigBallNumber) ||
+             !GameManager.IsValidTheme1BallNumber(bigBallNumber)))
+        {
+            error = $"Theme1 big-ball number out of bounds: '{state.BallRack.BigBallNumber}'.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryParseWinLabel(string label, out int amount)
+    {
+        amount = 0;
+        if (string.IsNullOrWhiteSpace(label) ||
+            !label.StartsWith("Gevinst - ", StringComparison.Ordinal) ||
+            !label.EndsWith(" kr", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string numericPart = label.Substring("Gevinst - ".Length, label.Length - "Gevinst - ".Length - " kr".Length);
+        return int.TryParse(numericPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out amount);
+    }
+
+    private static int CountRenderedNearWinPatterns(Theme1RoundRenderState state)
+    {
+        if (state?.Topper?.Slots == null)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        for (int slotIndex = 0; slotIndex < state.Topper.Slots.Length; slotIndex++)
+        {
+            Theme1TopperSlotRenderState slot = state.Topper.Slots[slotIndex];
+            if (slot == null || slot.ShowMatchedPattern || slot.MissingCellsVisible == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < slot.MissingCellsVisible.Length; cellIndex++)
+            {
+                if (slot.MissingCellsVisible[cellIndex])
+                {
+                    total += 1;
+                    break;
+                }
+            }
+        }
+
+        return total;
+    }
+
+    private static int CountRenderedHeaderNearWinCells(Theme1RoundRenderState state)
+    {
+        if (state?.Topper?.Slots == null)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        for (int slotIndex = 0; slotIndex < state.Topper.Slots.Length; slotIndex++)
+        {
+            Theme1TopperSlotRenderState slot = state.Topper.Slots[slotIndex];
+            if (slot?.MissingCellsVisible == null || slot.ShowMatchedPattern)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < slot.MissingCellsVisible.Length; cellIndex++)
+            {
+                if (slot.MissingCellsVisible[cellIndex])
+                {
+                    total += 1;
+                }
+            }
+        }
+
+        return total;
+    }
+
+    private static int CountRenderedCardNearWinCells(Theme1RoundRenderState state)
+    {
+        if (state?.Cards == null)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
+        {
+            Theme1CardCellRenderState[] cells = state.Cards[cardIndex]?.Cells;
+            if (cells == null)
+            {
+                continue;
+            }
+
+            for (int cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+            {
+                if (cells[cellIndex].IsMissing)
+                {
+                    total += 1;
+                }
+            }
+        }
+
+        return total;
+    }
+
+    private static int CountRenderedMatchedPatterns(Theme1RoundRenderState state)
+    {
+        if (state?.Topper?.Slots == null)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        for (int slotIndex = 0; slotIndex < state.Topper.Slots.Length; slotIndex++)
+        {
+            if (state.Topper.Slots[slotIndex] != null && state.Topper.Slots[slotIndex].ShowMatchedPattern)
+            {
+                total += 1;
+            }
+        }
+
+        return total;
+    }
+
+    private static int CountRenderedMatchedHeaderPatterns(Theme1RoundRenderState state)
+    {
+        return CountRenderedMatchedPatterns(state);
+    }
+
+    private static int CountRenderedPaylines(Theme1RoundRenderState state)
+    {
+        if (state?.Cards == null)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
+        {
+            bool[] paylines = state.Cards[cardIndex]?.PaylinesActive;
+            if (paylines == null)
+            {
+                continue;
+            }
+
+            for (int paylineIndex = 0; paylineIndex < paylines.Length; paylineIndex++)
+            {
+                if (paylines[paylineIndex])
+                {
+                    total += 1;
+                }
+            }
+        }
+
+        return total;
     }
 
     private static int CountActiveHeaderNearWinCells(TopperManager topperManager)
