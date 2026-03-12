@@ -3,6 +3,7 @@ import type { AckResponse, RealtimeRoomSnapshot, RealtimeRoomStateAck, RealtimeS
 
 interface RealtimeClientHandlers {
   onConnect: () => void;
+  onConnectError: (message: string) => void;
   onDisconnect: (reason: string) => void;
   onRoomUpdate: (snapshot: RealtimeRoomSnapshot) => void;
 }
@@ -13,6 +14,7 @@ let socketBaseUrl = "";
 export function getRealtimeSocket(session: RealtimeSession, handlers: RealtimeClientHandlers): Socket {
   if (socket && socketBaseUrl === session.baseUrl) {
     socket.off("connect");
+    socket.off("connect_error");
     socket.off("disconnect");
     socket.off("room:update");
     bindHandlers(socket, handlers);
@@ -41,6 +43,7 @@ export function disposeRealtimeSocket(): void {
   }
 
   socket.off("connect");
+  socket.off("connect_error");
   socket.off("disconnect");
   socket.off("room:update");
   socket.disconnect();
@@ -58,8 +61,26 @@ export async function requestRoomState(
   });
 }
 
+export async function requestRoomResume(
+  currentSocket: Socket,
+  session: RealtimeSession,
+): Promise<AckResponse<{ snapshot: RealtimeRoomSnapshot }>> {
+  return emitWithAck<{ snapshot: RealtimeRoomSnapshot }>(
+    currentSocket,
+    "room:resume",
+    {
+      roomCode: session.roomCode,
+      playerId: session.playerId,
+      accessToken: session.accessToken || undefined,
+    },
+  );
+}
+
 function bindHandlers(currentSocket: Socket, handlers: RealtimeClientHandlers): void {
   currentSocket.on("connect", handlers.onConnect);
+  currentSocket.on("connect_error", (error: Error) => {
+    handlers.onConnectError(error.message);
+  });
   currentSocket.on("disconnect", handlers.onDisconnect);
   currentSocket.on("room:update", handlers.onRoomUpdate);
 }

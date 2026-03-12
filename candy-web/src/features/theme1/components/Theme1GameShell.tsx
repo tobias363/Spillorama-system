@@ -16,7 +16,7 @@ export function Theme1GameShell() {
     if (session.roomCode) {
       void connect();
     }
-  }, []);
+  }, [connect, session.roomCode]);
 
   return (
     <main
@@ -37,7 +37,7 @@ export function Theme1GameShell() {
         <div className="theme1-app__status">
           <div>
             <span>Source</span>
-            <strong>candy-web/</strong>
+            <strong>{snapshot.meta.source}</strong>
           </div>
           <div>
             <span>Backend</span>
@@ -50,6 +50,18 @@ export function Theme1GameShell() {
           <div>
             <span>Room</span>
             <strong>{snapshot.meta.roomCode || "Ingen room valgt"}</strong>
+          </div>
+          <div>
+            <span>Player</span>
+            <strong>{snapshot.meta.playerId || "Ikke valgt"}</strong>
+          </div>
+          <div>
+            <span>Game</span>
+            <strong>{snapshot.meta.gameStatus}</strong>
+          </div>
+          <div>
+            <span>Draws</span>
+            <strong>{snapshot.meta.drawCount}</strong>
           </div>
         </div>
       </section>

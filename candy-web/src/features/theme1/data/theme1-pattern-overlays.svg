@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="pattern-14-top-row" viewBox="0 0 500 300">
+    <path d="M50 50H450" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+  <symbol id="pattern-15-middle-row" viewBox="0 0 500 300">
+    <path d="M50 150H450" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+  <symbol id="pattern-16-bottom-row" viewBox="0 0 500 300">
+    <path d="M50 250H450" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+  <symbol id="pattern-12-sides" viewBox="0 0 500 300">
+    <path d="M50 50V250M450 50V250" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+  <symbol id="pattern-13-v" viewBox="0 0 500 300">
+    <path d="M250 50L150 150L50 250M250 50L350 150L450 250" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+  <symbol id="pattern-03-cross" viewBox="0 0 500 300">
+    <path d="M50 150H450M250 50V250" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+  <symbol id="pattern-04-crown" viewBox="0 0 500 300">
+    <path d="M50 50H450M150 150L250 250L350 150" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+  <symbol id="pattern-05-goalposts" viewBox="0 0 500 300">
+    <path d="M50 50H450M150 50V250M350 50V250" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+  <symbol id="pattern-02-perimeter" viewBox="0 0 500 300">
+    <rect x="50" y="50" width="400" height="200" rx="34" fill="none" stroke="#741595" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+  </symbol>
+</svg>

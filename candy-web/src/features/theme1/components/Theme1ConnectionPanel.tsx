@@ -7,6 +7,7 @@ export function Theme1ConnectionPanel() {
   const connection = useTheme1Store((state) => state.connection);
   const setSessionField = useTheme1Store((state) => state.setSessionField);
   const connect = useTheme1Store((state) => state.connect);
+  const disconnect = useTheme1Store((state) => state.disconnect);
   const useMockMode = useTheme1Store((state) => state.useMockMode);
   const refresh = useTheme1Store((state) => state.refresh);
 
@@ -57,6 +58,13 @@ export function Theme1ConnectionPanel() {
         <button type="button" onClick={() => void refresh()} disabled={mode !== "live"}>
           Oppdater state
         </button>
+        <button
+          type="button"
+          onClick={disconnect}
+          disabled={connection.phase !== "connected" && connection.phase !== "connecting"}
+        >
+          Koble fra
+        </button>
         <button type="button" onClick={useMockMode}>
           Bruk mock
         </button>
@@ -64,7 +72,7 @@ export function Theme1ConnectionPanel() {
 
       <p className="connection-panel__message">
         {connection.message ||
-          "Skriv inn romkode og eventuelt playerId. Hvis playerId mangler, brukes host eller forste spiller i snapshotet."}
+          "Skriv inn romkode og eventuelt playerId. Hvis playerId finnes lokalt prover klienten room:resume forst, ellers room:state."}
       </p>
     </section>
   );
