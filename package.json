@@ -4,8 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "npm --prefix backend run dev",
+    "dev:candy-web": "npm --prefix candy-web run dev",
     "check": "npm --prefix backend run check",
+    "check:candy-web": "npm --prefix candy-web run check",
     "build": "npm --prefix backend run build",
+    "build:candy-web": "npm --prefix candy-web run build",
     "test:compliance": "npm --prefix backend run test:compliance",
     "check:unity": "bash scripts/unity-compile-check.sh",
     "check:all": "npm run check && npm run build && npm run test:compliance && npm run check:unity",
