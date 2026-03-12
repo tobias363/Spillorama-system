@@ -32,6 +32,18 @@ import {
   type Theme1TopperSlotRenderState,
   type Theme1WinLabelAnchor,
 } from "@/domain/theme1/renderModel";
+import {
+  THEME1_DEFAULT_ACTIVE_PATTERN_INDEXES,
+  THEME1_DEFAULT_PATTERN_MASKS,
+  THEME1_DEFAULT_TOPPER_PRIZE_LABELS,
+  THEME1_MAX_BALL_NUMBER,
+  formatTheme1KrAmount,
+  formatTheme1WholeNumber,
+  resolveTheme1CardStakeAmount,
+  resolveTheme1PayoutSlotIndex,
+  resolveTheme1TopperPayoutAmounts,
+  type Theme1PatternMask,
+} from "@/domain/theme1/theme1RuntimeConfig";
 import type {
   Theme1BoardState,
   Theme1CellTone,
@@ -75,7 +87,11 @@ interface Theme1ResolvedPlayerContext {
   source: Theme1RoomTicketSource;
 }
 
-export type Theme1PatternMask = readonly number[];
+export {
+  THEME1_DEFAULT_ACTIVE_PATTERN_INDEXES,
+  THEME1_DEFAULT_PATTERN_MASKS,
+} from "@/domain/theme1/theme1RuntimeConfig";
+export type { Theme1PatternMask } from "@/domain/theme1/theme1RuntimeConfig";
 
 export interface Theme1RoomSnapshotMapperOptions {
   playerId?: string;
@@ -113,29 +129,6 @@ export interface Theme1MappedRoomSnapshot {
   activePatternIndexes: number[];
 }
 
-export const THEME1_DEFAULT_PATTERN_MASKS: readonly Theme1PatternMask[] = [
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1],
-  [1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1],
-  [1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0],
-  [1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0],
-  [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0],
-  [1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1],
-  [0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
-  [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-  [1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0],
-  [0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1],
-  [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
-  [0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
-  [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
-  [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0],
-  [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
-] as const;
-
-export const THEME1_DEFAULT_ACTIVE_PATTERN_INDEXES = Object.freeze(
-  THEME1_DEFAULT_PATTERN_MASKS.map((_, index) => index),
-);
-
 export function inferTheme1PlayerId(snapshot: RoomSnapshot): string | undefined {
   return resolvePlayerContext(snapshot).playerId;
 }
@@ -170,6 +163,7 @@ export function mapRoomSnapshotToTheme1(
   const effectiveEntryFee = resolveEffectiveEntryFee(snapshot);
   const topperPayoutAmounts = normalizeTopperPayoutAmounts(
     options.topperPayoutAmounts,
+    effectiveEntryFee,
   );
   const topperSlotCount = resolveTopperSlotCount(options, topperPayoutAmounts);
   const topperPrizeLabels = resolveTopperPrizeLabels(
@@ -460,8 +454,13 @@ function normalizePreferredNearPatternIndexes(
 
 function normalizeTopperPayoutAmounts(
   payouts?: readonly number[],
+  totalBetAmount = 0,
 ): number[] {
-  return (payouts ?? []).map((value) =>
+  const source =
+    payouts && payouts.length > 0
+      ? payouts
+      : resolveTheme1TopperPayoutAmounts(totalBetAmount);
+  return source.map((value) =>
     Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0,
   );
 }
@@ -495,7 +494,9 @@ function resolveTopperPrizeLabels(
     );
   }
 
-  return Array.from({ length: topperSlotCount }, () => "");
+  return Array.from({ length: topperSlotCount }, (_, index) =>
+    THEME1_DEFAULT_TOPPER_PRIZE_LABELS[index] ?? "",
+  );
 }
 
 function resolveVisibleTickets(
@@ -1279,7 +1280,8 @@ function mapRenderStateToRoundModel(
       gameStatus: currentGame?.status ?? "WAITING",
       drawCount,
       remainingNumbers:
-        currentGame?.remainingNumbers ?? Math.max(0, 90 - drawCount),
+        currentGame?.remainingNumbers ??
+        Math.max(0, THEME1_MAX_BALL_NUMBER - drawCount),
       connectionPhase,
       connectionLabel:
         ticketSource === "empty" && mode === "live"
@@ -1462,20 +1464,7 @@ function getScheduler(
 }
 
 function resolvePayoutSlotIndex(rawPatternIndex: number, payoutCount: number): number {
-  if (payoutCount <= 0) {
-    return -1;
-  }
-
-  let resolvedIndex = rawPatternIndex;
-  if (resolvedIndex >= 5 && resolvedIndex <= 7) {
-    resolvedIndex = 5;
-  } else if (resolvedIndex > 7 && resolvedIndex < 13) {
-    resolvedIndex -= 2;
-  } else if (resolvedIndex >= 13) {
-    resolvedIndex = payoutCount - 1;
-  }
-
-  return clamp(resolvedIndex, 0, payoutCount - 1);
+  return resolveTheme1PayoutSlotIndex(rawPatternIndex, payoutCount);
 }
 
 function resolveCellNumber(ticket: readonly number[], cellIndex: number): number {
@@ -1505,29 +1494,16 @@ function formatTheme1CardStakeLabel(totalBetAmount: number): string {
   return `Innsats - ${formatWholeNumber(resolveTheme1CardStakeAmount(totalBetAmount))} kr`;
 }
 
-function resolveTheme1CardStakeAmount(totalBetAmount: number): number {
-  if (totalBetAmount <= 0) {
-    return 0;
-  }
-
-  return Math.max(0, Math.trunc(totalBetAmount / THEME1_DEFAULT_CARD_SLOT_COUNT));
-}
-
 function formatTheme1CardWinLabel(amount: number): string {
   return `Gevinst - ${formatWholeNumber(amount)} kr`;
 }
 
 function formatKrAmount(amount: number): string {
-  return `${formatWholeNumber(amount)} kr`;
+  return formatTheme1KrAmount(amount);
 }
 
 function formatWholeNumber(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-    minimumFractionDigits: 0,
-  })
-    .format(Math.max(0, Math.trunc(amount)))
-    .replaceAll(",", " ");
+  return formatTheme1WholeNumber(amount);
 }
 
 function formatCountdownLabel(millisUntilNextStart: number | null): string {
@@ -1599,7 +1575,9 @@ function padNumberList(values: readonly number[], length: number): number[] {
 }
 
 function normalizeTheme1Number(value: number): number {
-  return Number.isInteger(value) && value > 0 && value <= 90 ? value : 0;
+  return Number.isInteger(value) && value > 0 && value <= THEME1_MAX_BALL_NUMBER
+    ? value
+    : 0;
 }
 
 function toSortedArray(values: ReadonlySet<number>): number[] {

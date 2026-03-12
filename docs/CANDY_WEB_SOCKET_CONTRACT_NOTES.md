@@ -4,6 +4,9 @@ Kilder brukt:
 
 - `backend/src/index.ts`
 - `backend/src/game/types.ts`
+- `Candy/Assets/Script/GameManager.cs`
+- `Candy/Assets/Script/Theme1RealtimeTopperContractBuilder.cs`
+- `Candy/Assets/Script/Theme1LocalStateAdapter.cs`
 - `Candy/Assets/Script/Theme1RoundRenderState.cs`
 - `Candy/Assets/Script/Theme1DisplayState.cs`
 - `Candy/Assets/Script/Theme1StateBuilder.cs`
@@ -83,13 +86,26 @@ Disse verdiene finnes i Unity-flyten, men sendes ikke fra backend-snapshotet:
 - preferred near pattern per kort
 - Theme1-spesifikke HUD-strenger
 
-Web-mapperen i `candy-web/src/domain/theme1/mappers/mapRoomSnapshotToTheme1.ts` gjør derfor disse antakelsene:
+Web-klienten har derfor en eksplisitt lokal runtime-config i `candy-web/src/domain/theme1/theme1RuntimeConfig.ts`.
+
+Der er disse Unity-avledede verdiene låst:
 
 - default aktive patterns = alle 16 mønstre fra `PaylineManager`
 - default pattern masks = portet 1:1 fra `PaylineManager.Build_payline_templates()`
+- topper base payouts = `GameManager.BasePatternPayouts = [2400, 2200, 2000, 1800, 1600, 1400, 1200, 1000, 800, 600, 400, 200]`
+- default topper labels = formattert fra samme base-tabell via `FormatKrAmount(...)`
 - payout-slot mapping = portet 1:1 fra `GameManager.ResolvePayoutSlotIndex(...)`
-- topper labels/payouts må injiseres via mapper-options hvis web-klienten skal speile Unity-topperen nøyaktig
+- Theme1 max ball number = `60` fra `GameManager.Theme1MaxBallNumber`
+
+Mapperen i `candy-web/src/domain/theme1/mappers/mapRoomSnapshotToTheme1.ts` gjør fortsatt disse eksplisitte antakelsene:
+
+- hvis `options.topperPayoutAmounts` sendes inn, brukes de som autoritativ verdi
+- hvis `options.topperPayoutAmounts` mangler, brukes lokal runtime-config med Unitys display-regel fra `GameManager.GetDisplayPayoutForPatternSlot(...)`
+  display multiplier = `max(1, ResolveTheme1CardStakeAmount(entryFee))`
+- hvis `options.topperPrizeLabels` mangler, formatteres labels fra de resolved payout-verdiene
 - hvis `playerId` ikke er oppgitt, velges først en spiller med synlige tickets; deretter host/første spiller som fallback
+- hvis backend mangler `currentGame.remainingNumbers`, bruker web `max(0, 60 - drawCount)` som lokal fallback
+- hvis backend mangler Theme1-spesifikke HUD-strenger, formatteres de lokalt fra snapshot/session
 
 ### Formatering i web-mapperen
 
@@ -100,5 +116,5 @@ Web-mapperen i `candy-web/src/domain/theme1/mappers/mapRoomSnapshotToTheme1.ts` 
 ## Praktisk konsekvens for neste steg
 
 - Ikke endre backend-wire-format for Theme1 nå.
-- Hvis web-klienten trenger helt korrekt topper-strip og pattern-priser, legg de inn som lokale config-/mapper-options i `candy-web`, ikke som ad hoc tolkning av snapshotet.
+- Hvis web-klienten trenger andre payout-tabeller enn Unity-baseline, injiser dem via `topperPayoutAmounts`/`topperPrizeLabels` i mapper-options i stedet for å endre wire-format.
 - Ved reconnect eller oppstart bør klienten bruke `room:state`/`room:resume` for å sikre eget `playerId` og egne synlige tickets før rendering.
