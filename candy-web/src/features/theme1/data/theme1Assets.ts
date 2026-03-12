@@ -1,11 +1,11 @@
-import backgroundUrl from "../../../../../candybakgrunn.png";
-import saldoPanelUrl from "../../../../../Candy/Assets/Resources/Theme1/Controls/Theme1SaldoPanelBase.png";
-import gevinstPanelUrl from "../../../../../Candy/Assets/Resources/Theme1/Controls/Theme1GevinstPanelBase.png";
-import nextDrawBannerUrl from "../../../../../Candy/Assets/Resources/Theme1/Controls/Theme1NextDrawBannerBase.png";
-import stakePanelUrl from "../../../../../Candy/Assets/Resources/Theme1/Controls/Theme1StakePanelBase.png";
-import placeBetButtonUrl from "../../../../../Candy/Assets/Resources/Theme1/Controls/Theme1PlaceBetButtonShell.png";
-import shuffleButtonUrl from "../../../../../Candy/Assets/Resources/Theme1/Controls/Theme1ShuffleButton.png";
-import patternOverlayUrl from "./theme1-pattern-overlays.svg";
+import backgroundUrl from "../../../assets/theme1/backgrounds/candy-background.png";
+import saldoPanelUrl from "../../../assets/theme1/controls/Theme1SaldoPanelBase.png";
+import gevinstPanelUrl from "../../../assets/theme1/controls/Theme1GevinstPanelBase.png";
+import nextDrawBannerUrl from "../../../assets/theme1/controls/Theme1NextDrawBannerBase.png";
+import stakePanelUrl from "../../../assets/theme1/controls/Theme1StakePanelBase.png";
+import placeBetButtonUrl from "../../../assets/theme1/controls/Theme1PlaceBetButtonShell.png";
+import shuffleButtonUrl from "../../../assets/theme1/controls/Theme1ShuffleButton.png";
+import patternOverlayUrl from "../../../assets/theme1/overlays/theme1-pattern-overlays.svg";
 
 export const theme1Assets = {
   backgroundUrl,
