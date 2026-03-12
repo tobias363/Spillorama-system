@@ -19,8 +19,8 @@ public static class Theme1HudControlStyle
     public static readonly Vector2 NextDrawSize = new(158f, 88f);
     public static readonly Vector2 NextDrawPosition = new(0f, 124f);
 
-    public static readonly Vector2 MiniValueSize = new(66f, 20f);
-    public static readonly Vector2 StakeValueSize = new(76f, 24f);
+    public static readonly Vector2 MiniValueSize = new(106f, 32f);
+    public static readonly Vector2 StakeValueSize = new(122f, 38.4f);
     public static readonly Vector2 StakeValueOffset = new(0f, -3f);
     public static readonly Vector2 StakeMinusSize = new(36f, 36f);
     public static readonly Vector2 StakeMinusOffset = new(-50f, 0f);
@@ -35,9 +35,9 @@ public static class Theme1HudControlStyle
     public static readonly Vector2 NextDrawSubtitleOffset = new(0f, -1f);
     public static readonly Vector2 NextDrawSubtitleSize = new(122f, 20f);
     public static readonly Vector2 NextDrawCountdownOffset = new(0f, -25f);
-    public static readonly Vector2 NextDrawCountdownSize = new(92f, 22f);
+    public static readonly Vector2 NextDrawCountdownSize = new(180f, 35.2f);
     public static readonly Vector2 NextDrawPlayerCountOffset = new(0f, -28f);
-    public static readonly Vector2 NextDrawPlayerCountSize = new(116f, 14f);
+    public static readonly Vector2 NextDrawPlayerCountSize = new(185.6f, 22.4f);
 
     public static readonly Color32 HudValueColor = new(255, 255, 255, 255);
     public static readonly Color32 CountdownColor = new(255, 255, 255, 255);
@@ -89,6 +89,7 @@ public static class Theme1HudControlStyle
         target.fontSizeMax = Mathf.Max(minSize, maxSize);
         target.fontWeight = FontWeight.Medium;
         target.fontStyle = FontStyles.Normal;
+        target.enableExtraPadding = true;
         target.textWrappingMode = TextWrappingModes.NoWrap;
         target.overflowMode = TextOverflowModes.Overflow;
         target.raycastTarget = false;
@@ -102,10 +103,10 @@ public static class Theme1HudControlStyle
             return;
         }
 
-        ApplyHudValueStyle(hudBar.CountdownText, CountdownColor, 10f, 18f);
-        ApplyHudValueStyle(hudBar.RoomPlayerCountText, PlayerCountColor, 8f, 13f);
-        ApplyHudValueStyle(hudBar.CreditText, HudValueColor, 12f, 20f);
-        ApplyHudValueStyle(hudBar.WinningsText, HudValueColor, 12f, 20f);
-        ApplyHudValueStyle(hudBar.BetText, HudValueColor, 12f, 22f);
+        ApplyHudValueStyle(hudBar.CountdownText, CountdownColor, 22f, 72f);
+        ApplyHudValueStyle(hudBar.RoomPlayerCountText, PlayerCountColor, 16f, 30f);
+        ApplyHudValueStyle(hudBar.CreditText, HudValueColor, 20f, 40f);
+        ApplyHudValueStyle(hudBar.WinningsText, HudValueColor, 20f, 40f);
+        ApplyHudValueStyle(hudBar.BetText, HudValueColor, 22f, 44f);
     }
 }

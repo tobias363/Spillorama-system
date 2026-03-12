@@ -587,7 +587,7 @@ public static class CandyTypographySystem
         {
             CandyTypographyRole.Headline => 120,
             CandyTypographyRole.Number => 112,
-            CandyTypographyRole.Label => 104,
+            CandyTypographyRole.Label => 144,
             _ => 96
         };
     }
@@ -597,8 +597,8 @@ public static class CandyTypographySystem
         return role switch
         {
             CandyTypographyRole.Headline => 4096,
-            CandyTypographyRole.Number => 2048,
-            CandyTypographyRole.Label => 2048,
+            CandyTypographyRole.Number => 4096,
+            CandyTypographyRole.Label => 4096,
             _ => 2048
         };
     }
@@ -631,8 +631,8 @@ public static class CandyTypographySystem
                 break;
             case CandyTypographyRole.Label:
                 target.fontSize = safeCurrentSize;
-                target.fontSizeMin = Mathf.Max(12f, Mathf.Min(safeCurrentSize, 18f));
-                target.fontSizeMax = Mathf.Max(target.fontSizeMin + 8f, 56f);
+                target.fontSizeMin = Mathf.Max(16f, Mathf.Min(safeCurrentSize, 24f));
+                target.fontSizeMax = Mathf.Max(target.fontSizeMin + 8f, 72f);
                 break;
             default:
                 target.fontSize = safeCurrentSize;

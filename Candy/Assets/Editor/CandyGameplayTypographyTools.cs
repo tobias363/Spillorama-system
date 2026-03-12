@@ -657,8 +657,8 @@ public static class CandyGameplayTypographyTools
             role == CandyTypographyRole.Headline ? 120 : role == CandyTypographyRole.Number ? 112 : 96,
             8,
             GlyphRenderMode.SDFAA,
-            role == CandyTypographyRole.Headline ? 4096 : 2048,
-            role == CandyTypographyRole.Headline ? 4096 : 2048,
+            role == CandyTypographyRole.Body ? 2048 : 4096,
+            role == CandyTypographyRole.Body ? 2048 : 4096,
             AtlasPopulationMode.Dynamic,
             false);
         if (generated == null)
