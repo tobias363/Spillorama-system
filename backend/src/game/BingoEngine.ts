@@ -5,11 +5,19 @@ import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import {
   findFirstCompleteLinePatternIndex,
   countNearMissLinePattern,
+  getTicketNumbers,
   hasFullBingo,
   makeRoomCode,
   makeShuffledBallBag,
   ticketContainsNumber
 } from "./ticket.js";
+import {
+  findCompletedCandyPatternFamilies,
+  getCandyActivePatternIndexes,
+  getCandyPatternFamilyDefinition,
+  resolveCandyPatternPayoutAmounts,
+  type CandyPatternFamilyMatch,
+} from "./candyPatterns.js";
 import type {
   ClaimRecord,
   ClaimType,
@@ -108,6 +116,7 @@ interface ComplianceOptions {
   rtpControllerGain?: number;
   nearMissBiasEnabled?: boolean;
   nearMissTargetRate?: number;
+  nearMissCalibrationFactor?: number;
 }
 
 interface RoundPerformanceSnapshot {
@@ -137,6 +146,23 @@ interface RtpNearMissTelemetry {
   totalTickets: number;
   windowSize: number;
   recentRounds: RoundPerformanceSnapshot[];
+}
+
+interface NearMissTicketContext {
+  ticket: Ticket;
+  patterns: number[][];
+  numbers: Set<number>;
+}
+
+interface NearMissTicketStatus {
+  nearMissPatterns: number[][];
+  hasCompleteLine: boolean;
+  hasFullBingo: boolean;
+}
+
+interface NearMissEvaluation {
+  nearMissCount: number;
+  ticketStatuses: NearMissTicketStatus[];
 }
 
 interface LossLimits {
@@ -373,7 +399,8 @@ const MAX_SUPPORTED_BINGO_BALLS = 75;
 const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
 const DEFAULT_RTP_ROLLING_WINDOW_SIZE = 1000;
 const DEFAULT_RTP_CONTROLLER_GAIN = 0.5;
-const DEFAULT_NEAR_MISS_TARGET_RATE = 0.3;
+const DEFAULT_NEAR_MISS_TARGET_RATE = 0.38;
+const DEFAULT_NEAR_MISS_CALIBRATION_FACTOR = 0.92;
 
 export class BingoEngine {
   private readonly rooms = new Map<string, RoomState>();
@@ -403,6 +430,7 @@ export class BingoEngine {
   private readonly rtpControllerGain: number;
   private readonly nearMissBiasEnabled: boolean;
   private readonly nearMissTargetRate: number;
+  private readonly nearMissCalibrationFactor: number;
   private readonly roundPerformanceHistory: RoundPerformanceSnapshot[] = [];
   private readonly roundPerformanceRecorded = new Set<string>();
 
@@ -487,6 +515,10 @@ export class BingoEngine {
     this.nearMissTargetRate = Math.min(
       0.95,
       Math.max(0, options.nearMissTargetRate ?? DEFAULT_NEAR_MISS_TARGET_RATE)
+    );
+    this.nearMissCalibrationFactor = Math.min(
+      1,
+      Math.max(0, options.nearMissCalibrationFactor ?? DEFAULT_NEAR_MISS_CALIBRATION_FACTOR)
     );
 
     this.upsertPrizePolicy({
@@ -761,8 +793,16 @@ export class BingoEngine {
     const prizePool = this.roundCurrency(entryFee * players.length);
     const maxPayoutBudget = this.roundCurrency((prizePool * normalizedPayoutPercent) / 100);
     let drawBag = makeShuffledBallBag(this.maxBallNumber);
+    let nearMissTargetRateApplied: number | undefined;
+    const activePatternIndexes = getCandyActivePatternIndexes();
+    const patternPayoutAmounts = resolveCandyPatternPayoutAmounts(
+      entryFee,
+      normalizedPayoutPercent,
+      ticketsPerPlayer
+    ).map((amount) => this.roundCurrency(amount));
     if (this.nearMissBiasEnabled && this.nearMissTargetRate > 0) {
       const adaptiveNearMissRate = this.resolveAdaptiveNearMissRate(room.hallId);
+      nearMissTargetRateApplied = adaptiveNearMissRate;
       drawBag = this.applyNearMissBias(drawBag, tickets, adaptiveNearMissRate);
     }
     const game: GameState = {
@@ -775,10 +815,19 @@ export class BingoEngine {
       payoutPercent: normalizedPayoutPercent,
       maxPayoutBudget,
       remainingPayoutBudget: maxPayoutBudget,
+      activePatternIndexes,
+      patternPayoutAmounts,
       drawBag,
       drawnNumbers: [],
+      nearMissTargetRateApplied,
       tickets,
       marks,
+      settledPatternTopperSlots: new Map(
+        [...tickets.entries()].map(([playerId, playerTickets]) => [
+          playerId,
+          playerTickets.map(() => new Set<number>()),
+        ])
+      ),
       claims: [],
       startedAt: new Date().toISOString()
     };
@@ -939,6 +988,8 @@ export class BingoEngine {
       playerId: player.id,
       type: input.type,
       valid,
+      claimKind:
+        input.type === "LINE" ? "LEGACY_LINE" : input.type === "BINGO" ? "LEGACY_BINGO" : undefined,
       reason,
       createdAt: new Date().toISOString()
     };
@@ -1238,13 +1289,14 @@ export class BingoEngine {
       hallId,
       windowSize: this.rtpRollingWindowSize
     });
+    const calibratedTarget = this.roundCurrency(this.nearMissTargetRate * this.nearMissCalibrationFactor);
     if (telemetry.roundsConsidered <= 0) {
-      return this.nearMissTargetRate;
+      return calibratedTarget;
     }
 
-    const deviation = this.nearMissTargetRate - telemetry.nearMissRateAvg;
-    const adjusted = this.nearMissTargetRate + deviation * Math.max(0.1, this.rtpControllerGain * 0.5);
-    return Math.min(0.95, Math.max(0.05, this.roundCurrency(adjusted)));
+    const deviation = calibratedTarget - telemetry.nearMissRateAvg;
+    const adjusted = calibratedTarget + deviation * Math.max(0.1, this.rtpControllerGain * 0.5);
+    return Math.min(0.95, Math.max(0, this.roundCurrency(adjusted)));
   }
 
   private applyNearMissBias(drawBag: number[], ticketsByPlayer: Map<string, Ticket[]>, nearMissRate: number): number[] {
@@ -1266,106 +1318,231 @@ export class BingoEngine {
     }
 
     const normalizedTargetRate = Math.min(0.95, Math.max(0, nearMissRate));
-    const targetNearMissTickets = Math.min(
+    const desiredNearMissTickets = Math.min(
       allTickets.length,
-      Math.max(1, Math.round(allTickets.length * normalizedTargetRate))
+      Math.max(0, Math.round(allTickets.length * normalizedTargetRate))
     );
-    if (targetNearMissTickets <= 0) {
-      return drawBag;
+    const ticketContexts = allTickets.map((ticket) => ({
+      ticket,
+      patterns: this.extractTicketLinePatterns(ticket),
+      numbers: new Set<number>(getTicketNumbers(ticket))
+    }));
+    let workingDrawBag = [...drawBag];
+    let evaluation = this.evaluateNearMissBiasState(ticketContexts, workingDrawBag.slice(0, drawCap));
+    if (evaluation.nearMissCount === desiredNearMissTickets) {
+      return workingDrawBag;
     }
 
-    const candidateOrder = this.randomizeList(Array.from({ length: allTickets.length }, (_, index) => index));
-    const withheldNumbers = new Set<number>();
-    const promotedNumbers = new Set<number>();
-
-    let nearMissConfigured = 0;
-    for (const ticketIndex of candidateOrder) {
-      if (nearMissConfigured >= targetNearMissTickets) {
+    const maxIterations = Math.max(2, Math.min(16, allTickets.length * 2));
+    for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+      if (evaluation.nearMissCount === desiredNearMissTickets) {
         break;
       }
-      const ticket = allTickets[ticketIndex];
-      const candidatePatterns = this.extractTicketLinePatterns(ticket);
-      if (candidatePatterns.length === 0) {
-        continue;
-      }
 
-      const chosenPattern = candidatePatterns[randomInt(candidatePatterns.length)];
-      if (chosenPattern.length < 2) {
-        continue;
-      }
-      const missingCellIndex = randomInt(chosenPattern.length);
-      const missingNumber = chosenPattern[missingCellIndex];
-      if (!drawBag.includes(missingNumber)) {
-        continue;
-      }
-
-      withheldNumbers.add(missingNumber);
-      for (let i = 0; i < chosenPattern.length; i += 1) {
-        if (i === missingCellIndex) {
-          continue;
-        }
-        const number = chosenPattern[i];
-        if (drawBag.includes(number)) {
-          promotedNumbers.add(number);
-        }
-      }
-      nearMissConfigured += 1;
-    }
-
-    if (withheldNumbers.size === 0 || promotedNumbers.size === 0) {
-      return drawBag;
-    }
-
-    const randomizedPromotedNumbers = this.randomizeList([...promotedNumbers]).filter(
-      (number) => !withheldNumbers.has(number)
-    );
-    const earlyNumbers: number[] = [];
-    const earlyNumberSet = new Set<number>();
-
-    for (const number of randomizedPromotedNumbers) {
-      if (earlyNumbers.length >= drawCap) {
+      const nextCandidate =
+        evaluation.nearMissCount > desiredNearMissTickets
+          ? this.findNearMissReductionCandidate(workingDrawBag, drawCap, ticketContexts, evaluation, desiredNearMissTickets)
+          : this.findNearMissIncreaseCandidate(workingDrawBag, drawCap, ticketContexts, evaluation, desiredNearMissTickets);
+      if (!nextCandidate) {
         break;
       }
-      if (!drawBag.includes(number)) {
-        continue;
-      }
-      earlyNumbers.push(number);
-      earlyNumberSet.add(number);
+
+      workingDrawBag = nextCandidate.drawBag;
+      evaluation = nextCandidate.evaluation;
     }
 
-    for (const number of drawBag) {
-      if (earlyNumbers.length >= drawCap) {
-        break;
+    return workingDrawBag;
+  }
+
+  private evaluateNearMissBiasState(
+    ticketContexts: NearMissTicketContext[],
+    earlyNumbers: ReadonlyArray<number>
+  ): NearMissEvaluation {
+    const earlySet = new Set<number>(earlyNumbers);
+    const ticketStatuses: NearMissTicketStatus[] = [];
+    let nearMissCount = 0;
+
+    for (const context of ticketContexts) {
+      const effectiveMarks = this.buildEffectiveMarks(context.ticket, undefined, earlySet);
+      const hasCompleteLine = findFirstCompleteLinePatternIndex(context.ticket, effectiveMarks) >= 0;
+      const hasFullBingoState = hasFullBingo(context.ticket, effectiveMarks);
+      const nearMissPatterns =
+        hasCompleteLine || hasFullBingoState
+          ? []
+          : context.patterns.filter((pattern) => pattern.filter((number) => !effectiveMarks.has(number)).length === 1);
+      if (nearMissPatterns.length > 0) {
+        nearMissCount += 1;
       }
-      if (withheldNumbers.has(number) || earlyNumberSet.has(number)) {
-        continue;
-      }
-      earlyNumbers.push(number);
-      earlyNumberSet.add(number);
+      ticketStatuses.push({
+        nearMissPatterns,
+        hasCompleteLine,
+        hasFullBingo: hasFullBingoState,
+      });
     }
 
-    if (earlyNumbers.length < drawCap) {
-      for (const number of drawBag) {
-        if (earlyNumbers.length >= drawCap) {
-          break;
+    return {
+      nearMissCount,
+      ticketStatuses
+    };
+  }
+
+  private findNearMissReductionCandidate(
+    drawBag: number[],
+    drawCap: number,
+    ticketContexts: NearMissTicketContext[],
+    evaluation: NearMissEvaluation,
+    desiredNearMissTickets: number
+  ): { drawBag: number[]; evaluation: NearMissEvaluation } | undefined {
+    const currentDistance = Math.abs(evaluation.nearMissCount - desiredNearMissTickets);
+    const earlyNumbers = drawBag.slice(0, drawCap);
+    const lateNumbers = drawBag.slice(drawCap);
+    const earlySet = new Set<number>(earlyNumbers);
+    const candidateTicketIndexes = this.randomizeList(
+      evaluation.ticketStatuses.flatMap((status, index) => (status.nearMissPatterns.length > 0 ? [index] : []))
+    ).slice(0, 12);
+
+    let bestDrawBag: number[] | undefined;
+    let bestEvaluation: NearMissEvaluation | undefined;
+    let bestDistance = currentDistance;
+
+    for (const ticketIndex of candidateTicketIndexes) {
+      const ticketContext = ticketContexts[ticketIndex];
+      const status = evaluation.ticketStatuses[ticketIndex];
+      const patternCandidates = this.randomizeList(status.nearMissPatterns).slice(0, 3);
+      const replacementCandidates = this.randomizeList(lateNumbers.filter((number) => !ticketContext.numbers.has(number))).slice(0, 6);
+      if (replacementCandidates.length === 0) {
+        continue;
+      }
+
+      for (const pattern of patternCandidates) {
+        const presentPatternNumbers = pattern.filter((number) => earlySet.has(number));
+        for (const demotedNumber of this.randomizeList(presentPatternNumbers).slice(0, 3)) {
+          for (const promotedNumber of replacementCandidates) {
+            const candidateDrawBag = this.swapEarlyLateNumbers(drawBag, demotedNumber, promotedNumber, drawCap);
+            if (!candidateDrawBag) {
+              continue;
+            }
+            const candidateEvaluation = this.evaluateNearMissBiasState(ticketContexts, candidateDrawBag.slice(0, drawCap));
+            const candidateDistance = Math.abs(candidateEvaluation.nearMissCount - desiredNearMissTickets);
+            const improves =
+              candidateDistance < bestDistance ||
+              (candidateDistance === bestDistance && candidateEvaluation.nearMissCount < evaluation.nearMissCount);
+            if (!improves) {
+              continue;
+            }
+
+            bestDrawBag = candidateDrawBag;
+            bestEvaluation = candidateEvaluation;
+            bestDistance = candidateDistance;
+            if (candidateDistance === 0) {
+              return {
+                drawBag: bestDrawBag,
+                evaluation: bestEvaluation
+              };
+            }
+          }
         }
-        if (earlyNumberSet.has(number)) {
-          continue;
-        }
-        earlyNumbers.push(number);
-        earlyNumberSet.add(number);
       }
     }
 
-    const lateNumbers: number[] = [];
-    for (const number of drawBag) {
-      if (earlyNumberSet.has(number)) {
+    if (!bestDrawBag || !bestEvaluation || bestEvaluation.nearMissCount >= evaluation.nearMissCount) {
+      return undefined;
+    }
+
+    return {
+      drawBag: bestDrawBag,
+      evaluation: bestEvaluation
+    };
+  }
+
+  private findNearMissIncreaseCandidate(
+    drawBag: number[],
+    drawCap: number,
+    ticketContexts: NearMissTicketContext[],
+    evaluation: NearMissEvaluation,
+    desiredNearMissTickets: number
+  ): { drawBag: number[]; evaluation: NearMissEvaluation } | undefined {
+    const currentDistance = Math.abs(evaluation.nearMissCount - desiredNearMissTickets);
+    const earlyNumbers = drawBag.slice(0, drawCap);
+    const earlySet = new Set<number>(earlyNumbers);
+    const candidateTicketIndexes = this.randomizeList(
+      evaluation.ticketStatuses.flatMap((status, index) =>
+        status.nearMissPatterns.length === 0 && !status.hasCompleteLine && !status.hasFullBingo ? [index] : []
+      )
+    ).slice(0, 12);
+
+    let bestDrawBag: number[] | undefined;
+    let bestEvaluation: NearMissEvaluation | undefined;
+    let bestDistance = currentDistance;
+
+    for (const ticketIndex of candidateTicketIndexes) {
+      const ticketContext = ticketContexts[ticketIndex];
+      const demotionCandidates = this.randomizeList(earlyNumbers.filter((number) => !ticketContext.numbers.has(number))).slice(0, 6);
+      if (demotionCandidates.length === 0) {
         continue;
       }
-      lateNumbers.push(number);
+
+      const candidatePatterns = this.randomizeList(ticketContext.patterns).filter((pattern) => {
+        const missingCount = pattern.filter((number) => !earlySet.has(number)).length;
+        return missingCount === 2;
+      });
+
+      for (const pattern of candidatePatterns.slice(0, 3)) {
+        const missingNumbers = pattern.filter((number) => !earlySet.has(number));
+        for (const promotedNumber of this.randomizeList(missingNumbers)) {
+          for (const demotedNumber of demotionCandidates) {
+            const candidateDrawBag = this.swapEarlyLateNumbers(drawBag, demotedNumber, promotedNumber, drawCap);
+            if (!candidateDrawBag) {
+              continue;
+            }
+            const candidateEvaluation = this.evaluateNearMissBiasState(ticketContexts, candidateDrawBag.slice(0, drawCap));
+            const candidateDistance = Math.abs(candidateEvaluation.nearMissCount - desiredNearMissTickets);
+            const improves =
+              candidateDistance < bestDistance ||
+              (candidateDistance === bestDistance && candidateEvaluation.nearMissCount > evaluation.nearMissCount);
+            if (!improves) {
+              continue;
+            }
+
+            bestDrawBag = candidateDrawBag;
+            bestEvaluation = candidateEvaluation;
+            bestDistance = candidateDistance;
+            if (candidateDistance === 0) {
+              return {
+                drawBag: bestDrawBag,
+                evaluation: bestEvaluation
+              };
+            }
+          }
+        }
+      }
     }
 
-    return [...earlyNumbers, ...lateNumbers];
+    if (!bestDrawBag || !bestEvaluation || bestEvaluation.nearMissCount <= evaluation.nearMissCount) {
+      return undefined;
+    }
+
+    return {
+      drawBag: bestDrawBag,
+      evaluation: bestEvaluation
+    };
+  }
+
+  private swapEarlyLateNumbers(
+    drawBag: number[],
+    demotedEarlyNumber: number,
+    promotedLateNumber: number,
+    drawCap: number
+  ): number[] | undefined {
+    const earlyIndex = drawBag.indexOf(demotedEarlyNumber);
+    const lateIndex = drawBag.indexOf(promotedLateNumber);
+    if (earlyIndex < 0 || lateIndex < 0 || earlyIndex >= drawCap || lateIndex < drawCap) {
+      return undefined;
+    }
+
+    const candidate = [...drawBag];
+    [candidate[earlyIndex], candidate[lateIndex]] = [candidate[lateIndex], candidate[earlyIndex]];
+    return candidate;
   }
 
   private recordRoundPerformance(room: RoomState, game: GameState): void {
@@ -1418,6 +1595,26 @@ export class BingoEngine {
 
     this.roundPerformanceRecorded.add(game.id);
     this.roundPerformanceHistory.push(snapshot);
+
+    const shouldEmitRoundTelemetry =
+      process.env.BINGO_RTP_TELEMETRY_LOGS === "true" ||
+      (process.env.BINGO_RTP_TELEMETRY_LOGS !== "false" && !process.argv.includes("--test"));
+    if (shouldEmitRoundTelemetry) {
+      const rollingTelemetry = this.getRtpNearMissTelemetry({
+        hallId: room.hallId,
+        windowSize: this.rtpRollingWindowSize
+      });
+      const nearMissTargetApplied = game.nearMissTargetRateApplied ?? 0;
+      const nearMissDeviation = this.roundCurrency(nearMissRate - this.nearMissTargetRate);
+      const rollingNearMissDeviation = this.roundCurrency(rollingTelemetry.nearMissRateAvg - this.nearMissTargetRate);
+      console.info(
+        `[rtp-round] hall=${room.hallId} room=${room.code} game=${game.id} ` +
+          `targetRtp=${game.payoutPercent} actualRtp=${payoutPercentEffective} rollingRtp=${rollingTelemetry.payoutPercentActualAvg} ` +
+          `nearMiss=${nearMissRate} rollingNearMiss=${rollingTelemetry.nearMissRateAvg} ` +
+          `nearMissTarget=${this.nearMissTargetRate} appliedNearMissTarget=${nearMissTargetApplied} ` +
+          `nearMissDeviation=${nearMissDeviation} rollingNearMissDeviation=${rollingNearMissDeviation}`
+      );
+    }
 
     const retentionLimit = Math.max(this.rtpRollingWindowSize * 5, 5_000);
     while (this.roundPerformanceHistory.length > retentionLimit) {
@@ -3293,8 +3490,11 @@ export class BingoEngine {
       payoutPercent: game.payoutPercent,
       maxPayoutBudget: game.maxPayoutBudget,
       remainingPayoutBudget: game.remainingPayoutBudget,
+      activePatternIndexes: [...game.activePatternIndexes],
+      patternPayoutAmounts: [...game.patternPayoutAmounts],
       drawnNumbers: [...game.drawnNumbers],
       remainingNumbers: game.drawBag.length,
+      nearMissTargetRateApplied: game.nearMissTargetRateApplied,
       lineWinnerId: game.lineWinnerId,
       bingoWinnerId: game.bingoWinnerId,
       claims: [...game.claims],
@@ -3350,57 +3550,170 @@ export class BingoEngine {
     }
   }
 
-  private findAutomaticClaimCandidate(game: GameState, type: ClaimType): string | undefined {
-    const drawnSet = new Set<number>(game.drawnNumbers);
-    for (const [playerId, tickets] of game.tickets.entries()) {
-      const marksByTicket = game.marks.get(playerId) ?? [];
-      for (let ticketIndex = 0; ticketIndex < tickets.length; ticketIndex += 1) {
-        const effectiveMarks = this.buildEffectiveMarks(tickets[ticketIndex], marksByTicket[ticketIndex], drawnSet);
-        if (type === "LINE") {
-          if (findFirstCompleteLinePatternIndex(tickets[ticketIndex], effectiveMarks) >= 0) {
-            return playerId;
-          }
-          continue;
-        }
-        if (hasFullBingo(tickets[ticketIndex], effectiveMarks)) {
-          return playerId;
-        }
-      }
-    }
-    return undefined;
-  }
-
   private async processAutomaticClaimsForDraw(room: RoomState, game: GameState, number: number): Promise<void> {
     this.applyAutomaticMarksForNumber(game, number);
     if (game.status !== "RUNNING") {
       return;
     }
+    await this.processAutomaticCandyPatternClaims(room, game);
+  }
 
-    if (!game.lineWinnerId) {
-      const linePlayerId = this.findAutomaticClaimCandidate(game, "LINE");
-      if (linePlayerId) {
-        await this.submitClaim({
-          roomCode: room.code,
-          playerId: linePlayerId,
-          type: "LINE"
-        });
+  private async processAutomaticCandyPatternClaims(room: RoomState, game: GameState): Promise<void> {
+    const drawnSet = new Set<number>(game.drawnNumbers);
+
+    for (const [playerId, tickets] of game.tickets.entries()) {
+      const player = room.players.get(playerId);
+      if (!player) {
+        continue;
+      }
+
+      const marksByTicket = game.marks.get(playerId) ?? [];
+      let settledByTicket = game.settledPatternTopperSlots.get(playerId);
+      if (!settledByTicket) {
+        settledByTicket = tickets.map(() => new Set<number>());
+        game.settledPatternTopperSlots.set(playerId, settledByTicket);
+      }
+
+      for (let ticketIndex = 0; ticketIndex < tickets.length; ticketIndex += 1) {
+        const ticket = tickets[ticketIndex];
+        const effectiveMarks = this.buildEffectiveMarks(
+          ticket,
+          marksByTicket[ticketIndex],
+          drawnSet
+        );
+        const settledSlots = settledByTicket[ticketIndex] ?? new Set<number>();
+        settledByTicket[ticketIndex] = settledSlots;
+
+        const completedMatches = findCompletedCandyPatternFamilies(ticket, effectiveMarks);
+        for (const match of completedMatches) {
+          if (settledSlots.has(match.topperSlotIndex)) {
+            continue;
+          }
+
+          await this.settleAutomaticCandyPatternClaim(room, game, player, ticketIndex, match);
+          settledSlots.add(match.topperSlotIndex);
+        }
       }
     }
+  }
 
-    if (game.status !== "RUNNING" || game.bingoWinnerId) {
-      return;
-    }
+  private async settleAutomaticCandyPatternClaim(
+    room: RoomState,
+    game: GameState,
+    player: Player,
+    ticketIndex: number,
+    match: CandyPatternFamilyMatch
+  ): Promise<ClaimRecord> {
+    const claim: ClaimRecord = {
+      id: randomUUID(),
+      playerId: player.id,
+      type: "PATTERN",
+      valid: true,
+      claimKind: "PATTERN_FAMILY",
+      winningPatternIndex: match.rawPatternIndex,
+      patternIndex: match.rawPatternIndex,
+      displayPatternNumber: match.displayPatternNumber,
+      topperSlotIndex: match.topperSlotIndex,
+      ticketIndex,
+      createdAt: new Date().toISOString()
+    };
+    game.claims.push(claim);
 
-    const bingoPlayerId = this.findAutomaticClaimCandidate(game, "BINGO");
-    if (!bingoPlayerId) {
-      return;
-    }
-
-    await this.submitClaim({
-      roomCode: room.code,
-      playerId: bingoPlayerId,
-      type: "BINGO"
+    const family = getCandyPatternFamilyDefinition(match.topperSlotIndex);
+    const requestedPayout = family
+      ? Math.max(0, game.patternPayoutAmounts[family.topperSlotIndex] ?? 0)
+      : 0;
+    const gameType: LedgerGameType = "DATABINGO";
+    const channel: LedgerChannel = "INTERNET";
+    const houseAccountId = this.makeHouseAccountId(room.hallId, gameType, channel);
+    const rtpBudgetBefore = this.roundCurrency(Math.max(0, game.remainingPayoutBudget));
+    const cappedPatternPayout = this.applySinglePrizeCap({
+      room,
+      gameType,
+      amount: requestedPayout
     });
+    // Candy pattern payouts are calibrated against long-run RTP and should not
+    // be hard-capped to the current round's remaining prize pool / RTP budget.
+    // The round-level fields still track depletion for telemetry, but the
+    // actual claim amount is controlled by the payout table and single-prize
+    // policy so larger wins remain possible.
+    const payout = this.roundCurrency(Math.max(0, cappedPatternPayout.cappedAmount));
+
+    if (payout > 0) {
+      const transfer = await this.walletAdapter.transfer(
+        houseAccountId,
+        player.walletId,
+        payout,
+        `Pattern prize ${room.code} #${match.displayPatternNumber}`
+      );
+      player.balance += payout;
+      game.remainingPrizePool = this.roundCurrency(
+        Math.max(0, game.remainingPrizePool - payout)
+      );
+      game.remainingPayoutBudget = this.roundCurrency(
+        Math.max(0, game.remainingPayoutBudget - payout)
+      );
+      this.recordLossEntry(player.walletId, room.hallId, {
+        type: "PAYOUT",
+        amount: payout,
+        createdAtMs: Date.now()
+      });
+      this.recordComplianceLedgerEvent({
+        hallId: room.hallId,
+        gameType,
+        channel,
+        eventType: "PRIZE",
+        amount: payout,
+        roomCode: room.code,
+        gameId: game.id,
+        claimId: claim.id,
+        playerId: player.id,
+        walletId: player.walletId,
+        sourceAccountId: transfer.fromTx.accountId,
+        targetAccountId: transfer.toTx.accountId,
+        policyVersion: cappedPatternPayout.policy.id,
+        metadata: {
+          claimKind: "PATTERN_FAMILY",
+          displayPatternNumber: match.displayPatternNumber,
+          topperSlotIndex: match.topperSlotIndex,
+          ticketIndex,
+        }
+      });
+      this.appendPayoutAuditEvent({
+        kind: "CLAIM_PRIZE",
+        claimId: claim.id,
+        gameId: game.id,
+        roomCode: room.code,
+        hallId: room.hallId,
+        policyVersion: cappedPatternPayout.policy.id,
+        amount: payout,
+        walletId: player.walletId,
+        playerId: player.id,
+        sourceAccountId: houseAccountId,
+        txIds: [transfer.fromTx.id, transfer.toTx.id]
+      });
+    }
+
+    const rtpBudgetAfter = this.roundCurrency(Math.max(0, game.remainingPayoutBudget));
+    claim.payoutAmount = payout;
+    claim.payoutPolicyVersion = cappedPatternPayout.policy.id;
+    claim.payoutWasCapped = payout < requestedPayout;
+    claim.rtpBudgetBefore = rtpBudgetBefore;
+    claim.rtpBudgetAfter = rtpBudgetAfter;
+    claim.rtpCapped = false;
+
+    if (this.bingoAdapter.onClaimLogged) {
+      await this.bingoAdapter.onClaimLogged({
+        roomCode: room.code,
+        gameId: game.id,
+        playerId: player.id,
+        type: claim.type,
+        valid: claim.valid,
+        reason: claim.reason
+      });
+    }
+
+    return claim;
   }
 }
 
