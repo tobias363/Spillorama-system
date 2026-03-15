@@ -46,7 +46,7 @@ public sealed class Theme1DisplayPresenter
                     ? state.Cells[cellIndex]
                     : Theme1CardCellRenderState.Empty;
 
-                Theme1PresentationTextUtils.ApplyCardNumberText(cellView?.NumberLabel, cellState.NumberLabel);
+                Theme1PresentationTextUtils.ApplyCardNumberText(cellView, cellState.NumberLabel);
                 Theme1PresentationTextUtils.SetActive(cellView?.SelectionOverlay, cellState.IsSelected);
                 Theme1PresentationTextUtils.SetActive(cellView?.MissingOverlay, cellState.IsMissing);
                 Theme1PresentationTextUtils.SetActive(cellView?.MatchedOverlay, cellState.IsMatched);

@@ -6,13 +6,18 @@ public static class Theme1RuntimeAssetCatalog
     private const string BongShellResourcePath = "Theme1/Theme1BongShell";
     private const string OneToGoGlowRasterResourcePath = "Theme1/Theme1OneToGoGlowRaster";
     private const string OneToGoGlowResourcePath = "Theme1/Theme1OneToGoGlow";
+    private const string StakePanelShellVectorResourcePath = "Theme1/Controls/Theme1StakePanelVector";
     private const string StakePanelShellResourcePath = "Theme1/Controls/Theme1StakePanelBase";
     private const string StakeMinusButtonResourcePath = "Theme1/Controls/Theme1StakeMinusButton";
     private const string StakePlusButtonResourcePath = "Theme1/Controls/Theme1StakePlusButton";
+    private const string PlaceBetButtonVectorResourcePath = "Theme1/Controls/Theme1PlaceBetButtonVector";
     private const string PlaceBetButtonResourcePath = "Theme1/Controls/Theme1PlaceBetButtonShell";
+    private const string NextDrawBannerShellVectorResourcePath = "Theme1/Controls/Theme1NextDrawBannerVector";
     private const string NextDrawBannerShellResourcePath = "Theme1/Controls/Theme1NextDrawBannerBase";
     private const string ShuffleButtonResourcePath = "Theme1/Controls/Theme1ShuffleButton";
+    private const string SaldoPanelVectorResourcePath = "Theme1/Controls/Theme1SaldoPanelVector";
     private const string SaldoPanelResourcePath = "Theme1/Controls/Theme1SaldoPanelBase";
+    private const string GevinstPanelVectorResourcePath = "Theme1/Controls/Theme1GevinstPanelVector";
     private const string GevinstPanelResourcePath = "Theme1/Controls/Theme1GevinstPanelBase";
     private const string TopperCardResourcePathPrefix = "Theme1/Topper/Theme1TopperCard";
 
@@ -43,12 +48,7 @@ public static class Theme1RuntimeAssetCatalog
     {
         if (!bongShellResolved)
         {
-            bongShellSprite = Resources.Load<Sprite>(BongShellResourcePath);
-            if (bongShellSprite == null)
-            {
-                bongShellSprite = Resources.Load<Sprite>(BongShellRasterResourcePath);
-            }
-
+            bongShellSprite = LoadPrimaryThenFallback(BongShellResourcePath, BongShellRasterResourcePath);
             bongShellResolved = true;
         }
 
@@ -59,12 +59,7 @@ public static class Theme1RuntimeAssetCatalog
     {
         if (!oneToGoGlowResolved)
         {
-            oneToGoGlowSprite = Resources.Load<Sprite>(OneToGoGlowResourcePath);
-            if (oneToGoGlowSprite == null)
-            {
-                oneToGoGlowSprite = Resources.Load<Sprite>(OneToGoGlowRasterResourcePath);
-            }
-
+            oneToGoGlowSprite = LoadPrimaryThenFallback(OneToGoGlowResourcePath, OneToGoGlowRasterResourcePath);
             oneToGoGlowResolved = true;
         }
 
@@ -75,7 +70,7 @@ public static class Theme1RuntimeAssetCatalog
     {
         if (!stakePanelShellResolved)
         {
-            stakePanelShellSprite = Resources.Load<Sprite>(StakePanelShellResourcePath);
+            stakePanelShellSprite = LoadPrimaryThenFallback(StakePanelShellVectorResourcePath, StakePanelShellResourcePath);
             stakePanelShellResolved = true;
         }
 
@@ -108,7 +103,7 @@ public static class Theme1RuntimeAssetCatalog
     {
         if (!placeBetButtonResolved)
         {
-            placeBetButtonSprite = Resources.Load<Sprite>(PlaceBetButtonResourcePath);
+            placeBetButtonSprite = LoadPrimaryThenFallback(PlaceBetButtonVectorResourcePath, PlaceBetButtonResourcePath);
             placeBetButtonResolved = true;
         }
 
@@ -119,7 +114,7 @@ public static class Theme1RuntimeAssetCatalog
     {
         if (!nextDrawBannerShellResolved)
         {
-            nextDrawBannerShellSprite = Resources.Load<Sprite>(NextDrawBannerShellResourcePath);
+            nextDrawBannerShellSprite = LoadPrimaryThenFallback(NextDrawBannerShellVectorResourcePath, NextDrawBannerShellResourcePath);
             nextDrawBannerShellResolved = true;
         }
 
@@ -141,7 +136,7 @@ public static class Theme1RuntimeAssetCatalog
     {
         if (!saldoPanelResolved)
         {
-            saldoPanelSprite = Resources.Load<Sprite>(SaldoPanelResourcePath);
+            saldoPanelSprite = LoadPrimaryThenFallback(SaldoPanelVectorResourcePath, SaldoPanelResourcePath);
             saldoPanelResolved = true;
         }
 
@@ -152,7 +147,7 @@ public static class Theme1RuntimeAssetCatalog
     {
         if (!gevinstPanelResolved)
         {
-            gevinstPanelSprite = Resources.Load<Sprite>(GevinstPanelResourcePath);
+            gevinstPanelSprite = LoadPrimaryThenFallback(GevinstPanelVectorResourcePath, GevinstPanelResourcePath);
             gevinstPanelResolved = true;
         }
 
@@ -173,5 +168,20 @@ public static class Theme1RuntimeAssetCatalog
         }
 
         return topperCardSprites[slotIndex];
+    }
+
+    private static Sprite LoadPrimaryThenFallback(string primaryResourcePath, string fallbackResourcePath)
+    {
+        Sprite sprite = string.IsNullOrWhiteSpace(primaryResourcePath)
+            ? null
+            : Resources.Load<Sprite>(primaryResourcePath);
+        if (sprite != null)
+        {
+            return sprite;
+        }
+
+        return string.IsNullOrWhiteSpace(fallbackResourcePath)
+            ? null
+            : Resources.Load<Sprite>(fallbackResourcePath);
     }
 }

@@ -43,6 +43,48 @@ internal static class Theme1PresentationTextUtils
         ApplyText(target, value);
     }
 
+    public static void ApplyCardNumberText(Theme1CardCellView cellView, string value)
+    {
+        TextMeshProUGUI preferredLabel = cellView?.PreferredRenderLabel;
+        if (preferredLabel == null)
+        {
+            return;
+        }
+
+        RealtimeTextStyleUtils.ApplyCardNumber(preferredLabel, value ?? string.Empty);
+        Theme1BongTypography.ApplyCardNumber(preferredLabel);
+        if (!preferredLabel.enabled)
+        {
+            preferredLabel.enabled = true;
+        }
+
+        if (!preferredLabel.gameObject.activeSelf)
+        {
+            preferredLabel.gameObject.SetActive(true);
+        }
+
+        if (!Mathf.Approximately(preferredLabel.alpha, 1f))
+        {
+            preferredLabel.alpha = 1f;
+        }
+
+        preferredLabel.transform.SetAsLastSibling();
+
+        TextMeshProUGUI secondaryLabel = cellView.LegacyNumberLabel == preferredLabel
+            ? cellView.VisibleNumberLabel
+            : cellView.LegacyNumberLabel;
+        if (secondaryLabel != null)
+        {
+            secondaryLabel.text = string.Empty;
+            secondaryLabel.enabled = false;
+            secondaryLabel.alpha = 0f;
+            if (secondaryLabel.gameObject.activeSelf)
+            {
+                secondaryLabel.gameObject.SetActive(false);
+            }
+        }
+    }
+
     public static void ApplyBallNumberText(TMP_Text target, string value)
     {
         if (target is TextMeshProUGUI label)

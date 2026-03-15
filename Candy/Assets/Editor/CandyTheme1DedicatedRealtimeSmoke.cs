@@ -312,7 +312,9 @@ public static class CandyTheme1DedicatedRealtimeSmoke
 
         if (requireMatchedPayline && !HasMatchedPayline(dedicatedState))
         {
-            error = "[Theme1DedicatedSmoke] Dedicated view viste ikke matched payline på vinnsnapshot.";
+            error =
+                "[Theme1DedicatedSmoke] Dedicated view viste ikke matched payline på vinnsnapshot. " +
+                BuildPaylineDebugSummary(dedicatedState);
             return false;
         }
 
@@ -1156,7 +1158,8 @@ public static class CandyTheme1DedicatedRealtimeSmoke
             {
                 TextMeshProUGUI label = card.Cells[cellIndex]?.NumberLabel;
                 if (label == null ||
-                    !string.Equals(label.gameObject.name, "RealtimeCardNumberLabel", StringComparison.Ordinal) ||
+                    (!string.Equals(label.gameObject.name, "RealtimeCardNumberLabel", StringComparison.Ordinal) &&
+                     !string.Equals(label.gameObject.name, "RealtimeCardNumberVisibleLabel", StringComparison.Ordinal)) ||
                     label.transform.parent == null ||
                     !label.transform.parent.name.StartsWith("RealtimeCardCell_", StringComparison.Ordinal) ||
                     label.transform.parent.parent == null ||
@@ -1274,6 +1277,38 @@ public static class CandyTheme1DedicatedRealtimeSmoke
         }
 
         return false;
+    }
+
+    private static string BuildPaylineDebugSummary(Theme1RoundRenderState state)
+    {
+        if (state?.Cards == null)
+        {
+            return "paylines=<missing-state>";
+        }
+
+        List<string> cards = new List<string>();
+        for (int cardIndex = 0; cardIndex < state.Cards.Length; cardIndex++)
+        {
+            bool[] paylineStates = state.Cards[cardIndex]?.PaylinesActive;
+            if (paylineStates == null)
+            {
+                cards.Add($"card{cardIndex}=<null>");
+                continue;
+            }
+
+            List<int> active = new List<int>();
+            for (int i = 0; i < paylineStates.Length; i++)
+            {
+                if (paylineStates[i])
+                {
+                    active.Add(i);
+                }
+            }
+
+            cards.Add($"card{cardIndex}=[{string.Join(",", active)}]/len={paylineStates.Length}");
+        }
+
+        return "paylines=" + string.Join(";", cards);
     }
 
     private static void SetSerializedBool(SerializedObject serializedObject, string propertyName, bool value)

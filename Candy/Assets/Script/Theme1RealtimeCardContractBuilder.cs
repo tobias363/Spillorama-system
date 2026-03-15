@@ -68,6 +68,7 @@ internal static class Theme1RealtimeCardContractBuilder
                     hideWhenBlank: false);
                 Theme1RuntimeTextTargetBuilder.DeactivateLegacyTextLabels(cellRoot, label);
                 Theme1CardBoardBuilder.EnsureDedicatedCellVisuals(cellRoot, label);
+                TextMeshProUGUI visibleLabel = Theme1RuntimeTextTargetBuilder.EnsureDedicatedVisibleCardNumberLabel(cellRoot, label);
                 GameObject selectionMarker = Theme1CardBoardBuilder.EnsureCardCellStateToken(cellRoot, Theme1GameplayViewRepairUtils.SelectionMarkerName);
                 GameObject missingOverlay = Theme1CardBoardBuilder.EnsureCardCellStateToken(cellRoot, Theme1GameplayViewRepairUtils.MissingOverlayName);
                 GameObject matchedOverlay = Theme1CardBoardBuilder.EnsureCardCellStateToken(cellRoot, Theme1GameplayViewRepairUtils.MatchedOverlayName);
@@ -77,7 +78,7 @@ internal static class Theme1RealtimeCardContractBuilder
                 Theme1RuntimeViewCommon.SetActiveIfNeeded(selectionMarker, false);
                 Theme1RuntimeViewCommon.SetActiveIfNeeded(missingOverlay, false);
                 Theme1RuntimeViewCommon.SetActiveIfNeeded(matchedOverlay, false);
-                card.num_text[cellIndex] = label;
+                card.num_text[cellIndex] = visibleLabel != null ? visibleLabel : label;
                 card.selectionImg[cellIndex] = selectionMarker;
                 card.missingPatternImg[cellIndex] = missingOverlay;
                 card.matchPatternImg[cellIndex] = matchedOverlay;

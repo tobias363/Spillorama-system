@@ -1,30 +1,42 @@
 using System;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 [Serializable]
 public sealed class Theme1CardGridView
 {
+    [SerializeField] private RectTransform rootRect;
     [SerializeField] private TextMeshProUGUI headerLabel;
     [SerializeField] private TextMeshProUGUI betLabel;
     [SerializeField] private TextMeshProUGUI winLabel;
+    [SerializeField] private Button singleCardRerollButton;
     [SerializeField] private Theme1CardCellView[] cells = new Theme1CardCellView[15];
     [SerializeField] private GameObject[] paylineObjects = Array.Empty<GameObject>();
 
+    public RectTransform RootRect => rootRect;
     public TextMeshProUGUI HeaderLabel => headerLabel;
     public TextMeshProUGUI BetLabel => betLabel;
     public TextMeshProUGUI WinLabel => winLabel;
+    public Button SingleCardRerollButton => singleCardRerollButton;
     public TextMeshProUGUI CardIndexLabel => headerLabel;
     public TextMeshProUGUI StakeLabel => betLabel;
     public TextMeshProUGUI CardWinLabel => winLabel;
     public Theme1CardCellView[] Cells => cells;
     public GameObject[] PaylineObjects => paylineObjects;
 
-    public void PullFrom(CandyCardViewBinding binding, TextMeshProUGUI resolvedHeaderLabel, TextMeshProUGUI resolvedBetLabel, TextMeshProUGUI resolvedWinLabel)
+    public void PullFrom(
+        CandyCardViewBinding binding,
+        TextMeshProUGUI resolvedHeaderLabel,
+        TextMeshProUGUI resolvedBetLabel,
+        TextMeshProUGUI resolvedWinLabel,
+        int cardIndex)
     {
+        rootRect = ResolveRootRect(binding, resolvedHeaderLabel, resolvedBetLabel, resolvedWinLabel);
         headerLabel = resolvedHeaderLabel;
         betLabel = resolvedBetLabel;
         winLabel = resolvedWinLabel;
+        singleCardRerollButton = ResolveSingleCardRerollButton(rootRect, cardIndex);
 
         int cellCount = 15;
         cells = new Theme1CardCellView[cellCount];
@@ -48,6 +60,61 @@ public sealed class Theme1CardGridView
         {
             paylineObjects[i] = binding.PaylineObjects[i];
         }
+    }
+
+    public void AttachSingleCardRerollButton(Button button)
+    {
+        singleCardRerollButton = button;
+    }
+
+    private static RectTransform ResolveRootRect(
+        CandyCardViewBinding binding,
+        TextMeshProUGUI resolvedHeaderLabel,
+        TextMeshProUGUI resolvedBetLabel,
+        TextMeshProUGUI resolvedWinLabel)
+    {
+        RectTransform resolvedFromBinding = Theme1ViewHierarchyResolver.ResolveCardRoot(binding) as RectTransform;
+        if (resolvedFromBinding != null)
+        {
+            return resolvedFromBinding;
+        }
+
+        return ResolveRootRectFromLabel(resolvedHeaderLabel) ??
+               ResolveRootRectFromLabel(resolvedBetLabel) ??
+               ResolveRootRectFromLabel(resolvedWinLabel);
+    }
+
+    private static RectTransform ResolveRootRectFromLabel(TMP_Text label)
+    {
+        if (label == null)
+        {
+            return null;
+        }
+
+        Transform current = label.transform;
+        while (current != null)
+        {
+            if (current is RectTransform rectTransform &&
+                current.name.StartsWith("Card_", StringComparison.Ordinal))
+            {
+                return rectTransform;
+            }
+
+            current = current.parent;
+        }
+
+        return label.transform.parent as RectTransform;
+    }
+
+    private static Button ResolveSingleCardRerollButton(RectTransform cardRoot, int cardIndex)
+    {
+        if (cardRoot == null)
+        {
+            return null;
+        }
+
+        Transform child = cardRoot.Find(Theme1GameplayViewRepairUtils.BuildSingleCardRerollButtonName(cardIndex));
+        return child != null ? child.GetComponent<Button>() : null;
     }
 
     private static int CompareCellsByVisualOrder(Theme1CardCellView left, Theme1CardCellView right)

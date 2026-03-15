@@ -1,4 +1,4 @@
-export type ClaimType = "LINE" | "BINGO";
+export type ClaimType = "LINE" | "BINGO" | "PATTERN";
 export type GameStatus = "WAITING" | "RUNNING" | "ENDED";
 
 export interface Player {
@@ -22,8 +22,12 @@ export interface ClaimRecord {
   type: ClaimType;
   valid: boolean;
   reason?: string;
+  claimKind?: "LEGACY_LINE" | "LEGACY_BINGO" | "PATTERN_FAMILY";
   winningPatternIndex?: number;
   patternIndex?: number;
+  displayPatternNumber?: number;
+  topperSlotIndex?: number;
+  ticketIndex?: number;
   bonusTriggered?: boolean;
   bonusAmount?: number;
   payoutAmount?: number;
@@ -45,11 +49,14 @@ export interface GameState {
   payoutPercent: number;
   maxPayoutBudget: number;
   remainingPayoutBudget: number;
+  activePatternIndexes: number[];
+  patternPayoutAmounts: number[];
   drawBag: number[];
   drawnNumbers: number[];
   nearMissTargetRateApplied?: number;
   tickets: Map<string, Ticket[]>;
   marks: Map<string, Set<number>[]>;
+  settledPatternTopperSlots: Map<string, Set<number>[]>;
   claims: ClaimRecord[];
   lineWinnerId?: string;
   bingoWinnerId?: string;
@@ -79,6 +86,8 @@ export interface GameSnapshot {
   payoutPercent: number;
   maxPayoutBudget: number;
   remainingPayoutBudget: number;
+  activePatternIndexes: number[];
+  patternPayoutAmounts: number[];
   drawnNumbers: number[];
   remainingNumbers: number;
   nearMissTargetRateApplied?: number;

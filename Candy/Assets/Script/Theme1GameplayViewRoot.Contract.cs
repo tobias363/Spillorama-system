@@ -28,6 +28,30 @@ public sealed partial class Theme1GameplayViewRoot
             isValid = false;
         }
 
+        if (runtimeNumberGenerator == null)
+        {
+            errors.Add("Theme1ProductionRoot mangler runtimeNumberGenerator.");
+            isValid = false;
+        }
+
+        if (runtimeGameManager == null)
+        {
+            errors.Add("Theme1ProductionRoot mangler runtimeGameManager.");
+            isValid = false;
+        }
+
+        if (runtimeApiManager == null)
+        {
+            errors.Add("Theme1ProductionRoot mangler runtimeApiManager.");
+            isValid = false;
+        }
+
+        if (runtimeUiManager == null)
+        {
+            errors.Add("Theme1ProductionRoot mangler runtimeUiManager.");
+            isValid = false;
+        }
+
         if (cards == null || cards.Length != 4)
         {
             errors.Add($"Theme1GameplayViewRoot forventer 4 kort. Fikk {cards?.Length ?? 0}.");
@@ -51,9 +75,36 @@ public sealed partial class Theme1GameplayViewRoot
                     isValid = false;
                 }
 
+                if (card.RootRect == null)
+                {
+                    errors.Add($"cards[{cardIndex}].rootRect mangler.");
+                    isValid = false;
+                }
+
                 if (!ValidateText(card.BetLabel, $"cards[{cardIndex}].betLabel", errors, requireActive: true))
                 {
                     isValid = false;
+                }
+
+                if (card.SingleCardRerollButton == null)
+                {
+                    errors.Add($"cards[{cardIndex}].singleCardRerollButton mangler.");
+                    isValid = false;
+                }
+                else
+                {
+                    string expectedName = Theme1GameplayViewRepairUtils.BuildSingleCardRerollButtonName(cardIndex);
+                    if (!string.Equals(card.SingleCardRerollButton.gameObject.name, expectedName, StringComparison.Ordinal))
+                    {
+                        errors.Add($"cards[{cardIndex}].singleCardRerollButton har feil navn. Forventer '{expectedName}', fikk '{card.SingleCardRerollButton.gameObject.name}'.");
+                        isValid = false;
+                    }
+
+                    if (card.SingleCardRerollButton.transform is not RectTransform)
+                    {
+                        errors.Add($"cards[{cardIndex}].singleCardRerollButton mangler RectTransform.");
+                        isValid = false;
+                    }
                 }
 
                 if (!ValidateText(card.WinLabel, $"cards[{cardIndex}].winLabel", errors, requireActive: false))
@@ -92,7 +143,7 @@ public sealed partial class Theme1GameplayViewRoot
 
                         if (!Theme1GameplayViewRepairUtils.IsDedicatedCardNumberLabel(cell.NumberLabel, cell.SelectionOverlay))
                         {
-                            errors.Add($"cards[{cardIndex}].cells[{cellIndex}].numberLabel peker ikke til lokal RealtimeCardNumberLabel.");
+                            errors.Add($"cards[{cardIndex}].cells[{cellIndex}].numberLabel peker ikke til lokal Theme1 card number label.");
                             isValid = false;
                         }
 
@@ -175,6 +226,16 @@ public sealed partial class Theme1GameplayViewRoot
             isValid &= ValidateText(hudBar.CreditText, "hudBar.creditText", errors, requireActive: true);
             isValid &= ValidateText(hudBar.WinningsText, "hudBar.winningsText", errors, requireActive: true);
             isValid &= ValidateText(hudBar.BetText, "hudBar.betText", errors, requireActive: true);
+        }
+
+        if (hudControls == null)
+        {
+            errors.Add("hudControls mangler.");
+            isValid = false;
+        }
+        else if (!hudControls.Validate(errors))
+        {
+            isValid = false;
         }
 
         if (topperStrip == null || topperStrip.Slots == null || topperStrip.Slots.Length == 0)

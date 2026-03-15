@@ -18,10 +18,12 @@ public sealed class Theme1CardCellView
     [SerializeField] private Image background;
     [SerializeField] private Image glow;
     [SerializeField] private TextMeshProUGUI prizeLabel;
+    [SerializeField] private TextMeshProUGUI visibleNumberLabel;
     [SerializeField] private Theme1CellPulseController pulseController;
 
     public RectTransform CellRoot => cellRoot;
-    public TextMeshProUGUI NumberLabel => numberLabel;
+    public TextMeshProUGUI NumberLabel => visibleNumberLabel != null ? visibleNumberLabel : numberLabel;
+    public TextMeshProUGUI LegacyNumberLabel => numberLabel;
     public GameObject SelectionMarker => selectionMarker;
     public GameObject SelectionOverlay => selectionMarker;
     public GameObject MissingOverlay => missingOverlay;
@@ -29,6 +31,8 @@ public sealed class Theme1CardCellView
     public Image Background => background;
     public Image Glow => glow;
     public TextMeshProUGUI PrizeLabel => prizeLabel;
+    public TextMeshProUGUI VisibleNumberLabel => visibleNumberLabel;
+    public TextMeshProUGUI PreferredRenderLabel => NumberLabel;
     public Theme1CellPulseController PulseController => pulseController;
 
     public void PullFrom(RectTransform root, TextMeshProUGUI label, GameObject selection, GameObject missing, GameObject matched)
@@ -41,6 +45,7 @@ public sealed class Theme1CardCellView
         background = FindChildComponent<Image>(root, CellBackgroundName);
         glow = FindChildComponent<Image>(root, CellGlowName);
         prizeLabel = FindChildComponent<TextMeshProUGUI>(root, CellPrizeLabelName);
+        visibleNumberLabel = FindChildComponent<TextMeshProUGUI>(root, Theme1GameplayViewRepairUtils.CardNumberVisibleLabelName);
         pulseController = root != null ? root.GetComponent<Theme1CellPulseController>() : null;
     }
 

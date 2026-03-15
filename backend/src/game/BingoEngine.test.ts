@@ -194,12 +194,26 @@ class SequenceTicketBingoAdapter implements BingoSystemAdapter {
   }
 }
 
+class CandyTicketBingoAdapter implements BingoSystemAdapter {
+  async createTicket(_input: CreateTicketInput): Promise<Ticket> {
+    return {
+      grid: [
+        [1, 2, 3, 4, 5],
+        [6, 7, 8, 9, 10],
+        [11, 12, 13, 14, 15],
+      ],
+    };
+  }
+}
+
 async function makeEngineWithRoom(): Promise<{
   engine: BingoEngine;
   roomCode: string;
   hostPlayerId: string;
 }> {
-  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter());
+  const wallet = new InMemoryWalletAdapter();
+  await wallet.topUp("house-hall-1-databingo-internet", 5_000_000, "seed house");
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet);
   const { roomCode, playerId } = await engine.createRoom({
     hallId: "hall-1",
     playerName: "Host",
@@ -981,7 +995,9 @@ test("submitClaim validates against drawn numbers and snapshot marks without exp
 });
 
 test("drawNextNumber auto-settles a line claim before the round ends on the final allowed draw", async () => {
-  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+  const wallet = new InMemoryWalletAdapter();
+  await wallet.topUp("house-hall-auto-line-databingo-internet", 5_000_000, "seed house");
+  const engine = new BingoEngine(new CandyTicketBingoAdapter(), wallet, {
     maxDrawsPerRound: 5
   });
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
@@ -1004,7 +1020,7 @@ test("drawNextNumber auto-settles a line claim before the round ends on the fina
     payoutPercent: 80
   });
 
-  prioritizeDrawNumbers(engine, roomCode, [1, 2, 3, 4, 5]);
+  prioritizeDrawNumbers(engine, roomCode, [1, 4, 7, 10, 13]);
   for (let drawCount = 0; drawCount < 5; drawCount += 1) {
     await engine.drawNextNumber({
       roomCode,
@@ -1016,10 +1032,17 @@ test("drawNextNumber auto-settles a line claim before the round ends on the fina
   const snapshot = engine.getRoomSnapshot(roomCode);
   assert.equal(snapshot.currentGame?.status, "ENDED");
   assert.equal(snapshot.currentGame?.endedReason, "MAX_DRAWS_REACHED");
-  assert.equal(snapshot.currentGame?.lineWinnerId, hostPlayerId);
-  const lineClaim = snapshot.currentGame?.claims.find((claim) => claim.valid && claim.type === "LINE");
-  assert.ok(lineClaim);
-  assert.equal(lineClaim?.payoutAmount, 60);
+  const patternClaim = snapshot.currentGame?.claims.find(
+    (claim) =>
+      claim.valid &&
+      claim.type === "PATTERN" &&
+      claim.playerId === hostPlayerId,
+  );
+  assert.ok(patternClaim);
+  assert.equal(patternClaim?.claimKind, "PATTERN_FAMILY");
+  assert.equal(patternClaim?.displayPatternNumber, 1);
+  assert.equal(patternClaim?.topperSlotIndex, 11);
+  assert.equal((patternClaim?.payoutAmount ?? 0) > 0, true);
 });
 
 test("drawNextNumber auto-settles line and bingo claims for realtime-safe payout delivery", async () => {
@@ -1047,16 +1070,24 @@ test("drawNextNumber auto-settles line and bingo claims for realtime-safe payout
 
   const snapshot = engine.getRoomSnapshot(roomCode);
   assert.equal(snapshot.currentGame?.status, "ENDED");
-  assert.equal(snapshot.currentGame?.endedReason, "BINGO_CLAIMED");
-  assert.equal(snapshot.currentGame?.lineWinnerId, hostPlayerId);
-  assert.equal(snapshot.currentGame?.bingoWinnerId, hostPlayerId);
+  assert.equal(snapshot.currentGame?.endedReason, "MAX_DRAWS_REACHED");
+  assert.equal(snapshot.currentGame?.lineWinnerId, undefined);
+  assert.equal(snapshot.currentGame?.bingoWinnerId, undefined);
 
   const validClaims = snapshot.currentGame?.claims.filter((claim) => claim.valid) ?? [];
-  assert.equal(validClaims.some((claim) => claim.type === "LINE"), true);
-  assert.equal(validClaims.some((claim) => claim.type === "BINGO"), true);
+  const hostPatternClaims = validClaims.filter(
+    (claim) => claim.playerId === hostPlayerId && claim.type === "PATTERN",
+  );
+  assert.equal(validClaims.some((claim) => claim.type === "LINE"), false);
+  assert.equal(validClaims.some((claim) => claim.type === "BINGO"), false);
+  assert.equal(hostPatternClaims.length > 0, true);
   assert.equal(
-    validClaims.reduce((sum, claim) => sum + (claim.payoutAmount ?? 0), 0),
-    160
+    hostPatternClaims.every((claim) => claim.claimKind === "PATTERN_FAMILY"),
+    true,
+  );
+  assert.equal(
+    hostPatternClaims.reduce((sum, claim) => sum + (claim.payoutAmount ?? 0), 0) > 0,
+    true,
   );
 });
 

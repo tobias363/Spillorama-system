@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using TMPro;
 using UnityEditor;
@@ -23,7 +24,9 @@ public static class Theme1TextlessControlMigration
             Vector2 sizeDelta,
             float minFontSize,
             float maxFontSize,
-            bool allowWrap)
+            bool allowWrap,
+            Vector4 margin,
+            float lineSpacing = 0f)
         {
             ObjectName = objectName;
             SpriteAssetPath = spriteAssetPath;
@@ -34,6 +37,8 @@ public static class Theme1TextlessControlMigration
             MinFontSize = minFontSize;
             MaxFontSize = maxFontSize;
             AllowWrap = allowWrap;
+            Margin = margin;
+            LineSpacing = lineSpacing;
         }
 
         public string ObjectName { get; }
@@ -45,6 +50,8 @@ public static class Theme1TextlessControlMigration
         public float MinFontSize { get; }
         public float MaxFontSize { get; }
         public bool AllowWrap { get; }
+        public Vector4 Margin { get; }
+        public float LineSpacing { get; }
     }
 
     private static readonly ControlDefinition[] Definitions =
@@ -55,50 +62,56 @@ public static class Theme1TextlessControlMigration
             "Theme1PlaceBetLabel",
             "Plasser innsats",
             new Vector2(0f, 4f),
-            new Vector2(170f, 30f),
-            24f,
-            40f,
-            false),
+            new Vector2(194f, 42f),
+            30f,
+            48f,
+            false,
+            new Vector4(10f, 6f, 10f, 4f)),
         new(
             "Theme1StakePanel",
             "Assets/Resources/Theme1/Controls/Theme1StakePanelBase.png",
             "Theme1StakeTitleLabel",
             "Innsats",
-            new Vector2(0f, 12f),
-            new Vector2(110f, 22f),
-            18f,
-            30f,
-            false),
+            new Vector2(0f, 13f),
+            new Vector2(132f, 28f),
+            22f,
+            34f,
+            false,
+            new Vector4(8f, 4f, 8f, 2f)),
         new(
             "Theme1SaldoPanel",
             "Assets/Resources/Theme1/Controls/Theme1SaldoPanelBase.png",
             "Theme1SaldoTitleLabel",
             "Saldo",
-            new Vector2(0f, 14f),
-            new Vector2(96f, 22f),
-            18f,
-            28f,
-            false),
+            new Vector2(0f, 15f),
+            new Vector2(104f, 28f),
+            22f,
+            32f,
+            false,
+            new Vector4(8f, 4f, 8f, 2f)),
         new(
             "Theme1GevinstPanel",
             "Assets/Resources/Theme1/Controls/Theme1GevinstPanelBase.png",
             "Theme1GevinstTitleLabel",
             "Gevinst",
-            new Vector2(0f, 14f),
-            new Vector2(104f, 22f),
-            18f,
-            28f,
-            false),
+            new Vector2(0f, 15f),
+            new Vector2(118f, 28f),
+            22f,
+            32f,
+            false,
+            new Vector4(8f, 4f, 8f, 2f)),
         new(
             "Theme1NextDrawBanner",
             "Assets/Resources/Theme1/Controls/Theme1NextDrawBannerBase.png",
             "Theme1NextDrawTitleLabel",
             "Ny trekning\nstarter om",
             new Vector2(0f, 28f),
-            new Vector2(168f, 48f),
-            18f,
-            32f,
-            true),
+            new Vector2(196f, 60f),
+            24f,
+            38f,
+            true,
+            new Vector4(10f, 6f, 10f, 4f),
+            -8f),
     };
 
     [MenuItem("Candy/Theme1/Apply Textless Control Migration")]
@@ -242,6 +255,32 @@ public static class Theme1TextlessControlMigration
             return sprite;
         }
 
+        AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+        sprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+        if (sprite != null)
+        {
+            return sprite;
+        }
+
+        string resourcePath = ToResourcesPath(assetPath);
+        if (!string.IsNullOrWhiteSpace(resourcePath))
+        {
+            sprite = Resources.Load<Sprite>(resourcePath);
+            if (sprite != null)
+            {
+                return sprite;
+            }
+        }
+
+        UnityEngine.Object[] assetsAtPath = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+        for (int i = 0; i < assetsAtPath.Length; i++)
+        {
+            if (assetsAtPath[i] is Sprite subAssetSprite)
+            {
+                return subAssetSprite;
+            }
+        }
+
         TextureImporter importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
         if (importer == null)
         {
@@ -308,7 +347,39 @@ public static class Theme1TextlessControlMigration
             importer.SaveAndReimport();
         }
 
-        return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+        sprite = AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+        if (sprite != null)
+        {
+            return sprite;
+        }
+
+        assetsAtPath = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+        for (int i = 0; i < assetsAtPath.Length; i++)
+        {
+            if (assetsAtPath[i] is Sprite subAssetSprite)
+            {
+                return subAssetSprite;
+            }
+        }
+
+        return null;
+    }
+
+    private static string ToResourcesPath(string assetPath)
+    {
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+            return string.Empty;
+        }
+
+        const string resourcesMarker = "Assets/Resources/";
+        if (!assetPath.StartsWith(resourcesMarker, StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        string relativePath = assetPath.Substring(resourcesMarker.Length);
+        return Path.ChangeExtension(relativePath, null)?.Replace('\\', '/');
     }
 
     private static int EnsureLabel(GameObject target, ControlDefinition definition)
@@ -358,11 +429,13 @@ public static class Theme1TextlessControlMigration
         label.enableAutoSizing = true;
         label.fontSizeMin = definition.MinFontSize;
         label.fontSizeMax = definition.MaxFontSize;
-        label.enableWordWrapping = definition.AllowWrap;
+        label.fontSize = definition.MaxFontSize;
         label.textWrappingMode = definition.AllowWrap ? TextWrappingModes.Normal : TextWrappingModes.NoWrap;
         label.overflowMode = TextOverflowModes.Overflow;
         label.alignment = TextAlignmentOptions.Center;
         label.extraPadding = true;
+        label.margin = definition.Margin;
+        label.lineSpacing = definition.LineSpacing;
         Theme1BongTypography.ApplyPrizeLabel(label);
         EditorUtility.SetDirty(rect);
         EditorUtility.SetDirty(label);

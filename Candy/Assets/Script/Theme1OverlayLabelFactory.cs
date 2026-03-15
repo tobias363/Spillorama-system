@@ -82,6 +82,7 @@ internal static class Theme1OverlayLabelFactory
         label.gameObject.layer = parent.gameObject.layer;
         label.gameObject.SetActive(true);
         label.enabled = true;
+        label.maskable = false;
         label.raycastTarget = false;
         label.alpha = 1f;
         string existingText = ReadText(label, string.Empty);

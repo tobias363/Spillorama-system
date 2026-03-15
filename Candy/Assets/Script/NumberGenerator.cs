@@ -111,7 +111,15 @@ public class NumberGenerator : MonoBehaviour
             paylineManager = new PaylineManager(this);
             RebuildPatternLookupByCell();
             ResolveOptionalSceneReferences();
+            Theme1GameplayViewRepairUtils.EnsureCardNumberTargets(this);
             ApplyExplicitRealtimeCardViewBindingsFromComponent();
+            Theme1GameplayViewRoot theme1Root = APIManager.instance != null
+                ? APIManager.instance.Theme1GameplayViewRootRef
+                : UnityEngine.Object.FindFirstObjectByType<Theme1GameplayViewRoot>(FindObjectsInactive.Include);
+            if (theme1Root != null)
+            {
+                Theme1GameplayViewContractRefresher.RefreshVisibleContractFromScene(theme1Root);
+            }
             SetActiveIfChanged(extraBallObj, false);
             ResetRealtimeBonusFlow(closeBonusPanel: true);
             if (APIManager.instance == null || !APIManager.instance.UseRealtimeBackend)

@@ -517,6 +517,21 @@ public partial class APIManager
             return;
         }
 
+        bool shouldDriveContractPaylines = theme1RealtimeViewMode == Theme1RealtimeViewMode.DedicatedOnly;
+        Theme1GameplayViewRoot viewRoot = null;
+        GameObject[][] contractPaylineObjectsByCard = null;
+        if (shouldDriveContractPaylines &&
+            TryResolveTheme1GameplayViewContract(out viewRoot) &&
+            viewRoot?.Cards != null &&
+            viewRoot.Cards.Length > 0)
+        {
+            contractPaylineObjectsByCard = new GameObject[viewRoot.Cards.Length][];
+            for (int cardIndex = 0; cardIndex < viewRoot.Cards.Length; cardIndex++)
+            {
+                contractPaylineObjectsByCard[cardIndex] = viewRoot.Cards[cardIndex]?.PaylineObjects;
+            }
+        }
+
         for (int cardIndex = 0; cardIndex < generator.cardClasses.Length; cardIndex++)
         {
             CardClass card = generator.cardClasses[cardIndex];
@@ -543,11 +558,50 @@ public partial class APIManager
                 bool matched = matchedFlags[patternIndex];
                 card.paylineindex[patternIndex] = matched;
 
-                // Dedicated Theme1 cards own the visible overlay rendering.
-                // Keep the legacy flags in sync, but never show the legacy line objects.
-                SetActiveIfChanged(card.paylineObj[patternIndex], false);
+                GameObject paylineObject = card.paylineObj[patternIndex];
+                if (shouldDriveContractPaylines &&
+                    IsAuthoritativeDedicatedPayline(contractPaylineObjectsByCard, cardIndex, paylineObject))
+                {
+                    // The Theme1 production contract is authoritative for which payline objects belong
+                    // to the dedicated view, regardless of legacy scene naming.
+                    SetActiveIfChanged(paylineObject, matched);
+                    continue;
+                }
+
+                // Non-dedicated legacy lines should never become visible in the dedicated view.
+                SetActiveIfChanged(paylineObject, false);
             }
         }
+    }
+
+    private static bool IsAuthoritativeDedicatedPayline(
+        IReadOnlyList<GameObject[]> contractPaylineObjectsByCard,
+        int cardIndex,
+        GameObject paylineObject)
+    {
+        if (paylineObject == null ||
+            contractPaylineObjectsByCard == null ||
+            cardIndex < 0 ||
+            cardIndex >= contractPaylineObjectsByCard.Count)
+        {
+            return false;
+        }
+
+        GameObject[] contractPaylines = contractPaylineObjectsByCard[cardIndex];
+        if (contractPaylines == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < contractPaylines.Length; i++)
+        {
+            if (contractPaylines[i] == paylineObject)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsCellMatchedByPatternMasks(

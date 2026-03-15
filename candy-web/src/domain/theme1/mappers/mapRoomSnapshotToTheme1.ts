@@ -11,6 +11,15 @@ import {
   getTheme1PatternCatalogEntry,
 } from "@/domain/theme1/patternCatalog";
 import {
+  createEmptyTicketNumbers,
+  flattenTicketNumbers,
+  normalizeTicketNumbers,
+  resolvePlayerContext,
+  resolveVisibleTickets,
+  type Theme1ResolvedPlayerContext,
+  type Theme1RoomTicketSource,
+} from "@/domain/theme1/mappers/theme1TicketResolution";
+import {
   THEME1_CARD_CELL_COUNT,
   THEME1_DEFAULT_BALL_SLOT_COUNT,
   THEME1_DEFAULT_CARD_SLOT_COUNT,
@@ -45,12 +54,11 @@ import {
   type Theme1PatternMask,
 } from "@/domain/theme1/theme1RuntimeConfig";
 import type {
+  Theme1BoardPatternOverlayState,
   Theme1BoardState,
   Theme1CellTone,
   Theme1TopperState,
 } from "@/domain/theme1/renderModel";
-
-type Theme1RoomTicketSource = "currentGame" | "preRoundTickets" | "empty";
 
 interface Theme1NearWinResult {
   rawPatternIndex: number;
@@ -78,13 +86,6 @@ interface Theme1CardPatternEvaluation {
 interface Theme1PatternEvaluation {
   cards: Theme1CardPatternEvaluation[];
   nearWinsByTopperSlot: Map<number, Theme1NearWinResult[]>;
-}
-
-interface Theme1ResolvedPlayerContext {
-  playerId?: string;
-  player?: Player;
-  tickets: Ticket[];
-  source: Theme1RoomTicketSource;
 }
 
 export {
@@ -153,16 +154,12 @@ export function mapRoomSnapshotToTheme1(
     options.duplicateSingleTicketAcrossCards ?? true;
   const patternMasks = normalizePatternMasks(options.patternMasks);
   const activePatternIndexes = normalizeActivePatternIndexes(
-    options.activePatternIndexes,
+    options.activePatternIndexes ?? currentGame?.activePatternIndexes,
     patternMasks.length,
-  );
-  const preferredNearPatternIndexes = normalizePreferredNearPatternIndexes(
-    options.preferredNearPatternIndexesByCard,
-    cardSlotCount,
   );
   const effectiveEntryFee = resolveEffectiveEntryFee(snapshot);
   const topperPayoutAmounts = normalizeTopperPayoutAmounts(
-    options.topperPayoutAmounts,
+    options.topperPayoutAmounts ?? currentGame?.patternPayoutAmounts,
     effectiveEntryFee,
   );
   const topperSlotCount = resolveTopperSlotCount(options, topperPayoutAmounts);
@@ -194,6 +191,14 @@ export function mapRoomSnapshotToTheme1(
     normalizedTopperPayoutAmounts,
     topperSlotCount,
   );
+  const boardPatternEvaluation = evaluatePatterns(
+    visibleTickets,
+    drawnNumbers,
+    THEME1_DEFAULT_ACTIVE_PATTERN_INDEXES,
+    patternMasks,
+    normalizedTopperPayoutAmounts,
+    topperSlotCount,
+  );
 
   const renderState = createEmptyTheme1RoundRenderState(
     cardSlotCount,
@@ -205,8 +210,9 @@ export function mapRoomSnapshotToTheme1(
   for (let cardIndex = 0; cardIndex < renderState.cards.length; cardIndex += 1) {
     const ticket = visibleTickets[cardIndex] ?? createEmptyTicketNumbers();
     const cardEvaluation = patternEvaluation.cards[cardIndex];
+    const boardCardEvaluation = boardPatternEvaluation.cards[cardIndex];
     const matchedPatternIndexes = toSortedArray(
-      cardEvaluation?.matchedPatternIndexes ?? new Set<number>(),
+      boardCardEvaluation?.matchedPatternIndexes ?? new Set<number>(),
     );
     const completedPatterns = buildCompletedPatternStates(
       matchedPatternIndexes,
@@ -216,17 +222,19 @@ export function mapRoomSnapshotToTheme1(
       normalizedTopperPayoutAmounts,
       topperSlotCount,
     );
-    const activeNearPattern = buildActiveNearPatternState(
-      cardIndex,
-      cardEvaluation,
-      ticket,
-      preferredNearPatternIndexes[cardIndex] ?? -1,
-      patternMasks,
-      normalizedTopperPayoutAmounts,
-      topperSlotCount,
-    );
+    const activeNearPatterns =
+      completedPatterns.length > 0
+        ? []
+        : buildActiveNearPatternStates(
+            cardIndex,
+            boardCardEvaluation,
+            ticket,
+            patternMasks,
+            normalizedTopperPayoutAmounts,
+            topperSlotCount,
+          );
     const cardWinAmount = resolveCardWinAmount(
-      cardEvaluation?.matchedPatternIndexes ?? new Set<number>(),
+      boardCardEvaluation?.matchedPatternIndexes ?? new Set<number>(),
       normalizedTopperPayoutAmounts,
       topperSlotCount,
     );
@@ -251,16 +259,19 @@ export function mapRoomSnapshotToTheme1(
     cardState.paylinesActive = Array.from(
       { length: patternMasks.length },
       (_, patternIndex) =>
-        cardEvaluation?.matchedPatternIndexes.has(patternIndex) ?? false,
+        boardCardEvaluation?.matchedPatternIndexes.has(patternIndex) ?? false,
     );
     cardState.matchedPatternIndexes = matchedPatternIndexes;
     cardState.completedPatterns = completedPatterns;
-    cardState.activeNearPattern = activeNearPattern;
+    cardState.activeNearPatterns = activeNearPatterns;
 
     for (let cellIndex = 0; cellIndex < THEME1_CARD_CELL_COUNT; cellIndex += 1) {
       const number = ticket[cellIndex] ?? 0;
-      const nearWins = cardEvaluation?.nearWinsByCell.get(cellIndex) ?? [];
-      const isNearTargetCell = activeNearPattern?.targetCellIndex === cellIndex;
+      const nearWins = boardCardEvaluation?.nearWinsByCell.get(cellIndex) ?? [];
+      const targetNearPatterns = activeNearPatterns.filter(
+        (pattern) => pattern.targetCellIndex === cellIndex,
+      );
+      const isNearTargetCell = targetNearPatterns.length > 0;
       const completedPatternIndexes = extractCompletedPatternIndexes(
         completedPatterns,
         cellIndex,
@@ -268,7 +279,7 @@ export function mapRoomSnapshotToTheme1(
       const nearWinPatternIndexes = extractNearWinPatternIndexes(nearWins);
       const prizeLabels = buildCellPrizeLabels(
         completedPatterns,
-        activeNearPattern,
+        activeNearPatterns,
         cellIndex,
       );
       const isPrizeCell = hasCompletedPrizeLabel(completedPatterns, cellIndex);
@@ -276,15 +287,15 @@ export function mapRoomSnapshotToTheme1(
         cellIndex,
         completedPatterns,
       );
-      const isMatchedByActiveNearPattern = isCellMatchedByActiveNearPattern(
+      const isMatchedByActiveNearPatterns = isCellMatchedByActiveNearPatterns(
         cellIndex,
-        activeNearPattern,
+        activeNearPatterns,
       );
       const visualState = resolveCellVisualState(
         isPrizeCell,
         isNearTargetCell,
         isMatchedByCompletedPattern,
-        isMatchedByActiveNearPattern,
+        isMatchedByActiveNearPatterns,
       );
       const firstPrizeLabel = prizeLabels[0];
 
@@ -294,15 +305,13 @@ export function mapRoomSnapshotToTheme1(
         isMissing: isNearTargetCell,
         isMatched: isMatchedByCompletedPattern,
         nearWinPatternIndex: isNearTargetCell
-          ? activeNearPattern?.rawPatternIndex ?? -1
+          ? targetNearPatterns[0]?.rawPatternIndex ?? -1
           : (nearWinPatternIndexes[0] ?? -1),
         nearWinPatternIndexes: isNearTargetCell
-          ? activeNearPattern
-            ? [activeNearPattern.rawPatternIndex]
-            : []
+          ? targetNearPatterns.map((pattern) => pattern.rawPatternIndex)
           : nearWinPatternIndexes,
         missingNumber: isNearTargetCell
-          ? activeNearPattern?.targetNumber ?? 0
+          ? targetNearPatterns[0]?.targetNumber ?? 0
           : resolveMissingNumber(number, nearWins),
         visualState,
         isPrizeCell,
@@ -320,6 +329,7 @@ export function mapRoomSnapshotToTheme1(
     renderState,
     snapshot,
     playerContext.player,
+    selectedPlayerId,
     effectiveEntryFee,
     options,
   );
@@ -329,11 +339,6 @@ export function mapRoomSnapshotToTheme1(
     patternEvaluation,
     topperSlotCount,
   );
-
-  const completedPatternWinnings = resolveCompletedPatternWinnings(renderState);
-  if (!options.winningsLabel) {
-    renderState.hud.winningsLabel = formatWholeNumber(completedPatternWinnings);
-  }
 
   const model = mapRenderStateToRoundModel(
     renderState,
@@ -352,57 +357,6 @@ export function mapRoomSnapshotToTheme1(
     ticketSource: playerContext.source,
     visibleTickets,
     activePatternIndexes,
-  };
-}
-
-function resolvePlayerContext(
-  snapshot: RoomSnapshot,
-  preferredPlayerId?: string,
-): Theme1ResolvedPlayerContext {
-  const gameTicketMap = snapshot.currentGame?.tickets ?? {};
-  const preRoundTicketMap = snapshot.preRoundTickets ?? {};
-  const gameTicketKeys = Object.keys(gameTicketMap);
-  const preRoundTicketKeys = Object.keys(preRoundTicketMap);
-  const candidatePlayerIds = uniqueStrings([
-    preferredPlayerId,
-    ...(gameTicketKeys.length === 1 ? gameTicketKeys : []),
-    ...(preRoundTicketKeys.length === 1 ? preRoundTicketKeys : []),
-    snapshot.hostPlayerId,
-    ...gameTicketKeys,
-    ...preRoundTicketKeys,
-    ...snapshot.players.map((player) => player.id),
-  ]);
-
-  for (const playerId of candidatePlayerIds) {
-    const gameTickets = gameTicketMap[playerId];
-    if (Array.isArray(gameTickets) && gameTickets.length > 0) {
-      return {
-        playerId,
-        player: snapshot.players.find((player) => player.id === playerId),
-        tickets: gameTickets,
-        source: "currentGame",
-      };
-    }
-
-    const preRoundTickets = preRoundTicketMap[playerId];
-    if (Array.isArray(preRoundTickets) && preRoundTickets.length > 0) {
-      return {
-        playerId,
-        player: snapshot.players.find((player) => player.id === playerId),
-        tickets: preRoundTickets,
-        source: "preRoundTickets",
-      };
-    }
-  }
-
-  const fallbackPlayerId =
-    candidatePlayerIds[0] ?? snapshot.players[0]?.id ?? undefined;
-
-  return {
-    playerId: fallbackPlayerId,
-    player: snapshot.players.find((player) => player.id === fallbackPlayerId),
-    tickets: [],
-    source: "empty",
   };
 }
 
@@ -442,24 +396,18 @@ function normalizeActivePatternIndexes(
   return Array.from(values).sort((left, right) => left - right);
 }
 
-function normalizePreferredNearPatternIndexes(
-  preferredNearPatternIndexes: readonly number[] | undefined,
-  cardCount: number,
-): number[] {
-  return Array.from({ length: cardCount }, (_, index): number => {
-    const value = preferredNearPatternIndexes?.[index];
-    return Number.isInteger(value) ? (value as number) : -1;
-  });
-}
-
 function normalizeTopperPayoutAmounts(
   payouts?: readonly number[],
   totalBetAmount = 0,
 ): number[] {
-  const source =
-    payouts && payouts.length > 0
-      ? payouts
-      : resolveTheme1TopperPayoutAmounts(totalBetAmount);
+  const hasProvidedPayouts = Boolean(payouts && payouts.length > 0);
+  const hasAnyPositiveProvidedPayout =
+    hasProvidedPayouts &&
+    payouts!.some((value) => Number.isFinite(value) && Number(value) > 0);
+  const source = hasAnyPositiveProvidedPayout
+    ? payouts!
+    : resolveTheme1TopperPayoutAmounts(totalBetAmount);
+
   return source.map((value) =>
     Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0,
   );
@@ -497,33 +445,6 @@ function resolveTopperPrizeLabels(
   return Array.from({ length: topperSlotCount }, (_, index) =>
     THEME1_DEFAULT_TOPPER_PRIZE_LABELS[index] ?? "",
   );
-}
-
-function resolveVisibleTickets(
-  ticketSets: readonly number[][],
-  cardSlotCount: number,
-  currentTicketPage: number,
-  duplicateSingleTicketAcrossCards: boolean,
-): number[][] {
-  const visibleTickets: number[][] = Array.from(
-    { length: cardSlotCount },
-    () => createEmptyTicketNumbers(),
-  );
-  const pageStartIndex = Math.max(0, currentTicketPage) * Math.max(1, cardSlotCount);
-
-  for (let cardIndex = 0; cardIndex < cardSlotCount; cardIndex += 1) {
-    const ticketIndex = pageStartIndex + cardIndex;
-    const directTicket = ticketSets[ticketIndex];
-    const duplicatedTicket =
-      ticketSets.length === 1 && duplicateSingleTicketAcrossCards
-        ? ticketSets[0]
-        : undefined;
-    visibleTickets[cardIndex] = normalizeTicketNumbers(
-      directTicket ?? duplicatedTicket,
-    );
-  }
-
-  return visibleTickets;
 }
 
 function evaluatePatterns(
@@ -744,76 +665,70 @@ function buildCompletedPatternStates(
   return patterns;
 }
 
-function buildActiveNearPatternState(
+function buildActiveNearPatternStates(
   cardIndex: number,
   cardResult: Theme1CardPatternEvaluation | undefined,
   ticket: readonly number[],
-  preferredRawPatternIndex: number,
   patternMasks: readonly number[][],
   payoutAmounts: readonly number[],
   topperCount: number,
-): Theme1NearPatternRenderState | null {
+): Theme1NearPatternRenderState[] {
   if (!cardResult || cardResult.nearWins.length === 0) {
-    return null;
+    return [];
   }
 
-  let preferredCandidate: Theme1NearWinResult | undefined;
-  let fallbackCandidate: Theme1NearWinResult | undefined;
+  const states: Theme1NearPatternRenderState[] = [];
+  const seen = new Set<string>();
 
   for (const candidate of cardResult.nearWins) {
     if (candidate.cardIndex !== cardIndex) {
       continue;
     }
 
-    if (candidate.rawPatternIndex === preferredRawPatternIndex) {
-      preferredCandidate = candidate;
-      break;
+    const key = `${candidate.rawPatternIndex}:${candidate.cellIndex}`;
+    if (seen.has(key)) {
+      continue;
     }
 
-    if (
-      !fallbackCandidate ||
-      candidate.payoutAmount > fallbackCandidate.payoutAmount ||
-      (candidate.payoutAmount === fallbackCandidate.payoutAmount &&
-        candidate.rawPatternIndex < fallbackCandidate.rawPatternIndex)
-    ) {
-      fallbackCandidate = candidate;
+    const cellIndices = extractPatternCells(patternMasks, candidate.rawPatternIndex);
+    if (cellIndices.length === 0) {
+      continue;
     }
+
+    const prizeAmount =
+      candidate.payoutAmount > 0
+        ? candidate.payoutAmount
+        : resolvePatternPrizeAmount(
+            candidate.rawPatternIndex,
+            payoutAmounts,
+            topperCount,
+          );
+
+    states.push({
+      rawPatternIndex: candidate.rawPatternIndex,
+      slotIndex: resolvePayoutSlotIndex(candidate.rawPatternIndex, topperCount),
+      cellIndices,
+      matchedCellIndices: extractMatchedCellIndices(cellIndices, candidate.cellIndex),
+      targetCellIndex: candidate.cellIndex,
+      targetNumber:
+        candidate.missingNumber > 0
+          ? candidate.missingNumber
+          : resolveCellNumber(ticket, candidate.cellIndex),
+      prizeAmountKr: prizeAmount,
+      prizeLabel: prizeAmount > 0 ? formatKrAmount(prizeAmount) : "",
+      prizeAnchor: resolvePrizeAnchor(candidate.cellIndex),
+      overlayKind: resolveOverlayKind(candidate.rawPatternIndex, cellIndices),
+    });
+    seen.add(key);
   }
 
-  const selected = preferredCandidate ?? fallbackCandidate;
-  if (!selected) {
-    return null;
-  }
+  states.sort((left, right) =>
+    left.prizeAmountKr !== right.prizeAmountKr
+      ? right.prizeAmountKr - left.prizeAmountKr
+      : left.rawPatternIndex - right.rawPatternIndex,
+  );
 
-  const cellIndices = extractPatternCells(patternMasks, selected.rawPatternIndex);
-  if (cellIndices.length === 0) {
-    return null;
-  }
-
-  const prizeAmount =
-    selected.payoutAmount > 0
-      ? selected.payoutAmount
-      : resolvePatternPrizeAmount(
-          selected.rawPatternIndex,
-          payoutAmounts,
-          topperCount,
-        );
-
-  return {
-    rawPatternIndex: selected.rawPatternIndex,
-    slotIndex: resolvePayoutSlotIndex(selected.rawPatternIndex, topperCount),
-    cellIndices,
-    matchedCellIndices: extractMatchedCellIndices(cellIndices, selected.cellIndex),
-    targetCellIndex: selected.cellIndex,
-    targetNumber:
-      selected.missingNumber > 0
-        ? selected.missingNumber
-        : resolveCellNumber(ticket, selected.cellIndex),
-    prizeAmountKr: prizeAmount,
-    prizeLabel: prizeAmount > 0 ? formatKrAmount(prizeAmount) : "",
-    prizeAnchor: resolvePrizeAnchor(selected.cellIndex),
-    overlayKind: resolveOverlayKind(selected.rawPatternIndex, cellIndices),
-  };
+  return states;
 }
 
 function extractPatternCells(
@@ -950,11 +865,13 @@ function isCellMatchedByCompletedPatterns(
   return completedPatterns.some((pattern) => pattern.cellIndices.includes(cellIndex));
 }
 
-function isCellMatchedByActiveNearPattern(
+function isCellMatchedByActiveNearPatterns(
   cellIndex: number,
-  activeNearPattern: Theme1NearPatternRenderState | null,
+  activeNearPatterns: readonly Theme1NearPatternRenderState[],
 ): boolean {
-  return activeNearPattern?.matchedCellIndices.includes(cellIndex) ?? false;
+  return activeNearPatterns.some((pattern) =>
+    pattern.matchedCellIndices.includes(cellIndex),
+  );
 }
 
 function extractCompletedPatternIndexes(
@@ -977,43 +894,12 @@ function hasCompletedPrizeLabel(
 
 function buildCellPrizeLabels(
   completedPatterns: readonly Theme1CompletedPatternRenderState[],
-  activeNearPattern: Theme1NearPatternRenderState | null,
+  _activeNearPatterns: readonly Theme1NearPatternRenderState[],
   cellIndex: number,
 ): Theme1CellPrizeLabelRenderState[] {
-  const labels: Theme1CellPrizeLabelRenderState[] = completedPatterns
-    .filter((pattern) => pattern.triggerCellIndex === cellIndex)
-    .sort(compareCompletedPatternPrizePriority)
-    .map((pattern) => ({
-      text: pattern.prizeLabel,
-      anchor: pattern.prizeAnchor,
-      prizeAmountKr: pattern.prizeAmountKr,
-      rawPatternIndex: pattern.rawPatternIndex,
-    }));
-
-  if (
-    labels.length === 0 &&
-    activeNearPattern &&
-    activeNearPattern.targetCellIndex === cellIndex &&
-    activeNearPattern.prizeLabel.trim().length > 0
-  ) {
-    labels.push({
-      text: activeNearPattern.prizeLabel,
-      anchor: activeNearPattern.prizeAnchor,
-      prizeAmountKr: activeNearPattern.prizeAmountKr,
-      rawPatternIndex: activeNearPattern.rawPatternIndex,
-    });
-  }
-
-  return labels;
-}
-
-function compareCompletedPatternPrizePriority(
-  left: Theme1CompletedPatternRenderState,
-  right: Theme1CompletedPatternRenderState,
-): number {
-  return left.prizeAmountKr !== right.prizeAmountKr
-    ? right.prizeAmountKr - left.prizeAmountKr
-    : left.rawPatternIndex - right.rawPatternIndex;
+  void completedPatterns;
+  void cellIndex;
+  return [];
 }
 
 function resolveCellVisualState(
@@ -1026,12 +912,12 @@ function resolveCellVisualState(
     return "WonPrize";
   }
 
-  if (isNearTargetCell) {
-    return "NearTarget";
-  }
-
   if (isMatchedByCompletedPattern) {
     return "WonHit";
+  }
+
+  if (isNearTargetCell) {
+    return "NearTarget";
   }
 
   if (isMatchedByActiveNearPattern) {
@@ -1110,6 +996,7 @@ function populateHud(
   renderState: Theme1RoundRenderState,
   snapshot: RoomSnapshot | RoomSnapshotWithScheduler,
   player: Player | undefined,
+  playerId: string | undefined,
   effectiveEntryFee: number,
   options: Theme1RoomSnapshotMapperOptions,
 ): void {
@@ -1121,7 +1008,9 @@ function populateHud(
   renderState.hud.creditLabel =
     options.creditLabel ??
     formatWholeNumber(player ? normalizeCurrencyAmount(player.balance) : 0);
-  renderState.hud.winningsLabel = options.winningsLabel ?? "0";
+  renderState.hud.winningsLabel =
+    options.winningsLabel ??
+    formatWholeNumber(resolveCurrentRoundWinnings(snapshot, playerId));
   renderState.hud.betLabel =
     options.betLabel ?? formatWholeNumber(effectiveEntryFee);
 }
@@ -1132,57 +1021,38 @@ function populateTopper(
   patternEvaluation: Theme1PatternEvaluation,
   topperSlotCount: number,
 ): void {
-  const matchedCardsBySlot = new Map<number, Set<number>>();
-  const matchedPatternsBySlot = new Map<number, Set<number>>();
-
-  for (let cardIndex = 0; cardIndex < patternEvaluation.cards.length; cardIndex += 1) {
-    const card = patternEvaluation.cards[cardIndex];
-    for (const rawPatternIndex of card.matchedPatternIndexes) {
-      const slotIndex = resolvePayoutSlotIndex(rawPatternIndex, topperSlotCount);
-      if (slotIndex < 0) {
-        continue;
-      }
-
-      if (!matchedCardsBySlot.has(slotIndex)) {
-        matchedCardsBySlot.set(slotIndex, new Set<number>());
-      }
-      if (!matchedPatternsBySlot.has(slotIndex)) {
-        matchedPatternsBySlot.set(slotIndex, new Set<number>());
-      }
-
-      matchedCardsBySlot.get(slotIndex)?.add(cardIndex);
-      matchedPatternsBySlot.get(slotIndex)?.add(rawPatternIndex);
-    }
-  }
-
   renderState.topper.slots = Array.from(
     { length: topperSlotCount },
     (_, slotIndex): Theme1TopperSlotRenderState => {
-      const matchedCards = matchedCardsBySlot.get(slotIndex);
-      const matchedPatterns = matchedPatternsBySlot.get(slotIndex);
+      const matchedSelection = resolveRepresentativeMatchedTopperSelection(
+        patternEvaluation,
+        slotIndex,
+        topperSlotCount,
+      );
       const nearWins = patternEvaluation.nearWinsByTopperSlot.get(slotIndex) ?? [];
+      const representativeNearWins = resolveRepresentativeNearWins(nearWins);
 
-      if (matchedCards && matchedPatterns) {
+      if (matchedSelection) {
         return {
           prizeLabel: topperPrizeLabels[slotIndex] ?? "",
           showPattern: true,
           showMatchedPattern: true,
           missingCellsVisible: [],
           prizeVisualState: "Matched",
-          activePatternIndexes: toSortedArray(matchedPatterns),
-          activeCardIndexes: toSortedArray(matchedCards),
+          activePatternIndexes: [matchedSelection.rawPatternIndex],
+          activeCardIndexes: [matchedSelection.cardIndex],
         };
       }
 
-      if (nearWins.length > 0) {
+      if (representativeNearWins.length > 0) {
         return {
           prizeLabel: topperPrizeLabels[slotIndex] ?? "",
           showPattern: true,
           showMatchedPattern: false,
-          missingCellsVisible: buildTopperMissingCells(nearWins),
+          missingCellsVisible: buildTopperMissingCells(representativeNearWins),
           prizeVisualState: "NearWin",
-          activePatternIndexes: extractTopperActivePatternIndexes(nearWins),
-          activeCardIndexes: extractTopperActiveCardIndexes(nearWins),
+          activePatternIndexes: extractTopperActivePatternIndexes(representativeNearWins),
+          activeCardIndexes: extractTopperActiveCardIndexes(representativeNearWins),
         };
       }
 
@@ -1197,6 +1067,32 @@ function populateTopper(
       };
     },
   );
+}
+
+function resolveRepresentativeMatchedTopperSelection(
+  patternEvaluation: Theme1PatternEvaluation,
+  slotIndex: number,
+  topperSlotCount: number,
+): { cardIndex: number; rawPatternIndex: number } | null {
+  for (let cardIndex = 0; cardIndex < patternEvaluation.cards.length; cardIndex += 1) {
+    const matchingPatternIndexes = toSortedArray(
+      new Set(
+        [...patternEvaluation.cards[cardIndex].matchedPatternIndexes].filter(
+          (rawPatternIndex) =>
+            resolvePayoutSlotIndex(rawPatternIndex, topperSlotCount) === slotIndex,
+        ),
+      ),
+    );
+
+    if (matchingPatternIndexes.length > 0) {
+      return {
+        cardIndex,
+        rawPatternIndex: matchingPatternIndexes[0] ?? -1,
+      };
+    }
+  }
+
+  return null;
 }
 
 function buildTopperMissingCells(
@@ -1219,21 +1115,46 @@ function extractTopperActivePatternIndexes(
   return toSortedArray(new Set(nearWins.map((nearWin) => nearWin.rawPatternIndex)));
 }
 
+function resolveRepresentativeNearWins(
+  nearWins: readonly Theme1NearWinResult[],
+): Theme1NearWinResult[] {
+  if (nearWins.length === 0) {
+    return [];
+  }
+
+  const firstNearWin = nearWins[0];
+  if (!firstNearWin) {
+    return [];
+  }
+
+  return nearWins.filter(
+    (nearWin) =>
+      nearWin.cardIndex === firstNearWin.cardIndex &&
+      nearWin.rawPatternIndex === firstNearWin.rawPatternIndex,
+  );
+}
+
 function extractTopperActiveCardIndexes(
   nearWins: readonly Theme1NearWinResult[],
 ): number[] {
   return toSortedArray(new Set(nearWins.map((nearWin) => nearWin.cardIndex)));
 }
 
-function resolveCompletedPatternWinnings(
-  renderState: Theme1RoundRenderState,
+function resolveCurrentRoundWinnings(
+  snapshot: RoomSnapshot | RoomSnapshotWithScheduler,
+  playerId: string | undefined,
 ): number {
-  return renderState.cards.reduce((total, card) => {
-    const cardTotal = card.completedPatterns.reduce(
-      (sum, pattern) => sum + Math.max(0, pattern.prizeAmountKr),
-      0,
-    );
-    return total + cardTotal;
+  if (!playerId) {
+    return 0;
+  }
+
+  const validClaims = snapshot.currentGame?.claims ?? [];
+  return validClaims.reduce((sum, claim) => {
+    if (!claim.valid || claim.playerId !== playerId) {
+      return sum;
+    }
+
+    return sum + normalizeCurrencyAmount(claim.payoutAmount ?? 0);
   }, 0);
 }
 
@@ -1263,12 +1184,18 @@ function mapRenderStateToRoundModel(
     toppers: renderState.topper.slots.map((slot, index) =>
       mapTopperSlotToViewState(slot, index),
     ),
+    featuredBallNumber:
+      renderState.ballRack.showBigBall &&
+      Number.parseInt(renderState.ballRack.bigBallNumber, 10) > 0
+        ? Number.parseInt(renderState.ballRack.bigBallNumber, 10)
+        : null,
+    featuredBallIsPending: false,
     recentBalls: renderState.ballRack.slots
       .filter((slot) => slot.isVisible)
       .map((slot) => Number(slot.numberLabel))
       .filter((value) => Number.isFinite(value) && value > 0),
     boards: renderState.cards.map((card, index) =>
-      mapCardToBoardState(card, index),
+      mapCardToBoardState(card, index, currentGame?.status ?? "WAITING", drawCount),
     ),
     meta: {
       source: mode,
@@ -1306,12 +1233,35 @@ function mapTopperSlotToViewState(
     title,
     prize: slot.prizeLabel.trim().length > 0 ? slot.prizeLabel : "0 kr",
     highlighted: slot.prizeVisualState !== "Normal",
+    showMatchedPattern: slot.showMatchedPattern,
+    activePatternIndexes: [...slot.activePatternIndexes],
+    missingCellIndexes: convertTopperMissingCellsToUi(slot.missingCellsVisible),
+    highlightKind:
+      slot.prizeVisualState === "Matched"
+        ? "win"
+        : slot.prizeVisualState === "NearWin"
+          ? "near"
+          : "normal",
   };
+}
+
+function convertTopperMissingCellsToUi(missingCellsVisible: readonly boolean[]): number[] {
+  const columnMajorIndexes: number[] = [];
+
+  for (let cellIndex = 0; cellIndex < missingCellsVisible.length; cellIndex += 1) {
+    if (missingCellsVisible[cellIndex]) {
+      columnMajorIndexes.push(cellIndex);
+    }
+  }
+
+  return convertColumnMajorIndexesToUi(columnMajorIndexes);
 }
 
 function mapCardToBoardState(
   card: Theme1RoundRenderState["cards"][number],
   index: number,
+  gameStatus: string,
+  drawCount: number,
 ): Theme1BoardState {
   const cells = Array.from({ length: THEME1_CARD_CELL_COUNT }, (_, uiIndex) => ({
     index: uiIndex,
@@ -1335,18 +1285,65 @@ function mapCardToBoardState(
     win: card.showWinLabel
       ? stripKnownLabelPrefix(card.winLabel, "Gevinst - ")
       : "0 kr",
+    progressLabel: resolveBoardProgressLabel(card, gameStatus, drawCount),
+    progressState: resolveBoardProgressState(card, gameStatus, drawCount),
     cells,
-    completedPatterns: card.completedPatterns.map((pattern) => {
-      const patternMeta = getTheme1PatternCatalogEntry(pattern.rawPatternIndex);
-      return {
-        key: `${pattern.rawPatternIndex}-${pattern.triggerCellIndex}-${pattern.prizeAmountKr}`,
-        rawPatternIndex: pattern.rawPatternIndex,
-        title: patternMeta.title,
-        symbolId: patternMeta.overlaySymbolId,
-        cellIndices: convertColumnMajorIndexesToUi(pattern.cellIndices),
-      };
-    }),
+    completedPatterns: card.completedPatterns.map((pattern) =>
+      mapPatternToBoardOverlayState(
+        pattern.rawPatternIndex,
+        pattern.cellIndices,
+        `${pattern.rawPatternIndex}-${pattern.triggerCellIndex}-${pattern.prizeAmountKr}`,
+        pattern.prizeLabel,
+      ),
+    ),
+    activeNearPatterns: card.activeNearPatterns.map((pattern) =>
+      mapPatternToBoardOverlayState(
+        pattern.rawPatternIndex,
+        pattern.cellIndices,
+        `near-${pattern.rawPatternIndex}-${pattern.targetCellIndex}-${pattern.prizeAmountKr}`,
+      ),
+    ),
     prizeStacks: buildBoardPrizeStacks(card.cells),
+  };
+}
+
+function resolveBoardProgressLabel(
+  card: Theme1RoundRenderState["cards"][number],
+  gameStatus: string,
+  drawCount: number,
+) {
+  void card;
+  void gameStatus;
+  void drawCount;
+  return "";
+}
+
+function resolveBoardProgressState(
+  card: Theme1RoundRenderState["cards"][number],
+  gameStatus: string,
+  drawCount: number,
+): Theme1BoardState["progressState"] {
+  void card;
+  void gameStatus;
+  void drawCount;
+  return "hidden";
+}
+
+function mapPatternToBoardOverlayState(
+  rawPatternIndex: number,
+  columnMajorCellIndices: readonly number[],
+  key: string,
+  prizeLabel = "",
+): Theme1BoardPatternOverlayState {
+  const patternMeta = getTheme1PatternCatalogEntry(rawPatternIndex);
+  return {
+    key,
+    rawPatternIndex,
+    title: patternMeta.title,
+    symbolId: patternMeta.overlaySymbolId,
+    pathDefinition: patternMeta.overlayPathDefinition,
+    cellIndices: convertColumnMajorIndexesToUi(columnMajorCellIndices),
+    prizeLabel,
   };
 }
 
@@ -1356,7 +1353,11 @@ function mapCellToTone(cell: Theme1CardCellRenderState): Theme1CellTone {
   }
 
   if (cell.visualState === "WonPrize") {
-    return "won";
+    return "matched";
+  }
+
+  if (cell.isSelected) {
+    return "matched";
   }
 
   if (
@@ -1408,31 +1409,6 @@ function mapWinLabelAnchorToBoardAnchor(
 function parseCellValue(cell: Theme1CardCellRenderState): number {
   const parsed = Number.parseInt(cell.numberLabel, 10);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function flattenTicketNumbers(ticket: Ticket): number[] {
-  if (Array.isArray(ticket.numbers) && ticket.numbers.length > 0) {
-    return normalizeTicketNumbers(ticket.numbers);
-  }
-
-  if (!Array.isArray(ticket.grid) || ticket.grid.length === 0) {
-    return createEmptyTicketNumbers();
-  }
-
-  const flattened = ticket.grid.flatMap((row) =>
-    Array.isArray(row) ? row : [],
-  );
-  return normalizeTicketNumbers(flattened);
-}
-
-function normalizeTicketNumbers(source?: readonly number[]): number[] {
-  return Array.from({ length: THEME1_CARD_CELL_COUNT }, (_, index) =>
-    normalizeTheme1Number(source?.[index] ?? 0),
-  );
-}
-
-function createEmptyTicketNumbers(): number[] {
-  return Array.from({ length: THEME1_CARD_CELL_COUNT }, () => 0);
 }
 
 function extractValidDrawnNumbers(drawnNumbers: readonly number[]): number[] {
@@ -1487,7 +1463,7 @@ function normalizeHiddenWinLabel(value: string): string {
 }
 
 function formatTheme1CardHeaderLabel(cardIndex: number): string {
-  return `Bong - ${Math.max(0, cardIndex) + 1}`;
+  return `Bong nr ${Math.max(0, cardIndex) + 1}`;
 }
 
 function formatTheme1CardStakeLabel(totalBetAmount: number): string {
@@ -1582,19 +1558,6 @@ function normalizeTheme1Number(value: number): number {
 
 function toSortedArray(values: ReadonlySet<number>): number[] {
   return Array.from(values).sort((left, right) => left - right);
-}
-
-function uniqueStrings(values: Array<string | undefined>): string[] {
-  const unique = new Set<string>();
-
-  for (const value of values) {
-    const normalized = value?.trim();
-    if (normalized) {
-      unique.add(normalized);
-    }
-  }
-
-  return Array.from(unique);
 }
 
 function pushMapList<T>(map: Map<number, T[]>, key: number, value: T): void {

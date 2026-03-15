@@ -137,7 +137,7 @@ public sealed class CandyCardViewBinding
             GameObject selectionOverlay = selectionOverlays != null && cellIndex < selectionOverlays.Length ? selectionOverlays[cellIndex] : null;
             if (!Theme1GameplayViewRepairUtils.IsDedicatedCardNumberLabel(numberLabel, selectionOverlay))
             {
-                errors.Add($"{prefix} numberTexts[{cellIndex}] peker ikke til en lokal RealtimeCardNumberLabel.");
+                errors.Add($"{prefix} numberTexts[{cellIndex}] peker ikke til en lokal Theme1 card number label.");
                 isValid = false;
             }
         }

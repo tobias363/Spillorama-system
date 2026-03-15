@@ -1,68 +1,55 @@
-export const THEME1_BOARD_COLUMNS = 5;
-export const THEME1_BOARD_ROWS = 3;
-export const THEME1_BOARD_CELL_COUNT = THEME1_BOARD_COLUMNS * THEME1_BOARD_ROWS;
+import {
+  getTheme1PatternDefinition,
+  type Theme1PatternDefinition,
+} from "@/domain/theme1/patternDefinitions";
 
 export interface Theme1PatternCatalogEntry {
   rawPatternIndex: number;
   patternNumber: number;
+  displayPatternNumber: number;
   title: string;
   note: string;
   overlaySymbolId: string | null;
+  overlayPathDefinition: string | null;
 }
 
-const patternOverlayByNumber: Record<number, string> = {
-  2: "pattern-02-perimeter",
-  3: "pattern-03-cross",
-  4: "pattern-04-crown",
-  5: "pattern-05-goalposts",
-  12: "pattern-12-sides",
-  13: "pattern-13-v",
-  14: "pattern-14-top-row",
-  15: "pattern-15-middle-row",
-  16: "pattern-16-bottom-row",
-};
+export type { Theme1PatternDefinition } from "@/domain/theme1/patternDefinitions";
 
-const patternDefinitions = [
-  { patternNumber: 1, note: "Full grid" },
-  { patternNumber: 2, note: "Perimeter" },
-  { patternNumber: 3, note: "Cross" },
-  { patternNumber: 4, note: "Crown" },
-  { patternNumber: 5, note: "Goalposts" },
-  { patternNumber: 6, note: "Top + middle rows" },
-  { patternNumber: 7, note: "Top + bottom rows" },
-  { patternNumber: 8, note: "Middle + bottom rows" },
-  { patternNumber: 9, note: "Diamond cross" },
-  { patternNumber: 10, note: "Top arc" },
-  { patternNumber: 11, note: "Bottom arc" },
-  { patternNumber: 12, note: "Side rails" },
-  { patternNumber: 13, note: "V shape" },
-  { patternNumber: 14, note: "Top row" },
-  { patternNumber: 15, note: "Middle row" },
-  { patternNumber: 16, note: "Bottom row" },
-].map<Theme1PatternCatalogEntry>((definition, index) => ({
-  rawPatternIndex: index,
-  patternNumber: definition.patternNumber,
-  title: `Pattern ${String(definition.patternNumber).padStart(2, "0")}`,
-  note: definition.note,
-  overlaySymbolId: patternOverlayByNumber[definition.patternNumber] ?? null,
-}));
-
-const patternCatalogByRawIndex = new Map(
-  patternDefinitions.map((entry) => [entry.rawPatternIndex, entry] as const),
-);
+export const THEME1_BOARD_COLUMNS = 5;
+export const THEME1_BOARD_ROWS = 3;
+export const THEME1_BOARD_CELL_COUNT = THEME1_BOARD_COLUMNS * THEME1_BOARD_ROWS;
 
 export function getTheme1PatternCatalogEntry(
   rawPatternIndex: number,
 ): Theme1PatternCatalogEntry {
-  return (
-    patternCatalogByRawIndex.get(rawPatternIndex) ?? {
+  const definition = getTheme1PatternDefinition(rawPatternIndex);
+  if (!definition) {
+    return {
       rawPatternIndex,
       patternNumber: rawPatternIndex + 1,
+      displayPatternNumber: rawPatternIndex + 1,
       title: `Pattern ${String(Math.max(0, rawPatternIndex) + 1).padStart(2, "0")}`,
       note: "",
       overlaySymbolId: null,
-    }
-  );
+      overlayPathDefinition: null,
+    };
+  }
+
+  return mapDefinitionToCatalogEntry(definition);
+}
+
+function mapDefinitionToCatalogEntry(
+  definition: Theme1PatternDefinition,
+): Theme1PatternCatalogEntry {
+  return {
+    rawPatternIndex: definition.rawPatternIndex,
+    patternNumber: definition.rawPatternNumber,
+    displayPatternNumber: definition.displayPatternNumber,
+    title: definition.title,
+    note: definition.note,
+    overlaySymbolId: definition.overlaySymbolId,
+    overlayPathDefinition: definition.overlayPathDefinition,
+  };
 }
 
 export function columnMajorIndexToUiIndex(columnMajorIndex: number): number {

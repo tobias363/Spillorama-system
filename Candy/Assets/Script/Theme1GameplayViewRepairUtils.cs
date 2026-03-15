@@ -37,10 +37,17 @@ public static class Theme1GameplayViewRepairUtils
     public const string CardCellBackgroundName = "RealtimeCardCellBackground";
     public const string CardCellGlowName = "RealtimeCardCellGlow";
     public const string CardCellPrizeLabelName = "RealtimeCardCellPrizeLabel";
+    public const string SingleCardRerollButtonPrefix = "Theme1SingleCardRerollButton_";
     public const int TotalCardCellCount = 15;
     public const int VisibleCardCellCount = 15;
     public const int VisibleCardRows = 3;
     public const int VisibleCardColumns = 5;
+
+    public static string BuildSingleCardRerollButtonName(int cardIndex)
+    {
+        return SingleCardRerollButtonPrefix + (cardIndex + 1);
+    }
+
     public static void EnsureCardNumberTargets(NumberGenerator generator)
     {
         Theme1RealtimeCardContractBuilder.EnsureCardNumberTargets(generator);
@@ -74,6 +81,11 @@ public static class Theme1GameplayViewRepairUtils
     public static TextMeshProUGUI FindDedicatedCardNumberLabel(GameObject selectionOverlay)
     {
         return Theme1ViewHierarchyResolver.FindDedicatedCardNumberLabel(selectionOverlay);
+    }
+
+    public static TextMeshProUGUI FindDedicatedCardRenderLabel(GameObject selectionOverlay)
+    {
+        return Theme1ViewHierarchyResolver.FindDedicatedCardRenderLabel(selectionOverlay);
     }
 
     public static TextMeshProUGUI FindDedicatedBallNumberLabel(GameObject root)

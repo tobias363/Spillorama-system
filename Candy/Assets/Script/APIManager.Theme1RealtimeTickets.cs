@@ -617,7 +617,7 @@ public partial class APIManager
                 continue;
             }
 
-            TextMeshProUGUI resolved = Theme1GameplayViewRepairUtils.FindDedicatedCardNumberLabel(selectionCell);
+            TextMeshProUGUI resolved = Theme1GameplayViewRepairUtils.FindDedicatedCardRenderLabel(selectionCell);
 
             card.num_text[cellIndex] = resolved;
         }

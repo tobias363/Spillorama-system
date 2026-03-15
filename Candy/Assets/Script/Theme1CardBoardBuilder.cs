@@ -325,6 +325,7 @@ internal static class Theme1CardBoardBuilder
         {
             prizeLabel.gameObject.SetActive(false);
             prizeLabel.raycastTarget = false;
+            prizeLabel.maskable = false;
             prizeLabel.color = Theme1BongStyle.PrizeTextColor;
             prizeLabel.alpha = 1f;
             prizeLabel.enableAutoSizing = true;

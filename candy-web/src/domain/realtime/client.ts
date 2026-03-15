@@ -1,10 +1,18 @@
 import { io, type Socket } from "socket.io-client";
-import type { AckResponse, RealtimeRoomSnapshot, RealtimeRoomStateAck, RealtimeSession } from "@/domain/realtime/contracts";
+import type {
+  AckResponse,
+  CandyCreateRoomPayload,
+  CandyDrawNewPayload,
+  RealtimeRoomSnapshot,
+  RealtimeRoomStateAck,
+  RealtimeSession,
+} from "@/domain/realtime/contracts";
 
 interface RealtimeClientHandlers {
   onConnect: () => void;
   onConnectError: (message: string) => void;
   onDisconnect: (reason: string) => void;
+  onDrawNew: (payload: CandyDrawNewPayload) => void;
   onRoomUpdate: (snapshot: RealtimeRoomSnapshot) => void;
 }
 
@@ -16,6 +24,7 @@ export function getRealtimeSocket(session: RealtimeSession, handlers: RealtimeCl
     socket.off("connect");
     socket.off("connect_error");
     socket.off("disconnect");
+    socket.off("draw:new");
     socket.off("room:update");
     bindHandlers(socket, handlers);
     return socket;
@@ -45,6 +54,7 @@ export function disposeRealtimeSocket(): void {
   socket.off("connect");
   socket.off("connect_error");
   socket.off("disconnect");
+  socket.off("draw:new");
   socket.off("room:update");
   socket.disconnect();
   socket = null;
@@ -76,12 +86,100 @@ export async function requestRoomResume(
   );
 }
 
+export async function requestRoomCreate(
+  currentSocket: Socket,
+  session: RealtimeSession,
+): Promise<
+  AckResponse<{
+    roomCode: string;
+    playerId: string;
+    snapshot: RealtimeRoomSnapshot;
+  }>
+> {
+  const payload: CandyCreateRoomPayload = {
+    hallId: session.hallId || undefined,
+    accessToken: session.accessToken || undefined,
+  };
+
+  return emitWithAck<{
+    roomCode: string;
+    playerId: string;
+    snapshot: RealtimeRoomSnapshot;
+  }>(currentSocket, "room:create", { ...payload });
+}
+
+export async function requestRoomConfigure(
+  currentSocket: Socket,
+  session: RealtimeSession,
+  entryFee: number,
+): Promise<AckResponse<{ snapshot: RealtimeRoomSnapshot; entryFee: number }>> {
+  return emitWithAck<{ snapshot: RealtimeRoomSnapshot; entryFee: number }>(
+    currentSocket,
+    "room:configure",
+    {
+      roomCode: session.roomCode,
+      playerId: session.playerId,
+      entryFee,
+      accessToken: session.accessToken || undefined,
+    },
+  );
+}
+
+export async function requestBetArm(
+  currentSocket: Socket,
+  session: RealtimeSession,
+  armed: boolean,
+): Promise<
+  AckResponse<{ snapshot: RealtimeRoomSnapshot; armed: boolean; armedPlayerIds: string[] }>
+> {
+  return emitWithAck<{
+    snapshot: RealtimeRoomSnapshot;
+    armed: boolean;
+    armedPlayerIds: string[];
+  }>(currentSocket, "bet:arm", {
+    roomCode: session.roomCode,
+    playerId: session.playerId,
+    armed,
+    accessToken: session.accessToken || undefined,
+  });
+}
+
+export async function requestTicketReroll(
+  currentSocket: Socket,
+  session: RealtimeSession,
+  input: {
+    ticketsPerPlayer?: number;
+    ticketIndex?: number;
+  } = {},
+): Promise<
+  AckResponse<{
+    snapshot: RealtimeRoomSnapshot;
+    ticketsPerPlayer: number;
+    ticketCount: number;
+    rerolledTicketIndexes: number[];
+  }>
+> {
+  return emitWithAck<{
+    snapshot: RealtimeRoomSnapshot;
+    ticketsPerPlayer: number;
+    ticketCount: number;
+    rerolledTicketIndexes: number[];
+  }>(currentSocket, "ticket:reroll", {
+    roomCode: session.roomCode,
+    playerId: session.playerId,
+    ticketsPerPlayer: input.ticketsPerPlayer,
+    ticketIndex: input.ticketIndex,
+    accessToken: session.accessToken || undefined,
+  });
+}
+
 function bindHandlers(currentSocket: Socket, handlers: RealtimeClientHandlers): void {
   currentSocket.on("connect", handlers.onConnect);
   currentSocket.on("connect_error", (error: Error) => {
     handlers.onConnectError(error.message);
   });
   currentSocket.on("disconnect", handlers.onDisconnect);
+  currentSocket.on("draw:new", handlers.onDrawNew);
   currentSocket.on("room:update", handlers.onRoomUpdate);
 }
 

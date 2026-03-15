@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3440" height="1144" viewBox="0 0 3440 1144" fill="none">
+  <defs>
+    <linearGradient id="outerFill" x1="1720" y1="128" x2="1720" y2="1016" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB0E1"/>
+      <stop offset="0.2" stop-color="#FF8AD4"/>
+      <stop offset="0.55" stop-color="#FC4FB7"/>
+      <stop offset="1" stop-color="#D41287"/>
+    </linearGradient>
+    <linearGradient id="rimFill" x1="1720" y1="128" x2="1720" y2="1016" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD8EF"/>
+      <stop offset="0.5" stop-color="#FFA5DE" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FF7BCB" stop-opacity="0.12"/>
+    </linearGradient>
+    <radialGradient id="glossTop" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1720 222) rotate(90) scale(286 1500)">
+      <stop offset="0" stop-color="white" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bottomGlow" x1="1720" y1="704" x2="1720" y2="1016" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF5ABF" stop-opacity="0"/>
+      <stop offset="1" stop-color="#B50067" stop-opacity="0.22"/>
+    </linearGradient>
+    <filter id="shadow" x="16" y="84" width="3408" height="980" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#93004F" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="72" y="128" width="3296" height="888" rx="228" fill="url(#outerFill)"/>
+    <rect x="72" y="128" width="3296" height="888" rx="228" fill="url(#glossTop)"/>
+    <rect x="72" y="128" width="3296" height="888" rx="228" fill="url(#bottomGlow)"/>
+    <rect x="96" y="152" width="3248" height="840" rx="204" stroke="url(#rimFill)" stroke-width="24"/>
+    <rect x="136" y="192" width="3168" height="760" rx="184" stroke="#F76AC2" stroke-opacity="0.5" stroke-width="10"/>
+    <path d="M216 188H3224V330C3224 415.052 3155.05 484 3070 484H370C284.948 484 216 415.052 216 330V188Z" fill="white" fill-opacity="0.13"/>
+    <path d="M270 826C574 746 1060 704 1720 704C2380 704 2866 746 3170 826V908C2866 966 2380 996 1720 996C1060 996 574 966 270 908V826Z" fill="#A3005D" fill-opacity="0.14"/>
+  </g>
+</svg>

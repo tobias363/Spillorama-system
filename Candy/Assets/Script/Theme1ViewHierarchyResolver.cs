@@ -49,6 +49,25 @@ internal static class Theme1ViewHierarchyResolver
         return Theme1RuntimeTextTargetBuilder.FindNamedTextLabel(cellRoot, Theme1GameplayViewRepairUtils.CardNumberLabelName);
     }
 
+    internal static TextMeshProUGUI FindDedicatedCardRenderLabel(GameObject selectionOverlay)
+    {
+        RectTransform cellRoot = ResolveCardCellRoot(selectionOverlay);
+        if (cellRoot == null)
+        {
+            return null;
+        }
+
+        TextMeshProUGUI visible = Theme1RuntimeTextTargetBuilder.FindNamedTextLabel(
+            cellRoot,
+            Theme1GameplayViewRepairUtils.CardNumberVisibleLabelName);
+        if (visible != null)
+        {
+            return visible;
+        }
+
+        return Theme1RuntimeTextTargetBuilder.FindNamedTextLabel(cellRoot, Theme1GameplayViewRepairUtils.CardNumberLabelName);
+    }
+
     internal static TextMeshProUGUI FindDedicatedBallNumberLabel(GameObject root)
     {
         return root == null
@@ -66,7 +85,8 @@ internal static class Theme1ViewHierarchyResolver
     internal static bool IsDedicatedCardNumberLabel(TextMeshProUGUI label, GameObject selectionOverlay)
     {
         return label != null &&
-               string.Equals(label.gameObject.name, Theme1GameplayViewRepairUtils.CardNumberLabelName, StringComparison.Ordinal) &&
+               (string.Equals(label.gameObject.name, Theme1GameplayViewRepairUtils.CardNumberLabelName, StringComparison.Ordinal) ||
+                string.Equals(label.gameObject.name, Theme1GameplayViewRepairUtils.CardNumberVisibleLabelName, StringComparison.Ordinal)) &&
                IsTextLocalToSelectionOverlay(label, selectionOverlay);
     }
 

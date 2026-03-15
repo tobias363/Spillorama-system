@@ -143,6 +143,7 @@ public partial class APIManager : MonoBehaviour
     private bool realtimeBonusTriggeredForActiveGame = false;
     private bool isJoinOrCreatePending = false;
     private bool pendingJoinOrCreateAfterLaunchResolve = false;
+    private bool pendingRealtimeStateRequestAfterConnect = false;
     private float joinOrCreateIssuedAtRealtime = -1f;
     private float nextCountdownRefreshAt = -1f;
     private float nextScheduledRoomStateRefreshAt = -1f;
@@ -217,6 +218,8 @@ public partial class APIManager : MonoBehaviour
     private readonly Theme1RealtimeStateAdapter theme1RealtimeStateAdapter = new();
     private readonly Theme1LocalStateAdapter theme1LocalStateAdapter = new();
     private readonly Theme1DisplayPresenter theme1DisplayPresenter = new();
+
+    internal Theme1GameplayViewRoot Theme1GameplayViewRootRef => theme1GameplayViewRoot;
     private Theme1DisplayState preservedTheme1RoundDisplayState;
     private bool hasLoggedFirstRealtimeCardRender = false;
     private bool hasLoggedFirstRealtimeBallRender = false;
@@ -306,6 +309,7 @@ public partial class APIManager : MonoBehaviour
 #else
         allowEditorLocalFallbackWhenRealtimeUnavailable = false;
 #endif
+        ApplyEditorRealtimeLoggingPolicy();
     }
 
     void OnEnable()
@@ -660,6 +664,17 @@ public partial class APIManager : MonoBehaviour
     public bool ShouldLogRealtimeDrawTrace()
     {
         return logRealtimeDrawTrace;
+    }
+
+    private void ApplyEditorRealtimeLoggingPolicy()
+    {
+#if UNITY_EDITOR
+        logRealtimeLifecycleEvents = false;
+        logRealtimeDrawMetrics = false;
+        logRealtimeDrawTrace = false;
+        logRuntimeDiagnostics = false;
+        showRealtimeDebugOverlayInEditor = false;
+#endif
     }
 
     private BallManager ResolveBallManager()
@@ -1389,7 +1404,15 @@ public partial class APIManager : MonoBehaviour
 
             if (!string.IsNullOrWhiteSpace(activeRoomCode) && !string.IsNullOrWhiteSpace(activePlayerId))
             {
+                pendingRealtimeStateRequestAfterConnect = false;
                 realtimeClient.ResumeRoom(activeRoomCode, activePlayerId, HandleResumeAck);
+                return;
+            }
+
+            if (pendingRealtimeStateRequestAfterConnect)
+            {
+                pendingRealtimeStateRequestAfterConnect = false;
+                RequestRealtimeState();
                 return;
             }
 
@@ -2104,9 +2127,12 @@ public partial class APIManager : MonoBehaviour
 
         if (!realtimeClient.IsReady)
         {
+            pendingRealtimeStateRequestAfterConnect = true;
             realtimeClient.Connect();
             return;
         }
+
+        pendingRealtimeStateRequestAfterConnect = false;
 
         if (string.IsNullOrWhiteSpace(activeRoomCode))
         {

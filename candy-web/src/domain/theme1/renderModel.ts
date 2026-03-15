@@ -48,7 +48,7 @@ export interface Theme1CardRenderState {
   paylinesActive: boolean[];
   matchedPatternIndexes: number[];
   completedPatterns: Theme1CompletedPatternRenderState[];
-  activeNearPattern: Theme1NearPatternRenderState | null;
+  activeNearPatterns: Theme1NearPatternRenderState[];
 }
 
 export interface Theme1CellPrizeLabelRenderState {
@@ -167,7 +167,7 @@ export function createEmptyTheme1CardRenderState(): Theme1CardRenderState {
     paylinesActive: [],
     matchedPatternIndexes: [],
     completedPatterns: [],
-    activeNearPattern: null,
+    activeNearPatterns: [],
   };
 }
 
@@ -259,6 +259,10 @@ export interface Theme1TopperState {
   title: string;
   prize: string;
   highlighted?: boolean;
+  highlightKind?: "normal" | "near" | "win";
+  showMatchedPattern?: boolean;
+  activePatternIndexes?: number[];
+  missingCellIndexes?: number[];
 }
 
 export interface Theme1CellState {
@@ -272,7 +276,9 @@ export interface Theme1BoardPatternOverlayState {
   rawPatternIndex: number;
   title: string;
   symbolId: string | null;
+  pathDefinition: string | null;
   cellIndices: number[];
+  prizeLabel?: string;
 }
 
 export interface Theme1BoardPrizeLabelState {
@@ -292,9 +298,64 @@ export interface Theme1BoardState {
   label: string;
   stake: string;
   win: string;
+  progressLabel: string;
+  progressState: "hidden" | "ongoing" | "complete";
   cells: Theme1CellState[];
   completedPatterns: Theme1BoardPatternOverlayState[];
+  activeNearPatterns: Theme1BoardPatternOverlayState[];
   prizeStacks: Theme1BoardPrizeStackState[];
+}
+
+export interface Theme1CelebrationState {
+  claimId: string;
+  kind: "win" | "near" | "summary";
+  title: string;
+  subtitle: string;
+  amount: string;
+  topperId?: number | null;
+  boardId?: string | null;
+  details?: string[];
+}
+
+export type Theme1BonusStatus = "idle" | "open" | "resolved";
+
+export type Theme1BonusSymbolId =
+  | "asset-19"
+  | "asset-8"
+  | "asset-7"
+  | "asset-6"
+  | "asset-10"
+  | "asset-9"
+  | "asset-4";
+
+export interface Theme1BonusPayoutEntry {
+  symbolId: Theme1BonusSymbolId;
+  label: string;
+  shortLabel: string;
+  payoutKr: number;
+}
+
+export interface Theme1BonusSlotState {
+  id: string;
+  revealed: boolean;
+  selected: boolean;
+  symbolId: Theme1BonusSymbolId | null;
+}
+
+export interface Theme1BonusResultState {
+  matchedSymbolId: Theme1BonusSymbolId | null;
+  winAmount: number;
+  isWin: boolean;
+}
+
+export interface Theme1BonusState {
+  status: Theme1BonusStatus;
+  slotCount: number;
+  pickLimit: number;
+  selectedSlotIds: string[];
+  slots: Theme1BonusSlotState[];
+  payoutTable: Theme1BonusPayoutEntry[];
+  result: Theme1BonusResultState;
 }
 
 export interface Theme1RoundMeta {
@@ -315,6 +376,8 @@ export interface Theme1RoundMeta {
 export interface Theme1RoundRenderModel {
   hud: Theme1HudState;
   toppers: Theme1TopperState[];
+  featuredBallNumber: number | null;
+  featuredBallIsPending: boolean;
   recentBalls: number[];
   boards: Theme1BoardState[];
   meta: Theme1RoundMeta;

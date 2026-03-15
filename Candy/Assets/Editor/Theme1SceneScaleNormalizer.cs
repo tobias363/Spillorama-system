@@ -16,6 +16,7 @@ internal static class Theme1SceneScaleNormalizer
         "Card_2",
         "Card_3",
         "Card_4",
+        "Theme1ProductionRoot",
         "Theme1SaldoPanel",
         "Theme1GevinstPanel",
         "Theme1ShuffleButton",
@@ -188,6 +189,14 @@ internal static class Theme1SceneScaleNormalizer
         }
 
         Vector3 originalScale = rect.localScale;
+        if (ShouldResetDirectly(rect))
+        {
+            Undo.RecordObject(rect, "Reset Theme1 Root Rect Scale");
+            rect.localScale = Vector3.one;
+            EditorUtility.SetDirty(rect);
+            return 1;
+        }
+
         Vector2 scale2 = new Vector2(Mathf.Abs(originalScale.x), Mathf.Abs(originalScale.y));
         int updatedCount = 0;
 
@@ -240,6 +249,13 @@ internal static class Theme1SceneScaleNormalizer
         EditorUtility.SetDirty(rect);
         updatedCount += 1;
         return updatedCount;
+    }
+
+    private static bool ShouldResetDirectly(RectTransform rect)
+    {
+        return rect != null &&
+               rect.parent == null &&
+               rect.GetComponent<Canvas>() != null;
     }
 
     private static void ValidateRectHierarchy(RectTransform root, StringBuilder builder, ref bool isValid)

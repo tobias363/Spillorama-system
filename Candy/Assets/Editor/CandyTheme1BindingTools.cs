@@ -120,10 +120,11 @@ public static class CandyTheme1BindingTools
         BallManager ballManager = UnityEngine.Object.FindFirstObjectByType<BallManager>(FindObjectsInactive.Include);
         APIManager apiManager = UnityEngine.Object.FindFirstObjectByType<APIManager>(FindObjectsInactive.Include);
         GameManager gameManager = UnityEngine.Object.FindFirstObjectByType<GameManager>(FindObjectsInactive.Include);
+        UIManager uiManager = UnityEngine.Object.FindFirstObjectByType<UIManager>(FindObjectsInactive.Include);
         TopperManager topperManager = UnityEngine.Object.FindFirstObjectByType<TopperManager>(FindObjectsInactive.Include);
-        if (generator == null || ballManager == null || apiManager == null || gameManager == null || topperManager == null)
+        if (generator == null || ballManager == null || apiManager == null || gameManager == null || topperManager == null || uiManager == null)
         {
-            throw new InvalidOperationException($"{ValidationPrefix} Mangler NumberGenerator, BallManager, APIManager, GameManager eller TopperManager i Theme1.");
+            throw new InvalidOperationException($"{ValidationPrefix} Mangler NumberGenerator, BallManager, APIManager, GameManager, UIManager eller TopperManager i Theme1.");
         }
 
         CandyCardViewBindingSet cardBindings = generator.GetComponent<CandyCardViewBindingSet>();
@@ -191,8 +192,13 @@ public static class CandyTheme1BindingTools
         }
         else
         {
-            productionRoot.PullFrom(cardBindings, ballBindings, hudBindings, topperManager);
+            productionRoot.PullFrom(cardBindings, ballBindings, hudBindings, topperManager, uiManager);
         }
+
+        EnsureTheme1CardRerollButtons(productionRoot);
+        productionRoot.ReplaceRuntimeSceneReferences(generator, gameManager, apiManager, uiManager);
+        Theme1GameplayViewContractRefresher.RefreshVisibleContractFromScene(productionRoot);
+        EnsureTheme1HudButtonBindings(uiManager, productionRoot);
 
         Theme1LayoutController layoutController = productionRootObject.GetComponent<Theme1LayoutController>();
         if (layoutController == null)
@@ -247,6 +253,193 @@ public static class CandyTheme1BindingTools
         {
             Debug.Log($"{ValidationPrefix} Theme1ProductionRoot migrert og validert.");
         }
+    }
+
+    private static void EnsureTheme1HudButtonBindings(UIManager uiManager, Theme1GameplayViewRoot viewRoot)
+    {
+        if (uiManager == null || viewRoot?.HudControls == null)
+        {
+            return;
+        }
+
+        SerializedObject serializedUiManager = new SerializedObject(uiManager);
+        SetObjectReference(serializedUiManager, "playBtn", viewRoot.HudControls.PlaceBetButton);
+        SetObjectReference(serializedUiManager, "rerollTicketBtn", viewRoot.HudControls.ShuffleButton);
+        SetObjectReference(serializedUiManager, "betUp", viewRoot.HudControls.BetUpButton);
+        SetObjectReference(serializedUiManager, "betDown", viewRoot.HudControls.BetDownButton);
+        serializedUiManager.ApplyModifiedPropertiesWithoutUndo();
+        EditorUtility.SetDirty(uiManager);
+    }
+
+    private static void EnsureTheme1CardRerollButtons(Theme1GameplayViewRoot viewRoot)
+    {
+        if (viewRoot?.Cards == null)
+        {
+            return;
+        }
+
+        Button templateButton = viewRoot.HudControls?.ShuffleButton ?? viewRoot.HudControls?.PlaceBetButton;
+        TMP_Text templateLabel = templateButton != null ? templateButton.GetComponentInChildren<TMP_Text>(true) : null;
+        for (int cardIndex = 0; cardIndex < viewRoot.Cards.Length; cardIndex++)
+        {
+            Theme1CardGridView cardView = viewRoot.Cards[cardIndex];
+            RectTransform cardRoot = cardView?.RootRect;
+            if (cardRoot == null)
+            {
+                continue;
+            }
+
+            Button button = EnsureTheme1CardRerollButton(cardRoot, cardIndex, templateButton, templateLabel);
+            cardView.AttachSingleCardRerollButton(button);
+        }
+    }
+
+    private static Button EnsureTheme1CardRerollButton(
+        RectTransform cardRoot,
+        int cardIndex,
+        Button templateButton,
+        TMP_Text templateLabel)
+    {
+        string objectName = Theme1GameplayViewRepairUtils.BuildSingleCardRerollButtonName(cardIndex);
+        Transform existing = cardRoot.Find(objectName);
+        GameObject buttonObject = existing != null
+            ? existing.gameObject
+            : new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button));
+        if (existing == null)
+        {
+            Undo.RegisterCreatedObjectUndo(buttonObject, $"Create {objectName}");
+            Undo.SetTransformParent(buttonObject.transform, cardRoot, $"Parent {objectName}");
+        }
+
+        RectTransform backgroundRect = ResolveDirectChildRect(cardRoot, CardBackgroundName);
+        Vector2 baseSize = backgroundRect != null && backgroundRect.rect.width > 1f && backgroundRect.rect.height > 1f
+            ? backgroundRect.rect.size
+            : new Vector2(585f, 325f);
+        Vector2 basePosition = backgroundRect != null ? backgroundRect.anchoredPosition : new Vector2(2f, -5f);
+
+        RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
+        Undo.RecordObject(buttonRect, "Layout Theme1 card reroll button");
+        buttonRect.anchorMin = new Vector2(0.5f, 0.5f);
+        buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
+        buttonRect.pivot = new Vector2(0.5f, 0.5f);
+        buttonRect.anchoredPosition = new Vector2(basePosition.x, basePosition.y + (baseSize.y * 0.57f));
+        buttonRect.sizeDelta = new Vector2(Mathf.Max(132f, baseSize.x * 0.32f), 36f);
+        buttonRect.localScale = Vector3.one;
+        buttonRect.localRotation = Quaternion.identity;
+
+        Image image = buttonObject.GetComponent<Image>();
+        Button button = buttonObject.GetComponent<Button>();
+        if (image == null)
+        {
+            image = Undo.AddComponent<Image>(buttonObject);
+        }
+
+        if (button == null)
+        {
+            button = Undo.AddComponent<Button>(buttonObject);
+        }
+
+        Undo.RecordObject(image, "Style Theme1 card reroll button");
+        Sprite sprite = Theme1RuntimeAssetCatalog.GetShuffleButtonSprite() ?? Theme1RuntimeAssetCatalog.GetPlaceBetButtonSprite();
+        image.sprite = sprite;
+        image.type = sprite != null ? Image.Type.Sliced : Image.Type.Simple;
+        image.color = Color.white;
+        image.raycastTarget = true;
+        image.enabled = true;
+        image.preserveAspect = false;
+
+        Undo.RecordObject(button, "Configure Theme1 card reroll button");
+        if (templateButton != null)
+        {
+            button.transition = templateButton.transition;
+            button.colors = templateButton.colors;
+            button.spriteState = templateButton.spriteState;
+            button.navigation = templateButton.navigation;
+        }
+        else
+        {
+            button.transition = Selectable.Transition.None;
+        }
+
+        button.targetGraphic = image;
+        button.interactable = true;
+        buttonObject.SetActive(false);
+
+        Theme1ButtonPressFeedback feedback = buttonObject.GetComponent<Theme1ButtonPressFeedback>();
+        if (feedback == null)
+        {
+            feedback = Undo.AddComponent<Theme1ButtonPressFeedback>(buttonObject);
+        }
+
+        TextMeshProUGUI label = EnsureTheme1CardRerollLabel(buttonObject.transform, objectName + "_Label", templateLabel);
+        if (label != null)
+        {
+            label.text = "Bytt tall";
+            EditorUtility.SetDirty(label);
+        }
+
+        EditorUtility.SetDirty(buttonRect);
+        EditorUtility.SetDirty(image);
+        EditorUtility.SetDirty(button);
+        buttonRect.SetAsLastSibling();
+        return button;
+    }
+
+    private static TextMeshProUGUI EnsureTheme1CardRerollLabel(Transform parent, string objectName, TMP_Text templateLabel)
+    {
+        TextMeshProUGUI label = FindNamedTextLabel(parent, objectName);
+        if (label == null)
+        {
+            GameObject labelObject = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
+            Undo.RegisterCreatedObjectUndo(labelObject, $"Create {objectName}");
+            Undo.SetTransformParent(labelObject.transform, parent, $"Parent {objectName}");
+            labelObject.layer = parent.gameObject.layer;
+            label = labelObject.GetComponent<TextMeshProUGUI>();
+        }
+
+        if (label == null)
+        {
+            return null;
+        }
+
+        RectTransform rect = label.rectTransform;
+        Undo.RecordObject(rect, "Layout Theme1 card reroll label");
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.offsetMin = new Vector2(10f, 4f);
+        rect.offsetMax = new Vector2(-10f, -3f);
+        rect.localScale = Vector3.one;
+        rect.localRotation = Quaternion.identity;
+
+        Undo.RecordObject(label, "Style Theme1 card reroll label");
+        label.gameObject.SetActive(true);
+        label.enabled = true;
+        label.raycastTarget = false;
+        label.maskable = false;
+        label.color = templateLabel != null ? templateLabel.color : Color.white;
+        label.alpha = 1f;
+        label.enableAutoSizing = true;
+        label.fontSizeMin = 18f;
+        label.fontSizeMax = 28f;
+        label.fontSize = 24f;
+        label.textWrappingMode = TextWrappingModes.NoWrap;
+        label.overflowMode = TextOverflowModes.Overflow;
+        label.alignment = TextAlignmentOptions.Center;
+        label.extraPadding = true;
+        label.margin = new Vector4(8f, 4f, 8f, 2f);
+        label.lineSpacing = 0f;
+        if (templateLabel != null)
+        {
+            label.font = templateLabel.font;
+            label.fontSharedMaterial = templateLabel.fontSharedMaterial;
+            label.fontStyle = templateLabel.fontStyle;
+            label.fontWeight = templateLabel.fontWeight;
+        }
+
+        Theme1BongTypography.ApplyPrizeLabel(label);
+        label.transform.SetAsLastSibling();
+        return label;
     }
 
     private static bool ValidateTheme1Bindings(bool openSceneIfNeeded, bool logSummary, out string report)

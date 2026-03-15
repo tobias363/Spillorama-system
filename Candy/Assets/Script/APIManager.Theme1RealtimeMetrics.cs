@@ -10,7 +10,7 @@ public partial class APIManager
             Theme1CardGridView card = viewRoot.Cards[cardIndex];
             for (int cellIndex = 0; card?.Cells != null && cellIndex < card.Cells.Length; cellIndex++)
             {
-                TextMeshProUGUI label = card.Cells[cellIndex]?.NumberLabel;
+                TextMeshProUGUI label = card.Cells[cellIndex]?.PreferredRenderLabel;
                 if (label == null)
                 {
                     continue;

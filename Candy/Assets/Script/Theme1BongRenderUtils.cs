@@ -20,10 +20,24 @@ public static class Theme1BongRenderUtils
         bool showPrize = visiblePrizeLabels.Length > 0;
 
         ConfigureBackground(cellView.Background, visualState, cellState.IsSelected);
-        ConfigureNumberLabel(cellView.NumberLabel, showPrize);
+        ConfigureNumberLabel(cellView.PreferredRenderLabel, showPrize);
         ConfigurePrizeLabels(cellView, visiblePrizeLabels);
         ConfigureGlow(cellView.Glow);
         ConfigurePulse(cellView, visualState == Theme1CardCellVisualState.NearTarget);
+
+        TextMeshProUGUI inactiveNumberLabel = cellView.LegacyNumberLabel == cellView.PreferredRenderLabel
+            ? cellView.VisibleNumberLabel
+            : cellView.LegacyNumberLabel;
+        if (inactiveNumberLabel != null)
+        {
+            inactiveNumberLabel.text = string.Empty;
+            inactiveNumberLabel.enabled = false;
+            inactiveNumberLabel.alpha = 0f;
+            if (inactiveNumberLabel.gameObject.activeSelf)
+            {
+                inactiveNumberLabel.gameObject.SetActive(false);
+            }
+        }
     }
 
     public static void ApplyPaylineVisuals(Theme1CardGridView view, Theme1CardRenderState state)
@@ -134,11 +148,26 @@ public static class Theme1BongRenderUtils
 
         Theme1BongTypography.ApplyCardNumber(label);
         label.color = Theme1BongStyle.NumberColor;
+        label.maskable = false;
+        label.raycastTarget = false;
+        label.alpha = 1f;
+        label.enabled = true;
+        label.enableAutoSizing = false;
+        if (!label.gameObject.activeSelf)
+        {
+            label.gameObject.SetActive(true);
+        }
         RectTransform rect = label.rectTransform;
         rect.anchorMin = new Vector2(0.5f, 0.5f);
         rect.anchorMax = new Vector2(0.5f, 0.5f);
         rect.pivot = new Vector2(0.5f, 0.5f);
         rect.anchoredPosition = showPrize ? new Vector2(0f, 10f) : Vector2.zero;
+        RectTransform parentRect = label.transform.parent as RectTransform;
+        float referenceSize = parentRect != null
+            ? Mathf.Min(parentRect.rect.width, parentRect.rect.height)
+            : Mathf.Min(rect.rect.width, rect.rect.height);
+        label.fontSize = Mathf.Clamp(referenceSize * 0.58f, 24f, 42f);
+        label.transform.SetAsLastSibling();
     }
 
     private static void ConfigurePrizeLabels(Theme1CardCellView cellView, Theme1CellPrizeLabelRenderState[] prizeLabels)
@@ -373,7 +402,7 @@ public static class Theme1BongRenderUtils
             return;
         }
 
-        pulseController.Bind(cellView.NumberLabel, cellView.PrizeLabel, cellView.Glow);
+        pulseController.Bind(cellView.PreferredRenderLabel, cellView.PrizeLabel, cellView.Glow);
         pulseController.SetPulsing(pulsing);
     }
 }

@@ -87,9 +87,11 @@ public static class Theme1HudControlStyle
         target.enableAutoSizing = true;
         target.fontSizeMin = minSize;
         target.fontSizeMax = Mathf.Max(minSize, maxSize);
+        target.fontSize = target.fontSizeMax;
         target.fontWeight = FontWeight.Medium;
         target.fontStyle = FontStyles.Normal;
         target.extraPadding = true;
+        target.margin = new Vector4(4f, 2f, 4f, 2f);
         target.textWrappingMode = TextWrappingModes.NoWrap;
         target.overflowMode = TextOverflowModes.Overflow;
         target.raycastTarget = false;
@@ -103,10 +105,10 @@ public static class Theme1HudControlStyle
             return;
         }
 
-        ApplyHudValueStyle(hudBar.CountdownText, CountdownColor, 22f, 72f);
-        ApplyHudValueStyle(hudBar.RoomPlayerCountText, PlayerCountColor, 16f, 30f);
-        ApplyHudValueStyle(hudBar.CreditText, HudValueColor, 20f, 40f);
-        ApplyHudValueStyle(hudBar.WinningsText, HudValueColor, 20f, 40f);
-        ApplyHudValueStyle(hudBar.BetText, HudValueColor, 22f, 44f);
+        ApplyHudValueStyle(hudBar.CountdownText, CountdownColor, 26f, 82f);
+        ApplyHudValueStyle(hudBar.RoomPlayerCountText, PlayerCountColor, 18f, 34f);
+        ApplyHudValueStyle(hudBar.CreditText, HudValueColor, 22f, 48f);
+        ApplyHudValueStyle(hudBar.WinningsText, HudValueColor, 22f, 48f);
+        ApplyHudValueStyle(hudBar.BetText, HudValueColor, 24f, 52f);
     }
 }

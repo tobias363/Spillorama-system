@@ -11,6 +11,13 @@ import {
   makeShuffledBallBag,
   ticketContainsNumber
 } from "./ticket.js";
+import {
+  findCompletedCandyPatternFamilies,
+  getCandyActivePatternIndexes,
+  getCandyPatternFamilyDefinition,
+  resolveCandyPatternPayoutAmounts,
+  type CandyPatternFamilyMatch,
+} from "./candyPatterns.js";
 import type {
   ClaimRecord,
   ClaimType,
@@ -392,7 +399,7 @@ const MAX_SUPPORTED_BINGO_BALLS = 75;
 const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
 const DEFAULT_RTP_ROLLING_WINDOW_SIZE = 1000;
 const DEFAULT_RTP_CONTROLLER_GAIN = 0.5;
-const DEFAULT_NEAR_MISS_TARGET_RATE = 0.35;
+const DEFAULT_NEAR_MISS_TARGET_RATE = 0.38;
 const DEFAULT_NEAR_MISS_CALIBRATION_FACTOR = 0.92;
 
 export class BingoEngine {
@@ -787,6 +794,12 @@ export class BingoEngine {
     const maxPayoutBudget = this.roundCurrency((prizePool * normalizedPayoutPercent) / 100);
     let drawBag = makeShuffledBallBag(this.maxBallNumber);
     let nearMissTargetRateApplied: number | undefined;
+    const activePatternIndexes = getCandyActivePatternIndexes();
+    const patternPayoutAmounts = resolveCandyPatternPayoutAmounts(
+      entryFee,
+      normalizedPayoutPercent,
+      ticketsPerPlayer
+    ).map((amount) => this.roundCurrency(amount));
     if (this.nearMissBiasEnabled && this.nearMissTargetRate > 0) {
       const adaptiveNearMissRate = this.resolveAdaptiveNearMissRate(room.hallId);
       nearMissTargetRateApplied = adaptiveNearMissRate;
@@ -802,11 +815,19 @@ export class BingoEngine {
       payoutPercent: normalizedPayoutPercent,
       maxPayoutBudget,
       remainingPayoutBudget: maxPayoutBudget,
+      activePatternIndexes,
+      patternPayoutAmounts,
       drawBag,
       drawnNumbers: [],
       nearMissTargetRateApplied,
       tickets,
       marks,
+      settledPatternTopperSlots: new Map(
+        [...tickets.entries()].map(([playerId, playerTickets]) => [
+          playerId,
+          playerTickets.map(() => new Set<number>()),
+        ])
+      ),
       claims: [],
       startedAt: new Date().toISOString()
     };
@@ -967,6 +988,8 @@ export class BingoEngine {
       playerId: player.id,
       type: input.type,
       valid,
+      claimKind:
+        input.type === "LINE" ? "LEGACY_LINE" : input.type === "BINGO" ? "LEGACY_BINGO" : undefined,
       reason,
       createdAt: new Date().toISOString()
     };
@@ -1353,7 +1376,7 @@ export class BingoEngine {
       ticketStatuses.push({
         nearMissPatterns,
         hasCompleteLine,
-        hasFullBingo: hasFullBingoState
+        hasFullBingo: hasFullBingoState,
       });
     }
 
@@ -3467,6 +3490,8 @@ export class BingoEngine {
       payoutPercent: game.payoutPercent,
       maxPayoutBudget: game.maxPayoutBudget,
       remainingPayoutBudget: game.remainingPayoutBudget,
+      activePatternIndexes: [...game.activePatternIndexes],
+      patternPayoutAmounts: [...game.patternPayoutAmounts],
       drawnNumbers: [...game.drawnNumbers],
       remainingNumbers: game.drawBag.length,
       nearMissTargetRateApplied: game.nearMissTargetRateApplied,
@@ -3525,57 +3550,168 @@ export class BingoEngine {
     }
   }
 
-  private findAutomaticClaimCandidate(game: GameState, type: ClaimType): string | undefined {
-    const drawnSet = new Set<number>(game.drawnNumbers);
-    for (const [playerId, tickets] of game.tickets.entries()) {
-      const marksByTicket = game.marks.get(playerId) ?? [];
-      for (let ticketIndex = 0; ticketIndex < tickets.length; ticketIndex += 1) {
-        const effectiveMarks = this.buildEffectiveMarks(tickets[ticketIndex], marksByTicket[ticketIndex], drawnSet);
-        if (type === "LINE") {
-          if (findFirstCompleteLinePatternIndex(tickets[ticketIndex], effectiveMarks) >= 0) {
-            return playerId;
-          }
-          continue;
-        }
-        if (hasFullBingo(tickets[ticketIndex], effectiveMarks)) {
-          return playerId;
-        }
-      }
-    }
-    return undefined;
-  }
-
   private async processAutomaticClaimsForDraw(room: RoomState, game: GameState, number: number): Promise<void> {
     this.applyAutomaticMarksForNumber(game, number);
     if (game.status !== "RUNNING") {
       return;
     }
+    await this.processAutomaticCandyPatternClaims(room, game);
+  }
 
-    if (!game.lineWinnerId) {
-      const linePlayerId = this.findAutomaticClaimCandidate(game, "LINE");
-      if (linePlayerId) {
-        await this.submitClaim({
-          roomCode: room.code,
-          playerId: linePlayerId,
-          type: "LINE"
-        });
+  private async processAutomaticCandyPatternClaims(room: RoomState, game: GameState): Promise<void> {
+    const drawnSet = new Set<number>(game.drawnNumbers);
+
+    for (const [playerId, tickets] of game.tickets.entries()) {
+      const player = room.players.get(playerId);
+      if (!player) {
+        continue;
+      }
+
+      const marksByTicket = game.marks.get(playerId) ?? [];
+      let settledByTicket = game.settledPatternTopperSlots.get(playerId);
+      if (!settledByTicket) {
+        settledByTicket = tickets.map(() => new Set<number>());
+        game.settledPatternTopperSlots.set(playerId, settledByTicket);
+      }
+
+      for (let ticketIndex = 0; ticketIndex < tickets.length; ticketIndex += 1) {
+        const ticket = tickets[ticketIndex];
+        const effectiveMarks = this.buildEffectiveMarks(
+          ticket,
+          marksByTicket[ticketIndex],
+          drawnSet
+        );
+        const settledSlots = settledByTicket[ticketIndex] ?? new Set<number>();
+        settledByTicket[ticketIndex] = settledSlots;
+
+        const completedMatches = findCompletedCandyPatternFamilies(ticket, effectiveMarks);
+        for (const match of completedMatches) {
+          if (settledSlots.has(match.topperSlotIndex)) {
+            continue;
+          }
+
+          await this.settleAutomaticCandyPatternClaim(room, game, player, ticketIndex, match);
+          settledSlots.add(match.topperSlotIndex);
+        }
       }
     }
+  }
 
-    if (game.status !== "RUNNING" || game.bingoWinnerId) {
-      return;
-    }
+  private async settleAutomaticCandyPatternClaim(
+    room: RoomState,
+    game: GameState,
+    player: Player,
+    ticketIndex: number,
+    match: CandyPatternFamilyMatch
+  ): Promise<ClaimRecord> {
+    const claim: ClaimRecord = {
+      id: randomUUID(),
+      playerId: player.id,
+      type: "PATTERN",
+      valid: true,
+      claimKind: "PATTERN_FAMILY",
+      winningPatternIndex: match.rawPatternIndex,
+      patternIndex: match.rawPatternIndex,
+      displayPatternNumber: match.displayPatternNumber,
+      topperSlotIndex: match.topperSlotIndex,
+      ticketIndex,
+      createdAt: new Date().toISOString()
+    };
+    game.claims.push(claim);
 
-    const bingoPlayerId = this.findAutomaticClaimCandidate(game, "BINGO");
-    if (!bingoPlayerId) {
-      return;
-    }
-
-    await this.submitClaim({
-      roomCode: room.code,
-      playerId: bingoPlayerId,
-      type: "BINGO"
+    const family = getCandyPatternFamilyDefinition(match.topperSlotIndex);
+    const requestedPayout = family
+      ? Math.max(0, game.patternPayoutAmounts[family.topperSlotIndex] ?? 0)
+      : 0;
+    const gameType: LedgerGameType = "DATABINGO";
+    const channel: LedgerChannel = "INTERNET";
+    const houseAccountId = this.makeHouseAccountId(room.hallId, gameType, channel);
+    const rtpBudgetBefore = this.roundCurrency(Math.max(0, game.remainingPayoutBudget));
+    const cappedPatternPayout = this.applySinglePrizeCap({
+      room,
+      gameType,
+      amount: requestedPayout
     });
+    // Candy pattern payouts follow the fixed per-ticket payout table. The
+    // round-level fields still track depletion for telemetry, but the actual
+    // claim amount is controlled by the payout table and single-prize policy.
+    const payout = this.roundCurrency(Math.max(0, cappedPatternPayout.cappedAmount));
+
+    if (payout > 0) {
+      const transfer = await this.walletAdapter.transfer(
+        houseAccountId,
+        player.walletId,
+        payout,
+        `Pattern prize ${room.code} #${match.displayPatternNumber}`
+      );
+      player.balance += payout;
+      game.remainingPrizePool = this.roundCurrency(
+        Math.max(0, game.remainingPrizePool - payout)
+      );
+      game.remainingPayoutBudget = this.roundCurrency(
+        Math.max(0, game.remainingPayoutBudget - payout)
+      );
+      this.recordLossEntry(player.walletId, room.hallId, {
+        type: "PAYOUT",
+        amount: payout,
+        createdAtMs: Date.now()
+      });
+      this.recordComplianceLedgerEvent({
+        hallId: room.hallId,
+        gameType,
+        channel,
+        eventType: "PRIZE",
+        amount: payout,
+        roomCode: room.code,
+        gameId: game.id,
+        claimId: claim.id,
+        playerId: player.id,
+        walletId: player.walletId,
+        sourceAccountId: transfer.fromTx.accountId,
+        targetAccountId: transfer.toTx.accountId,
+        policyVersion: cappedPatternPayout.policy.id,
+        metadata: {
+          claimKind: "PATTERN_FAMILY",
+          displayPatternNumber: match.displayPatternNumber,
+          topperSlotIndex: match.topperSlotIndex,
+          ticketIndex,
+        }
+      });
+      this.appendPayoutAuditEvent({
+        kind: "CLAIM_PRIZE",
+        claimId: claim.id,
+        gameId: game.id,
+        roomCode: room.code,
+        hallId: room.hallId,
+        policyVersion: cappedPatternPayout.policy.id,
+        amount: payout,
+        walletId: player.walletId,
+        playerId: player.id,
+        sourceAccountId: houseAccountId,
+        txIds: [transfer.fromTx.id, transfer.toTx.id]
+      });
+    }
+
+    const rtpBudgetAfter = this.roundCurrency(Math.max(0, game.remainingPayoutBudget));
+    claim.payoutAmount = payout;
+    claim.payoutPolicyVersion = cappedPatternPayout.policy.id;
+    claim.payoutWasCapped = payout < requestedPayout;
+    claim.rtpBudgetBefore = rtpBudgetBefore;
+    claim.rtpBudgetAfter = rtpBudgetAfter;
+    claim.rtpCapped = false;
+
+    if (this.bingoAdapter.onClaimLogged) {
+      await this.bingoAdapter.onClaimLogged({
+        roomCode: room.code,
+        gameId: game.id,
+        playerId: player.id,
+        type: claim.type,
+        valid: claim.valid,
+        reason: claim.reason
+      });
+    }
+
+    return claim;
   }
 }
 

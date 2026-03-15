@@ -1,4 +1,10 @@
-export type Theme1PatternMask = readonly number[];
+import {
+  getTheme1PatternDefinition,
+  THEME1_PATTERN_DEFINITIONS,
+  type Theme1PatternMask,
+} from "@/domain/theme1/patternDefinitions";
+
+export type { Theme1PatternMask } from "@/domain/theme1/patternDefinitions";
 
 export interface Theme1RuntimeConfig {
   maxBallNumber: number;
@@ -14,41 +20,26 @@ export const THEME1_MAX_BALL_NUMBER = 60;
 export const THEME1_DEFAULT_CARD_COUNT = 4;
 
 export const THEME1_BASE_TOPPER_PAYOUT_AMOUNTS = Object.freeze([
-  2400,
-  2200,
-  2000,
-  1800,
-  1600,
-  1400,
-  1200,
-  1000,
-  800,
-  600,
-  400,
+  1500,
+  500,
+  300,
   200,
+  100,
+  100,
+  40,
+  40,
+  10,
+  8,
+  3,
+  3,
 ]);
 
-export const THEME1_DEFAULT_PATTERN_MASKS = Object.freeze<readonly Theme1PatternMask[]>([
-  Object.freeze([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
-  Object.freeze([1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1]),
-  Object.freeze([1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1]),
-  Object.freeze([1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0]),
-  Object.freeze([1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0]),
-  Object.freeze([1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0]),
-  Object.freeze([1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1]),
-  Object.freeze([0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1]),
-  Object.freeze([1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]),
-  Object.freeze([1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0]),
-  Object.freeze([0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1]),
-  Object.freeze([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1]),
-  Object.freeze([0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
-  Object.freeze([1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0]),
-  Object.freeze([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
-  Object.freeze([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
-]);
+export const THEME1_DEFAULT_PATTERN_MASKS = Object.freeze<readonly Theme1PatternMask[]>(
+  THEME1_PATTERN_DEFINITIONS.map((definition) => definition.mask),
+);
 
 export const THEME1_DEFAULT_ACTIVE_PATTERN_INDEXES = Object.freeze(
-  THEME1_DEFAULT_PATTERN_MASKS.map((_, index) => index),
+  THEME1_PATTERN_DEFINITIONS.map((definition) => definition.rawPatternIndex),
 );
 
 export const THEME1_DEFAULT_TOPPER_PAYOUT_AMOUNTS = Object.freeze([
@@ -100,16 +91,12 @@ export function resolveTheme1PayoutSlotIndex(
     return -1;
   }
 
-  let resolvedIndex = rawPatternIndex;
-  if (resolvedIndex >= 5 && resolvedIndex <= 7) {
-    resolvedIndex = 5;
-  } else if (resolvedIndex > 7 && resolvedIndex < 13) {
-    resolvedIndex -= 2;
-  } else if (resolvedIndex >= 13) {
-    resolvedIndex = payoutCount - 1;
+  const definition = getTheme1PatternDefinition(rawPatternIndex);
+  if (!definition) {
+    return clamp(rawPatternIndex, 0, payoutCount - 1);
   }
 
-  return clamp(resolvedIndex, 0, payoutCount - 1);
+  return clamp(definition.topperSlotIndex, 0, payoutCount - 1);
 }
 
 export function formatTheme1KrAmount(amount: number): string {

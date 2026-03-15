@@ -111,7 +111,7 @@ public sealed class Theme1LayoutController : MonoBehaviour
         }
 
         targetsResolved = true;
-        targets = Theme1ResponsiveLayoutTargets.Resolve();
+        targets = Theme1ResponsiveLayoutTargets.Resolve(GetComponent<Theme1GameplayViewRoot>());
         targets.CaptureDesktopState();
         resolvedTargets = targets;
         return resolvedTargets.IsUsable;
@@ -215,9 +215,36 @@ public sealed class Theme1LayoutController : MonoBehaviour
             PlaceBetButton != null &&
             NextDrawBanner != null;
 
-        public static Theme1ResponsiveLayoutTargets Resolve()
+        public static Theme1ResponsiveLayoutTargets Resolve(Theme1GameplayViewRoot root)
         {
             Theme1ResponsiveLayoutTargets resolved = new Theme1ResponsiveLayoutTargets();
+            if (root != null)
+            {
+                Theme1CardGridView[] cards = root.Cards;
+                resolved.Card1 = cards != null && cards.Length > 0 ? cards[0]?.RootRect : null;
+                resolved.Card2 = cards != null && cards.Length > 1 ? cards[1]?.RootRect : null;
+                resolved.Card3 = cards != null && cards.Length > 2 ? cards[2]?.RootRect : null;
+                resolved.Card4 = cards != null && cards.Length > 3 ? cards[3]?.RootRect : null;
+
+                Theme1HudControlsView hudControls = root.HudControls;
+                resolved.SaldoPanel = hudControls?.SaldoPanel;
+                resolved.WinningsPanel = hudControls?.WinningsPanel;
+                resolved.ShuffleButton = hudControls?.ShuffleButtonRoot;
+                resolved.StakePanel = hudControls?.StakePanel;
+                resolved.PlaceBetButton = hudControls?.PlaceBetButtonRoot;
+                resolved.NextDrawBanner = hudControls?.NextDrawBanner;
+            }
+
+            if (resolved.IsUsable)
+            {
+                return resolved;
+            }
+
+            if (Application.isPlaying)
+            {
+                return resolved;
+            }
+
             RectTransform[] rects = Object.FindObjectsByType<RectTransform>(
                 FindObjectsInactive.Include,
                 FindObjectsSortMode.None);

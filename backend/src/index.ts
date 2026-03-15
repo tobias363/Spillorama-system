@@ -259,7 +259,7 @@ const bingoRtpControllerGain = Math.min(
   Math.max(0, parseNonNegativeNumberEnv(process.env.BINGO_RTP_CONTROLLER_GAIN, 0.5))
 );
 const bingoNearMissBiasEnabled = parseBooleanEnv(process.env.BINGO_NEAR_MISS_BIAS_ENABLED, true);
-const bingoNearMissTargetRate = parseRatioEnv(process.env.BINGO_NEAR_MISS_TARGET_RATE, 0.35);
+const bingoNearMissTargetRate = parseRatioEnv(process.env.BINGO_NEAR_MISS_TARGET_RATE, 0.38);
 const bingoNearMissCalibrationFactor = parseRatioEnv(process.env.BINGO_NEAR_MISS_CALIBRATION_FACTOR, 0.92);
 const candyProductionApiBaseHost = "bingosystem-3.onrender.com";
 const allowProductionCandyApiBaseUrl = parseBooleanEnv(process.env.CANDY_ALLOW_PRODUCTION_API_BASE_URL, false);

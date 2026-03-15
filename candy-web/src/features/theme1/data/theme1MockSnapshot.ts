@@ -23,6 +23,22 @@ function buildCompletedPattern(
     rawPatternIndex,
     title: pattern.title,
     symbolId: pattern.overlaySymbolId,
+    pathDefinition: pattern.overlayPathDefinition,
+    cellIndices,
+  };
+}
+
+function buildNearPattern(
+  rawPatternIndex: number,
+  cellIndices: number[],
+): Theme1BoardPatternOverlayState {
+  const pattern = getTheme1PatternCatalogEntry(rawPatternIndex);
+  return {
+    key: `near-${rawPatternIndex}-${cellIndices.join("-")}`,
+    rawPatternIndex,
+    title: pattern.title,
+    symbolId: pattern.overlaySymbolId,
+    pathDefinition: pattern.overlayPathDefinition,
     cellIndices,
   };
 }
@@ -45,6 +61,7 @@ function buildBoard(
   tones: number[],
   target?: number,
   completedPatterns: Theme1BoardPatternOverlayState[] = [],
+  activeNearPatterns: Theme1BoardPatternOverlayState[] = [],
   prizeStacks: Theme1BoardPrizeStackState[] = [],
 ): Theme1BoardState {
   const source = boardNumbers[id - 1];
@@ -54,6 +71,9 @@ function buildBoard(
     label: `Bong ${id}`,
     stake: "30 kr",
     win: completedPatterns.length > 0 ? "120 kr" : "0 kr",
+    progressLabel:
+      completedPatterns.length > 0 ? `${completedPatterns.length} mønstre vunnet · flere mulig` : "",
+    progressState: completedPatterns.length > 0 ? "ongoing" : "hidden",
     cells: source.map((value, index) => ({
       index,
       value,
@@ -67,6 +87,7 @@ function buildBoard(
             : "idle",
     })),
     completedPatterns,
+    activeNearPatterns,
     prizeStacks,
   };
 }
@@ -86,14 +107,24 @@ export const theme1MockSnapshot: Theme1RoundRenderModel = {
     { id: 4, title: "Pattern 04", prize: "12 kr" },
     { id: 5, title: "Pattern 05", prize: "15 kr" },
   ],
+  featuredBallNumber: 41,
+  featuredBallIsPending: false,
   recentBalls: [3, 11, 18, 24, 33, 41],
   boards: [
-    buildBoard(1, [0, 1, 2, 3], 4, [], [buildPrizeStack(4, "3 kr", 13, "right")]),
+    buildBoard(
+      1,
+      [0, 1, 2, 3],
+      4,
+      [],
+      [buildNearPattern(13, [0, 1, 2, 3, 4])],
+      [buildPrizeStack(4, "3 kr", 13, "right")],
+    ),
     buildBoard(
       2,
       [0, 1, 2, 3, 4],
       undefined,
       [buildCompletedPattern(13, [0, 1, 2, 3, 4])],
+      [],
       [buildPrizeStack(4, "3 kr", 13, "right")],
     ),
     buildBoard(
@@ -104,6 +135,7 @@ export const theme1MockSnapshot: Theme1RoundRenderModel = {
         buildCompletedPattern(13, [0, 1, 2, 3, 4]),
         buildCompletedPattern(14, [5, 6, 7, 8, 9]),
       ],
+      [],
       [
         buildPrizeStack(4, "3 kr", 13, "right"),
         buildPrizeStack(9, "6 kr", 14, "center"),
@@ -114,6 +146,7 @@ export const theme1MockSnapshot: Theme1RoundRenderModel = {
       [0, 4, 5, 9, 10, 11, 12, 14],
       13,
       [buildCompletedPattern(11, [0, 4, 5, 9, 10, 14])],
+      [],
       [
         buildPrizeStack(14, "12 kr", 11, "right"),
         buildPrizeStack(13, "15 kr", 15, "center"),

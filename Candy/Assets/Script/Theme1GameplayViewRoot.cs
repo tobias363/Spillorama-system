@@ -7,25 +7,48 @@ public sealed partial class Theme1GameplayViewRoot : MonoBehaviour
     [SerializeField] private Theme1CardGridView[] cards = new Theme1CardGridView[4];
     [SerializeField] private Theme1BallRackView ballRack = new Theme1BallRackView();
     [SerializeField] private Theme1HudBarView hudBar = new Theme1HudBarView();
+    [SerializeField] private Theme1HudControlsView hudControls = new Theme1HudControlsView();
     [SerializeField] private Theme1TopperStripView topperStrip = new Theme1TopperStripView();
+    [SerializeField] private NumberGenerator runtimeNumberGenerator;
+    [SerializeField] private GameManager runtimeGameManager;
+    [SerializeField] private APIManager runtimeApiManager;
+    [SerializeField] private UIManager runtimeUiManager;
     private bool presentationInitialized;
     private Theme1LayoutController cachedLayoutController;
 
     public Theme1CardGridView[] Cards => cards;
     public Theme1BallRackView BallRack => ballRack;
     public Theme1HudBarView HudBar => hudBar;
+    public Theme1HudControlsView HudControls => hudControls;
     public Theme1TopperStripView TopperStrip => topperStrip;
+    public NumberGenerator RuntimeNumberGenerator => runtimeNumberGenerator;
+    public GameManager RuntimeGameManager => runtimeGameManager;
+    public APIManager RuntimeApiManager => runtimeApiManager;
+    public UIManager RuntimeUiManager => runtimeUiManager;
 
     internal void ReplaceCards(Theme1CardGridView[] value) => cards = value;
     internal void ReplaceBallRack(Theme1BallRackView value) => ballRack = value;
     internal void ReplaceHudBar(Theme1HudBarView value) => hudBar = value;
+    internal void ReplaceHudControls(Theme1HudControlsView value) => hudControls = value ?? new Theme1HudControlsView();
     internal void ReplaceTopperStrip(Theme1TopperStripView value) => topperStrip = value;
+    public void ReplaceRuntimeSceneReferences(
+        NumberGenerator numberGenerator,
+        GameManager gameManager,
+        APIManager apiManager,
+        UIManager uiManager)
+    {
+        runtimeNumberGenerator = numberGenerator;
+        runtimeGameManager = gameManager;
+        runtimeApiManager = apiManager;
+        runtimeUiManager = uiManager;
+    }
 
     public void PullFrom(
         CandyCardViewBindingSet cardBindings,
         CandyBallViewBindingSet ballBindings,
         CandyTheme1HudBindingSet hudBindings,
-        TopperManager topperManager)
+        TopperManager topperManager,
+        UIManager uiManager = null)
     {
         cards = new Theme1CardGridView[cardBindings != null ? cardBindings.Cards.Count : 0];
         for (int i = 0; i < cards.Length; i++)
@@ -35,7 +58,8 @@ public sealed partial class Theme1GameplayViewRoot : MonoBehaviour
                 cardBindings.Cards[i],
                 cardBindings.Cards[i].HeaderText,
                 cardBindings.Cards[i].BetText,
-                cardBindings.Cards[i].WinningText);
+                cardBindings.Cards[i].WinningText,
+                i);
         }
 
         ballRack = new Theme1BallRackView();
@@ -43,6 +67,16 @@ public sealed partial class Theme1GameplayViewRoot : MonoBehaviour
 
         hudBar = new Theme1HudBarView();
         hudBar.PullFrom(hudBindings);
+
+        hudControls = new Theme1HudControlsView();
+        hudControls.PullFrom(
+            uiManager,
+            FindNamedRect("Theme1SaldoPanel"),
+            FindNamedRect("Theme1GevinstPanel"),
+            FindNamedRect("Theme1ShuffleButton"),
+            FindNamedRect("Theme1StakePanel"),
+            FindNamedRect("Theme1PlaceBetButton"),
+            FindNamedRect("Theme1NextDrawBanner"));
 
         topperStrip = new Theme1TopperStripView();
         topperStrip.PullFrom(topperManager);
@@ -87,6 +121,7 @@ public sealed partial class Theme1GameplayViewRoot : MonoBehaviour
             for (int cellIndex = 0; card?.Cells != null && cellIndex < card.Cells.Length; cellIndex++)
             {
                 AddTextTarget(targets, card.Cells[cellIndex]?.NumberLabel);
+                AddTextTarget(targets, card.Cells[cellIndex]?.VisibleNumberLabel);
                 AddTextTarget(targets, card.Cells[cellIndex]?.PrizeLabel);
             }
         }
@@ -156,6 +191,28 @@ public sealed partial class Theme1GameplayViewRoot : MonoBehaviour
     private void OnDisable()
     {
         Theme1ManagedTypographyRegistry.Clear();
+    }
+
+    private RectTransform FindNamedRect(string objectName)
+    {
+        if (string.IsNullOrWhiteSpace(objectName))
+        {
+            return null;
+        }
+
+        RectTransform[] rects = Object.FindObjectsByType<RectTransform>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None);
+        for (int i = 0; i < rects.Length; i++)
+        {
+            RectTransform rect = rects[i];
+            if (rect != null && string.Equals(rect.gameObject.name, objectName, System.StringComparison.Ordinal))
+            {
+                return rect;
+            }
+        }
+
+        return null;
     }
 
     private static void AddTextTarget(System.Collections.Generic.ICollection<TMP_Text> targets, TMP_Text target)

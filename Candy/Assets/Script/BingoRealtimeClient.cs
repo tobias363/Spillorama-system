@@ -68,6 +68,9 @@ public class BingoRealtimeClient : MonoBehaviour
 
         instance = this;
         backendBaseUrl = NormalizeBackendBaseUrl(backendBaseUrl);
+#if UNITY_EDITOR
+        verboseLogging = false;
+#endif
     }
 
     private void Start()

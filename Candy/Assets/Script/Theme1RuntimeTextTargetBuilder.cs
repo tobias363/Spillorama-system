@@ -53,6 +53,7 @@ internal static class Theme1RuntimeTextTargetBuilder
         label.gameObject.layer = cardRoot.gameObject.layer;
         label.gameObject.SetActive(true);
         label.enabled = true;
+        label.maskable = false;
         label.raycastTarget = false;
         label.alpha = 1f;
         label.enableAutoSizing = true;
@@ -180,6 +181,7 @@ internal static class Theme1RuntimeTextTargetBuilder
         }
 
         label.enabled = true;
+        label.maskable = false;
         label.raycastTarget = false;
         label.color = preferredColor;
         label.alpha = 1f;
@@ -202,6 +204,76 @@ internal static class Theme1RuntimeTextTargetBuilder
         RectTransform rect = label.rectTransform;
         rect.localScale = Vector3.one;
         rect.sizeDelta = preferredSize;
+        label.transform.SetAsLastSibling();
+        return label;
+    }
+
+    internal static TextMeshProUGUI EnsureDedicatedVisibleCardNumberLabel(RectTransform cellRoot, TextMeshProUGUI sourceLabel)
+    {
+        if (cellRoot == null)
+        {
+            return null;
+        }
+
+        TextMeshProUGUI label = FindNamedTextLabel(cellRoot, Theme1GameplayViewRepairUtils.CardNumberVisibleLabelName);
+        if (label == null)
+        {
+            GameObject child = new GameObject(
+                Theme1GameplayViewRepairUtils.CardNumberVisibleLabelName,
+                typeof(RectTransform),
+                typeof(TextMeshProUGUI));
+            child.layer = cellRoot.gameObject.layer;
+            child.transform.SetParent(cellRoot, false);
+            label = child.GetComponent<TextMeshProUGUI>();
+        }
+
+        if (label == null)
+        {
+            return null;
+        }
+
+        label.gameObject.name = Theme1GameplayViewRepairUtils.CardNumberVisibleLabelName;
+        label.gameObject.layer = cellRoot.gameObject.layer;
+        if (!label.gameObject.activeSelf)
+        {
+            label.gameObject.SetActive(true);
+        }
+
+        label.enabled = true;
+        label.maskable = false;
+        label.raycastTarget = false;
+        label.alpha = 1f;
+        label.enableAutoSizing = true;
+        label.fontSizeMin = sourceLabel != null && sourceLabel.fontSizeMin > 0f ? sourceLabel.fontSizeMin : 20f;
+        label.fontSizeMax = sourceLabel != null && sourceLabel.fontSizeMax >= label.fontSizeMin ? sourceLabel.fontSizeMax : 72f;
+        label.overflowMode = TextOverflowModes.Overflow;
+        label.alignment = TextAlignmentOptions.Center;
+        label.textWrappingMode = TextWrappingModes.NoWrap;
+        label.text = sourceLabel != null ? (sourceLabel.text ?? string.Empty) : string.Empty;
+        RealtimeTextStyleUtils.ApplyGameplayTextPresentation(
+            label,
+            CandyTypographyRole.Number,
+            GameplayTextSurface.CardNumber,
+            preserveExistingFont: false);
+        Theme1BongTypography.ApplyCardNumber(label);
+
+        RectTransform rect = label.rectTransform;
+        rect.localScale = Vector3.one;
+        rect.localRotation = Quaternion.identity;
+        if (sourceLabel != null)
+        {
+            RectTransform sourceRect = sourceLabel.rectTransform;
+            rect.anchorMin = sourceRect.anchorMin;
+            rect.anchorMax = sourceRect.anchorMax;
+            rect.pivot = sourceRect.pivot;
+            rect.anchoredPosition = sourceRect.anchoredPosition;
+            rect.sizeDelta = sourceRect.sizeDelta;
+        }
+        else
+        {
+            PlaceCardNumberLabel(rect, cellRoot);
+        }
+
         label.transform.SetAsLastSibling();
         return label;
     }

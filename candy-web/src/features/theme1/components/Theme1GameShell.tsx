@@ -1,76 +1,219 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTheme1Store } from "@/features/theme1/hooks/useTheme1Store";
 import { Theme1ConnectionPanel } from "@/features/theme1/components/Theme1ConnectionPanel";
-import { Theme1HudRack } from "@/features/theme1/components/Theme1HudRack";
 import { Theme1TopperStrip } from "@/features/theme1/components/Theme1TopperStrip";
-import { Theme1BoardGrid } from "@/features/theme1/components/Theme1BoardGrid";
-import { Theme1BallRail } from "@/features/theme1/components/Theme1BallRail";
+import { Theme1Playfield } from "@/features/theme1/components/Theme1Playfield";
 import { theme1Assets } from "@/features/theme1/data/theme1Assets";
+import { resolveSchedulerCountdownLabel } from "@/domain/theme1/schedulerCountdown";
+import integratedSceneUrl from "../../../../bilder/ny bakgrunn.jpg";
+
+export type Theme1BonusTestMode = "random" | "win";
+
+const THEME1_LIVE_STAGE_WIDTH = 1365;
+const THEME1_LIVE_STAGE_HEIGHT = 768;
+
+function resolveTheme1StageScale() {
+  if (typeof window === "undefined") {
+    return 1;
+  }
+
+  return Math.min(
+    window.innerWidth / THEME1_LIVE_STAGE_WIDTH,
+    window.innerHeight / THEME1_LIVE_STAGE_HEIGHT,
+  );
+}
+
+export function resolveBonusTestMode(search: string): Theme1BonusTestMode | null {
+  const params = new URLSearchParams(search);
+  const value = params.get("bonusTest")?.trim().toLowerCase();
+
+  if (value === "random" || value === "win") {
+    return value;
+  }
+
+  return null;
+}
 
 export function Theme1GameShell() {
   const snapshot = useTheme1Store((state) => state.snapshot);
+  const bonus = useTheme1Store((state) => state.bonus);
+  const celebration = useTheme1Store((state) => state.celebration);
+  const topperPulses = useTheme1Store((state) => state.topperPulses);
   const session = useTheme1Store((state) => state.session);
   const connect = useTheme1Store((state) => state.connect);
+  const roomSnapshot = useTheme1Store((state) => state.roomSnapshot);
+  const mode = useTheme1Store((state) => state.mode);
+  const mockBetArmed = useTheme1Store((state) => state.mockBetArmed);
+  const stakeBusy = useTheme1Store((state) => state.stakeBusy);
+  const rerollBusy = useTheme1Store((state) => state.rerollBusy);
+  const betBusy = useTheme1Store((state) => state.betBusy);
+  const changeStake = useTheme1Store((state) => state.changeStake);
+  const rerollTickets = useTheme1Store((state) => state.rerollTickets);
+  const toggleBetArm = useTheme1Store((state) => state.toggleBetArm);
+  const openBonusTest = useTheme1Store((state) => state.openBonusTest);
+  const openWinningBonusTest = useTheme1Store((state) => state.openWinningBonusTest);
+  const selectBonusSlot = useTheme1Store((state) => state.selectBonusSlot);
+  const resetBonusTest = useTheme1Store((state) => state.resetBonusTest);
+  const closeBonusTest = useTheme1Store((state) => state.closeBonusTest);
+  const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
+  const [stageScale, setStageScale] = useState(() => resolveTheme1StageScale());
+  const [displayedRecentBalls, setDisplayedRecentBalls] = useState<number[]>(snapshot.recentBalls);
+  const handledBonusSearchRef = useRef<string>("");
+  const isBonusActive = bonus.status !== "idle";
+
+  const isBetArmed =
+    mode === "live"
+      ? session.playerId.trim().length > 0 &&
+        (roomSnapshot?.scheduler.armedPlayerIds ?? []).includes(session.playerId.trim())
+      : mockBetArmed;
+
+  const countdownLabel = resolveSchedulerCountdownLabel(
+    roomSnapshot?.scheduler,
+    snapshot.hud.nesteTrekkOm,
+    countdownNowMs,
+    snapshot.meta.gameStatus,
+  );
+  const backgroundImage = isBonusActive
+    ? `linear-gradient(180deg, rgba(255, 245, 251, 0.02), rgba(255, 245, 251, 0.12)), url(${theme1Assets.bonusBackgroundUrl})`
+    : `linear-gradient(180deg, rgba(102, 35, 129, 0.08), rgba(48, 7, 58, 0.18)), url(${integratedSceneUrl})`;
 
   useEffect(() => {
-    if (session.roomCode) {
-      void connect();
+    void connect();
+  }, [connect]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
     }
-  }, [connect, session.roomCode]);
+
+    const search = window.location.search;
+    if (search === handledBonusSearchRef.current) {
+      return;
+    }
+
+    handledBonusSearchRef.current = search;
+
+    const bonusTestMode = resolveBonusTestMode(search);
+    if (bonusTestMode === "random") {
+      openBonusTest();
+      return;
+    }
+
+    if (bonusTestMode === "win") {
+      openWinningBonusTest();
+    }
+  }, [openBonusTest, openWinningBonusTest]);
+
+  useEffect(() => {
+    if (!roomSnapshot?.scheduler?.enabled || snapshot.meta.gameStatus === "RUNNING") {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setCountdownNowMs(Date.now());
+    }, 250);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    roomSnapshot?.scheduler?.enabled,
+    roomSnapshot?.scheduler?.nextStartAt,
+    roomSnapshot?.scheduler?.millisUntilNextStart,
+    roomSnapshot?.scheduler?.serverTime,
+    snapshot.meta.gameStatus,
+  ]);
+
+  useEffect(() => {
+    if (snapshot.meta.gameStatus === "RUNNING" && snapshot.meta.drawCount === 0) {
+      setDisplayedRecentBalls([]);
+      return;
+    }
+
+    if (snapshot.recentBalls.length > 0) {
+      setDisplayedRecentBalls(snapshot.recentBalls);
+    }
+  }, [snapshot.meta.drawCount, snapshot.meta.gameStatus, snapshot.recentBalls]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const syncStageScale = () => {
+      setStageScale(resolveTheme1StageScale());
+    };
+
+    syncStageScale();
+    window.addEventListener("resize", syncStageScale);
+
+    return () => {
+      window.removeEventListener("resize", syncStageScale);
+    };
+  }, []);
 
   return (
     <main
-      className="theme1-app"
-      style={{ backgroundImage: `linear-gradient(180deg, rgba(255, 245, 251, 0.02), rgba(255, 245, 251, 0.12)), url(${theme1Assets.backgroundUrl})` }}
+      className={`theme1-app${isBonusActive ? " theme1-app--bonus-active" : ""}`.trim()}
+      style={
+        {
+          backgroundImage,
+          "--theme1-live-backdrop-image": isBonusActive ? "none" : `url(${integratedSceneUrl})`,
+          "--theme1-stage-scale": String(stageScale),
+        } as CSSProperties
+      }
     >
       <div className="theme1-app__backdrop" />
 
-      <section className="theme1-app__header">
-        <div>
-          <p className="theme1-app__eyebrow">Candy Web Rebuild</p>
-          <h1>Theme1 runtime rebuilt for web-first delivery</h1>
-          <p className="theme1-app__lede">
-            Ren startflate for ny klient. Denne appen skal overta UI/state/rendering gradvis, uten Unity-monolitten.
-          </p>
-        </div>
+      <div className="theme1-app__viewport">
+        <div className={`theme1-app__chrome${isBonusActive ? " theme1-app__chrome--bonus-active" : ""}`.trim()}>
+          <section className="theme1-app__topbar">
+            <div className="theme1-app__brand">
+              <p className="theme1-app__eyebrow">Candy Web</p>
+              <strong>Theme1 live runtime</strong>
+            </div>
 
-        <div className="theme1-app__status">
-          <div>
-            <span>Source</span>
-            <strong>{snapshot.meta.source}</strong>
-          </div>
-          <div>
-            <span>Backend</span>
-            <strong>{snapshot.meta.backendUrl}</strong>
-          </div>
-          <div>
-            <span>Status</span>
-            <strong>{snapshot.meta.connectionLabel}</strong>
-          </div>
-          <div>
-            <span>Room</span>
-            <strong>{snapshot.meta.roomCode || "Ingen room valgt"}</strong>
-          </div>
-          <div>
-            <span>Player</span>
-            <strong>{snapshot.meta.playerId || "Ikke valgt"}</strong>
-          </div>
-          <div>
-            <span>Game</span>
-            <strong>{snapshot.meta.gameStatus}</strong>
-          </div>
-          <div>
-            <span>Draws</span>
-            <strong>{snapshot.meta.drawCount}</strong>
-          </div>
-        </div>
-      </section>
+            <div className="theme1-app__status-chips">
+              <span>{snapshot.meta.connectionLabel}</span>
+              <span>{snapshot.meta.gameStatus}</span>
+              <span>{snapshot.meta.roomCode || "Ingen room valgt"}</span>
+              <span>{snapshot.meta.drawCount} trekk</span>
+            </div>
+          </section>
 
-      <Theme1ConnectionPanel />
-      <Theme1TopperStrip toppers={snapshot.toppers} />
-      <Theme1HudRack hud={snapshot.hud} />
-      <Theme1BoardGrid boards={snapshot.boards} />
-      <Theme1BallRail balls={snapshot.recentBalls} />
+          {bonus.status === "idle" ? (
+            <Theme1TopperStrip toppers={snapshot.toppers} topperPulses={topperPulses} />
+          ) : null}
+          <Theme1Playfield
+            bonusActive={isBonusActive}
+            bonus={bonus}
+            boards={snapshot.boards}
+            hud={{
+              ...snapshot.hud,
+              nesteTrekkOm: countdownLabel,
+            }}
+            meta={snapshot.meta}
+            recentBalls={snapshot.recentBalls}
+            displayedRecentBalls={displayedRecentBalls}
+            featuredBall={snapshot.featuredBallNumber}
+            featuredBallIsPending={snapshot.featuredBallIsPending}
+            celebration={celebration}
+            stakeBusy={stakeBusy}
+            rerollBusy={rerollBusy}
+            betBusy={betBusy}
+            isBetArmed={isBetArmed}
+            onDecreaseStake={() => void changeStake(-30)}
+            onIncreaseStake={() => void changeStake(30)}
+            onShuffle={() => void rerollTickets()}
+            onPlaceBet={() => void toggleBetArm()}
+            onOpenBonusTest={openBonusTest}
+            onResetBonusTest={resetBonusTest}
+            onSelectBonusSlot={selectBonusSlot}
+            onCloseBonusTest={closeBonusTest}
+          />
+          {isBonusActive ? null : <Theme1ConnectionPanel />}
+        </div>
+      </div>
     </main>
   );
 }

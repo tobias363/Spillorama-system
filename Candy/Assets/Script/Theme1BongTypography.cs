@@ -26,6 +26,13 @@ public static class Theme1BongTypography
         }
 
         CandyTypographySystem.ApplyGameplayRole(target, role, surface, preserveColor: true, preserveExistingFont: false);
+        if (surface == GameplayTextSurface.CardNumber &&
+            target.font != null &&
+            target.font.material != null &&
+            target.fontSharedMaterial != target.font.material)
+        {
+            target.fontSharedMaterial = target.font.material;
+        }
         target.havePropertiesChanged = true;
         target.SetVerticesDirty();
         target.SetMaterialDirty();
