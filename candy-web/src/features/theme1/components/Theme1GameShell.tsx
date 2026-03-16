@@ -17,6 +17,7 @@ export type Theme1BonusTestMode = "random" | "win";
 const THEME1_LIVE_STAGE_WIDTH = 1365;
 const THEME1_LIVE_STAGE_HEIGHT = 768;
 const THEME1_POST_ROUND_COUNTDOWN_DELAY_MS = 5000;
+const THEME1_LIVE_BOOTSTRAP_SETTLE_MS = 6000;
 
 function resolveTheme1StageScale() {
   if (typeof window === "undefined") {
@@ -66,6 +67,30 @@ export function shouldDeferTheme1LiveChrome({
   return true;
 }
 
+export function shouldHoldTheme1LiveChromeDuringSettle({
+  hostname,
+  mode,
+  connectionPhase,
+  hasRoomSnapshot,
+  settleDelayComplete,
+}: {
+  hostname: string;
+  mode: Theme1DataSource;
+  connectionPhase: Theme1ConnectionPhase;
+  hasRoomSnapshot: boolean;
+  settleDelayComplete: boolean;
+}) {
+  if (isLocalTheme1RuntimeHost(hostname)) {
+    return false;
+  }
+
+  if (settleDelayComplete) {
+    return false;
+  }
+
+  return mode === "live" && connectionPhase === "connected" && hasRoomSnapshot;
+}
+
 export function Theme1GameShell() {
   const snapshot = useTheme1Store((state) => state.snapshot);
   const bonus = useTheme1Store((state) => state.bonus);
@@ -92,17 +117,28 @@ export function Theme1GameShell() {
   const [stageScale, setStageScale] = useState(() => resolveTheme1StageScale());
   const [displayedRecentBalls, setDisplayedRecentBalls] = useState<number[]>(snapshot.recentBalls);
   const [countdownHiddenUntilMs, setCountdownHiddenUntilMs] = useState(0);
+  const [liveChromeSettleComplete, setLiveChromeSettleComplete] = useState(
+    () => isLocalTheme1RuntimeHost(hostname),
+  );
   const handledBonusSearchRef = useRef<string>("");
   const previousGameStatusRef = useRef(snapshot.meta.gameStatus);
   const isBonusActive = bonus.status !== "idle";
   const hostname =
     typeof window !== "undefined" ? window.location.hostname.trim().toLowerCase() : "";
-  const shouldBlockChrome = shouldDeferTheme1LiveChrome({
+  const shouldDeferChrome = shouldDeferTheme1LiveChrome({
     hostname,
     mode,
     connectionPhase: connection.phase,
     hasRoomSnapshot: roomSnapshot !== null,
   });
+  const shouldHoldChromeDuringSettle = shouldHoldTheme1LiveChromeDuringSettle({
+    hostname,
+    mode,
+    connectionPhase: connection.phase,
+    hasRoomSnapshot: roomSnapshot !== null,
+    settleDelayComplete: liveChromeSettleComplete,
+  });
+  const shouldBlockChrome = shouldDeferChrome || shouldHoldChromeDuringSettle;
   const shouldShowBootstrapError =
     shouldBlockChrome === false &&
     !isLocalTheme1RuntimeHost(hostname) &&
@@ -172,6 +208,36 @@ export function Theme1GameShell() {
 
     previousGameStatusRef.current = currentGameStatus;
   }, [snapshot.meta.gameStatus]);
+
+  useEffect(() => {
+    if (isLocalTheme1RuntimeHost(hostname)) {
+      setLiveChromeSettleComplete(true);
+      return undefined;
+    }
+
+    if (shouldDeferChrome || connection.phase === "error" || roomSnapshot === null) {
+      setLiveChromeSettleComplete(false);
+      return undefined;
+    }
+
+    if (liveChromeSettleComplete) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setLiveChromeSettleComplete(true);
+    }, THEME1_LIVE_BOOTSTRAP_SETTLE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    hostname,
+    shouldDeferChrome,
+    connection.phase,
+    roomSnapshot,
+    liveChromeSettleComplete,
+  ]);
 
   useEffect(() => {
     if (!shouldTickCountdownClock || snapshot.meta.gameStatus === "RUNNING") {
@@ -246,7 +312,11 @@ export function Theme1GameShell() {
               />
               <div className="theme1-app__gate-spinner" aria-hidden="true" />
               <strong>{connection.label || "Kobler til"}</strong>
-              <p>{connection.message || "Laster live-rom og synkroniserer aktiv trekning..."}</p>
+              <p>
+                {shouldHoldChromeDuringSettle
+                  ? "Synkroniserer live-rom og klargjør aktiv trekning..."
+                  : (connection.message || "Laster live-rom og synkroniserer aktiv trekning...")}
+              </p>
             </div>
           </section>
         ) : shouldShowBootstrapError ? (

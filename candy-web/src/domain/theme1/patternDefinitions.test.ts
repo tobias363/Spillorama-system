@@ -471,6 +471,104 @@ describe("theme1 pattern definitions", () => {
     expect(result.model.hud.gevinst).toBe("0 kr");
   });
 
+  it("shows live drawn balls without marking boards for players who are not in the running game", () => {
+    const snapshot = createSnapshotForPattern([1, 2, 3, 4]);
+    snapshot.players.push({
+      id: "player-2",
+      name: "Guest",
+      walletId: "wallet-2",
+      balance: 1000,
+    });
+    snapshot.currentGame!.tickets = {
+      "player-1": snapshot.currentGame!.tickets["player-1"] ?? [],
+    };
+    snapshot.currentGame!.marks = {
+      "player-1": [],
+    };
+    snapshot.preRoundTickets = {
+      "player-2": [
+        {
+          numbers: Array.from({ length: 15 }, (_, index) => index + 16),
+          grid: [
+            [16, 17, 18, 19, 20],
+            [21, 22, 23, 24, 25],
+            [26, 27, 28, 29, 30],
+          ],
+        },
+      ],
+    };
+    snapshot.scheduler!.armedPlayerIds = [];
+    snapshot.scheduler!.armedPlayerCount = 0;
+
+    const result = mapRoomSnapshotToTheme1(snapshot, {
+      session: {
+        baseUrl: "https://example.com",
+        roomCode: "ROOM42",
+        playerId: "player-2",
+        accessToken: "token-2",
+        hallId: "hall-1",
+      },
+      cardSlotCount: 1,
+      patternMasks: THEME1_DEFAULT_PATTERN_MASKS,
+    });
+
+    expect(result.resolvedPlayerId).toBe("player-2");
+    expect(result.model.recentBalls).toEqual([1, 2, 3, 4]);
+    expect(result.model.featuredBallNumber).toBe(4);
+    expect(result.model.boards[0]?.cells.every((cell) => cell.tone === "idle")).toBe(true);
+    expect(result.model.boards[0]?.activeNearPatterns).toEqual([]);
+    expect(result.model.boards[0]?.completedPatterns).toEqual([]);
+  });
+
+  it("never shows one-to-go on pre-round boards during countdown after a previous round", () => {
+    const snapshot = createSnapshotForPattern([31, 43, 51, 60, 54, 50, 38, 27, 48, 30, 10, 36, 15, 33, 1, 2, 40, 13, 59, 8, 45, 49, 46, 3, 42, 55, 22, 52, 25, 53]);
+    snapshot.currentGame!.status = "ENDED";
+    snapshot.currentGame!.endedAt = "2026-03-13T10:02:00.000Z";
+    snapshot.players.push({
+      id: "player-2",
+      name: "Guest",
+      walletId: "wallet-2",
+      balance: 1000,
+    });
+    snapshot.currentGame!.tickets = {
+      "player-1": snapshot.currentGame!.tickets["player-1"] ?? [],
+    };
+    snapshot.currentGame!.marks = {
+      "player-1": [],
+    };
+    snapshot.preRoundTickets = {
+      "player-2": [
+        {
+          numbers: [1, 43, 16, 50, 30, 14, 49, 29, 8, 48, 27, 6, 44, 19, 54],
+          grid: [
+            [1, 43, 16, 50, 30],
+            [14, 49, 29, 8, 48],
+            [27, 6, 44, 19, 54],
+          ],
+        },
+      ],
+    };
+    snapshot.scheduler!.armedPlayerIds = [];
+    snapshot.scheduler!.armedPlayerCount = 0;
+
+    const result = mapRoomSnapshotToTheme1(snapshot, {
+      session: {
+        baseUrl: "https://example.com",
+        roomCode: "ROOM42",
+        playerId: "player-2",
+        accessToken: "token-2",
+        hallId: "hall-1",
+      },
+      cardSlotCount: 1,
+      patternMasks: THEME1_DEFAULT_PATTERN_MASKS,
+    });
+
+    expect(result.model.recentBalls).toHaveLength(30);
+    expect(result.model.boards[0]?.cells.some((cell) => cell.tone !== "idle")).toBe(false);
+    expect(result.model.boards[0]?.activeNearPatterns).toEqual([]);
+    expect(result.model.boards[0]?.completedPatterns).toEqual([]);
+  });
+
   it("falls back to stake-based topper prizes during countdown when snapshot payouts are zeroed", () => {
     const snapshot = createSnapshotForPattern([]);
     snapshot.currentGame!.status = "WAITING";

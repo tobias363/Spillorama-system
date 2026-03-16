@@ -184,10 +184,16 @@ export function mapRoomSnapshotToTheme1(
     duplicateSingleTicketAcrossCards,
   );
   const drawnNumbers = extractValidDrawnNumbers(currentGame?.drawnNumbers ?? []);
-  const drawOrderByNumber = buildDrawOrderLookup(drawnNumbers);
+  const playerDrawnNumbers = resolvePlayerVisibleDrawnNumbers({
+    snapshot,
+    playerId: selectedPlayerId,
+    ticketSource: playerContext.source,
+    drawnNumbers,
+  });
+  const drawOrderByNumber = buildDrawOrderLookup(playerDrawnNumbers);
   const patternEvaluation = evaluatePatterns(
     visibleTickets,
-    drawnNumbers,
+    playerDrawnNumbers,
     activePatternIndexes,
     patternMasks,
     normalizedTopperPayoutAmounts,
@@ -195,7 +201,7 @@ export function mapRoomSnapshotToTheme1(
   );
   const boardPatternEvaluation = evaluatePatterns(
     visibleTickets,
-    drawnNumbers,
+    playerDrawnNumbers,
     THEME1_DEFAULT_ACTIVE_PATTERN_INDEXES,
     patternMasks,
     normalizedTopperPayoutAmounts,
@@ -303,7 +309,7 @@ export function mapRoomSnapshotToTheme1(
 
       cardState.cells[cellIndex] = {
         numberLabel: number > 0 ? String(number) : "-",
-        isSelected: number > 0 && drawnNumbers.includes(number),
+        isSelected: number > 0 && playerDrawnNumbers.includes(number),
         isMissing: isNearTargetCell,
         isMatched: isMatchedByCompletedPattern,
         nearWinPatternIndex: isNearTargetCell
@@ -413,6 +419,19 @@ function normalizeTopperPayoutAmounts(
   return source.map((value) =>
     Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0,
   );
+}
+
+function resolvePlayerVisibleDrawnNumbers(input: {
+  snapshot: RoomSnapshot | RoomSnapshotWithScheduler;
+  playerId: string | undefined;
+  ticketSource: Theme1RoomTicketSource;
+  drawnNumbers: readonly number[];
+}): readonly number[] {
+  if (input.ticketSource === "currentGame") {
+    return input.drawnNumbers;
+  }
+
+  return [];
 }
 
 function resolveTopperSlotCount(

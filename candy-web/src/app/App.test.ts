@@ -3,6 +3,7 @@ import { resolveAppView } from "@/app/App";
 import {
   resolveBonusTestMode,
   shouldDeferTheme1LiveChrome,
+  shouldHoldTheme1LiveChromeDuringSettle,
 } from "@/features/theme1/components/Theme1GameShell";
 
 describe("resolveAppView", () => {
@@ -75,6 +76,44 @@ describe("shouldDeferTheme1LiveChrome", () => {
         mode: "mock",
         connectionPhase: "error",
         hasRoomSnapshot: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldHoldTheme1LiveChromeDuringSettle", () => {
+  it("keeps the loader up briefly after the live room is connected on non-local hosts", () => {
+    expect(
+      shouldHoldTheme1LiveChromeDuringSettle({
+        hostname: "bingosystem-staging.onrender.com",
+        mode: "live",
+        connectionPhase: "connected",
+        hasRoomSnapshot: true,
+        settleDelayComplete: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("releases the loader after the settle delay has completed", () => {
+    expect(
+      shouldHoldTheme1LiveChromeDuringSettle({
+        hostname: "bingosystem-staging.onrender.com",
+        mode: "live",
+        connectionPhase: "connected",
+        hasRoomSnapshot: true,
+        settleDelayComplete: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("never adds the extra settle delay on localhost", () => {
+    expect(
+      shouldHoldTheme1LiveChromeDuringSettle({
+        hostname: "127.0.0.1",
+        mode: "live",
+        connectionPhase: "connected",
+        hasRoomSnapshot: true,
+        settleDelayComplete: false,
       }),
     ).toBe(false);
   });
