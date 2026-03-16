@@ -4,6 +4,7 @@ import {
   isLocalTheme1RuntimeHost,
   resolveAdjustedStakeAmount,
   resolveStakeAmountBeforeArming,
+  resolveTheme1InitialSessionSeed,
   shouldAutoBootstrapDefaultLiveSession,
   shouldAttemptLiveRoomRecoveryFromSyncFailure,
 } from "@/features/theme1/hooks/useTheme1Store";
@@ -153,5 +154,46 @@ describe("theme1 stake controls", () => {
         "UNAUTHORIZED",
       ),
     ).toBe(false);
+  });
+
+  it("prefers portal auth on non-local hosts and clears stale room bindings when the token changes", () => {
+    const seed = resolveTheme1InitialSessionSeed({
+      storedSession: {
+        baseUrl: "https://bingosystem-staging.onrender.com",
+        roomCode: "OLD123",
+        playerId: "player-1",
+        accessToken: "stale-candy-token",
+        hallId: "",
+      },
+      search: "",
+      hostname: "bingosystem-staging.onrender.com",
+      portalAuthAccessToken: "fresh-portal-token",
+    });
+
+    expect(seed.accessTokenSource).toBe("portal-storage");
+    expect(seed.session.accessToken).toBe("fresh-portal-token");
+    expect(seed.session.roomCode).toBe("");
+    expect(seed.session.playerId).toBe("");
+    expect(seed.session.hallId).toBe("default-hall");
+  });
+
+  it("keeps the stored room binding when portal auth matches the saved candy session", () => {
+    const seed = resolveTheme1InitialSessionSeed({
+      storedSession: {
+        baseUrl: "https://bingosystem-staging.onrender.com",
+        roomCode: "ROOM42",
+        playerId: "player-42",
+        accessToken: "shared-token",
+        hallId: "default-hall",
+      },
+      search: "",
+      hostname: "bingosystem-staging.onrender.com",
+      portalAuthAccessToken: "shared-token",
+    });
+
+    expect(seed.accessTokenSource).toBe("portal-storage");
+    expect(seed.session.roomCode).toBe("ROOM42");
+    expect(seed.session.playerId).toBe("player-42");
+    expect(seed.session.hallId).toBe("default-hall");
   });
 });

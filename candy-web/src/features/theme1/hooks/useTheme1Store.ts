@@ -75,7 +75,13 @@ interface Theme1AuthSessionResponse {
   };
 }
 
-type Theme1AccessTokenSource = "url" | "storage" | "launch-token" | "manual" | "none";
+type Theme1AccessTokenSource =
+  | "url"
+  | "storage"
+  | "portal-storage"
+  | "launch-token"
+  | "manual"
+  | "none";
 
 interface CandyLaunchResolvePayload {
   accessToken: string;
@@ -133,8 +139,10 @@ interface Theme1State {
 }
 
 const STORAGE_KEY = "candy-web.realtime-session";
+const PORTAL_AUTH_STORAGE_KEY = "bingo.portal.auth";
 const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
-const LOCAL_LIVE_DEMO_HALL_ID = "default-hall";
+const DEFAULT_CANDY_HALL_ID = "default-hall";
+const LOCAL_LIVE_DEMO_HALL_ID = DEFAULT_CANDY_HALL_ID;
 const INITIAL_SESSION_SEED = readInitialSessionSeed();
 export const THEME1_STAKE_STEP_KR = 4;
 export const THEME1_MAX_TOTAL_STAKE_KR = 20;
@@ -1176,22 +1184,78 @@ function readInitialSessionSeed(): {
   session: RealtimeSession;
   accessTokenSource: Theme1AccessTokenSource;
 } {
+  if (typeof window === "undefined") {
+    return {
+      session: normalizeSession({
+        baseUrl: DEFAULT_BACKEND_URL,
+        roomCode: "",
+        playerId: "",
+        accessToken: "",
+        hallId: "",
+      }),
+      accessTokenSource: "none",
+    };
+  }
+
   const stored = readStoredSession();
-  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const urlAccessToken = params?.get("accessToken")?.trim() || "";
+  const seed = resolveTheme1InitialSessionSeed({
+    storedSession: stored,
+    search: window.location.search,
+    hostname: window.location.hostname,
+    portalAuthAccessToken: readPortalAuthAccessToken(),
+  });
+
+  if (seed.accessTokenSource === "url" || seed.accessTokenSource === "portal-storage") {
+    writeSession(seed.session);
+  }
+
+  return {
+    session: seed.session,
+    accessTokenSource: seed.accessTokenSource,
+  };
+}
+
+export function resolveTheme1InitialSessionSeed(input: {
+  storedSession: Partial<RealtimeSession>;
+  search: string;
+  hostname: string;
+  portalAuthAccessToken?: string;
+}): {
+  session: RealtimeSession;
+  accessTokenSource: Theme1AccessTokenSource;
+} {
+  const params = new URLSearchParams(input.search);
+  const urlAccessToken = params.get("accessToken")?.trim() || "";
   const storedAccessToken =
-    typeof stored.accessToken === "string" ? stored.accessToken.trim() : "";
+    typeof input.storedSession.accessToken === "string"
+      ? input.storedSession.accessToken.trim()
+      : "";
+  const portalAccessToken = (input.portalAuthAccessToken || "").trim();
+  const isLocalRuntimeHost = isLocalTheme1RuntimeHost(input.hostname);
+  const fallbackHallId = isLocalRuntimeHost ? "" : DEFAULT_CANDY_HALL_ID;
+  const shouldUsePortalSession = !isLocalRuntimeHost && portalAccessToken.length > 0;
+  const shouldResetStoredRoomBinding =
+    shouldUsePortalSession && storedAccessToken !== portalAccessToken;
+  const resolvedAccessToken =
+    urlAccessToken ||
+    (shouldUsePortalSession ? portalAccessToken : storedAccessToken || portalAccessToken);
 
   const session = normalizeSession({
-    baseUrl: params?.get("backendUrl") || stored.baseUrl || DEFAULT_BACKEND_URL,
-    roomCode: params?.get("roomCode") || stored.roomCode || "",
-    playerId: params?.get("playerId") || stored.playerId || "",
-    accessToken: urlAccessToken || storedAccessToken || "",
-    hallId: params?.get("hallId") || stored.hallId || "",
+    baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || DEFAULT_BACKEND_URL,
+    roomCode:
+      params.get("roomCode") ||
+      (shouldResetStoredRoomBinding ? "" : input.storedSession.roomCode || ""),
+    playerId:
+      params.get("playerId") ||
+      (shouldResetStoredRoomBinding ? "" : input.storedSession.playerId || ""),
+    accessToken: resolvedAccessToken,
+    hallId:
+      params.get("hallId") ||
+      input.storedSession.hallId ||
+      (resolvedAccessToken ? fallbackHallId : ""),
   });
 
   if (urlAccessToken) {
-    writeSession(session);
     return {
       session,
       accessTokenSource: "url",
@@ -1200,8 +1264,32 @@ function readInitialSessionSeed(): {
 
   return {
     session,
-    accessTokenSource: storedAccessToken ? "storage" : "none",
+    accessTokenSource: shouldUsePortalSession
+      ? "portal-storage"
+      : storedAccessToken
+        ? "storage"
+        : portalAccessToken
+          ? "portal-storage"
+          : "none",
   };
+}
+
+function readPortalAuthAccessToken(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PORTAL_AUTH_STORAGE_KEY);
+    if (!raw) {
+      return "";
+    }
+
+    const parsed = JSON.parse(raw) as { accessToken?: unknown };
+    return typeof parsed?.accessToken === "string" ? parsed.accessToken.trim() : "";
+  } catch {
+    return "";
+  }
 }
 
 function readStoredSession(): Partial<RealtimeSession> {
