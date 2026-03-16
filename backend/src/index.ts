@@ -573,16 +573,38 @@ function enforceCandyApiBasePolicy(value: string | undefined, fieldName: string)
   }
 }
 
-function sanitizeCandyLaunchUrlForRuntime(launchUrl: string): string {
+function deriveRequestOrigin(req: express.Request): string {
+  const forwardedProto = readForwardedHeaderValue(req.headers["x-forwarded-proto"]);
+  const forwardedHost = readForwardedHeaderValue(req.headers["x-forwarded-host"]);
+  const proto = (forwardedProto || req.protocol || "https").trim() || "https";
+  const host = (forwardedHost || req.get("host") || "").trim();
+  if (!host) {
+    throw new DomainError("INVALID_RUNTIME_ORIGIN", "Klarte ikke bestemme runtime origin for Candy.");
+  }
+  return `${proto}://${host}`;
+}
+
+function sanitizeCandyLaunchUrlForRuntime(launchUrl: string, req: express.Request): string {
   try {
+    const runtimeOrigin = new URL(deriveRequestOrigin(req));
     const parsed = new URL(launchUrl);
+    parsed.protocol = runtimeOrigin.protocol;
+    parsed.host = runtimeOrigin.host;
     parsed.searchParams.delete("v");
-    if (parsed.pathname === "/" || parsed.pathname.trim() === "") {
-      parsed.pathname = "/candy/";
-    }
+    parsed.pathname = "/candy/";
+    parsed.search = "";
+    parsed.hash = "";
     return parsed.toString();
   } catch {
-    return launchUrl;
+    try {
+      const runtimeOrigin = new URL(deriveRequestOrigin(req));
+      runtimeOrigin.pathname = "/candy/";
+      runtimeOrigin.search = "";
+      runtimeOrigin.hash = "";
+      return runtimeOrigin.toString();
+    } catch {
+      return launchUrl;
+    }
   }
 }
 
@@ -2097,7 +2119,7 @@ app.post("/api/games/candy/launch-token", async (req, res) => {
       walletId: user.walletId,
       apiBaseUrl
     });
-    const runtimeLaunchUrl = sanitizeCandyLaunchUrlForRuntime(launchSettings.launchUrl);
+    const runtimeLaunchUrl = sanitizeCandyLaunchUrlForRuntime(launchSettings.launchUrl, req);
 
     logCandyRealtimeEvent("launch_token_issued", {
       userId: user.id,
