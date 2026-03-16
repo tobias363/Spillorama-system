@@ -24,6 +24,27 @@ export function resolveSchedulerCountdownLabel(
   return formatCountdownFromMillis(Math.max(0, targetStartMs - nowMs));
 }
 
+export function resolveVisibleCountdownPanelLabel(
+  countdownLabel: string,
+  nowMs: number,
+  hiddenUntilMs: number,
+  gameStatus?: string,
+): string {
+  if (gameStatus === "RUNNING") {
+    return "";
+  }
+
+  if (countdownLabel.trim().length === 0) {
+    return "";
+  }
+
+  if (hiddenUntilMs > nowMs) {
+    return "";
+  }
+
+  return countdownLabel;
+}
+
 function resolveSchedulerTargetStartMs(
   scheduler: CandyRoomSchedulerState,
 ): number | null {

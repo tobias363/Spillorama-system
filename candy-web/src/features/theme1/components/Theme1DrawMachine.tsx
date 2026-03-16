@@ -98,6 +98,11 @@ const INTEGRATED_SCENE_ANCHORS: Theme1MachineAnchors = Object.freeze({
   outputXPct: 50,
   outputYPct: 62.7,
 });
+const INTEGRATED_LIVE_ANCHORS: Theme1MachineAnchors = Object.freeze({
+  ...THEME1_MACHINE_ANCHORS,
+  outputXPct: 50,
+  outputYPct: 84.8,
+});
 const THEME1_DRAW_MACHINE_PRESETS: Record<Theme1DrawMachineVariant, Theme1MachineVisualPreset> = {
   standalone: {
     anchors: THEME1_MACHINE_ANCHORS,
@@ -162,7 +167,7 @@ const THEME1_DRAW_MACHINE_PRESETS: Record<Theme1DrawMachineVariant, Theme1Machin
     topInsetPx: 10,
   },
   "integrated-live": {
-    anchors: THEME1_MACHINE_ANCHORS,
+    anchors: INTEGRATED_LIVE_ANCHORS,
     frameImageUrl: glassMachineUrl,
     ballRadiusScale: 1,
     sceneMaxWidth: "267px",
@@ -610,7 +615,7 @@ export function Theme1DrawMachine({
     const settleEnd = exitEnd + THEME1_MACHINE_TIMINGS.settleMs;
     const usesIntegratedBackdropScene = variant === "integrated-scene";
     const usesIntegratedLiveScene = variant === "integrated-live";
-    const outputScale = usesIntegratedBackdropScene ? 1 : usesIntegratedLiveScene ? 2.18 : 1.18;
+    const outputScale = usesIntegratedBackdropScene ? 1 : usesIntegratedLiveScene ? 2.34 : 1.18;
     const holeScale = usesIntegratedBackdropScene ? 0.122 : usesIntegratedLiveScene ? 0.58 : 0.168;
     const suctionScale = usesIntegratedBackdropScene ? holeScale * 0.72 : usesIntegratedLiveScene ? 0.46 : holeScale * 0.72;
 
@@ -650,14 +655,14 @@ export function Theme1DrawMachine({
       clipTopPct = usesIntegratedLiveScene ? lerp(24, 42, easeInOutCubic(progress)) : 0;
     } else if (phase === "exit") {
       const progress = clamp01((elapsedMs - dropEnd) / THEME1_MACHINE_TIMINGS.exitMs);
-      const holdInHoleUntil = usesIntegratedBackdropScene ? 0.26 : 0.64;
+      const holdInHoleUntil = usesIntegratedBackdropScene ? 0.26 : 0.56;
       const releaseProgress = clamp01((progress - holdInHoleUntil) / (1 - holdInHoleUntil));
-      const growthProgress = clamp01((progress - (usesIntegratedBackdropScene ? 0.38 : 0.78)) / (usesIntegratedBackdropScene ? 0.62 : 0.22));
+      const growthProgress = clamp01((progress - (usesIntegratedBackdropScene ? 0.38 : 0.58)) / (usesIntegratedBackdropScene ? 0.62 : 0.42));
       const easedRelease = easeOutBack(releaseProgress);
-      const popLift = Math.sin(releaseProgress * Math.PI) * (usesIntegratedBackdropScene ? -24 : -28);
+      const popLift = Math.sin(releaseProgress * Math.PI) * (usesIntegratedBackdropScene ? -24 : -16);
       const holeSeatDrop = Math.sin(clamp01(progress / Math.max(holdInHoleUntil, 0.01)) * Math.PI) * (usesIntegratedBackdropScene ? 2 : 4.8);
       x = lerp(layout.holeX, layout.outputX, easeOutCubic(releaseProgress));
-      y = lerp(layout.holeY + (usesIntegratedLiveScene ? 12 : 0) + holeSeatDrop, layout.outputY, easeOutCubic(releaseProgress)) + popLift;
+      y = lerp(layout.holeY + (usesIntegratedLiveScene ? 6 : 0) + holeSeatDrop, layout.outputY, easeOutCubic(releaseProgress)) + popLift;
       scale =
         progress < holdInHoleUntil
           ? holeScale

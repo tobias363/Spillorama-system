@@ -5,14 +5,10 @@ import {
 } from "@/features/theme1/components/Theme1Playfield";
 
 describe("resolveRailFlightDurationMs", () => {
-  it("gives longer rail flights more time at the same speed", () => {
-    expect(resolveRailFlightDurationMs(60)).toBeLessThan(resolveRailFlightDurationMs(180));
-    expect(resolveRailFlightDurationMs(180)).toBeLessThan(resolveRailFlightDurationMs(300));
-  });
-
-  it("clamps very short and very long flights to safe bounds", () => {
-    expect(resolveRailFlightDurationMs(10)).toBe(1800);
-    expect(resolveRailFlightDurationMs(4000)).toBe(4600);
+  it("keeps the same transfer duration for every rail slot", () => {
+    expect(resolveRailFlightDurationMs(10)).toBe(3200);
+    expect(resolveRailFlightDurationMs(180)).toBe(3200);
+    expect(resolveRailFlightDurationMs(4000)).toBe(3200);
   });
 
   it("shrinks the ball gradually across the whole flight", () => {

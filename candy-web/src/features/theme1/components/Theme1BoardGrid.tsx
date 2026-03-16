@@ -118,11 +118,12 @@ function Theme1BoardCard({
               const animationSequence =
                 cellAnimationSequences[`${board.id}:${cell.index}`] ?? 0;
               const shouldAnimate = animationSequence > 0 && cell.tone !== "idle";
+              const hasPrizeStack = Boolean(stack);
 
               return (
                 <div
                   key={`${cell.index}-${animationSequence}`}
-                  className={`board__cell ${toneClass(cell)}${shouldAnimate ? " board__cell--animate" : ""}`.trim()}
+                  className={`board__cell ${toneClass(cell)}${shouldAnimate ? " board__cell--animate" : ""}${hasPrizeStack ? " board__cell--with-prize" : ""}`.trim()}
                 >
                   {cell.tone === "target" ? (
                     <img
@@ -164,66 +165,30 @@ function PatternOverlay({
 }: {
   pattern: Theme1BoardPatternOverlayState;
 }) {
-  const badgePosition = resolvePatternBadgePosition(pattern.cellIndices);
-
   if (pattern.symbolId) {
     return (
-      <>
-        <svg viewBox="0 0 500 300" role="presentation" preserveAspectRatio="none">
-          <use href={`#${pattern.symbolId}`} />
-        </svg>
-        {pattern.prizeLabel ? (
-          <span className="board__pattern-badge" style={badgePosition}>
-            {pattern.prizeLabel}
-          </span>
-        ) : null}
-      </>
+      <svg viewBox="0 0 500 300" role="presentation" preserveAspectRatio="none">
+        <use href={`#${pattern.symbolId}`} />
+      </svg>
     );
   }
 
   if (pattern.pathDefinition) {
     return (
-      <>
-        <svg viewBox="0 0 500 300" role="presentation" preserveAspectRatio="none">
-          <path
-            d={pattern.pathDefinition}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={18}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        {pattern.prizeLabel ? (
-          <span className="board__pattern-badge" style={badgePosition}>
-            {pattern.prizeLabel}
-          </span>
-        ) : null}
-      </>
+      <svg viewBox="0 0 500 300" role="presentation" preserveAspectRatio="none">
+        <path
+          d={pattern.pathDefinition}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={18}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
     );
   }
 
   return null;
-}
-
-function resolvePatternBadgePosition(cellIndices: readonly number[]) {
-  if (cellIndices.length === 0) {
-    return undefined;
-  }
-
-  const centers = cellIndices.map((cellIndex) => ({
-    x: 50 + (cellIndex % 5) * 100,
-    y: 50 + Math.floor(cellIndex / 5) * 100,
-  }));
-  const minX = Math.min(...centers.map((point) => point.x));
-  const maxX = Math.max(...centers.map((point) => point.x));
-  const minY = Math.min(...centers.map((point) => point.y));
-  const maxY = Math.max(...centers.map((point) => point.y));
-
-  return {
-    left: `${((minX + maxX) / 2 / 500) * 100}%`,
-    top: `${((minY + maxY) / 2 / 300) * 100}%`,
-  } as const;
 }
 
 function PrizeStack({

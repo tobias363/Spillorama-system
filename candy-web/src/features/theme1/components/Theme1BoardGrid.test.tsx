@@ -88,7 +88,18 @@ describe("Theme1BoardGrid", () => {
         },
       ],
       activeNearPatterns: [],
-      prizeStacks: [],
+      prizeStacks: [
+        {
+          cellIndex: 4,
+          anchor: "center",
+          labels: [{ text: "20 kr", prizeAmountKr: 20, rawPatternIndex: 0 }],
+        },
+        {
+          cellIndex: 14,
+          anchor: "center",
+          labels: [{ text: "10 kr", prizeAmountKr: 10, rawPatternIndex: 3 }],
+        },
+      ],
     };
 
     const markup = renderToStaticMarkup(
@@ -97,10 +108,11 @@ describe("Theme1BoardGrid", () => {
 
     expect(markup).toContain("board-card board-card--spotlight-win");
     expect(markup).toContain("board__pattern-layer board__pattern-layer--celebrate");
-    expect(markup).toContain("board__pattern-badge");
+    expect(markup).toContain("board__cell--with-prize");
+    expect(markup).toContain("board__prize-chip");
     expect(markup).toContain("20 kr");
     expect(markup).toContain("board-card__topline-label board-card__topline-label--win board-card__topline-label--celebrate");
-    expect(markup).not.toContain("board__prize-chip");
+    expect(markup).not.toContain("board__pattern-badge");
     expect(markup).not.toContain("mønstre vunnet");
     expect(markup).not.toContain("board-card__progress-label");
   });

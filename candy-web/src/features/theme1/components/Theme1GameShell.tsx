@@ -4,13 +4,17 @@ import { Theme1ConnectionPanel } from "@/features/theme1/components/Theme1Connec
 import { Theme1TopperStrip } from "@/features/theme1/components/Theme1TopperStrip";
 import { Theme1Playfield } from "@/features/theme1/components/Theme1Playfield";
 import { theme1Assets } from "@/features/theme1/data/theme1Assets";
-import { resolveSchedulerCountdownLabel } from "@/domain/theme1/schedulerCountdown";
+import {
+  resolveSchedulerCountdownLabel,
+  resolveVisibleCountdownPanelLabel,
+} from "@/domain/theme1/schedulerCountdown";
 import integratedSceneUrl from "../../../../bilder/ny bakgrunn.jpg";
 
 export type Theme1BonusTestMode = "random" | "win";
 
 const THEME1_LIVE_STAGE_WIDTH = 1365;
 const THEME1_LIVE_STAGE_HEIGHT = 768;
+const THEME1_POST_ROUND_COUNTDOWN_DELAY_MS = 5000;
 
 function resolveTheme1StageScale() {
   if (typeof window === "undefined") {
@@ -58,7 +62,9 @@ export function Theme1GameShell() {
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
   const [stageScale, setStageScale] = useState(() => resolveTheme1StageScale());
   const [displayedRecentBalls, setDisplayedRecentBalls] = useState<number[]>(snapshot.recentBalls);
+  const [countdownHiddenUntilMs, setCountdownHiddenUntilMs] = useState(0);
   const handledBonusSearchRef = useRef<string>("");
+  const previousGameStatusRef = useRef(snapshot.meta.gameStatus);
   const isBonusActive = bonus.status !== "idle";
 
   const isBetArmed =
@@ -67,12 +73,20 @@ export function Theme1GameShell() {
         (roomSnapshot?.scheduler.armedPlayerIds ?? []).includes(session.playerId.trim())
       : mockBetArmed;
 
-  const countdownLabel = resolveSchedulerCountdownLabel(
+  const schedulerCountdownLabel = resolveSchedulerCountdownLabel(
     roomSnapshot?.scheduler,
     snapshot.hud.nesteTrekkOm,
     countdownNowMs,
     snapshot.meta.gameStatus,
   );
+  const countdownLabel = resolveVisibleCountdownPanelLabel(
+    schedulerCountdownLabel,
+    countdownNowMs,
+    countdownHiddenUntilMs,
+    snapshot.meta.gameStatus,
+  );
+  const shouldTickCountdownClock =
+    Boolean(roomSnapshot?.scheduler?.enabled) || countdownHiddenUntilMs > countdownNowMs;
   const backgroundImage = isBonusActive
     ? `linear-gradient(180deg, rgba(255, 245, 251, 0.02), rgba(255, 245, 251, 0.12)), url(${theme1Assets.bonusBackgroundUrl})`
     : `linear-gradient(180deg, rgba(102, 35, 129, 0.08), rgba(48, 7, 58, 0.18)), url(${integratedSceneUrl})`;
@@ -105,7 +119,20 @@ export function Theme1GameShell() {
   }, [openBonusTest, openWinningBonusTest]);
 
   useEffect(() => {
-    if (!roomSnapshot?.scheduler?.enabled || snapshot.meta.gameStatus === "RUNNING") {
+    const previousGameStatus = previousGameStatusRef.current;
+    const currentGameStatus = snapshot.meta.gameStatus;
+
+    if (previousGameStatus === "RUNNING" && currentGameStatus !== "RUNNING") {
+      setCountdownHiddenUntilMs(Date.now() + THEME1_POST_ROUND_COUNTDOWN_DELAY_MS);
+    } else if (currentGameStatus === "RUNNING") {
+      setCountdownHiddenUntilMs(0);
+    }
+
+    previousGameStatusRef.current = currentGameStatus;
+  }, [snapshot.meta.gameStatus]);
+
+  useEffect(() => {
+    if (!shouldTickCountdownClock || snapshot.meta.gameStatus === "RUNNING") {
       return undefined;
     }
 
@@ -117,10 +144,11 @@ export function Theme1GameShell() {
       window.clearInterval(intervalId);
     };
   }, [
-    roomSnapshot?.scheduler?.enabled,
+    shouldTickCountdownClock,
     roomSnapshot?.scheduler?.nextStartAt,
     roomSnapshot?.scheduler?.millisUntilNextStart,
     roomSnapshot?.scheduler?.serverTime,
+    countdownHiddenUntilMs,
     snapshot.meta.gameStatus,
   ]);
 
@@ -202,8 +230,8 @@ export function Theme1GameShell() {
             rerollBusy={rerollBusy}
             betBusy={betBusy}
             isBetArmed={isBetArmed}
-            onDecreaseStake={() => void changeStake(-30)}
-            onIncreaseStake={() => void changeStake(30)}
+            onDecreaseStake={() => void changeStake(-4)}
+            onIncreaseStake={() => void changeStake(4)}
             onShuffle={() => void rerollTickets()}
             onPlaceBet={() => void toggleBetArm()}
             onOpenBonusTest={openBonusTest}

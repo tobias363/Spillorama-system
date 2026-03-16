@@ -9,6 +9,20 @@ interface Theme1BallRailProps {
   onCompactBallRef?: (ball: number, element: HTMLDivElement | null) => void;
 }
 
+const THEME1_COMPACT_BALL_RAIL_ROW_SIZE = 15;
+
+export function resolveCompactRailPlacement(index: number) {
+  const normalizedIndex = Math.max(0, index);
+  const row =
+    normalizedIndex < THEME1_COMPACT_BALL_RAIL_ROW_SIZE ? 2 : 1;
+  const column =
+    normalizedIndex < THEME1_COMPACT_BALL_RAIL_ROW_SIZE
+      ? normalizedIndex + 1
+      : (normalizedIndex - THEME1_COMPACT_BALL_RAIL_ROW_SIZE) + 1;
+
+  return { row, column };
+}
+
 export function Theme1BallRail({
   featuredBall,
   featuredBallIsPending,
@@ -33,12 +47,17 @@ export function Theme1BallRail({
         <div className="ball-rail__list ball-rail__list--compact">
           {railBalls.map((ball, index) => {
             const spriteUrl = getTheme1BallSpriteUrl(ball);
+            const placement = resolveCompactRailPlacement(index);
 
             return (
               <div
                 key={`${ball}-${index}`}
                 ref={(element) => onCompactBallRef?.(ball, element)}
                 className={`ball-rail__compact-ball${hiddenCompactBallNumber === ball ? " ball-rail__compact-ball--hidden-slot" : ""}`.trim()}
+                style={{
+                  gridColumn: placement.column,
+                  gridRow: placement.row,
+                }}
               >
                 {spriteUrl ? (
                   <img src={spriteUrl} alt={`Ball ${ball}`} loading="lazy" />

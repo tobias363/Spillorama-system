@@ -55,9 +55,7 @@ interface Theme1FlyingRailBallState {
 }
 
 const THEME1_RAIL_FLIGHT_HOLD_MS = 1000;
-const THEME1_RAIL_FLIGHT_SPEED_PX_PER_MS = 0.07;
-const THEME1_RAIL_FLIGHT_MIN_DURATION_MS = 1800;
-const THEME1_RAIL_FLIGHT_MAX_DURATION_MS = 4600;
+const THEME1_RAIL_FLIGHT_DURATION_MS = 3200;
 
 export function Theme1Playfield({
   bonusActive,
@@ -480,11 +478,8 @@ function clamp(value: number, minimum: number, maximum: number) {
 }
 
 export function resolveRailFlightDurationMs(travelDistance: number) {
-  return clamp(
-    travelDistance / THEME1_RAIL_FLIGHT_SPEED_PX_PER_MS,
-    THEME1_RAIL_FLIGHT_MIN_DURATION_MS,
-    THEME1_RAIL_FLIGHT_MAX_DURATION_MS,
-  );
+  void travelDistance;
+  return THEME1_RAIL_FLIGHT_DURATION_MS;
 }
 
 export function resolveRailFlightVisibleScale(

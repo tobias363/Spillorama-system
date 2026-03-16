@@ -897,9 +897,17 @@ function buildCellPrizeLabels(
   _activeNearPatterns: readonly Theme1NearPatternRenderState[],
   cellIndex: number,
 ): Theme1CellPrizeLabelRenderState[] {
-  void completedPatterns;
-  void cellIndex;
-  return [];
+  return completedPatterns
+    .filter(
+      (pattern) =>
+        pattern.triggerCellIndex === cellIndex && pattern.prizeLabel.trim().length > 0,
+    )
+    .map((pattern) => ({
+      text: pattern.prizeLabel,
+      anchor: "BottomCenter" as const,
+      prizeAmountKr: pattern.prizeAmountKr,
+      rawPatternIndex: pattern.rawPatternIndex,
+    }));
 }
 
 function resolveCellVisualState(

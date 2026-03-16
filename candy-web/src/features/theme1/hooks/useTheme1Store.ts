@@ -32,7 +32,10 @@ import type {
 } from "@/domain/theme1/renderModel";
 import { THEME1_DRAW_PRESENTATION_MS } from "@/domain/theme1/theme1MachineAnimation";
 import { validateRealtimeRoomSnapshot } from "@/domain/realtime/validateRealtimeRoomSnapshot";
-import { theme1MockSnapshot } from "@/features/theme1/data/theme1MockSnapshot";
+import {
+  rerollTheme1MockBoards,
+  theme1MockSnapshot,
+} from "@/features/theme1/data/theme1MockSnapshot";
 import {
   buildTheme1SessionKey,
   freezeBoardsFromPreviousModel,
@@ -133,6 +136,9 @@ const STORAGE_KEY = "candy-web.realtime-session";
 const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 const LOCAL_LIVE_DEMO_HALL_ID = "default-hall";
 const INITIAL_SESSION_SEED = readInitialSessionSeed();
+export const THEME1_STAKE_STEP_KR = 4;
+export const THEME1_MAX_TOTAL_STAKE_KR = 20;
+const THEME1_MIN_ARMABLE_TOTAL_STAKE_KR = 4;
 let pendingDrawTimer: ReturnType<typeof setTimeout> | null = null;
 let celebrationTimer: ReturnType<typeof setTimeout> | null = null;
 let celebrationLeadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -325,7 +331,7 @@ export const useTheme1Store = create<Theme1State>((set, get) => ({
   changeStake: async (delta) => {
     const currentState = get();
     const currentStake = resolveCurrentStakeAmount(currentState);
-    const nextStake = clampStakeAmount(currentStake + Math.trunc(delta));
+    const nextStake = resolveAdjustedStakeAmount(currentStake, delta);
     if (nextStake === currentStake) {
       return;
     }
@@ -370,9 +376,21 @@ export const useTheme1Store = create<Theme1State>((set, get) => ({
   },
   toggleBetArm: async () => {
     const currentState = get();
+    const nextStakeToArm = resolveStakeAmountBeforeArming(resolveCurrentStakeAmount(currentState));
 
     if (currentState.mode !== "live") {
-      set({ mockBetArmed: !currentState.mockBetArmed });
+      set({
+        mockBetArmed: !currentState.mockBetArmed,
+        snapshot: !currentState.mockBetArmed
+          ? {
+              ...currentState.snapshot,
+              hud: {
+                ...currentState.snapshot.hud,
+                innsats: formatStakeAmount(nextStakeToArm),
+              },
+            }
+          : currentState.snapshot,
+      });
       return;
     }
 
@@ -384,10 +402,29 @@ export const useTheme1Store = create<Theme1State>((set, get) => ({
     set({ controlsBusy: true, betBusy: true });
 
     try {
+      const currentlyArmed = isCurrentPlayerArmed(currentState);
+      if (!currentlyArmed && nextStakeToArm !== resolveCurrentStakeAmount(currentState)) {
+        const configureResponse = await requestRoomConfigure(
+          socket,
+          currentState.session,
+          nextStakeToArm,
+        );
+        if (!configureResponse.ok || !configureResponse.data?.snapshot) {
+          throw new Error(configureResponse.error?.message || "Klarte ikke oppdatere innsats.");
+        }
+
+        const validatedConfigureSnapshot = validateRealtimeRoomSnapshot(configureResponse.data.snapshot);
+        if (!validatedConfigureSnapshot.ok) {
+          throw new Error(`Ugyldig room:configure fra backend: ${validatedConfigureSnapshot.error}`);
+        }
+
+        applyLiveSnapshot(validatedConfigureSnapshot.value, "room:state", set, get);
+      }
+
       const response = await requestBetArm(
         socket,
         currentState.session,
-        !isCurrentPlayerArmed(currentState),
+        !currentlyArmed,
       );
       if (!response.ok || !response.data?.snapshot) {
         throw new Error(response.error?.message || "Klarte ikke plassere innsats.");
@@ -410,10 +447,14 @@ export const useTheme1Store = create<Theme1State>((set, get) => ({
 
     if (currentState.mode !== "live") {
       set({
+        snapshot: {
+          ...currentState.snapshot,
+          boards: rerollTheme1MockBoards(currentState.snapshot.boards),
+        },
         connection: {
           phase: "mock",
           label: "Mock",
-          message: "Shuffle er tilgjengelig som ekte reroll i live-modus.",
+          message: "Tallene på bongene ble byttet lokalt i mock-modus.",
         },
       });
       return;
@@ -1347,8 +1388,9 @@ function applyPendingDrawPresentation(
   get: () => Theme1State,
   drawNumber: number,
 ): void {
-  const currentState = get();
   const nextPendingDrawNumber = Math.trunc(drawNumber);
+  commitPreviousPendingDrawPresentation(set, get, nextPendingDrawNumber);
+  const currentState = get();
   clearPendingDrawTimer();
   set({
     snapshot: applyTheme1DrawPresentation(
@@ -1399,6 +1441,53 @@ function applyPendingDrawPresentation(
       },
     });
   }, THEME1_DRAW_PRESENTATION_MS);
+}
+
+function commitPreviousPendingDrawPresentation(
+  set: (partial: Partial<Theme1State>) => void,
+  get: () => Theme1State,
+  nextPendingDrawNumber: number,
+): void {
+  const currentState = get();
+  const previousPendingDrawNumber = currentState.runtime.pendingDrawNumber;
+
+  if (
+    previousPendingDrawNumber === null ||
+    previousPendingDrawNumber === nextPendingDrawNumber
+  ) {
+    return;
+  }
+
+  if (currentState.mode === "live" && currentState.roomSnapshot) {
+    const session = normalizeSession(currentState.session);
+    const result = mapRoomSnapshotToTheme1(currentState.roomSnapshot, {
+      session,
+      connectionPhase: "connected",
+    });
+    const nextSession =
+      result.resolvedPlayerId && result.resolvedPlayerId !== session.playerId
+        ? { ...session, playerId: result.resolvedPlayerId }
+        : session;
+
+    writeSession(nextSession);
+    set({
+      session: nextSession,
+      snapshot: result.model,
+      runtime: {
+        ...currentState.runtime,
+        pendingDrawNumber: null,
+      },
+    });
+    return;
+  }
+
+  set({
+    snapshot: applyTheme1DrawPresentation(currentState.snapshot, null),
+    runtime: {
+      ...currentState.runtime,
+      pendingDrawNumber: null,
+    },
+  });
 }
 
 function clearPendingDrawTimer(): void {
@@ -1620,12 +1709,32 @@ function formatStakeAmount(value: number): string {
   return `${clampStakeAmount(value)} kr`;
 }
 
-function clampStakeAmount(value: number): number {
+export function resolveAdjustedStakeAmount(currentStake: number, delta: number): number {
+  return clampStakeAmount(currentStake + Math.trunc(delta));
+}
+
+export function resolveStakeAmountBeforeArming(currentStake: number): number {
+  if (currentStake > 0) {
+    return clampStakeAmount(currentStake);
+  }
+
+  return THEME1_MIN_ARMABLE_TOTAL_STAKE_KR;
+}
+
+export function clampStakeAmount(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
 
-  return Math.max(0, Math.min(300, Math.trunc(value)));
+  const truncatedValue = Math.trunc(value);
+  if (truncatedValue <= 0) {
+    return 0;
+  }
+
+  const steppedValue =
+    Math.floor(truncatedValue / THEME1_STAKE_STEP_KR) * THEME1_STAKE_STEP_KR;
+
+  return Math.max(0, Math.min(THEME1_MAX_TOTAL_STAKE_KR, steppedValue));
 }
 
 function isCurrentPlayerArmed(state: Theme1State): boolean {

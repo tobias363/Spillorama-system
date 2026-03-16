@@ -626,11 +626,11 @@ img {
 
 .board__prize-stack {
   position: absolute;
-  top: calc(100% - 16px);
+  bottom: 5px;
   z-index: 6;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   pointer-events: none;
 }
 
@@ -651,16 +651,21 @@ img {
 }
 
 .board__prize-chip {
-  min-width: 54px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(255, 214, 238, 0.94);
-  box-shadow: 0 8px 16px rgba(77, 8, 53, 0.18);
-  color: var(--ink);
-  font-size: 0.74rem;
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #b4ddbf;
+  font-size: 0.68rem;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
+  text-align: center;
+  text-shadow:
+    0 1px 0 rgba(67, 16, 87, 0.28),
+    0 0 8px rgba(180, 221, 191, 0.22);
 }
 
 .board__prize-chip--celebrate {
@@ -865,6 +870,7 @@ img {
   width: fit-content;
   display: grid;
   grid-template-columns: repeat(15, 1fr);
+  grid-template-rows: repeat(2, auto);
   gap: 5px;
   justify-content: center;
   justify-items: center;
@@ -3501,6 +3507,14 @@ body {
 
 .board__cell--target .board__cell-number {
   animation: boardCellNumberPulse 0.92s ease-in-out infinite;
+}
+
+.board__cell--with-prize {
+  z-index: 7;
+}
+
+.board__cell--with-prize .board__cell-number {
+  transform: translateY(-9px);
 }
 
 .board__cell--animate {

@@ -223,7 +223,13 @@ describe("theme1 pattern definitions", () => {
     expect(completedPattern?.prizeLabel).toBe("45 kr");
     expect(board.win).toBe("45 kr");
     expect(board.cells.find((cell) => cell.value === 13)?.tone).toBe("matched");
-    expect(board.prizeStacks).toHaveLength(0);
+    expect(board.prizeStacks).toEqual([
+      {
+        cellIndex: 4,
+        anchor: "center",
+        labels: [{ text: "45 kr", prizeAmountKr: 45, rawPatternIndex: 13 }],
+      },
+    ]);
   });
 
   it("hides one-to-go highlights on a bong once any pattern on that bong is won", () => {
@@ -268,7 +274,10 @@ describe("theme1 pattern definitions", () => {
     expect(winningPatternIndexes).toContain(14);
     expect(board.win).toBe(`${totalDisplayedPrizeAmount} kr`);
     expect(labelTexts.filter((text) => text === "30 kr").length).toBeGreaterThanOrEqual(2);
-    expect(board.prizeStacks).toHaveLength(0);
+    expect(board.prizeStacks).toHaveLength(2);
+    expect(
+      board.prizeStacks.flatMap((stack) => stack.labels.map((label) => label.text)),
+    ).toEqual(["30 kr", "30 kr"]);
   });
 
   it("keeps adding won patterns on the bong as later draw numbers complete more pattern rows", () => {
@@ -294,7 +303,10 @@ describe("theme1 pattern definitions", () => {
     expect(board.completedPatterns.length).toBeGreaterThanOrEqual(2);
     expect(board.win).toBe(`${totalDisplayedPrizeAmount} kr`);
     expect(labelTexts.filter((text) => text === "30 kr").length).toBeGreaterThanOrEqual(2);
-    expect(board.prizeStacks).toHaveLength(0);
+    expect(board.prizeStacks).toHaveLength(2);
+    expect(
+      board.prizeStacks.flatMap((stack) => stack.labels.map((label) => label.text)),
+    ).toEqual(["30 kr", "30 kr"]);
   });
 
   it("reveals every won pattern on the bong after 30 draws even if the live round only tracked a subset", () => {

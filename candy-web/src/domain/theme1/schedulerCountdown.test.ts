@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { CandyRoomSchedulerState } from "@/domain/realtime/contracts";
-import { resolveSchedulerCountdownLabel } from "@/domain/theme1/schedulerCountdown";
+import {
+  resolveSchedulerCountdownLabel,
+  resolveVisibleCountdownPanelLabel,
+} from "@/domain/theme1/schedulerCountdown";
 
 function createSchedulerState(): CandyRoomSchedulerState {
   return {
@@ -60,5 +63,25 @@ describe("resolveSchedulerCountdownLabel", () => {
         "RUNNING",
       ),
     ).toBe("");
+  });
+
+  it("keeps the countdown panel hidden until the UI delay window has passed", () => {
+    expect(
+      resolveVisibleCountdownPanelLabel(
+        "00:30",
+        Date.parse("2026-03-16T12:00:03.000Z"),
+        Date.parse("2026-03-16T12:00:05.000Z"),
+        "WAITING",
+      ),
+    ).toBe("");
+
+    expect(
+      resolveVisibleCountdownPanelLabel(
+        "00:30",
+        Date.parse("2026-03-16T12:00:06.000Z"),
+        Date.parse("2026-03-16T12:00:05.000Z"),
+        "WAITING",
+      ),
+    ).toBe("00:30");
   });
 });

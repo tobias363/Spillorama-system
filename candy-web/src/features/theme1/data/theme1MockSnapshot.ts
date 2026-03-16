@@ -6,6 +6,14 @@ import type {
   Theme1RoundRenderModel,
 } from "@/domain/theme1/renderModel";
 
+const CANDY_COLUMN_RANGES: Array<readonly [number, number]> = [
+  [1, 12],
+  [13, 24],
+  [25, 36],
+  [37, 48],
+  [49, 60],
+];
+
 const boardNumbers = [
   [1, 6, 11, 16, 21, 2, 7, 12, 17, 22, 3, 8, 13, 18, 23],
   [4, 9, 14, 19, 24, 5, 10, 15, 20, 25, 26, 31, 36, 41, 46],
@@ -90,6 +98,59 @@ function buildBoard(
     activeNearPatterns,
     prizeStacks,
   };
+}
+
+export function createTheme1MockTicketNumbers(random = Math.random): number[] {
+  const columnValues = CANDY_COLUMN_RANGES.map(([start, end]) =>
+    pickUniqueValuesInRange(start, end, 3, random),
+  );
+
+  return Array.from({ length: 15 }, (_, index) => {
+    const row = Math.floor(index / 5);
+    const column = index % 5;
+    return columnValues[column]?.[row] ?? 0;
+  });
+}
+
+export function rerollTheme1MockBoards(previousBoards: Theme1BoardState[]): Theme1BoardState[] {
+  return previousBoards.map((board, index) => {
+    const nextNumbers = createTheme1MockTicketNumbers();
+
+    return {
+      ...board,
+      win: "0 kr",
+      progressLabel: "",
+      progressState: "hidden",
+      completedPatterns: [],
+      activeNearPatterns: [],
+      prizeStacks: [],
+      cells: nextNumbers.map((value, cellIndex) => ({
+        index: cellIndex,
+        value,
+        tone: "idle" as const,
+      })),
+    };
+  });
+}
+
+function pickUniqueValuesInRange(
+  start: number,
+  end: number,
+  count: number,
+  random: () => number,
+) {
+  const values = Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  shuffle(values, random);
+  return values.slice(0, count).sort((left, right) => left - right);
+}
+
+function shuffle<T>(values: T[], random: () => number) {
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
+  }
+
+  return values;
 }
 
 export const theme1MockSnapshot: Theme1RoundRenderModel = {
