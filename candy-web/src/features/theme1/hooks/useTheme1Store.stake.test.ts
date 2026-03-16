@@ -45,7 +45,7 @@ describe("theme1 stake controls", () => {
     expect(isLocalTheme1RuntimeHost("bingosystem-staging.onrender.com")).toBe(false);
   });
 
-  it("auto-bootstraps default live session on staging when the session is empty", () => {
+  it("does not auto-bootstrap a synthetic live session on staging", () => {
     expect(
       shouldAutoBootstrapDefaultLiveSession(
         {
@@ -60,7 +60,7 @@ describe("theme1 stake controls", () => {
           hasLaunchToken: false,
         },
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("does not auto-bootstrap when there is an explicit launch token or existing session", () => {
@@ -96,7 +96,7 @@ describe("theme1 stake controls", () => {
     ).toBe(false);
   });
 
-  it("auto-bootstraps when a non-local session is incomplete", () => {
+  it("does not auto-bootstrap synthetic live sessions on non-local hosts", () => {
     expect(
       shouldAutoBootstrapDefaultLiveSession(
         {
@@ -110,7 +110,25 @@ describe("theme1 stake controls", () => {
           hostname: "bingosystem-staging.onrender.com",
         },
       ),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("does not auto-bootstrap on localhost either", () => {
+    expect(
+      shouldAutoBootstrapDefaultLiveSession(
+        {
+          baseUrl: "http://127.0.0.1:4000",
+          roomCode: "",
+          playerId: "",
+          accessToken: "",
+          hallId: "",
+        },
+        {
+          hostname: "127.0.0.1",
+          hasLaunchToken: false,
+        },
+      ),
+    ).toBe(false);
   });
 
   it("recovers stale room sessions by falling back to canonical room create", () => {
@@ -156,7 +174,7 @@ describe("theme1 stake controls", () => {
     ).toBe(false);
   });
 
-  it("prefers portal auth on non-local hosts and clears stale room bindings when the token changes", () => {
+  it("prefers portal auth on non-local hosts and clears all stale room bindings", () => {
     const seed = resolveTheme1InitialSessionSeed({
       storedSession: {
         baseUrl: "https://bingosystem-staging.onrender.com",
@@ -172,12 +190,12 @@ describe("theme1 stake controls", () => {
 
     expect(seed.accessTokenSource).toBe("portal-storage");
     expect(seed.session.accessToken).toBe("fresh-portal-token");
-    expect(seed.session.roomCode).toBe("CANDY1");
+    expect(seed.session.roomCode).toBe("");
     expect(seed.session.playerId).toBe("");
     expect(seed.session.hallId).toBe("default-hall");
   });
 
-  it("forces the canonical candy room code on non-local hosts even when portal auth matches", () => {
+  it("forces a fresh canonical room join on non-local hosts even when portal auth matches", () => {
     const seed = resolveTheme1InitialSessionSeed({
       storedSession: {
         baseUrl: "https://bingosystem-staging.onrender.com",
@@ -192,12 +210,12 @@ describe("theme1 stake controls", () => {
     });
 
     expect(seed.accessTokenSource).toBe("portal-storage");
-    expect(seed.session.roomCode).toBe("CANDY1");
+    expect(seed.session.roomCode).toBe("");
     expect(seed.session.playerId).toBe("");
     expect(seed.session.hallId).toBe("default-hall");
   });
 
-  it("keeps a stored player binding only when it already belongs to the canonical candy room", () => {
+  it("does not reuse stored candy room bindings on non-local hosts", () => {
     const seed = resolveTheme1InitialSessionSeed({
       storedSession: {
         baseUrl: "https://bingosystem-staging.onrender.com",
@@ -211,7 +229,27 @@ describe("theme1 stake controls", () => {
       portalAuthAccessToken: "shared-token",
     });
 
-    expect(seed.session.roomCode).toBe("CANDY1");
-    expect(seed.session.playerId).toBe("player-42");
+    expect(seed.session.roomCode).toBe("");
+    expect(seed.session.playerId).toBe("");
+  });
+
+  it("ignores a stale stored candy token on non-local hosts when portal auth is missing", () => {
+    const seed = resolveTheme1InitialSessionSeed({
+      storedSession: {
+        baseUrl: "https://bingosystem-staging.onrender.com",
+        roomCode: "CANDY1",
+        playerId: "player-42",
+        accessToken: "stale-candy-token",
+        hallId: "default-hall",
+      },
+      search: "",
+      hostname: "bingosystem-staging.onrender.com",
+      portalAuthAccessToken: "",
+    });
+
+    expect(seed.accessTokenSource).toBe("none");
+    expect(seed.session.accessToken).toBe("");
+    expect(seed.session.roomCode).toBe("");
+    expect(seed.session.playerId).toBe("");
   });
 });

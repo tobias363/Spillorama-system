@@ -142,7 +142,6 @@ const STORAGE_KEY = "candy-web.realtime-session";
 const PORTAL_AUTH_STORAGE_KEY = "bingo.portal.auth";
 const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 const DEFAULT_CANDY_HALL_ID = "default-hall";
-const DEFAULT_CANDY_ROOM_CODE = "CANDY1";
 const LOCAL_LIVE_DEMO_HALL_ID = DEFAULT_CANDY_HALL_ID;
 const INITIAL_SESSION_SEED = readInitialSessionSeed();
 export const THEME1_STAKE_STEP_KR = 4;
@@ -1234,40 +1233,30 @@ export function resolveTheme1InitialSessionSeed(input: {
   const portalAccessToken = (input.portalAuthAccessToken || "").trim();
   const isLocalRuntimeHost = isLocalTheme1RuntimeHost(input.hostname);
   const fallbackHallId = isLocalRuntimeHost ? "" : DEFAULT_CANDY_HALL_ID;
-  const fallbackRoomCode = isLocalRuntimeHost ? "" : DEFAULT_CANDY_ROOM_CODE;
-  const shouldUsePortalSession = !isLocalRuntimeHost && portalAccessToken.length > 0;
-  const shouldResetStoredRoomBinding =
-    shouldUsePortalSession && storedAccessToken !== portalAccessToken;
-  const normalizedStoredRoomCode =
-    typeof input.storedSession.roomCode === "string"
-      ? input.storedSession.roomCode.trim().toUpperCase()
-      : "";
-  const canReuseStoredPlayerId =
-    isLocalRuntimeHost || normalizedStoredRoomCode === DEFAULT_CANDY_ROOM_CODE;
-  const resolvedAccessToken =
-    urlAccessToken ||
-    (shouldUsePortalSession ? portalAccessToken : storedAccessToken || portalAccessToken);
+  const resolvedAccessToken = isLocalRuntimeHost
+    ? urlAccessToken || storedAccessToken || portalAccessToken
+    : urlAccessToken || portalAccessToken;
 
-  const session = normalizeSession({
-    baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || DEFAULT_BACKEND_URL,
-    roomCode:
-      params.get("roomCode") ||
-      (shouldResetStoredRoomBinding
-        ? fallbackRoomCode
-        : isLocalRuntimeHost
-          ? input.storedSession.roomCode || ""
-          : fallbackRoomCode),
-    playerId:
-      params.get("playerId") ||
-      (shouldResetStoredRoomBinding || !canReuseStoredPlayerId
-        ? ""
-        : input.storedSession.playerId || ""),
-    accessToken: resolvedAccessToken,
-    hallId:
-      params.get("hallId") ||
-      input.storedSession.hallId ||
-      (resolvedAccessToken ? fallbackHallId : ""),
-  });
+  const session = normalizeSession(
+    isLocalRuntimeHost
+      ? {
+          baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || DEFAULT_BACKEND_URL,
+          roomCode: params.get("roomCode") || input.storedSession.roomCode || "",
+          playerId: params.get("playerId") || input.storedSession.playerId || "",
+          accessToken: resolvedAccessToken,
+          hallId:
+            params.get("hallId") ||
+            input.storedSession.hallId ||
+            (resolvedAccessToken ? fallbackHallId : ""),
+        }
+      : {
+          baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || DEFAULT_BACKEND_URL,
+          roomCode: params.get("roomCode") || "",
+          playerId: params.get("playerId") || "",
+          accessToken: resolvedAccessToken,
+          hallId: params.get("hallId") || (resolvedAccessToken ? fallbackHallId : ""),
+        },
+  );
 
   if (urlAccessToken) {
     return {
@@ -1278,8 +1267,10 @@ export function resolveTheme1InitialSessionSeed(input: {
 
   return {
     session,
-    accessTokenSource: shouldUsePortalSession
-      ? "portal-storage"
+    accessTokenSource: !isLocalRuntimeHost
+      ? portalAccessToken
+        ? "portal-storage"
+        : "none"
       : storedAccessToken
         ? "storage"
         : portalAccessToken
@@ -1508,31 +1499,14 @@ export function isLocalTheme1RuntimeHost(hostname: string): boolean {
 }
 
 export function shouldAutoBootstrapDefaultLiveSession(
-  session: RealtimeSession,
+  _session: RealtimeSession,
   options: {
     hostname?: string;
     hasLaunchToken?: boolean;
   } = {},
 ): boolean {
-  const normalizedSession = normalizeSession(session);
-  const hostname =
-    options.hostname ??
-    (typeof window !== "undefined" ? window.location.hostname : "");
-
-  if (isLocalTheme1RuntimeHost(hostname)) {
-    return false;
-  }
-
-  if (options.hasLaunchToken) {
-    return false;
-  }
-
-  return (
-    normalizedSession.roomCode.length === 0 &&
-    normalizedSession.playerId.length === 0 &&
-    (normalizedSession.accessToken.length === 0 ||
-      normalizedSession.hallId.length === 0)
-  );
+  void options;
+  return false;
 }
 
 function resolveHostnameFromBaseUrl(baseUrl: string): string {
