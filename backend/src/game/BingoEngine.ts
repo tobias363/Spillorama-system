@@ -44,6 +44,7 @@ interface CreateRoomInput {
   hallId: string;
   walletId?: string;
   socketId?: string;
+  roomCode?: string;
 }
 
 interface JoinRoomInput extends CreateRoomInput {
@@ -548,7 +549,11 @@ export class BingoEngine {
       socketId: input.socketId
     };
 
-    const code = makeRoomCode(new Set(this.rooms.keys()));
+    const requestedRoomCode = input.roomCode?.trim().toUpperCase() || "";
+    const code = requestedRoomCode || makeRoomCode(new Set(this.rooms.keys()));
+    if (this.rooms.has(code)) {
+      throw new DomainError("ROOM_ALREADY_EXISTS", `Rom ${code} finnes allerede.`);
+    }
     const room: RoomState = {
       code,
       hallId,

@@ -1920,3 +1920,19 @@ test("overskudd distribution enforces minimum percentages and links transfers to
   assert.equal(fetchedBatch.id, batch.id);
   assert.equal(fetchedBatch.date, date);
 });
+
+test("createRoom can use a fixed explicit room code", async () => {
+  const wallet = new InMemoryWalletAdapter();
+  await wallet.topUp("house-hall-1-databingo-internet", 5_000_000, "seed house");
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet);
+
+  const created = await engine.createRoom({
+    roomCode: "CANDY1",
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host",
+  });
+
+  assert.equal(created.roomCode, "CANDY1");
+  assert.equal(engine.getRoomSnapshot("CANDY1").code, "CANDY1");
+});

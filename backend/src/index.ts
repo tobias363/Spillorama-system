@@ -392,6 +392,8 @@ const swedbankPayService = new SwedbankPayService(walletAdapter, {
 const candyLaunchTokenStore = new CandyLaunchTokenStore({
   ttlMs: candyLaunchTokenTtlMs
 });
+const canonicalCandyRoomCode =
+  process.env.CANDY_CANONICAL_ROOM_CODE?.trim().toUpperCase() || "CANDY1";
 
 function ackSuccess<T>(callback: (response: AckResponse<T>) => void, data: T): void {
   callback({ ok: true, data });
@@ -1333,6 +1335,12 @@ function getArmedPlayerIdsForSnapshot(snapshot: RoomSnapshot): string[] {
 }
 
 function compareCandyRoomPriority(a: RoomSummary, b: RoomSummary): number {
+  const canonicalScoreA = a.code === canonicalCandyRoomCode ? 1 : 0;
+  const canonicalScoreB = b.code === canonicalCandyRoomCode ? 1 : 0;
+  if (canonicalScoreA !== canonicalScoreB) {
+    return canonicalScoreB - canonicalScoreA;
+  }
+
   const runningScoreA = a.gameStatus === "RUNNING" ? 1 : 0;
   const runningScoreB = b.gameStatus === "RUNNING" ? 1 : 0;
   if (runningScoreA !== runningScoreB) {
@@ -1417,6 +1425,21 @@ function resolveCanonicalRoomCodeOrThrow(requestedRoomCode: string): string {
   return canonicalRoom.code;
 }
 
+async function createCanonicalCandyRoom(input: {
+  hallId: string;
+  playerName: string;
+  walletId: string;
+  socketId?: string;
+}): Promise<{ roomCode: string; playerId: string }> {
+  return engine.createRoom({
+    roomCode: canonicalCandyRoomCode,
+    hallId: input.hallId,
+    playerName: input.playerName,
+    walletId: input.walletId,
+    socketId: input.socketId,
+  });
+}
+
 async function ensureCanonicalCandyRoomExists(reason: "scheduler" | "startup"): Promise<string | null> {
   if (!enforceSingleCandyGlobalRoom) {
     return null;
@@ -1428,7 +1451,7 @@ async function ensureCanonicalCandyRoomExists(reason: "scheduler" | "startup"): 
   }
 
   const hallId = await resolveCandyLaunchHallId(undefined);
-  const { roomCode, playerId } = await engine.createRoom({
+  const { roomCode, playerId } = await createCanonicalCandyRoom({
     hallId,
     playerName: "Candy System",
     walletId: `candy-system-host-${hallId}`,
@@ -2687,11 +2710,17 @@ app.post("/api/admin/rooms", async (req, res) => {
       typeof req.body?.hostWalletId === "string" && req.body.hostWalletId.trim().length > 0
         ? req.body.hostWalletId.trim()
         : `admin-host-${hallId}-${Date.now().toString(36)}`;
-    const { roomCode, playerId } = await engine.createRoom({
-      hallId,
-      playerName: requestedHostName,
-      walletId: requestedHostWalletId
-    });
+    const { roomCode, playerId } = enforceSingleCandyGlobalRoom
+      ? await createCanonicalCandyRoom({
+          hallId,
+          playerName: requestedHostName,
+          walletId: requestedHostWalletId
+        })
+      : await engine.createRoom({
+          hallId,
+          playerName: requestedHostName,
+          walletId: requestedHostWalletId
+        });
     const snapshot = await emitRoomUpdate(roomCode);
     apiSuccess(res, {
       roomCode,
@@ -3626,12 +3655,19 @@ io.on("connection", (socket: Socket) => {
         }
       }
 
-      const { roomCode, playerId } = await engine.createRoom({
-        playerName: identity.playerName,
-        hallId: identity.hallId,
-        walletId: identity.walletId,
-        socketId: socket.id
-      });
+      const { roomCode, playerId } = enforceSingleCandyGlobalRoom
+        ? await createCanonicalCandyRoom({
+            playerName: identity.playerName,
+            hallId: identity.hallId,
+            walletId: identity.walletId,
+            socketId: socket.id
+          })
+        : await engine.createRoom({
+            playerName: identity.playerName,
+            hallId: identity.hallId,
+            walletId: identity.walletId,
+            socketId: socket.id
+          });
       await ensurePlayerHasVisiblePreRoundTickets(roomCode, playerId);
       socket.join(roomCode);
       const snapshot = await emitRoomUpdate(roomCode, playerId);
@@ -3663,7 +3699,7 @@ io.on("connection", (socket: Socket) => {
       if (enforceSingleCandyGlobalRoom) {
         const canonicalRoom = getCanonicalCandyRoom();
         if (!canonicalRoom) {
-          const created = await engine.createRoom({
+          const created = await createCanonicalCandyRoom({
             playerName: identity.playerName,
             hallId: identity.hallId,
             walletId: identity.walletId,
