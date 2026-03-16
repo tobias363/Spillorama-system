@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTheme1Store } from "@/features/theme1/hooks/useTheme1Store";
+import { isLocalTheme1RuntimeHost } from "@/features/theme1/hooks/useTheme1Store";
 import { Theme1ConnectionPanel } from "@/features/theme1/components/Theme1ConnectionPanel";
 import { Theme1TopperStrip } from "@/features/theme1/components/Theme1TopperStrip";
 import { Theme1Playfield } from "@/features/theme1/components/Theme1Playfield";
@@ -8,6 +9,7 @@ import {
   resolveSchedulerCountdownLabel,
   resolveVisibleCountdownPanelLabel,
 } from "@/domain/theme1/schedulerCountdown";
+import type { Theme1ConnectionPhase, Theme1DataSource } from "@/domain/theme1/renderModel";
 import integratedSceneUrl from "../../../../bilder/ny bakgrunn.jpg";
 
 export type Theme1BonusTestMode = "random" | "win";
@@ -38,6 +40,32 @@ export function resolveBonusTestMode(search: string): Theme1BonusTestMode | null
   return null;
 }
 
+export function shouldDeferTheme1LiveChrome({
+  hostname,
+  mode,
+  connectionPhase,
+  hasRoomSnapshot,
+}: {
+  hostname: string;
+  mode: Theme1DataSource;
+  connectionPhase: Theme1ConnectionPhase;
+  hasRoomSnapshot: boolean;
+}) {
+  if (isLocalTheme1RuntimeHost(hostname)) {
+    return false;
+  }
+
+  if (mode === "live" && connectionPhase === "connected" && hasRoomSnapshot) {
+    return false;
+  }
+
+  if (connectionPhase === "error" || connectionPhase === "disconnected") {
+    return false;
+  }
+
+  return true;
+}
+
 export function Theme1GameShell() {
   const snapshot = useTheme1Store((state) => state.snapshot);
   const bonus = useTheme1Store((state) => state.bonus);
@@ -47,6 +75,7 @@ export function Theme1GameShell() {
   const connect = useTheme1Store((state) => state.connect);
   const roomSnapshot = useTheme1Store((state) => state.roomSnapshot);
   const mode = useTheme1Store((state) => state.mode);
+  const connection = useTheme1Store((state) => state.connection);
   const mockBetArmed = useTheme1Store((state) => state.mockBetArmed);
   const stakeBusy = useTheme1Store((state) => state.stakeBusy);
   const rerollBusy = useTheme1Store((state) => state.rerollBusy);
@@ -66,6 +95,19 @@ export function Theme1GameShell() {
   const handledBonusSearchRef = useRef<string>("");
   const previousGameStatusRef = useRef(snapshot.meta.gameStatus);
   const isBonusActive = bonus.status !== "idle";
+  const hostname =
+    typeof window !== "undefined" ? window.location.hostname.trim().toLowerCase() : "";
+  const shouldBlockChrome = shouldDeferTheme1LiveChrome({
+    hostname,
+    mode,
+    connectionPhase: connection.phase,
+    hasRoomSnapshot: roomSnapshot !== null,
+  });
+  const shouldShowBootstrapError =
+    shouldBlockChrome === false &&
+    !isLocalTheme1RuntimeHost(hostname) &&
+    connection.phase === "error" &&
+    roomSnapshot === null;
 
   const isBetArmed =
     mode === "live"
@@ -194,53 +236,83 @@ export function Theme1GameShell() {
       <div className="theme1-app__backdrop" />
 
       <div className="theme1-app__viewport">
-        <div className={`theme1-app__chrome${isBonusActive ? " theme1-app__chrome--bonus-active" : ""}`.trim()}>
-          <section className="theme1-app__topbar">
-            <div className="theme1-app__brand">
-              <p className="theme1-app__eyebrow">Candy Web</p>
-              <strong>Theme1 live runtime</strong>
-            </div>
-
-            <div className="theme1-app__status-chips">
-              <span>{snapshot.meta.connectionLabel}</span>
-              <span>{snapshot.meta.gameStatus}</span>
-              <span>{snapshot.meta.roomCode || "Ingen room valgt"}</span>
-              <span>{snapshot.meta.drawCount} trekk</span>
+        {shouldBlockChrome ? (
+          <section className="theme1-app__gate" aria-live="polite">
+            <div className="theme1-app__gate-card">
+              <img
+                className="theme1-app__gate-logo"
+                src={theme1Assets.candyManiaLogoUrl}
+                alt="Candy"
+              />
+              <div className="theme1-app__gate-spinner" aria-hidden="true" />
+              <strong>{connection.label || "Kobler til"}</strong>
+              <p>{connection.message || "Laster live-rom og synkroniserer aktiv trekning..."}</p>
             </div>
           </section>
+        ) : shouldShowBootstrapError ? (
+          <section className="theme1-app__gate" aria-live="polite">
+            <div className="theme1-app__gate-card theme1-app__gate-card--error">
+              <img
+                className="theme1-app__gate-logo"
+                src={theme1Assets.candyManiaLogoUrl}
+                alt="Candy"
+              />
+              <strong>Klarte ikke laste live-rommet</strong>
+              <p>{connection.message || "Prøv igjen om et øyeblikk."}</p>
+              <button type="button" onClick={() => void connect()}>
+                Prøv igjen
+              </button>
+            </div>
+          </section>
+        ) : (
+          <div className={`theme1-app__chrome${isBonusActive ? " theme1-app__chrome--bonus-active" : ""}`.trim()}>
+            <section className="theme1-app__topbar">
+              <div className="theme1-app__brand">
+                <p className="theme1-app__eyebrow">Candy Web</p>
+                <strong>Theme1 live runtime</strong>
+              </div>
 
-          {bonus.status === "idle" ? (
-            <Theme1TopperStrip toppers={snapshot.toppers} topperPulses={topperPulses} />
-          ) : null}
-          <Theme1Playfield
-            bonusActive={isBonusActive}
-            bonus={bonus}
-            boards={snapshot.boards}
-            hud={{
-              ...snapshot.hud,
-              nesteTrekkOm: countdownLabel,
-            }}
-            meta={snapshot.meta}
-            recentBalls={snapshot.recentBalls}
-            displayedRecentBalls={displayedRecentBalls}
-            featuredBall={snapshot.featuredBallNumber}
-            featuredBallIsPending={snapshot.featuredBallIsPending}
-            celebration={celebration}
-            stakeBusy={stakeBusy}
-            rerollBusy={rerollBusy}
-            betBusy={betBusy}
-            isBetArmed={isBetArmed}
-            onDecreaseStake={() => void changeStake(-4)}
-            onIncreaseStake={() => void changeStake(4)}
-            onShuffle={() => void rerollTickets()}
-            onPlaceBet={() => void toggleBetArm()}
-            onOpenBonusTest={openBonusTest}
-            onResetBonusTest={resetBonusTest}
-            onSelectBonusSlot={selectBonusSlot}
-            onCloseBonusTest={closeBonusTest}
-          />
-          {isBonusActive ? null : <Theme1ConnectionPanel />}
-        </div>
+              <div className="theme1-app__status-chips">
+                <span>{snapshot.meta.connectionLabel}</span>
+                <span>{snapshot.meta.gameStatus}</span>
+                <span>{snapshot.meta.roomCode || "Ingen room valgt"}</span>
+                <span>{snapshot.meta.drawCount} trekk</span>
+              </div>
+            </section>
+
+            {bonus.status === "idle" ? (
+              <Theme1TopperStrip toppers={snapshot.toppers} topperPulses={topperPulses} />
+            ) : null}
+            <Theme1Playfield
+              bonusActive={isBonusActive}
+              bonus={bonus}
+              boards={snapshot.boards}
+              hud={{
+                ...snapshot.hud,
+                nesteTrekkOm: countdownLabel,
+              }}
+              meta={snapshot.meta}
+              recentBalls={snapshot.recentBalls}
+              displayedRecentBalls={displayedRecentBalls}
+              featuredBall={snapshot.featuredBallNumber}
+              featuredBallIsPending={snapshot.featuredBallIsPending}
+              celebration={celebration}
+              stakeBusy={stakeBusy}
+              rerollBusy={rerollBusy}
+              betBusy={betBusy}
+              isBetArmed={isBetArmed}
+              onDecreaseStake={() => void changeStake(-4)}
+              onIncreaseStake={() => void changeStake(4)}
+              onShuffle={() => void rerollTickets()}
+              onPlaceBet={() => void toggleBetArm()}
+              onOpenBonusTest={openBonusTest}
+              onResetBonusTest={resetBonusTest}
+              onSelectBonusSlot={selectBonusSlot}
+              onCloseBonusTest={closeBonusTest}
+            />
+            {isBonusActive ? null : <Theme1ConnectionPanel />}
+          </div>
+        )}
       </div>
     </main>
   );

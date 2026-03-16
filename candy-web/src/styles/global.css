@@ -1006,6 +1006,86 @@ body {
   will-change: transform;
 }
 
+.theme1-app__gate {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.theme1-app__gate-card {
+  width: min(440px, calc(100% - 48px));
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 28px 26px 30px;
+  border-radius: 32px;
+  background:
+    linear-gradient(180deg, rgba(255, 168, 226, 0.94), rgba(231, 63, 162, 0.94)),
+    rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  box-shadow:
+    0 24px 60px rgba(77, 8, 53, 0.3),
+    inset 0 2px 0 rgba(255, 255, 255, 0.4);
+  text-align: center;
+  color: #fffafd;
+}
+
+.theme1-app__gate-card--error {
+  background:
+    linear-gradient(180deg, rgba(255, 150, 189, 0.96), rgba(214, 50, 102, 0.96)),
+    rgba(255, 255, 255, 0.2);
+}
+
+.theme1-app__gate-logo {
+  width: min(280px, 78%);
+  object-fit: contain;
+  filter: drop-shadow(0 14px 24px rgba(91, 7, 60, 0.3));
+}
+
+.theme1-app__gate-card strong {
+  font-size: 1.18rem;
+  font-family: "FredokaCandyBold", "FredokaCandy", sans-serif;
+  text-shadow: 0 2px 8px rgba(91, 7, 60, 0.26);
+}
+
+.theme1-app__gate-card p {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 0.98rem;
+  line-height: 1.4;
+  text-shadow: 0 2px 8px rgba(91, 7, 60, 0.22);
+}
+
+.theme1-app__gate-card button {
+  min-height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fff9fd 0%, #ffe0f1 100%);
+  color: #9b146f;
+  font: inherit;
+  font-family: "FredokaCandyBold", "FredokaCandy", sans-serif;
+  box-shadow: 0 10px 18px rgba(91, 7, 60, 0.2);
+  cursor: pointer;
+}
+
+.theme1-app__gate-spinner {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 6px solid rgba(255, 255, 255, 0.28);
+  border-top-color: rgba(255, 255, 255, 0.96);
+  animation: theme1GateSpin 900ms linear infinite;
+}
+
+@keyframes theme1GateSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .theme1-app__chrome {
   position: absolute;
   inset: 0 auto auto 0;
