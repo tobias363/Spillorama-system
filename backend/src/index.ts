@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import cors from "cors";
 import express from "express";
+import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { URL, fileURLToPath } from "node:url";
@@ -142,10 +143,13 @@ interface NormalizeGameSettingsOptions {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
-const frontendDir = path.resolve(__dirname, "../../frontend");
-const adminFrontendFile = path.resolve(frontendDir, "admin/index.html");
-const adminFrontendDir = path.resolve(frontendDir, "admin");
 const projectDir = path.resolve(__dirname, "../..");
+const legacyFrontendDir = path.resolve(projectDir, "frontend");
+const candyWebFrontendDir = path.resolve(projectDir, "candy-web/dist");
+const frontendDir = fs.existsSync(path.join(candyWebFrontendDir, "index.html")) ? candyWebFrontendDir : legacyFrontendDir;
+const frontendIndexFile = path.resolve(frontendDir, "index.html");
+const adminFrontendFile = path.resolve(legacyFrontendDir, "admin/index.html");
+const adminFrontendDir = path.resolve(legacyFrontendDir, "admin");
 
 const app = express();
 app.use(cors());
@@ -3933,7 +3937,7 @@ app.get("*", (_req, res) => {
     res.sendFile(adminFrontendFile);
     return;
   }
-  res.sendFile(path.join(frontendDir, "index.html"));
+  res.sendFile(frontendIndexFile);
 });
 
 const PORT = Number(process.env.PORT ?? 4000);
