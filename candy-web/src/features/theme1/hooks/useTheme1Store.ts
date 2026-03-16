@@ -139,6 +139,13 @@ const INITIAL_SESSION_SEED = readInitialSessionSeed();
 export const THEME1_STAKE_STEP_KR = 4;
 export const THEME1_MAX_TOTAL_STAKE_KR = 20;
 const THEME1_MIN_ARMABLE_TOTAL_STAKE_KR = 4;
+const THEME1_RECOVERABLE_SYNC_ERROR_CODES = new Set([
+  "FORBIDDEN",
+  "PLAYER_NOT_FOUND",
+  "ROOM_NOT_FOUND",
+  "ROOM_BLOCKED_NON_CANONICAL",
+  "SINGLE_ROOM_ONLY",
+]);
 let pendingDrawTimer: ReturnType<typeof setTimeout> | null = null;
 let celebrationTimer: ReturnType<typeof setTimeout> | null = null;
 let celebrationLeadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -841,6 +848,10 @@ async function syncLiveSnapshot(
     }
 
     if (!response.ok || !response.data?.snapshot) {
+      const recovered = await attemptLiveRoomRecovery(set, get, session, response.error?.code);
+      if (recovered) {
+        return;
+      }
       set({
         connection: {
           phase: "error",
@@ -1231,6 +1242,71 @@ function normalizeSession(session: RealtimeSession): RealtimeSession {
 
 function canAutoCreateRoom(session: RealtimeSession): boolean {
   return session.accessToken.trim().length > 0 && session.hallId.trim().length > 0;
+}
+
+export function shouldAttemptLiveRoomRecoveryFromSyncFailure(
+  session: RealtimeSession,
+  errorCode?: string,
+): boolean {
+  const normalizedSession = normalizeSession(session);
+  if (!normalizedSession.roomCode && !normalizedSession.playerId) {
+    return false;
+  }
+
+  if (!canAutoCreateRoom(normalizedSession)) {
+    return false;
+  }
+
+  return Boolean(errorCode && THEME1_RECOVERABLE_SYNC_ERROR_CODES.has(errorCode));
+}
+
+async function attemptLiveRoomRecovery(
+  set: (partial: Partial<Theme1State>) => void,
+  get: () => Theme1State,
+  session: RealtimeSession,
+  errorCode?: string,
+): Promise<boolean> {
+  if (!shouldAttemptLiveRoomRecoveryFromSyncFailure(session, errorCode)) {
+    return false;
+  }
+
+  const recoverySession = normalizeSession({
+    ...session,
+    roomCode: "",
+    playerId: "",
+  });
+
+  clearPendingDrawTimer();
+  clearCelebrationTimer();
+  clearCelebrationLeadTimer();
+  clearAllTopperPulseTimers();
+  writeSession(recoverySession);
+  set({
+    session: recoverySession,
+    roomSnapshot: null,
+    celebration: null,
+    celebrationQueue: [],
+    topperPulses: {},
+    bonus: createIdleTheme1BonusState(),
+    connection: {
+      phase: "connecting",
+      label: "Kobler til",
+      message: "Lagret Candy-session var utgått. Kobler til canonical live-rom på nytt...",
+    },
+    runtime: {
+      ...get().runtime,
+      syncInFlight: false,
+      pendingDrawNumber: null,
+      activeGameId: "",
+      seenClaimIds: [],
+      activeSessionKey: buildTheme1SessionKey(recoverySession),
+      activeRoomCode: "",
+      inFlightSyncRequestId: null,
+    },
+  });
+
+  await autoCreateLiveRoom(set, get, recoverySession);
+  return true;
 }
 
 async function autoCreateLiveRoom(

@@ -1417,6 +1417,33 @@ function resolveCanonicalRoomCodeOrThrow(requestedRoomCode: string): string {
   return canonicalRoom.code;
 }
 
+async function ensureCanonicalCandyRoomExists(reason: "scheduler" | "startup"): Promise<string | null> {
+  if (!enforceSingleCandyGlobalRoom) {
+    return null;
+  }
+
+  const existingCanonicalRoom = getCanonicalCandyRoom();
+  if (existingCanonicalRoom) {
+    return existingCanonicalRoom.code;
+  }
+
+  const hallId = await resolveCandyLaunchHallId(undefined);
+  const { roomCode, playerId } = await engine.createRoom({
+    hallId,
+    playerName: "Candy System",
+    walletId: `candy-system-host-${hallId}`,
+  });
+  setRoomConfiguredEntryFee(roomCode, runtimeCandyManiaSettings.autoRoundEntryFee);
+  setNextRoundForRoom(roomCode, Date.now());
+  await emitRoomUpdate(roomCode, playerId);
+  logCandyRealtimeEvent("canonical_room_bootstrapped", {
+    reason,
+    roomCode,
+    hallId,
+  });
+  return roomCode;
+}
+
 function findPlayerInRoomByWallet(snapshot: RoomSnapshot, walletId: string): RoomSnapshot["players"][number] | null {
   const normalizedWalletId = walletId.trim();
   if (!normalizedWalletId) {
@@ -1874,6 +1901,7 @@ async function runSchedulerTick(): Promise<void> {
   schedulerTickInProgress = true;
 
   try {
+    await ensureCanonicalCandyRoomExists("scheduler");
     const now = Date.now();
     let summaries = engine.listRoomSummaries();
     if (await applyPendingCandyManiaSettingsIfDue(now, summaries)) {
@@ -4016,6 +4044,9 @@ hydrateCandyManiaSettingsFromCatalog()
       console.log(
         `[scheduler] autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} interval=${runtimeCandyManiaSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms`
       );
+      ensureCanonicalCandyRoomExists("startup").catch((error) => {
+        console.error("[scheduler] klarte ikke bootstrappe canonical Candy-rom ved oppstart", error);
+      });
       console.log(
         `[daily-report] enabled=${dailyReportJobEnabled} interval=${dailyReportJobIntervalMs}ms lastDate=${lastDailyReportDateKey || "-"}`
       );

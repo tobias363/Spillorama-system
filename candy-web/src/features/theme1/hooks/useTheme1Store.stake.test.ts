@@ -5,6 +5,7 @@ import {
   resolveAdjustedStakeAmount,
   resolveStakeAmountBeforeArming,
   shouldAutoBootstrapDefaultLiveSession,
+  shouldAttemptLiveRoomRecoveryFromSyncFailure,
 } from "@/features/theme1/hooks/useTheme1Store";
 
 describe("theme1 stake controls", () => {
@@ -109,5 +110,48 @@ describe("theme1 stake controls", () => {
         },
       ),
     ).toBe(true);
+  });
+
+  it("recovers stale room sessions by falling back to canonical room create", () => {
+    expect(
+      shouldAttemptLiveRoomRecoveryFromSyncFailure(
+        {
+          baseUrl: "https://bingosystem-staging.onrender.com",
+          roomCode: "OLD123",
+          playerId: "player-1",
+          accessToken: "valid-token",
+          hallId: "hall-default",
+        },
+        "FORBIDDEN",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not attempt recovery without enough session data or for non-recoverable errors", () => {
+    expect(
+      shouldAttemptLiveRoomRecoveryFromSyncFailure(
+        {
+          baseUrl: "https://bingosystem-staging.onrender.com",
+          roomCode: "OLD123",
+          playerId: "player-1",
+          accessToken: "",
+          hallId: "hall-default",
+        },
+        "FORBIDDEN",
+      ),
+    ).toBe(false);
+
+    expect(
+      shouldAttemptLiveRoomRecoveryFromSyncFailure(
+        {
+          baseUrl: "https://bingosystem-staging.onrender.com",
+          roomCode: "OLD123",
+          playerId: "player-1",
+          accessToken: "valid-token",
+          hallId: "hall-default",
+        },
+        "UNAUTHORIZED",
+      ),
+    ).toBe(false);
   });
 });
