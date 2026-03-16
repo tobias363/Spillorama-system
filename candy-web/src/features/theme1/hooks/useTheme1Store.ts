@@ -142,6 +142,7 @@ const STORAGE_KEY = "candy-web.realtime-session";
 const PORTAL_AUTH_STORAGE_KEY = "bingo.portal.auth";
 const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 const DEFAULT_CANDY_HALL_ID = "default-hall";
+const DEFAULT_CANDY_ROOM_CODE = "CANDY1";
 const LOCAL_LIVE_DEMO_HALL_ID = DEFAULT_CANDY_HALL_ID;
 const INITIAL_SESSION_SEED = readInitialSessionSeed();
 export const THEME1_STAKE_STEP_KR = 4;
@@ -208,10 +209,16 @@ export const useTheme1Store = create<Theme1State>((set, get) => ({
     });
   },
   connect: async () => {
-    const hydrated = await hydrateSessionFromLaunchToken(
-      normalizeSession(get().session),
-      set,
-    );
+    const currentHostname =
+      typeof window !== "undefined" ? window.location.hostname.trim().toLowerCase() : "";
+    const currentSearch = typeof window !== "undefined" ? window.location.search : "";
+    const rehydratedSession = resolveTheme1InitialSessionSeed({
+      storedSession: normalizeSession(get().session),
+      search: currentSearch,
+      hostname: currentHostname,
+      portalAuthAccessToken: readPortalAuthAccessToken(),
+    }).session;
+    const hydrated = await hydrateSessionFromLaunchToken(rehydratedSession, set);
     const session = hydrated.session;
     writeSession(session);
     set({
@@ -235,14 +242,25 @@ export const useTheme1Store = create<Theme1State>((set, get) => ({
       }
 
       set({
-        mode: "mock",
         connection: {
-          phase: "mock",
-          label: "Mock",
-          message:
-            "Room code mangler og ingen launch-session ble funnet. Fortsetter i mock-modus til du starter fra portalen eller fyller inn room code.",
+          phase: "error",
+          label: "Feil",
+          message: isLocalTheme1RuntimeHost(currentHostname)
+            ? "Room code mangler og ingen launch-session ble funnet. Fortsetter i mock-modus til du starter fra portalen eller fyller inn room code."
+            : "Portal-innlogging mangler eller kunne ikke leses. Logg inn i portalen og åpne Candy på nytt.",
         },
       });
+      if (isLocalTheme1RuntimeHost(currentHostname)) {
+        set({
+          mode: "mock",
+          connection: {
+            phase: "mock",
+            label: "Mock",
+            message:
+              "Room code mangler og ingen launch-session ble funnet. Fortsetter i mock-modus til du starter fra portalen eller fyller inn room code.",
+          },
+        });
+      }
       return;
     }
 
@@ -1253,10 +1271,10 @@ export function resolveTheme1InitialSessionSeed(input: {
         }
       : {
           baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || DEFAULT_BACKEND_URL,
-          roomCode: params.get("roomCode") || "",
+          roomCode: params.get("roomCode") || DEFAULT_CANDY_ROOM_CODE,
           playerId: params.get("playerId") || "",
           accessToken: resolvedAccessToken,
-          hallId: params.get("hallId") || (resolvedAccessToken ? fallbackHallId : ""),
+          hallId: params.get("hallId") || fallbackHallId,
         },
   );
 

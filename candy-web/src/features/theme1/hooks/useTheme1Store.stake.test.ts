@@ -190,7 +190,7 @@ describe("theme1 stake controls", () => {
 
     expect(seed.accessTokenSource).toBe("portal-storage");
     expect(seed.session.accessToken).toBe("fresh-portal-token");
-    expect(seed.session.roomCode).toBe("");
+    expect(seed.session.roomCode).toBe("CANDY1");
     expect(seed.session.playerId).toBe("");
     expect(seed.session.hallId).toBe("default-hall");
   });
@@ -210,7 +210,7 @@ describe("theme1 stake controls", () => {
     });
 
     expect(seed.accessTokenSource).toBe("portal-storage");
-    expect(seed.session.roomCode).toBe("");
+    expect(seed.session.roomCode).toBe("CANDY1");
     expect(seed.session.playerId).toBe("");
     expect(seed.session.hallId).toBe("default-hall");
   });
@@ -229,7 +229,7 @@ describe("theme1 stake controls", () => {
       portalAuthAccessToken: "shared-token",
     });
 
-    expect(seed.session.roomCode).toBe("");
+    expect(seed.session.roomCode).toBe("CANDY1");
     expect(seed.session.playerId).toBe("");
   });
 
@@ -249,7 +249,7 @@ describe("theme1 stake controls", () => {
 
     expect(seed.accessTokenSource).toBe("none");
     expect(seed.session.accessToken).toBe("");
-    expect(seed.session.roomCode).toBe("");
+    expect(seed.session.roomCode).toBe("CANDY1");
     expect(seed.session.playerId).toBe("");
   });
 });
