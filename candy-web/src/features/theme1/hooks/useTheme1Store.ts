@@ -158,6 +158,7 @@ const THEME1_RECOVERABLE_SYNC_ERROR_CODES = new Set([
 let pendingDrawTimer: ReturnType<typeof setTimeout> | null = null;
 let celebrationTimer: ReturnType<typeof setTimeout> | null = null;
 let celebrationLeadTimer: ReturnType<typeof setTimeout> | null = null;
+let queuedRoomUpdateSnapshot: RealtimeRoomSnapshot | null = null;
 const THEME1_CELEBRATION_PRESENTATION_MS = 2400;
 const THEME1_TOPPER_NEAR_PULSE_MS = 950;
 const THEME1_TOPPER_WIN_PULSE_MS = 1600;
@@ -788,6 +789,8 @@ function getBoundRealtimeSocket(
 ) {
   return getRealtimeSocket(session, {
     onConnect: () => {
+      clearPendingDrawTimer();
+      queuedRoomUpdateSnapshot = null;
       const activeRuntime = get().runtime;
       set({
         connection: {
@@ -797,6 +800,7 @@ function getBoundRealtimeSocket(
         },
         runtime: {
           ...activeRuntime,
+          pendingDrawNumber: null,
           activeSessionKey: buildTheme1SessionKey(session),
           activeRoomCode: session.roomCode,
         },
@@ -832,6 +836,7 @@ function getBoundRealtimeSocket(
   clearCelebrationTimer();
   clearCelebrationLeadTimer();
   clearAllTopperPulseTimers();
+  queuedRoomUpdateSnapshot = null;
   set({
     snapshot: applyTheme1DrawPresentation(get().snapshot, null),
     celebration: null,
@@ -861,29 +866,42 @@ function getBoundRealtimeSocket(
       });
     },
     onDrawNew: (payload) => {
-      const nextNumber = validateDrawNewPayload(payload);
-      if (nextNumber === null) {
-        return;
-      }
+      try {
+        const nextNumber = validateDrawNewPayload(payload);
+        if (nextNumber === null) {
+          return;
+        }
 
-      applyPendingDrawPresentation(set, get, nextNumber);
+        applyPendingDrawPresentation(set, get, nextNumber);
+      } catch (error) {
+        console.error("[candy-web] onDrawNew handler error:", error);
+      }
     },
     onRoomUpdate: (snapshot) => {
-      const validatedSnapshot = validateRealtimeRoomSnapshot(snapshot);
-      if (!validatedSnapshot.ok) {
-        setSnapshotValidationError(
-          set,
-          get,
-          `Ugyldig room:update fra backend: ${validatedSnapshot.error}`,
-        );
-        return;
-      }
+      try {
+        const validatedSnapshot = validateRealtimeRoomSnapshot(snapshot);
+        if (!validatedSnapshot.ok) {
+          setSnapshotValidationError(
+            set,
+            get,
+            `Ugyldig room:update fra backend: ${validatedSnapshot.error}`,
+          );
+          return;
+        }
 
-      if (!isSnapshotForActiveRoom(validatedSnapshot.value, get().runtime.activeRoomCode)) {
-        return;
-      }
+        if (!isSnapshotForActiveRoom(validatedSnapshot.value, get().runtime.activeRoomCode)) {
+          return;
+        }
 
-      applyLiveSnapshot(validatedSnapshot.value, "room:update", set, get);
+        if (get().runtime.syncInFlight) {
+          queuedRoomUpdateSnapshot = validatedSnapshot.value;
+          return;
+        }
+
+        applyLiveSnapshot(validatedSnapshot.value, "room:update", set, get);
+      } catch (error) {
+        console.error("[candy-web] onRoomUpdate handler error:", error);
+      }
     },
   });
 }
@@ -982,6 +1000,7 @@ async function syncLiveSnapshot(
           inFlightSyncRequestId: null,
         },
       });
+      drainQueuedRoomUpdate(set, get);
       return;
     }
 
@@ -1027,6 +1046,7 @@ async function syncLiveSnapshot(
         inFlightSyncRequestId: null,
       },
     });
+    drainQueuedRoomUpdate(set, get);
   }
 }
 
@@ -1193,6 +1213,21 @@ function applyLiveSnapshot(
     })
   ) {
     void syncLiveSnapshot(set, get, "manual-refresh");
+  }
+
+  if (syncSource !== "room:update") {
+    drainQueuedRoomUpdate(set, get);
+  }
+}
+
+function drainQueuedRoomUpdate(
+  set: (partial: Partial<Theme1State>) => void,
+  get: () => Theme1State,
+): void {
+  const queued = queuedRoomUpdateSnapshot;
+  queuedRoomUpdateSnapshot = null;
+  if (queued && isSnapshotForActiveRoom(queued, get().runtime.activeRoomCode)) {
+    applyLiveSnapshot(queued, "room:update", set, get);
   }
 }
 

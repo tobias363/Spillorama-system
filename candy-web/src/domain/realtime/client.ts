@@ -183,12 +183,34 @@ function bindHandlers(currentSocket: Socket, handlers: RealtimeClientHandlers): 
   currentSocket.on("room:update", handlers.onRoomUpdate);
 }
 
-function emitWithAck<T>(
+const EMIT_ACK_TIMEOUT_MS = 10_000;
+
+export function emitWithAck<T>(
   currentSocket: Socket,
   eventName: string,
   payload: Record<string, unknown>,
+  timeoutMs: number = EMIT_ACK_TIMEOUT_MS,
 ): Promise<AckResponse<T>> {
   return new Promise((resolve) => {
-    currentSocket.emit(eventName, payload, (response: AckResponse<T>) => resolve(response));
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({
+        ok: false,
+        error: {
+          code: "TIMEOUT",
+          message: `Server did not respond to "${eventName}" within ${timeoutMs}ms`,
+        },
+      } as AckResponse<T>);
+    }, timeoutMs);
+
+    currentSocket.emit(eventName, payload, (response: AckResponse<T>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(response);
+    });
   });
 }
