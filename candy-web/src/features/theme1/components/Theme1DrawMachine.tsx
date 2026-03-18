@@ -21,6 +21,7 @@ interface Theme1DrawMachineProps {
   recentBalls: readonly number[];
   variant?: Theme1DrawMachineVariant;
   outputBallRef?: RefObject<HTMLDivElement | null>;
+  flightOriginRef?: RefObject<HTMLDivElement | null>;
   suppressedOutputBallNumber?: number | null;
 }
 
@@ -206,6 +207,7 @@ export function Theme1DrawMachine({
   recentBalls,
   variant = "standalone",
   outputBallRef,
+  flightOriginRef,
   suppressedOutputBallNumber = null,
 }: Theme1DrawMachineProps) {
   const preset = THEME1_DRAW_MACHINE_PRESETS[variant];
@@ -903,6 +905,15 @@ export function Theme1DrawMachine({
             src={preset.frameImageUrl}
             alt=""
             aria-hidden="true"
+          />
+          <div
+            ref={flightOriginRef}
+            className="theme1-draw-machine__flight-origin"
+            aria-hidden="true"
+            style={{
+              "--theme1-flight-origin-left": `${preset.anchors.holeXPct}%`,
+              "--theme1-flight-origin-top": `${preset.anchors.holeYPct}%`,
+            } as CSSProperties}
           />
           <div ref={holeMaskRef} className="theme1-draw-machine__hole-mask" />
         </div>

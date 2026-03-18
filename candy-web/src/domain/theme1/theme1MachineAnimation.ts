@@ -113,8 +113,6 @@ export function deriveTheme1MachinePresentationState(
   const availableBallNumbers = Array.from({ length: 60 }, (_, index) => index + 1).filter(
     (number) => !drawnNumbers.has(number),
   );
-  const lastDrawnBall = normalizedRecentBalls[normalizedRecentBalls.length - 1] ?? null;
-
   return {
     availableBallNumbers,
     outputBallNumber:
@@ -123,6 +121,6 @@ export function deriveTheme1MachinePresentationState(
       Number.isFinite(input.featuredBallNumber) &&
       input.featuredBallNumber > 0
         ? input.featuredBallNumber
-        : lastDrawnBall,
+        : null,
   };
 }

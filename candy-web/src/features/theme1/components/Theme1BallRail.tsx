@@ -5,8 +5,8 @@ interface Theme1BallRailProps {
   featuredBallIsPending: boolean;
   balls: number[];
   compact?: boolean;
-  hiddenCompactBallNumber?: number | null;
-  onCompactBallRef?: (ball: number, element: HTMLDivElement | null) => void;
+  hiddenCompactBallIndex?: number | null;
+  onCompactSlotRef?: (index: number, element: HTMLDivElement | null) => void;
 }
 
 const THEME1_COMPACT_BALL_RAIL_ROW_SIZE = 15;
@@ -28,8 +28,8 @@ export function Theme1BallRail({
   featuredBallIsPending,
   balls,
   compact = false,
-  hiddenCompactBallNumber = null,
-  onCompactBallRef,
+  hiddenCompactBallIndex = null,
+  onCompactSlotRef,
 }: Theme1BallRailProps) {
   const railBalls = compact
     ? balls.slice(-30)
@@ -38,32 +38,30 @@ export function Theme1BallRail({
       : balls.slice(-10);
 
   if (compact) {
-    if (railBalls.length === 0) {
-      return null;
-    }
-
     return (
       <section className="ball-rail ball-rail--compact" aria-label="Siste baller">
         <div className="ball-rail__list ball-rail__list--compact">
-          {railBalls.map((ball, index) => {
-            const spriteUrl = getTheme1BallSpriteUrl(ball);
+          {Array.from({ length: Math.max(railBalls.length, THEME1_COMPACT_BALL_RAIL_ROW_SIZE * 2) }, (_, index) => {
             const placement = resolveCompactRailPlacement(index);
+            const ball = railBalls[index] ?? null;
+            const spriteUrl = ball ? getTheme1BallSpriteUrl(ball) : null;
+            const hidden = hiddenCompactBallIndex === index;
 
             return (
               <div
-                key={`${ball}-${index}`}
-                ref={(element) => onCompactBallRef?.(ball, element)}
-                className={`ball-rail__compact-ball${hiddenCompactBallNumber === ball ? " ball-rail__compact-ball--hidden-slot" : ""}`.trim()}
+                key={`slot-${index}`}
+                ref={(element) => onCompactSlotRef?.(index, element)}
+                className={`ball-rail__compact-ball${hidden ? " ball-rail__compact-ball--hidden-slot" : ""}`.trim()}
                 style={{
                   gridColumn: placement.column,
                   gridRow: placement.row,
                 }}
               >
-                {spriteUrl ? (
+                {ball && spriteUrl ? (
                   <img src={spriteUrl} alt={`Ball ${ball}`} loading="lazy" />
-                ) : (
+                ) : ball ? (
                   <span>{ball}</span>
-                )}
+                ) : null}
               </div>
             );
           })}

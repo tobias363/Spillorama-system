@@ -332,6 +332,17 @@
   pointer-events: none;
 }
 
+.theme1-draw-machine__flight-origin {
+  position: absolute;
+  left: var(--theme1-flight-origin-left, 50%);
+  top: var(--theme1-flight-origin-top, 79.1%);
+  width: var(--theme1-output-ball-size, 60.564%);
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  pointer-events: none;
+}
+
 .theme1-draw-machine__floating-ball {
   width: var(--theme1-floating-ball-size, 60.564%);
   z-index: 3;

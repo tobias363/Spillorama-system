@@ -266,10 +266,16 @@ export function Theme1GameShell() {
       return;
     }
 
-    if (snapshot.recentBalls.length > 0) {
-      setDisplayedRecentBalls(snapshot.recentBalls);
-    }
-  }, [snapshot.meta.drawCount, snapshot.meta.gameStatus, snapshot.recentBalls]);
+    setDisplayedRecentBalls(
+      resolveVisibleRecentBalls(snapshot.recentBalls, snapshot.featuredBallNumber, snapshot.featuredBallIsPending),
+    );
+  }, [
+    snapshot.meta.drawCount,
+    snapshot.meta.gameStatus,
+    snapshot.recentBalls,
+    snapshot.featuredBallNumber,
+    snapshot.featuredBallIsPending,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -386,4 +392,26 @@ export function Theme1GameShell() {
       </div>
     </main>
   );
+}
+
+export function resolveVisibleRecentBalls(
+  recentBalls: readonly number[],
+  featuredBallNumber: number | null,
+  featuredBallIsPending: boolean,
+) {
+  if (!featuredBallIsPending || recentBalls.length === 0) {
+    return [...recentBalls];
+  }
+
+  const normalizedFeatured =
+    typeof featuredBallNumber === "number" && Number.isFinite(featuredBallNumber)
+      ? Math.trunc(featuredBallNumber)
+      : null;
+  const lastRecentBall = recentBalls[recentBalls.length - 1] ?? null;
+
+  if (normalizedFeatured === null || lastRecentBall !== normalizedFeatured) {
+    return [...recentBalls];
+  }
+
+  return recentBalls.slice(0, -1);
 }

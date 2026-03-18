@@ -42,6 +42,10 @@ interface Theme1PlayfieldProps {
   onResetBonusTest: () => void;
   onSelectBonusSlot: (slotId: string) => void;
   onCloseBonusTest: () => void;
+  onRailFlightSettled?: (ballNumber: number) => void;
+  showHudControls?: boolean;
+  showCountdownPanel?: boolean;
+  showBallRail?: boolean;
 }
 
 interface Theme1FlyingRailBallState {
@@ -51,11 +55,28 @@ interface Theme1FlyingRailBallState {
   deltaX: number;
   deltaY: number;
   startSize: number;
+  startScale: number;
   endScale: number;
 }
 
-const THEME1_RAIL_FLIGHT_HOLD_MS = 1000;
-const THEME1_RAIL_FLIGHT_DURATION_MS = 3200;
+interface Theme1RailPresentationState {
+  renderedBalls: number[];
+  queuedBallNumber: number | null;
+  queuedTargetIndex: number | null;
+}
+
+interface Theme1RailFlightGeometry {
+  startX: number;
+  startY: number;
+  deltaX: number;
+  deltaY: number;
+}
+
+const THEME1_RAIL_FLIGHT_HOLD_MS = 750;
+const THEME1_RAIL_FLIGHT_DURATION_MS = 2400;
+const THEME1_RAIL_FLIGHT_START_OFFSET_X_PX = -26;
+const THEME1_RAIL_FLIGHT_OUTPUT_OVERLAP_MS = 0;
+const THEME1_RAIL_FLIGHT_LANDING_OVERLAP_MS = 90;
 
 export function Theme1Playfield({
   bonusActive,
@@ -80,22 +101,33 @@ export function Theme1Playfield({
   onResetBonusTest,
   onSelectBonusSlot,
   onCloseBonusTest,
+  onRailFlightSettled,
+  showHudControls = true,
+  showCountdownPanel = true,
+  showBallRail = true,
 }: Theme1PlayfieldProps) {
   const topBoards = boards.slice(0, 2);
   const bottomBoards = boards.slice(2, 4);
   const usesIntegratedMachineScene = !bonusActive;
   const machineVariant = usesIntegratedMachineScene ? "integrated-live" : "standalone";
   const playfieldRef = useRef<HTMLElement | null>(null);
+  const machineFlightOriginRef = useRef<HTMLDivElement | null>(null);
   const machineOutputBallRef = useRef<HTMLDivElement | null>(null);
   const flyingBallRef = useRef<HTMLDivElement | null>(null);
-  const compactBallRefsRef = useRef(new Map<number, HTMLDivElement>());
-  const previousDisplayedRecentBallsRef = useRef(displayedRecentBalls);
+  const compactSlotRefsRef = useRef(new Map<number, HTMLDivElement>());
+  const previousRecentBallsRef = useRef(recentBalls);
+  const queuedFlightResolvedBallsRef = useRef<number[] | null>(null);
+  const pendingDisplayedRecentBallsQueueRef = useRef<number[][]>([]);
   const measureFlightFrameRef = useRef<number | null>(null);
   const flightAnimationFrameRef = useRef<number | null>(null);
-  const [hiddenRailBallNumber, setHiddenRailBallNumber] = useState<number | null>(null);
+  const landingSettleTimeoutRef = useRef<number | null>(null);
+  const outputSuppressedForActiveFlightRef = useRef(false);
+  const [hiddenRailBallIndex, setHiddenRailBallIndex] = useState<number | null>(null);
   const [queuedFlightBallNumber, setQueuedFlightBallNumber] = useState<number | null>(null);
+  const [queuedFlightTargetIndex, setQueuedFlightTargetIndex] = useState<number | null>(null);
   const [suppressedOutputBallNumber, setSuppressedOutputBallNumber] = useState<number | null>(null);
   const [flyingRailBall, setFlyingRailBall] = useState<Theme1FlyingRailBallState | null>(null);
+  const [renderedRecentBalls, setRenderedRecentBalls] = useState<number[]>(displayedRecentBalls);
 
   useEffect(() => {
     return () => {
@@ -105,40 +137,79 @@ export function Theme1Playfield({
       if (flightAnimationFrameRef.current !== null) {
         window.cancelAnimationFrame(flightAnimationFrameRef.current);
       }
+      if (landingSettleTimeoutRef.current !== null) {
+        window.clearTimeout(landingSettleTimeoutRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
-    const previousBalls = previousDisplayedRecentBallsRef.current;
-    const currentBalls = displayedRecentBalls;
-    const appendedBall = resolveSingleAppendedBall(previousBalls, currentBalls);
-
-    if (currentBalls.length === 0 || currentBalls.length < previousBalls.length || !sharesBallPrefix(previousBalls, currentBalls)) {
-      setHiddenRailBallNumber(null);
-      setQueuedFlightBallNumber(null);
-      setSuppressedOutputBallNumber(null);
-      setFlyingRailBall(null);
-    } else if (appendedBall !== null) {
-      setHiddenRailBallNumber(appendedBall);
-      setQueuedFlightBallNumber(appendedBall);
-      setSuppressedOutputBallNumber(null);
-      setFlyingRailBall(null);
+    if (flyingRailBall !== null || queuedFlightBallNumber !== null) {
+      queueRecentBallsSnapshot(
+        pendingDisplayedRecentBallsQueueRef.current,
+        recentBalls,
+      );
+      return;
     }
 
-    previousDisplayedRecentBallsRef.current = currentBalls;
-  }, [displayedRecentBalls]);
+    applyRecentBallsSnapshot(
+      previousRecentBallsRef.current,
+      recentBalls,
+      {
+        setRenderedRecentBalls,
+        setHiddenRailBallIndex,
+        setQueuedFlightBallNumber,
+        setQueuedFlightTargetIndex,
+        setSuppressedOutputBallNumber,
+        setFlyingRailBall,
+        queuedFlightResolvedBallsRef,
+      },
+    );
+    previousRecentBallsRef.current = recentBalls;
+  }, [recentBalls, flyingRailBall, queuedFlightBallNumber]);
+
+  useEffect(() => {
+    if (flyingRailBall !== null || queuedFlightBallNumber !== null) {
+      return;
+    }
+
+    const nextQueuedSnapshot = pendingDisplayedRecentBallsQueueRef.current.shift();
+    if (!nextQueuedSnapshot || areBallArraysEqual(nextQueuedSnapshot, previousRecentBallsRef.current)) {
+      return;
+    }
+
+    applyRecentBallsSnapshot(
+      previousRecentBallsRef.current,
+      nextQueuedSnapshot,
+      {
+        setRenderedRecentBalls,
+        setHiddenRailBallIndex,
+        setQueuedFlightBallNumber,
+        setQueuedFlightTargetIndex,
+        setSuppressedOutputBallNumber,
+        setFlyingRailBall,
+        queuedFlightResolvedBallsRef,
+      },
+    );
+    previousRecentBallsRef.current = nextQueuedSnapshot;
+  }, [flyingRailBall, queuedFlightBallNumber]);
 
   useLayoutEffect(() => {
-    if (bonusActive || queuedFlightBallNumber === null || flyingRailBall !== null) {
+    if (
+      bonusActive ||
+      queuedFlightBallNumber === null ||
+      queuedFlightTargetIndex === null ||
+      flyingRailBall !== null
+    ) {
       return;
     }
 
     const measureFlight = (remainingAttempts = 16) => {
       const playfieldElement = playfieldRef.current;
-      const outputBallElement = machineOutputBallRef.current;
-      const targetBallElement = compactBallRefsRef.current.get(queuedFlightBallNumber);
+      const flightOriginElement = machineFlightOriginRef.current;
+      const targetBallElement = compactSlotRefsRef.current.get(queuedFlightTargetIndex);
 
-      if (!playfieldElement || !outputBallElement || !targetBallElement) {
+      if (!playfieldElement || !flightOriginElement || !targetBallElement) {
         if (remainingAttempts > 0) {
           measureFlightFrameRef.current = window.requestAnimationFrame(() => {
             measureFlightFrameRef.current = null;
@@ -147,14 +218,15 @@ export function Theme1Playfield({
           return;
         }
 
-        setHiddenRailBallNumber(null);
+        setHiddenRailBallIndex(null);
         setQueuedFlightBallNumber(null);
+        setQueuedFlightTargetIndex(null);
         setSuppressedOutputBallNumber(null);
         return;
       }
 
       const playfieldRect = playfieldElement.getBoundingClientRect();
-      const outputBallRect = outputBallElement.getBoundingClientRect();
+      const outputBallRect = flightOriginElement.getBoundingClientRect();
       const targetBallRect = targetBallElement.getBoundingClientRect();
 
       if (outputBallRect.width === 0 || targetBallRect.width === 0) {
@@ -166,22 +238,31 @@ export function Theme1Playfield({
           return;
         }
 
-        setHiddenRailBallNumber(null);
+        setHiddenRailBallIndex(null);
         setQueuedFlightBallNumber(null);
+        setQueuedFlightTargetIndex(null);
         setSuppressedOutputBallNumber(null);
         return;
       }
 
+      const geometry = resolveRailFlightGeometry(
+        playfieldRect,
+        outputBallRect,
+        targetBallRect,
+      );
+
+      outputSuppressedForActiveFlightRef.current = false;
+      setSuppressedOutputBallNumber(null);
       setFlyingRailBall({
         number: queuedFlightBallNumber,
-        startX: (outputBallRect.left - playfieldRect.left) + (outputBallRect.width * 0.5),
-        startY: (outputBallRect.top - playfieldRect.top) + (outputBallRect.height * 0.5),
-        deltaX: (targetBallRect.left - outputBallRect.left) + ((targetBallRect.width - outputBallRect.width) * 0.5),
-        deltaY: (targetBallRect.top - outputBallRect.top) + ((targetBallRect.height - outputBallRect.height) * 0.5),
+        startX: geometry.startX,
+        startY: geometry.startY,
+        deltaX: geometry.deltaX,
+        deltaY: geometry.deltaY,
         startSize: outputBallRect.width,
+        startScale: 0.22,
         endScale: targetBallRect.width / outputBallRect.width,
       });
-      setSuppressedOutputBallNumber(queuedFlightBallNumber);
     };
 
     measureFlightFrameRef.current = window.requestAnimationFrame(() => {
@@ -195,7 +276,7 @@ export function Theme1Playfield({
         measureFlightFrameRef.current = null;
       }
     };
-  }, [bonusActive, flyingRailBall, queuedFlightBallNumber]);
+  }, [bonusActive, flyingRailBall, queuedFlightBallNumber, queuedFlightTargetIndex]);
 
   useEffect(() => {
     if (!flyingRailBall || !flyingBallRef.current) {
@@ -208,8 +289,8 @@ export function Theme1Playfield({
     const totalDurationMs = THEME1_RAIL_FLIGHT_HOLD_MS + flightDurationMs;
     let startTimeMs: number | null = null;
 
-    flyingElement.style.opacity = "1";
-    flyingElement.style.transform = "translate(-50%, -50%) translate3d(0px, 0px, 0) scale(1)";
+    flyingElement.style.opacity = String(resolveRailFlightOpacity(0));
+    flyingElement.style.transform = `translate(-50%, -50%) translate3d(0px, 0px, 0) scale(${flyingRailBall.startScale})`;
 
     const animate = (nowMs: number) => {
       if (startTimeMs === null) {
@@ -219,10 +300,33 @@ export function Theme1Playfield({
       const elapsedMs = nowMs - startTimeMs;
       const travelElapsedMs = Math.max(0, elapsedMs - THEME1_RAIL_FLIGHT_HOLD_MS);
       const travelProgress = clamp01(travelElapsedMs / flightDurationMs);
-      const scale = resolveRailFlightVisibleScale(travelProgress, flyingRailBall.endScale);
-      const x = flyingRailBall.deltaX * travelProgress;
-      const y = flyingRailBall.deltaY * travelProgress;
+      const easedTravelProgress = resolveRailFlightProgress(travelProgress);
+      const emergenceProgress = resolveRailFlightEmergenceProgress(
+        elapsedMs,
+        THEME1_RAIL_FLIGHT_HOLD_MS,
+      );
+      const arcLift = resolveRailFlightArcLift(
+        easedTravelProgress,
+        Math.hypot(flyingRailBall.deltaX, flyingRailBall.deltaY),
+      );
+      const scale = resolveRailFlightVisibleScale(
+        emergenceProgress,
+        easedTravelProgress,
+        flyingRailBall.startScale,
+        flyingRailBall.endScale,
+      );
+      const x = flyingRailBall.deltaX * easedTravelProgress;
+      const y = (flyingRailBall.deltaY * easedTravelProgress) - arcLift;
 
+      if (
+        !outputSuppressedForActiveFlightRef.current &&
+        elapsedMs >= THEME1_RAIL_FLIGHT_OUTPUT_OVERLAP_MS
+      ) {
+        outputSuppressedForActiveFlightRef.current = true;
+        setSuppressedOutputBallNumber(flyingRailBall.number);
+      }
+
+      flyingElement.style.opacity = String(resolveRailFlightOpacity(emergenceProgress));
       flyingElement.style.transform = `translate(-50%, -50%) translate3d(${x}px, ${y}px, 0) scale(${scale})`;
 
       if (elapsedMs < totalDurationMs) {
@@ -230,9 +334,21 @@ export function Theme1Playfield({
         return;
       }
 
-      setFlyingRailBall(null);
-      setHiddenRailBallNumber(null);
-      setQueuedFlightBallNumber(null);
+      flyingElement.style.opacity = "1";
+      flyingElement.style.transform = `translate(-50%, -50%) translate3d(${flyingRailBall.deltaX}px, ${flyingRailBall.deltaY}px, 0) scale(${flyingRailBall.endScale})`;
+      const resolvedBalls = queuedFlightResolvedBallsRef.current ?? previousRecentBallsRef.current;
+      queuedFlightResolvedBallsRef.current = null;
+      const settledBallNumber = flyingRailBall.number;
+      landingSettleTimeoutRef.current = window.setTimeout(() => {
+        landingSettleTimeoutRef.current = null;
+        setRenderedRecentBalls(resolvedBalls);
+        setHiddenRailBallIndex(null);
+        setFlyingRailBall(null);
+        setQueuedFlightBallNumber(null);
+        setQueuedFlightTargetIndex(null);
+        setSuppressedOutputBallNumber(null);
+        onRailFlightSettled?.(settledBallNumber);
+      }, THEME1_RAIL_FLIGHT_LANDING_OVERLAP_MS);
     };
 
     flightAnimationFrameRef.current = window.requestAnimationFrame(animate);
@@ -242,16 +358,20 @@ export function Theme1Playfield({
         window.cancelAnimationFrame(flightAnimationFrameRef.current);
         flightAnimationFrameRef.current = null;
       }
+      if (landingSettleTimeoutRef.current !== null) {
+        window.clearTimeout(landingSettleTimeoutRef.current);
+        landingSettleTimeoutRef.current = null;
+      }
     };
-  }, [flyingRailBall]);
+  }, [flyingRailBall, onRailFlightSettled]);
 
-  function registerCompactBallRef(ball: number, element: HTMLDivElement | null) {
+  function registerCompactSlotRef(index: number, element: HTMLDivElement | null) {
     if (element) {
-      compactBallRefsRef.current.set(ball, element);
+      compactSlotRefsRef.current.set(index, element);
       return;
     }
 
-    compactBallRefsRef.current.delete(ball);
+    compactSlotRefsRef.current.delete(index);
   }
 
   const flyingBallSpriteUrl = flyingRailBall ? getTheme1BallSpriteUrl(flyingRailBall.number) : null;
@@ -286,6 +406,7 @@ export function Theme1Playfield({
           featuredBall={featuredBall}
           featuredBallIsPending={featuredBallIsPending}
           celebration={celebration}
+          flightOriginRef={machineFlightOriginRef}
           outputBallRef={machineOutputBallRef}
           suppressedOutputBallNumber={suppressedOutputBallNumber}
         />
@@ -336,37 +457,39 @@ export function Theme1Playfield({
         ) : null}
       </div>
 
-      <div className="playfield__controls-row">
-        <Theme1HudRack
-          hud={hud}
-          drawCountLabel={`${meta.drawCount} / 30`}
-          stakeBusy={stakeBusy}
-          rerollBusy={rerollBusy}
-          betBusy={betBusy}
-          isBetArmed={isBetArmed}
-          onDecreaseStake={onDecreaseStake}
-          onIncreaseStake={onIncreaseStake}
-          onShuffle={onShuffle}
-          onPlaceBet={onPlaceBet}
-          onOpenBonusTest={onOpenBonusTest}
-        />
-      </div>
+      {showHudControls ? (
+        <div className="playfield__controls-row">
+          <Theme1HudRack
+            hud={hud}
+            drawCountLabel={`${meta.drawCount} / 30`}
+            stakeBusy={stakeBusy}
+            rerollBusy={rerollBusy}
+            betBusy={betBusy}
+            isBetArmed={isBetArmed}
+            onDecreaseStake={onDecreaseStake}
+            onIncreaseStake={onIncreaseStake}
+            onShuffle={onShuffle}
+            onPlaceBet={onPlaceBet}
+            onOpenBonusTest={onOpenBonusTest}
+          />
+        </div>
+      ) : null}
 
-      {!bonusActive && hud.nesteTrekkOm.trim().length > 0 ? (
+      {!bonusActive && showCountdownPanel && hud.nesteTrekkOm.trim().length > 0 ? (
         <div className="playfield__countdown-anchor">
           <Theme1CountdownPanel countdown={hud.nesteTrekkOm} />
         </div>
       ) : null}
 
-      {!bonusActive && displayedRecentBalls.length > 0 ? (
+      {!bonusActive && showBallRail ? (
         <div className="playfield__ball-rail-anchor">
           <Theme1BallRail
             featuredBall={featuredBall}
             featuredBallIsPending={featuredBallIsPending}
-            balls={displayedRecentBalls}
+            balls={renderedRecentBalls}
             compact
-            hiddenCompactBallNumber={hiddenRailBallNumber}
-            onCompactBallRef={registerCompactBallRef}
+            hiddenCompactBallIndex={hiddenRailBallIndex}
+            onCompactSlotRef={registerCompactSlotRef}
           />
         </div>
       ) : null}
@@ -380,6 +503,8 @@ export function Theme1Playfield({
             top: `${flyingRailBall.startY}px`,
             width: `${flyingRailBall.startSize}px`,
             height: `${flyingRailBall.startSize}px`,
+            opacity: resolveRailFlightOpacity(0),
+            transform: `translate(-50%, -50%) translate3d(0px, 0px, 0) scale(${flyingRailBall.startScale})`,
           }}
           aria-hidden="true"
         >
@@ -408,6 +533,7 @@ function Theme1DrawStage({
   featuredBall,
   featuredBallIsPending,
   celebration,
+  flightOriginRef,
   outputBallRef,
   suppressedOutputBallNumber,
 }: {
@@ -417,6 +543,7 @@ function Theme1DrawStage({
   featuredBall: number | null;
   featuredBallIsPending: boolean;
   celebration: Theme1CelebrationState | null;
+  flightOriginRef: RefObject<HTMLDivElement | null>;
   outputBallRef: RefObject<HTMLDivElement | null>;
   suppressedOutputBallNumber: number | null;
 }) {
@@ -428,6 +555,7 @@ function Theme1DrawStage({
         featuredBallIsPending={featuredBallIsPending}
         recentBalls={recentBalls}
         variant={machineVariant}
+        flightOriginRef={flightOriginRef}
         outputBallRef={outputBallRef}
         suppressedOutputBallNumber={suppressedOutputBallNumber}
       />
@@ -461,6 +589,64 @@ function sharesBallPrefix(previousBalls: readonly number[], currentBalls: readon
   return previousBalls.every((ball, index) => currentBalls[index] === ball);
 }
 
+function areBallArraysEqual(left: readonly number[], right: readonly number[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => right[index] === value);
+}
+
+function queueRecentBallsSnapshot(queue: number[][], nextSnapshot: readonly number[]) {
+  const previousQueuedSnapshot = queue[queue.length - 1];
+  if (previousQueuedSnapshot && areBallArraysEqual(previousQueuedSnapshot, nextSnapshot)) {
+    return;
+  }
+
+  queue.push([...nextSnapshot]);
+}
+
+function applyRecentBallsSnapshot(
+  previousBalls: readonly number[],
+  currentBalls: readonly number[],
+  handlers: {
+    setRenderedRecentBalls: (balls: number[]) => void;
+    setHiddenRailBallIndex: (index: number | null) => void;
+    setQueuedFlightBallNumber: (ballNumber: number | null) => void;
+    setQueuedFlightTargetIndex: (index: number | null) => void;
+    setSuppressedOutputBallNumber: (ballNumber: number | null) => void;
+    setFlyingRailBall: (ball: Theme1FlyingRailBallState | null) => void;
+    queuedFlightResolvedBallsRef: { current: number[] | null };
+  },
+) {
+  const nextRailState = resolveRailPresentationState(previousBalls, currentBalls);
+
+  if (currentBalls.length === 0 || currentBalls.length < previousBalls.length || !sharesBallPrefix(previousBalls, currentBalls)) {
+    handlers.queuedFlightResolvedBallsRef.current = null;
+    handlers.setRenderedRecentBalls(nextRailState.renderedBalls);
+    handlers.setHiddenRailBallIndex(null);
+    handlers.setQueuedFlightBallNumber(null);
+    handlers.setQueuedFlightTargetIndex(null);
+    handlers.setSuppressedOutputBallNumber(null);
+    handlers.setFlyingRailBall(null);
+    return;
+  }
+
+  if (nextRailState.queuedBallNumber !== null && nextRailState.queuedTargetIndex !== null) {
+    handlers.queuedFlightResolvedBallsRef.current = [...currentBalls];
+    handlers.setRenderedRecentBalls(nextRailState.renderedBalls);
+    handlers.setHiddenRailBallIndex(nextRailState.queuedTargetIndex);
+    handlers.setQueuedFlightBallNumber(nextRailState.queuedBallNumber);
+    handlers.setQueuedFlightTargetIndex(nextRailState.queuedTargetIndex);
+    handlers.setSuppressedOutputBallNumber(null);
+    handlers.setFlyingRailBall(null);
+    return;
+  }
+
+  handlers.queuedFlightResolvedBallsRef.current = null;
+  handlers.setRenderedRecentBalls(nextRailState.renderedBalls);
+}
+
 function resolveSingleAppendedBall(previousBalls: readonly number[], currentBalls: readonly number[]) {
   if (!sharesBallPrefix(previousBalls, currentBalls) || currentBalls.length !== previousBalls.length + 1) {
     return null;
@@ -483,10 +669,93 @@ export function resolveRailFlightDurationMs(travelDistance: number) {
 }
 
 export function resolveRailFlightVisibleScale(
+  emergenceProgress: number,
   travelProgress: number,
+  startScale: number,
   endScale: number,
 ) {
-  return lerp(1, endScale, clamp01(travelProgress));
+  const emergedScale = lerp(startScale, 1, clamp01(emergenceProgress));
+  return lerp(emergedScale, endScale, clamp01(travelProgress));
+}
+
+export function resolveRailFlightProgress(travelProgress: number) {
+  const normalizedProgress = clamp01(travelProgress);
+  if (normalizedProgress < 0.5) {
+    return 4 * normalizedProgress * normalizedProgress * normalizedProgress;
+  }
+
+  const inverse = (-2 * normalizedProgress) + 2;
+  return 1 - ((inverse * inverse * inverse) / 2);
+}
+
+export function resolveRailFlightArcLift(
+  travelProgress: number,
+  travelDistance: number,
+) {
+  void travelDistance;
+  const normalizedProgress = clamp01(travelProgress);
+  const arcPeak = 34;
+  return Math.sin(normalizedProgress * Math.PI) * arcPeak;
+}
+
+export function resolveRailFlightEmergenceProgress(
+  elapsedMs: number,
+  holdMs: number,
+) {
+  const emergenceWindowMs = Math.max(220, holdMs * 0.9);
+  return clamp01(elapsedMs / emergenceWindowMs);
+}
+
+export function resolveRailFlightOpacity(emergenceProgress: number) {
+  void emergenceProgress;
+  return 1;
+}
+
+export function resolveRailPresentationState(
+  previousBalls: readonly number[],
+  currentBalls: readonly number[],
+): Theme1RailPresentationState {
+  const appendedBall = resolveSingleAppendedBall(previousBalls, currentBalls);
+  if (appendedBall === null) {
+    return {
+      renderedBalls: [...currentBalls],
+      queuedBallNumber: null,
+      queuedTargetIndex: null,
+    };
+  }
+
+  return {
+    renderedBalls: [...previousBalls],
+    queuedBallNumber: appendedBall,
+    queuedTargetIndex: Math.min(currentBalls.length, 30) - 1,
+  };
+}
+
+export function resolveRailFlightGeometry(
+  playfieldRect: Pick<DOMRect, "left" | "top">,
+  outputBallRect: Pick<DOMRect, "left" | "top" | "width" | "height">,
+  targetBallRect: Pick<DOMRect, "left" | "top" | "width" | "height">,
+): Theme1RailFlightGeometry {
+  const startX =
+    (outputBallRect.left - playfieldRect.left) +
+    (outputBallRect.width * 0.5) +
+    THEME1_RAIL_FLIGHT_START_OFFSET_X_PX;
+  const startY =
+    (outputBallRect.top - playfieldRect.top) +
+    (outputBallRect.height * 0.5);
+  const targetCenterX =
+    (targetBallRect.left - playfieldRect.left) +
+    (targetBallRect.width * 0.5);
+  const targetCenterY =
+    (targetBallRect.top - playfieldRect.top) +
+    (targetBallRect.height * 0.5);
+
+  return {
+    startX,
+    startY,
+    deltaX: targetCenterX - startX,
+    deltaY: targetCenterY - startY,
+  };
 }
 
 function lerp(start: number, end: number, progress: number) {

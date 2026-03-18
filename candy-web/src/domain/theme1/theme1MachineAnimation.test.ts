@@ -22,7 +22,7 @@ describe("theme1MachineAnimation", () => {
     expect(result.outputBallNumber).toBeNull();
   });
 
-  it("removes already drawn balls from the globe and keeps the latest drawn ball as output", () => {
+  it("removes already drawn balls from the globe and leaves the output empty after settlement", () => {
     const result = deriveTheme1MachinePresentationState({
       recentBalls: [41, 17, 6],
       featuredBallNumber: 6,
@@ -33,7 +33,7 @@ describe("theme1MachineAnimation", () => {
     expect(result.availableBallNumbers).not.toContain(17);
     expect(result.availableBallNumbers).not.toContain(6);
     expect(result.availableBallNumbers).toHaveLength(57);
-    expect(result.outputBallNumber).toBe(6);
+    expect(result.outputBallNumber).toBeNull();
   });
 
   it("uses the pending featured ball as stable output when resuming mid-animation", () => {
