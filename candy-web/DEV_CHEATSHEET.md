@@ -11,6 +11,7 @@ Mappe:
 Full dokumentasjon:
 
 - [README.md](/Users/tobiashaugen/Projects/Bingo/candy-web/README.md)
+- [BRANCH_DEPLOY_WORKFLOW.md](/Users/tobiashaugen/Projects/Bingo/docs/BRANCH_DEPLOY_WORKFLOW.md)
 
 ## Start lokalt
 

@@ -6,6 +6,10 @@ For kortversjonen med bare kommandoer, URL-er og viktigste filer, se:
 
 - [DEV_CHEATSHEET.md](/Users/tobiashaugen/Projects/Bingo/candy-web/DEV_CHEATSHEET.md)
 
+For branch/deploy-reglene som faktisk styrer staging og production, se:
+
+- [BRANCH_DEPLOY_WORKFLOW.md](/Users/tobiashaugen/Projects/Bingo/docs/BRANCH_DEPLOY_WORKFLOW.md)
+
 Den brukes på to måter:
 
 - lokalt som egen frontend for utvikling og animasjonstesting
