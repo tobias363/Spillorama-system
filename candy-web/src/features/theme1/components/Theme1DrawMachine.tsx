@@ -471,7 +471,7 @@ export function Theme1DrawMachine({
         (0.18 + mixBoost * 0.5),
     };
 
-    const solverSteps = phase === "mix" ? 5 : 4;
+    const solverSteps = phase === "mix" ? 4 : 3;
     const stepSeconds = deltaSeconds / solverSteps;
     const mixProgress =
       sequence && phase === "mix"
@@ -752,7 +752,7 @@ export function Theme1DrawMachine({
     const devicePixelRatioValue = window.devicePixelRatio || 1;
     context.setTransform(devicePixelRatioValue, 0, 0, devicePixelRatioValue, 0, 0);
     context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
+    context.imageSmoothingQuality = "medium";
     context.clearRect(0, 0, layout.clusterWidth, layout.clusterHeight);
 
     context.save();
@@ -778,15 +778,10 @@ export function Theme1DrawMachine({
     context.closePath();
     context.clip();
 
-    const sortedBalls = [...visibleBalls].sort((first, second) => {
+    const sortedBalls = (visibleBalls as Theme1MachineBallState[]).slice().sort((first, second) => {
       const firstLayer = resolveBallLayerDepth(first, layout, activeDrawNumber, phase, mixProgress);
       const secondLayer = resolveBallLayerDepth(second, layout, activeDrawNumber, phase, mixProgress);
-
-      if (firstLayer === secondLayer) {
-        return first.number - second.number;
-      }
-
-      return firstLayer - secondLayer;
+      return firstLayer !== secondLayer ? firstLayer - secondLayer : first.number - second.number;
     });
 
     for (const model of sortedBalls) {
@@ -802,17 +797,16 @@ export function Theme1DrawMachine({
       const usesIntegratedBackdropScene = variant === "integrated-scene";
       const alpha = usesIntegratedBackdropScene ? 0.99 : 0.94 + (model.depth * 0.04);
 
-      context.save();
-      context.translate(model.x, model.y);
-      context.rotate(rotation);
       context.globalAlpha = alpha;
-      context.shadowColor = usesIntegratedBackdropScene
-        ? "rgba(79, 18, 64, 0.08)"
-        : "rgba(79, 18, 64, 0.16)";
-      context.shadowBlur = usesIntegratedBackdropScene ? 2.4 : 4;
-      context.shadowOffsetY = usesIntegratedBackdropScene ? 0.7 : 1.5;
-      context.drawImage(image, -drawRadius, -drawRadius, drawSize, drawSize);
-      context.restore();
+      if (rotation !== 0) {
+        context.save();
+        context.translate(model.x, model.y);
+        context.rotate(rotation);
+        context.drawImage(image, -drawRadius, -drawRadius, drawSize, drawSize);
+        context.restore();
+      } else {
+        context.drawImage(image, model.x - drawRadius, model.y - drawRadius, drawSize, drawSize);
+      }
     }
 
     context.restore();
