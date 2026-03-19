@@ -62,7 +62,7 @@ describe("applyTheme1DrawPresentation", () => {
     expect(result.boards[0]?.cells.find((cell) => cell.value === 18)?.tone).toBe("idle");
   });
 
-  it("falls back to the latest snapshot ball when there is no pending draw", () => {
+  it("clears the featured ball when there is no pending draw", () => {
     const baseModel = {
       ...theme1MockSnapshot,
       featuredBallNumber: 27,
@@ -72,7 +72,7 @@ describe("applyTheme1DrawPresentation", () => {
 
     const result = applyTheme1DrawPresentation(baseModel, null);
 
-    expect(result.featuredBallNumber).toBe(18);
+    expect(result.featuredBallNumber).toBe(null);
     expect(result.featuredBallIsPending).toBe(false);
     expect(result.recentBalls).toEqual([3, 11, 18]);
   });

@@ -42,7 +42,7 @@ export function applyTheme1DrawPresentation(
     return {
       ...model,
       boards,
-      featuredBallNumber: recentBalls[recentBalls.length - 1] ?? null,
+      featuredBallNumber: null,
       featuredBallIsPending: false,
       recentBalls,
     };

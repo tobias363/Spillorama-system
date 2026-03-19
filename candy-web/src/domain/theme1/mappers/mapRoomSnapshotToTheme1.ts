@@ -1213,11 +1213,7 @@ function mapRenderStateToRoundModel(
     toppers: renderState.topper.slots.map((slot, index) =>
       mapTopperSlotToViewState(slot, index),
     ),
-    featuredBallNumber:
-      renderState.ballRack.showBigBall &&
-      Number.parseInt(renderState.ballRack.bigBallNumber, 10) > 0
-        ? Number.parseInt(renderState.ballRack.bigBallNumber, 10)
-        : null,
+    featuredBallNumber: null,
     featuredBallIsPending: false,
     recentBalls: renderState.ballRack.slots
       .filter((slot) => slot.isVisible)

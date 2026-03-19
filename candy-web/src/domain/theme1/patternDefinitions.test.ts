@@ -514,7 +514,7 @@ describe("theme1 pattern definitions", () => {
 
     expect(result.resolvedPlayerId).toBe("player-2");
     expect(result.model.recentBalls).toEqual([1, 2, 3, 4]);
-    expect(result.model.featuredBallNumber).toBe(4);
+    expect(result.model.featuredBallNumber).toBe(null);
     expect(result.model.boards[0]?.cells.every((cell) => cell.tone === "idle")).toBe(true);
     expect(result.model.boards[0]?.activeNearPatterns).toEqual([]);
     expect(result.model.boards[0]?.completedPatterns).toEqual([]);
