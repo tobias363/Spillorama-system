@@ -967,11 +967,29 @@ async function syncLiveSnapshot(
         ? await requestRoomResume(socket, session)
         : undefined;
 
+    const resumeFailed = response !== undefined && !response.ok;
+    const resumeErrorCode = resumeFailed ? response?.error?.code : undefined;
+
     if (!response?.ok || !response.data?.snapshot) {
       response = await requestRoomState(socket, session);
       syncSource = "room:state";
     } else {
       syncSource = "room:resume";
+    }
+
+    // If room:resume failed with PLAYER_NOT_FOUND but room:state succeeded,
+    // the player's session expired (e.g. backend restart). Re-create the
+    // player in the room so boards, bets, and tickets work again.
+    if (
+      resumeErrorCode === "PLAYER_NOT_FOUND" &&
+      response.ok &&
+      response.data?.snapshot &&
+      canAutoCreateRoom(session)
+    ) {
+      const recovered = await attemptLiveRoomRecovery(set, get, session, resumeErrorCode);
+      if (recovered) {
+        return;
+      }
     }
 
     if (!response.ok || !response.data?.snapshot) {
