@@ -1783,12 +1783,32 @@ function applyPendingDrawPresentation(
   drawNumber: number,
 ): void {
   const nextPendingDrawNumber = Math.trunc(drawNumber);
-  commitPreviousPendingDrawPresentation(set, get, nextPendingDrawNumber);
-  const currentState = get();
   clearPendingDrawTimer();
+
+  // Commit previous AND apply new in a SINGLE set() call to avoid
+  // an intermediate render frame where featuredBallNumber is null (blink).
+  const currentState = get();
+  const previousPending = currentState.runtime.pendingDrawNumber;
+  let baseModel = currentState.snapshot;
+
+  if (previousPending !== null && previousPending !== nextPendingDrawNumber) {
+    // Commit previous: remap from snapshot if in live mode
+    if (currentState.mode === "live" && currentState.roomSnapshot) {
+      const session = normalizeSession(currentState.session);
+      const result = mapRoomSnapshotToTheme1(currentState.roomSnapshot, {
+        session,
+        connectionPhase: "connected",
+      });
+      baseModel = result.model;
+    } else {
+      baseModel = applyTheme1DrawPresentation(currentState.snapshot, null);
+    }
+  }
+
+  // Apply new draw presentation on top of the committed base
   set({
     snapshot: applyTheme1DrawPresentation(
-      currentState.snapshot,
+      baseModel,
       nextPendingDrawNumber,
       {
         markBoards: currentState.runtime.lastTicketSource === "currentGame",
