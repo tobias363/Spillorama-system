@@ -1816,14 +1816,19 @@ function applyPendingDrawPresentation(
   let baseModel = currentState.snapshot;
 
   if (previousPending !== null && previousPending !== nextPendingDrawNumber) {
-    // Commit previous: remap from snapshot if in live mode
+    // Commit previous: remap from snapshot if in live mode, but preserve
+    // the client's recentBalls so that balls only enter the rail through
+    // the draw:new → flight animation pipeline (not dumped from server snapshot).
     if (currentState.mode === "live" && currentState.roomSnapshot) {
       const session = normalizeSession(currentState.session);
       const result = mapRoomSnapshotToTheme1(currentState.roomSnapshot, {
         session,
         connectionPhase: "connected",
       });
-      baseModel = result.model;
+      baseModel = {
+        ...result.model,
+        recentBalls: currentState.snapshot.recentBalls,
+      };
     } else {
       baseModel = applyTheme1DrawPresentation(currentState.snapshot, null);
     }
