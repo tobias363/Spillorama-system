@@ -13,7 +13,7 @@ import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
 import type { ClaimType, RoomSnapshot, RoomSummary, Ticket } from "./game/types.js";
 import { GameCheckpointStore } from "./game/GameCheckpointStore.js";
-import { logger } from "./logger.js";
+import { logger, correlationId } from "./logger.js";
 import {
   parseSocketPayload,
   drawNextSchema,
@@ -3898,6 +3898,7 @@ app.post("/api/wallets/transfer", async (req, res) => {
 });
 
 io.on("connection", (socket: Socket) => {
+  const socketId = socket.id;
   socketConnectionsActive.inc();
   socket.on("disconnect", () => {
     socketConnectionsActive.dec();
@@ -3907,21 +3908,27 @@ io.on("connection", (socket: Socket) => {
   const RATE_LIMIT_WINDOW_MS = 2000;
   const RATE_LIMIT_MAX_EVENTS = 10;
   const socketEventTimestamps: number[] = [];
+  let rateLimitLogCount = 0;
 
-  function checkSocketRateLimit(): boolean {
+  function checkSocketRateLimit(event: string): boolean {
     const now = Date.now();
     // Remove timestamps outside window
     while (socketEventTimestamps.length > 0 && socketEventTimestamps[0] < now - RATE_LIMIT_WINDOW_MS) {
       socketEventTimestamps.shift();
     }
     if (socketEventTimestamps.length >= RATE_LIMIT_MAX_EVENTS) {
+      rateLimitLogCount++;
+      // Log every 5th rate limit to avoid log spam
+      if (rateLimitLogCount % 5 === 1) {
+        console.warn(`[rate-limit] Socket ${socketId} rate-limited on "${event}" (${rateLimitLogCount} total)`);
+      }
       return false;
     }
     socketEventTimestamps.push(now);
     return true;
   }
 
-  // Wrap socket.on to inject rate limiting on player-action events
+  // Wrap socket.on to inject rate limiting and correlation IDs on player-action events
   const originalOn = socket.on.bind(socket);
   const rateLimitedEvents = new Set([
     "bet:arm", "claim:submit", "ticket:reroll", "room:configure",
@@ -3930,7 +3937,7 @@ io.on("connection", (socket: Socket) => {
   socket.on = ((event: string, handler: (...args: unknown[]) => void) => {
     if (rateLimitedEvents.has(event)) {
       return originalOn(event, (...args: unknown[]) => {
-        if (!checkSocketRateLimit()) {
+        if (!checkSocketRateLimit(event)) {
           const callback = args[args.length - 1];
           if (typeof callback === "function") {
             (callback as (r: unknown) => void)({
@@ -4149,11 +4156,12 @@ io.on("connection", (socket: Socket) => {
       callback: (response: AckResponse<{ snapshot: RoomSnapshot; entryFee: number }>) => void
     ) => {
       try {
-        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+        const validated = parseSocketPayload(configureRoomSchema, payload, "room:configure");
+        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(validated);
         assertCanonicalCandyRoomForGameplay(roomCode);
         engine.getRoomSnapshot(roomCode);
 
-        const requestedEntryFee = parseOptionalNonNegativeNumber(payload?.entryFee, "entryFee");
+        const requestedEntryFee = parseOptionalNonNegativeNumber(validated.entryFee, "entryFee");
         if (requestedEntryFee === undefined) {
           throw new DomainError("INVALID_INPUT", "entryFee må oppgis.");
         }
@@ -4174,9 +4182,10 @@ io.on("connection", (socket: Socket) => {
       callback: (response: AckResponse<{ snapshot: RoomSnapshot; armed: boolean; armedPlayerIds: string[] }>) => void
     ) => {
       try {
-        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+        const validated = parseSocketPayload(betArmSchema, payload, "bet:arm");
+        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(validated);
         assertCanonicalCandyRoomForGameplay(roomCode);
-        const shouldArm = payload?.armed === undefined ? true : Boolean(payload.armed);
+        const shouldArm = validated.armed === undefined ? true : Boolean(validated.armed);
         setPlayerBetArm(roomCode, playerId, shouldArm);
         const snapshot = await emitRoomUpdate(roomCode, playerId);
         const armedPlayerIds = getArmedPlayerIdsForSnapshot(snapshot);
@@ -4262,16 +4271,16 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("draw:extra:purchase", async (payload: ExtraDrawPayload, callback: (response: AckResponse<{ denied: true }>) => void) => {
     try {
-      const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+      const validated = parseSocketPayload(extraDrawSchema, payload, "draw:extra:purchase");
+      const { roomCode, playerId } = await requireAuthenticatedPlayerAction(validated);
       assertCanonicalCandyRoomForGameplay(roomCode);
       engine.rejectExtraDrawPurchase({
         source: "SOCKET",
         roomCode,
         playerId,
         metadata: {
-          requestedCount:
-            payload?.requestedCount === undefined ? undefined : Number(payload.requestedCount),
-          packageId: typeof payload?.packageId === "string" ? payload.packageId : undefined
+          requestedCount: validated.requestedCount,
+          packageId: validated.packageId
         }
       });
       ackSuccess(callback, { denied: true });
@@ -4311,14 +4320,15 @@ io.on("connection", (socket: Socket) => {
       }>) => void
     ) => {
       try {
-        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+        const validated = parseSocketPayload(ticketRerollSchema, payload, "ticket:reroll");
+        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(validated);
         assertCanonicalCandyRoomForGameplay(roomCode);
 
         const hallGameConfig = await resolveBingoHallGameConfigForRoom(roomCode);
         const requestedTicketsPerPlayer =
-          payload?.ticketsPerPlayer === undefined || payload?.ticketsPerPlayer === null
+          validated.ticketsPerPlayer === undefined
             ? undefined
-            : parseTicketsPerPlayerInput(payload.ticketsPerPlayer);
+            : parseTicketsPerPlayerInput(validated.ticketsPerPlayer);
         const ticketsPerPlayer =
           requestedTicketsPerPlayer ??
           Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
@@ -4328,10 +4338,7 @@ io.on("connection", (socket: Socket) => {
           roomCode,
           playerId,
           ticketsPerPlayer,
-          ticketIndex:
-            payload?.ticketIndex === undefined || payload?.ticketIndex === null
-              ? undefined
-              : Math.trunc(Number(payload.ticketIndex))
+          ticketIndex: validated.ticketIndex
         });
         const snapshot = await emitRoomUpdate(roomCode, playerId);
         ackSuccess(callback, {

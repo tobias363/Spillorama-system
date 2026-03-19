@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import pino from "pino";
 
 const level = process.env.LOG_LEVEL?.trim().toLowerCase() || "info";
@@ -23,5 +24,12 @@ console.error = (...args: unknown[]) => logger.error(args.map(String).join(" "))
 console.warn = (...args: unknown[]) => logger.warn(args.map(String).join(" "));
 console.info = (...args: unknown[]) => logger.info(args.map(String).join(" "));
 console.debug = (...args: unknown[]) => logger.debug(args.map(String).join(" "));
+
+// ---------------------------------------------------------------------------
+// Correlation ID — generate a short unique ID for tracing requests
+// ---------------------------------------------------------------------------
+export function correlationId(): string {
+  return randomUUID().slice(0, 8);
+}
 
 export type Logger = typeof logger;
