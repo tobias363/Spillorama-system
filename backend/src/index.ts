@@ -279,8 +279,8 @@ const bingoRtpControllerGain = Math.min(
   2,
   Math.max(0, parseNonNegativeNumberEnv(process.env.BINGO_RTP_CONTROLLER_GAIN, 0.5))
 );
-const bingoNearMissBiasEnabled = parseBooleanEnv(process.env.BINGO_NEAR_MISS_BIAS_ENABLED, true);
-const bingoNearMissTargetRate = parseRatioEnv(process.env.BINGO_NEAR_MISS_TARGET_RATE, 0.38);
+const bingoNearMissBiasEnabled = parseBooleanEnv(process.env.BINGO_NEAR_MISS_BIAS_ENABLED, false);
+const bingoNearMissTargetRate = parseRatioEnv(process.env.BINGO_NEAR_MISS_TARGET_RATE, 0.15);
 const bingoNearMissCalibrationFactor = parseRatioEnv(process.env.BINGO_NEAR_MISS_CALIBRATION_FACTOR, 0.92);
 const candyProductionApiBaseHost = "bingosystem-3.onrender.com";
 const allowProductionCandyApiBaseUrl = parseBooleanEnv(process.env.CANDY_ALLOW_PRODUCTION_API_BASE_URL, false);
@@ -320,10 +320,10 @@ const runtimeCandyManiaSettings: CandyManiaSchedulerSettings = {
     Math.max(1, parsePositiveIntEnv(process.env.AUTO_ROUND_TICKETS_PER_PLAYER, 4))
   ),
   payoutPercent: Math.round(
-    Math.min(100, Math.max(0, parseNonNegativeNumberEnv(process.env.CANDY_PAYOUT_PERCENT, 80))) * 100
+    Math.min(100, Math.max(0, parseNonNegativeNumberEnv(process.env.CANDY_PAYOUT_PERCENT, 75))) * 100
   ) / 100,
   autoDrawEnabled: forceCandyAutoDraw ? true : autoplayAllowed ? requestedAutoDrawEnabled : false,
-  autoDrawIntervalMs: parsePositiveIntEnv(process.env.AUTO_DRAW_INTERVAL_MS, 1200)
+  autoDrawIntervalMs: parsePositiveIntEnv(process.env.AUTO_DRAW_INTERVAL_MS, 1300)
 };
 let candyManiaSettingsEffectiveFromMs = Date.now();
 let pendingCandyManiaSettingsUpdate: PendingCandyManiaSettingsUpdate | null = null;

@@ -9,9 +9,9 @@ import {
 
 describe("resolveRailFlightDurationMs", () => {
   it("keeps the same transfer duration for every rail slot", () => {
-    expect(resolveRailFlightDurationMs(10)).toBe(2400);
-    expect(resolveRailFlightDurationMs(180)).toBe(2400);
-    expect(resolveRailFlightDurationMs(4000)).toBe(2400);
+    expect(resolveRailFlightDurationMs(10)).toBe(700);
+    expect(resolveRailFlightDurationMs(180)).toBe(700);
+    expect(resolveRailFlightDurationMs(4000)).toBe(700);
   });
 
   it("grows out of the hole before shrinking toward the target slot", () => {

@@ -73,8 +73,8 @@ interface Theme1RailFlightGeometry {
   deltaY: number;
 }
 
-const THEME1_RAIL_FLIGHT_HOLD_MS = 750;
-const THEME1_RAIL_FLIGHT_DURATION_MS = 2400;
+const THEME1_RAIL_FLIGHT_HOLD_MS = 150;
+const THEME1_RAIL_FLIGHT_DURATION_MS = 700;
 const THEME1_RAIL_FLIGHT_START_OFFSET_X_PX = -1;
 const THEME1_RAIL_FLIGHT_START_OFFSET_Y_PX = 6;
 const THEME1_RAIL_FLIGHT_OUTPUT_OVERLAP_MS = 0;
@@ -329,7 +329,7 @@ export function Theme1Playfield({
       // During emergence (hold phase) the ball drifts downward to simulate
       // dropping out of the machine hole.  The drift peaks at ~30 px when
       // emergence completes and then blends into the normal travel path.
-      const emergenceDriftY = emergenceProgress * (1 - easedTravelProgress) * 90;
+      const emergenceDriftY = emergenceProgress * (1 - easedTravelProgress) * 40;
       const x = flyingRailBall.deltaX * easedTravelProgress;
       const y = (flyingRailBall.deltaY * easedTravelProgress) - arcLift + emergenceDriftY;
 
