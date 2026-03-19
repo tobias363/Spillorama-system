@@ -1142,38 +1142,33 @@ function applyLiveSnapshot(
     snapshot,
     playerId: nextSession.playerId,
   });
-  // For room:update events, preserve the client's recentBalls ordering
-  // so balls enter the rail through the draw:new → flight animation pipeline.
-  // CRITICAL: Never remove balls from or reorder the client's list during a
-  // room:update — the Playfield's sharesBallPrefix() invariant requires that
-  // the existing prefix is always preserved. Only APPEND missing balls.
-  // When the server has a completely different set (new round), use server's list.
+  // For room:update events, ALWAYS use client's recentBalls. Balls must
+  // only enter the rail through draw:new → applyTheme1DrawPresentation,
+  // because the Playfield animation requires single-ball appends
+  // (resolveSingleAppendedBall). Adding multiple balls at once from a
+  // room:update snapshot bypasses the flight animation entirely.
+  //
+  // Exception: when server has no drawn balls (new round), clear the list.
+  // When client has no balls yet (initial load), use server's list.
   const nextModelWithBallRailGuard = (() => {
-    if (syncSource !== "room:update" || currentState.snapshot.recentBalls.length === 0) {
+    if (syncSource !== "room:update") {
       return nextModelWithPendingDraw;
     }
     const clientBalls = currentState.snapshot.recentBalls;
     const serverBalls = nextModelWithPendingDraw.recentBalls;
 
-    // Detect new game round: server has no balls (WAITING/new round started)
-    // or server has balls with ZERO overlap with client's list.
-    if (serverBalls.length === 0) {
-      return nextModelWithPendingDraw;
-    }
-    const serverSet = new Set(serverBalls);
-    const hasOverlap = clientBalls.some((b) => serverSet.has(b));
-    if (!hasOverlap) {
+    // Initial load: client has no balls, use server's list
+    if (clientBalls.length === 0) {
       return nextModelWithPendingDraw;
     }
 
-    // Append-only: keep client's full list unchanged, add any server balls
-    // that the client hasn't received via draw:new yet.
-    const clientSet = new Set(clientBalls);
-    const missingFromClient = serverBalls.filter((b) => !clientSet.has(b));
-    if (missingFromClient.length === 0) {
-      return { ...nextModelWithPendingDraw, recentBalls: clientBalls };
+    // New round: server has no balls, clear client's list
+    if (serverBalls.length === 0) {
+      return { ...nextModelWithPendingDraw, recentBalls: [] };
     }
-    return { ...nextModelWithPendingDraw, recentBalls: [...clientBalls, ...missingFromClient] };
+
+    // During active round: keep client's list exactly as-is
+    return { ...nextModelWithPendingDraw, recentBalls: clientBalls };
   })();
   const nextModel = shouldHoldPendingVisuals
     ? preservePendingPresentationVisuals(currentState.snapshot, nextModelWithBallRailGuard)
@@ -1877,22 +1872,12 @@ function applyPendingDrawPresentation(
 
       writeSession(nextSession);
 
-      // Append-only merge: keep client's full list, add any server balls
-      // not yet seen via draw:new. Never remove or reorder client balls
-      // to preserve the Playfield's sharesBallPrefix() invariant.
-      const clientBalls = latestState.snapshot.recentBalls;
-      const serverBalls = result.model.recentBalls;
-      const clientSet = new Set(clientBalls);
-      const missingFromClient = serverBalls.filter((b) => !clientSet.has(b));
-      const mergedRecentBalls =
-        missingFromClient.length === 0
-          ? clientBalls
-          : [...clientBalls, ...missingFromClient];
+      // Always keep client's recentBalls — balls only enter through draw:new.
       set({
         session: nextSession,
         snapshot: {
           ...result.model,
-          recentBalls: mergedRecentBalls,
+          recentBalls: latestState.snapshot.recentBalls,
           featuredBallNumber: null,
           featuredBallIsPending: false,
         },

@@ -162,121 +162,72 @@ describe("30-ball draw sequence simulation", () => {
 });
 
 /**
- * Append-only merge: mirrors the logic in applyLiveSnapshot for room:update.
- * Never removes or reorders client balls — only appends server balls the
- * client hasn't seen via draw:new. This preserves the sharesBallPrefix()
- * invariant that the Playfield flight animation depends on.
+ * room:update recentBalls guard: mirrors the logic in applyLiveSnapshot.
+ * room:update NEVER adds balls — balls only enter through draw:new.
+ * room:update only clears balls on new round (server has empty list).
  */
-function appendOnlyMerge(clientBalls: number[], serverBalls: number[]): number[] {
-  // New round detection: server has no balls OR no overlap with client
-  if (serverBalls.length === 0) {
-    return serverBalls;
-  }
-  const serverSet = new Set(serverBalls);
-  const hasOverlap = clientBalls.some((b) => serverSet.has(b));
-  if (!hasOverlap) {
-    return serverBalls;
-  }
-  const clientSet = new Set(clientBalls);
-  const missingFromClient = serverBalls.filter((b) => !clientSet.has(b));
-  if (missingFromClient.length === 0) {
-    return clientBalls;
-  }
-  return [...clientBalls, ...missingFromClient];
+function roomUpdateBallGuard(clientBalls: number[], serverBalls: number[]): number[] {
+  if (clientBalls.length === 0) return serverBalls; // initial load
+  if (serverBalls.length === 0) return []; // new round
+  return clientBalls; // keep client's list unchanged
 }
 
-describe("recentBalls append-only merge logic", () => {
-  it("appends server balls that client hasn't seen via draw:new", () => {
-    const merged = appendOnlyMerge([1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(merged).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+describe("recentBalls room:update guard logic", () => {
+  it("keeps client balls unchanged during active round", () => {
+    const result = roomUpdateBallGuard([1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(result).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it("uses server list when client has completely different balls (new round)", () => {
-    const merged = appendOnlyMerge([51, 52, 53], [1, 2, 3]);
-    expect(merged).toEqual([1, 2, 3]);
+  it("clears client balls when server has empty list (new round)", () => {
+    const result = roomUpdateBallGuard([1, 2, 3, 4, 5], []);
+    expect(result).toEqual([]);
   });
 
-  it("clears client balls when server has empty list (new round WAITING)", () => {
-    const merged = appendOnlyMerge([1, 2, 3, 4, 5, 6, 7], []);
-    expect(merged).toEqual([]);
+  it("uses server list on initial load when client has no balls", () => {
+    const result = roomUpdateBallGuard([], [1, 2, 3]);
+    expect(result).toEqual([1, 2, 3]);
   });
 
-  it("preserves client ordering exactly when server has same balls", () => {
-    const merged = appendOnlyMerge([5, 3, 1, 4, 2], [1, 2, 3, 4, 5]);
-    expect(merged).toEqual([5, 3, 1, 4, 2]);
+  it("never modifies client list even if server is ahead", () => {
+    const client = [5, 3, 1, 4, 2];
+    const result = roomUpdateBallGuard(client, [1, 2, 3, 4, 5, 6, 7]);
+    expect(result).toEqual([5, 3, 1, 4, 2]);
   });
 
-  it("never removes client balls even if server has fewer (timing lag)", () => {
-    // Client got draw:new for ball 15 but server snapshot only has 1-14
-    const clientBalls = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    const serverBalls = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
-    const merged = appendOnlyMerge(clientBalls, serverBalls);
-    // Client's ball 15 must NOT be removed
-    expect(merged).toEqual(clientBalls);
-  });
-
-  it("never produces duplicates", () => {
-    const merged = appendOnlyMerge([1, 2, 3, 4, 5], [3, 4, 5, 6, 7]);
-    const unique = new Set(merged);
-    expect(unique.size).toBe(merged.length);
-    // Client prefix preserved, missing appended
-    expect(merged).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  it("never modifies client list even if server is behind (timing lag)", () => {
+    const client = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const result = roomUpdateBallGuard(client, [1, 2, 3, 4, 5]);
+    expect(result).toEqual(client);
   });
 
   it("preserves sharesBallPrefix invariant through entire 30-ball round", () => {
-    const totalBalls = 30;
     const violations: string[] = [];
-    let clientRecentBalls: number[] = [];
+    let clientBalls: number[] = [];
 
-    for (let i = 1; i <= totalBalls; i++) {
-      const previousBalls = [...clientRecentBalls];
+    for (let i = 1; i <= 30; i++) {
+      const previousBalls = [...clientBalls];
 
-      // draw:new adds ball to client (simulates applyTheme1DrawPresentation)
-      if (!clientRecentBalls.includes(i)) {
-        clientRecentBalls = [...clientRecentBalls, i];
-      }
+      // draw:new adds ball (single append — this is the ONLY way balls enter)
+      clientBalls = [...clientBalls, i];
 
-      // INVARIANT: new list must share prefix with previous
-      const prefixOk = previousBalls.every(
-        (ball, index) => clientRecentBalls[index] === ball,
-      );
-      if (!prefixOk) {
-        violations.push(`Ball ${i}: draw:new broke prefix invariant`);
-      }
+      // Prefix invariant after draw:new
+      const prefixOk = previousBalls.every((b, idx) => clientBalls[idx] === b);
+      if (!prefixOk) violations.push(`Ball ${i}: draw:new broke prefix`);
 
-      // Every 2nd ball, room:update arrives (simulates real socket timing)
+      // room:update arrives every 2nd ball — should NOT change list
       if (i % 2 === 0) {
-        const previousBeforeMerge = [...clientRecentBalls];
+        const before = [...clientBalls];
         const serverBalls = Array.from({ length: i }, (_, j) => j + 1);
-        clientRecentBalls = appendOnlyMerge(clientRecentBalls, serverBalls);
+        const after = roomUpdateBallGuard(clientBalls, serverBalls);
 
-        // INVARIANT: merge must preserve prefix
-        const mergedPrefixOk = previousBeforeMerge.every(
-          (ball, index) => clientRecentBalls[index] === ball,
-        );
-        if (!mergedPrefixOk) {
-          violations.push(
-            `Ball ${i}: room:update merge broke prefix invariant. ` +
-            `Before: [${previousBeforeMerge.join(",")}] After: [${clientRecentBalls.join(",")}]`,
-          );
+        if (after.length !== before.length || !before.every((b, idx) => after[idx] === b)) {
+          violations.push(`Ball ${i}: room:update changed client list!`);
         }
-
-        // INVARIANT: no balls lost
-        for (let j = 1; j <= i; j++) {
-          if (!clientRecentBalls.includes(j)) {
-            violations.push(`Ball ${i}: ball ${j} missing after merge`);
-          }
-        }
-
-        // INVARIANT: no duplicates
-        const unique = new Set(clientRecentBalls);
-        if (unique.size !== clientRecentBalls.length) {
-          violations.push(`Ball ${i}: duplicates after merge`);
-        }
+        clientBalls = after;
       }
     }
 
     expect(violations).toEqual([]);
-    expect(clientRecentBalls.length).toBe(30);
+    expect(clientBalls.length).toBe(30);
   });
 });
