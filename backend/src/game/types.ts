@@ -51,6 +51,7 @@ export interface GameState {
   remainingPayoutBudget: number;
   activePatternIndexes: number[];
   patternPayoutAmounts: number[];
+  patternPayoutPercentApplied?: number;
   drawBag: number[];
   drawnNumbers: number[];
   nearMissTargetRateApplied?: number;
@@ -88,6 +89,7 @@ export interface GameSnapshot {
   remainingPayoutBudget: number;
   activePatternIndexes: number[];
   patternPayoutAmounts: number[];
+  patternPayoutPercentApplied?: number;
   drawnNumbers: number[];
   remainingNumbers: number;
   nearMissTargetRateApplied?: number;
