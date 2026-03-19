@@ -1184,11 +1184,17 @@ function applyLiveSnapshot(
     // During active round: keep client's list exactly as-is
     return { ...nextModelWithPendingDraw, recentBalls: clientBalls };
   })();
-  const nextModel = shouldHoldPendingVisuals
+  const nextModelPreserved = shouldHoldPendingVisuals
     ? preservePendingPresentationVisuals(currentState.snapshot, nextModelWithBallRailGuard)
     : shouldFreezeBoards
       ? freezeBoardsFromPreviousModel(currentState.snapshot, nextModelWithBallRailGuard)
       : nextModelWithBallRailGuard;
+  // preservePendingPresentationVisuals overwrites recentBalls with the
+  // previous model's balls. Restore the ball guard's decision so that
+  // new-round clearing is not undone.
+  const nextModel = nextModelPreserved.recentBalls !== nextModelWithBallRailGuard.recentBalls
+    ? { ...nextModelPreserved, recentBalls: nextModelWithBallRailGuard.recentBalls }
+    : nextModelPreserved;
   const nearCallouts =
     syncSource === "room:update" && !shouldFreezeBoards
       ? extractNewTheme1NearCallouts({
