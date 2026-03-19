@@ -129,7 +129,7 @@ export function Theme1AnimationLab() {
 
           return {
             ...currentState,
-            featuredBallNumber: nextNumber,
+            featuredBallNumber: null,
             featuredBallIsPending: false,
           };
         });
@@ -140,7 +140,7 @@ export function Theme1AnimationLab() {
   useEffect(() => {
     drawIndexRef.current = 0;
     activeDrawNumberRef.current = null;
-    scheduleNextDraw(1200);
+    scheduleNextDraw(2000);
     return () => {
       clearPendingTimeouts();
     };
@@ -166,7 +166,7 @@ export function Theme1AnimationLab() {
       return;
     }
 
-    scheduleNextDraw(320);
+    scheduleNextDraw(2000);
   }, [clearPendingTimeouts, scheduleNextDraw]);
 
   useEffect(() => {
