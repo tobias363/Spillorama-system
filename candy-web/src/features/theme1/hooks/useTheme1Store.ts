@@ -872,6 +872,14 @@ function getBoundRealtimeSocket(
           return;
         }
 
+        // Skip draws that already appear in the latest snapshot to avoid
+        // replaying stale events after reconnect.
+        const currentSnapshot = get().roomSnapshot;
+        const drawnNumbers = currentSnapshot?.currentGame?.drawnNumbers ?? [];
+        if (drawnNumbers.includes(nextNumber)) {
+          return;
+        }
+
         applyPendingDrawPresentation(set, get, nextNumber);
       } catch (error) {
         console.error("[candy-web] onDrawNew handler error:", error);
