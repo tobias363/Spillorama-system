@@ -154,6 +154,12 @@ export function Theme1Playfield({
       return;
     }
 
+    // Skip redundant processing when the array reference hasn't changed
+    // (e.g. after a flight lands and the effect re-fires due to flyingRailBall → null).
+    if (previousRecentBallsRef.current === recentBalls) {
+      return;
+    }
+
     applyRecentBallsSnapshot(
       previousRecentBallsRef.current,
       recentBalls,

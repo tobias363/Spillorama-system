@@ -58,7 +58,7 @@ export function Theme1BallRail({
                 }}
               >
                 {ball && spriteUrl ? (
-                  <img src={spriteUrl} alt={`Ball ${ball}`} loading="lazy" />
+                  <img src={spriteUrl} alt={`Ball ${ball}`} />
                 ) : ball ? (
                   <span>{ball}</span>
                 ) : null}
