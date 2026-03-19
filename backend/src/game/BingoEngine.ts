@@ -400,12 +400,13 @@ const MAX_SUPPORTED_BINGO_BALLS = 75;
 const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
 const DEFAULT_RTP_ROLLING_WINDOW_SIZE = 1000;
 const DEFAULT_RTP_CONTROLLER_GAIN = 0.5;
-const DEFAULT_NEAR_MISS_TARGET_RATE = 0.38;
+const DEFAULT_NEAR_MISS_TARGET_RATE = 0.15;
 const DEFAULT_NEAR_MISS_CALIBRATION_FACTOR = 0.92;
 
 export class BingoEngine {
   private readonly rooms = new Map<string, RoomState>();
   private readonly roomLastRoundStartMs = new Map<string, number>();
+  private readonly candyPayoutBankByHall = new Map<string, number>();
   private readonly lossEntriesByScope = new Map<string, LossLedgerEntry[]>();
   private readonly personalLossLimitsByScope = new Map<string, LossLimits>();
   private readonly playStateByWallet = new Map<string, PlaySessionState>();
@@ -512,7 +513,7 @@ export class BingoEngine {
       2,
       Math.max(0, options.rtpControllerGain ?? DEFAULT_RTP_CONTROLLER_GAIN)
     );
-    this.nearMissBiasEnabled = options.nearMissBiasEnabled ?? true;
+    this.nearMissBiasEnabled = options.nearMissBiasEnabled ?? false;
     this.nearMissTargetRate = Math.min(
       0.95,
       Math.max(0, options.nearMissTargetRate ?? DEFAULT_NEAR_MISS_TARGET_RATE)
@@ -566,6 +567,103 @@ export class BingoEngine {
 
     this.rooms.set(code, room);
     return { roomCode: code, playerId };
+  }
+
+  restoreGameFromCheckpoint(input: {
+    roomCode: string;
+    hallId: string;
+    hostPlayerId: string;
+    gameId: string;
+    entryFee: number;
+    ticketsPerPlayer: number;
+    payoutPercent: number;
+    drawnNumbers: number[];
+    drawBag: number[];
+    players: Array<{ id: string; name: string; walletId: string }>;
+    tickets: Record<string, number[][]>;
+    claims: Array<{ id: string; playerId: string; type: string; valid: boolean; reason?: string }>;
+    lineWinnerId: string | null;
+    bingoWinnerId: string | null;
+    startedAt: string | null;
+  }): void {
+    const code = input.roomCode.trim().toUpperCase();
+    if (this.rooms.has(code)) {
+      return; // Room already exists, skip restore
+    }
+
+    const players = new Map<string, Player>();
+    for (const p of input.players) {
+      players.set(p.id, { id: p.id, name: p.name, walletId: p.walletId, balance: 0 });
+    }
+
+    const tickets = new Map<string, Ticket[]>();
+    for (const [playerId, playerTickets] of Object.entries(input.tickets)) {
+      tickets.set(
+        playerId,
+        playerTickets.map((numbers) => ({ numbers, grid: [] })),
+      );
+    }
+
+    const marks = new Map<string, Set<number>[]>();
+    // Reconstruct marks from drawn numbers + tickets
+    for (const [playerId, playerTickets] of tickets.entries()) {
+      const playerMarks: Set<number>[] = [];
+      for (const ticket of playerTickets) {
+        const ticketMarks = new Set<number>();
+        for (const num of input.drawnNumbers) {
+          if (ticket.numbers?.includes(num)) {
+            ticketMarks.add(num);
+          }
+        }
+        playerMarks.push(ticketMarks);
+      }
+      marks.set(playerId, playerMarks);
+    }
+
+    const claims: ClaimRecord[] = input.claims.map((c) => ({
+      id: c.id,
+      playerId: c.playerId,
+      type: c.type as ClaimType,
+      valid: c.valid,
+      reason: c.reason,
+      createdAt: new Date().toISOString(),
+    }));
+
+    const game: GameState = {
+      id: input.gameId,
+      status: "RUNNING",
+      entryFee: input.entryFee,
+      ticketsPerPlayer: input.ticketsPerPlayer,
+      prizePool: 0,
+      remainingPrizePool: 0,
+      payoutPercent: input.payoutPercent,
+      maxPayoutBudget: 0,
+      remainingPayoutBudget: 0,
+      activePatternIndexes: [],
+      patternPayoutAmounts: [],
+      drawBag: input.drawBag,
+      drawnNumbers: input.drawnNumbers,
+      tickets,
+      marks,
+      settledPatternTopperSlots: new Map(),
+      claims,
+      lineWinnerId: input.lineWinnerId ?? undefined,
+      bingoWinnerId: input.bingoWinnerId ?? undefined,
+      startedAt: input.startedAt ?? new Date().toISOString(),
+    };
+
+    const room: RoomState = {
+      code,
+      hallId: input.hallId,
+      hostPlayerId: input.hostPlayerId,
+      createdAt: new Date().toISOString(),
+      players,
+      currentGame: game,
+      preRoundTicketsByPlayer: new Map(),
+      gameHistory: [],
+    };
+
+    this.rooms.set(code, room);
   }
 
   async joinRoom(input: JoinRoomInput): Promise<{ roomCode: string; playerId: string }> {
@@ -797,12 +895,21 @@ export class BingoEngine {
 
     const prizePool = this.roundCurrency(entryFee * players.length);
     const maxPayoutBudget = this.roundCurrency((prizePool * normalizedPayoutPercent) / 100);
+    const carriedPayoutBudget = this.roundCurrency(
+      Math.max(0, this.candyPayoutBankByHall.get(room.hallId) ?? 0),
+    );
+    const remainingPayoutBudget = this.roundCurrency(carriedPayoutBudget + maxPayoutBudget);
+    this.candyPayoutBankByHall.set(room.hallId, remainingPayoutBudget);
     let drawBag = makeShuffledBallBag(this.maxBallNumber);
     let nearMissTargetRateApplied: number | undefined;
     const activePatternIndexes = getCandyActivePatternIndexes();
+    const patternPayoutPercentApplied = this.resolveAdaptiveCandyPatternPayoutPercent(
+      normalizedPayoutPercent,
+      room.hallId
+    );
     const patternPayoutAmounts = resolveCandyPatternPayoutAmounts(
       entryFee,
-      normalizedPayoutPercent,
+      patternPayoutPercentApplied,
       ticketsPerPlayer
     ).map((amount) => this.roundCurrency(amount));
     if (this.nearMissBiasEnabled && this.nearMissTargetRate > 0) {
@@ -819,9 +926,10 @@ export class BingoEngine {
       remainingPrizePool: prizePool,
       payoutPercent: normalizedPayoutPercent,
       maxPayoutBudget,
-      remainingPayoutBudget: maxPayoutBudget,
+      remainingPayoutBudget,
       activePatternIndexes,
       patternPayoutAmounts,
+      patternPayoutPercentApplied,
       drawBag,
       drawnNumbers: [],
       nearMissTargetRateApplied,
@@ -1031,6 +1139,7 @@ export class BingoEngine {
         player.balance += payout;
         game.remainingPrizePool = this.roundCurrency(Math.max(0, game.remainingPrizePool - payout));
         game.remainingPayoutBudget = this.roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
+        this.syncCandyPayoutBank(room.hallId, game.remainingPayoutBudget);
         this.recordLossEntry(player.walletId, room.hallId, {
           type: "PAYOUT",
           amount: payout,
@@ -1137,6 +1246,7 @@ export class BingoEngine {
       }
       game.remainingPrizePool = this.roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = this.roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
+      this.syncCandyPayoutBank(room.hallId, game.remainingPayoutBudget);
       game.status = "ENDED";
       game.endedAt = endedAt.toISOString();
       game.endedReason = "BINGO_CLAIMED";
@@ -1183,6 +1293,11 @@ export class BingoEngine {
   getRoomSnapshot(roomCode: string): RoomSnapshot {
     const room = this.requireRoom(roomCode.trim().toUpperCase());
     return this.serializeRoom(room);
+  }
+
+  getGameDrawBag(roomCode: string): number[] {
+    const room = this.requireRoom(roomCode.trim().toUpperCase());
+    return room.currentGame?.drawBag ?? [];
   }
 
   archiveEndedGameIfReady(roomCode: string, nowMs: number, minEndedAgeMs = 0): boolean {
@@ -1244,6 +1359,26 @@ export class BingoEngine {
     // Treat the configured RTP as a floor so the controller compensates upward
     // when actual payout lags behind, but never intentionally schedules below target.
     return Math.max(normalizedTarget, normalizedAdjusted);
+  }
+
+  private resolveAdaptiveCandyPatternPayoutPercent(targetPayoutPercent: number, hallId?: string): number {
+    const normalizedTarget = Math.min(100, Math.max(0, this.roundCurrency(targetPayoutPercent)));
+    if (this.rtpControllerGain <= 0) {
+      return normalizedTarget;
+    }
+
+    const telemetry = this.getRtpNearMissTelemetry({
+      hallId,
+      windowSize: this.rtpRollingWindowSize
+    });
+    if (telemetry.roundsConsidered <= 0) {
+      return normalizedTarget;
+    }
+
+    const controlGain = Math.max(0.5, this.rtpControllerGain * 1.5);
+    const deviation = normalizedTarget - telemetry.payoutPercentActualAvg;
+    const adjusted = normalizedTarget + deviation * controlGain;
+    return Math.min(100, Math.max(45, this.roundCurrency(adjusted)));
   }
 
   getRtpNearMissTelemetry(input: { hallId?: string; windowSize?: number } = {}): RtpNearMissTelemetry {
@@ -3134,6 +3269,13 @@ export class BingoEngine {
     };
   }
 
+  private syncCandyPayoutBank(hallId: string, remainingPayoutBudget: number): void {
+    this.candyPayoutBankByHall.set(
+      hallId,
+      this.roundCurrency(Math.max(0, remainingPayoutBudget)),
+    );
+  }
+
   private resolvePrizePolicy(input: {
     hallId: string;
     linkId: string;
@@ -3497,6 +3639,7 @@ export class BingoEngine {
       remainingPayoutBudget: game.remainingPayoutBudget,
       activePatternIndexes: [...game.activePatternIndexes],
       patternPayoutAmounts: [...game.patternPayoutAmounts],
+      patternPayoutPercentApplied: game.patternPayoutPercentApplied,
       drawnNumbers: [...game.drawnNumbers],
       remainingNumbers: game.drawBag.length,
       nearMissTargetRateApplied: game.nearMissTargetRateApplied,
@@ -3637,12 +3780,11 @@ export class BingoEngine {
       gameType,
       amount: requestedPayout
     });
-    // Candy pattern payouts follow the fixed per-ticket payout table and
-    // should not be hard-capped to the current round's remaining RTP budget.
-    // The round-level fields still track depletion for telemetry, but the
-    // actual claim amount is controlled by the payout table and single-prize
-    // policy so larger wins remain possible.
-    const payout = this.roundCurrency(Math.max(0, cappedPatternPayout.cappedAmount));
+    const requestedAfterPolicyAndBudget = Math.min(
+      cappedPatternPayout.cappedAmount,
+      game.remainingPayoutBudget,
+    );
+    const payout = this.roundCurrency(Math.max(0, requestedAfterPolicyAndBudget));
 
     if (payout > 0) {
       const transfer = await this.walletAdapter.transfer(
@@ -3658,6 +3800,7 @@ export class BingoEngine {
       game.remainingPayoutBudget = this.roundCurrency(
         Math.max(0, game.remainingPayoutBudget - payout)
       );
+      this.syncCandyPayoutBank(room.hallId, game.remainingPayoutBudget);
       this.recordLossEntry(player.walletId, room.hallId, {
         type: "PAYOUT",
         amount: payout,
@@ -3705,7 +3848,7 @@ export class BingoEngine {
     claim.payoutWasCapped = payout < requestedPayout;
     claim.rtpBudgetBefore = rtpBudgetBefore;
     claim.rtpBudgetAfter = rtpBudgetAfter;
-    claim.rtpCapped = false;
+    claim.rtpCapped = payout < cappedPatternPayout.cappedAmount;
 
     if (this.bingoAdapter.onClaimLogged) {
       await this.bingoAdapter.onClaimLogged({

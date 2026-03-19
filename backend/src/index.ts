@@ -12,6 +12,7 @@ import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
 import type { ClaimType, RoomSnapshot, RoomSummary, Ticket } from "./game/types.js";
+import { GameCheckpointStore } from "./game/GameCheckpointStore.js";
 import { CandyLaunchTokenStore } from "./launch/CandyLaunchTokenStore.js";
 import {
   ADMIN_ACCESS_POLICY,
@@ -231,6 +232,11 @@ if (!platformConnectionString) {
     "Mangler APP_PG_CONNECTION_STRING (eller WALLET_PG_CONNECTION_STRING) for auth/plattform."
   );
 }
+
+const gameCheckpointStore = new GameCheckpointStore(
+  platformConnectionString,
+  platformConnectionString.includes("render.com") || platformConnectionString.includes("ssl=true"),
+);
 
 function parseBooleanEnv(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined || value.trim().length === 0) {
@@ -1708,6 +1714,86 @@ function buildRoomUpdatePayload(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Game state checkpoints — fire-and-forget writes to Postgres
+// ---------------------------------------------------------------------------
+
+function checkpointRoom(roomCode: string): void {
+  try {
+    const snapshot = engine.getRoomSnapshot(roomCode);
+    const players = (snapshot.players ?? []).map((p: { id: string; name: string; walletId?: string }) => ({
+      id: p.id,
+      name: p.name,
+      walletId: p.walletId ?? "",
+    }));
+    const preRoundTickets: Record<string, number[][]> = {};
+    if (snapshot.preRoundTickets) {
+      for (const [pid, tickets] of Object.entries(snapshot.preRoundTickets)) {
+        preRoundTickets[pid] = (tickets as Array<{ numbers: number[] }>).map((t) => t.numbers);
+      }
+    }
+    gameCheckpointStore.saveRoomCheckpoint({
+      roomCode,
+      hallId: snapshot.hallId ?? "",
+      hostPlayerId: snapshot.hostPlayerId ?? "",
+      players,
+      preRoundTickets,
+      createdAt: snapshot.createdAt ?? new Date().toISOString(),
+    }).catch((err) => console.error("[checkpoint] room save error:", err));
+  } catch (err) {
+    console.error("[checkpoint] room checkpoint error:", err);
+  }
+}
+
+function checkpointGame(roomCode: string): void {
+  try {
+    const snapshot = engine.getRoomSnapshot(roomCode);
+    const game = snapshot.currentGame;
+    if (!game) return;
+
+    const players = (snapshot.players ?? []).map((p: { id: string; name: string; walletId?: string }) => ({
+      id: p.id,
+      name: p.name,
+      walletId: p.walletId ?? "",
+    }));
+    const tickets: Record<string, number[][]> = {};
+    if (game.tickets) {
+      for (const [pid, playerTickets] of Object.entries(game.tickets)) {
+        tickets[pid] = (playerTickets as Array<{ numbers: number[] }>).map((t) => t.numbers);
+      }
+    }
+    const claims = (game.claims ?? []).map((c: { id: string; playerId: string; type: string; valid: boolean; reason?: string }) => ({
+      id: c.id,
+      playerId: c.playerId,
+      type: c.type,
+      valid: c.valid,
+      reason: c.reason,
+    }));
+
+    gameCheckpointStore.saveGameCheckpoint({
+      roomCode,
+      gameId: game.id,
+      status: game.status,
+      hallId: snapshot.hallId ?? "",
+      hostPlayerId: snapshot.hostPlayerId ?? "",
+      entryFee: game.entryFee ?? 0,
+      ticketsPerPlayer: game.ticketsPerPlayer ?? 4,
+      payoutPercent: game.payoutPercent ?? 75,
+      drawnNumbers: game.drawnNumbers ?? [],
+      drawBag: engine.getGameDrawBag(roomCode),
+      players,
+      tickets,
+      claims,
+      lineWinnerId: game.lineWinnerId ?? null,
+      bingoWinnerId: game.bingoWinnerId ?? null,
+      startedAt: game.startedAt ?? null,
+      endedAt: game.endedAt ?? null,
+    }).catch((err) => console.error("[checkpoint] game save error:", err));
+  } catch (err) {
+    console.error("[checkpoint] game checkpoint error:", err);
+  }
+}
+
 function readTelemetryNumber(record: Record<string, unknown>, key: string): number | null {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -1978,6 +2064,8 @@ async function processAutoStart(summary: ReturnType<typeof engine.listRoomSummar
     setNextRoundForRoom(roomCode, Date.now());
     lastAutoDrawAtByRoom.delete(roomCode);
     await emitRoomUpdate(roomCode);
+    checkpointRoom(roomCode);
+    checkpointGame(roomCode);
   });
 }
 
@@ -2022,6 +2110,7 @@ async function processAutoDraw(summary: ReturnType<typeof engine.listRoomSummari
     }
 
     await emitRoomUpdate(roomCode);
+    checkpointGame(roomCode);
   });
 }
 
@@ -4159,6 +4248,7 @@ io.on("connection", (socket: Socket) => {
         });
       });
       const snapshot = await emitRoomUpdate(roomCode, playerId);
+      checkpointGame(roomCode);
       ackSuccess(callback, { snapshot });
     } catch (error) {
       ackFailure(callback, error);
@@ -4223,9 +4313,60 @@ process.on("unhandledRejection", (reason) => {
 });
 
 const PORT = Number(process.env.PORT ?? 4000);
+async function restoreGameStateFromCheckpoints(): Promise<void> {
+  try {
+    await gameCheckpointStore.ensureSchema();
+    const runningGames = await gameCheckpointStore.loadRunningGameCheckpoints();
+    if (runningGames.length === 0) {
+      console.log("[checkpoint] No running games to restore.");
+      return;
+    }
+    for (const game of runningGames) {
+      console.log(
+        `[checkpoint] Restoring game ${game.gameId} in room ${game.roomCode} ` +
+        `(${game.drawnNumbers.length} draws, ${game.claims.length} claims)`
+      );
+      try {
+        engine.restoreGameFromCheckpoint({
+          roomCode: game.roomCode,
+          hallId: game.hallId,
+          hostPlayerId: game.hostPlayerId,
+          gameId: game.gameId,
+          entryFee: game.entryFee,
+          ticketsPerPlayer: game.ticketsPerPlayer,
+          payoutPercent: game.payoutPercent,
+          drawnNumbers: game.drawnNumbers,
+          drawBag: game.drawBag,
+          players: game.players,
+          tickets: game.tickets,
+          claims: game.claims,
+          lineWinnerId: game.lineWinnerId,
+          bingoWinnerId: game.bingoWinnerId,
+          startedAt: game.startedAt,
+        });
+        setNextRoundForRoom(game.roomCode, Date.now());
+        console.log(`[checkpoint] Restored game ${game.gameId} successfully.`);
+      } catch (err) {
+        console.error(`[checkpoint] Failed to restore game ${game.gameId}:`, err);
+      }
+    }
+    // Cleanup old ended games
+    const cleaned = await gameCheckpointStore.cleanupEndedGames(24);
+    if (cleaned > 0) {
+      console.log(`[checkpoint] Cleaned up ${cleaned} ended game checkpoints.`);
+    }
+  } catch (error) {
+    console.error("[checkpoint] Failed to restore game state:", error);
+  }
+}
+
 hydrateCandyManiaSettingsFromCatalog()
   .catch((error) => {
     console.warn("[candy-mania] Oppstart med env/default settings pga last-feil.", error);
+  })
+  .then(() => restoreGameStateFromCheckpoints())
+  .catch((error) => {
+    console.error("[checkpoint] Restore feilet, fortsetter uten:", error);
   })
   .finally(() => {
     server.listen(PORT, () => {
