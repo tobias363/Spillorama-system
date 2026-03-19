@@ -1142,15 +1142,30 @@ function applyLiveSnapshot(
     snapshot,
     playerId: nextSession.playerId,
   });
-  // For room:update events, preserve the current recentBalls so that balls
-  // only enter the rail through the draw:new → flight animation pipeline.
-  // Without this, a room:update snapshot containing multiple new draws would
-  // dump them all into the rail at once, bypassing the sequential animation.
-  const shouldPreserveRecentBalls =
-    syncSource === "room:update" && currentState.snapshot.recentBalls.length > 0;
-  const nextModelWithBallRailGuard = shouldPreserveRecentBalls
-    ? { ...nextModelWithPendingDraw, recentBalls: currentState.snapshot.recentBalls }
-    : nextModelWithPendingDraw;
+  // For room:update events, preserve the client's recentBalls ordering
+  // so balls enter the rail through the draw:new → flight animation pipeline.
+  // However, we MERGE any server-side balls that the client hasn't seen yet
+  // (e.g. if draw:new arrived after room:update, or on reconnect) to prevent
+  // balls from disappearing.
+  const nextModelWithBallRailGuard = (() => {
+    if (syncSource !== "room:update" || currentState.snapshot.recentBalls.length === 0) {
+      return nextModelWithPendingDraw;
+    }
+    const clientBalls = currentState.snapshot.recentBalls;
+    const serverBalls = nextModelWithPendingDraw.recentBalls;
+    const clientSet = new Set(clientBalls);
+    const missingFromClient = serverBalls.filter((b) => !clientSet.has(b));
+    if (missingFromClient.length === 0) {
+      return { ...nextModelWithPendingDraw, recentBalls: clientBalls };
+    }
+    // If the server has a completely different set (new game round), use server's list
+    const serverSet = new Set(serverBalls);
+    const clientOnlyBalls = clientBalls.filter((b) => serverSet.has(b));
+    if (clientOnlyBalls.length === 0) {
+      return nextModelWithPendingDraw;
+    }
+    return { ...nextModelWithPendingDraw, recentBalls: [...clientOnlyBalls, ...missingFromClient] };
+  })();
   const nextModel = shouldHoldPendingVisuals
     ? preservePendingPresentationVisuals(currentState.snapshot, nextModelWithBallRailGuard)
     : shouldFreezeBoards
@@ -1848,15 +1863,23 @@ function applyPendingDrawPresentation(
 
       writeSession(nextSession);
 
-      // Preserve the current recentBalls to prevent balls that haven't
-      // gone through draw:new → flight animation from appearing in the
-      // rail all at once.  The server's full drawnNumbers will be
-      // applied when the corresponding room:update arrives.
+      // Merge recentBalls: keep client ordering but add any server-side
+      // balls that the client hasn't seen via draw:new yet.
+      const clientBalls = latestState.snapshot.recentBalls;
+      const serverBalls = result.model.recentBalls;
+      const clientSet = new Set(clientBalls);
+      const serverSet = new Set(serverBalls);
+      const clientValid = clientBalls.filter((b) => serverSet.has(b));
+      const missingFromClient = serverBalls.filter((b) => !clientSet.has(b));
+      const mergedRecentBalls =
+        clientValid.length === 0 && missingFromClient.length > 0
+          ? serverBalls
+          : [...clientValid, ...missingFromClient];
       set({
         session: nextSession,
         snapshot: {
           ...result.model,
-          recentBalls: latestState.snapshot.recentBalls,
+          recentBalls: mergedRecentBalls,
           featuredBallNumber: null,
           featuredBallIsPending: false,
         },
