@@ -310,6 +310,10 @@ export class PlatformService {
     });
   }
 
+  async closePool(): Promise<void> {
+    await this.pool.end();
+  }
+
   async register(input: {
     email: string;
     password: string;

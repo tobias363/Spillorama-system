@@ -1320,6 +1320,32 @@ export class BingoEngine {
     return [...this.rooms.keys()];
   }
 
+  /**
+   * Remove rooms that have no running game and haven't been active for the
+   * given TTL.  Returns the list of purged room codes.
+   */
+  purgeStaleRooms(ttlMs: number, protectedRoomCodes: ReadonlySet<string> = new Set()): string[] {
+    const now = Date.now();
+    const purged: string[] = [];
+    for (const [code, room] of this.rooms) {
+      if (protectedRoomCodes.has(code)) continue;
+      if (room.currentGame?.status === "RUNNING") continue;
+      const endedAtMs = room.currentGame?.endedAt
+        ? new Date(room.currentGame.endedAt).getTime()
+        : 0;
+      const createdAtMs = room.createdAt
+        ? new Date(room.createdAt).getTime()
+        : 0;
+      const lastActivity = endedAtMs || createdAtMs;
+      if (now - lastActivity > ttlMs) {
+        this.rooms.delete(code);
+        this.roomLastRoundStartMs.delete(code);
+        purged.push(code);
+      }
+    }
+    return purged;
+  }
+
   listRoomSummaries(): RoomSummary[] {
     return [...this.rooms.values()]
       .map((room) => {

@@ -1354,6 +1354,27 @@ const roomSchedulerLocks = new Set<string>();
 // Per-room claim mutex: queues concurrent claims so LINE can't be double-awarded.
 const roomClaimQueues = new Map<string, Promise<void>>();
 
+// ---------------------------------------------------------------------------
+// Per-room draw mutex — serializes draw:next events to prevent double-draws
+// ---------------------------------------------------------------------------
+const roomDrawQueues = new Map<string, Promise<void>>();
+
+async function withRoomDrawLock<T>(roomCode: string, work: () => Promise<T>): Promise<T> {
+  const previous = roomDrawQueues.get(roomCode) ?? Promise.resolve();
+  let resolve: () => void;
+  const next = new Promise<void>((r) => { resolve = r; });
+  roomDrawQueues.set(roomCode, next);
+  await previous;
+  try {
+    return await work();
+  } finally {
+    resolve!();
+    if (roomDrawQueues.get(roomCode) === next) {
+      roomDrawQueues.delete(roomCode);
+    }
+  }
+}
+
 async function withRoomClaimLock<T>(roomCode: string, work: () => Promise<T>): Promise<T> {
   const previous = roomClaimQueues.get(roomCode) ?? Promise.resolve();
   let resolve: () => void;
@@ -2094,20 +2115,22 @@ async function processAutoDraw(summary: ReturnType<typeof engine.listRoomSummari
       return;
     }
 
-    try {
-      const number = await engine.drawNextNumber({
-        roomCode,
-        actorPlayerId: latestSnapshot.hostPlayerId,
-        autoSettleClaims: true
-      });
-      io.to(roomCode).emit("draw:new", { number, source: "auto" });
-    } catch (error) {
-      if (!(error instanceof DomainError) || error.code !== "NO_MORE_NUMBERS") {
-        throw error;
+    await withRoomDrawLock(roomCode, async () => {
+      try {
+        const number = await engine.drawNextNumber({
+          roomCode,
+          actorPlayerId: latestSnapshot.hostPlayerId,
+          autoSettleClaims: true
+        });
+        io.to(roomCode).emit("draw:new", { number, source: "auto" });
+      } catch (error) {
+        if (!(error instanceof DomainError) || error.code !== "NO_MORE_NUMBERS") {
+          throw error;
+        }
+      } finally {
+        lastAutoDrawAtByRoom.set(roomCode, currentNow);
       }
-    } finally {
-      lastAutoDrawAtByRoom.set(roomCode, currentNow);
-    }
+    });
 
     await emitRoomUpdate(roomCode);
     checkpointGame(roomCode);
@@ -2141,6 +2164,14 @@ async function runSchedulerTick(): Promise<void> {
       } catch (error) {
         console.error(`[scheduler] room ${summary.code} feilet`, error);
       }
+    }
+    // Purge stale rooms every tick (canonical room is protected)
+    const purged = engine.purgeStaleRooms(
+      24 * 60 * 60 * 1000, // 24 hour TTL
+      new Set([canonicalCandyRoomCode]),
+    );
+    if (purged.length > 0) {
+      console.log(`[scheduler] Purged ${purged.length} stale room(s): ${purged.join(", ")}`);
     }
   } finally {
     schedulerTickInProgress = false;
@@ -4133,14 +4164,17 @@ io.on("connection", (socket: Socket) => {
     try {
       const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
       assertCanonicalCandyRoomForGameplay(roomCode);
-      const number = await engine.drawNextNumber({
-        roomCode,
-        actorPlayerId: playerId,
-        autoSettleClaims: true
+      const result = await withRoomDrawLock(roomCode, async () => {
+        const number = await engine.drawNextNumber({
+          roomCode,
+          actorPlayerId: playerId,
+          autoSettleClaims: true
+        });
+        io.to(roomCode).emit("draw:new", { number });
+        const snapshot = await emitRoomUpdate(roomCode, playerId);
+        return { number, snapshot };
       });
-      io.to(roomCode).emit("draw:new", { number });
-      const snapshot = await emitRoomUpdate(roomCode, playerId);
-      ackSuccess(callback, { number, snapshot });
+      ackSuccess(callback, result);
     } catch (error) {
       ackFailure(callback, error);
     }
@@ -4311,6 +4345,63 @@ process.on("uncaughtException", (error) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[FATAL] Unhandled promise rejection:", reason);
 });
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown — clean up on SIGTERM/SIGINT (Render deploys, restarts)
+// ---------------------------------------------------------------------------
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[shutdown] ${signal} received — starting graceful shutdown...`);
+
+  // 1. Stop scheduler intervals so no new draws fire
+  clearInterval(scheduler);
+  console.log("[shutdown] Scheduler stopped.");
+
+  // 2. Checkpoint all active games before closing
+  try {
+    const activeRooms = engine.getAllRoomCodes();
+    for (const roomCode of activeRooms) {
+      try {
+        checkpointGame(roomCode);
+        console.log(`[shutdown] Checkpointed room ${roomCode}.`);
+      } catch (err) {
+        console.error(`[shutdown] Failed to checkpoint room ${roomCode}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error("[shutdown] Failed to checkpoint active games:", err);
+  }
+
+  // 3. Close socket.io connections
+  try {
+    io.disconnectSockets(true);
+    console.log("[shutdown] Socket.io connections closed.");
+  } catch (err) {
+    console.error("[shutdown] Failed to close sockets:", err);
+  }
+
+  // 4. Close HTTP server
+  server.close(() => {
+    console.log("[shutdown] HTTP server closed.");
+  });
+
+  // 5. Close database pool
+  try {
+    await platformService.closePool();
+    console.log("[shutdown] Database pool closed.");
+  } catch (err) {
+    console.error("[shutdown] Failed to close database pool:", err);
+  }
+
+  console.log("[shutdown] Graceful shutdown complete.");
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 const PORT = Number(process.env.PORT ?? 4000);
 async function restoreGameStateFromCheckpoints(): Promise<void> {
