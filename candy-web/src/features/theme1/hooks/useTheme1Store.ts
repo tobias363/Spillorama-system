@@ -1162,39 +1162,26 @@ function applyLiveSnapshot(
     const currentGameId = snapshot.currentGame?.id ?? "";
     const previousGameId = currentState.runtime.activeGameId;
 
-    console.debug("[ball-guard]", {
-      clientBallCount: clientBalls.length,
-      serverBallCount: serverBalls.length,
-      currentGameId: currentGameId.slice(0, 8),
-      previousGameId: previousGameId.slice(0, 8),
-      gameStatus: snapshot.currentGame?.status,
-    });
-
     // Initial load: client has no balls, use server's list
     if (clientBalls.length === 0) {
-      console.debug("[ball-guard] → initial load, use server");
       return nextModelWithPendingDraw;
     }
 
-    // New round detection:
-    // 1. Game ID changed (and we had a previous game ID)
-    // 2. Server has significantly fewer balls than client (round reset)
-    const isNewRound =
-      (currentGameId !== previousGameId && previousGameId.length > 0) ||
-      (serverBalls.length < clientBalls.length && serverBalls.length <= 5);
-    if (isNewRound) {
-      console.debug("[ball-guard] → NEW ROUND detected, use server");
+    // New round: server has significantly fewer balls than client.
+    // This catches the transition from a completed round (30 balls) to
+    // a new round with only a few balls. A difference of 3+ balls rules
+    // out normal timing lag (where client is 1-2 balls ahead of server).
+    // We can't use game ID because activeGameId is set AFTER this guard.
+    if (clientBalls.length - serverBalls.length >= 3) {
       return nextModelWithPendingDraw;
     }
 
     // Game ended / waiting: server has no balls, clear client's list
     if (serverBalls.length === 0) {
-      console.debug("[ball-guard] → server empty, clear");
       return { ...nextModelWithPendingDraw, recentBalls: [] };
     }
 
     // During active round: keep client's list exactly as-is
-    console.debug("[ball-guard] → keep client balls");
     return { ...nextModelWithPendingDraw, recentBalls: clientBalls };
   })();
   const nextModel = shouldHoldPendingVisuals
