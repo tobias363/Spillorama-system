@@ -319,6 +319,20 @@ export class PlatformService {
     return result.rowCount === 1;
   }
 
+  async cleanupExpiredSessions(olderThanDays = 7): Promise<number> {
+    try {
+      const result = await this.pool.query(
+        `DELETE FROM ${this.sessionsTable()}
+         WHERE expires_at < now() - interval '1 day' * $1`,
+        [olderThanDays],
+      );
+      return result.rowCount ?? 0;
+    } catch (error) {
+      console.error("[session-cleanup] Failed to cleanup expired sessions:", error);
+      return 0;
+    }
+  }
+
   async register(input: {
     email: string;
     password: string;

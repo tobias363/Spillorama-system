@@ -13,6 +13,20 @@ import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
 import type { ClaimType, RoomSnapshot, RoomSummary, Ticket } from "./game/types.js";
 import { GameCheckpointStore } from "./game/GameCheckpointStore.js";
+import { logger } from "./logger.js";
+import {
+  metricsRegistry,
+  drawsTotal,
+  claimsTotal,
+  payoutsTotal,
+  payoutAmountTotal,
+  socketConnectionsActive,
+  activeRooms,
+  drawDurationMs,
+  claimDurationMs,
+  gamesStartedTotal,
+  gamesEndedTotal,
+} from "./metrics.js";
 import { CandyLaunchTokenStore } from "./launch/CandyLaunchTokenStore.js";
 import {
   ADMIN_ACCESS_POLICY,
@@ -405,8 +419,10 @@ const engine = new BingoEngine(new LocalBingoSystemAdapter(), walletAdapter, {
   nearMissCalibrationFactor: bingoNearMissCalibrationFactor
 });
 
-// Persist payout audit events to database (fire-and-forget)
+// Persist payout audit events to database and track metrics
 engine.onPayoutAuditEvent((event) => {
+  payoutsTotal.inc({ kind: event.kind });
+  payoutAmountTotal.inc({ kind: event.kind }, event.amount);
   gameCheckpointStore.persistPayoutAuditEvent(event).catch((error) => {
     console.error("[audit] Failed to persist payout event:", error);
   });
@@ -2123,12 +2139,15 @@ async function processAutoDraw(summary: ReturnType<typeof engine.listRoomSummari
     }
 
     await withRoomDrawLock(roomCode, async () => {
+      const drawStart = Date.now();
       try {
         const number = await engine.drawNextNumber({
           roomCode,
           actorPlayerId: latestSnapshot.hostPlayerId,
           autoSettleClaims: true
         });
+        drawDurationMs.observe(Date.now() - drawStart);
+        drawsTotal.inc({ room_code: roomCode, source: "auto" });
         io.to(roomCode).emit("draw:new", { number, source: "auto" });
       } catch (error) {
         if (!(error instanceof DomainError) || error.code !== "NO_MORE_NUMBERS") {
@@ -2206,9 +2225,18 @@ function yesterdayDateKeyLocal(nowMs: number): string {
 }
 
 let lastDailyReportDateKey = "";
+let lastSessionCleanupDateKey = "";
 async function runDailyReportSchedulerTick(nowMs: number): Promise<void> {
   const dateKey = yesterdayDateKeyLocal(nowMs);
   if (dateKey === lastDailyReportDateKey) {
+    // Run session cleanup once per day (same schedule as daily report)
+    if (lastSessionCleanupDateKey !== dateKey) {
+      lastSessionCleanupDateKey = dateKey;
+      const cleaned = await platformService.cleanupExpiredSessions(7);
+      if (cleaned > 0) {
+        console.log(`[session-cleanup] Deleted ${cleaned} expired session(s).`);
+      }
+    }
     return;
   }
   const report = engine.runDailyReportJob({ date: dateKey });
@@ -2216,6 +2244,12 @@ async function runDailyReportSchedulerTick(nowMs: number): Promise<void> {
   console.log(
     `[daily-report] generated date=${report.date} rows=${report.rows.length} turnover=${report.totals.grossTurnover} prizes=${report.totals.prizesPaid}`
   );
+  // Also cleanup sessions when daily report runs
+  lastSessionCleanupDateKey = dateKey;
+  const cleaned = await platformService.cleanupExpiredSessions(7);
+  if (cleaned > 0) {
+    console.log(`[session-cleanup] Deleted ${cleaned} expired session(s).`);
+  }
 }
 
 if (dailyReportJobEnabled) {
@@ -3652,6 +3686,16 @@ app.get("/readiness", async (_req, res) => {
   }
 });
 
+app.get("/metrics", async (_req, res) => {
+  try {
+    activeRooms.set(engine.getAllRoomCodes().length);
+    res.set("Content-Type", metricsRegistry.contentType);
+    res.end(await metricsRegistry.metrics());
+  } catch {
+    res.status(500).end();
+  }
+});
+
 app.get("/health", async (_req, res) => {
   try {
     const wallets = await walletAdapter.listAccounts();
@@ -3843,6 +3887,11 @@ app.post("/api/wallets/transfer", async (req, res) => {
 });
 
 io.on("connection", (socket: Socket) => {
+  socketConnectionsActive.inc();
+  socket.on("disconnect", () => {
+    socketConnectionsActive.dec();
+  });
+
   // Per-socket rate limiter: max events per sliding window
   const RATE_LIMIT_WINDOW_MS = 2000;
   const RATE_LIMIT_MAX_EVENTS = 10;
