@@ -140,6 +140,9 @@ export function freezeBoardsFromPreviousModel(
   return {
     ...nextModel,
     boards: previousModel.boards,
+    recentBalls: previousModel.recentBalls.length > 0
+      ? previousModel.recentBalls
+      : nextModel.recentBalls,
   };
 }
 
@@ -158,6 +161,10 @@ export function preservePendingPresentationVisuals(
 }
 
 function hasAnyBoardActivity(model: Theme1RoundRenderModel): boolean {
+  if (model.recentBalls.length > 0) {
+    return true;
+  }
+
   return model.boards.some((board) => {
     if (board.stake !== "0 kr" || board.win !== "0 kr") {
       return true;
