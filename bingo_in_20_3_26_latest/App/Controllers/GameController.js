@@ -1,5 +1,6 @@
 var Sys = require('../../Boot/Sys');
 const redisClient = require('../../Config/Redis');
+const { uploadToCloudinary } = require('../../Helper/cloudinaryUpload');
 var bcrypt = require('bcryptjs');
 const moment = require('moment');
 const mongoose = require('mongoose');
@@ -142,58 +143,56 @@ module.exports = {
         let translate = await Sys.Helper.bingo.getTraslateData(keys, req.session.details.language)
         try {
             console.log('pattern: ', req.body);
-            let fileName = '';
             if (req.files) {
                 let image = req.files.avatar;
-                var re = /(?:\.([^.]+))?$/;
-                var ext = re.exec(image.name)[1];
-                fileName = Date.now() + '.' + ext;
-                // Use the mv() method to place the file somewhere on your server
-                image.mv('./public/profile/bingo/' + fileName, async function (err) {
-                    if (err) {
-                        req.flash('error', translate.error_uploading_profile_avatar)//'Error Uploading Profile Avatar');
-                        return res.redirect('/profile');
-                    }
-                    let pattern = (req.body.pattern == 'on') ? true : false;
-                    var pickLuckyNumber = [];
-                    if ((await Sys.App.Services.GameService.getGameTypeCount() + 1) == 1 || (await Sys.App.Services.GameService.getGameTypeCount() + 1) == 3) {
-                        ;
-                        pickLuckyNumber = [
-                            '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
-                            '11', '12', '13', '14', '15', '16', '17', '18', '19', '20',
-                            '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
-                            '31', '32', '33', '34', '35', '36', '37', '38', '39', '30',
-                            '41', '42', '43', '44', '45', '46', '47', '48', '49', '50',
-                            '51', '52', '53', '54', '55', '56', '57', '58', '59', '60',
-                            '61', '62', '63', '64', '65', '66', '67', '68', '69', '70',
-                            '71', '72', '73', '74', '75'
-                        ];
-                    } else if ((await Sys.App.Services.GameService.getGameTypeCount() + 1) == 2) {
-                        pickLuckyNumber = [
-                            '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11',
-                            '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'
-                        ];
-                    }
+                let photoUrl;
+                try {
+                    const { url } = await uploadToCloudinary(image);
+                    photoUrl = url;
+                } catch (uploadErr) {
+                    console.log("Cloudinary upload error:", uploadErr);
+                    req.flash('error', translate.error_uploading_profile_avatar);
+                    return res.redirect('/profile');
+                }
 
-                    let game = await Sys.App.Services.GameService.insertGameTypeData({
-                        createrId: req.session.details.id,
-                        type: "game_" + (await Sys.App.Services.GameService.getGameTypeCount() + 1),
-                        name: req.body.name,
-                        row: req.body.row,
-                        columns: req.body.columns,
-                        photo: fileName,
-                        pickLuckyNumber: pickLuckyNumber,
-                        pattern: pattern,
-                        // totalNoTickets: req.body.totalNoTickets,
-                        // userMaxTickets: req.body.userMaxTickets,
-                        rangeMin: req.body.rangeMin,
-                        rangeMax: req.body.rangeMax,
-                    });
-                    req.flash('success', translate.game_create_successfully)//'Game create successfully');
-                    return res.redirect('/gameType');
+                let pattern = (req.body.pattern == 'on') ? true : false;
+                var pickLuckyNumber = [];
+                if ((await Sys.App.Services.GameService.getGameTypeCount() + 1) == 1 || (await Sys.App.Services.GameService.getGameTypeCount() + 1) == 3) {
+                    pickLuckyNumber = [
+                        '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
+                        '11', '12', '13', '14', '15', '16', '17', '18', '19', '20',
+                        '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
+                        '31', '32', '33', '34', '35', '36', '37', '38', '39', '30',
+                        '41', '42', '43', '44', '45', '46', '47', '48', '49', '50',
+                        '51', '52', '53', '54', '55', '56', '57', '58', '59', '60',
+                        '61', '62', '63', '64', '65', '66', '67', '68', '69', '70',
+                        '71', '72', '73', '74', '75'
+                    ];
+                } else if ((await Sys.App.Services.GameService.getGameTypeCount() + 1) == 2) {
+                    pickLuckyNumber = [
+                        '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11',
+                        '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'
+                    ];
+                }
+
+                let game = await Sys.App.Services.GameService.insertGameTypeData({
+                    createrId: req.session.details.id,
+                    type: "game_" + (await Sys.App.Services.GameService.getGameTypeCount() + 1),
+                    name: req.body.name,
+                    row: req.body.row,
+                    columns: req.body.columns,
+                    photo: photoUrl,
+                    pickLuckyNumber: pickLuckyNumber,
+                    pattern: pattern,
+                    // totalNoTickets: req.body.totalNoTickets,
+                    // userMaxTickets: req.body.userMaxTickets,
+                    rangeMin: req.body.rangeMin,
+                    rangeMax: req.body.rangeMax,
                 });
+                req.flash('success', translate.game_create_successfully);
+                return res.redirect('/gameType');
             } else {
-                req.flash('error', translate.game_not_created)//'Game Not Created');
+                req.flash('error', translate.game_not_created);
                 return res.redirect('/gameType');
             }
         } catch (e) {
@@ -265,31 +264,28 @@ module.exports = {
                 let pattern = (req.body.pattern == 'on') ? true : false;
                 if (req.files && req.files.avatar && req.files.avatar.name) {
                     let image = req.files.avatar;
-                    var re = /(?:\.([^.]+))?$/;
-                    var ext = re.exec(image.name)[1];
-                    fileName = Date.now() + '.' + ext;
-                    // Use the mv() method to place the file somewhere on your server
-                    image.mv('./public/profile/bingo/' + fileName, async function (err) {
-                        if (err) {
-                            req.flash('error', await Sys.Helper.bingo.getSingleTraslateData(["error_uploading_profile_avatar"], req.session.details.language))//'Error Uploading Profile Avatar');
-                            return res.redirect('/profile');
-                        }
-                        let game = await Sys.App.Services.GameService.updateOneGameType({
-                            _id: req.params.id
-                        }, {
-                            name: req.body.name,
-                            // row: req.body.row,
-                            // columns: req.body.columns,
-                            photo: fileName,
-                            pattern: pattern,
-                            totalNoTickets: req.body.totalNoTickets,
-                            userMaxTickets: req.body.userMaxTickets,
-                            rangeMin: req.body.rangeMin,
-                            rangeMax: req.body.rangeMax,
-                        });
-                        req.flash('success', await Sys.Helper.bingo.getSingleTraslateData(["game_type_updated_successfully"], req.session.details.language) )//'Game Updated successfully');
-                        return res.redirect('/gameType');
+                    let photoUrl;
+                    try {
+                        const { url } = await uploadToCloudinary(image);
+                        photoUrl = url;
+                    } catch (uploadErr) {
+                        console.log("Cloudinary upload error:", uploadErr);
+                        req.flash('error', await Sys.Helper.bingo.getSingleTraslateData(["error_uploading_profile_avatar"], req.session.details.language));
+                        return res.redirect('/profile');
+                    }
+                    let game = await Sys.App.Services.GameService.updateOneGameType({
+                        _id: req.params.id
+                    }, {
+                        name: req.body.name,
+                        photo: photoUrl,
+                        pattern: pattern,
+                        totalNoTickets: req.body.totalNoTickets,
+                        userMaxTickets: req.body.userMaxTickets,
+                        rangeMin: req.body.rangeMin,
+                        rangeMax: req.body.rangeMax,
                     });
+                    req.flash('success', await Sys.Helper.bingo.getSingleTraslateData(["game_type_updated_successfully"], req.session.details.language));
+                    return res.redirect('/gameType');
                 } else {
                     let game = await Sys.App.Services.GameService.updateOneGameType({
                         _id: req.params.id

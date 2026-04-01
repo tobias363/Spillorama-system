@@ -1,5 +1,6 @@
 var Sys = require('../../../Boot/Sys');
 var bcrypt = require('bcryptjs');
+const { resolveImageUrl } = require('../../../Helper/cloudinaryUpload');
 const moment = require('moment');
 var path = require("path");
 var fs = require('fs');
@@ -1269,7 +1270,7 @@ module.exports = {
     
             const gameType = gameList.map(game => ({
                 name: game.name,
-                photo: `${baseUrl}profile/bingo/${game.photo}`
+                photo: resolveImageUrl(game.photo, baseUrl)
             }));
             
             return {

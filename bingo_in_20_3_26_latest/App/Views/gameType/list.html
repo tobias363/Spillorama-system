@@ -109,7 +109,7 @@
                     "data": "photo",
                     render: function(data, type, row) {
                         return `<div class="image imagewidthSet fix_list_img">
-                                <img src="/profile/bingo/` + row.photo + `" alt="` + row.name + ` ""/>
+                                <img src="` + (row.photo && row.photo.startsWith('http') ? row.photo : '/profile/bingo/' + row.photo) + `" alt="` + row.name + ` ""/>
                             </div>`;
                     }
                 }, {

@@ -1,5 +1,6 @@
 var Sys = require('../../Boot/Sys');
 var bcrypt = require('bcryptjs');
+const { uploadToCloudinary } = require('../../Helper/cloudinaryUpload');
 const moment = require('moment');
 const mongoose = require('mongoose');
 var back = require('express-back');
@@ -99,27 +100,25 @@ module.exports = {
             let fileName = '';
             if (req.files) {
                 let image = req.files.avatar;
-                var re = /(?:\.([^.]+))?$/;
-                var ext = re.exec(image.name)[1];
-                fileName = Date.now() + '.' + ext;
-                // Use the mv() method to place the file somewhere on your server
-                image.mv('./public/profile/bingo/' + fileName, async function (err) {
-                    if (err) {
-                        req.flash('error'/await Sys.Helper.bingo.getSingleTraslateData(["error_uploading_profile_avatar"], req.session.details.language))//Error Uploading Profile Avatar
-                        return res.redirect('/background');
-                    }
-                    let game = await Sys.App.Services.OtherModules.insertBackgroundData({
-                        name: req.body.name,
-                        price: req.body.price,
-                        photo: fileName,
-                        isDefault: true
-                    });
-                    req.flash('success',await Sys.Helper.bingo.getSingleTraslateData(["background_create_successfully"], req.session.details.language))//'Background create successfully'
+                let photoUrl;
+                try {
+                    const { url } = await uploadToCloudinary(image);
+                    photoUrl = url;
+                } catch (uploadErr) {
+                    console.log("Cloudinary upload error:", uploadErr);
+                    req.flash('error', await Sys.Helper.bingo.getSingleTraslateData(["error_uploading_profile_avatar"], req.session.details.language));
                     return res.redirect('/background');
+                }
+                let game = await Sys.App.Services.OtherModules.insertBackgroundData({
+                    name: req.body.name,
+                    price: req.body.price,
+                    photo: photoUrl,
+                    isDefault: true
                 });
+                req.flash('success', await Sys.Helper.bingo.getSingleTraslateData(["background_create_successfully"], req.session.details.language));
+                return res.redirect('/background');
             } else {
-                req.flash('error',await Sys.Helper.bingo.getSingleTraslateData(["background_not_created"], req.session.details.language)) //'Background Not Created');
-                
+                req.flash('error', await Sys.Helper.bingo.getSingleTraslateData(["background_not_created"], req.session.details.language));
                 return res.redirect('/background');
             }
         } catch (e) {
@@ -160,26 +159,25 @@ module.exports = {
                 let pattern = (req.body.pattern == 'on') ? true : false;
                 if (req.files && req.files.avatar && req.files.avatar.name) {
                     let image = req.files.avatar;
-                    var re = /(?:\.([^.]+))?$/;
-                    var ext = re.exec(image.name)[1];
-                    fileName = Date.now() + '.' + ext;
-                    // Use the mv() method to place the file somewhere on your server
-                    image.mv('./public/profile/bingo/' + fileName, async function (err) {
-                        if (err) {
-                            req.flash('error',await Sys.Helper.bingo.getSingleTraslateData(["error_uploading_profile_avatar"], req.session.details.language)) //'Error Uploading Profile Avatar');
-                            return res.redirect('/background');
-                        }
-                        let game = await Sys.App.Services.OtherModules.updateBackgroundData({
-                            _id: req.params.id
-                        }, {
-                            name: req.body.name,
-                            price: req.body.price,
-                            photo: fileName,
-                            isDefault: true
-                        });
-                        req.flash('success',await Sys.Helper.bingo.getSingleTraslateData(["background_Updated_successfully"], req.session.details.language)) //'Background Updated successfully');
+                    let photoUrl;
+                    try {
+                        const { url } = await uploadToCloudinary(image);
+                        photoUrl = url;
+                    } catch (uploadErr) {
+                        console.log("Cloudinary upload error:", uploadErr);
+                        req.flash('error', await Sys.Helper.bingo.getSingleTraslateData(["error_uploading_profile_avatar"], req.session.details.language));
                         return res.redirect('/background');
+                    }
+                    let game = await Sys.App.Services.OtherModules.updateBackgroundData({
+                        _id: req.params.id
+                    }, {
+                        name: req.body.name,
+                        price: req.body.price,
+                        photo: photoUrl,
+                        isDefault: true
                     });
+                    req.flash('success', await Sys.Helper.bingo.getSingleTraslateData(["background_Updated_successfully"], req.session.details.language));
+                    return res.redirect('/background');
                 } else {
                     let game = await Sys.App.Services.OtherModules.updateBackgroundData({
                         _id: req.params.id
@@ -187,7 +185,7 @@ module.exports = {
                         name: req.body.name,
                         price: req.body.price
                     });
-                    req.flash('success',await Sys.Helper.bingo.getSingleTraslateData(["background_updated_successfully"], req.session.details.language)) //'Background Updated successfully');
+                    req.flash('success', await Sys.Helper.bingo.getSingleTraslateData(["background_updated_successfully"], req.session.details.language));
                     return res.redirect('/background');
                 }
             } else {
@@ -506,30 +504,27 @@ module.exports = {
     addThemePostData: async function (req, res) {
         try {
             console.log('pattern: ', req.body);
-            let fileName = '';
             if (req.files) {
                 let image = req.files.avatar;
-                var re = /(?:\.([^.]+))?$/;
-                var ext = re.exec(image.name)[1];
-                fileName = Date.now() + '.' + ext;
-                // Use the mv() method to place the file somewhere on your server
-                image.mv('./public/profile/bingo/' + fileName, async function (err) {
-                    if (err) {
-                        req.flash('error',await Sys.Helper.bingo.getSingleTraslateData(["error_uploading_profile_avatar"], req.session.details.language)) //'Error Uploading Profile Avatar');
-                        return res.redirect('/theme');
-                    }
-                    let game = await Sys.App.Services.OtherModules.insertThemeData({
-                        name: req.body.name,
-                        price: req.body.price,
-                        photo: fileName,
-                        isDefault: true
-                    });
-                    req.flash('success',await Sys.Helper.bingo.getSingleTraslateData(["theme_create_successfully"], req.session.details.language)) //'Theme create successfully');
+                let photoUrl;
+                try {
+                    const { url } = await uploadToCloudinary(image);
+                    photoUrl = url;
+                } catch (uploadErr) {
+                    console.log("Cloudinary upload error:", uploadErr);
+                    req.flash('error', await Sys.Helper.bingo.getSingleTraslateData(["error_uploading_profile_avatar"], req.session.details.language));
                     return res.redirect('/theme');
+                }
+                let game = await Sys.App.Services.OtherModules.insertThemeData({
+                    name: req.body.name,
+                    price: req.body.price,
+                    photo: photoUrl,
+                    isDefault: true
                 });
+                req.flash('success', await Sys.Helper.bingo.getSingleTraslateData(["theme_create_successfully"], req.session.details.language));
+                return res.redirect('/theme');
             } else {
-                req.flash('error',await Sys.Helper.bingo.getSingleTraslateData(["theme_not_created"], req.session.details.language)) //'Theme Not Created');
-                r
+                req.flash('error', await Sys.Helper.bingo.getSingleTraslateData(["theme_not_created"], req.session.details.language));
                 return res.redirect('/theme');
             }
         } catch (e) {
@@ -570,26 +565,25 @@ module.exports = {
                 let pattern = (req.body.pattern == 'on') ? true : false;
                 if (req.files && req.files.avatar && req.files.avatar.name) {
                     let image = req.files.avatar;
-                    var re = /(?:\.([^.]+))?$/;
-                    var ext = re.exec(image.name)[1];
-                    fileName = Date.now() + '.' + ext;
-                    // Use the mv() method to place the file somewhere on your server
-                    image.mv('./public/profile/bingo/' + fileName, async function (err) {
-                        if (err) {
-                            req.flash('error',await Sys.Helper.bingo.getSingleTraslateData(["error-uploading_profile_avatar"], req.session.details.language)) //'Error Uploading Profile Avatar');
-                            return res.redirect('/theme');
-                        }
-                        let game = await Sys.App.Services.OtherModules.updateThemeData({
-                            _id: req.params.id
-                        }, {
-                            name: req.body.name,
-                            price: req.body.price,
-                            photo: fileName,
-                            isDefault: true
-                        });
-                        req.flash('success',await Sys.Helper.bingo.getSingleTraslateData(["theme_updated_successfully"], req.session.details.language)) //'Theme Updated successfully');
+                    let photoUrl;
+                    try {
+                        const { url } = await uploadToCloudinary(image);
+                        photoUrl = url;
+                    } catch (uploadErr) {
+                        console.log("Cloudinary upload error:", uploadErr);
+                        req.flash('error', await Sys.Helper.bingo.getSingleTraslateData(["error-uploading_profile_avatar"], req.session.details.language));
                         return res.redirect('/theme');
+                    }
+                    let game = await Sys.App.Services.OtherModules.updateThemeData({
+                        _id: req.params.id
+                    }, {
+                        name: req.body.name,
+                        price: req.body.price,
+                        photo: photoUrl,
+                        isDefault: true
                     });
+                    req.flash('success', await Sys.Helper.bingo.getSingleTraslateData(["theme_updated_successfully"], req.session.details.language));
+                    return res.redirect('/theme');
                 } else {
                     let game = await Sys.App.Services.OtherModules.updateThemeData({
                         _id: req.params.id

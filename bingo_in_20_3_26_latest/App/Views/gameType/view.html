@@ -118,7 +118,7 @@
                                                     <div class="row form-group m-t-20">
                                                         <div class="col-12 col-md-12 text-center">
                                                             <div class="profile_img">
-                                                                <img id="myImg" src="/profile/bingo/{{ gameType.photo }}" alt="{{ gameType.name}}" style="height: 300px; width: 500px;" />
+                                                                <img id="myImg" src="{{ gameType.photo | resolveImageUrl }}" alt="{{ gameType.name}}" style="height: 300px; width: 500px;" />
                                                             </div>
                                                         </div>
                                                         <div class="col col-md-12 text-center">

@@ -1,5 +1,6 @@
 const Sys = require('../../../Boot/Sys');
 const moment = require('moment');
+const { resolveImageUrl } = require('../../../Helper/cloudinaryUpload');
 const game1HallStausCache = new Map();
 const { processGame2, 
     processGame3, 
@@ -277,7 +278,7 @@ module.exports = {
             // Transform data efficiently using map
             const gameList = gameTypes.map(({ name, photo }) => ({
                 name,
-                img: `profile/bingo/${photo}`
+                img: resolveImageUrl(photo)
             }));
 
             return createSuccessResponse(
