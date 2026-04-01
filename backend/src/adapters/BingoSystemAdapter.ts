@@ -1,4 +1,4 @@
-import type { Player, Ticket, ClaimType } from "../game/types.js";
+import type { Player, Ticket, ClaimType, ClaimRecord } from "../game/types.js";
 
 export interface CreateTicketInput {
   roomCode: string;
@@ -31,9 +31,21 @@ export interface ClaimLoggedInput {
   reason?: string;
 }
 
+export interface GameEndedInput {
+  roomCode: string;
+  hallId: string;
+  gameId: string;
+  entryFee: number;
+  endedReason: string;
+  drawnNumbers: number[];
+  claims: ClaimRecord[];
+  playerIds: string[];
+}
+
 export interface BingoSystemAdapter {
   createTicket(input: CreateTicketInput): Promise<Ticket>;
   onGameStarted?(input: GameStartedInput): Promise<void>;
   onNumberDrawn?(input: NumberDrawnInput): Promise<void>;
   onClaimLogged?(input: ClaimLoggedInput): Promise<void>;
+  onGameEnded?(input: GameEndedInput): Promise<void>;
 }

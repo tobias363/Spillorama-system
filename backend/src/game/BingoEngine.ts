@@ -2148,6 +2148,22 @@ export class BingoEngine {
     for (const [walletId, hallId] of walletToHall.entries()) {
       this.finishPlaySession(walletId, hallId, endedAtMs);
     }
+
+    // Fire onGameEnded callback (non-blocking).
+    if (this.bingoAdapter.onGameEnded) {
+      this.bingoAdapter.onGameEnded({
+        roomCode: room.code,
+        hallId: room.hallId,
+        gameId: game.id,
+        entryFee: game.entryFee,
+        endedReason: game.endedReason ?? "UNKNOWN",
+        drawnNumbers: [...game.drawnNumbers],
+        claims: [...game.claims],
+        playerIds: [...game.tickets.keys()]
+      }).catch((err) => {
+        console.error("[BingoEngine] onGameEnded callback failed:", err);
+      });
+    }
   }
 
   private finishPlaySession(walletId: string, hallId: string, endedAtMs: number): void {

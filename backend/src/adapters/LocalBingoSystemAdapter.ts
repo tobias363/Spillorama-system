@@ -3,6 +3,7 @@ import type {
   BingoSystemAdapter,
   ClaimLoggedInput,
   CreateTicketInput,
+  GameEndedInput,
   GameStartedInput,
   NumberDrawnInput
 } from "./BingoSystemAdapter.js";
@@ -21,6 +22,10 @@ export class LocalBingoSystemAdapter implements BingoSystemAdapter {
   }
 
   async onClaimLogged(_input: ClaimLoggedInput): Promise<void> {
+    // No-op for local development.
+  }
+
+  async onGameEnded(_input: GameEndedInput): Promise<void> {
     // No-op for local development.
   }
 }
