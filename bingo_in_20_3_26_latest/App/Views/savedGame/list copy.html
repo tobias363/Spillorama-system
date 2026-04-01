@@ -1,0 +1,423 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!--<div class="content-header">
+            <div class="choose-game">
+                <label>Choose a Game:-</label>
+                <select id="games" name="gamesList">
+                    <option value="">Choose Game Type</option>
+                    {% for item in DataOfGames %}
+                    <option value="{{item._id}}">{{item.name}}</option>
+                    {% endfor %}
+                    </select>
+            </div>
+        </div> -->
+
+        <!-- Title -->
+        <section class="content-header" id="gameHeader">
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content" id="allGameDetails">
+           
+            <div class="row">
+                <input type="hidden" id="gameType" value="{{GameId}}">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading" id="addGameID">
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %} {% block Jscript %}
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    $(document).ready(function() {
+        
+        let viewFlag="{{permissionObj.viewFlag}}";
+        let editFlag="{{permissionObj.editFlag}}";
+        let deleteFlag="{{permissionObj.deleteFlag}}";
+        let addFlag="{{permissionObj.addFlag}}";
+
+
+        var socket = io();
+
+        $("#gameHeader").hide();
+        $("#allGameDetails").hide();
+
+        // clear for internal content
+        $("#gameHeader").empty();
+        $("#addGameID").empty();
+        $("#myTable").empty();
+        $(".table-responsive").empty();
+        $("#gameHeader").hide();
+        $("#allGameDetails").hide();
+        let GameId = $("#gameType").val();
+        console.log('GameId',GameId);
+        //Dropdown Wise Game Details Changes
+        /*
+        $("#games").change(function() {
+
+            // clear for internal content
+            $("#gameHeader").empty();
+            $("#addGameID").empty();
+            $("#myTable").empty();
+            $(".table-responsive").empty();
+            $("#gameHeader").hide();
+            $("#allGameDetails").hide();
+
+            // Game ID Select
+            var selectedValue = $("#games option:selected").val();
+            //console.log("option", selectedValue);
+
+            // if any pervious key store so localStorage do Clear this  key
+            localStorage.removeItem("selectedId");
+            localStorage.clear();
+
+            //localStorage Set
+            localStorage.setItem("selectedId", selectedValue);
+
+            if (selectedValue == "") { // if selectedValue is Blank
+                // clear for internal content
+                $("#gameHeader").empty();
+                $("#addGameID").empty();
+                $("#myTable").empty();
+                $(".table-responsive").empty();
+                $("#gameHeader").hide();
+                $("#allGameDetails").hide();
+            } else {
+                gameDetailsGet(selectedValue);
+            }
+        }).val(function() {
+            //Previous Value get
+            var id = localStorage.getItem("selectedId");
+            //console.log("id", id);
+            if (id === null) {
+                $("#gameHeader").hide();
+                $("#allGameDetails").hide();
+
+                // clear for internal content
+                $("#gameHeader").empty();
+                $("#addGameID").empty();
+                $("#myTable").empty();
+                $(".table-responsive").empty();
+                $("#gameHeader").hide();
+                $("#allGameDetails").hide();
+
+            } else {
+                gameDetailsGet(id);
+            }
+
+            return localStorage.getItem("selectedId");
+        });
+        */
+        gameDetailsGet(GameId);
+        //localStorage Clear
+        // localStorage.removeItem("selectedId");
+        // localStorage.clear();
+
+        function gameDetailsGet(values) {
+            var gameTypeId = values;
+            //console.log("values", gameTypeId);
+            $.ajax({
+                type: 'GET',
+                url: host + "/savedGameDetailList/" + gameTypeId,
+                success: function(resultData) {
+                        console.log("resultData: ", resultData);
+                        if (resultData) {
+                            var gameData = resultData.gameData;
+
+                            let htmlHeader = '<h1>' + gameData.name + ' Table</h1>\
+                            <ol class="breadcrumb">\
+                                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>\
+                                <li class="active">' + gameData.name + ' </li>\
+                            </ol>';
+
+
+                            let htmlGameID = ' <div class="pull-left">\
+                                              <h6 class="panel-title txt-dark">' + gameData.name + ' </h6>\
+                                           </div>\
+                                           <div class="clearfix"></div>';
+
+
+                            var str = "";
+                            str += '<table id="myTable" class="table table-hover display  pb-30"><thead><tr>';
+                            for (var i = 0; i < resultData.theadField.length; i++) {
+                                str += '<th>' + resultData.theadField[i] + '</th>';
+                            }
+                            str += '</tr></thead><tbody></tbody></table>';
+
+                            $("#gameHeader").append(htmlHeader);
+                            $("#addGameID").append(htmlGameID);
+                            $(".table-responsive").append(str);
+                            $("#gameHeader").show();
+                            $("#allGameDetails").show();
+
+
+
+                            var gameType = gameData.type;
+                            //console.log("gameType::::::", gameType);
+                            var columns;
+                            var typeId = gameData._id;
+                            //console.log("typeId", typeId);
+                            if (gameType == "game_1") {
+                                columns = [{
+                                    "data": "srno",
+                                    render: function(data, type, row, meta) {
+                                        return meta.row + meta.settings._iDisplayStart + 1;
+                                    },
+                                }, {
+                                    "data": "gameNumber",
+                                    render: function(data, type, row, meta) {
+                                        //let html = row.gameNumber + "-" + row.day;
+                                        let html = row.gameNumber;
+                                        return html
+                                    }
+                                }, {
+                                    "data": "action",
+                                    render: function(data, type, row) {
+                                                let html ="";
+                                                console.log(" viewFlag viewFlag : "+viewFlag+" editFlag editFlag :"+editFlag+" deleteFlag deleteFlag : "+deleteFlag)
+                                                if(viewFlag=='true'){
+                                                    html += `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="View">
+                                                                <i class="fa fa-eye" aria-hidden="true"></i>
+                                                            </a>`;
+                                                }
+                                                if(editFlag=='true'){
+                                                    html +=`<a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                                                <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                                    <i class="fa fa-edit" aria-hidden="true"></i>
+                                                                </button>
+                                                            </a>`;
+                                                }
+                                                if(deleteFlag=='true'){
+                                                    html +=`<button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="Delete Game">
+                                                                        <i class="fa fa-trash" aria-hidden="true"></i>
+                                                            </button>`;
+                                                }
+                                                // let html = `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="View">
+                                                //                 <i class="fa fa-eye" aria-hidden="true"></i>
+                                                //             </a>
+                                                //             <a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                                //                 <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                //                     <i class="fa fa-edit" aria-hidden="true"></i>
+                                                //                 </button>
+                                                //             </a>
+                                                //             <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="Delete Game">
+                                                //                             <i class="fa fa-trash" aria-hidden="true"></i>
+                                                //             </button>`;
+                                        return html;
+                                    }
+                                }];
+                            } else if (gameType == "game_2") {
+                                columns = [{
+                                    "data": "srno",
+                                    render: function(data, type, row, meta) {
+                                        return meta.row + meta.settings._iDisplayStart + 1;
+                                    }
+                                }, {
+                                    "data": "gameNumber",
+                                    render: function(data, type, row, meta) {
+                                        //let html = row.gameNumber + "-" + row.day;
+                                        let html = row.gameNumber;
+                                        return html
+                                    }
+                                }, {
+                                    "data": "action",
+                                    render: function(data, type, row) {
+
+                                        let html = `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="View">
+                                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                                    </a>
+                                                    <a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                                        <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                            <i class="fa fa-edit" aria-hidden="true"></i>
+                                                        </button>
+                                                    </a>
+                                                    <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="Delete Game">
+                                                                    <i class="fa fa-trash" aria-hidden="true"></i>
+                                                                </button>`;
+                                        return html;
+                                    }
+                                }];
+                            } else if (gameType == "game_3") {
+                                columns = [{
+                                    "data": "srno",
+                                    render: function(data, type, row, meta) {
+                                        return meta.row + meta.settings._iDisplayStart + 1;
+                                    }
+                                }, {
+                                    "data": "gameNumber",
+                                    render: function(data, type, row, meta) {
+                                        //let html = row.gameNumber + "-" + row.day;
+                                        let html = row.gameNumber;
+                                        return html
+                                    }
+                                }, {
+                                    "data": "action",
+                                    render: function(data, type, row) {
+
+                                        let html = `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="View">
+                                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                                    </a>
+                                                    <a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                                        <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                            <i class="fa fa-edit" aria-hidden="true"></i>
+                                                        </button>
+                                                    </a>
+                                                    <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="Delete Game">
+                                                                    <i class="fa fa-trash" aria-hidden="true"></i>
+                                                                </button>`;
+                                        return html;
+                                    }
+                                }];
+                            } else if (gameType == "game_4") {
+                                columns = [{
+                                    "data": "srno",
+                                    render: function(data, type, row, meta) {
+                                        return meta.row + meta.settings._iDisplayStart + 1;
+                                    }
+                                }, {
+                                    "data": "gameNumber",
+                                    render: function(data, type, row, meta) {
+                                        //let html = row.gameNumber + "-" + row.day;
+                                        let html = row.gameNumber;
+                                        return html
+                                    }
+                                }, {
+                                    "data": "action",
+                                    render: function(data, type, row) {
+
+                                        let html = `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="View">
+                                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                                    </a>
+                                                    <a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                                        <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                            <i class="fa fa-edit" aria-hidden="true"></i>
+                                                        </button>
+                                                    </a>
+                                                    <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="Delete Game">
+                                                                    <i class="fa fa-trash" aria-hidden="true"></i>
+                                                                </button>`;
+                                        return html;
+                                    }
+                                }];
+                            }
+
+                            let targetCol = 2;
+
+                            $(document).ready(function() {
+                                var host = window.location.origin;
+                                let newTable = $('#myTable').DataTable({
+                                    "oLanguage": {
+                                        "sSearch": "Search Game Number"
+                                    },
+                                    "scrollX": true,
+                                    "searching": true,
+                                    "processing": true,
+                                    "serverSide": true,
+                                    "order": [
+                                        [0, "desc"]
+                                    ],
+                                    "columnDefs": [{
+                                        "targets": [targetCol],
+                                        "orderable": false
+                                    }],
+                                    "autoWidth": false,
+                                    "pageLength": 25,
+                                    "ajax": {
+                                        url: host + "/getSavedGameDetailList",
+                                        data: {
+                                            gameType: gameType
+                                        }
+                                    },
+                                    "columns": columns,
+                                });
+
+
+                                $(function() {
+                                    "use strict";
+
+                                    var SweetAlert = function() {};
+
+                                    SweetAlert.prototype.init = function() {
+
+                                            //Parameter
+                                            $('body').on('click', '.delete', function(e) {
+                                                var id = $(this).attr('id');
+                                                var thisElement = this;
+                                                swal({
+                                                    title: "Are you sure?",
+                                                    text: "You will not be able to recover this Game!",
+                                                    type: "warning",
+                                                    showCancelButton: true,
+                                                    confirmButtonColor: "#e69a2a",
+                                                    confirmButtonText: "Yes, delete it!",
+                                                    cancelButtonText: "No, cancel Plz!",
+                                                    closeOnConfirm: false,
+                                                    closeOnCancel: false
+                                                }, function(isConfirm) {
+                                                    if (isConfirm) {
+                                                        $.ajax({
+                                                            type: 'POST',
+                                                            url: host + "/getSaveGameDelete",
+                                                            data: {
+                                                                id: id
+                                                            },
+                                                            success: function(resultData) {
+                                                                //console.log(resultData);
+                                                                if (resultData == 'success') {
+                                                                    $(thisElement).parent().parent().hide(700);
+                                                                    swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                                                                    newTable.ajax.reload();
+                                                                } else {
+                                                                    swal("Cancelled", "Sorry Game was not Deleted because Few moments are left Start to the game..!!", "error");
+                                                                }
+                                                                // alert("Save Complete")
+                                                            }
+                                                        });
+                                                        swal("Deleted!", "Game Deleted Succesfully.", "success");
+
+                                                    } else {
+                                                        swal("Cancelled", "Game Not Deleted", "error");
+                                                    }
+                                                });
+                                                return false;
+                                            });
+                                        },
+                                        $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+                                    $.SweetAlert.init();
+                                    //Delete over
+                                });
+                                // Document over
+                            });
+                            // if end
+                        }
+                        //success end
+                    }
+                    // ajax end
+            });
+            // function end
+        }
+        // Document over
+    });
+</script>
+<script>
+</script>
+{% endblock %}

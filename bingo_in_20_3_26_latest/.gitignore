@@ -1,0 +1,12 @@
+node_modules/
+.env
+env.conf
+sessions/
+Log/
+*.log
+.DS_Store
+dump.rdb
+public/SSL/
+*.csv
+Bingo-Dev...-out.log
+spillorama-214ee-firebase-adminsdk-*.json

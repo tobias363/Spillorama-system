@@ -1,0 +1,164 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Breadcrumb -->
+        <section class="content-header">
+            <h1>Edit Ticket</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>
+                <li class="active">Edit Ticket</li>
+            </ol>
+        </section>
+        <!-- /Breadcrumb -->
+
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">Edit Ticket</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <!-- {{subGameData.subGames|dump}} -->
+                                <div class="table-responsive">
+                                    <form method="POST" id="physicalTicketEditForm" name="addPhysicalTicket" class="form-horizontal has-validation-callback" enctype="multipart/form-data">
+                                        <div class="col-sm-6">
+                                            <div class="panel-wrapper collapse in">
+                                                <div class="panel-body">
+                                                    <div class="form-group">
+                                                        <div class="row">
+                                                            <label for="name" class="mb-10 col-sm-12">Game Name:</label>
+                                                            <div class="col-sm-12">
+                                                                <label for="name" class="form-control">{{subGameData.subGames[0].gameName}}</label>
+                                                                <input type="hidden" name="physicalTicketGameId" value="{{subGameData._id}}" subid="{{subGameData.subGames[0].subGameId}}" />
+                                                                <input type="hidden" name="ticketUniqueId" value="{{ticketData._id}}">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                
+                                                    <!-- <div class="form-group">
+                                                        <div class="row">
+                                                            <label for="name" class="mb-10 col-sm-12">Enter Unique Id :</label>
+                                                            <div class="col-sm-12">
+                                                                <input type="text" class="form-control" required="" data-validation="required" name="physicalUniqueId" id="physicalUniqueId" value="" placeholder="Enter Unique Id" />
+                                                            </div>
+                                                        </div>
+                                                    </div> -->
+                                                    <input type="hidden" class="form-control" required="" data-validation="required" name="physicalUniqueId"  value="{{ticketData.uniquePlayerId}}" placeholder="Enter Unique Id" />
+                                
+                                                    <div class="form-group">
+                                                        <div class="row">
+                                                            <label for="name" class="mb-10 col-sm-12">Select Ticket Color:</label>
+                                                            <div class="col-sm-12">
+                                                                <select class="form-control" id="gamesTicketColors" name="ticketcolor" required="">
+                                                                    <option value="">Select color</option>
+                                                                    {% for rr in subGameData.subGames[0].ticketColorTypesNo %}
+                                                                      {% set abc= "" %}
+                                                                      {% if(ticketData.ticketColorType==rr.ticketType) %}
+                                                                        {% set abc="selected" %}
+                                                                      {% endif %}
+                                                                        <option value="{{rr.ticketType}}" pval="{{rr.ticketPrice}}" {{abc}}> {{rr.ticketName}} </option>
+                                                                    {% endfor%}
+                                
+                                                                   
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <div class="row">
+                                                            <label for="name" class="mb-10 col-sm-12">Ticket Price:</label>
+                                                            <div class="col-sm-12">
+                                                                <input type="text" class="form-control" required=""
+                                                                    name="ticketprice" id="ticketprice" value="{{ticketData.ticketPrice}}" placeholder="Enter Ticket Price"
+                                                                    data-validation-length="" data-validation-error-msg="Price is Required" readonly=""
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                
+                                                    <!-- <div class="form-group">
+                                                        <div class="row">
+                                                            <label class="col-sm-12 mb-10">Unique ID Purchase Date</label>
+                                                            <div class="col-sm-12">
+                                                                <div class="input-group">
+                                                                    <input type="text" class="form-control" name="uipd" id="uipd" value="" placeholder="Unique purchase date" data-date-format="YYYY-MM-DD HH:mm" required="" readonly="" />
+                                                                    <div class="input-group-addon"><i class="glyphicon glyphicon-calendar"></i></div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                
+                                                    <div class="form-group">
+                                                        <div class="row">
+                                                            <label class="col-sm-12 mb-10">Unique ID Expiry Date</label>
+                                                            <div class="col-sm-12">
+                                                                <div class="input-group">
+                                                                    <input type="text" class="form-control" name="uied" id="uied" value="" placeholder="Unique expiry date" data-date-format="YYYY-MM-DD HH:mm" required="" readonly="" />
+                                                                    <div class="input-group-addon"><i class="glyphicon glyphicon-calendar"></i></div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                
+                                                    <div class="form-group">
+                                                        <div class="row">
+                                                            <label for="name" class="mb-10 col-sm-12">Hours Validity:</label>
+                                                            <div class="col-sm-12">
+                                                                <input type="text" class="form-control" required="" name="validity" id="physical_validity" value="" placeholder="Enter Hours Validity"
+                                                                    data-validation-length=""
+                                                                    data-validation-error-msg="Hours is Required"
+                                                                    readonly=""
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div> -->
+
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <table border="0" class="table display pb-30">
+                                            <tbody>
+                                                <tr>
+                                                    <td colspan="4">
+                                                        <div class="pull-left">
+                                                            <input type="button" id="btnReGenerateTicket" class="btn btn-default btn-flat" value="Re-generate" />
+                                                            <input type="button" id="btnRePrintPhysicalTicket" class="btn btn-default btn-flat" value="Print" />
+                                                            <input type="button" id="btnCancelPhysicalTicket" class="btn btn-default btn-flat" value="Cancel" />
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </form>
+                                </div>
+                                
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- /Row -->
+        </div>
+    </div>
+
+    {% endblock %} {% block Jscript %}
+    <script>
+        $(document).ready(function() {
+            var host = window.location.origin;
+        });
+    </script>
+    {% endblock %}

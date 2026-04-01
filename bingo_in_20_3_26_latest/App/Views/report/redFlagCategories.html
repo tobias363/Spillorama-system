@@ -1,0 +1,461 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    .wrapperSelected {
+        height: 28px !important;
+        border: 1px solid #ABADB3;
+        margin: 0;
+        padding: 4px 0 0 0;
+        font-size: 14px;
+    }
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <div class="content-header">
+            <h1>{{gameManage.red_flag_category}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{gameManage.dashboard}}</a></li>
+                <!-- <li class="active">User profile</li> -->
+            </ol>
+            <div class="choose-game">
+                <select id="redFlagCategory" name="redFlagCategory">
+                    <option value="" selected>{{gameManage.choose_a_category_type}}</option>
+                    {% for item in redFlagData %}
+                    <option value="{{item.id}}">{{item.name}}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <!-- Title -->
+        <section class="content-header" id="gameHeader">
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content" id="allGameDetails">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading" id="addGameID">
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="row" id="amountRow">
+
+                                </div>
+                                <div class="table-wrap">
+                                    <div class="table-responsive responsive-table">
+                                        
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script src="/socket.io/socket.io.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/moment.js/2.17.1/moment.min.js"></script>
+<script>
+    $(document).ready(function() {
+        let editFlag = '{{editFlag}}';
+        let deleteFlag = '{{deleteFlag}}';
+        let addFlag = '{{addFlag}}';
+        let viewFlag = '{{viewFlag}}';
+        let startFlag = '{{startFlag}}';
+        let pauseFlag = '{{pauseFlag}}';
+        let newTable
+
+        $("#gameHeader").hide();
+        $("#allGameDetails").hide();
+
+        // clear for internal content
+        $("#gameHeader").empty();
+        $("#addGameID").empty();
+        $("#gameHeader").hide();
+        $("#amountRow").empty();
+        $("#allGameDetails").hide();
+        
+        $("#redFlagCategory").change(function() {
+
+            // clear for internal content
+            $("#gameHeader").empty();
+            $("#addGameID").empty();
+            $("#gameHeader").hide();
+            $("#allGameDetails").hide();
+            $("#amountRow").empty();
+            // Game ID Select
+            let selectedValue = $("#redFlagCategory option:selected").val();
+            let amount = $("#amount").val();
+            console.log("option", selectedValue, amount);
+
+            // if any pervious key store so localStorage do Clear this  key
+            localStorage.removeItem("selectedId");
+            localStorage.clear();
+
+            //localStorage Set
+            localStorage.setItem("selectedId", selectedValue);
+            console.log("selectedValue:-----", selectedValue);
+            if (!selectedValue) { // if selectedValue is Blank
+                // clear for internal content
+                $("#gameHeader").empty();
+                $("#addGameID").empty();
+                $("#gameHeader")?.hide();
+                $("#allGameDetails")?.hide();
+                $("#amountRow")?.empty();
+            } else {
+                gameDetailsGet(selectedValue);
+            }
+        })
+
+        $(document).on('click', '#searchAmount', function(){
+            let amount = $("#amount").val();
+            let selectedValue = $("#redFlagCategory option:selected").val();
+            console.log("amount", amount, selectedValue);
+            if(amount && amount > 0){
+                categoryDetailsGet(selectedValue);
+            }else{
+                alert("{{gameManage.please_enter_amount}}");
+            }
+        })
+        function categoryDetailsGet(values) {
+            if(newTable){
+                newTable.destroy();
+            }
+            let amount = $("#amount").val();
+            let selectedValue = Number(values);
+            console.log("selectedValue",typeof selectedValue, selectedValue, amount);
+            $.ajax({
+                type: 'GET',
+                url: host + "/getRedFlagCategory/" + selectedValue,
+                success: function(resultData) {
+                    if (resultData.status) {
+                        let gameData = resultData.gameData;
+                        console.log("resultData", resultData);
+                            let columns;
+                            const baseColumns = [
+                                {
+                                    "data": "username", "orderable": true
+                                },
+                                {
+                                    "data": "email", "orderable": true, 
+                                    "render": function (data, type, row) {
+                                        return data ? data : "";
+                                    }
+                                }
+                            ];
+
+                            const thirdColumnMap = {
+                                1: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                2: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                3: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                4: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                5: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                6: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                7: { "data": "addressDetails.country", "orderable": true },
+                                8: { "data": "PEP", "orderable": false }
+                            };
+
+                            const fourthColumnMap = {
+                                1: { "data": "action", "orderable": false,
+                                render: function(data, type, row) {
+                                    let html = `<a href="/viewUserTransaction?id=${row._id}&flagType=${selectedValue}&amount=${amount}" 
+                                        class="btn btn-info btn-xs btn-rounded" 
+                                        title="Game History" target="_blank">
+                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                        </a>`;
+                                    return html;
+                                }
+                                 },
+                                2: { "data": "action", "orderable": false,
+                                    render: function(data, type, row) {
+                                        let html = `<a href="/viewUserTransaction?id=${row._id}&flagType=${selectedValue}&amount=${amount}" 
+                                        class="btn btn-info btn-xs btn-rounded" 
+                                        title="Game History" target="_blank">
+                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                        </a>`;
+                                        return html;
+                                    }
+                                 },
+                                3: { "data": "action", "orderable": false,
+                                    render: function(data, type, row) {
+                                        let html = `<a href="/viewUserTransaction?id=${row._id}&flagType=${selectedValue}&amount=${amount}" 
+                                        class="btn btn-info btn-xs btn-rounded" 
+                                        title="Game History" target="_blank">
+                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                        </a>`;
+                                        return html;
+                                    }
+                                 },
+                                4: { "data": "action", "orderable": false,
+                                    render: function(data, type, row) {
+                                        let html = `<a href="/viewUserTransaction?id=${row._id}&flagType=${selectedValue}&amount=${amount}" 
+                                        class="btn btn-info btn-xs btn-rounded" 
+                                        title="Game History" target="_blank">
+                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                        </a>`;
+                                        return html;
+                                    }
+                                 },
+                                5: { "data": "action", "orderable": false,
+                                    render: function(data, type, row) {
+                                        let html = `<a href="/viewUserTransaction?id=${row._id}&flagType=${selectedValue}&amount=${amount}" 
+                                        class="btn btn-info btn-xs btn-rounded" 
+                                        title="Game History" target="_blank">
+                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                        </a>`;
+                                        return html;
+                                    }
+                                 },
+                                6: { "data": "action", "orderable": false,
+                                    render: function(data, type, row) {
+                                        let html = `<a href="/viewUserTransaction?id=${row._id}&flagType=${selectedValue}&amount=${amount}" 
+                                        class="btn btn-info btn-xs btn-rounded" 
+                                        title="Game History" target="_blank">
+                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                        </a>`;
+                                        return html;
+                                    }
+                                }
+                            };
+
+                            const thirdColumn = thirdColumnMap[selectedValue];
+                            const fourthColumn = fourthColumnMap[selectedValue];
+                            
+                            if (thirdColumn && fourthColumn) {
+                                columns = [...baseColumns, thirdColumn, fourthColumn];
+                            } else if (thirdColumn) {
+                                columns = [...baseColumns, thirdColumn];
+                            } else {
+                                columns = baseColumns;
+                            }
+
+                            let targetCol = 0;
+                            let textAlign = {};
+                            if (selectedValue == 1) {
+                                targetCol = 0; //10;
+                            } else if (selectedValue == 2) {
+                                targetCol = 0; //10;
+                            } else if (selectedValue == 3) {
+                                targetCol = 0; //8;
+                            } else if (selectedValue == 4) {
+                                targetCol = 0;
+                            }
+                            let host = window.location.origin;
+                            newTable = $('#myTable')?.DataTable({
+                                "oLanguage": {
+                                    "sSearch": "{{gameManage.search}}",
+                                    "sLengthMenu": "{{gameManage.show}} _MENU_ {{gameManage.entries}}",
+                                    "oPaginate": {
+                                        sPrevious: "{{ gameManage.previous }}",
+                                        sNext: "{{ gameManage.next }}"
+                                    },
+                                    "sEmptyTable": "{{gameManage.no_data_available_in_table}}",
+                                    "sInfo": "{{gameManage.showing}} _START_ to _END_ of _TOTAL_ {{gameManage.entries}}",
+                                    "sInfoEmpty": "{{gameManage.showing}} 0 to 0 of 0 {{gameManage.entries}}",
+                                },
+                                "bSort": true,
+                                "scrollX": false,
+                                "scrollCollapse": true,
+                                "searching": true,
+                                // "searchDelay":1000,
+                                "processing": true,
+                                "serverSide": true,
+                                "order": [
+                                    [0, "desc"]
+                                ],
+                                "columnDefs": [{
+                                    "targets": [0],
+                                    "orderable": false
+                                },
+                                // textAlign
+                                ],
+                                // "fixedcolumns":true,
+                                "autoWidth": false,
+                                "pageLength": 25,
+                                "ajax": {
+                                    url: host + "/getPlayersRedFlagList",
+                                    data: {
+                                        flagType: Number(selectedValue),
+                                        amount: amount
+                                    }
+                                },
+                                "columns": columns
+                            });
+
+                            let table = $('#myTable')?.DataTable();
+                        } else {
+                            alert(resultData.message);
+                        }
+                    }
+                    // ajax end
+            });
+            // function end
+        }
+
+        function gameDetailsGet(values) {
+            if(newTable){
+                newTable.destroy();
+                $("#myTable tbody")?.empty();
+                $("#myTable").empty();
+                $(".responsive-table")?.empty();
+            }
+            let amount = $("#amount").val();
+            let selectedValue = Number(values);
+            console.log("selectedValue",typeof selectedValue, selectedValue, amount);
+            $.ajax({
+                type: 'GET',
+                url: host + "/getRedFlagCategory/" + selectedValue,
+                success: function(resultData) {
+                    if (resultData.status) {
+                        let gameData = resultData.gameData;
+                        console.log("resultData", resultData);
+                        // let htmlHeader = '<h1>' + gameData.name + ' {{gameManage.table}}</h1>' +
+                        //     '<ol class="breadcrumb">' +
+                        //         '<li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>' +
+                        //         '<li class="active">' + gameData.name + ' </li>' +
+                        //     '</ol>';
+
+                            let htmlGameID= ' <div class="pull-left">' +
+                                              '<h6 class="panel-title txt-dark">' + gameData.name + ' </h6>' +
+                                           '</div>';
+                                htmlGameID += `<div class="pull-right"> - </div>  <div class="clearfix"></div>`;
+                                let categoryAmount;
+                                if([1,2,3,4,5,6].includes(selectedValue)){
+                                    categoryAmount = `<div class="col-sm-2">
+                                        <div class="form-group">
+                                            <label for="amount" class="control-label">{{gameManage.amount}}:</label>
+                                            <input type="number" class="form-control" min="1" id="amount" placeholder="{{gameManage.enter}} {{gameManage.amount}}" value="${amount}">
+                                        </div>
+                                    </div>
+                                    <div class="col-sm-2">
+                                        <div class="form-group">
+                                            <label class="control-label">&nbsp;</label>
+                                            <button class="btn btn-info btn-block" id="searchAmount">{{gameManage.search}}</button>
+                                        </div>
+                                    </div>`
+                                }
+
+                            var str = "";
+                            str += '<table id="myTable" class="table table-hover display  pb-30"><thead><tr>';
+                            for (const field of resultData.theadField) {
+                                str += '<th>' + field + '</th>';
+                            }
+                            str += '</tr></thead><tbody></tbody></table>';
+
+                            // $("#gameHeader").append(htmlHeader);
+                            $("#addGameID").append(htmlGameID);
+                            if(categoryAmount){
+                                $("#amountRow").append(categoryAmount);
+                            }
+                            $(".responsive-table").append(str);
+                            // $("#gameHeader").show();
+                            $("#allGameDetails").show();
+
+                            let columns;
+                            const baseColumns = [
+                                {
+                                    "data": "username"
+                                },
+                                {
+                                    "data": "email",
+                                    "render": function (data, type, row) {  
+                                        return data ? data : "";
+                                    }
+                                }
+                            ];
+
+                            const thirdColumnMap = {
+                                1: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                2: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                3: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                4: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                5: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                6: { "data": "amount", render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0} },
+                                7: { "data": "addressDetails.country" },
+                                8: { "data": "PEP", "orderable": false }
+                            };
+
+                            const thirdColumn = thirdColumnMap[selectedValue];
+                            columns = thirdColumn ? [...baseColumns, thirdColumn] : baseColumns;
+
+                            let targetCol = 0;
+                            if (selectedValue == 1) {
+                                targetCol = 5; //10;
+                            } else if (selectedValue == 2) {
+                                targetCol = 10; //10;
+                            } else if (selectedValue == 3) {
+                                targetCol = 5; //8;
+                            } else if (selectedValue == 4) {
+                                targetCol = 3;
+                            }
+                            let host = window.location.origin;
+                            newTable = $('#myTable')?.DataTable({
+                                "oLanguage": {
+                                    "sSearch": "{{gameManage.search}}",
+                                    "sLengthMenu": "{{gameManage.show}} _MENU_ {{gameManage.entries}}",
+                                    "oPaginate": {
+                                        sPrevious: "{{ gameManage.previous }}",
+                                        sNext: "{{ gameManage.next }}"
+                                    },
+                                    "sEmptyTable": "{{gameManage.no_data_available_in_table}}",
+                                    "sInfo": "{{gameManage.showing}} _START_ to _END_ of _TOTAL_ {{gameManage.entries}}",
+                                    "sInfoEmpty": "{{gameManage.showing}} 0 to 0 of 0 {{gameManage.entries}}",
+                                },
+                                "bSort": true,
+                                "scrollX": false,
+                                "scrollCollapse": true,
+                                "searching": [7,8,9].includes(selectedValue) ? true : false,
+                                "searchDelay":1000,
+                                "processing": true,
+                                "serverSide": true,
+                                "order": [
+                                    [0, "desc"]
+                                ],
+                                "columnDefs": [{
+                                    "targets": [0],
+                                    "orderable": false
+                                },
+                                // textAlign
+                                ],
+                                // "fixedcolumns":true,
+                                "autoWidth": false,
+                                "pageLength": 25,
+                                "ajax": {
+                                    url: host + "/getPlayersRedFlagList",
+                                    data: {
+                                        flagType: Number(selectedValue),
+                                        amount: amount
+                                    }
+                                },
+                                "columns": columns
+                            });
+
+                            let table = $('#myTable')?.DataTable();
+                        } else {
+                            alert(resultData.message);
+                        }
+                    }
+                    // ajax end
+            });
+            // function end
+        }
+        // Document over
+    });
+</script>
+<script>
+</script>
+{% endblock %}

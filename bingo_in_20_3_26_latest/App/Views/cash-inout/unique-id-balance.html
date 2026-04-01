@@ -1,0 +1,250 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+ 
+</style>
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            {% if action=="add" %}
+                <h1>{{translate.add_money_unique_id}}</h1>
+                <ol class="breadcrumb">
+                    <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+                    <li class="active">{{translate.add_money_unique_id}}</li>
+                </ol>
+            {% elseif action == "withdraw" %}
+                <h1>{{translate.withdraw_money_unique_id}}</h1>
+                <ol class="breadcrumb">
+                    <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+                    <li class="active">{{translate.withdraw_money_unique_id}}</li>
+                </ol>
+            {% endif %}
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                {% if action=="add" %}
+                                <h6 class="panel-title txt-dark">{{translate.add_money}}</h6>
+                                {% else %}
+                                <h6 class="panel-title txt-dark">{{translate.withdraw_money}}</h6>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                    <form method="POST" id="uniqueIdBalanceForm" class="">
+                               
+                                    <div class="table display pb-30">
+                                        <input type="hidden" name="action" id="action" value="{{action}}">
+                                        <div class="">
+                                            
+                                            <div class="row">
+                                                <div class="col-lg-6 col-md-6">
+                                                    <div class="form-group">
+                                                        <label>{{translate.enter_unique_id}}:</label>
+                                                        <input type="text" class="form-control" name="uniqueId"
+                                                            placeholder="{{translate.enter_unique_id}}" value=""
+                                                            id="uniqueId" data-validation="required server" data-validation-url="/agent/unique-id/check-validity?action={{action}}">
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-lg-6 col-md-6">
+                                                    <div class="form-group">
+                                                        <label>{{translate.amount}}:</label>
+                                                        <label id = "balanceResult" style="float: right;"></label>
+                                                        <input type="number" class="form-control"
+                                                            onkeypress="return event.charCode >= 48" min="1"
+                                                            name="amount"placeholder="{{translate.enter}} {{translate.amount}}"
+                                                            value="" id="amount" data-validation="required">
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-lg-6 col-md-6">
+                                                    <div class="form-group ">
+                                                        <label>Select Payment Type:</label>
+                                                        <select name="paymentType" id="paymentType" class="form-control" required >
+                                                            <option value="Cash">Cash</option>
+                                                            {% if action == "add" %}
+                                                                <option value="Card">Card</option>
+                                                            {% endif %}
+                                                            </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                
+                                            <br>
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    {% if action=="add" %}
+                                                        <input type="submit" class="btn btn-success sbBtn btn-flat submitRegisterUser"
+                                                        value="{{translate.add}}"> 
+                                                    {% elseif action == "withdraw" %}
+                                                        <input type="submit" class="btn btn-success sbBtn btn-flat submitRegisterUser"
+                                                        value="{{translate.withdraw}}"> 
+                                                    {% endif %}
+
+                                                    <a href="/agent/cashinout"
+                                                        class="btn btn-danger btn-flat">{{translate.cancel}}</a>
+                                                </div>
+                                            </div>
+
+                                        </div>   
+
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+        let typingTimer;
+        const typingInterval = 500; // 0.5 seconds delay
+
+        $('#uniqueId').on('keyup', function() {
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(function() {
+                const uniqueId = $('#uniqueId').val();
+                console.log("uniqueId---", uniqueId)
+                if (uniqueId) {
+                    getUSerBalance(uniqueId);
+                } else {
+                    $('#balanceResult').text('');
+                }
+            }, typingInterval);
+        });
+
+        $('#uniqueId').on('keydown', function() {
+            clearTimeout(typingTimer);
+        });
+
+        $('#uniqueId').on('blur', function() {
+            clearTimeout(typingTimer);
+            const uniqueId = $('#uniqueId').val();
+            if (uniqueId) {
+                getUSerBalance(uniqueId);
+            } else {
+                $('#balanceResult').text('');
+            }
+        });
+
+        function getUSerBalance(uniqueId){
+            $.ajax({
+                url: '/agent/unique-id/balance/get',
+                method: 'GET',
+                data: { uniqueId: uniqueId, action : `{{action}}` },
+                success: function(response) {
+                    if(response.status == "success"){
+                        $('#balanceResult').text(`Current Balance: ${response.balance} Kr`).css('color', 'green');
+
+                    }else{
+                        $('#balanceResult').text(response.message).css('color', 'red');
+                        $('#balanceResult').text('');
+                    }
+                },
+            });
+        }
+
+        $(function() {
+            "use strict";
+
+            let SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    $( "#uniqueIdBalanceForm" ).submit(function( event ) {
+                        event.preventDefault();
+                        if($("#uniqueIdBalanceForm").isValid() == true){
+                            let action = "{{action}}";
+                            let confirmText = "{{translate.do_you_want_to_add_money_to_unique_id}}" + ` "${$('#uniqueId').val()}" ?`;
+                            let acceptMessage = "{{translate.yes_add_money}}!";
+                            let cancelMessage = "{{translate.the_add_money_action_has_been_cancelled}}.";
+                            if(action == "withdraw"){
+                                confirmText = "{{translate.do_you_want_to_withdraw_money_from_unique_id}}" +` "${$('#uniqueId').val()}" ?`;
+                                acceptMessage = "{{translate.yes_withdraw_money}}!";
+                                cancelMessage = "{{translate.the_withdraw_money_action_has_been_cancelled}}.";
+                            }
+                            swal({
+                                title: "{{translate.are_you_sure}}",
+                                text: confirmText,
+                                type: "warning",
+                                showCancelButton: true,
+                                confirmButtonColor: "#e69a2a",
+                                confirmButtonText: acceptMessage,
+                                cancelButtonText: "{{translate.cancel_button}}!",
+                                closeOnConfirm: false,
+                                closeOnCancel: false
+                            }, function(isConfirm) {
+                                if (isConfirm) {
+                                    $(".confirm").attr('disabled', 'disabled'); 
+                                    $.ajax({
+                                        url: '/agent/unique-id/balance/update', 
+                                        method: 'POST',
+                                        data: {
+                                            uniqueId: $('#uniqueId').val(),
+                                            amount: $('#amount').val(),
+                                            paymentType: $('#paymentType').val(),
+                                            action: $('#action').val(),
+                                        }, 
+                                        success: function(response) {
+                                            console.log("response of update user balance", response)
+                                            if(response.status == "success"){
+                                                if (response?.paymentType.toLowerCase() == "cash") {
+                                                    $("#rootChips").text(parseFloat(response.dailyBalance).toFixed(2));
+                                                }
+                                                swal("{{translate.success}}!", response.message, "success");
+                                            }else{
+                                                swal("{{translate.failed}}", response.message, "error");
+                                            }
+                                        }, complete: function() {
+                                            $("#uniqueIdBalanceForm")[0].reset();
+                                            $('#balanceResult').text('');
+                                        }
+                                    });
+                                } else {
+                                    swal("{{translate.cancelled}}", cancelMessage, "error");
+                                }
+                            });
+                            return false;
+                        }else{
+                            if ($(".has-error").length) {
+                                let el = $('.has-error').first();
+                                if (! $.isEmptyObject(el)) {
+                                    $('html, body').animate({
+                                        scrollTop: (el.offset().top)
+                                    },10);
+                                }
+                            }
+                        }
+                        
+                    });
+
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+    });
+</script>
+{% endblock %}

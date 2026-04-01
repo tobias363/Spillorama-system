@@ -1,0 +1,659 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<style>
+  button#search,
+  button#filterReset {
+    min-width: 55px;
+  }
+
+    /* css for ticket animation */
+  .ticket-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 10px;
+  }
+  .ticket {
+      display: grid;
+      grid-template-columns: repeat(5, 50px);
+      gap: 5px;
+      justify-content: center;
+  }
+  .cell {
+      width: 50px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #ccc;
+      font-size: 18px;
+      transition: background-color 0.5s;
+  }
+  .checked {
+      background-color: tomato; /* Red tone for checked boxes */
+      color: white;
+  }
+  .unchecked {
+      background-color: white; /* White for unchecked boxes */
+  }
+  .highlight {
+      position: relative;
+      animation: beaming 2s infinite;
+  }
+  /* .winning-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+      width: 100%;
+  }
+  .winning-line h4 {
+      margin: 0;
+      flex-grow: 1;
+      text-align: left;
+  }
+  .winning-line button {
+      margin-left: 10px;
+      white-space: nowrap;
+  } */
+  .winning-line {
+      display: flex;
+      align-items: center;
+      margin-top: 10px;
+      width: 100%;
+      padding: 5px 15px;
+      box-sizing: border-box;
+  }
+  .winning-line h4 {
+      margin: 0;
+      flex-grow: 1;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+  }
+  .winning-line button {
+      margin-left: 10px;
+      white-space: nowrap;
+  }
+  .no-winning-message {
+    margin-top: 20px; /* Add space on the upper side */
+    text-align: center;
+  }
+  @keyframes beaming {
+      0% {
+          box-shadow: 0 0 5px 2px lightgreen; /* Greenish shadow */
+      }
+      50% {
+          box-shadow: 0 0 20px 5px lightgreen; /* Larger greenish shadow */
+      }
+      100% {
+          box-shadow: 0 0 5px 2px lightgreen; /* Return to smaller greenish shadow */
+      }
+  }
+  /* css for ticket animation */
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+  <div class="container-fluid">
+
+    <!-- Title -->
+    <section class="content-header">
+      <h1>{{translate.physical_cashout_details}}</h1>
+      <ol class="breadcrumb">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+        <li class="active">{{translate.physical_cashout_details}}</li>
+      </ol>
+    </section>
+    <!-- /Title -->
+    {% include "partition/notification.html" %}
+    <!-- Row -->
+    <section class="content">
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                <h6 class="panel-title txt-dark">{{translate.physical_cashout_details}}</h6>
+              </div>
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+                <!-- Search Filter Code Start -->
+                <div class="row">
+                  <div class="col-sm-4">{{translate.date}} : {{gameData.startDate | date('DD/MM/YYYY') }}</div>
+                  <div class="col-sm-4">{{translate.sub_game_name}} : {{gameData.gameName}}</div>
+                  <div class="col-sm-4">
+                    <button type="button" id="rewardAll" class="btn btn-primary btn-sm pull-right">{{translate.reward_all}}</button>
+                  </div>
+                </div>
+                <br>
+                <!-- Search Filter Code End -->
+                <div class="table-wrap">
+                  <div class="table-responsive">
+                    <table id="myTable" class="table table-bordered table-hover text-center">
+                      <thead>
+                        <tr>
+                          <th>{{translate.physical_ticket_no}}.</th>
+                          <th>{{translate.ticket_type}}</th>
+                          <th>{{translate.ticket_price}}</th>
+                          <th>{{translate.winning_pattern}}</th>
+                          <th>{{translate.total_winning}}</th>
+                          <th>{{translate.rewarded_amount}}</th>
+                          <th>{{translate.pending_amount}}</th>
+                          <th>{{translate.action}}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <th colspan="5" class="text-right">{{translate.total_winnings}} : {{gameData.totalWinning}} kr</th>
+                          <th class="text-center">{{translate.rewarded}} : <span id="paid"></span> kr</th>
+                          <th colspan="2" class="text-left">{{translate.pending}} : <span id="pending"></span> kr</th>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="modal fade" id="ticketsModal" tabindex="-1" role="dialog" aria-labelledby="ticketsModalLabel"
+  aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
+            aria-hidden="true">&times;</span></button>
+        <h3 class="modal-title text-center" id="ticketsModalLabel">{{translate.bingo_pattern}}</h3>
+      </div>
+      <div class="modal-body">
+        <div class="ticket-wrapper">
+          <div id="ticket" class="ticket"></div>
+          <div id="winningLines" class="text-center"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script src="/socket.io/socket.io.js"></script>
+<script>
+
+  let id = `{{gameData._id | dump | safe}}`;
+  id = JSON.parse(id);
+  console.log("gameId",id);
+  $(document).ready(function () {
+    const shiftId = JSON.parse(`{{session.shiftId | dump | safe}}`);
+    const hallId = "{{hallId}}";console.log("hallid", hallId)
+    const adminSocket = io("/admin");
+    adminSocket.on("connect", () => {
+      adminSocket.emit("joinHall", { hallId }, (data) => {
+        console.log("Joined hall successfully");
+      });
+    });
+    adminSocket.on('hallBalanceBroadcast', handleHallBalanceUpdate);
+    function handleHallBalanceUpdate(resultData) {
+      console.log("handleHallBalanceUpdate data", resultData);
+      if (shiftId.toString() == resultData.shiftId.toString()) {
+        $('#rootChips').text(parseFloat(resultData.dailyBalance || 0).toFixed(2))
+      }
+    }
+
+    let host = window.location.origin;
+    console.log("host", host + "/agent/getPhysicalWinningInGame");
+    let table;
+    fetch_data();
+    function fetch_data() {
+      table = $('#myTable').DataTable({
+        "oLanguage": {
+          "sSearch": "{{translate.search}} {{translate.ticket_id}}",
+          "sLengthMenu": "{{translate.show}} _MENU_ {{translate.entries}}",
+          "oPaginate": {
+            sPrevious: "{{ translate.previous }}",
+            sNext: "{{ translate.next }}"
+          },
+          "sEmptyTable": "{{translate.no_data_available_in_table}}",
+          "sInfo": "{{translate.showing}} _START_ to _END_ of _TOTAL_ {{translate.entries}}",
+          "sInfoEmpty": "{{translate.showing}} 0 to 0 of 0 {{translate.entries}}",
+          "sProcessing": "<img style='width:50px; height:50px;' src='/admin/loading.gif'/>",
+        },
+        "autoWidth": false,
+        "paging": true,
+        "searching": true,
+        "processing": true,
+        "serverSide": true,
+        "order": [
+          [0, "desc"]
+        ],
+        "ajax": {
+          url : host+"/agent/getPhysicalWinningInGame",
+          type: "GET",
+          data : {
+            id : id
+          },
+          dataSrc: function (json) {
+            let pendingAmount = 0;
+            let paidAmount = 0;
+            for (let i = 0; i < json.data.length; i++) {
+              const winningStats = json.data[i].otherData.winningStats;
+              for (let j = 0; j < winningStats.length; j++) {
+                if (winningStats[j].isWinningDistributed) {
+                  paidAmount += winningStats[j].wonAmount;
+                }else{
+                  pendingAmount += winningStats[j].wonAmount;
+                }
+              }
+            }
+            console.log("total pending amount",pendingAmount);
+            console.log("total paid amount", paidAmount);
+            $('#paid').text(parseFloat(paidAmount).toFixed(2));
+            $('#pending').text(parseFloat(pendingAmount).toFixed(2));
+            return json.data;
+          },
+        },
+        "columns": [
+          {
+            "data": "ticketId",
+            "orderable": false,
+            "render": function (data, type, row) {
+              return row.ticketId;
+            }
+          }, {
+            "data": "ticketColorName",
+            "orderable": false,
+            "render": function (data, type, row) {
+              return row.ticketColorName;
+            }
+          }, {
+            "data": "ticketPrice",
+            "orderable": false,
+            "render": function (data, type, row) {
+              return row.ticketPrice;
+            }
+          }, {
+            "data": "winningStats",
+            "orderable": false,
+            "render":  function (data, type, row) {
+              let html = `<select name='patterns'>`;
+              for (let i = 0; i < row.otherData.winningStats.length; i++) {
+                html += `<option>${row.otherData.winningStats[i].lineType}</option>`
+              }
+              html += `</html>`;
+              return html;
+            }
+          }, {
+            "data": "totalWinningOfTicket",
+            "orderable": false,
+            "render": function (data, type, row) {
+              return row.totalWinningOfTicket;
+            }
+          }, {
+            "data": "winningStats",
+            "orderable": false,
+            "render": function (data, type, row) {
+              let amount = 0;
+              for (let i = 0; i < row.otherData.winningStats.length; i++) {
+                 if (row.otherData.winningStats[i].isWinningDistributed) {
+                  amount += row.otherData.winningStats[i].wonAmount;
+                 }
+              }
+              return amount;
+            }
+          }, {
+            "data": "winningStats",
+            "orderable": false,
+            "render": function (data, type, row) {
+              let amount = 0;
+              for (let i = 0; i < row.otherData.winningStats.length; i++) {
+                if (!row.otherData.winningStats[i].isWinningDistributed) {
+                  amount += row.otherData.winningStats[i].wonAmount;
+                }
+              }
+              return amount;
+            }
+          }, {
+            "data": null,
+            "orderable": false,
+            "render": function (data, type, row) {
+              return `<button id="ticketData_${row._id}" type="button" name="view" class="btn btn-info btn-xs view btn-rounded" title="{{translate.view_tickets}}"> <i class="fa fa-eye" aria-hidden="true"></i></button>`;
+            }
+          }
+        ]
+      });
+    }
+
+
+    $('#rewardAll').click(function (e) {
+      swal({
+        title: "{{translate.are_you_sure}}?",
+        text: "{{translate.reward_all_pending_winings}}?",
+        type: "warning",
+        showLoaderOnConfirm: true,
+        showCancelButton: true,
+        confirmButtonColor: "#e69a2a",
+        confirmButtonText: "{{translate.yes}}",
+        cancelButtonText: "{{translate.cancel_button}}",
+        closeOnConfirm: false,
+        closeOnCancel: false
+      }, function (isConfirm) {
+        if (isConfirm) {
+          $.ajax({
+            url: '/agent/reward-all',
+            method: 'POST',
+            data: {
+              id: id,
+            },
+            success: function (response) {
+              console.log("response after winning distribution", response)
+              if (response.status == "success") {
+                swal("{{translate.success}}!", response.message, "success");
+              } else {
+                swal("{{translate.failed}}", response.message, "error");
+              }
+            }, complete: function () {
+              table.ajax.reload()
+            }
+          });
+        } else {
+          swal("{{translate.cancelled}}", "{{translate.cancel_winning_distribution}}.", "error");
+        }
+      });
+    })
+
+    $('body').on('click','[id^="ticketData_"]',function () {
+      const ticketData = table.row($(this).parent().parent()).data()
+      console.log("ticket data :  ", ticketData);
+      
+      if(!ticketData){
+        alert("Something went wrong")
+      }
+      if(ticketData && ticketData.winningStats.lineTypeArray?.length > 0){
+        let winnings = [];
+        if (ticketData.otherData && ticketData.otherData.winningStats) {
+            winnings = ticketData.otherData.winningStats;
+        }
+        let responseTicketData = {ticket: ticketData.tickets, winnings: winnings, ticketNumber: ticketData.ticketId, id: ticketData.gameId, isPhysical: (ticketData.userType == "Physical") ? true : false, gameStartDate: ticketData.gameStartDate}
+        openBingoModal(responseTicketData)
+      }else{
+        $.ajax({
+          url: '/agent/game/check-bingo',
+          method: 'POST',
+          data: { ticketNumber: ticketData.ticketId, id: ticketData.gameId, isView: true },
+          success: function (response) {
+            console.log("response of check for bingo", response)
+            if (response.status == "success") {
+              openBingoModal(response)
+            } else {
+              let winnings = [];
+              if (ticketData.otherData && ticketData.otherData.winningStats) {
+                  winnings = ticketData.otherData.winningStats;
+              }
+              let responseTicketData = {ticket: ticketData.tickets, winnings: winnings, ticketNumber: ticketData.ticketId, id: ticketData.gameId, isPhysical: (ticketData.userType == "Physical") ? true : false, gameStartDate: ticketData.gameStartDate}
+              openBingoModal(responseTicketData)
+            }
+          }
+        });
+      }
+
+    })
+
+
+    // Function to render the ticket in the modal
+    function renderTicket(ticketData) {
+        const ticketElement = $('#ticket');
+        ticketElement.empty();
+        $.each(ticketData.ticket, function(rowIndex, row) {
+            $.each(row, function(cellIndex, cell) {
+                const cellElement = $('<div>')
+                  .addClass('cell')
+                  .text(cell.Number);
+                if (cell.checked) {
+                  cellElement.addClass('checked');
+                } else {
+                  cellElement.addClass('unchecked');
+                }
+                ticketElement.append(cellElement);
+            });
+        });
+      }
+
+    // Function to highlight winning elements in the ticket
+    function highlightWinningElements(ticketData) {
+        const ticketElement = $('#ticket');
+        const cells = ticketElement.find('.cell');
+
+        const winningLinesContainer = $('#winningLines');
+        winningLinesContainer.empty();
+        if (ticketData.winnings && Array.isArray(ticketData.winnings) && ticketData.winnings.length > 0) {
+          
+          $.each(ticketData.winnings, function(index, winning) {
+              const { lineType, wonAmount, wonElements, isWinningDistributed } = winning;
+              const { rows, columns } = wonElements;
+
+              // Display winning line type and cash-out button together
+              const lineDiv = $('<div>').addClass('winning-line');
+              const lineTitle = $('<h4>').text(`${lineType} - ${wonAmount} Kr`);
+              
+              lineDiv.append(lineTitle)
+              if(ticketData.isPhysical == true){
+
+                let isCashoutEnabled = false;
+                const gameStartDate = new Date(ticketData.gameStartDate);
+                const currentDate = new Date();
+                // Check if a new day has started
+                if (currentDate.toDateString() == gameStartDate.toDateString()) {
+                  isCashoutEnabled = true;
+                } 
+                
+                let cashOutBtn;
+                if(isWinningDistributed == true){
+                  cashOutBtn = $('<button>')
+                  .text('Rewarded')
+                  .addClass('btn btn-primary rewarded');
+                }else{
+                  if(isCashoutEnabled){
+                    cashOutBtn = $('<button>')
+                    .text('Cash Out')
+                    .addClass('btn btn-success cash-out')
+                    .on('click', function() {
+                      //alert(`Cash out ${wonAmount} Kr for ${lineType}`);
+                      // Add your logic for cashing out here
+                      physicalTicketCashout({ticketNumber: ticketData.ticketNumber, id: ticketData.id, lineType: lineType})
+
+                    });
+                  }else{
+                    cashOutBtn = $('<h4>')
+                        .text('Cash Out')
+                        .addClass('cash-out').css('padding-left', '10px');
+                  }
+                  
+                }
+                lineDiv.append(cashOutBtn);
+              }
+              
+              winningLinesContainer.append(lineDiv);
+
+              // Highlight columns
+              $.each(columns, function(index, columnIndex) {
+                cells.each(function(cellIndex) {
+                  if (cellIndex % 5 === parseInt(columnIndex)) {
+                    if (ticketData.ticket[Math.floor(cellIndex / 5)][cellIndex % 5].checked) {
+                        $(this).addClass('highlight');
+                    }
+                  }
+                });
+              });
+
+              // Highlight rows
+              $.each(rows, function(index, rowIndex) {
+                cells.each(function(cellIndex) {
+                  if (Math.floor(cellIndex / 5) === rowIndex) {
+                    if (ticketData.ticket[Math.floor(cellIndex / 5)][cellIndex % 5].checked) {
+                        $(this).addClass('highlight');
+                    }
+                  }
+                });
+              });
+
+              if (rows.length == 0 && columns.length == 0 && lineType == "Picture") {
+                // Highlight specific elements
+                let specificElements = [
+                { "rowIndex": 1, "columnIndex": 1 }, { "rowIndex": 1, "columnIndex": 2 },  { "rowIndex": 1, "columnIndex": 3 },
+                { "rowIndex": 2, "columnIndex": 1 }, { "rowIndex": 2, "columnIndex": 2 },  { "rowIndex": 2, "columnIndex": 3 },
+                { "rowIndex": 3, "columnIndex": 1 }, { "rowIndex": 3, "columnIndex": 2 },  { "rowIndex": 3, "columnIndex": 3 },
+                ]
+                $.each(specificElements, function(index, element) {
+                    const { rowIndex, columnIndex } = element;
+                    cells.each(function(cellIndex) {
+                        if (Math.floor(cellIndex / 5) === rowIndex && cellIndex % 5 === columnIndex) {
+                            if (ticketData.ticket[rowIndex][columnIndex].checked) {
+                                $(this).addClass('highlight');
+                            }
+                        }
+                    });
+                });
+              }
+
+              
+          });
+        } else {
+          console.log('No winnings data found or winnings is not an array.');
+          if(ticketData.winnings.length == 0 ){
+            const noWinningMessage = $('<div>').addClass('no-winning-message');
+            const message = $('<h3>').text('No patterns won');
+            noWinningMessage.append(message);
+            winningLinesContainer.append(noWinningMessage);   
+          }
+        }
+    }
+
+    function renderWinningLines(ticketData) {
+      const winningLinesContainer = $('#winningLines');
+      winningLinesContainer.empty();
+      console.log("renderWinningLines called", ticketData)
+      if (ticketData.winnings && Array.isArray(ticketData.winnings) && ticketData.winnings.length > 0) {
+          $.each(ticketData.winnings, function(index, winning) {
+              const { lineType, wonAmount, wonElements, isWinningDistributed } = winning;
+              const { rows, columns } = wonElements;
+
+              // Display winning line type and cash-out button together
+              const lineDiv = $('<div>').addClass('winning-line');
+              const lineTitle = $('<h4>').text(`${lineType} - ${wonAmount} Kr`);
+              
+              let isCashoutEnabled = false;
+              const gameStartDate = new Date(ticketData.gameStartDate);
+              const currentDate = new Date();
+              // Check if a new day has started
+              if (currentDate.toDateString() == gameStartDate.toDateString()) {
+                isCashoutEnabled = true;
+              } 
+              
+              let cashOutBtn;
+              if(ticketData.isPhysical == true){
+
+                if (isWinningDistributed) {
+                    cashOutBtn = $('<button>')
+                        .text('Rewarded')
+                        .addClass('btn btn-primary rewarded');
+                } else {
+                  if(isCashoutEnabled){
+                    cashOutBtn = $('<button>')
+                        .text('Cash Out')
+                        .addClass('btn btn-success cash-out')
+                        .on('click', function() {
+                          physicalTicketCashout({
+                              ticketNumber: ticketData.ticketNumber,
+                              id: ticketData.id,
+                              lineType: lineType
+                          });
+                        });
+                  }else{
+                    cashOutBtn = $('<span>')
+                        .text('Cash Out')
+                        .addClass('cash-out-text');
+                  }
+                    
+                }
+
+              }
+
+              lineDiv.append(lineTitle).append(cashOutBtn);
+              winningLinesContainer.append(lineDiv);
+          });
+      } else {
+          console.log('No winnings data found or winnings is not an array.');
+          const noWinningMessage = $('<div>').addClass('no-winning-message').text('No Patterns Won');
+          winningLinesContainer.append(noWinningMessage);
+      }
+    }
+
+    function openBingoModal(ticketData) {
+      renderTicket(ticketData);
+      highlightWinningElements(ticketData);
+      $("#ticketsModalLabel").text(ticketData.ticketNumber)
+      $('#ticketsModal').modal('show'); // Using jQuery to show Bootstrap modal
+    }
+
+    function physicalTicketCashout(data){
+      const {ticketNumber, id, lineType} = data;
+      console.log("physicalTicketCashout called", ticketNumber, id, lineType);
+      let previousWindowKeyDown = window.onkeydown;
+      swal({
+          title: "{{translate.are_you_sure}}?",
+          text: "{{translate.do_you_want_to_cash_out}}",
+          icon: "warning",
+          showCancelButton: true,
+          confirmButtonColor: "#e69a2a",
+          confirmButtonText: "{{translate.yes}}",
+          cancelButtonText: "{{translate.cancel_button}}",
+          closeOnConfirm: false,
+          closeOnCancel: true
+      }, function (isConfirm) {
+          window.onkeydown = previousWindowKeyDown;
+          if (isConfirm) {
+            $(".confirm").attr('disabled', 'disabled');
+            $.ajax({
+              url: '/agent/game/physical/cash-out', 
+              method: 'POST',
+              data:data, 
+              success: function(response) {
+                console.log("response of cash out", response)
+                if(response.status == "success"){
+                  $('#myTable').DataTable().clear().destroy();
+                  fetch_data();
+                  renderWinningLines(response);
+                  swal("{{translate.success}}!", response.message, "success");
+                }else{
+                  if(response.isAlreadyCashout){
+                    $('#myTable').DataTable().clear().destroy();
+                    fetch_data();
+                    renderWinningLines(response);
+                  }
+                  swal("{{translate.failed}}", response.message, "error");
+                }
+              }, complete: function() {
+                
+              }
+            });
+          } else {
+            
+          }
+          window.onkeydown = previousWindowKeyDown;
+      });
+    }
+
+
+  });
+
+</script>
+{% endblock %}

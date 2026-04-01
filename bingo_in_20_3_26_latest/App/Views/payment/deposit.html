@@ -1,0 +1,194 @@
+<html>
+	<head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Spilorama Deposit Payment</title>
+        
+            <link rel="stylesheet" type="text/css" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" />
+            <link rel="stylesheet" type="text/css" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" />
+            <script src="/vendors/bower_components/jquery/dist/jquery.min.js"></script>
+            <style type="text/css">
+                
+                 body { background: #812222; }
+                .payment { border: 1px solid #f2f2f2; height: 330px; border-radius: 20px; background: #fff; }
+                .payment_header { background: rgba(98,190,79,255); padding: 20px; border-radius: 20px 20px 0px 0px; }
+                .check { margin: 0px auto; width: 50px; height: 50px; border-radius: 100%; background: #fff; text-align: center; }
+                .check i { vertical-align: middle; line-height: 50px; font-size: 30px; color: #62be4f}
+                .content { text-align: center; padding: 25px}
+                .content  h1 { font-size: 25px; padding-top: 20px; }
+                .content a { width: 200px; height: 35px; color: #fff; border-radius: 30px; padding: 5px 10px; background: rgba(98,190,79,255); transition: all ease-in-out 0.3s; }
+                .content a:hover { text-decoration: none; background: #812222; }
+               
+                .times i {color: rgba(255, 102, 0, 1)}
+                .orange { background: rgba(255, 102, 0, 1); }
+                .content .orange {background: rgba(255, 102, 0, 1);}
+                .center-container {
+                    height: 100vh; 
+                    display: flex; 
+                    justify-content: center; 
+                    align-items: center; 
+                }
+                .spinner {
+                    border: 4px solid rgba(0, 0, 0, 0.1);
+                    border-left-color: #7983ff;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                    position: absolute;
+                    height: 80px;
+                    width: 80px;
+                    top: 50%;
+                    left: 50%;
+                    margin-left: -50px;
+                    margin-top: -50px;
+                    background-size: 100%;
+                }
+
+                .center-container iframe {
+                    border-radius: 40px;
+                }
+
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+
+                @media screen and (max-device-width: 991px) and (orientation: landscape) {
+                    .center-container {
+                        height: 100vh; 
+                    }
+                    .center-container iframe {
+                        /* height: 150% !important; */
+                        transform: scale(0.6) !important;
+                        border-radius: 40px;
+                    }
+                } 
+                /* .center {
+                    height: 100%; display: flex; align-items: center;
+                } */
+
+                .custom-iframe-class {
+                    background: #812222;
+                }
+
+                @media screen and (max-device-width: 991px) and (orientation: landscape) {
+                    .paymentRow {
+                        transform: scale(0.9) !important;
+                    }
+                } 
+            </style>
+        
+	</head>
+	<body>
+		<div class="container center-container">
+        <!-- <div class="center"> -->
+        {% if (status == "pending") %}
+        <div class="spinner-container">
+            <div class="spinner"></div>
+        </div>
+        <script defer src="{{url}}"></script>
+        {% else %}
+
+        <div class="row paymentRow">
+            <div class="col-md-10 mx-auto">
+                {% if (status == "success") %}
+                <div class="payment">
+                    <div class="payment_header">
+                        <div class="check"><i class="fa fa-check" aria-hidden="true"></i></div>
+                    </div>
+                    <div class="content">
+                        <h1>{{title}}</h1>
+                        <p> {{message}} </p>
+                        <a href="#" class="btn btn-primary gotoApp">{{goBack}}</a>
+                    </div>
+                </div>
+                {% else %}
+                <div class="payment">
+                    <div class="payment_header orange">
+                        <div class="check times"><i class="fa fa-exclamation" aria-hidden="true"></i></div>
+                    </div>
+                    <div class="content">
+                        <h1>{{title}}</h1>
+                        <p> {{message}} </p>
+                        <a href="#" class="btn btn-primary gotoApp">{{goBack}}</a>
+                    </div>
+                </div>
+                {% endif %}
+		    </div>
+        </div>
+        {% endif %}
+        
+        {% if (status == "pending") %}
+            <script>
+                function hideSpinner() {
+                    const spinner = document.querySelector('.spinner');
+                    spinner.style.display = 'none';
+                }
+
+                $(window).on('load', function () {
+                    hideSpinner();
+                });
+                
+                function generateTabId() {
+                    return Math.random().toString(36).substring(2);
+                }
+
+                if (!sessionStorage.getItem('tabId')) {
+                    sessionStorage.setItem('tabId', generateTabId());
+                }
+
+                window.addEventListener('message', function(event) {console.log("event.data", event.data)
+                    if(event.data.event == "SHOW_VIPPS_SCREEN"){console.log("innnn---")
+                        setTimeout(()=>{
+                            let deviceWidth = window.innerWidth;
+                            console.log("deviceWidth---", deviceWidth)
+                            //alert(deviceWidth)
+                            if (deviceWidth < 992) { 
+                                document.querySelector("iframe").style.cssText="min-height: 800px; transform: scale(0.4) !important; min-width: 690px; width: 100%; overflow:auto; align-items: center; text-align:center;" ;
+                            }  else { // For large devices (e.g., desktops)
+                                document.querySelector("iframe").style.cssText="min-height:100%; min-width: 690px; width: 100%; overflow:auto; align-items: center; text-align:center;" ;
+                            }
+                            //document.querySelector("iframe").style.cssText="min-height:100%; min-width: 690px; width: 100%; overflow:auto; align-items: center; text-align:center;" ;
+                            //console.log("check")
+                        },1000)
+                    }
+                });
+
+                
+            </script>
+        {% else %}
+            <script>
+                function goBack(data){
+					let url = window.location.pathname;
+                    let id = url.substring(url.lastIndexOf('/') + 1);
+                    let host = window.location.origin;
+                    console.log("id---", id, host)
+                    if(id){
+                        $.ajax({
+                            type: 'POST',
+                            url: host + "/payment/goback",
+                            data: {id: id},
+                            success: function(resultData) {
+                                console.log(resultData);
+                                if (resultData.status == 'success') {
+                                    console.log("go back", resultData.message);
+                                }
+                            }
+                        });
+                    }
+				}
+                setTimeout(function(){
+					goBack();
+				}, 10000);
+
+		
+				$(".gotoApp").click(function(e){
+                    e.preventDefault();
+					goBack();
+				});
+                
+            </script>
+        {% endif %}
+	</body>
+</html>

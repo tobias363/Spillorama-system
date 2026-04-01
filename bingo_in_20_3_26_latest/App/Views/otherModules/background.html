@@ -1,0 +1,166 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>Background</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>
+                <li class="active">Background</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">Background</h6>
+                            </div>
+                            <div class="pull-right">
+                                <a href="/addBackground"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add Background</button></a>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>Name</th>
+                                                    <th>Photo</th>
+                                                    <th>Default</th>
+                                                    <th>Price</th>
+                                                    <th>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+
+        // [ Variable Declaration ]
+
+
+
+        var host = window.location.origin;
+        $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "Search GameName"
+            },
+            "scrollX": true,
+            "searching": true,
+            "processing": true,
+            "serverSide": true,
+            "order": [
+                [0, "desc"]
+            ],
+            "autoWidth": false,
+            "pageLength": 25,
+            "ajax": host + "/otherModules/getBackground",
+            "columns": [{
+                "data": "name"
+            }, {
+                "data": "photo",
+                render: function(data, type, row) {
+                    return `<div class="image imagewidthSet">
+                                <img src="/profile/bingo/` + row.photo + `" alt="` + row.name + ` "style="width: 60%;"/>
+                            </div>`;
+                }
+            }, {
+                "data": "isDefault"
+            }, {
+                "data": "price"
+            }, {
+                "data": "action",
+                render: function(data, type, row) {
+                    let html = `
+                            <a href="/editBackground/` + row._id + `">
+                                <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit"><i class="fa fa-edit" aria-hidden="true"></i>
+                                </button>
+                            </a>`;
+                    html += `<button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded">
+                                        <i class="fa fa-trash" aria-hidden="true"></i>
+                                    </button>`;
+                    return html;
+                }
+            }],
+        });
+
+        $(function() {
+            "use strict";
+
+            var SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    //Parameter
+                    $('body').on('click', '.delete', function(e) {
+                        var id = $(this).attr('id');
+                        var thisElement = this;
+                        swal({
+                            title: "Are you sure?",
+                            text: "You will not be able to recover this Background!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes, delete it!",
+                            cancelButtonText: "No, cancel Plz!",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/background/deleteBackground",
+                                    data: {
+                                        id: id
+                                    },
+                                    success: function(resultData) {
+                                        console.log(resultData);
+                                        if (resultData == 'success') {
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                                        }
+                                        // alert("Save Complete")
+                                    }
+                                });
+                                swal("Deleted!", "Background Deleted Succesfully.", "success");
+                            } else {
+                                swal("Cancelled", "Game Not Deleted)", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+    });
+</script>
+{% endblock %}

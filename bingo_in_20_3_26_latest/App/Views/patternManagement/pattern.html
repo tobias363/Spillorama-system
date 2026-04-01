@@ -1,0 +1,346 @@
+{% extends "partition/layout.html" %} {% block body %}
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1> {{gameData.name}} {{pattern.pattern_management}} </h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{pattern.dashboard}}</a></li>
+                <li class="active" href="#"> {{gameData.name}} {{pattern.pattern_management}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{gameData.name}} {{pattern.pattern_management}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                <!-- Game 1  -->
+                                {% if gameData.type=='game_1' %}
+                                <a href="/addPattern/{{gameData._id}}"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> {{pattern.add_pattern}} {{gameData.name}}</button></a>
+                                <!-- over  -->
+                                <!-- Game 3  -->
+                                {% elif gameData.type=='game_3' %}
+                                <!-- Game 3 pattern count -->
+                                {% if count==32 %}
+                                <!-- Game 3 total 32 achive so button hide  -->
+                                {% else %}
+                                <a href="/addPattern/{{gameData._id}}"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> {{pattern.add_pattern}} {{gameData.name}}</button></a>
+                                <!-- over  -->
+                                {% endif %}
+                                <!-- Game 4  -->
+                                {% elif gameData.type=='game_4' %}
+                                <!-- Game 4 pattern count -->
+                                {% if count==15%}
+                                <!-- Game 4 total 15 achive so button hide  -->
+                                {% else %}
+                                <a href="/addPattern/{{gameData._id}}"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> {{pattern.add_pattern}} {{gameData.name}}</button></a>
+                                <!-- over  -->
+                                {% endif %}
+                                <!-- all over  -->
+                                {% elif gameData.type=='game_5' %}
+                               
+                                    {% if count <17 %}
+                                        <a href="/addPattern/{{gameData._id}}"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> {{pattern.add_pattern}} {{gameData.name}}</button></a>
+                                    {% endif %}
+                            
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr>
+                                                    {% for row in theadField %}
+                                                    <th>{{row}}</th>
+                                                    {% endfor %}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+
+
+{% endblock %} {% block Jscript %}
+
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+<script>
+    var gameType = '{{gameData.type}}';
+    console.log("gameType::::::", gameType);
+    var columns;
+    var typeId = '{{gameData._id}}';
+    let viewFlag = '{{viewFlag}}';
+    let editFlag = '{{editFlag}}';
+    let deleteFlag = '{{deleteFlag}}';
+    console.log("typeId", typeId);
+
+    if (gameType == "game_1") {
+        columns = [{
+            "data": "gameName"
+        }, {
+            "data": "patternNumber"
+        }, {
+            "data": "patternName"
+        }, {
+            "data": "status"
+        }, 
+        { "data": "createdAt", render: function(data , type , row){
+					
+                    let dt = new Date(row.createdAt);
+                    let date = dt.getDate();
+                    let month = parseInt(dt.getMonth() + 1);
+                    let year = dt.getFullYear();
+                    let hours = dt.getHours();
+                    let minutes = dt.getMinutes();
+                    let ampm = hours >= 12 ? 'pm' : 'am';
+                    hours = hours % 12;
+                    hours = hours ? hours : 12;
+                    minutes = minutes < 10 ? '0' + minutes : minutes;
+                    month = month < 10 ? '0' + month : month;
+                    let newDt = year + '/' + month + '/' + date + ' ' + hours + ':' + minutes + ' ' + ampm;
+                    return newDt;
+                                
+                } 
+        },
+        {
+            "data": "action",
+            render: function(data, type, row) {
+                let html = '';
+                if(viewFlag){
+                    html += `<a href="/viewPattern/${typeId}/${row._id}" class="btn btn-info btn-xs btn-rounded" title="{{pattern.view_pattern}}"><i class="fa fa-eye" aria-hidden="true"></i></a>`
+                }
+                if(editFlag){
+                    html += `<a href="/patternEdit/${typeId}/${row._id}"><button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a>`
+                }
+                if(deleteFlag){
+                    html += `<button type="button" name="delete" id="${row._id}" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>`
+                }
+                return html;
+                // return ' <a href="/patternEdit/' + typeId + '/' + row._id + '"><button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a> <button type="button" name="delete" id="' + row._id + '" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>'
+            }
+        }];
+    } else if (gameType == "game_3") {
+        columns = [{
+            "data": "gameName"
+        }, {
+            "data": "patternNumber"
+        }, {
+            "data": "patternName"
+        }
+        // , {
+        //     "data": "patternPlace"
+        // }
+        ,
+        { "data": "createdAt", render: function(data , type , row){
+					
+                    let dt = new Date(row.createdAt);
+                    let date = dt.getDate();
+                    let month = parseInt(dt.getMonth() + 1);
+                    let year = dt.getFullYear();
+                    let hours = dt.getHours();
+                    let minutes = dt.getMinutes();
+                    let ampm = hours >= 12 ? 'pm' : 'am';
+                    hours = hours % 12;
+                    hours = hours ? hours : 12;
+                    minutes = minutes < 10 ? '0' + minutes : minutes;
+                    month = month < 10 ? '0' + month : month;
+                    let newDt = year + '/' + month + '/' + date + ' ' + hours + ':' + minutes + ' ' + ampm;
+                    return newDt;
+                                
+                } 
+        },
+        {
+            "data": "action",
+            render: function(data, type, row) {
+                let html = '';
+                if(viewFlag){
+                    html += `<a href="/viewPattern/${typeId}/${row._id}" class="btn btn-info btn-xs btn-rounded" title="{{pattern.view_pattern}}"><i class="fa fa-eye" aria-hidden="true"></i></a>`
+                }
+                if(editFlag){
+                    html += `<a href="/patternEdit/${typeId}/${row._id}"><button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a>`
+                }
+                if(deleteFlag){
+                    html += `<button type="button" name="delete" id="${row._id}" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>`
+                }
+                return html;
+                // return '<a href="/viewPattern/' + typeId + '/' + row._id + '" class="btn btn-info btn-xs btn-rounded" title="{{pattern.view_pattern}}"><i class="fa fa-eye" aria-hidden="true"></i></a> <a href="/patternEdit/' + typeId + '/' + row._id + '"><button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a> <button type="button" name="delete" id="' + row._id + '" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>'
+            }
+        }];
+    } else if (gameType == "game_4" || gameType == "game_5") {
+        columns = [{
+            "data": "gameName"
+        }, {
+            "data": "patternNumber"
+        }, {
+            "data": "patternName"
+        },
+        { "data": "createdAt", render: function(data , type , row){
+					
+                    let dt = new Date(row.createdAt);
+                    let date = dt.getDate();
+                    let month = parseInt(dt.getMonth() + 1);
+                    let year = dt.getFullYear();
+                    let hours = dt.getHours();
+                    let minutes = dt.getMinutes();
+                    let ampm = hours >= 12 ? 'pm' : 'am';
+                    hours = hours % 12;
+                    hours = hours ? hours : 12;
+                    minutes = minutes < 10 ? '0' + minutes : minutes;
+                    month = month < 10 ? '0' + month : month;
+                    let newDt = year + '/' + month + '/' + date + ' ' + hours + ':' + minutes + ' ' + ampm;
+                    return newDt;
+                                
+                } 
+        },
+        {
+            "data": "action",
+            render: function(data, type, row) {
+                if(viewFlag){
+                    return `<a href="/viewPattern/${typeId}/${row._id}" class="btn btn-info btn-xs btn-rounded" title="{{pattern.view_pattern}}">
+                                <i class="fa fa-eye" aria-hidden="true"></i>
+                            </a>`;
+                }else{
+                    return '';
+                }
+
+                /* 
+                        
+                <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>
+                <a href="/patternEdit/` + typeId + `/` + row._id + `">
+                    <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                        <i class="fa fa-edit" aria-hidden="true"></i>
+                    </button>
+                </a> */
+
+            }
+        }];
+    }
+
+    let targetCol = 0;
+    if (gameType == "game_1") {
+        targetCol = 3;
+    } else if (gameType == "game_3") {
+        targetCol = 3;
+    } else if (gameType == "game_4") {
+        targetCol = 3;
+    }
+
+    $(document).ready(function() {
+        var host = window.location.origin;
+        let newTable = $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "{{pattern.search_pattern_name}}",
+                "sLengthMenu": "{{pattern.show}} _MENU_ {{pattern.entries}}",
+				"oPaginate": {
+					sPrevious: "{{ pattern.previous }}",
+					sNext: "{{ pattern.next }}"
+				},
+                "sEmptyTable": "{{pattern.no_data_available_in_table}}",
+                "sInfo": "{{pattern.showing}} _START_ to _END_ of _TOTAL_ {{pattern.entries}}",
+                "sInfoEmpty": "{{pattern.showing}} 0 to 0 of 0 {{pattern.entries}}"
+            },
+            "scrollX": true,
+            "order": [
+                [1, "asc"]
+            ],
+            "columnDefs": [{
+                "targets": [0, targetCol],
+                "orderable": false
+            }],
+            "searching": true,
+            "processing": true,
+            "serverSide": true,
+            "autoWidth": false,
+            "pageLength": 25,
+            "ajax": {
+                url: host + "/getPatternDetailList",
+                data: {
+                    gameType: gameType
+                }
+            },
+            "columns": columns,
+        });
+
+
+        $(function() {
+            "use strict";
+
+            var SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    //Parameter
+                    $('body').on('click', '.delete', function(e) {
+                        var id = $(this).attr('id');
+                        var thisElement = this;
+                        swal({
+                            title: "Are you sure?",
+                            text: "You will not be able to recover this Pattern!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes, delete it!",
+                            cancelButtonText: "No, cancel Plz!",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/getPatternDelete",
+                                    data: {
+                                        id: id
+                                    },
+                                    success: function(resultData) {
+                                        console.log(resultData);
+                                        if (resultData == 'success') {
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                                            newTable.ajax.reload();
+                                        }
+                                        // alert("Save Complete")
+                                    }
+                                });
+                                swal("Deleted!", "Pattern Deleted Succesfully.", "success");
+                            } else {
+                                swal("Cancelled", "Pattern Not Deleted", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+    });
+</script>
+{% endblock %}

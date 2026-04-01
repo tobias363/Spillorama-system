@@ -1,0 +1,292 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+
+    .cst {
+        display: flex;
+        justify-content: flex-end;
+        gap: 20px;
+        align-items: flex-end;
+    }
+
+    .form-horizontal button {
+        width: 50px;
+    }
+
+    button#search,
+    button#filterReset {
+        min-width: 55px;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{unique.transaction_history}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i>{{unique.dashboard}}</a></li>
+                <li class="active" href="#">{{unique.transaction_history}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+           
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{unique.transaction_history}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                <!-- <a href="/addWallet"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add Wallet</button></a> -->
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="row">
+                                    
+                                    <div class="col-sm-3">
+                                        <div class="form-group">
+                                            <label for="fromDate" class="control-label">{{unique.from_date}} :</label>
+                                            <div class='input-group date' id='startDate'> 
+                                                <input type='text' class="form-control" name="fromDate" id="fromDate" placeholder="{{unique.start_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"/>
+                                                <span class="input-group-addon">
+                                                    <span class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                   
+                                    <div class="col-sm-3">
+                                        <div class="form-group">
+                                            <label for="toDate" class="control-label">{{unique.to_date}} :</label>
+                                            <div class='input-group date' id='endDate'>
+                                                <input type='text' class="form-control" name="toDate" id="toDate" placeholder="{{unique.end_date}}" data-date-format="yyyy-mm-dd" autocomplete="off" />
+                                                <span class="input-group-addon">
+                                                    <span class="glyphicon glyphicon2 glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-sm-6">
+                                        <div class="form-group">
+                                            <label for=""></label>
+                                            <div class='row'>
+                                                <div class='col-xs-2'>
+                                                    <input type="button" name="search" id="search" value="{{unique.search}}" class="btn btn-info searchTransaction" />
+                                                </div>
+                                                <!-- <div class='col-xs-2'>
+                                                    <input type="button" name="reset" id="reset" value="Reset" class="btn btn-info" />
+                                                </div> -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                </div>
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <input type="text" class="playerId" id="playerId" value="{{playerId}}" hidden>
+                                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{unique.order_number}}</th>
+                                                    <th>{{unique.tranaction_id}}</th>
+                                                    <th>{{unique.date_time}}</th>
+                                                    <th>{{unique.tranaction_type}}</th>
+                                                    <th>{{unique.amount}}</th>
+                                                    <th>{{unique.status}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script>
+    var orderTable = "";
+    var host = window.location.origin;
+    $(document).ready(function() {
+        function formatDate(date) {
+            let d = new Date(date),
+                month = '' + (d.getMonth() + 1),
+                day = '' + d.getDate(),
+                year = d.getFullYear();
+
+            if (month.length < 2) 
+                month = '0' + month;
+            if (day.length < 2) 
+                day = '0' + day;
+
+            return [year, month, day].join('-');
+        }
+
+        //Setting Up Start and End Date
+        $('#startDate input').datepicker({
+            autoclose: true,
+            endDate : new Date()
+        }).on('changeDate', function (ev) {
+            let minDate = new Date(ev.date.valueOf());
+            $('#endDate input').datepicker('setStartDate', minDate);
+        });
+
+
+        $("#endDate input").datepicker({
+            //settings
+            startDate: $('#startDate input').val(),
+            autoclose:true,
+            endDate: new Date()
+        }).on('changeDate', function (selected) {
+            let minDate = new Date(selected.date.valueOf());
+            $('#startDate input').datepicker('setEndDate', minDate);
+        });
+
+        $('.glyphicon1').click(function() {
+            $("#startDate input").focus();
+        });
+
+        $('.glyphicon2').click(function() {
+            $("#endDate input").focus();
+        });
+        ////Setting Up Start and End Date Done
+
+        //Setting initial Value in Start Date and End Date
+        $('#startDate input').datepicker('setDate', formatDate(new Date(new Date().setDate(new Date().getDate() - 7))));
+        $('#endDate input').datepicker('setDate', formatDate(new Date()));
+
+        let ajaxUrl = host + "/unique/get/transactions";
+        function loadData() {
+            let startdate = $("#fromDate").val();
+            let enddate = $("#toDate").val();
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "{{unique.search}} {{unique.unique_id}}",
+                    "sLengthMenu": "{{unique.show}} _MENU_ {{unique.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ unique.previous }}",
+                        sNext: "{{ unique.next }}"
+                    }
+                },
+                //"language": { search: '', searchPlaceholder: "search" },
+                "processing": true,
+                "serverSide": true,
+                "ordering": false,
+                "order": [
+                    [2, "desc"]
+                ],
+                "autoWidth": false,
+                "pageLength": 10,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: function (data) {
+                        data.playerId = $('#playerId').val();
+                        data.startdate = startdate;
+                        data.enddate = enddate;
+                    }
+                },
+                /*dom: 'lBfrtip',*/
+                lengthMenu: [
+                    [10, 100, -1],
+                    [10, 100, "All"]
+                ],
+                /*"buttons": [
+                    // 'csv', 'excel'
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }, {
+                        extend: 'excelHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }
+                ],*/
+                "columns": [{
+                "data": "transactionId"
+            }, {
+                "data": "transactionId"
+            }, {
+                "data": "createdAt",
+                render: function(data, type, row) {
+                    let dt = new Date(row.createdAt);
+                    let date = dt.getDate();
+                    let month = parseInt(dt.getMonth() + 1);
+                    let year = dt.getFullYear();
+                    let hours = dt.getHours();
+                    let minutes = dt.getMinutes();
+                    let ampm = hours >= 12 ? 'pm' : 'am';
+                    hours = hours % 12;
+                    hours = hours ? hours : 12;
+                    minutes = minutes < 10 ? '0' + minutes : minutes;
+                    let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+                    return createdAt;
+                }
+            }, {
+                "data": "category"
+            }, {
+                "data": "typeOfTransactionTotalAmount",
+                render: function(data, type, row, meta){
+                    let amount = 0;
+                    if(row.typeOfTransactionTotalAmount != undefined){
+                        amount = row.typeOfTransactionTotalAmount;
+                    }
+                    return amount;
+                }
+            }, {
+                "data": "status",
+                render: function(data, type, row) {
+                    if (row.status == "pending") {
+                        return '<span class="badge bg-blue">In Progress</span>';
+                    } else if (row.status == "success") {
+                        return '<span class="badge bg-green">' + row.status + '</span>';
+                    } else if (row.status == "fail") {
+                        return '<span class="badge bg-red">' + row.status + '</span>';
+                    } else if (row.status == "rejected") {
+                        return '<span class="badge bg-red">' + row.status + '</span>';
+                    }
+                }
+            }, ]
+            });
+        }
+        loadData();
+
+        var table = $('#myTable').DataTable();
+
+        $('body').on('click', '.searchTransaction', function (e) {
+            $('#myTable').DataTable().clear().destroy();
+            loadData();
+        });
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

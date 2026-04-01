@@ -1,0 +1,443 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{rejectRequest.rejected_player_details}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{rejectRequest.dashboard}}</a></li>
+                <li class="active">{{rejectRequest.rejected_player_details}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content">
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{rejectRequest.rejected_player_details}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <form method="POST" action="#" class="form-horizontal">
+                                            <table border="0" class="table display  pb-30">
+                                                <div class="col-sm-8">
+                                                    <div class="panel-wrapper collapse in">
+                                                        <div class="panel-body">
+                                                            <input type="text" class="playerId" value="{{Player._id}}" hidden>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="username">{{rejectRequest.photo_id}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    {% for photos in Player.profilePic%}
+                                                                    <img src="{{photos}}" style="width: 100px;margin-right: 10px;">
+                                                                    {%endfor%}
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="customerNumber">{{rejectRequest.customer_number}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.customerNumber}}">
+                                                                </div>
+                                                            </div>
+                                                
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="username">{{rejectRequest.username}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.username}}">
+                                                                </div>
+                                                            </div>
+                                                
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="email">{{rejectRequest.emailId}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.email}}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="mobile">{{rejectRequest.phone_number}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.phone}}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{rejectRequest.firstname}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.nickname}}">
+                                                                </div>
+                                                            </div>
+                                                
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4">{{rejectRequest.date_of_birth}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{DOB}}">
+                                                                </div>
+                                                            </div>
+                                                
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{rejectRequest.bank_ac_no}}.:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.bankId}}">
+                                                                </div>
+                                                            </div>
+                                                
+                                                            <!-- <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">Group Hall:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required
+                                                                        value="{{Player.groupHall.name}}">
+                                                                </div>
+                                                            </div> -->
+                                                
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{rejectRequest.hall}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required
+                                                                        value="{{Player.hall.name}}">
+                                                                </div>
+                                                            </div>
+                                                
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{rejectRequest.reject_by}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required
+                                                                        value="{{Player.hall.actionBy.name}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- PLayer Address Details -->
+                                                            <!-- Residential Address in Norway Question -->
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-4">{{rejectRequest.do_you_have_address_in_norway}}:</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" name="isResidentialAddressInNorway" value="yes"
+                                                                        {% if Player.addressDetails.residentialAddressInNorway == true %} checked {% endif %}
+                                                                        disabled
+                                                                    >
+                                                                    <label for="html">{{rejectRequest.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" name="isResidentialAddressInNorway" value="no"
+                                                                        {% if Player.addressDetails.residentialAddressInNorway == false %} checked {% endif %}
+                                                                        disabled
+                                                                    >
+                                                                    <label for="html">{{rejectRequest.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- Norwegian Address Fields (shown when Yes is selected) -->
+                                                            <div class="norwegian-address-fields" style="display: none;">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="city">{{rejectRequest.city}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" class="form-control" id="city" name="city" placeholder="Enter City" value="{{Player.addressDetails.city}}" data-validation="required" disabled>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="zipCode">{{rejectRequest.zip_code}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" class="form-control" id="zipCode" name="zipCode" placeholder="Enter ZIP Code" value="{{Player.addressDetails.zipCode}}" data-validation="required" disabled>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="address">{{rejectRequest.address}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <textarea class="form-control" id="address" name="address" placeholder="Enter Address" data-validation="required" disabled rows="3">{{Player.addressDetails.address}}</textarea>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- International Address Fields (shown when No is selected) -->
+                                                            <div class="international-address-fields" style="display: none;">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="country">{{rejectRequest.country}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <select class="form-control" id="country" name="country" data-validation="required" disabled>
+                                                                            <option>{{Player.addressDetails.country}}</option>
+                                                                        </select>
+                                                                    </div>
+                                                                </div>
+
+                                                                 <!-- Income Sources -->
+                                                                 <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{rejectRequest.type_of_income_used_to_play}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="salary" 
+                                                                                    {% if Player.addressDetails.incomeSources.salary %} checked {% endif %}
+                                                                                    data-validation="checkbox_group"
+                                                                                    data-validation-qty="min1"
+                                                                                    disabled
+                                                                                >
+                                                                                {{rejectRequest.salary}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="propertySaleOrLease" 
+                                                                                    {% if Player.addressDetails.incomeSources.propertySaleOrLease %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{rejectRequest.sale_lease_property}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="stocks" 
+                                                                                    {% if Player.addressDetails.incomeSources.stocks %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{rejectRequest.stocks}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="socialSupport" 
+                                                                                    {% if Player.addressDetails.incomeSources.socialSupport %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{rejectRequest.social_security_pension_support_scheme}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="giftsOrInheritance" 
+                                                                                    {% if Player.addressDetails.incomeSources.giftsOrInheritance %} checked {% endif %}
+                                                                                    disabled
+                                                                                >  
+                                                                                {{rejectRequest.gift_inheritance}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="other" 
+                                                                                    {% if Player.addressDetails.incomeSources.other %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{rejectRequest.other}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <!-- Validation message -->
+                                                                        <div id="income-error" class="text-danger" style="display: none;">
+                                                                            Please select at least one income source.
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <!-- PLayer Address Details -->
+                                                
+                                                            <div class="form-group" aria-disabled="true">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{rejectRequest.is_the_player_high_risk}}?</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="yes" name="fav_language" value="yes"  {% if Player.HR == 'yes' %} checked {%endif%} disabled>
+                                                                    <label for="html">Yes</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="no" name="fav_language" value="no"  {% if Player.HR == 'yes' %} checked {%endif%} disabled>
+                                                                    <label for="html">No</label>
+                                                                </div>
+                                                            </div>
+                                                
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{rejectRequest.is_the_player_pep}}</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="yes" name="fav_language1" value="yes" {% if Player.PEP == 'yes' %} checked {%endif%} disabled>
+                                                                    <label for="html">Yes</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="no" name="fav_language1" value="no" {% if Player.PEP == 'no' %} checked {%endif%} disabled>
+                                                                    <label for="html">No</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- PEP Details Section -->
+                                                            <div id="pep-details" class="{% if Player.PEP == 'no' %}hidden{% endif %}">
+                                                
+                                                                <!-- Residential Address in Norway -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{rejectRequest.do_you_have_address_in_norway}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <label>
+                                                                            <input type="radio" name="hasNorwegianAddress" value="yes"
+                                                                                {% if Player.pepDetails.residentialAddressInNorway == true %} checked {% endif %}
+                                                                                {% if not Player.pepDetails.residentialAddressInNorway %} checked {% endif %}
+                                                                                disabled>
+                                                                            {{rejectRequest.yes}}
+                                                                        </label>
+                                                                        <label>
+                                                                            <input type="radio" name="hasNorwegianAddress" value="no"
+                                                                                {% if Player.pepDetails.residentialAddressInNorway == false %} checked {% endif %}
+                                                                                disabled>
+                                                                            {{rejectRequest.no}}
+                                                                        </label>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Name of PEP -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{rejectRequest.name_of_pep}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" name="nameOfPEP" class="form-control"
+                                                                            value="{{ Player.pepDetails.name or '' }}"
+                                                                            data-validation="required"
+                                                                            disabled>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Relationship to PEP -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{rejectRequest.relation_with_pep}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <textarea name="relationshipToPEP" class="form-control" rows="3"
+                                                                            data-validation="required"
+                                                                           disabled>{{ Player.pepDetails.relationship or '' }}</textarea>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Date of Birth -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{rejectRequest.date_of_birth}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="date" name="dateOfBirth" class="form-control"
+                                                                            value="{{ pepdateofBirth  }}"
+                                                                            data-validation="date required"
+                                                                           disabled
+                                                                            max="{{ today }}">
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Income Sources -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{rejectRequest.type_of_income_used_to_play}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="salary" 
+                                                                                    {% if Player.pepDetails.incomeSources.salary %} checked {% endif %}
+                                                                                    data-validation="checkbox_group"
+                                                                                    data-validation-qty="min1"
+                                                                                   disabled>
+                                                                                    {{rejectRequest.salary}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="propertySaleOrLease" 
+                                                                                    {% if Player.pepDetails.incomeSources.propertySaleOrLease %} checked {% endif %}
+                                                                                   disabled>
+                                                                                    {{rejectRequest.sale_lease_property}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="stocks" 
+                                                                                    {% if Player.pepDetails.incomeSources.stocks %} checked {% endif %}
+                                                                                   disabled>
+                                                                                    {{rejectRequest.stocks}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="socialSupport" 
+                                                                                    {% if Player.pepDetails.incomeSources.socialSupport %} checked {% endif %}
+                                                                                   disabled>
+                                                                                    {{rejectRequest.social_security_pension_support_scheme}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="giftsOrInheritance" 
+                                                                                    {% if Player.pepDetails.incomeSources.giftsOrInheritance %} checked {% endif %}
+                                                                                   disabled>
+                                                                                    {{rejectRequest.gift_inheritance}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="other" 
+                                                                                    {% if Player.pepDetails.incomeSources.other %} checked {% endif %}
+                                                                                   disabled>
+                                                                                    {{rejectRequest.other}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <!-- Validation message -->
+                                                                        <div id="income-error" class="text-danger" style="display: none;">
+                                                                            Please select at least one income source.
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="reason">{{rejectRequest.rejection_reason}} :</label>
+                                                                <div class="col-sm-8">
+                                                                    <textarea  class="form-control" name="reason" readonly disabled required  cols="4" rows="4" style="resize: none;">{{Player.hall.reason}}</textarea>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <tr>
+                                                    <td colspan="2">
+                                                        <div class="pull-left" style="margin-left: 25%;">
+                                                            <a href="/rejectedRequests" class="btn btn-danger btn-flat">{{rejectRequest.cancel}}</a>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- /Row -->
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script src="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.jquery.min.js"></script>
+<link href="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.min.css" rel="stylesheet" />
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+<script>
+    $(document).ready(function() {
+        // check for player has residential address and manage fields accordingly
+        function handleAddressFieldsVisibility(value) {
+            if (value === 'yes') {
+                $('.norwegian-address-fields').show();
+                $('.international-address-fields').hide();
+            } else if (value === 'no') {
+                $('.norwegian-address-fields').hide();
+                $('.international-address-fields').show();
+            }
+        }
+
+        // Check on page load which radio is selected
+        var selectedValue = $('input[name="isResidentialAddressInNorway"]:checked').val();
+        if (selectedValue) {
+            handleAddressFieldsVisibility(selectedValue);
+        }
+    });
+</script>
+{% endblock %}

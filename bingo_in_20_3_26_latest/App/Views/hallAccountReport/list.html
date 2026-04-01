@@ -1,0 +1,170 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+  .btn-group-new>.btn,
+  .btn-new {
+    padding: 2px 83px;
+    font-size: 12px;
+    line-height: 1.5;
+    border-radius: 3px
+  }
+
+  .cst {
+    display: flex;
+    justify-content: flex-start;
+    gap: 20px;
+    align-items: stretch;
+  }
+
+  .form-horizontal button {
+    width: 50px;
+  }
+
+  button#search,
+  button#filterReset {
+    min-width: 55px;
+  }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+  <div class="container-fluid">
+    <!-- Title -->
+    <section class="content-header">
+      <h1>{{hallReport.hall_account_report}}</h1>
+      <ol class="breadcrumb">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i>{{hallReport.dashboard}}</a></li>
+        <li class="active" href="#">{{hallReport.hall}}</li>
+      </ol>
+    </section>
+    <!-- /Title -->
+    {% include "partition/notification.html" %}
+    <!-- Row -->
+    <section class="content">
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                <h6 class="panel-title txt-dark">{{hallReport.hall_account_report}} </h6>
+              </div>
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+                <div class="table-wrap">
+                  <div class="table-responsive">
+                    <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                    <table id="myTable" class="table table-bordered table-striped">
+                      <thead>
+                        <tr>
+                          <th>{{hallReport.hall_id}}</th>
+                          <th>{{hallReport.hall_name}}</th>
+                          <th>{{hallReport.action}}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script>
+  var orderTable = "";
+  var host = window.location.origin;
+  let viewFlag = '{{viewFlag}}';
+  let editFlag = '{{editFlag}}';
+  $(document).ready(function () {
+
+    let sessionRole = '{{session.role}}';
+    let columns = [];
+    if (sessionRole == 'agent') {
+      columns = [{
+        "data": "hallId"
+      }, {
+        "data": "name"
+      }, {
+        "data": "action",
+        render: function (data, type, row) {
+          let html = '';
+          return html;
+        }
+      }];
+    } else {
+      columns = [{
+        "data": "hallId"
+      }, {
+        "data": "name"
+      }, {
+        "data": "action",
+        render: function (data, type, row) {
+          let html = '';
+          if (viewFlag == 'true') {
+            html += `<a href="/hallAccountReportTable/` + row._id + `" style="padding: 0px 5px 0px 5px;">
+            <button type="button" class="btn btn-info btn-xs btn-rounded" title="{{hallReport.view}}" name="view">
+            <i class="fa fa-eye" aria-hidden="true"></i>
+            </button>
+            </a>`;
+          }
+          if (editFlag == 'true') {
+            html += `<a href="/report/settlement/` + row._id + `" style="padding: 0px 5px 0px 5px;">
+            <button type="button" class="btn btn-danger btn-xs btn-rounded" title="{{hallReport.settlement_report}}" name="Settlement Report">
+            <i class="fa fa-file" aria-hidden="true"></i>
+            </button>
+            </a>`;
+          }
+          return html;
+        }
+      }];
+    }
+    let ajaxUrl = host + "/getHall";
+    function loadData() {
+      $('#myTable').DataTable({
+        // "language": { search: '', searchPlaceholder: "search" },
+        "oLanguage": {
+            "sSearch": "{{hallReport.search}}",
+            "sLengthMenu": "{{hallReport.show}} _MENU_ {{hallReport.entries}}",
+            "oPaginate": {
+                sPrevious: "{{ hallReport.previous }}",
+                sNext: "{{ hallReport.next }}"
+            },
+            "sEmptyTable": "{{hallReport.no_data_available_in_table}}",
+            "sInfo": "{{hallReport.showing}} _START_ to _END_ of _TOTAL_ {{hallReport.entries}}",
+            "sInfoEmpty": "{{hallReport.showing}} 0 to 0 of 0 {{hallReport.entries}}"
+        },
+        "order": [
+          [0, "desc"]
+        ],
+        "columnDefs": [{
+          "targets": [2],
+          "orderable": false
+        }],
+        "processing": true,
+        "serverSide": true,
+        "autoWidth": false,
+        "ajax": {
+          url: ajaxUrl,
+          type: "GET",
+          data: function (data) {
+            data.playerStatus = '';
+            data.grpHallId = '';
+          }
+        },
+        "pageLength": 25,
+        "columns": columns
+      });
+    }
+    loadData();
+
+    let table = $('#myTable').DataTable();
+  });
+</script>
+{% endblock %}

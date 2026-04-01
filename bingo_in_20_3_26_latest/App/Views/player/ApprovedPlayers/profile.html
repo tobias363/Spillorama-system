@@ -1,0 +1,1554 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<style type="text/css">
+    .buttonRight {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        display: inline-block;
+        margin-left: -10px;
+        margin-right: 4px;
+        margin-bottom: 4px;
+    }
+
+    .profile-upload .profile-pic0,
+    .profile-pic1 {
+        height: 100%;
+        max-width: 100%;
+        width: 100%;
+    }
+
+    /* .profile-upload .profile-pic1 {
+        height: 100%;
+        max-width: 100%;
+        width: 100%;
+    }  */
+    .profile-upload .upload-button0,
+    .upload-button1 {
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    /* .profile-upload .upload-button1 {
+        font-size: 14px;
+        cursor: pointer;
+    } */
+    .profile-upload .file-upload0 {
+        display: none;
+    }
+
+    .profile-upload .file-upload1 {
+        display: none;
+    } 
+
+    #riskCategorySection {
+        display: none;
+    }
+
+    .profile-circle {
+        width: 200px;
+        height: 200px;
+        border-radius: 50%;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid #ddd;
+        position: relative;
+    }
+
+    .profile-upload .p-image {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        color: #fff;
+        transition: all .3s cubic-bezier(.175, .885, .32, 1.275);
+        /* background-color: #c7af62; */
+        width: 0px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 100%;
+    }
+
+    .profile-circle img,
+    .profile-circle video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 50%;
+    }
+
+    .p-image {
+        position: relative;
+        text-align: center;
+        margin-top: 8px;
+    }
+
+    .p-image .fa-camera,
+    .p-image .fa-pencil {
+        cursor: pointer;
+        font-size: 18px;
+        color: #555;
+        margin: 0 5px;
+    }
+
+    .capture-btn {
+        display: none;
+        background: #c7af62;
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        margin-top: 10px;
+        text-align: center;
+        /* width: 100%; */
+    }
+
+    .capture-btn:hover {
+        background: #c7af62;
+    }
+
+    .profile-upload {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+</style>
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+
+        <section class="content-header">
+            <h1>{{editPlayer.player}} {{editPlayer.profile}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{editPlayer.dashboard}}</a></li>
+                <li class="active" href="/player">{{editPlayer.player}}</li>
+                <li class="active" href="/player">{{editPlayer.profile}}</li>
+            </ol>
+        </section>
+
+        {% include "partition/notification.html" %}
+
+        <!-- profile information start -->
+        <section class="content">
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{editPlayer.edit_player_details}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <form method="POST" id="editForm" action="/playerEdit/{{player._id}}"
+                                            name="adduser" enctype="multipart/form-data" class="form-horizontal">
+
+                                            <table border="0" class="table display  pb-30">
+                                                <div class="col-sm-8">
+                                                    <div class="panel-wrapper collapse in">
+                                                        <div class="panel-body">
+                                                            <input type="text" class="playerId" value="{{player._id}}"
+                                                                hidden>
+                                                            <!-- <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="username">Capture Image:</label>
+
+                                                                <div class="col-sm-4">
+                                                                    <div class="profile-edit">
+                                                                        <div class="profile-upload">
+                                                                            
+                                                                            <div class="profile-circle">
+                                                                                <video id="video" autoplay
+                                                                                    style="display: none;"></video>
+                                                                                <img id="previewImage"
+                                                                                    class="profile-pic"
+                                                                                    src="{{ player.captureImage if player.captureImage else '/assets/profilePic/gameUser.jpg' }}">
+                                                                            </div>
+
+                                                                            <div class="p-image">
+                                                                                <i class="fa fa-camera upload-button"
+                                                                                    id="startCamera"></i>
+                                                                                <input class="file-upload" type="file"
+                                                                                    name="profilePic" accept="image/*"
+                                                                                    style="display:none;">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                               
+                                                                <canvas id="canvas" style="display:none;"></canvas>
+                                                                <br>
+                                                                <button id="captureBtn" type="button"
+                                                                    style="display: none;">Capture Photo</button>
+                                                                <input type="file" name="capturedImage"
+                                                                    id="capturedImageInput" style="display: none;">
+                                                            </div> -->
+                                                            <!-- <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="username">{{editPlayer.photo_id}}:</label>
+                                                                {%if photoLength == 2 %}
+                                                                {% for photos in player.profilePic%}
+                                                                <div class="col-sm-4">
+                                                                    <div class="profile-edit">
+                                                                        <div class="profile-upload">
+                                                                            <img class="profile-pic{{loop.index0}}"
+                                                                                src="{{photos}}">
+                                                                            <div class="p-image ">
+                                                                                <i
+                                                                                    class="fa fa-pencil upload-button{{loop.index0}}"></i>
+                                                                                <input
+                                                                                    class="file-upload{{loop.index0}}"
+                                                                                    type="file"
+                                                                                    name="profilePic{{loop.index0}}"
+                                                                                    accept="image/*">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                {%endfor%}
+                                                                {% elif photoLength == 1%}
+                                                                {% for photos in player.profilePic%}
+                                                                <div class="col-sm-4">
+                                                                    <div class="profile-edit">
+                                                                        <div class="profile-upload">
+                                                                            <img class="profile-pic{{loop.index0}}"
+                                                                                src="{{photos}}">
+                                                                            <div class="p-image ">
+                                                                                <i
+                                                                                    class="fa fa-pencil upload-button{{loop.index0}}"></i>
+                                                                                <input
+                                                                                    class="file-upload{{loop.index0}}"
+                                                                                    type="file"
+                                                                                    name="profilePic{{loop.index0}}"
+                                                                                    accept="image/*">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                {%endfor%}
+                                                                <div class="col-sm-4">
+                                                                    <div class="profile-edit">
+                                                                        <div class="profile-upload">
+                                                                            <img class="profile-pic1"
+                                                                                src="/assets/profilePic/gameUser.jpg">
+                                                                            <div class="p-image ">
+                                                                                <i
+                                                                                    class="fa fa-pencil upload-button1"></i>
+                                                                                <input class="file-upload1" type="file"
+                                                                                    name="profilePic1" accept="image/*">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                {% else %}
+                                                                <div class="col-sm-4">
+                                                                    <div class="profile-edit">
+                                                                        <div class="profile-upload">
+                                                                            <img class="profile-pic0"
+                                                                                src="/assets/profilePic/gameUser.jpg">
+                                                                            <div class="p-image ">
+                                                                                <i
+                                                                                    class="fa fa-pencil upload-button0"></i>
+                                                                                <input class="file-upload0" type="file"
+                                                                                    name="profilePic0" accept="image/*">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="col-sm-4">
+                                                                    <div class="profile-edit">
+                                                                        <div class="profile-upload">
+                                                                            <img class="profile-pic1"
+                                                                                src="/assets/profilePic/gameUser.jpg">
+                                                                            <div class="p-image ">
+                                                                                <i
+                                                                                    class="fa fa-pencil upload-button1"></i>
+                                                                                <input class="file-upload1" type="file"
+                                                                                    name="profilePic1" accept="image/*">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                {% endif %}
+                                                            </div> -->
+
+
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="username">{{ editPlayer.photo_id }}:</label>
+
+                                                                {% if photoLength == 2 %}
+                                                                {% for photos in player.profilePic %}
+                                                                <div class="col-sm-4">
+                                                                    <div class="profile-edit">
+                                                                        <div class="profile-upload">
+                                                                            <div class="profile-circle">
+                                                                                <video id="video{{ loop.index0 }}"
+                                                                                    autoplay
+                                                                                    style="display: none;"></video>
+                                                                                <img class="profile-pic"
+                                                                                    id="previewImage{{ loop.index0 }}"
+                                                                                    src="{{ photos }}">
+                                                                            </div>
+                                                                            <button id="captureBtn{{ loop.index0 }}"
+                                                                                type="button" class="capture-btn"
+                                                                                data-index="{{ loop.index0 }}"
+                                                                                style="display: none;">Capture</button>
+                                                                            <div class="p-image">
+                                                                                <i class="fa fa-camera capture-button"
+                                                                                    data-index="{{ loop.index0 }}"></i>
+                                                                                <i class="fa fa-pencil upload-button"
+                                                                                    data-index="{{ loop.index0 }}"></i>
+                                                                                <input class="file-upload" type="file"
+                                                                                    name="profilePic{{ loop.index0 }}"
+                                                                                    accept="image/*"
+                                                                                    data-index="{{ loop.index0 }}"
+                                                                                    style="display:none;">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <canvas id="canvas{{ loop.index0 }}"
+                                                                    style="display:none;"></canvas>
+                                                                {% endfor %}
+                                                                {% else %}
+                                                                {% for i in range(2) %}
+                                                                <div class="col-sm-4">
+                                                                    <div class="profile-edit">
+                                                                        <div class="profile-upload">
+                                                                            <div class="profile-circle">
+                                                                                <video id="video{{ i }}" autoplay
+                                                                                    style="display: none;"></video>
+                                                                                <img class="profile-pic"
+                                                                                    id="previewImage{{ i }}"
+                                                                                    src="/assets/profilePic/gameUser.jpg">
+                                                                            </div>
+                                                                            <button id="captureBtn{{ i }}" type="button"
+                                                                                class="capture-btn" data-index="{{ i }}"
+                                                                                style="display: none;">Capture</button>
+                                                                            <div class="p-image">
+                                                                                <i class="fa fa-camera capture-button"
+                                                                                    data-index="{{ i }}"></i>
+                                                                                <i class="fa fa-pencil upload-button"
+                                                                                    data-index="{{ i }}"></i>
+                                                                                <input class="file-upload" type="file"
+                                                                                    name="profilePic{{ i }}"
+                                                                                    accept="image/*"
+                                                                                    data-index="{{ i }}"
+                                                                                    style="display:none;">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <canvas id="canvas{{ i }}"
+                                                                    style="display:none;"></canvas>
+                                                                {% endfor %}
+                                                                {% endif %}
+
+                                                                {% for i in range(2) %}
+                                                                <input type="hidden" id="capturedImageInput{{ i }}"
+                                                                    name="profilePic{{ i }}">
+                                                                {% endfor %}
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="customerNumber">{{editPlayer.customer_number}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly
+                                                                        disabled required
+                                                                        value="{{player.customerNumber}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="username">{{editPlayer.username}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly
+                                                                        disabled required value="{{player.username}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="email">{{editPlayer.emailId}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="email" class="form-control"
+                                                                        name="email" placeholder="Email"
+                                                                        value="{{player.email}}"
+                                                                        data-validation="email" data-validation-optional="true">
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="mobile">{{editPlayer.phone_number}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="mobile" class="form-control"
+                                                                        name="phone" onkeypress='validate(event)'
+                                                                        maxlength='10' placeholder="Phone"
+                                                                        value="{{player.phone}}" required
+                                                                        data-validation="number length"
+                                                                        data-validation-length="min8">
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="nickname">{{editPlayer.firstname}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control"
+                                                                        name="nickname" placeholder="nickname"
+                                                                        value="{{player.nickname}}" required
+                                                                        data-validation="required">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label
+                                                                    class="control-label mb-8 col-sm-4">{{editPlayer.date_of_birth}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="date" class="form-control" name="dob"
+                                                                        value="{{DOB}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="nickname">{{editPlayer.bank_ac_no}}.:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control"
+                                                                        name="bankId" onkeypress='validate(event)'
+                                                                        maxlength='11' value="{{player.bankId}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">Group Hall:</label>
+                                                                <div class="col-sm-8">
+                                                                    <select name="grpHallName" class="form-control" id="grpHallName">
+                                                                        {% if(player.groupHall.name == undefined) %}
+                                                                        <option value="" selected="selected">Group of Hall Name</option>
+                                                                        {%endif%}
+                                                                            {% for groupHall in groupHalls %}
+                                                                            <option {{ "selected" if player.groupHall.id == groupHall._id else "" }} value={{groupHall._id}} class="select-{{groupHall._id}}">{{groupHall.name}}</option>
+                                                                            {% endfor %}
+                                                                    </select>
+                                                                </div>
+                                                            </div> -->
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="nickname">{{editPlayer.hall}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <select name="hallId" class="form-control"
+                                                                        id="hallId" {{ "disabled" if Agent.role=="agent"
+                                                                        else "" }} multiple data-validation="required">
+                                                                        {% if(player.hall.name == undefined) %}
+
+                                                                        {% endif %}
+                                                                        {% for hall in halls %}
+                                                                        {% set isApproved = false %}
+                                                                        {% set stopLoop = false %}
+
+                                                                        {% for approvedHall in player.approvedHalls %}
+                                                                        {% if not stopLoop and approvedHall.id ==
+                                                                        hall._id %}
+                                                                        {% set isApproved = true %}
+                                                                        {% set stopLoop = true %}
+                                                                        {% endif %}
+                                                                        {% endfor %}
+                                                                        <option {{ "selected" if isApproved else "" }}
+                                                                            value={{hall._id}}
+                                                                            class="select-{{hall._id}}">{{ hall.name }}
+                                                                        </option>
+                                                                        <!-- <option {{ "selected" if player.hall.id == hall._id else "" }} value={{hall._id}} class="select-{{hall._id}}">{{hall.name}}</option> -->
+                                                                        {% endfor %}
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                            <!-- <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="agent">Agent:</label>
+                                                                <div class="col-sm-8">
+                                                                    <select name="agent" class="form-control" id="agent" disabled required>
+                                                                        <option value="" id="firstAgent">Select Agent</option>
+                                                                        {% for hall in halls %}
+                                                                         {% if (hall.id == player.hall.id) %}
+                                                                            {% for agent in hall.agents %}
+                                                                                <option {{ "selected" if player.hall.agent.id == agent.id else "" }} value={{agent.id}} class="select-{{agent.id}}">{{agent.name}}</option>
+                                                                            {% endfor %}
+                                                                         {% endif %}
+                                                                        {% endfor %}
+                                                                    </select>
+                                                                </div>
+                                                            </div> -->
+
+                                                            <!-- <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">Available Balance (In Points):</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{(player.points|float).toFixed(2)}}">
+                                                                </div>
+                                                            </div> -->
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="nickname">{{editPlayer.available_balance_in}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly
+                                                                        disabled required
+                                                                        value="{{(player.walletAmount|float).toFixed(2)}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- PLayer Address Details -->
+                                                            <!-- Residential Address in Norway Question -->
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-4">{{editPlayer.do_you_have_address_in_norway}}:</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" name="isResidentialAddressInNorway" value="yes"
+                                                                        {% if player.addressDetails.residentialAddressInNorway == true %} checked {% endif %}
+                                                                    >
+                                                                    <label for="html">{{editPlayer.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" name="isResidentialAddressInNorway" value="no"
+                                                                        {% if player.addressDetails.residentialAddressInNorway == false %} checked {% endif %}   
+                                                                    >
+                                                                    <label for="html">{{editPlayer.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- Norwegian Address Fields (shown when Yes is selected) -->
+                                                            <div class="norwegian-address-fields" style="display: none;">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="city">{{editPlayer.city}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" class="form-control" id="city" name="city" placeholder="{{editPlayer.enter}} {{editPlayer.city}}" value="{{player.addressDetails.city}}" data-validation="required">
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="zipCode">{{editPlayer.zip_code}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" class="form-control" id="zipCode" name="zipCode" placeholder="{{editPlayer.enter}} {{editPlayer.zip_code}}" value="{{player.addressDetails.zipCode}}" data-validation="required">
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="address">{{editPlayer.address}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <textarea class="form-control" id="address" name="address" placeholder="{{editPlayer.enter}} {{editPlayer.address}}" data-validation="required" rows="3">{{player.addressDetails.address}}</textarea>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- International Address Fields (shown when No is selected) -->
+                                                            <div class="international-address-fields" style="display: none;">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="country">{{editPlayer.country}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <select class="form-control" id="country" name="country" data-validation="required">
+                                                                            {% for country in countries %}
+                                                                                <option value="{{country}}" {% if player.addressDetails.country == country %} selected {% endif %}>{{country}}</option>
+                                                                            {% endfor %}
+                                                                        </select>
+                                                                    </div>
+                                                                </div>
+
+                                                                 <!-- Income Sources -->
+                                                                 <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{editPlayer.type_of_income_used_to_play}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="incomeSources[]" value="salary" 
+                                                                                    {% if player.addressDetails.incomeSources.salary %} checked {% endif %}
+                                                                                    data-validation="checkbox_group"
+                                                                                    data-validation-qty="min1"
+                                                                                >
+                                                                                {{editPlayer.salary}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="incomeSources[]" value="propertySaleOrLease" 
+                                                                                    {% if player.addressDetails.incomeSources.propertySaleOrLease %} checked {% endif %}
+                                                                                >
+                                                                                {{editPlayer.sale_lease_property}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="incomeSources[]" value="stocks" 
+                                                                                    {% if player.addressDetails.incomeSources.stocks %} checked {% endif %}
+                                                                                >
+                                                                                {{editPlayer.stocks}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="incomeSources[]" value="socialSupport" 
+                                                                                    {% if player.addressDetails.incomeSources.socialSupport %} checked {% endif %}
+                                                                                >
+                                                                                {{editPlayer.social_security_pension_support_scheme}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="incomeSources[]" value="giftsOrInheritance" 
+                                                                                    {% if player.addressDetails.incomeSources.giftsOrInheritance %} checked {% endif %}
+                                                                                >  
+                                                                                {{editPlayer.gift_inheritance}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="incomeSources[]" value="other" 
+                                                                                    {% if player.addressDetails.incomeSources.other %} checked {% endif %}
+                                                                                >
+                                                                                {{editPlayer.other}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <!-- Validation message -->
+                                                                        <div id="income-error" class="text-danger" style="display: none;">
+                                                                            {{editPlayer.income_source_required}}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <!-- PLayer Address Details -->
+
+                                                            <!-- Check for high risk player -->
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="nickname">{{editPlayer.is_the_player_high_risk}}?</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="yes" name="HR" value="yes"
+                                                                        {{ "checked" if player.HR=='yes' else "" }}>
+                                                                    <label for="html">{{editPlayer.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="no" name="HR" value="no"
+                                                                        {{ "checked" if player.HR=='no' else "" }}>
+                                                                    <label for="html">{{editPlayer.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- Player Risk Category and Comment -->
+                                                            <div id="riskCategorySection">   
+                                                                {% if Agent.role == 'admin' or (Agent.role == 'agent' and permissions.view_risk_categoryFlag) %} 
+                                                                    <div class="form-group">
+                                                                        <label class="control-label mb-8 col-sm-4"
+                                                                            for="riskCategory">{{editPlayer.risk_category}}:</label>
+                                                                        <div class="col-sm-8">
+                                                                            <select class="form-control" id="riskCategory"
+                                                                                name="riskCategory" {{ "disabled" if
+                                                                                Agent.role=="agent" and not permissions.edit_risk_categoryFlag else "" }}>
+                                                                                <option value="Low" {% if
+                                                                                    player.riskCategory=='Low' %}selected{%
+                                                                                    endif %}>{{editPlayer.low}}</option>
+                                                                                <option value="Medium" {% if
+                                                                                    player.riskCategory=='Medium' %}selected{%
+                                                                                    endif %}>{{editPlayer.medium}}</option>
+                                                                                <option value="High" {% if
+                                                                                    player.riskCategory=='High' %}selected{%
+                                                                                    endif %}>{{editPlayer.high}}</option>
+                                                                            </select>
+                                                                        </div>
+                                                                    </div>
+                                                                {% endif %}
+                                                                {% if Agent.role == 'admin' or (Agent.role == 'agent' and permissions.view_risk_commentFlag) %}
+                                                                    <div class="form-group" id="riskCommentGroup">
+                                                                        <label class="control-label mb-8 col-sm-4"
+                                                                            for="riskComment">{{editPlayer.risk_comment}}:</label>
+                                                                        <div class="col-sm-8">
+                                                                            <textarea class="form-control" id="riskComment"
+                                                                                name="riskComment" rows="3" {{ "disabled" if
+                                                                                Agent.role=="agent" and not permissions.edit_risk_commentFlag else ""
+                                                                                }}>{{ player.riskComment }}</textarea>
+                                                                        </div>
+                                                                    </div>
+                                                                {% endif %}
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="nickname">{{editPlayer.is_the_player_pep}}</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="yes" readonly name="PEP"
+                                                                        value="yes" {{ "checked" if player.PEP=='yes'
+                                                                        else "" }} disabled>
+                                                                    <label for="html">{{editPlayer.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="no" readonly name="PEP"
+                                                                        value="no" {{ "checked" if player.PEP=='no'
+                                                                        else "" }} disabled>
+                                                                    <label for="html">{{editPlayer.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- PEP Details Section -->
+                                                            <div id="pep-details"
+                                                                class="{% if player.PEP == 'no' %}hidden{% endif %}">
+
+                                                                <!-- Residential Address in Norway -->
+                                                                <div class="form-group">
+                                                                    <label
+                                                                        class="control-label col-sm-4">{{editPlayer.do_you_have_address_in_norway}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <label>
+                                                                            <input type="radio"
+                                                                                name="hasNorwegianAddress" value="yes"
+                                                                                {% if
+                                                                                player.pepDetails.residentialAddressInNorway==true
+                                                                                %} checked {% endif %} {% if not
+                                                                                player.pepDetails.residentialAddressInNorway
+                                                                                %} checked {% endif %} disabled>
+                                                                            {{editPlayer.yes}}
+                                                                        </label>
+                                                                        <label>
+                                                                            <input type="radio"
+                                                                                name="hasNorwegianAddress" value="no" {%
+                                                                                if
+                                                                                player.pepDetails.residentialAddressInNorway==false
+                                                                                %} checked {% endif %} disabled>
+                                                                            {{editPlayer.no}}
+                                                                        </label>
+                                                                    </div>
+                                                                </div>
+
+                                                                <!-- Name of PEP -->
+                                                                <div class="form-group">
+                                                                    <label
+                                                                        class="control-label col-sm-4">{{editPlayer.name_of_pep}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" name="nameOfPEP"
+                                                                            class="form-control"
+                                                                            value="{{ player.pepDetails.name or '' }}"
+                                                                            data-validation="required" {% if
+                                                                            (Agent.role=='agent' ) and (forwarded==true)
+                                                                            %} disabled {% endif %} disabled>
+                                                                    </div>
+                                                                </div>
+
+                                                                <!-- Relationship to PEP -->
+                                                                <div class="form-group">
+                                                                    <label
+                                                                        class="control-label col-sm-4">{{editPlayer.relation_with_pep}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <textarea name="relationshipToPEP"
+                                                                            class="form-control" rows="3"
+                                                                            data-validation="required" {% if
+                                                                            (Agent.role=='agent' ) and (forwarded==true)
+                                                                            %} disabled {% endif %}
+                                                                            disabled>{{ player.pepDetails.relationship or '' }}</textarea>
+                                                                    </div>
+                                                                </div>
+
+                                                                <!-- Date of Birth -->
+                                                                <div class="form-group">
+                                                                    <label
+                                                                        class="control-label col-sm-4">{{editPlayer.date_of_birth}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="date" name="dateOfBirth"
+                                                                            class="form-control"
+                                                                            value="{{ pepdateofBirth  }}"
+                                                                            data-validation="date required" {% if
+                                                                            (Agent.role=='agent' ) and (forwarded==true)
+                                                                            %} disabled {% endif %} max="{{ today }}"
+                                                                            disabled>
+                                                                    </div>
+                                                                </div>
+
+                                                                <!-- Income Sources -->
+                                                                <div class="form-group">
+                                                                    <label
+                                                                        class="control-label col-sm-4">{{editPlayer.type_of_income_used_to_play}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]"
+                                                                                    value="salary" {% if
+                                                                                    player.pepDetails.incomeSources.salary
+                                                                                    %} checked {% endif %}
+                                                                                    data-validation="checkbox_group"
+                                                                                    data-validation-qty="min1" disabled>
+                                                                                {{editPlayer.salary}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]"
+                                                                                    value="propertySaleOrLease" {% if
+                                                                                    player.pepDetails.incomeSources.propertySaleOrLease
+                                                                                    %} checked {% endif %} disabled>
+                                                                                {{editPlayer.sale_lease_property}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]"
+                                                                                    value="stocks" {% if
+                                                                                    player.pepDetails.incomeSources.stocks
+                                                                                    %} checked {% endif %} disabled>
+                                                                                {{editPlayer.stocks}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]"
+                                                                                    value="socialSupport" {% if
+                                                                                    player.pepDetails.incomeSources.socialSupport
+                                                                                    %} checked {% endif %} disabled>
+                                                                                {{editPlayer.social_security_pension_support_scheme}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]"
+                                                                                    value="giftsOrInheritance" {% if
+                                                                                    player.pepDetails.incomeSources.giftsOrInheritance
+                                                                                    %} checked {% endif %} disabled>
+                                                                                {{editPlayer.gift_inheritance}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]"
+                                                                                    value="other" {% if
+                                                                                    player.pepDetails.incomeSources.other
+                                                                                    %} checked {% endif %} disabled>
+                                                                                {{editPlayer.other}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <!-- Validation message -->
+                                                                        <div id="income-error" class="text-danger"
+                                                                            style="display: none;">
+                                                                            {{editPlayer.income_source_required}}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                            </div>
+
+                                                            {# Player block rules only visible to super admin #}
+                                                            {% if Agent.role == 'admin' and Agent.isSuperAdmin %}
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-8 col-sm-4"
+                                                                        for="nickname">{{editPlayer.block_rules}}:</label>
+                                                                    <div class="col-sm-8">
+
+                                                                        <!-- Always render this alert and hide if there are rules -->
+                                                                        <div class="alert alert-info"
+                                                                            style="{% if existingBlockRules.length > 0 %}display: none;{% endif %}">
+                                                                            {{editPlayer.block_rule_not_found}}
+                                                                        </div>
+
+                                                                        {% if existingBlockRules.length > 0 %}
+                                                                            {% for rule in existingBlockRules %}
+                                                                            <div class="panel panel-default block-rule-panel" style="box-shadow: 0 1px 5px rgba(0,0,0,0.1);">
+                                                                                <div class="panel-heading" style="font-size: 18px; font-weight: bold;">
+                                                                                    {{ rule.hallName }}
+                                                                                    <span class="pull-right text-muted" style="font-size: 18px;">
+                                                                                        <span class="label label-warning">{{editPlayer.expiry_date}}: {{ rule.endDate | date('YYYY-MM-DD') }}</span>
+                                                                                    </span>
+                                                                                </div>
+                                                                                <div class="panel-body">
+                                                                                    <div style="font-size: 14px; margin-bottom: 8px;"><strong>{{editPlayer.games_blocked}}:</strong></div>
+                                                                                    <ul class="list-unstyled" style="margin-left: 15px; font-size: 16px;">
+                                                                                        {% for gt in rule.gameTypes %}
+                                                                                        <li style="margin-bottom: 5px;">
+                                                                                            <span class="label label-primary" style="font-size: 14px;">{{ gt.name }}</span>
+                                                                                            {% if gt.subTypes.length > 0 %}
+                                                                                                <small style="color: #555;">→ {{ gt.subTypes | join(', ') }}</small>
+                                                                                            {% endif %}
+                                                                                        </li>
+                                                                                        {% endfor %}
+                                                                                    </ul>
+
+                                                                                    <button type="button" class="btn btn-danger btn-sm delete-block-rule" 
+                                                                                            data-player-id="{{ player._id }}" 
+                                                                                            data-rule-id="{{ rule.ruleId }}" 
+                                                                                            style="margin-top: 10px;">
+                                                                                        <i class="glyphicon glyphicon-trash"></i> {{editPlayer.delete}}
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                            {% endfor %}
+                                                                        {% endif %}
+                                                                    </div>
+
+                                                                    </div>
+                                                                </div>
+                                                            {% endif %}
+
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <tr>
+                                                    <td colspan="2" style="padding-left: 25%;">
+                                                        <div class="pull-left">
+                                                            <input type="submit" class="btn btn-success btn-flat"
+                                                                value="Submit">
+                                                            <a href="/player"
+                                                                class="btn btn-danger btn-flat">{{editPlayer.cancel}}</a>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- profile information end -->
+
+        <!--<div class="buttonRight">
+            <button class="btn btn-primary btn-flat unblockPlayer" id="{{player._id}}">Unblock Player</button>
+            <button class="btn btn-danger btn-flat deletePlayer" id="{{player._id}}">Delete Player</button>
+        </div>-->
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<link href="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/css/bootstrap-multiselect.css"
+    rel="stylesheet" type="text/css" />
+<script src="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/js/bootstrap-multiselect.js"
+    type="text/javascript"></script>
+
+<script>
+    function validate(evt) {
+        var theEvent = evt || window.event;
+        // Handle paste
+        if (theEvent.type === 'paste') {
+            key = event.clipboardData.getData('text/plain');
+        } else {
+            // Handle key press
+            var key = theEvent.keyCode || theEvent.which;
+            key = String.fromCharCode(key);
+        }
+        var regex = /[0-9]|\./;
+        if (!regex.test(key)) {
+            theEvent.returnValue = false;
+            if (theEvent.preventDefault) theEvent.preventDefault();
+        }
+    }
+    $(document).ready(function () {
+
+        document.addEventListener("click", function (event) {
+            if (event.target.classList.contains("capture-button")) {
+                let index = event.target.getAttribute("data-index");
+                openCamera(index);
+            }
+
+            if (event.target.classList.contains("capture-btn")) {
+                let index = event.target.getAttribute("data-index");
+                capturePhoto(index);
+            }
+
+            if (event.target.classList.contains("upload-button")) {
+                let index = event.target.getAttribute("data-index");
+                document.querySelector(`.file-upload[data-index='${index}']`).click();
+            }
+        });
+
+        document.addEventListener("change", function (event) {
+            if (event.target.classList.contains("file-upload")) {
+                let index = event.target.getAttribute("data-index");
+                let file = event.target.files[0];
+
+                if (file) {
+                    let allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+
+                    if (!allowedTypes.includes(file.type)) {
+                        alert("Only JPEG, PNG, and WEBP image files are allowed! GIFs, videos, and PDFs are not permitted.");
+                        event.target.value = ""; // Clear invalid file
+                        return;
+                    }
+
+                    let img = document.getElementById(`previewImage${index}`);
+                    let inputHidden = document.getElementById(`capturedImageInput${index}`);
+
+                    let reader = new FileReader();
+                    reader.onload = function (e) {
+                        img.src = e.target.result;
+                        inputHidden.value = e.target.result;  // Store base64 in hidden input
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+        });
+
+        // document.addEventListener("change", function (event) {
+        //     if (event.target.classList.contains("file-upload")) {
+        //         let index = event.target.getAttribute("data-index");
+        //         let file = event.target.files[0];
+
+        //         if (file && !file.type.startsWith("image/")) {
+        //             alert("Only image files are allowed!");
+        //             event.target.value = ""; // Clear invalid file
+        //             return;
+        //         }
+
+        //         let img = document.getElementById(`previewImage${index}`);
+        //         let inputHidden = document.getElementById(`capturedImageInput${index}`);
+
+        //         if (file) {
+        //             let reader = new FileReader();
+        //             reader.onload = function (e) {
+        //                 img.src = e.target.result;
+        //                 inputHidden.value = e.target.result;  // Store base64 in hidden input
+        //             };
+        //             reader.readAsDataURL(file);
+        //         }
+        //     }
+        // });
+
+
+        // document.addEventListener("change", function (event) {
+        //     if (event.target.classList.contains("file-upload")) {
+        //         let index = event.target.getAttribute("data-index");
+        //         let file = event.target.files[0];
+        //         let img = document.getElementById(`previewImage${index}`);
+        //         let inputHidden = document.getElementById(`capturedImageInput${index}`);
+
+        //         if (file) {
+        //             let reader = new FileReader();
+        //             reader.onload = function (e) {
+        //                 img.src = e.target.result;
+        //                 inputHidden.value = e.target.result;  // Store base64 in hidden input
+        //             };
+        //             reader.readAsDataURL(file);
+        //         }
+        //     }
+        // });
+
+        function openCamera(index) {
+            let video = document.getElementById(`video${index}`);
+            let preview = document.getElementById(`previewImage${index}`);
+            let captureBtn = document.getElementById(`captureBtn${index}`);
+
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(function (stream) {
+                    video.srcObject = stream;
+                    video.style.display = 'block';
+                    preview.style.display = 'none';
+                    captureBtn.style.display = 'block';
+                })
+                .catch(function (error) {
+                    console.error("Error accessing camera: ", error);
+                });
+        }
+
+        function dataURLtoFile(dataurl, filename) {
+            let arr = dataurl.split(',');
+            let mime = arr[0].match(/:(.*?);/)[1]; // Extract MIME type
+            let bstr = atob(arr[1]); // Decode Base64
+            let n = bstr.length;
+            let u8arr = new Uint8Array(n);
+
+            while (n--) {
+                u8arr[n] = bstr.charCodeAt(n);
+            }
+
+            return new File([u8arr], filename, { type: mime });
+        }
+
+
+        function capturePhoto(index) {
+            let video = document.getElementById(`video${index}`);
+            let canvas = document.getElementById(`canvas${index}`);
+            let img = document.getElementById(`previewImage${index}`);
+            let fileInput = document.querySelector(`.file-upload[data-index='${index}']`);
+            let context = canvas.getContext("2d");
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            let imageData = canvas.toDataURL("image/png"); // Convert to Base64
+            video.srcObject.getTracks().forEach(track => track.stop());
+
+            img.src = imageData;
+            img.style.display = "block";
+            video.style.display = "none";
+            document.getElementById(`captureBtn${index}`).style.display = "none";
+
+            // Convert Base64 to File
+            let file = dataURLtoFile(imageData, `profilePic${index}.png`);
+
+            // Check file type (should always be an image)
+            if (!file.type.startsWith("image/")) {
+                alert("Invalid file format!");
+                return;
+            }
+
+            // Assign file to the existing input using DataTransfer API
+            let dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            fileInput.files = dataTransfer.files;
+
+            console.log(`Captured file for profilePic${index}:`, file);
+        }
+
+
+        // function capturePhoto(index) {
+        //     let video = document.getElementById(`video${index}`);
+        //     let canvas = document.getElementById(`canvas${index}`);
+        //     let img = document.getElementById(`previewImage${index}`);
+        //     let fileInput = document.querySelector(`.file-upload[data-index='${index}']`);
+        //     let context = canvas.getContext("2d");
+
+        //     canvas.width = video.videoWidth;
+        //     canvas.height = video.videoHeight;
+        //     context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        //     let imageData = canvas.toDataURL("image/png"); // Convert to Base64
+        //     video.srcObject.getTracks().forEach(track => track.stop());
+
+        //     img.src = imageData;
+        //     img.style.display = "block";
+        //     video.style.display = "none";
+        //     document.getElementById(`captureBtn${index}`).style.display = "none";
+
+        //     // Convert Base64 to File
+        //     let file = dataURLtoFile(imageData, `profilePic${index}.png`);
+
+        //     // Assign file to the existing input using DataTransfer API
+        //     let dataTransfer = new DataTransfer();
+        //     dataTransfer.items.add(file);
+        //     fileInput.files = dataTransfer.files;
+
+        //     console.log(`Captured file for profilePic${index}:`, file);
+        // }
+
+
+
+        // let video = document.getElementById('video');
+        // let preview = document.getElementById('previewImage');
+        // let canvas = document.getElementById('canvas');
+        // let startCameraBtn = document.getElementById('startCamera');
+        // let captureBtn = document.getElementById('captureBtn');
+        // let uploadBtn = document.getElementById('uploadBtn');
+
+        // startCameraBtn.addEventListener('click', function () {
+        //     navigator.mediaDevices.getUserMedia({ video: true })
+        //         .then(function (stream) {
+        //             video.srcObject = stream;
+        //             video.style.display = 'block';
+        //             preview.style.display = 'none';
+        //             captureBtn.style.display = 'inline-block';
+        //         })
+        //         .catch(function (error) {
+        //             console.error("Error accessing camera: ", error);
+        //         });
+        // });
+
+        // captureBtn.addEventListener('click', function () {
+        //     canvas.width = video.videoWidth;
+        //     canvas.height = video.videoHeight;
+        //     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        //     let imageData = canvas.toDataURL('image/png');
+
+        //     // Stop webcam
+        //     video.srcObject.getTracks().forEach(track => track.stop());
+
+        //     // Convert base64 to Blob
+        //     function dataURLtoBlob(dataurl) {
+        //         let arr = dataurl.split(','),
+        //             mime = arr[0].match(/:(.*?);/)[1],
+        //             bstr = atob(arr[1]),
+        //             n = bstr.length,
+        //             u8arr = new Uint8Array(n);
+        //         while (n--) {
+        //             u8arr[n] = bstr.charCodeAt(n);
+        //         }
+        //         return new Blob([u8arr], { type: mime });
+        //     }
+
+        //     let imageBlob = dataURLtoBlob(imageData);
+        //     let imageFile = new File([imageBlob], "captured_image.png", { type: "image/png" });
+
+        //     // Display preview
+        //     preview.src = imageData;
+        //     preview.style.display = 'block';
+        //     video.style.display = 'none';
+        //     captureBtn.style.display = 'none';
+
+        //     console.log("Captured Image File: ", imageFile);
+
+        //     // Add the file to the form before submission
+        //     let fileInput = document.getElementById("capturedImageInput");
+        //     if (!fileInput) {
+        //         fileInput = document.createElement("input");
+        //         fileInput.type = "file";
+        //         fileInput.name = "capturedImage";
+        //         fileInput.id = "capturedImageInput";
+        //         fileInput.style.display = "none";
+        //         document.getElementById("editForm").appendChild(fileInput);
+        //     }
+
+        //     // Create a DataTransfer object to hold the file
+        //     let dataTransfer = new DataTransfer();
+        //     dataTransfer.items.add(imageFile);
+        //     fileInput.files = dataTransfer.files;
+        // });
+
+
+
+
+
+        // Set the max date to the current date for the Date of Birth field
+        const today = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
+        $("input[name='dateOfBirth']").attr("max", today);
+
+        // Show or hide the PEP details section based on the selected value
+        $('input[name="PEP"]').on('change', function () {
+            const pepDetails = $('#pep-details');
+            if ($(this).val() === 'yes') {
+                pepDetails.removeClass('hidden');
+            } else {
+                pepDetails.addClass('hidden');
+            }
+        });
+
+        let halls = `{{ halls | dump | safe }}`;
+        halls = JSON.parse(halls);
+        console.log("halls on load page", halls);
+
+        $("#newPassword").keyup(checkPasswordMatch32);
+        $("#verifyPassword").keyup(checkPasswordMatch32);
+
+        $('#hallId').select2({
+            placeholder: "Select Hall Name",
+            allowClear: true
+        });
+
+        function checkPasswordMatch32() {
+            var password = $("#newPassword").val();
+            var confirmPassword = $("#verifyPassword").val();
+            console.log('password: ', password);
+            console.log('confirmPassword: ', confirmPassword);
+            if (password != confirmPassword) {
+                $("#CheckPasswordMatch2").html("Passwords does not match");
+                $("#CheckPasswordMatch2").css("color", "red");
+            } else {
+                $("#CheckPasswordMatch2").html("Passwords match");
+                $("#CheckPasswordMatch2").css("color", "green");
+                setTimeout(function () {
+                    $("#CheckPasswordMatch2").html("");
+                }, 500)
+            }
+        }
+
+        $(function () {
+            "use strict";
+
+            var SweetAlert = function () { };
+
+            SweetAlert.prototype.init = function () {
+
+                //Parameter
+                $('body').on('click', '.deletePlayer', function (e) {
+                    var id = $(this).attr('id');
+                    var thisElement = this;
+                    swal({
+                        title: "Are you sure?",
+                        text: "You will not be able to recover this Player!",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "Yes, delete it!",
+                        cancelButtonText: "No, cancel Plz!",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/player/getPlayerDelete",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData) {
+                                    // alert(resultData)
+                                    //console.log(resultData);
+                                    if (resultData == 'success') {
+                                        $(thisElement).parent().parent().hide(700);
+                                        swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                                    } else {
+                                        alert("Something went wrong")
+                                    }
+                                    // alert("Save Complete")
+                                }
+                            });
+                            swal("Deleted!", "Player Deleted Succesfully.", "success");
+                        } else {
+                            swal("Cancelled", "Player Not Deleted)", "error");
+                        }
+                    });
+                    return false;
+                });
+
+                // Active & Deactive
+
+                $('body').on('click', '.playerActive', function (e) {
+                    var id = $(this).attr('id');
+                    let $this = $(this);
+                    let st = $(this).attr('data-st');
+                    var thisElement = this;
+                    swal({
+                        title: "Are You Sure?",
+                        text: "Do You Want To Update The Status?",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "Yes, Update It!",
+                        cancelButtonText: "No, Cancel It!",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/player/active",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData, data) {
+                                    //console.log(data);
+                                    if (resultData == 'success') {
+                                        swal("Update!", "Player Status Updated Successfully..", "success");
+                                    } else {
+                                        alert("Something went wrong")
+                                    }
+                                }
+                            });
+                            swal("Success!", "Player Status Updated Succesfully.", "success");
+                        } else {
+                            swal("Cancelled", "Player Status not Updated)", "error");
+                        }
+                    });
+                    return false;
+                });
+
+                // Delete Block Rule
+                $('body').on('click', '.delete-block-rule', function (e) {
+                    e.preventDefault();
+                    const playerId = $(this).data('player-id');
+                    const ruleId = $(this).data('rule-id');
+                    const $this = $(this);
+                    
+                    swal({
+                        title: "{{editPlayer.are_you_sure}}?",
+                        text: "{{editPlayer.you_will_not_be_able_to_recover_this_block_rule}}!",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#d33",
+                        confirmButtonText: "{{editPlayer.yes_delete}}",
+                        cancelButtonText: "{{editPlayer.no_cancle}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: true
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + '/player/block-rules/delete',
+                                data: {
+                                    playerId: playerId,
+                                    ruleId: ruleId
+                                },
+                                success: function (resultData) {
+                                    if (resultData.status === "success") {
+                                        swal("{{editPlayer.deleted}}!", resultData.message, "success");
+                                        // Remove the rule panel from the UI
+                                        $this.closest('.block-rule-panel').fadeOut(300, function() {
+                                            $(this).remove();
+                                            // Check if no more rules exist
+                                            if ($('.block-rule-panel').length === 0) {
+                                                $('.alert-info').show();
+                                            }
+                                        });
+
+                                       
+
+                                    } else {
+                                        swal("{{editPlayer.failed}}!", resultData.message || "{{editPlayer.something_went_wrong}}", "error");
+                                    }
+                                },
+                                error: function (xhr, status, error) {
+                                    swal("{{editPlayer.failed}}!", resultData.message || "{{editPlayer.something_went_wrong}}", "error");
+                                }
+                            });
+                        }
+                    });
+                    return false;
+                });
+
+            },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+
+            // $('#hallId').on('change', function () {
+            //     let value = $(this).val();
+            //     console.log("hallName selection", value);
+            //     $('#agent').removeAttr('disabled').find('option:not(:first)').remove();
+            //     if (value) {
+            //         let singleHall = halls.find((hall)=>hall._id == value);
+            //         if (singleHall) {
+            //             for (let i = 0; i < singleHall.agents.length; i++) {
+            //                 $('#agent').removeAttr('disabled').append(`<option value="${singleHall.agents[i].id}">${singleHall.agents[i].name}</option>`);
+            //             }
+            //         }
+            //     }
+            // });
+
+
+        });
+
+        // Show or hide risk comment field based on selected risk category and based on is player high risk
+        
+        // Check on page load which radio is selected
+        const isHighRisk = $('input[name="HR"]:checked').val();
+        if (isHighRisk) {
+            handleRiskCategoryVisibility(isHighRisk);
+        }
+
+        // Handle change event
+        $('input[name="HR"]').change(function() {
+            handleRiskCategoryVisibility($(this).val());
+        });
+
+        // check for player has risk category and manage fields accordingly
+        function handleRiskCategoryVisibility(value) {
+            if(value === 'yes'){
+                $('#riskCategorySection').show();
+            }else{
+                $('#riskCategorySection').hide();
+                $('#riskCategory').val('Low');
+                $('#riskComment').val('');
+            }
+        }
+        
+        // $('#riskCategory').on('change', function () {
+        //     const selectedValue = $(this).val();
+        //     if (selectedValue === 'Medium' || selectedValue === 'High') {
+        //         $('#riskCommentGroup').show(); // Show the comment field
+        //         $('#riskComment').attr('data-validation', 'required'); // Make it required
+        //     } else {
+        //         $('#riskCommentGroup').hide(); // Hide the comment field
+        //         $('#riskComment').val(''); // Clear the comment field
+        //         $('#riskComment').removeAttr('data-validation'); // Remove required validation
+        //     }
+        // }).trigger('change');
+
+        // check for player has residential address and manage fields accordingly
+        function handleAddressFieldsVisibility(value) {
+            if (value === 'yes') {
+                $('.norwegian-address-fields').show();
+                $('.international-address-fields').hide();
+            } else if (value === 'no') {
+                $('.norwegian-address-fields').hide();
+                $('.international-address-fields').show();
+            }
+        }
+
+        // Check on page load which radio is selected
+        const selectedValue = $('input[name="isResidentialAddressInNorway"]:checked').val();
+        if (selectedValue) {
+            handleAddressFieldsVisibility(selectedValue);
+        }
+
+        // Handle change event
+        $('input[name="isResidentialAddressInNorway"]').change(function() {
+            handleAddressFieldsVisibility($(this).val());
+        });
+
+    })
+</script>
+
+<!-- profile image upload -->
+<script>
+    $(document).ready(function () {
+        var readURLFirst = function (input) {
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+
+                reader.onload = function (e) {
+                    $('.profile-pic0').attr('src', e.target.result);
+                }
+
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+
+        $(".file-upload0").on('change', function () {
+            readURLFirst(this);
+        });
+
+        $(".upload-button0").on('click', function () {
+            $(".file-upload0").click();
+        });
+
+        var readURL = function (input) {
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+
+                reader.onload = function (e) {
+                    $('.profile-pic1').attr('src', e.target.result);
+                }
+
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+
+        $(".file-upload1").on('change', function () {
+            readURL(this);
+        });
+
+        $(".upload-button1").on('click', function () {
+            $(".file-upload1").click();
+        });
+        // var readURLProfile = function (input) {
+        //     if (input.files && input.files[0]) {
+        //         var reader = new FileReader();
+
+        //         reader.onload = function (e) {
+        //             $('.profile-pic').attr('src', e.target.result);
+        //         }
+
+        //         reader.readAsDataURL(input.files[0]);
+        //     }
+        // }
+
+
+        // $(".file-upload").on('change', function () {
+        //     readURLProfile(this);
+        // });
+
+        // $(".upload-button").on('click', function () {
+        //     $(".file-upload").click();
+        // });
+    });
+</script>
+<!-- profile image upload -->
+
+{% endblock %}

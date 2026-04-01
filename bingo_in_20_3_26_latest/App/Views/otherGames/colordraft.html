@@ -1,0 +1,130 @@
+{% extends "partition/layout.html" %} {% block body %}
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <section class="content-header">
+            <h1>{{otherGame.color_draft}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i>{{otherGame.dashboard}}</a></li>
+                <li href="#">{{otherGame.color_draft}} </li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content">
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{otherGame.color_draft}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <form method="POST" action="/colorDraftEdit/" name="addTerm" class="form-horizontal">
+                                            <table border="0" class="table display  pb-30">
+                                                <div class="col-sm-8">
+                                                    <div class="panel-wrapper collapse in">
+                                                        <div class="panel-body">
+                                                            <div class="form-group">
+                                                                <div class="row">
+                                                                    
+                                                                    <div class="col-sm-12">
+                                                                        <div class="row">
+                                                                            <label class="control-label col-sm-4" for="redcolorPrize">{{otherGame.red_color_prize}}:</label>
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="redColorPrize1" value="{{redPrizes[0]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="redColorPrize2" value="{{redPrizes[1]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="redColorPrize3" value="{{redPrizes[2]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="redColorPrize4" value="{{redPrizes[3]}}" data-validation="required">
+                                                                            </div>
+                                                                           
+                                                                        </div>
+                                                                        <br>
+                                                                        <div class="row">
+                                                                            <label class="control-label col-sm-4" for="yellowcolorPrize">{{otherGame.yellow_color_prize}}:</label>
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="yellowColorPrize1" value="{{yellowPrizes[0]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="yellowColorPrize2" value="{{yellowPrizes[1]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="yellowColorPrize3" value="{{yellowPrizes[2]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="yellowColorPrize4" value="{{yellowPrizes[3]}}" data-validation="required">
+                                                                            </div>
+                                                                            <div class="clearfix"></div>
+                                                                        </div>
+                                                                        <br>
+                                                                        <div class="row">
+                                                                            <label class="control-label col-sm-4" for="greencolorPrize">{{otherGame.green_color_prize}}:</label>
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="greenColorPrize1" value="{{greenPrizes[0]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="greenColorPrize2" value="{{greenPrizes[1]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="greenColorPrize3" value="{{greenPrizes[2]}}" data-validation="required">
+                                                                            </div>
+
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control numericCls" min="1" placeholder="100"  name="greenColorPrize4" value="{{greenPrizes[3]}}" data-validation="required">
+                                                                            </div>
+                                                                            <div class="clearfix"></div>
+                                                                        </div>
+                                                                        
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <tr>
+                                                    <td colspan="2">
+                                                        <div class="pull-left">
+                                                            {% if editFlag %}
+                                                            <input type="submit" class="btn btn-success btn-flat" value="{{otherGame.submit}}">
+                                                            {% endif %}
+                                                            <a href="/dashboard" class="btn btn-danger btn-flat">{{otherGame.cancel}}</a>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+    </div>
+
+{% endblock %} {% block Jscript %}
+
+{% endblock %}

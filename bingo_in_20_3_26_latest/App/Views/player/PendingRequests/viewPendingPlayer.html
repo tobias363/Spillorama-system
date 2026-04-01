@@ -1,0 +1,918 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    .preview-image {
+        position: relative;
+        display: inline-block;
+        margin: 5px;
+    }
+
+    .remove-button {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        background-color: red;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        line-height: 18px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+
+    .actual-image{
+        width: 200px;
+        height: 200px;
+    }
+
+    /* Apply padding-top: 35px only to big screens or desktops */
+    @media screen and (min-width: 1024px) {
+        .main-section {
+            padding-top: 35px;
+        }
+    }
+</style>
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{penddingRequest.view_pending_request}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{penddingRequest.dashboard}}</a></li>
+                <li class="active">{{penddingRequest.view_player_details}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content main-section">
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{penddingRequest.view_player_details}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <form method="POST" class="form-horizontal" id="approvalForm">
+                                            <table border="0" class="table display  pb-30">
+                                                <div class="col-sm-8">
+                                                    <div class="panel-wrapper collapse in">
+                                                        <div class="panel-body">
+                                                            <input type="text" class="playerId" value="{{Player._id}}" hidden>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2" for="profile">{{penddingRequest.photo_id}}:</label>
+                                                                <div class="col-sm-10" name = "profile">
+                                                                    {% for photos in Player.profilePic%}
+                                                                    <img src="{{photos}}" style="width: 100px;margin-right: 10px;">
+                                                                    {%endfor%}
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2"
+                                                                    for="customerNumber">{{penddingRequest.customer_number}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" name="customerNumber"
+                                                                        class="form-control" readonly disabled required
+                                                                        value="{{Player.customerNumber}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2"
+                                                                    for="username">{{penddingRequest.username}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" name="username"
+                                                                        class="form-control" readonly disabled required
+                                                                        value="{{Player.username}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2"
+                                                                    for="email">{{penddingRequest.emailId}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" name="email" class="form-control"
+                                                                        readonly disabled required
+                                                                        value="{{Player.email}}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2"
+                                                                    for="mobile">{{penddingRequest.phone_number}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" name="mobile"
+                                                                        class="form-control" readonly disabled required
+                                                                        value="{{Player.phone}}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2"
+                                                                    for="nickname">{{penddingRequest.firstname}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" name="nickname"
+                                                                        class="form-control" readonly disabled required
+                                                                        value="{{Player.nickname}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2"
+                                                                    for="dob">{{penddingRequest.date_of_birth}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" name="dob" class="form-control"
+                                                                        readonly disabled required value="{{DOB}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2"
+                                                                    for="bank">{{penddingRequest.bank_ac_no}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" name="bank" class="form-control"
+                                                                        readonly disabled required
+                                                                        value="{{Player.bankId}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2" for="hall">{{penddingRequest.hall}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <select name="hallName" class="form-control" id="hallName" required readonly disabled>
+                                                                        <!-- <option value="" selected="selected">Hall Name</option> -->
+                                                                        <option value="{{Player.hall.id}}" selected  class="select-{{Player.hall.id}}">{{Player.hall.name}}</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                            {% if Agent.role == 'admin' %}
+                                                            {% if Player.hall.agent %}
+                                                            <div class="form-group">
+                                                                <label for="agent"
+                                                                    class="control-label mb-10 col-sm-2">{{penddingRequest.agent}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" name="agent[id]" hidden value="{{Player.hall.agent.id}}">
+                                                                    <input type="text" class="form-control" name="agent[name]" readonly disabled required value="{{Player.hall.agent.name}}">
+                                                                </div>
+                                                            </div>
+                                                            {% else %}
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2" for="hall">{{penddingRequest.agent}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <select name="agent" class="form-control" id="agentId" required>
+                                                                        {% for agent in agents %}
+                                                                        <option value="{{agent.id}}">{{agent.name}}</option>
+                                                                        {% endfor %}
+                                                                    </select>
+                                                                    <input type="text" id="agentName" name="agent[name]" hidden value="{{agents[0].name}}">
+                                                                    <input type="text" id="agentIdHidden" name="agent[id]" hidden value="{{agents[0].id}}">
+                                                                </div>
+                                                            </div>
+                                                            {% endif %}
+                                                            {% if Player.hall.actionBy %}
+                                                            <div class="form-group">
+                                                                <label for="requestBy" class="control-label mb-10 col-sm-2">{{penddingRequest.request_by}}:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" class="form-control" name="requestBy" readonly disabled required value="{{Player.hall.agent.name}}">
+                                                                </div>
+                                                            </div>
+                                                            {% endif %}
+                                                            {% endif %}
+                                                            {% if Player.photoId.length %}
+                                                            <div class="form-group">
+                                                                <label for="imageToggle" class="control-label mb-10 col-sm-2">{{penddingRequest.photo_id}} :</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="hidden" name="image" id="photoIdLink" value="{{Player.photoId}}">
+                                                                    <div class="col-sm-10" id="imgContainer">
+                                                                        <button name="imageToggle" id="viewImage" type="button" class="btn btn-primary btn-flat viewImage">View</button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            {% elif Agent.role == 'agent'%}
+                                                            <div class="form-group">
+                                                                <label for="imageToggle" class="control-label mb-10 col-sm-2">{{penddingRequest.photo_id}} :</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="file" accept="image/*" multiple id="imageInput" style="display: none;" name="images">
+                                                                    <button id="addImageButton" class="btn btn-primary btn-flat" type="button">{{penddingRequest.upload}}</button>
+                                                                    <div id="imageContainer" style="display: flex;">
+                                                                </div>
+                                                                </div>
+                                                            </div>
+                                                            {% endif %}
+
+                                                            <!-- PLayer Address Details -->
+                                                            <!-- Residential Address in Norway Question -->
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2">{{penddingRequest.do_you_have_address_in_norway}}:</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" name="isResidentialAddressInNorway" value="yes"
+                                                                        {% if Player.addressDetails.residentialAddressInNorway == true %} checked {% endif %}
+                                                                        disabled
+                                                                    >
+                                                                    <label for="html">{{penddingRequest.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" name="isResidentialAddressInNorway" value="no"
+                                                                        {% if Player.addressDetails.residentialAddressInNorway == false %} checked {% endif %}
+                                                                        disabled
+                                                                    >
+                                                                    <label for="html">{{penddingRequest.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- Norwegian Address Fields (shown when Yes is selected) -->
+                                                            <div class="norwegian-address-fields" style="display: none;">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-2" for="city">{{penddingRequest.city}}:</label>
+                                                                    <div class="col-sm-10">
+                                                                        <input type="text" class="form-control" id="city" name="city" placeholder="Enter City" value="{{Player.addressDetails.city}}" data-validation="required" disabled>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-2" for="zipCode">{{penddingRequest.zip_code}}:</label>
+                                                                    <div class="col-sm-10">
+                                                                        <input type="text" class="form-control" id="zipCode" name="zipCode" placeholder="Enter ZIP Code" value="{{Player.addressDetails.zipCode}}" data-validation="required" disabled>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-2" for="address">{{penddingRequest.address}}:</label>
+                                                                    <div class="col-sm-10">
+                                                                        <textarea class="form-control" id="address" name="address" placeholder="Enter Address" data-validation="required" disabled rows="3">{{Player.addressDetails.address}}</textarea>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- International Address Fields (shown when No is selected) -->
+                                                            <div class="international-address-fields" style="display: none;">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-2" for="country">{{penddingRequest.country}}:</label>
+                                                                    <div class="col-sm-10">
+                                                                        <select class="form-control" id="country" name="country" data-validation="required" disabled>
+                                                                            <option>{{Player.addressDetails.country}}</option>
+                                                                        </select>
+                                                                    </div>
+                                                                </div>
+
+                                                                 <!-- Income Sources -->
+                                                                 <div class="form-group">
+                                                                    <label class="control-label col-sm-2">{{penddingRequest.type_of_income_used_to_play}}</label>
+                                                                    <div class="col-sm-10">
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="salary" 
+                                                                                    {% if Player.addressDetails.incomeSources.salary %} checked {% endif %}
+                                                                                    data-validation="checkbox_group"
+                                                                                    data-validation-qty="min1"
+                                                                                    disabled
+                                                                                >
+                                                                                {{penddingRequest.salary}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="propertySaleOrLease" 
+                                                                                    {% if Player.addressDetails.incomeSources.propertySaleOrLease %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{penddingRequest.sale_lease_property}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="stocks" 
+                                                                                    {% if Player.addressDetails.incomeSources.stocks %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{penddingRequest.stocks}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="socialSupport" 
+                                                                                    {% if Player.addressDetails.incomeSources.socialSupport %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{penddingRequest.social_security_pension_support_scheme}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="giftsOrInheritance" 
+                                                                                    {% if Player.addressDetails.incomeSources.giftsOrInheritance %} checked {% endif %}
+                                                                                    disabled
+                                                                                >  
+                                                                                {{penddingRequest.gift_inheritance}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="other" 
+                                                                                    {% if Player.addressDetails.incomeSources.other %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{penddingRequest.other}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <!-- Validation message -->
+                                                                        <div id="income-error" class="text-danger" style="display: none;">
+                                                                            Please select at least one income source.
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <!-- PLayer Address Details -->
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="HR">{{penddingRequest.is_the_player_high_risk}}?</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio"  name="HR"
+                                                                        value="yes" {% if Player.HR == 'yes' %}checked{%endif%}
+                                                                        {% if (Agent.role == 'agent') and (forwarded == true ) %} disabled {%endif%}
+                                                                    >
+                                                                    <label for="html">{{penddingRequest.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio"  name="HR"
+                                                                        value="no"{% if not Player.HR == 'no' %}checked{%endif%}
+                                                                        {% if (Agent.role == 'agent') and (forwarded == true ) %} disabled {%endif%}
+                                                                    >
+                                                                    <label for="html">{{penddingRequest.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4"
+                                                                    for="PEP">{{penddingRequest.is_the_player_pep}}</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio"  name="PEP"
+                                                                        value="yes" {% if Player.PEP == 'yes' %} checked {%endif%}
+                                                                        {% if (Agent.role == 'agent') and (forwarded == true ) %} disabled {%endif%}
+                                                                    >
+                                                                    <label for="html">{{penddingRequest.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio"  name="PEP"
+                                                                        value="no" {% if Player.PEP == 'no' %}checked{%endif%}
+                                                                        {% if (Agent.role == 'agent') and (forwarded == true ) %} disabled {%endif%}
+                                                                    >
+                                                                    <label for="html">{{penddingRequest.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- PEP Details Section -->
+                                                            <div id="pep-details" class="{% if Player.PEP == 'no' %}hidden{% endif %}">
+                                                
+                                                                <!-- Residential Address in Norway -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{penddingRequest.do_you_have_address_in_norway}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <label>
+                                                                            <input type="radio" name="hasNorwegianAddress" value="yes"
+                                                                                {% if Player.pepDetails.residentialAddressInNorway == true %} checked {% endif %}
+                                                                                {% if not Player.pepDetails.residentialAddressInNorway %} checked {% endif %}
+                                                                                {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                            {{penddingRequest.yes}}
+                                                                        </label>
+                                                                        <label>
+                                                                            <input type="radio" name="hasNorwegianAddress" value="no"
+                                                                                {% if Player.pepDetails.residentialAddressInNorway == false %} checked {% endif %}
+                                                                                {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                            {{penddingRequest.no}}
+                                                                        </label>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Name of PEP -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{penddingRequest.name_of_pep}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" name="nameOfPEP" class="form-control"
+                                                                            value="{{ Player.pepDetails.name or '' }}"
+                                                                            data-validation="required"
+                                                                            {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Relationship to PEP -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{penddingRequest.relation_with_pep}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <textarea name="relationshipToPEP" class="form-control" rows="3"
+                                                                            data-validation="required"
+                                                                            {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>{{ Player.pepDetails.relationship or '' }}</textarea>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Date of Birth -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{penddingRequest.date_of_birth}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="date" name="dateOfBirth" class="form-control"
+                                                                            value="{{ pepdateofBirth  }}"
+                                                                            data-validation="date required"
+                                                                            {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}
+                                                                            max="{{ today }}">
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Income Sources -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{penddingRequest.type_of_income_used_to_play}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="salary" 
+                                                                                    {% if Player.pepDetails.incomeSources.salary %} checked {% endif %}
+                                                                                    data-validation="checkbox_group"
+                                                                                    data-validation-qty="min1"
+                                                                                    {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                                    {{penddingRequest.salary}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="propertySaleOrLease" 
+                                                                                    {% if Player.pepDetails.incomeSources.propertySaleOrLease %} checked {% endif %}
+                                                                                    {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                                    {{penddingRequest.sale_lease_property}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="stocks" 
+                                                                                    {% if Player.pepDetails.incomeSources.stocks %} checked {% endif %}
+                                                                                    {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                                    {{penddingRequest.stocks}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="socialSupport" 
+                                                                                    {% if Player.pepDetails.incomeSources.socialSupport %} checked {% endif %}
+                                                                                    {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                                    {{penddingRequest.social_security_pension_support_scheme}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="giftsOrInheritance" 
+                                                                                    {% if Player.pepDetails.incomeSources.giftsOrInheritance %} checked {% endif %}
+                                                                                    {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                                    {{penddingRequest.gift_inheritance}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="other" 
+                                                                                    {% if Player.pepDetails.incomeSources.other %} checked {% endif %}
+                                                                                    {% if (Agent.role == 'agent') and (forwarded == true) %} disabled {% endif %}>
+                                                                                    {{penddingRequest.other}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <!-- Validation message -->
+                                                                        <div id="income-error" class="text-danger" style="display: none;">
+                                                                            Please select at least one income source.
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                
+                                                            </div>
+
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <tr>
+                                                    <td colspan="2">
+                                                        <div id="actionBtn" style="margin-left: 25%;">
+                                                            {% if Agent.isSuperAdmin == true or Agent.role == 'agent' or acceptFlag == true %}
+                                                                <button class="btn btn-success btn-flat Approve">{{penddingRequest.approve}}</button>
+                                                            {% endif %}
+                                                            {% if Agent.isSuperAdmin == true or Agent.role == 'agent' or rejectFlag == true %}
+                                                                <button class="btn btn-danger btn-flat Reject">{{penddingRequest.reject}}</button>
+                                                            {% endif %}
+                                                        </div>
+                                                        {% if (Agent.role == 'agent')%}
+                                                        {% if editFlag == true %}
+                                                        <div id="forwardBtn" style="margin-left: 25%;display: none;">
+                                                            <button class="btn btn-primary btn-flat Forward">{{penddingRequest.forward_to_admin}}</button>
+                                                        </div>
+                                                        {% endif %}
+                                                        <div id="cancelBtn" style="margin-left: 25%;display: none;">
+                                                            <a href="/pendingRequests" class="btn btn-danger btn-flat Cancel">{{penddingRequest.cancel}}</a>
+                                                        </div>
+                                                       
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- /Row -->
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script src="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.jquery.min.js"></script>
+<link href="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.min.css" rel="stylesheet" />
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+<script>
+    let role = "{{Agent.role}}";
+    let forwarded = "{{forwarded}}";
+    $(document).ready(function () {
+         // Set the max date to the current date for the Date of Birth field
+        const today = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
+        $("input[name='dateOfBirth']").attr("max", today);
+
+        let selectedFiles = [];
+        let id = "{{Player._id}}";
+        checkForward();
+        $(function () {
+            "use strict";
+
+            var SweetAlert = function () { };
+
+            SweetAlert.prototype.init = function () {
+                let id = "{{Player._id}}";
+                console.log("id of pending request", id);
+                //Parameter
+                $('body').on('click', '.Approve', function (e) {
+                    $.validate();
+                    if (!$("#approvalForm").isValid()) {
+                        const firstError = $('.has-error').first();
+                        if (firstError.length) {
+                            $('html, body').animate({ scrollTop: firstError.offset().top }, 10);
+                        }
+                        return;
+                    }
+                    swal({
+                        title: "{{penddingRequest.are_you_sure_want_to_approve_the_request}}",
+                        text: "{{penddingRequest.once_performed_can_not_revert}}",
+                        type: "info",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{penddingRequest.yes_approve_it}}!",
+                        cancelButtonText: "{{penddingRequest.no_cancle}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/pendingRequests/approvePendingPlayer",
+                                data: {
+                                    id: id,
+                                    agent: {
+                                        id : $('input[name="agent[id]"]').val(),
+                                        name: $('input[name="agent[name]"]').val()
+                                    },
+                                    PEP: $('input[name="PEP"]:checked').val(),
+                                    HR: $('input[name="HR"]:checked').val(),
+                                    hallId: $('#hallName :selected').val(),
+                                    hallName: $('#hallName :selected').text().trim(),
+                                    residentialAddressInNorway: $('input[name="hasNorwegianAddress"]').is(':checked'),
+                                    pepName: $('input[name="nameOfPEP"]').val(),
+                                    pepRelationship: $('textarea[name="relationshipToPEP"]').val(),
+                                    pepDateOfBirth: $('input[name="dateOfBirth"]').val(),
+                                    salary: $('input[name="income[]"][value="salary"]').is(':checked'),
+                                    propertySaleOrLease: $('input[name="income[]"][value="propertySaleOrLease"]').is(':checked'),
+                                    stocks: $('input[name="income[]"][value="stocks"]').is(':checked'),
+                                    socialSupport: $('input[name="income[]"][value="socialSupport"]').is(':checked'),
+                                    giftsOrInheritance: $('input[name="income[]"][value="giftsOrInheritance"]').is(':checked'),
+                                    other: $('input[name="income[]"][value="other"]').is(':checked')
+                                },
+                                success: function (resultData) {
+                                    console.log("Approved Player Response", resultData);
+                                    swal({
+                                        title: resultData.action,
+                                        text: resultData.message,
+                                        type: resultData.status
+                                    }, function (flag) {
+                                        if (flag) {
+                                            window.location.assign(window.location.origin + '/pendingRequests');
+                                        }
+                                    });
+                                }
+                            });
+                        } else {
+                            // swal("Cancelled", "Player Not Approved", "error");
+                            window.location.assign(window.location.origin + '/pendingRequests');
+                        }
+                    });
+                    return false;
+                });
+
+                $('body').on('click','.Reject',function (e) {
+                    $.validate();
+                    if (!$("#approvalForm").isValid()) {
+                        const firstError = $('.has-error').first();
+                        if (firstError.length) {
+                            $('html, body').animate({ scrollTop: firstError.offset().top }, 10);
+                        }
+                        return;
+                    }
+                    console.log("PEP HR",$('input[name="PEP"]:checked').val(), $('input[name="HR"]:checked').val());
+                     swal({
+                        title: "{{penddingRequest.are_you_sure_want_to_reject_the_request}}",
+                        text: "",
+                        type: "info",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{penddingRequest.yes_reject_it}}",
+                        cancelButtonText: "{{penddingRequest.no_cancle}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            swal({
+                                title:"{{penddingRequest.provide_reason_to_reject}}",
+                                type: "input",
+                                showCancelButton: true,
+                                confirmButtonColor: "#e69a2a",
+                                confirmButtonText: "{{penddingRequest.yes_reject_it}}",
+                                cancelButtonText: "{{penddingRequest.no_cancle}}",
+                                closeOnConfirm: false,
+                                closeOnCancel: false,
+                                animation: "slide-from-top",
+                                inputPlaceholder: "{{penddingRequest.enter_reason}}"
+                            },function (reason) {
+                                console.log("the flag",reason.length);
+                                if (reason === false) {
+                                    swal("{{penddingRequest.cancelled}}", "Player Not Rejected", "error", window.location.assign(window.location.origin + '/pendingRequests'));
+                                }else{
+                                    if (reason.length) {   
+                                        $.ajax({
+                                            type: 'POST',
+                                            url: host + "/pendingRequests/rejectPendingPlayer",
+                                            data: {
+                                                id: id,
+                                                agent: {
+                                                    id: $('input[name="agent[id]"]').val(),
+                                                    name: $('input[name="agent[name]"]').val()
+                                                },
+                                                reason:reason,
+                                                PEP: $('input[name="PEP"]:checked').val(),
+                                                HR: $('input[name="HR"]:checked').val(),
+                                                residentialAddressInNorway: $('input[name="hasNorwegianAddress"]').is(':checked'),
+                                                pepName: $('input[name="nameOfPEP"]').val(),
+                                                pepRelationship: $('textarea[name="relationshipToPEP"]').val(),
+                                                pepDateOfBirth: $('input[name="dateOfBirth"]').val(),
+                                                salary: $('input[name="income[]"][value="salary"]').is(':checked'),
+                                                propertySaleOrLease: $('input[name="income[]"][value="propertySaleOrLease"]').is(':checked'),
+                                                stocks: $('input[name="income[]"][value="stocks"]').is(':checked'),
+                                                socialSupport: $('input[name="income[]"][value="socialSupport"]').is(':checked'),
+                                                giftsOrInheritance: $('input[name="income[]"][value="giftsOrInheritance"]').is(':checked'),
+                                                other: $('input[name="income[]"][value="other"]').is(':checked')
+                                            },
+                                            success: function (resultData) {
+                                                console.log("Rejected Player Response", resultData);
+                                                swal({
+                                                    title: resultData.action,
+                                                    text: resultData.message,
+                                                    type: resultData.status
+                                                }, function (flag) {
+                                                    if (flag) {
+                                                        window.location.assign(window.location.origin + '/pendingRequests');
+                                                    }
+                                                });
+                                            }
+                                        });
+                                    }else{
+                                        swal("{{penddingRequest.reason_required}}", "{{penddingRequest.can_not_reject_without_reason}}!", "error");
+                                        return false;
+                                    }
+                                }
+                            });
+                        } else {
+                            // swal("Cancelled", "Player Not Rejected", "error", window.location.assign(window.location.origin + '/pendingRequests'));
+                            window.location.assign(window.location.origin + '/pendingRequests');
+                        }
+                    });
+                    return false;
+                })
+
+               },
+            $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+            $.SweetAlert.init();
+        });
+
+        $('body').on('click', '.Forward', function (e) {
+            e.preventDefault();
+
+            $.validate();
+            if (!$("#approvalForm").isValid()) {
+                const firstError = $('.has-error').first();
+                if (firstError.length) {
+                    $('html, body').animate({ scrollTop: firstError.offset().top }, 10);
+                }
+                return;
+            }
+            console.log("PEP HR", $('input[name="PEP"]:checked').val(), $('input[name="HR"]:checked').val());
+            let formData = new FormData();
+
+            for (let i = 0; i < selectedFiles.length; i++) {
+                formData.append('photoId', selectedFiles[i]);
+            }
+            formData.append('id', id)
+            formData.append('hallName', $('#hallName :selected').text().trim())
+            formData.append('hallId', $('#hallName :selected').val())
+            formData.append('PEP', $('input[name="PEP"]:checked').val())
+            formData.append('HR', $('input[name="HR"]:checked').val())
+
+            // Append PEP form values to FormData instance
+            if($('input[name="PEP"]:checked').val() == "yes"){
+                formData.append('residentialAddressInNorway', $('input[name="hasNorwegianAddress"]').is(':checked'));
+                formData.append('pepName', $('input[name="nameOfPEP"]').val());
+                formData.append('pepRelationship', $('textarea[name="relationshipToPEP"]').val());
+                formData.append('pepDateOfBirth', $('input[name="dateOfBirth"]').val());
+                formData.append('salary', $('input[name="income[]"][value="salary"]').is(':checked'));
+                formData.append('propertySaleOrLease', $('input[name="income[]"][value="propertySaleOrLease"]').is(':checked'));
+                formData.append('stocks', $('input[name="income[]"][value="stocks"]').is(':checked'));
+                formData.append('socialSupport', $('input[name="income[]"][value="socialSupport"]').is(':checked'));
+                formData.append('giftsOrInheritance', $('input[name="income[]"][value="giftsOrInheritance"]').is(':checked'));
+                formData.append('other', $('input[name="income[]"][value="other"]').is(':checked'));
+            }
+            
+
+            if (selectedFiles.length) {
+                 $.ajax({
+                    type: 'POST',
+                    url: host + "/pendingRequests/forwardRequest",
+                    data: formData,
+                    mimeType: "multipart/form-data",
+                    processData: false,
+                    contentType: false,
+                    success: function () {
+                        window.location.assign(window.location.origin + '/pendingRequests');
+                    },
+                    error: function (resultData) {
+                        swal({
+                            title: resultData.action,
+                            text: resultData.message,
+                            type: resultData.status
+                        }, function (flag) {
+                            if (flag) {
+                                window.location.assign(window.location.origin + '/pendingRequests');
+                            }
+                        });
+                    }
+                });
+            } else {
+                alert("Please Select a Photo Id.")
+            }
+            
+        });
+        
+
+        $('input[type=radio][name=HR]').change(function () {
+            console.log("HR value changed", this.value);
+            checkForward();
+        });
+        
+        $('input[type=radio][name=PEP]').change(function () {
+            console.log("PEP value changed", this.value);
+             checkForward();
+        });
+    
+        $(document).on('click', '.viewImage',function (e) {
+            console.log("clicked in view Image",this);
+            $(this).removeClass();
+            $(this).addClass('btn btn-danger btn-flat hideImage');
+            $(this).html('Hide');
+            let image = $('#photoIdLink').val().split(',');
+            console.log(image);
+            for (let i = 0; i < image.length; i++) {
+                $('#imgContainer').append(`
+                     <div class="container" style="margin-top:20px;"><img src="${image[i]}" alt="Photo ID" width="150px" height="150px"></div>
+                `)
+            }
+        })
+
+        $(document).on('click','.hideImage', function (e) {
+            console.log("clicked in hide Image");
+            $(this).removeClass();
+            $(this).addClass('btn btn-primary btn-flat viewImage');
+            $(this).html('View');
+            $('.container').remove();
+        })
+
+
+        // Event listener for the "Add Image" button
+        $("#addImageButton").on("click", function () {
+            // Trigger the hidden file input click event
+            $("#imageInput").trigger("click");
+        });
+
+        // Event listener for the file input change
+        $("#imageInput").on("change", function () {
+            const imageContainer = $("#imageContainer");
+            const files = Array.from(this.files);
+            // Add newly selected files to the array of selected files
+            selectedFiles = selectedFiles.concat(files);
+             imageContainer.html("");
+            $.each(selectedFiles, function (index, file) {
+                const reader = new FileReader();
+
+                reader.onload = function (e) {
+                    const imageSrc = e.target.result;
+                    // Create a preview element for the image
+                    const preview = $(
+                        `<div class="preview-image">
+                        <img src="${imageSrc}" class="actual-image" alt="Preview">
+                        <button type="button" class="remove-button" data-index="${index}">X</button>
+                        </div>`
+                    );
+
+                    // Event listener to remove the image from the list
+                    preview.find(".remove-button").on("click", function () {
+                        const index = $(this).data("index");
+                        selectedFiles.splice(index, 1);
+                        $(this).closest(".preview-image").remove();
+                    });
+
+                    imageContainer.append(preview);
+                };
+
+                // Read the image file as a data URL
+                reader.readAsDataURL(file);
+            });
+        });
+        $("#agentId").on("change",function(e) {
+           $("#agentName").val($("#agentId  option:selected").text());
+           $("#agentIdHidden").val($(this).val())
+        })
+
+        // Show or hide the PEP details section based on the selected value
+        $('input[name="PEP"]').on('change', function () {
+            const pepDetails = $('#pep-details');
+            if ($(this).val() === 'yes') {
+                pepDetails.removeClass('hidden');
+            } else {
+                pepDetails.addClass('hidden');
+            }
+        });
+        
+
+    });
+
+    function checkForward() {
+        if (role == 'agent' && (!forwarded || forwarded == 'false')) {
+           let HR = $('input[type=radio][name=HR]:checked').val();
+           let PEP = $('input[type=radio][name=PEP]:checked').val();
+           let isResidentialAddressInNorway = $('input[type=radio][name=isResidentialAddressInNorway]:checked').val();
+           console.log("value changed", HR, PEP, isResidentialAddressInNorway);
+           if (HR == 'yes' || PEP == 'yes' || isResidentialAddressInNorway == 'no') {
+            $("#forwardBtn").css("display", "block");
+            $("#actionBtn").css("display", "none");
+           } else {
+            $("#forwardBtn").css("display", "none");
+            $("#actionBtn").css("display", "block");
+           }
+        }else if(role == 'agent' && forwarded == "true"){
+            $("#forwardBtn").css("display", "none");
+            $("#actionBtn").css("display", "none");
+            $("#cancelBtn").css("display", "block");
+        }
+    }
+
+    // check for player has residential address and manage fields accordingly
+    function handleAddressFieldsVisibility(value) {
+        if (value === 'yes') {
+            $('.norwegian-address-fields').show();
+            $('.international-address-fields').hide();
+        } else if (value === 'no') {
+            $('.norwegian-address-fields').hide();
+            $('.international-address-fields').show();
+        }
+    }
+
+    // Check on page load which radio is selected
+    var selectedValue = $('input[name="isResidentialAddressInNorway"]:checked').val();
+    if (selectedValue) {
+        handleAddressFieldsVisibility(selectedValue);
+    }
+</script>
+
+{% endblock %}
