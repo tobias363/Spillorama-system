@@ -30,7 +30,7 @@ async function uploadToCloudinary(fileObject, folder = 'bingo') {
 function resolveImageUrl(photo, baseUrl = '') {
     if (!photo) return '';
     if (photo.startsWith('http://') || photo.startsWith('https://')) return photo;
-    return `${baseUrl}profile/bingo/${photo}`;
+    return `${baseUrl}/profile/bingo/${photo}`;
 }
 
 module.exports = { uploadToCloudinary, resolveImageUrl };
