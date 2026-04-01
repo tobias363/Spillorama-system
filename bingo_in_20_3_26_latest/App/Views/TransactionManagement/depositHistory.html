@@ -1,0 +1,295 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{deposit.deposit_history}} {{deposit.table}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{deposit.dashboard}}</a></li>
+                <li class="active" href="/deposit/history">{{deposit.deposit_history}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{deposit.deposit_history}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                <button class="btn btn-success btn-xs btn-rounded" onClick="$('#myTable').DataTable().ajax.reload();">{{deposit.refresh_table}}</button>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <div class="row">
+                                    <div class="col-sm-3">
+                                        <div class="form-group">
+                                            <div class='input-group date' id='startDate'>
+                                                <input type='text' class="form-control" name="start_date" id="start_date" placeholder="{{deposit.start_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"/>
+                                                <span class="input-group-addon">
+                                                    <span class="glyphicon glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-sm-3">
+                                        <div class="form-group">
+                                            <div class='input-group date' id='endDate'>
+                                                <input type='text' class="form-control" name="end_date" id="end_date" placeholder="{{deposit.end_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"/>
+                                                <span class="input-group-addon">
+                                                    <span class="glyphicon glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div class="col-sm-3">
+                                            <div class="form-group">
+                                                <div class="input-group">
+                                                    <span class="input-group-addon"><i class="fa fa-filter"
+                                                            aria-hidden="true"></i></span>
+                                                    <select name="transactionType" class="form-control"
+                                                        id="transactionType">
+                                                        <option value="offline">{{deposit.pay_in_hall}}</option>
+                                                        <option value="online">{{deposit.vipps_cards}}</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-sm-3">
+                                        <input type="button" name="search" id="search" value="{{deposit.search}}" class="btn btn-info" />
+                                    </div>
+                                </div>
+
+                                <!-- <div class="panel-wrapper collapse in"> -->
+                                    <!-- <div class="panel-body"> -->
+                                        <div class="table-wrap">
+                                            <div class="table-responsive">
+                                                <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                                <table id="myTable" class="table table-bordered table-striped">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>{{deposit.date_time}}</th>
+                                                            <th>{{deposit.order_number}}</th>
+                                                            <th>{{deposit.transaction_id}}</th>
+                                                            <th>{{deposit.customer_number}}</th>
+                                                            <th>{{deposit.username}}</th>
+                                                            <th>{{deposit.amount}}</th>
+                                                            <th>{{deposit.payment_method}}</th>
+                                                            <th>{{deposit.hall_name}}</th>
+                                                            <th>{{deposit.status}}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    <!-- </div> -->
+                                <!-- </div> -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script>
+    function formatDate(date) {
+        let d = new Date(date),
+            month = '' + (d.getMonth() + 1),
+            day = '' + d.getDate(),
+            year = d.getFullYear();
+
+        if (month.length < 2) 
+            month = '0' + month;
+        if (day.length < 2) 
+            day = '0' + day;
+
+        return [year, month, day].join('-');
+    }
+    var orderTable = "";
+    var host = window.location.origin;
+    $(document).ready(function() {
+        let ajaxUrl = host + "/deposit/history/get";
+        $('#startDate input,#endDate input').datepicker();
+        $('#startDate input,#endDate input').val(formatDate(new Date()));
+
+        // let startDate;
+        // let endDate;
+        
+        // $('#startDate').datepicker({
+        //     autoclose: true,
+        //     format: 'yyyy-mm-dd',
+        // }).on('changeDate', function(selected){
+        //     startDate = new Date(selected.date.valueOf());
+        //     startDate.setDate(startDate.getDate(new Date(selected.date.valueOf())));
+        //     $('#endDate').datepicker('setStartDate', startDate);
+        //     $('#endDate').datepicker('setEndDate', new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000)); // Set the end date to be 7 days after the selected start date
+        // });
+
+        // $('#endDate').datepicker({
+        //     autoclose: true,
+        //     format: 'yyyy-mm-dd',
+        // }).on('changeDate', function(selected){
+        //     endDate = new Date(selected.date.valueOf());
+        //     endDate.setDate(endDate.getDate(new Date(selected.date.valueOf())));
+        //     $('#startDate').datepicker('setEndDate', endDate);
+        //     $('#startDate').datepicker('setStartDate', new Date(endDate.getTime() - 7 * 24 * 60 * 60 * 1000)); // Set the start date to be 7 days before the selected end date
+        // });
+        // $('#startDate input,#endDate input').val(formatDate(new Date()));
+
+        let start_date = $('#start_date').val();
+        let end_date = $('#end_date').val();
+        fetch_data('yes', start_date, end_date);
+
+        function fetch_data(is_date_search, start_date = '', end_date = '') {
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "{{deposit.search}} {{deposit.username}}/{{deposit.customer_number}}",
+                    "sLengthMenu": "{{deposit.show}} _MENU_ {{deposit.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ deposit.previous }}",
+                        sNext: "{{ deposit.next }}"
+                    },
+                    "sEmptyTable": "{{deposit.no_data_available_in_table}}",
+                    "sInfo": "{{deposit.showing}} _START_ to _END_ of _TOTAL_ {{deposit.entries}}",
+                    "sInfoEmpty": "{{deposit.showing}} 0 to 0 of 0 {{deposit.entries}}"
+                },
+                "processing": true,
+                "serverSide": true,
+                "order": [
+                    [0, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": [8],
+                    "orderable": false
+                }],
+                "autoWidth": false,
+                "pageLength": 10,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: {
+                        is_date_search: is_date_search,
+                        start_date: start_date,
+                        end_date: end_date,
+                        transactionType: $("#transactionType").val()
+                    }
+                },
+                //dom: 'lBfrtip',
+                //dom: '<"pull-left"B><"pull-right"f>rt<"row"<"col-sm-4"l><"col-sm-4"i><"col-sm-4"p>>',
+                dom:
+                   "<'row'<'col-sm-3'l><'col-sm-4 text-center'B><'col-sm-5'f>>" +
+                        "<'row'<'col-sm-12'tr>>" +
+                        "<'row'<'col-sm-5'i><'col-sm-7'p>>",
+                lengthMenu: [
+                    [10, 50, 100 ],
+                    [10, 50, 100 ]
+                ],
+                "buttons": [
+                    // 'csv', 'excel'
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5, 6]
+                        }
+                    }, {
+                        extend: 'excelHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5, 6]
+                        }
+                    }
+                ],
+                "columns": [
+                {
+                    "data": "updatedAt",
+                    render: function(data, type, row, meta) {
+                        return moment(row.updatedAt).format('DD/MM/YYYY hh:mm a'); //moment.utc(row.updatedAt).format('DD/MM/YYYY hh:mm a');
+                    }
+                }, {
+                    "data": "orderNumber"
+                }, {
+                    "data": "transactionID"
+                }, {
+                    "data": "customerNumber",
+                        render: function (data, type, row) {
+                        let customerNumber = ''
+                        if (data) {
+                            customerNumber = data;
+                        }
+                        return customerNumber;
+                    }
+                }, {
+                    "data": "playerName"
+                }, {
+                    "data": "amount"
+                },  {
+                    "data": "paymentBy",
+                    render: function(data, type, row) {
+                        if(data) {
+                            return data.charAt(0).toUpperCase() + data.slice(1);
+                        } else {
+                            return "";
+                        }
+                    }
+                }, {
+                    "data": "hallName"
+                }, {
+                    "data": "status",
+                    render: function(data, type, row) {
+                        if (row.status == "pending") {
+                            return '<span class="badge bg-blue"> In Progress </span>';
+                        } else if (row.status == "completed") {
+                            return '<span class="badge bg-green"> Completed </span>';
+                        } else if (row.status == "failed" || row.status == "expired" || row.status == "cancelled" || row.status == "aborted" || row.status == "rejected") {
+                            return `<span class="badge bg-red"> ${row.status.charAt(0).toUpperCase() + row.status.slice(1) || "Failed"} </span>`;
+                        }   
+                    }
+                }, ]
+            });
+        }
+
+        $('#search').click(function() {
+            let start_date = $('#start_date').val();
+            let end_date = $('#end_date').val();
+            if (start_date != '' && end_date != '') {
+                $('#myTable').DataTable().destroy();
+                fetch_data('yes', start_date, end_date);
+            } else {
+                alert("{{deposit.both_date_required}}");
+            }
+        });
+        
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

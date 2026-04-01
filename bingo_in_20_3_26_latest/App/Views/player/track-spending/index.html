@@ -1,0 +1,199 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<div class="page-wrapper">
+    <div class="container-fluid">
+        
+        <section class="content-header">
+            <h1>{{translate.tracking_player_spending}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+                <li class="active">{{translate.tracking_player_spending}}</li>
+            </ol>
+        </section>
+       
+        {% include "partition/notification.html" %}
+       
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{translate.tracking_player_spending}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                               
+                                <div class="row">
+                                    <!-- Date Range Picker -->
+                                    <div class="col-sm-3">
+                                        <div class="form-group">
+                                            <label for="date_range" class="control-label">{{translate.date_range}}:</label>
+                                            <input type="text" class="form-control" id="date_range" placeholder="{{translate.enter}} {{translate.date_range}}">
+                                        </div>
+                                    </div>
+                    
+                                    <!-- Amount Input -->
+                                    <div class="col-sm-2">
+                                        <div class="form-group">
+                                            <label for="amount" class="control-label">{{translate.deposit_amount}}:</label>
+                                            <input type="number" class="form-control" id="amount" placeholder="{{translate.enter}} {{translate.deposit_amount}}">
+                                        </div>
+                                    </div>
+                    
+                                    <!-- Percentage Input -->
+                                    <div class="col-sm-2">
+                                        <div class="form-group">
+                                            <label for="percentage" class="control-label">{{translate.bet_percentage}} (%):</label>
+                                            <input type="number" class="form-control" id="percentage" placeholder="{{translate.enter}} %">
+                                        </div>
+                                    </div>
+                    
+                                    <!-- Search Button -->
+                                    <div class="col-sm-2">
+                                        <div class="form-group">
+                                            <label class="control-label">&nbsp;</label>
+                                            <button class="btn btn-info btn-block" id="search">{{translate.search}}</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{translate.customer_number}}</th>
+                                                    <th>{{translate.username}}</th>
+                                                    <th>{{translate.deposit_amount}}</th>  
+                                                    <th>{{translate.bet_amount}}</th>
+                                                    <th>{{translate.bet_percentage}}</th>
+                                                    <th>{{translate.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+
+<script>
+    $(document).ready(function () {
+        let isSuperAdmin = "{{Agent.isSuperAdmin}}"
+        let viewFlag = '{{viewFlag}}';
+        let today = moment().format('DD-MM-YYYY');
+        // Initialize Date Range Picker 
+        $('#date_range').daterangepicker({
+            autoUpdateInput: true,
+            format: 'DD-MM-YYYY',  // Set date format
+            showDropdowns: true,
+            startDate: today, // Set default start date
+            endDate: today, // Set default end date
+            locale: {
+                format: 'DD-MM-YYYY',
+                cancelLabel: 'Clear'
+            }
+        });
+    
+        $('#date_range').on('apply.daterangepicker', function (ev, picker) {
+            $(this).val(picker.startDate.format('DD-MM-YYYY') + ' - ' + picker.endDate.format('DD-MM-YYYY'));
+        });
+
+        $('#date_range').on('cancel.daterangepicker', function (ev, picker) {
+            $(this).val('');
+        });
+
+        const ajaxUrl = host + "/players/track-spending/get";
+        let table = $('#myTable').DataTable({
+            "language": {
+                'paginate': {
+                    'previous': '{{translate.previous}}',
+                    'next': '{{translate.next}}'
+                }
+            },
+            "oLanguage": {
+                "sLengthMenu": "{{translate.show}} _MENU_ {{translate.entries}}",
+                "sSearch": "{{translate.search}} {{translate.username}} / {{translate.customer_number}}",
+                "sEmptyTable": "{{translate.no_data_available_in_table}}",
+                "sInfo": "{{translate.showing}} _START_ to _END_ of _TOTAL_ {{translate.entries}}",
+                "sInfoEmpty": "{{translate.showing}} 0 to 0 of 0 {{translate.entries}}",
+            },
+            "processing": true,
+            "serverSide": true,
+            "bSort": false,
+            "order": [[0, "desc"]],
+            "columnDefs": [{
+                "targets": [0,1,2,3,4],
+                "orderable": false
+            }],
+            "autoWidth": false,
+            "pageLength": 25,
+            "deferLoading": 0,  // Prevent initial data load
+            "ajax": {
+                url: ajaxUrl,
+                type: "GET",
+                data: function (data) {
+                    // Only fetch data when the search button is clicked
+                    data.dateRange = $('#date_range').val();  // Pass date range
+                    data.amount = $('#amount').val();  // Pass amount
+                    data.percentage = $('#percentage').val();  // Pass percentage
+                },
+                beforeSend: function () {
+                    $('#search').prop('disabled', true).text('Searching...');
+                },
+                complete: function () {
+                    $('#search').prop('disabled', false).text('Search');
+                }
+            },
+            "columns": [
+                { "data": "customerNumber" },
+                { "data": "username" },
+                { "data": "totalDeposit",
+                    "render": function (data, type, row) {
+                        return +data.toFixed(2);
+                    }
+                },
+                { "data": "totalBet", 
+                    "render": function (data, type, row) {
+                        return +data.toFixed(2);
+                    }
+                },
+                { "data": "betPercentage",
+                    "render": function (data, type, row) {
+                        return +data.toFixed(2);
+                    }
+                },
+                {
+                    "data": "action",
+                    "render": function (data, type, row) {
+                        let html = ``;
+                        if(viewFlag == "true"){
+                            html =`<a href="/players/track-spending/transactions/${row._id}?&dateRange=${$('#date_range').val()}&totaldeposit=${row.totalDeposit}&totalbet=${row.totalBet}" name="view" class="btn btn-info btn-xs view btn-rounded"><i class="fa fa-eye" aria-hidden="true"></i></a>`
+                        }
+                        return html;
+                    }
+                }
+            ]
+        });
+
+        // Load data only when "Search" button is clicked
+        $('#search').on('click', function () {
+            table.ajax.reload();
+        });
+
+    });
+    </script>
+{% endblock %}

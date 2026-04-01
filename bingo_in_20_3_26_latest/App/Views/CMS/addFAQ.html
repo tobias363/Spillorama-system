@@ -1,0 +1,111 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            {% if FAQ %}
+            <h1>{{cmsM.edit_faq}}</h1>
+            {% else %}
+            <h1>{{cmsM.add_faq}}</h1>
+            {% endif %}
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{cmsM.dashboard}}</a></li>
+                <li href="/faq">{{cmsM.faq}}</li>
+                {% if FAQ %}
+                <li class="active">{{cmsM.edit_faq}}</li>
+                {% else %}
+                <li class="active">{{cmsM.add_faq}}</li>
+                {% endif %}
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content">
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                {% if FAQ %}
+                                <h6 class="panel-title txt-dark">{{cmsM.edit_faq}}</h6>
+                                {% else %}
+                                <h6 class="panel-title txt-dark">{{cmsM.add_faq}}</h6>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        {% if FAQ %}
+                                        <form method="POST" action="/faqEdit/{{FAQ._id}}" name="addFAQ" class="form-horizontal">
+                                            {% else %}
+                                            <form method="POST" action="/addFAQ" name="addHall" class="form-horizontal">
+                                                {% endif %}
+                                                <table border="0" class="table display  pb-30">
+                                                    <div class="col-sm-8">
+                                                        <div class="panel-wrapper collapse in">
+                                                            <div class="panel-body">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-2" for="question">{{cmsM.question}}:</label>
+                                                                    <div class="col-sm-10">
+                                                                        <input type="text" class="form-control" id="question" placeholder="{{cmsM.enter}} {{cmsM.question}}" required name="question" value="{{FAQ.question}}" data-validation="required" data-validation-length="" data-validation-error-msg="">
+                                                                    </div>
+                                                                </div>
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-2" for="answer">{{cmsM.answer}}:</label>
+                                                                    <div class="col-sm-10">
+                                                                        <textarea class="form-control" placeholder="{{cmsM.enter}} {{cmsM.answer}}" required name="answer" value="">{{FAQ.answer}}</textarea>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <tr>
+                                                        <td colspan="2">
+                                                            <div class="pull-left">
+                                                                <input type="submit" class="btn btn-success btn-flat" value="{{cmsM.submit}}">
+                                                                <a href="/faq" class="btn btn-danger btn-flat">{{cmsM.cancel}}</a>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+        <!-- /Row -->
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script src="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.jquery.min.js"></script>
+<link href="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.min.css" rel="stylesheet" />
+<!-- 
+<script>
+    // $("#agent_menu_placeholder").change(function() {
+    //     var dateType = $('#agent_menu_placeholder option:selected').val();
+    //     var dateType1 = $('#agent_menu_placeholder option:selected').text();
+    //     console.log("Agent ID::::", dateType);
+    //     console.log("Agent ID::::", dateType1);
+    // });
+    $(document).ready(function() {
+        $(".chosen-select").chosen({
+            no_results_text: "Oops, nothing found!"
+        });
+    });
+</script> -->
+{% endblock %}

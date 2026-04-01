@@ -1,0 +1,177 @@
+<style>
+    .suggestion-container {
+        position: absolute;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        max-height: 150px;
+        overflow-y: auto;
+        width: 50%;
+        display: none;
+        /* Initially hidden */
+        z-index: 1000;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+
+    .suggestion-item {
+        padding: 8px;
+        cursor: pointer;
+        border-bottom: 1px solid #eee;
+    }
+
+    .suggestion-item:hover {
+        background-color: #f2f2f2;
+    }
+</style>
+
+<!-- Slot Machine Buttons Modal -->
+<div id="slotMachineButtonModal" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document"> <!-- Updated for larger size -->
+        <div class="modal-content">
+            <div class="modal-header text-center">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
+                        aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title">{{translate.select_slot_machine}}</h4> <!-- Added title for better clarity -->
+            </div>
+
+            <div class="modal-body">
+                <div class="btn-group-vertical" style="width: 100%;"> <!-- Align buttons in a vertical group -->
+                    <button class="btn btn-success btn-block slot-option" data-option="Metronia">Metronia</button>
+                    <button class="btn btn-success btn-block slot-option" data-option="OK Bingo">OK Bingo</button>
+                    <button class="btn btn-success btn-block slot-option" data-option="Franco">Franco</button>
+                    <button class="btn btn-success btn-block slot-option" data-option="Otium">Otium</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- Slot Machine Details Modal -->
+<div id="slotMachineDetailsModal" class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header text-center">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
+                        aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title">Metronia</h4> <!-- Title is dynamically updated -->
+            </div>
+
+            <div class="modal-body">
+                <div class="response-message">
+                    <div id="machineErrorContainer" class="hidden alert alert-danger" style="text-align: center"
+                        role="alert">
+                    </div>
+                    <div id="machineSuccessContainer" class="hidden alert alert-success" style="text-align: center"
+                        role="alert">
+                    </div>
+                </div>
+
+                <div class="btn-group-vertical" style="width: 100%; margin-top: 10px; margin-bottom: 25px;">
+                    <div class="row text-center">
+                        <!-- <div class="col-xs-3">
+                            <button class="custom-btn direct-action" id="open_day">{{translate.open_day}}</button>
+                        </div> -->
+                        <div class="col-xs-6">
+                            <button class="btn btn-block custom-btn custom-btn-no-padding direct-action"
+                                id="get_numbers_today_this_far">{{translate.get_numbers_today_this_far}}</button>
+                        </div>
+                        <div class="col-xs-6">
+                            <button class="btn btn-block custom-btn direct-action"
+                                id="close_all_tickets">{{translate.close_all_tickets}}</button>
+                        </div>
+                        <!-- <div class="col-xs-3">
+                            <button class="custom-btn direct-action" id="close_day">{{translate.close_day}}</button>
+                        </div> -->
+                    </div>
+                </div>
+
+                <form method="POST" id="slotMachineForm">
+                    <!-- UserName Input -->
+                    <div class="form-group text-center">
+                        <input type="text" class="form-control rounded-input financialUserName" id="machine_username" name="machine_userName"
+                            placeholder="{{translate.enter}} {{translate.username}} / {{translate.customer_number}} / {{translate.phone_number}}" autocomplete="off" data-validation="username_server"
+                            data-validation-error-msg-container="#noErrorMsg">
+                        <div id="usernameSuggestions" class="suggestion-container"></div>
+                        <input type="hidden" id="playerIdOfUsernameMachine" name="playerIdOfUsernameMachine"
+                            class="playerIdOfUsername" value="">
+
+                        <div id="usernameBalanceResult" class="registerUserFinancialBalanceResult"
+                            style="margin-top: 10px; color: green;"></div>
+                        <!-- data-validation="required username_server" -->
+                    </div>
+
+                    <!-- TicketId Input -->
+                    <div class="form-group text-center">
+                        <input type="text" id="machine_ticketId" class="form-control rounded-input"
+                            placeholder="{{translate.enter}} Ticket Id" autocomplete="off"
+                            data-validation-error-msg-container="#noErrorMsg">
+                        <!-- data-validation="required" -->
+                    </div>
+
+                    <!-- Amount Input -->
+                    <div class="form-group text-center">
+                        <input type="number" id="machine_amount" class="form-control rounded-input"
+                            placeholder="{{translate.enter}} {{translate.amount}}" autocomplete="off" step="1"
+                            onkeydown="return event.key !== '.' && event.key !== ',';" onpaste="return false;"
+                            data-validation="number"
+                            data-validation-allowing="range[1;1000]"
+                            data-validation-error-msg=" "
+                            data-validation-error-msg-number="{{translate.amount_should_be_between_1_1000}}"
+                            data-validation-error-msg-container="#amount-error-msg">
+                            <div id="amount-error-msg"></div>
+                        <!-- data-validation="required number" data-validation-error-msg-container="#noErrorMsg"-->
+                    </div>
+
+                    <!-- Action Buttons (Two buttons per row) -->
+                    <div class="btn-group-vertical" style="width: 100%;">
+                        <div class="row">
+                            <div class="col-xs-6">
+                                <button class="btn btn-block custom-btn"
+                                    id="make_ticket">{{translate.make_ticket}}</button>
+                            </div>
+                            <div class="col-xs-6">
+                                <button class="btn btn-block custom-btn"
+                                    id="add_to_ticket">{{translate.add_to_ticket}}</button>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-xs-6">
+                                <button class="btn btn-block custom-btn direct-action"
+                                    id="balance_on_ticket">{{translate.balance_on_ticket}}</button>
+                            </div>
+                            <div class="col-xs-6">
+                                <button class="btn btn-block custom-btn direct-action"
+                                    id="close_ticket">{{translate.close_ticket}}</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Payment Options -->
+                    <div class="btn-group-vertical" style="width: 100%; margin-top: 20px;">
+                        <div class="row">
+                            <div class="col-xs-12 col-xs-4">
+                                <button class="btn btn-block custom-btn pay-method" id="pay_by_cash_machine"
+                                    value="Cash">{{translate.cash}}</button>
+                            </div>
+                            <div class="col-xs-12 col-xs-4">
+                                <button class="btn btn-block custom-btn pay-method" id="pay_by_card_machine"
+                                    value="Card">{{translate.card}}</button>
+                            </div>
+                            <div class="col-xs-12 col-xs-4">
+                                <button class="btn btn-block custom-btn pay-method" id="pay_by_player_account_machine"
+                                    value="customerNumber">{{translate.player_account}}</button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-footer text-center">
+
+            </div>
+
+        </div>
+    </div>
+</div>

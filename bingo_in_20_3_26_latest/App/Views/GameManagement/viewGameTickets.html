@@ -1,0 +1,586 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+  .btn-group-new>.btn,
+  .btn-new {
+    padding: 2px 83px;
+    font-size: 12px;
+    line-height: 1.5;
+    border-radius: 3px
+  }
+
+  .cst {
+    display: flex;
+    justify-content: flex-start;
+    gap: 20px;
+    align-items: stretch;
+  }
+
+  .form-horizontal button {
+    width: 50px;
+  }
+
+  button#search,
+  button#filterReset {
+    min-width: 55px;
+  }
+</style>
+<div class="page-wrapper">
+  <div class="container-fluid">
+    <section class="content-header">
+      <h1>{{gameData.name}} {{translate.table}}</h1>
+      <ol class="breadcrumb pull-right">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+        <li class="active">{{gameData.name}} </li>
+      </ol>
+    </section>
+    {% include "partition/notification.html" %}
+    <section class="content">
+      <!-- Modal Code Start -->
+      <div class="row">
+        <div class="container-fluid">
+          <!-- The modal -->
+          <div class="modal fade" id="ticket-Modal" tabindex="-1" role="dialog" aria-labelledby="modalLabel"
+            aria-hidden="true" data-keyboard="false" data-backdrop="static">
+            <div class="modal-dialog" role="document">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                  </button>
+                  <h4 class="modal-title" id="modalLabel">{{translate.view_tickets}}</h4>
+                </div>
+                <div class="modal-body">
+                  <!--Total Number display -->
+                  <div class="form-group ">
+                    <div class="row">
+                      <label class="mb-10 col-sm-12">{{translate.count_total_number_displayed}}:</label>
+                      <div class="col-sm-12">
+                        <p class="col-md-1" id="totalBalls">{{Game.withdrawNumberList|length}} </p>
+                      </div>
+                    </div>
+                  </div>
+
+
+                  <!--Total Number display -->
+                  <div class="form-group ">
+
+                    <div class="row ">
+                      <label class="mb-10 col-sm-12 ">{{translate.total_number_displayed}}:</label>
+                      <div class="col-sm-12" id="ballList">
+                        {% for item in Game.withdrawNumberList %}
+
+                        <!-- <div class="row" style="overflow: auto"> -->
+                        <p class="col-md-1">{{item.number}} </p>
+                        <!-- </div> -->
+                        {% endfor %}
+                      </div>
+                    </div>
+                  </div>
+
+
+                  <h4>{{translate.ticket_display}}:</h4>
+
+                  <div class="ticket-coupon ticket5">
+                    <!-- {{Game|dump}} -->
+                    {% if(Game.gameType=='game_2') %}
+                    <div class="coupon" style="width: 140px;">
+                      <div class="coupon-top">
+                        <div class="coupon-top-left" id="tikId"></div>
+                        <div class="coupon-top-right" id="tikPrice"></div>
+                      </div>
+                      <ul class="coupon-botm" id="tikNums">
+                        {% for row in ticketData.tickets %}
+                        <li style="flex: 0 0 28.21%;">{{row}}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                    {% else %}
+                    <div class="coupon" style="width:239px">
+                      <div class="coupon-top">
+                        <div class="coupon-top-left" id="tikId">{{ticketData.ticketId}}</div>
+                        <div class="coupon-top-right" id="tikPrice">{{ticketData.ticketPrice}}kr</div>
+                      </div>
+                      <ul class="coupon-botm" id="tikNums">
+                        {% for row in ticketData.tickets %}
+                        <li style="flex: 0 0 17.21%;">{{row}}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                    {% endif %}
+                  </div>
+
+                  <div class="form-group">
+                    <div class="">
+
+                      <label class="mb-10 col-sm-12 ">{{translate.winner_type}}:</label>
+                      <div class="col-sm-6">
+                        <table class="table table-bordered" style="border: 1px solid black;">
+                          <thead>
+                            <tr>
+                              <th>{{translate.win_pattern}}</th>
+                              <th>{{translate.winning_amount}}</th>
+                            </tr>
+                          </thead>
+                          <tbody id="winnerData">
+                            {% for row in ticketData.winningStats.lineTypeArray %}
+                            <tr>
+                              <th>
+                                {{row.lineType}}
+                              </th>
+                              <th>
+                                {{row.wonAmount}}
+                              </th>
+                            </tr>
+
+
+                            {% endfor %}
+                            {% if(ticketData.luckyNumberWinningStats) %}
+                            <tr>
+                              <th>
+                                {{ticketData.luckyNumberWinningStats.lineType}}
+                              </th>
+                              <th>
+                                {{ticketData.luckyNumberWinningStats.wonAmount}}
+                              </th>
+                            </tr>
+                            {% endif %}
+                          </tbody>
+                        </table>
+
+                      </div>
+                      <div class="clearfix"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Modal Code End -->
+      <!-- Upcoming Game -->
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                {% if Game.status === 'active' %}
+                <h6 class="panel-title txt-dark">{{translate.game_tickets_are_availbale}}.</h6>
+                {% elif Game.status === 'running'%}
+                <h6 class="panel-title txt-dark">{{translate.ongoing_game2}}</h6>
+                {% else %}
+                <h6 class="panel-title txt-dark">{{translate.recent_game}}</h6>
+                {% endif %}
+              </div>
+              <div class="pull-right">
+                <a href="#">{{translate.game_history}}</a>
+              </div>
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+
+                <!-- Search Filter Code Start -->
+                <div class="row">
+                  <div class="col-sm-12">
+                    <form id="filterBox">
+                      <div class="box">
+                        <div class="box-body">
+                          <div class="row">
+                            <div class="col-lg-9 pull-left">
+                              <div class="cst">
+                                <div class="form-horizontal">
+                                  <div class="input-group">
+                                    <span class="input-group-addon"><i class="fa fa-filter"
+                                        aria-hidden="true"></i></span>
+                                    <select name="orderby" class="form-control" id="userType">
+                                      <option value="" selected="selected">{{translate.all}}</option>
+                                      <option value="UniqueID">UniqueID</option>
+                                      <option value="Digital">Digital</option>
+                                      <option value="Bot">Bot</option>
+                                    </select>
+                                  </div>
+                                </div>
+                                <div class="form-horizontal">
+                                  <div class="input-group">
+                                    <select name="groupHall" class="form-control" id="groupHall">
+                                      <option value="" selected="selected">{{translate.group_of_hall_name}}</option>
+                                      {% for grpHall in Game.groupHalls %}
+                                      <option value="{{grpHall.id}}">{{grpHall.name}}</option>
+                                      {% endfor %}
+                                    </select>
+                                  </div>
+                                </div>
+                                <div class="form-horizontal">
+                                  <div class="input-group">
+                                    <select name="hallName" class="form-control" id="hallName" disabled>
+                                      <option value="" selected="selected">{{translate.hall_name}}</option>
+                                    </select>
+                                  </div>
+                                </div>
+                                <button type="button" class="pull-right btn btn-sm btn-primary playersearch"
+                                  id="search"><i class="fa fa-search"></i></button>
+                                <button type="reset" class="btn btn-primary pull-right clickreset"
+                                  id="filterReset">{{translate.hall_name}}</button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+                <!-- Search Filter Code End -->
+                <div class="row">
+                  <div class="col-sm-12">
+                    <div class="table-wrap">
+                      <div class="table-responsive">
+                        <table id="myTable" class="table table-responsive table-hover display  pb-30">
+                          <thead>
+                            <tr>
+                              {% if Game.status === 'active' %}
+                              <th>{{translate.player_name_uniqueid}}</th>
+                              <th>{{translate.user_type}}</th>
+                              <th>{{translate.group_of_hall_name}}</th>
+                              <th>{{translate.hall_name}}</th>
+                              <th>{{translate.ticket_number}}</th>
+                              <th>{{translate.ticket_price}}</th>
+                              <th>{{translate.purcahsed_with_kr_points}}</th>
+                              <th>{{translate.action}}</th>
+                              {% else %}
+                              <th>{{translate.player_name_uniqueid}}</th>
+                              <th>{{translate.user_type}}</th>
+                              <th>{{translate.group_of_hall_name}}</th>
+                              <th>{{translate.hall_name}}</th>
+                              <th>{{translate.ticket_number}}</th>
+                              <th>{{translate.ticket_price}}</th>
+                              <th>{{translate.purcahsed_with_kr_points}}</th>
+                              <th>{{translate.winning_on_jackpot_number}}</th>
+                              <th>{{translate.winning_on_lucky_number}}</th>
+                              <th>{{translate.total_winnings}}</th>
+                              <th>{{translate.remark}}</th>
+                              <th>{{translate.action}}</th>
+                              {% endif %}
+                            </tr>
+                          </thead>
+                          <tbody>
+
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %} {% block Jscript %}
+<script>
+  let orderTable = "";
+  let table;
+  var host = window.location.origin;
+  let data = {
+    userType: '',
+    groupHall: '',
+    hallName: ''
+  }
+  let gameType = '{{Game.gameType}}';
+  $(document).ready(function () {
+    let status = "{{Game.status}}";
+    console.log(status);
+    let column = [];
+    //Check Status and Set columns accordingly
+    if (status.trim() == "active") {
+      column = [
+        {
+          "data": "userName",
+          render: function (data, type, row) {
+            return row.userName;
+          }
+        }, {
+          "data": "userType",
+          render: function (data, type, row) {
+            return (row.userType == "Online") ? "Digital" : (row.userType == "Bot") ? "Bot" : "Unique";
+          }
+        }, {
+          "data": "groupHall",
+          render: function (data, type, row) {
+            return row.groupHall;
+          }
+        }, {
+          "data": "hall",
+          render: function (data, type, row) {
+            return row.hall;
+          }
+        }, {
+          "data": "ticketNum",
+          render: function (data, type, row) {
+            return row.ticketNum;
+          }
+        }, {
+          "data": "price",
+          render: function (data, type, row) {
+            return row.price;
+          }
+        }, {
+          "data": "purchaseType",
+          render: function (data, type, row) {
+            return row.purchaseType;
+          }
+        }, {
+          "data": "action",
+          render: function (data, type, row) {
+            let html = '<div style="width : 100px !important;margin : 0 auto;text-align: center;">';
+            html += ` <a href="#" name="view" class="btn btn-info btn-xs view btn-rounded" title="{{translate.view_game}}"><i class="fa fa-eye" aria-hidden="true"></i></a>`;
+            html += '</div>';
+            return html;
+          }
+        }
+      ]
+    }
+    else {
+      column = [
+        {
+          "data": "userName",
+          render: function (data, type, row) {
+            return row.userName;
+          }
+        }, {
+          "data": "userType",
+          render: function (data, type, row) {
+            return (row.userType == "Online") ? "Digital" : (row.userType == "Bot") ? "Bot" : "Unique";
+          }
+        }, {
+          "data": "groupHall",
+          render: function (data, type, row) {
+            return row.groupHall;
+          }
+        }, {
+          "data": "hall",
+          render: function (data, type, row) {
+            return row.hall;
+          }
+        }, {
+          "data": "ticketNum",
+          render: function (data, type, row) {
+            return row.ticketNum;
+          }
+        }, {
+          "data": "price",
+          render: function (data, type, row) {
+            return row.price;
+          }
+        }, {
+          "data": "purchaseType",
+          render: function (data, type, row) {
+            return row.purchaseType;
+          }
+        }, {
+          "data": "jackpotWinning",
+          render: function (data, type, row) {
+            return row.jackpotWinning;
+          }
+        }, {
+          "data": "luckyNumberWinning",
+          render: function (data, type, row) {
+            return row.luckyNumberWinning;
+          }
+        }, {
+          "data": "totalWinningOfTicket",
+          render: function (data, type, row) {
+            return row.totalWinningOfTicket;
+          }
+        }, {
+          "data": "remarks",
+          render: function (data, type, row) {
+            return row.remarks;
+          }
+        }, {
+          "data": "action",
+          render: function (data, type, row) {
+            let html = '<div style="width : 100px !important;margin : 0 auto;text-align: center;">';
+            html += ` <a href="#" name="view" class="btn btn-info btn-xs view btn-rounded" title="{{translate.view_game}}"><i class="fa fa-eye" aria-hidden="true"></i></a>`;
+            html += '</div>';
+            return html;
+          }
+        }
+      ]
+    }
+    dataLoad(data);
+    function dataLoad(params) {
+      //Drawing Datatable
+      $('#myTable').DataTable({
+        "oLanguage": {
+          "sSearch":  "{{translate.search}} {{translate.username}}",
+          "sEmptyTable": "{{translate.no_data_available_in_table}}",
+          "sLengthMenu": "{{translate.show}} _MENU_ {{translate.entries}}",
+          "oPaginate": {
+              sPrevious: "{{ translate.previous }}",
+              sNext: "{{ translate.next }}"
+          }
+        },
+        // drawCallback: function () {
+        //   $('[data-toggle="popover"]').popover({
+        //     'container': 'body'
+        //   });
+        // },
+        "processing": true,
+        "serverSide": true,
+        "order": [
+          [(status == "active") ? 4 : 9, "desc"]
+        ],
+        "columnDefs": [{
+          "targets": (status == "active") ? [7] : [10],
+          "orderable": false
+        }],
+        "autoWidth": false,
+        "pageLength": 100,
+        "ajax": {
+          url: host + `/getTicketTable/{{gameData.id}}/{{Game._id}}`,
+          type: "GET",
+          data: function (data) {
+            data.params = params;
+          }
+        },
+        "pageLength": 25,
+        "columns": column
+      });
+      table = $('#myTable').DataTable();
+    }
+
+    //Search after click on search button
+    $('#search').on("click", function () {
+      table.destroy();
+      dataLoad(data);
+    });
+
+    //Reset filter after click on reset.
+    $('#filterReset').on("click", function (e) {
+      e.preventDefault();
+      if (data.userType == '' && data.groupHall == '' && data.hallName == '') {
+        return;
+      } else {
+        data = {
+          userType: '',
+          groupHall: '',
+          hallName: ''
+        }
+        $('#filterBox')[0].reset();
+        $('#groupHall').trigger("change");
+        table.destroy();
+        dataLoad(data);
+        console.log(data, 'after from reset filter');
+      }
+    });
+
+    $('body').on('click', '.view', function () {
+      console.log("this", $(this).closest("tr"));
+      let row = $(this).closest("tr");
+      let data = table.row(row).data();
+      console.log("data", data);
+      $("#tikId").text(data.ticketNum);
+      $("#tikPrice").text(`${data.price}kr`);
+      if (gameType == 'game_2') {
+        for (let i = 0; i < data.numArray.length; i++) {
+          $("#tikNums").append(`<li style="flex: 0 0 28.21%;">${data.numArray[i]}</li>`);
+        }
+      } else {
+        for (let i = 0; i < data.numArray.length; i++) {
+          $("#tikNums").append(`<li style="flex: 0 0 17.21%;">${data.numArray[i]}</li>`);
+        }
+      }
+      for (let j = 0; j < data.lineTypeArray.length; j++) {
+        $("#winnerData").append(`<tr><th>${data.lineTypeArray[j].lineType}</th><th>${data.lineTypeArray[j].wonAmount > 0 ? data.lineTypeArray[j].wonAmount : "--"}</th></tr>`);
+      }
+      /*$("#winnerData").append(`<tr><th>Bingo</th><th>${data.totalWinningOfTicket  > 0 ? data.totalWinningOfTicket:"--"}</th></tr>`);*/
+      $("#ticket-Modal").modal("toggle");
+    });
+
+    //:: Modal Related Code ::
+    $('#ticket-Modal').on('hidden.bs.modal', function () {
+      // Reset values of modal
+      $("#tikId").empty();
+      $("#tikPrice").empty();
+      $("#tikNums").empty();
+      $("#winnerData").empty();
+    });
+
+  });
+
+  //Group Hall Name 'reset'
+  $('#groupHall').on('change', function () {
+    let value = $(this).val();
+    let name = '';
+    if (value !== '') {
+      name = $('#groupHall>option:selected').text().trim();
+    }
+    data.groupHall = value;
+    console.log("groupHall selection", value);
+    $("#hallName > option").each(function () {
+      if (this.value !== '') {
+        $(this).remove();
+      } else {
+        $(this).attr('selected', true);
+      }
+    });
+    if (value == "") {
+      $('#hallName').prop('disabled', true);
+      data.hallName = '';
+    } else {
+      //Load Hall DropDown Options
+      $.ajax({
+        type: 'GET',
+        url: host + "/player/getHalls",
+        data: {
+          id: value
+        },
+        success: function (resultData) {
+          console.log("List of Halls", resultData);
+          if (resultData.status == 'success') {
+            console.log(resultData);
+            if (resultData.halls.length) {
+              for (const val of resultData.halls) {
+                $('#hallName').append($(document.createElement('option')).prop({
+                  value: val._id,
+                  text: val.name
+                }));
+              }
+            }
+            $('#hallName').prop('disabled', false);
+          } else {
+            console.log("something went wrong");
+          }
+        }
+      });
+    }
+  });
+
+  //Hall Name Change
+  $('#hallName').on('change', function () {
+    if ($(this).find(":selected").val() !== '') {
+      // data.hallName = $(this).find(":selected").text().trim();
+      data.hallName = $(this).find(":selected").val().trim();
+    } else {
+      data.hallName = '';
+    }
+  });
+
+  //UserType Change
+  $('#userType').on('change', function () {
+    if ($(this).find(":selected").val() !== '') {
+      data.userType = $(this).find(":selected").text().trim();
+    } else {
+      data.userType = '';
+    }
+  });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

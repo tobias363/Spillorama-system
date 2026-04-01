@@ -1,0 +1,2682 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    .m-b-1 {
+        margin-bottom: 1em;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            {% if slug=="Add" %}
+            <h1>Add {{gameData.name}}</h1>
+            {% else %}
+            <h1>Edit {{Game.gameName}}</h1>
+            {% endif %}
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>
+                {% if slug=="Add" %}
+                <li href="#">{{gameData.name}}</li>
+                {% else %}
+                <li href="#">{{Game.gameName}}</li>
+                {% endif %} {% if slug=="Add" %}
+                <li class="active">Add {{gameData.name}}</li>
+                {% else %}
+                <li class="active">Edit {{Game.gameName}}</li>
+                {% endif %}
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content">
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                {% if slug=="Add" %}
+                                <h6 class="panel-title txt-dark">Add {{gameData.name}}</h6>
+                                {% else %}
+                                <h6 class="panel-title txt-dark">Edit {{Game.gameName}}</h6>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        {% if slug=="Add" %}
+                                        <form method="POST" action="/addGameManagement/{{gameData._id}}/{{gameData.type}}/add" class="">
+                                            {% else %}
+                                            <form method="POST" action="/gameManagementEdit/{{gameData._id}}/{{Game._id}}" class="">
+                                                {% endif %}
+                                                <div class="table display pb-30">
+
+                                                    <div class="panel-body">
+                                                        {% if gameData.type!='game_4' %}
+                                                        <div class="pull-right">
+                                                            <a href="#"><button type="button" class="btn savedGame btn-primary btn-md"><i class="fa fa-plus"></i> Save Game</button></a>
+                                                        </div>
+                                                        <div class="clearfix"></div>
+                                                        {% endif %} {% if gameData.type=='game_3' %}
+                                                        <!-- Pattern Add -->
+                                                        <div class="pull-right">
+                                                            <a href="#"><button type="button" class="btn btnn btn-primary btn-md"><i class="fa fa-plus"></i> Add Pattern</button></a>
+                                                        </div>
+                                                        <div class="clearfix"></div>
+                                                        {% endif %} {% if gameData.type=='game_1' or gameData.type=='game_2' or gameData.type=='game_3' %}
+
+
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-sm-6">
+                                                                <!-- Game Mode -->
+                                                                <div class="form-group">
+                                                                    <label>Select Game Mode :-</label>
+                                                                    <select id="gameMode" name="gameMode" data-validation="required" class="form-control">
+                                                                        <option value="">Choose Game Mode</option>
+                                                                        <option value="auto" {{ "selected" if Game.gameMode=='auto' else "" }}>Auto</option>
+                                                                        <option value="manual" {{ "selected" if Game.gameMode=='manual' else "" }}>Manual</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-lg-6 col-sm-6">
+                                                                <!-- Start Date and Time-->
+                                                                <div class="form-group">
+                                                                    <label>Start Date and Time:-</label>
+                                                                    <div class='input-group date' id='startDate'>
+                                                                        <input type='text' class="form-control" name="start_date" id="start_date" value="{{StartDate}}" data-validation="required" placeholder="Start Date" data-date-format="YYYY-MM-DD HH:mm" />
+                                                                        <span class="input-group-addon">
+                                                                                <span class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-sm-6">
+                                                                <!-- Select Day -->
+                                                                <div class="form-group" id="day">
+                                                                    <label>Day :-</label>
+                                                                    <select name="day" id="dayDate" data-validation="required" class="form-control">
+                                                                        <option value=" ">Choose Day</option>
+                                                                        <option value="sunday" {{ "selected" if Game.day =='sunday' else " " }}>sunday</option>
+                                                                        <option value="monday" {{ "selected" if Game.day =='monday' else " " }}>monday</option>
+                                                                        <option value="tuesday" {{ "selected" if Game.day =='tuesday' else " " }}>tuesday</option>
+                                                                        <option value="wednesday" {{ "selected" if Game.day =='wednesday' else " " }}>wednesday</option>
+                                                                        <option value="thursday" {{ "selected" if Game.day == 'thursday' else " " }}>thursday</option>
+                                                                        <option value="friday" {{ "selected" if Game.day =='friday' else " " }}>friday</option>
+                                                                        <option value="saturday" {{ "selected" if Game.day =='saturday' else " " }}>saturday</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-lg-6 col-sm-6">
+                                                                <!-- Minimum Ticket Count-->
+                                                                <div class="form-group " id="minTicketCount">
+                                                                    <label>Minimum Ticket Count :-</label>
+                                                                    <select name="minTicketCount" id="minTicketCt" class="form-control">
+                                                                        <option value="20 " {{ "selected " if Game.minTicketCount=='20' else " " }}>20</option>
+                                                                        <option value="25 " {{ "selected " if Game.minTicketCount=='25' else " " }}>25</option>
+                                                                        <option value="30 " {{ "selected " if Game.minTicketCount=='30' else " " }}>30</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-sm-6">
+                                                                <!--Game if auto so Time Grace-->
+                                                                <div class="form-group" id="timeGrace">
+                                                                    <label>Grace Period (Select Time):-</label>
+                                                                    <div class='input-group date' id='graceTime'>
+                                                                        <input type='text' class="form-control" name="grace_time" id="grace_time" value="{{GraceTime}}" data-validation="required " placeholder="Grace Period" data-date-format="YYYY-MM-DD HH:mm" />
+                                                                        <span class="input-group-addon">
+                                                                                <span class="glyphicon glyphicon2 glyphicon-calendar "></span>
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="row">
+                                                            <div class="col-lg-12">
+                                                                {% if gameData.type=='game_2' %}
+                                                                <!--Game 2 Jackpot-->
+                                                                <div class="form-group ">
+                                                                    <div class="row ">
+                                                                        <label>Jackpot Number & it's Prize </label>
+                                                                        <div class="row ">
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number " class="form-control " readonly disabled value="9 ">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number " class="form-control priceNine " onkeypress="return event.charCode>= 48" min="1" required name="priceNine" placeholder="Enter Price" value="{{Game.jackPotNumber[0][9]}}" data-validation="required ">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control" readonly disabled value="10">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number" class="form-control priceTen" onkeypress="return event.charCode >= 48" min="1" required name="priceTen" placeholder="Enter Price " value="{{Game.jackPotNumber[0][10]}}" data-validation="required ">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number" class="form-control" readonly disabled value="11">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number" class="form-control priceEleven" onkeypress="return event.charCode >= 48" min="1" required name="priceEleven" placeholder="Enter Price " value="{{Game.jackPotNumber[0][11]}}" data-validation="required ">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number" class="form-control" readonly disabled value="12">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number" class="form-control priceTwelve" onkeypress="return event.charCode >= 48" min="1" required name="priceTwelve" placeholder="Enter Price " value="{{Game.jackPotNumber[0][12]}}" data-validation="required ">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number" class="form-control" readonly disabled value="13">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number" class="form-control priceThirteen" onkeypress="return event.charCode >= 48" min="1" required name="priceThirteen" placeholder="Enter Price " value="{{Game.jackPotNumber[0][13]}}" data-validation="required ">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number " class="form-control " readonly disabled value="14 to 21">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1 ">
+                                                                                <input type="number " class="form-control priceFourteenToTwentyone" onkeypress="return event.charCode >= 48" min="1" required name="priceFourteenToTwentyone" placeholder="Enter Price " value="{{Game.jackPotNumber[0][1421]}}" data-validation="required ">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+
+
+
+                                                        {% elif gameData.type=='game_3' %}
+
+                                                        <div class="row">
+                                                            <div class="col-lg-12">
+                                                                <!--Game 3 Jackpot-->
+                                                                <label>Pattern Group, Number and It's Price:-</label>
+                                                                <div class="nwCl">
+                                                                    {% if Game %} {% for ptrn in Game.patternGroupNumberPrize %}
+
+                                                                    <div class="group-number">
+                                                                        <div class="group-type">
+                                                                            <input type="text" class="form-control ptrnVall_{{loop.index}}" name="grpp" data-cntt="{{loop.index}}" placeholder="{{ptrn.GroupName}}" value="{{ptrn.GroupName}}">
+                                                                        </div>
+                                                                        {% for ptrnSdrr in ptrn.PatternData %}
+                                                                        <div class="group-number-input patternTotalDivList_{{loop.index}}">
+                                                                            <div class="group-number-input-inner">
+                                                                                <div class="group-number-checkbox">
+                                                                                    <input type="text" class="form-control" name="ptname" id="ptName_{{gL}}_{{loop.index}}" readOnly placeholder="`+patternList[m]+`" value="{{ptrnSdrr.patternName}}">
+                                                                                </div>
+                                                                                <div class="number-input">
+                                                                                    <input type="text" class="form-control" name="ptvalue" id="ptvalue_{{gL}}_{{loop.index}}" placeholder="{{ptrnSdrr.ballNumber}}" value="{{ptrnSdrr.ballNumber}}">
+                                                                                </div>
+                                                                                <div class="number-input">
+                                                                                    <input type="text" class="form-control" name="ptvalue2" id="ptvalue2_{{gL}}_{{loop.index}}" placeholder="{{ptrnSdrr.prize}}" value="{{ptrnSdrr.prize}}">
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                        {% endfor %}
+                                                                        <div class="col-lg-2 m-b-1">
+                                                                            <a href="#"><button type="button" class="btn addGrpList btn-primary btn-md" data-cntt="0"><i class="fa fa-plus"></i> Add Group</button></a>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {% endfor %} {% else %}
+
+                                                                    <div class="group-number">
+                                                                        <div class="group-type">
+                                                                            <input type="text" class="form-control ptrnVall_0" name="grpp" data-cntt="0" readonly placeholder="Group A">
+                                                                        </div>
+                                                                        <div class="group-number-input patternTotalDivList_0">
+
+                                                                        </div>
+                                                                        <div class="clearfix"></div>
+                                                                        <div class="col-lg-2 m-b-1">
+                                                                            <a href="#"><button type="button" class="btn addGrpList btn-primary btn-md" data-cntt="0"><i class="fa fa-plus"></i> Add Group</button></a>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {% endif %}
+                                                                </div>
+
+                                                                {% endif %}
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <!--Total Ticket-->
+                                                                <div class="form-group ">
+                                                                    <label>Total number of tickets allocate for this game:</label>
+                                                                    <div>
+                                                                        {% if gameData.type=='game_2' %}
+                                                                        <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" max="30" required name="totalNoTickets" placeholder="Enter Total No Tickets" value="{{Game.totalNoTickets}}" id="totalNoTickets" data-validation="required ">                                                                        {% else %}
+                                                                        <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" required name="totalNoTickets" placeholder="Enter Total No Tickets" value="{{Game.totalNoTickets}}" id="totalNoTickets" data-validation="required ">                                                                        {% endif %}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <!--Notification Time-->
+                                                                <div class="form-group ">
+                                                                    <label>Notification Start Time:</label>
+                                                                    <select name="notificationStartTime" id="notificationStartTime" class="form-control">
+                                                                        <option value="30s" {{ "selected" if Game.notificationStartTime=='30s' else "" }}>30s</option>
+                                                                        <option value="1m"  {{ "selected" if Game.notificationStartTime=='1m' else "" }}>1m</option>
+                                                                        <option value="2m"  {{ "selected" if Game.notificationStartTime=='2m' else "" }}>2m</option>
+                                                                        <option value="3m"  {{ "selected" if Game.notificationStartTime=='3m' else "" }}>3m</option>
+                                                                        <option value="4m"  {{ "selected" if Game.notificationStartTime=='4m' else "" }}>4m</option>
+                                                                        <option value="5m"  {{ "selected" if Game.notificationStartTime=='5m' else "" }}>5m</option>
+                                                                      </select>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <!--Luckynumber price-->
+                                                                <div class="form-group">
+                                                                    <label>Enter Lucky Number Prize:</label>
+                                                                    <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" required name="luckyNumberPrize" placeholder="Enter Lucky Number Prize" value="{{Game.luckyNumberPrize}}" id="luckyNumberPrize" data-validation="required ">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {% endif %} {% if gameData.type=='game_4' %}
+
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label>Pattern Name & it's Prize </label>
+                                                                        <div class="row">
+
+                                                                            {% for pattern in patternData %}
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number " class="form-control" readonly disabled value="{{pattern.patternName}}">
+                                                                            </div>
+                                                                            <div class="col-lg-2 m-b-1">
+                                                                                <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" required name="{{pattern.name}}" placeholder="1000" value="{{pattern.price}}" data-validation="required ">
+                                                                            </div>
+                                                                            {% endfor %}
+
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <div class="form-group">
+                                                                    <label>Bet Multiplier:</label>
+                                                                    <input type="number" class="form-control numericCls32" min="1" max="4" required name="betMultiplier" placeholder="Enter Bet Multiplier ( 1 to 4 )" value="{{Game.betMultiplier}}" id="betMultiplier" data-validation="required">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="row">
+                                                            <div class="col-lg-12 col-md-12">
+                                                                <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label class="mb-10 col-sm-12">Bet Amount</label>
+                                                                        <div class="col-sm-12">
+                                                                            <div class="row addNewBox">
+
+                                                                                <div class="col-lg-3 m-b-1">
+                                                                                    <input type="number " class="form-control" readonly="" disabled="" value="Ticket 1">
+                                                                                </div>
+                                                                                <div class="col-lg-3 m-b-1">
+                                                                                    <input type="number " class="form-control" readonly="" disabled="" value="Ticket 2">
+                                                                                </div>
+                                                                                <div class="col-lg-3 m-b-1">
+                                                                                    <input type="number " class="form-control" readonly="" disabled="" value="Ticket 3">
+                                                                                </div>
+                                                                                <div class="col-lg-3 m-b-1">
+                                                                                    <input type="number " class="form-control" readonly="" disabled="" value="Ticket 4">
+                                                                                </div>
+
+                                                                                {% for bet in Game.betAmount %}
+
+                                                                                <div class="col-lg-3 m-b-1">
+                                                                                    <input type="number " class="form-control" required name="betAmount" value="{{bet}}">
+                                                                                </div>
+
+                                                                                {% endfor %}
+
+
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {% endif %}
+
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <!--Ticket Price-->
+                                                                <div class="form-group">
+                                                                    <label>Ticket Price:-</label>
+                                                                    <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" required name="ticketPrice" placeholder="Enter Ticket Price" value="{{Game.ticketPrice}}" id="ticketPrice" data-validation="required">
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <!--Seconds-->
+                                                                <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label class="mb-10 col-sm-12 ">Total Seconds to display single ball:</label> {% if gameData.type=='game_4' %}
+
+                                                                        <div class="col-sm-12 ">
+                                                                            &nbsp Example: 1 to 18 Balls [ 1 Ball = 0.5sec ]
+                                                                            <input type="number" step="any" class="form-control numericCls" min="0.001" max="60" required name="seconds" placeholder="Enter Seconds" value="{{Game.seconds/1000}}" id="seconds" data-validation="required ">
+                                                                        </div>
+
+                                                                        <hr>
+                                                                        <div class="col-sm-12 ">
+                                                                            &nbsp Example: 19 to 33 Balls [ 1 Ball = 1sec ]
+                                                                            <input type="number" step="any" class="form-control numericCls" min="0.001" max="60" required name="seconds2" placeholder="Enter Seconds" value="{{Game.seconds2/1000}}" id="seconds" data-validation="required ">
+                                                                        </div>
+                                                                        {% else %}
+                                                                        <div class="col-sm-12 ">
+                                                                            <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" max="60" required name="seconds" placeholder="Enter Seconds " value="{{Game.seconds/1000}}" id="seconds" data-validation="required ">
+                                                                        </div>
+                                                                        {% endif %}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {% if gameData.type=='game_1' %}
+
+                                                        <!-- Hall select -->
+                                                        <input type="hidden" id="hallArrayData" value="{{hallArray}}">
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <div class="row">
+                                                                    <div class="col-lg-9">
+                                                                        <div class="form-group">
+                                                                            <label>Hall Name</label>
+                                                                            <div class="row full-width-select2">
+                                                                                <div class="col-lg-12">
+                                                                                    <select class="js-select2" multiple="" id="hlSl">
+                                                                                        {% for hall in hallArray %}
+                                                                                        <option value="{{hall._id}}">{{hall.name}}</option>
+                                                                                        {% endfor %}
+                                                                                    </select>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <!-- Master hall select -->
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <div class="row">
+                                                                    <div class="col-lg-9">
+                                                                        <div class="form-group">
+                                                                            <label>Master Hall</label>
+                                                                            <div class="row full-width-select2">
+                                                                                <div class="col-lg-12">
+                                                                                    <select id="masterHallOption">
+                                                                   
+                                                                                    </select>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <!-- Game name select -->
+                                                        <div class="row">
+                                                            <div class="col-lg-12 col-md-12">
+                                                                <div class="row">
+                                                                    <div class="col-lg-12">
+                                                                        <div class="form-group">
+                                                                            <label>Game Name</label>
+                                                                            <div class="row full-width-select2">
+                                                                                <div class="col-lg-12">
+                                                                                    <select class="js-select4" multiple="" id="hlSl2">
+                                                                                        <option value="elvis" class=" elvis">Elvis</option>
+                                                                                        <option value="mystery" class="mystery">Mystery</option>
+                                                                                        <option value="1_3_5" class="1_3_5">1-3-5</option>
+                                                                                        <option value="traffic_light" class="traffic_light">Traffic Light</option>
+                                                                                        <option value="tv_extra" class=" elvis">TV Extra</option>
+                                                                                        <option value="jackpot" class=" elvis">Jackpot</option>
+                                                                                        <option value="innstanten" class=" elvis">Innstanten(Efforts)</option>
+                                                                                        <option value="oddsen" class=" elvis">Oddsen(The Odds)</option>
+                                                                                        <option value="lykkehjulet" class=" elvis">Lykkehjulet(Wheel of Fortune)</option>
+                                                                                        <option value="spillernes_spill" class=" elvis">Spillernes Spill(The Player's Game)</option>
+                                                                                        <option value="kvikkis_full_bong" class=" elvis">Kvikkis Full Bong(Quick's Full Bong)</option>
+                                                                                        <option value="super_nils" class=" elvis">Super Nils</option>
+                                                                                        <option value="1000_spills" class=" elvis">1000 Spills</option>
+                                                                                        <option value="fargekladden" class=" elvis">Fargekladden</option>
+                                                                                        <option value="skattekisten" class=" elvis">Skattekisten</option>
+                                                                                        <option value="ball_x_10" class=" elvis">Ball X 10</option>
+                                                                                        <option value="500_spills" class=" elvis">500 Spills</option>
+                                                                                        <option value="500_x_5" class=" elvis">500 X 5</option>
+                                                                                        <option value="extra" class=" elvis">Extra</option>
+                                                                                        <option value="jocker" class=" elvis">Jocker</option>
+                                                                                        <option value="2500_in_full" class=" elvis">2500 in Full</option>
+                                                                                        <option value="4000_in_full" class=" elvis">4000 in Full</option>
+                                                                                        <option value="finale" class=" elvis">Finale</option>
+                                                                                    </select>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <!-- <div class="col-lg-3">
+                                                                        <a href="javascript:void(0);" class="btn btn-success btn-flat mt-25">Add Multiple</a>
+                                                                    </div> -->
+                                                                </div>
+
+                                                            </div>
+                                                        </div>
+
+                                                        <hr>
+
+                                                        <!-- Game, Ticket Color & its Price -->
+                                                        <div class="row">
+                                                            <div class="col-lg-12">
+                                                                <label>Game, Ticket Color & its Price</label>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="form-group">
+                                                            <div class="full-width-box">
+                                                                <ul class="clsli">
+                                                                    <span class="basicHtml">Select Game <span class="text-green"> &nbsp; <b> [ This Data Automatically Added ] </b></span></span>
+                                                                </ul>
+                                                            </div>
+                                                        </div>
+
+                                                        <hr>
+
+                                                        <!-- Generate Number of tickets for ticket color/type -->
+                                                        <div class="row mb-10">
+                                                            <div class="col-lg-12">
+                                                                <label>Generate Number of tickets for ticket color/type</label>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="color_pr">
+
+                                                            <!-- <span class="basicHtml1">Select Game <span class="text-blue"> &nbsp; <b> [ This Data Automatically Added ] </b></span></span> -->
+
+                                                            <div class="elvis_color">
+
+                                                            </div>
+
+                                                            <div class="traffic_color">
+
+                                                            </div>
+
+                                                        </div>
+
+                                                        <hr>
+
+                                                        <!-- Game & its Jackpot Prize & Drawse -->
+                                                        <div class="row mb-10">
+                                                            <div class="col-lg-12">
+                                                                <label>Game & its Jackpot Prize & Draws</label>
+                                                            </div>
+                                                        </div>
+
+                                                        <span class="basicHtml2">Select Game <span class="text-green"> &nbsp; <b> [ This Data Automatically Added ] </b></span></span>
+
+                                                        <div class="price_draws">
+
+                                                        </div>
+
+                                                        <hr>
+
+                                                        <!-- Game Name and Row/Pattern Prize -->
+                                                        <div class="row mb-10">
+                                                            <div class="col-lg-12">
+                                                                <label>Game Name and Row/Pattern Prize</label>
+                                                            </div>
+                                                        </div>
+
+                                                        <span class="basicHtml3">Select Game <span class="text-blue"> &nbsp; <b> [ This Data Automatically Added ] </b></span></span>
+
+                                                        <div class="pattern_price">
+
+                                                        </div>
+
+                                                        <hr> {% endif %}
+
+                                                        <div class="row">
+                                                            <div class="col-lg-12">
+                                                                {% if gameData.type=='game_3' %}
+                                                                <input type="button" class="btn btn-success sbBtn btn-flat" value="Submit"> {% else %}
+                                                                <input type="submit" class="btn btn-success btn-flat" value="Submit"> {% endif %}
+                                                                <a href="/gameManagement" class="btn btn-danger btn-flat">Cancel</a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                </div>
+                                            </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- /Row -->
+    </div>
+</div>
+
+{% if gameData.type=='game_3' %}
+<div class="modal fade add-pattern-modal" id="addNewWordModal">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <h4 class="modal-title">Add Pattern</h4>
+            </div>
+            <div class="modal-body">
+                <div class="pattern-name">
+                    <label>Group Name</label>
+                    <input type="text" class="form-control ptrnP" placeholder="Group Test" value="Group Test" required>
+                </div>
+
+                <div class="pattern-group">
+                    <label>Pattern Group</label>
+                    <ul class="pattern-group-ul patternList">
+                        {% for ptrn in pattern %}
+                        <li rel="{{ptrn.patternName}}">
+                            <div class="checkbox">
+                                <label>
+                                        <input type="checkbox" name="checkboxPt" data-patternId="{{ptrn._id}}" value="{{ptrn.patternName}}" data-patternType="{{ptrn.patternType}}">
+                                            {{ptrn.patternName}}
+                                    </label>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    <button type="submit" class="btn sBtnn btn-primary" data-cntt="0" data-dismiss="modal">Add</button>
+                </div>
+                <div class="clearfix"></div>
+            </div>
+        </div>
+        <!-- /.modal-content -->
+    </div>
+</div>
+{% endif %} {% endblock %} {% block Jscript %}
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+<script src="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.jquery.min.js "></script>
+<link href="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.min.css " rel="stylesheet " />
+<link rel="stylesheet " href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css " integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin=" anonymous " />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js " integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin=" anonymous "></script>
+
+
+<link href="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/css/bootstrap-multiselect.css" rel="stylesheet" type="text/css" />
+<script src="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/js/bootstrap-multiselect.js" type="text/javascript"></script>
+
+<script>
+</script>
+
+<script>
+    $(document).ready(function() {
+
+        // [ Dynamic Function ]
+        var CheckboxDropdown;
+        (function($) {
+            CheckboxDropdown = function(el) {
+                var _this = this;
+                this.isOpen = false;
+                this.areAllChecked = false;
+                this.$el = $(el);
+                this.$label = this.$el.find('.dropdown-label');
+                this.$inputs = this.$el.find('[type="checkbox"]');
+                let gameName = $(el).children('.commonCls').attr('data-name');
+                window.name = gameName;
+                this.onCheckBox();
+
+                this.$label.on('click', function(e) {
+                    e.preventDefault();
+                    _this.toggleOpen();
+                });
+
+                this.$inputs.on('change', function(e) {
+                    _this.onCheckBox();
+                });
+            };
+
+            CheckboxDropdown.prototype.onCheckBox = function() {
+                this.updateStatus();
+            };
+
+            CheckboxDropdown.prototype.updateStatus = function() {
+                var checked = this.$el.find(':checked');
+
+                if (checked.length <= 0) {
+                    this.$label.html(window.name);
+                } else if (checked.length === 1) {
+                    this.$label.html(checked.parent('label').text());
+                } else if (checked.length === this.$inputs.length) {
+                    this.$label.html('All Selected');
+                    this.areAllChecked = true;
+                } else {
+                    this.$label.html(checked.length + ' Selected');
+                }
+            };
+
+            CheckboxDropdown.prototype.onCheckAll = function(checkAll) {
+                if (!this.areAllChecked || checkAll) {
+                    this.areAllChecked = true;
+                    this.$checkAll.html('Uncheck All');
+                    this.$inputs.prop('checked', true);
+                } else {
+                    this.areAllChecked = false;
+                    this.$checkAll.html('Check All');
+                    this.$inputs.prop('checked', false);
+                }
+
+                this.updateStatus();
+            };
+
+            CheckboxDropdown.prototype.toggleOpen = function(forceOpen) {
+                var _this = this;
+
+                if (!this.isOpen || forceOpen) {
+                    this.isOpen = true;
+                    this.$el.addClass('on');
+                    $(document).on('click', function(e) {
+                        if (!$(e.target).closest('[data-control]').length) {
+                            _this.toggleOpen();
+                        }
+                    });
+                } else {
+                    this.isOpen = false;
+                    this.$el.removeClass('on');
+                    $(document).off('click');
+                }
+            };
+
+            var checkboxesDropdowns = document.querySelectorAll('[data-control="checkbox-dropdown"]');
+            for (var i = 0, length = checkboxesDropdowns.length; i < length; i++) {
+                new CheckboxDropdown(checkboxesDropdowns[i]);
+            }
+        })(jQuery);
+
+
+        // let halls = $('#hallArrayData').attr('value');
+
+        $("#hlSl").on('change', function() {
+            let arrayHall = [];
+            let valueHall = $(this).val();
+            let textHall = $("#hlSl option:selected").text();
+            arrayHall.push(valueHall);
+            let html;
+
+            let select = $('#masterHallOption');
+            select.empty().append(html);
+        });
+
+        // [ Step 1 ] [ Game Add Section ]
+        $("#hlSl2").on('change', function() {
+
+            // [ Old Div Content Remove ]
+            resetGameTicketPrice();
+
+            let shiv = $(this).val()
+
+            let html = ``;
+            let elvisHtml2 = `<div class="full-width-box tket-color-type mb-10">
+                                            <div class="row">
+                                                `;
+            if (shiv.length > 0) {
+
+                for (let i = 0; i < shiv.length; i++) {
+
+                    if (shiv[i] == 'elvis') {
+                        html += `<li class="elvs">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <select class="js-select4 s_elvis hlSl5" data-class="s_elvis" multiple="" id="hlSl5">
+                                                <option value="5" data-class="Elvis 1">Elvis 1</option>
+                                                <option value="5" data-class="Elvis 2">Elvis 2</option>
+                                                <option value="5">Elvis 3</option>
+                                                <option value="5">Elvis 4</option>
+                                                <option value="5">Elvis 5</option>
+                                            </select>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" value="0" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Elvis');
+                    }
+                    if (shiv[i] == 'mystery') {
+                        html += `<li class="mystery">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_mystery commonCls" data-class="s_mystery" data-name="Mystery">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox"  name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox"  name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox"  name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox"  name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox"  name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox"  name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox"  name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox"  name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Mystery');
+                    }
+                    if (shiv[i] == '1_3_5') {
+                        html += `<li class="1_3_5">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_1_3_5 commonCls" data-class="s_1_3_5" data-name="1-3-5">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" name="1_3_5_value" class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('1 3 5');
+                    }
+                    if (shiv[i] == 'traffic_light') {
+                        html += `<li class="trfc">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <select class="js-select5 s_traffic hlSl5" data-class="s_traffic" data-html="false" multiple="">
+                                                <option value="5">Red</option>
+                                                <option value="5">Yellow</option>
+                                                <option value="5">Green</option>
+                                            </select>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" value="0" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Traffic Light');
+                    }
+                    if (shiv[i] == 'tv_extra') {
+                        html += `<li class="tv_extra">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_tv_extra commonCls" data-class="s_tv_extra" data-name="tv Extra">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('TV Extra');
+                    }
+
+                    if (shiv[i] == 'jackpot') {
+                        html += `<li class="jackpot">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_jackpot commonCls" data-class="s_jackpot" data-name="Jackpot">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Jackpot');
+                    }
+                    if (shiv[i] == 'innstanten') {
+                        html += `<li class="innstanten">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_innstanten commonCls" data-class="s_innstanten" data-name="Innstanten">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Innstanten')
+                    }
+                    if (shiv[i] == 'oddsen') {
+                        html += `<li class="oddsen">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_oddsen commonCls" data-class="s_oddsen" data-name="Oddsen">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Oddsen');
+                    }
+                    if (shiv[i] == 'lykkehjulet') {
+                        html += `<li class="lykkehjulet">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_lykkehjulet commonCls" data-class="s_lykkehjulet" data-name="Lykkehjulet">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Lykkehjulet');
+                    }
+                    if (shiv[i] == 'spillernes_spill') {
+                        html += `<li class="spillernes_spill">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_spillernes_spill commonCls" data-class="s_spillernes_spill" data-name="Spillernes Spill">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Spillernes Spill');
+                    }
+                    if (shiv[i] == 'kvikkis_full_bong') {
+                        html += `<li class="kvikkis_full_bong">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_kvikkis_full_bong commonCls" data-class="s_kvikkis_full_bong" data-name="Lvikkis Full Bong">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Kvikkis Full Bong');
+                    }
+                    if (shiv[i] == 'super_nils') {
+                        html += `<li class="super_nils">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_super_nils commonCls" data-class="s_super_nils" data-name="Super Nils">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Super Nils');
+                    }
+                    if (shiv[i] == '1000_spills') {
+                        html += `<li class="1000_spills">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_1000_spills commonCls" data-class="s_1000_spills" data-name="1000 Spills">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('1000 Spills');
+                    }
+                    if (shiv[i] == 'fargekladden') {
+                        html += `<li class="fargekladden">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_fargekladden commonCls" data-class="s_fargekladden" data-name="Fargekladden">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Fargekladden');
+                    }
+                    if (shiv[i] == 'skattekisten') {
+                        html += `<li class="skattekisten">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_skattekisten commonCls" data-class="s_skattekisten" data-name="Skattekisten">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Skattekisten');
+                    }
+                    if (shiv[i] == 'ball_x_10') {
+                        html += `<li class="ball_x_10">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_ball_x_10 commonCls" data-class="s_ball_x_10" data-name="Ball X 10">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Ball X 10');
+                    }
+                    if (shiv[i] == '500_spills') {
+                        html += `<li class="500_spills">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_500_spills commonCls" data-class="s_500_spills" data-name="500 Spills">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('500 Spills');
+                    }
+                    if (shiv[i] == '500_x_5') {
+                        html += `<li class="500_x_5">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_500_x_5 commonCls" data-class="s_500_x_5" data-name="500 X 5">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('500 X 5');
+                    }
+                    if (shiv[i] == 'extra') {
+                        html += `<li class="extra">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_extra commonCls" data-class="s_extra" data-name="Extra">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Extra');
+                    }
+                    if (shiv[i] == 'jocker') {
+                        html += `<li class="jocker">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_jocker commonCls" data-class="s_jocker" data-name="Jocker">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('Jocker');
+                    }
+                    if (shiv[i] == '2500_in_full') {
+                        html += `<li class="2500_in_full">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_2500_in_full commonCls" data-class="s_2500_in_full" data-name="2500 in Full">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('2500 in Full');
+                    }
+                    if (shiv[i] == '4000_in_full') {
+                        html += `<li class="4000_in_full">
+                                    <div class="select-drop-input">
+                                        <div class="select-dropdown">
+                                            <div class="dropdown_box" data-control="checkbox-dropdown">
+                                                <label class="dropdown-label">Select</label>
+                                                <div class="dropdown-list s_4000_in_full commonCls" data-class="s_4000_in_full" data-name="4000 in Full">
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                    Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                    Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                    Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                    Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                    Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                    Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                    Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+
+                                                    <label class="dropdown-option">
+                                                    <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                    Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                                </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="select-input">
+                                            <input type="text" readonly class="form-control">
+                                        </div>
+                                    </div>
+                                </li>`;
+                        createDiv('4000 in Full');
+                    }
+                    if (shiv[i] == 'finale') {
+                        html += `<li class="finale">
+                                <div class="select-drop-input">
+                                    <div class="select-dropdown">
+                                        <div class="dropdown_box" data-control="checkbox-dropdown">
+                                            <label class="dropdown-label">Select</label>
+                                            <div class="dropdown-list s_finale commonCls" data-class="s_finale" data-name="finale">
+
+                                                <label class="dropdown-option">
+                                                <input type="checkbox" name="dropdown-group" value="Selection 1" /><span class="span-w-90">
+                                                Small White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                            </label>
+
+                                                <label class="dropdown-option">
+                                                <input type="checkbox" name="dropdown-group" value="Selection 2" /><span class="span-w-90">
+                                                Large White</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                            </label>
+
+                                                <label class="dropdown-option">
+                                                <input type="checkbox" name="dropdown-group" value="Selection 3" /><span class="span-w-90">
+                                                Small Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                            </label>
+
+                                                <label class="dropdown-option">
+                                                <input type="checkbox" name="dropdown-group" value="Selection 4" /><span class="span-w-90">
+                                                Large Yellow</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                            </label>
+
+                                                <label class="dropdown-option">
+                                                <input type="checkbox" name="dropdown-group" value="Selection 5" /><span class="span-w-90">
+                                                Small Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                            </label>
+
+                                                <label class="dropdown-option">
+                                                <input type="checkbox" name="dropdown-group" value="Selection 6" /><span class="span-w-90">
+                                                Large Purple</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                            </label>
+
+                                                <label class="dropdown-option">
+                                                <input type="checkbox" name="dropdown-group" value="Selection 7" /><span class="span-w-90">
+                                                Small Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                            </label>
+
+                                                <label class="dropdown-option">
+                                                <input type="checkbox" name="dropdown-group" value="Selection 8" /><span class="span-w-90">
+                                                Large Blue</span><input class="bx_in" type="text" class="w-45" value="0"/>
+                                            </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="select-input">
+                                        <input type="text" readonly class="form-control">
+                                    </div>
+                                </div>
+                            </li>`;
+                        createDiv('Finale')
+                    }
+
+                }
+
+            } else {
+                basicHtml();
+            }
+
+            function createDiv(name) {
+                $('.basicHtml2').hide();
+                elvisHtml2 += ` </hr>
+                                <div class="col-lg-2 pd-r-5 main_tkt_lable_ttl">
+                                            <ul>
+                                                <li>
+                                                    <label>` + name + `</label>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                        <div class="col-lg-2 pd-l-5">
+                                            <ul>
+                                                <li>
+                                                    <div class="row">
+                                                        <div class="col-lg-6 pd-r-5">
+                                                            <input type="text" class="form-control" placeholder="10000">
+                                                        </div>
+                                                        <div class="col-lg-6 pd-l-5">
+                                                            <input type="text" class="form-control" placeholder="51">
+                                                        </div>
+                                                    </div>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    `;
+            }
+
+            elvisHtml2 += `</div>
+                        </div>`
+
+            $('.price_draws').html(elvisHtml2);
+            $('.clsli').html(html);
+            $('.js-select2').select2({
+                closeOnSelect: false,
+                placeholder: "Elvis",
+                allowHtml: true,
+                allowClear: true,
+                tags: true
+            });
+            $('.js-select5').select2({
+                closeOnSelect: false,
+                placeholder: "Traffic Light",
+                allowHtml: true,
+                allowClear: true,
+                tags: true
+            });
+            var checkboxesDropdowns = document.querySelectorAll('[data-control="checkbox-dropdown"]');
+            for (var i = 0, length = checkboxesDropdowns.length; i < length; i++) {
+                new CheckboxDropdown(checkboxesDropdowns[i]);
+            }
+        });
+
+        // [ Step 2 ] [ Checkbox Change Value Store in Input ]
+        $(document).on('change', '.dropdown-list input[type=checkbox]', function() {
+            let total = 0;
+            let className32 = $(this).parent('.dropdown-option').parent('.dropdown-list').attr('data-class');
+
+            $('.' + className32 + ' input:checked').each(function() {
+                let rs = $(this).parent().find("input[type=text]").val();
+                if (rs != '') {
+                    total = total + Number(rs);
+                }
+            });
+            $(this).parent().parent().parent().parent().parent().children('.select-input').children().val(total);
+        });
+
+        // [ Step 2 ] [ Checkbox Input Value Change Then Main Input Value ]
+        $(document).on('change paste keyup', '.bx_in', function() {
+
+            let total = 0;
+            let className32 = $(this).parent('.dropdown-option').parent('.dropdown-list').attr('data-class');
+            $('.' + className32 + ' input:checked').each(function() {
+                let rs = $(this).parent().find("input[type=text]").val();
+                if (rs != '') {
+                    total = total + Number(rs);
+                }
+            });
+            $(this).parent().parent().parent().parent().parent().children('.select-input').children().val(total);
+        });
+
+        // [ Step 3 ] [ Elvis & Traffic Light ]
+        $(document).on('change', '.hlSl5', function() {
+
+            let total = 0;
+            let text = $(this).attr('data-class');
+            let selVal = $(this).val();
+            let selVal2 = $(this).attr('data-class');
+
+            let fl = $(this).attr('data-html');
+            console.info('Call.....');
+            console.log('fl: ', fl);
+            console.log('fl2: ', $(this).attr('data-html'));
+            console.log('text: ', text);
+            console.log('selVal: ', selVal);
+            console.log('selVal2: ', selVal2);
+            console.log('Shiv: ', $(this).index());
+            console.info('-----------');
+
+            let sec3 = `<div class="full-width-box tket-color-type mb-10">
+                                    <div class="row">
+                                        <div class="col-lg-2 pd-r-5 main_tkt_lable_ttl">
+                                            <ul>
+                                                <li>
+                                                    <label>` + text + `</label>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                        <div class="col-lg-10 pd-l-5">
+                                            <ul>`;
+
+            if (selVal.length > 0) {
+
+                for (let i = 0; i < selVal.length; i++) {
+                    let value = selVal[i];
+                    total = Number(total) + Number(value);
+
+                    // [ Elvis ]
+
+                    if (selVal2 == 's_elvis') {
+                        sec3 += `  <li>
+                                            <div class="row">
+                                                <div class="col-lg-6 pd-r-5">
+                                                    <label>Elvis ` + (i + 1) + `</label>
+                                                </div>
+                                                <div class="col-lg-6 pd-l-5">
+                                                    <input type="text" class="form-control" placeholder="10">
+                                                </div>
+                                            </div>
+                                        </li>`;
+
+                    }
+                    // else {
+
+                    // }
+
+                }
+
+                if (selVal2 == 's_traffic' && fl == 'false') {
+                    sec3 += `   <li>
+                                            <div class="row">
+                                                <div class="col-lg-6 pd-r-5">
+                                                    <label>Red</label>
+                                                </div>
+                                                <div class="col-lg-6 pd-l-5">
+                                                    <input type="text" class="form-control" placeholder="40">
+                                                </div>
+                                            </div>
+                                        </li>
+                                        <li>
+                                            <div class="row">
+                                                <div class="col-lg-6 pd-r-5">
+                                                    <label>Yellow</label>
+                                                </div>
+                                                <div class="col-lg-6 pd-l-5">
+                                                    <input type="text" class="form-control" placeholder="40">
+                                                </div>
+                                            </div>
+                                        </li>
+                                        <li>
+                                            <div class="row">
+                                                <div class="col-lg-6 pd-r-5">
+                                                    <label>Green</label>
+                                                </div>
+                                                <div class="col-lg-6 pd-l-5">
+                                                    <input type="text" class="form-control" placeholder="40">
+                                                </div>
+                                            </div>
+                                        </li>`;
+                    sec3 += `</ul>
+                                                </div>
+                                            </div>
+                                        </div>`
+
+                    $('.traffic_color').html(sec3);
+                } else {
+                    sec3 += `</ul>
+                                                </div>
+                                            </div>
+                                        </div>`
+
+                    $('.elvis_color').html(sec3);
+                }
+
+
+
+                $(this).parent().parent().children('.select-input').children().val(total);
+            } else {
+                $('.elvis_color').html('');
+                $('.traffic_color').html('');
+            }
+
+        });
+
+        $(document).on("change", ".dropdown_box input[type='checkbox']", function() {
+
+        })
+
+        // [ Step 4 ] [ Elvis & Traffic Light ]
+
+        // [ Game 1 Functions ]
+        function resetGameTicketPrice() {
+            $('.clsli').html('');
+        }
+
+        // function resetGameTicketColor(){
+        //     $('.color_pr').html('');
+        // }
+
+        function basicHtml() {
+            $('.basicHtml').html('');
+            let html = `<span class="basicHtml">Select Game <span class="text-green"> &nbsp; <b> [ This Data Automatically Added ] </b></span></span>`;
+            $('.basicHtml').html(html);
+        }
+
+        function removeBasicHtml() {
+            $('.basicHtml').html('');
+        }
+
+        function basicHtml1() {
+            $('.basicHtml1').html('');
+            let html = `<span class="basicHtml1">Select Game <span class="text-green"> &nbsp; <b> [ This Data Automatically Added ] </b></span></span>`;
+            $('.basicHtml1').html(html);
+        }
+
+        function removeBasicHtml1() {
+            $('.basicHtml1').html('');
+        }
+
+        $("#minTicketCount").hide();
+
+        $('body').on('click', '.btnn', function() {
+            $('input:checkbox[name=checkboxPt]').each(function() {
+                $(this).prop('checked', false);
+            });
+            $('#addNewWordModal').modal({
+                backdrop: 'static',
+                keyboard: false
+            })
+        });
+
+
+
+        $('body').on('.numericCls', 'keyup', function() {
+            this.value = this.value.replace(/[^0-9\.]/g, '');
+        });
+
+        $('body').on('.numericCls32', 'keyup', function() {
+            this.value = this.value.replace(/[^1-4\.]/g, '');
+        });
+
+        // [ Game 4 ]
+        $("#betMultiplier").on("change paste keyup", function() {
+            let numb = $(this).val();
+            let html = ``;
+            let oldHtml = ` <div class="col-lg-3 m-b-1">
+                                <input type="number " class="form-control" readonly="" disabled="" value="Ticket 1">
+                            </div>
+                            <div class="col-lg-3 m-b-1">
+                                <input type="number " class="form-control" readonly="" disabled="" value="Ticket 2">
+                            </div>
+                            <div class="col-lg-3 m-b-1">
+                                <input type="number " class="form-control" readonly="" disabled="" value="Ticket 3">
+                            </div>
+                            <div class="col-lg-3 m-b-1">
+                                <input type="number " class="form-control" readonly="" disabled="" value="Ticket 4">
+                            </div>`;
+            for (let i = 0; i < numb * 4; i++) {
+                html += `<div class="col-lg-3 m-b-1">
+                            <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" required name="betAmount" placeholder="Enter Price" value="" data-validation="required ">
+                         </div>`;
+            }
+            $('.addNewBox').html(oldHtml);
+            $('.addNewBox').append(html);
+        });
+
+        $("#timeGrace").hide();
+        let cn = '{{gameData.type}}';
+        let cnLn = '{{gL}}';
+
+        let cntt = 0
+        if (cn == 'game_3') {
+            cntt = Number(cnLn);
+        }
+
+        let prtnAr = [];
+        let allPatternArray = [];
+        let patternList = [];
+        let prnId = [];
+        let ptTy = [];
+        //{Only for Edit} if value is selected Preselected
+        let selectedValue = $("#gameMode option:selected").val();
+
+
+        let fl = false;
+        if (selectedValue == 'auto') {
+            $("#minTicketCount").show();
+            $("#timeGrace").show();
+        } else {
+            $("#minTicketCount").hide();
+            $("#timeGrace").hide();
+        }
+        // [ Pattern ]
+        $('body').on('click', '.btnn', function() {
+            let vall = $('.ptrnVall_' + cntt).val();
+            let cntVl = $('.ptrnVall_' + cntt).attr('data-cntt');
+            $('.ptrnP').val(vall);
+            $('.sBtn').attr('data-cntt', cntVl);
+            $('#addNewWordModal').modal('show');
+        });
+        $('body').on('click', '.sbBtn', function() {
+            let gameMode = $("#gameMode option:selected").val();
+            if (gameMode == '') {
+                alert("Please Enter GameMode");
+                return false;
+            }
+            let start_date = $("#start_date").val();
+            if (gameMode == '') {
+                alert("Please Enter Time");
+                return false;
+            }
+            let grace_time = $("#grace_time").val();
+            let gameId = '{{gameData._id}}';
+            let minTicketCt = $('#minTicketCt').val();
+            if (gameMode == '') {
+                alert("Please Enter GameMode");
+                return false;
+            }
+
+            let day = $('#dayDate option:selected').val();
+            if (day == '') {
+                alert("Please Choose Day");
+                return false;
+            }
+            let totalNoTickets = $('#totalNoTickets').val();
+            if (totalNoTickets == '') {
+                alert("Please Enter Total Numbers of tickets");
+                return false;
+            }
+            let notificationStartTime = $('#notificationStartTime').val();
+            if (notificationStartTime == '') {
+                alert("Please Enter notificationStartTime");
+                return false;
+            }
+            let luckyNumberPrize = $('#luckyNumberPrize').val();
+            if (luckyNumberPrize == '') {
+                alert("Please Enter luckyNumberPrize");
+                return false;
+            }
+            let ticketPrice = $('#ticketPrice').val();
+            if (ticketPrice == '') {
+                alert("Please Enter ticketPrice");
+                return false;
+            }
+            let seconds = $('#seconds').val();
+            if (seconds == '') {
+                alert("Please Enter seconds");
+                return false;
+            }
+            let gameType = '{{gameData.type}}';
+            let ptNa = $('.ptrnVall_' + cntt).val();
+            let tmpAr = [];
+            for (let m = 0; m < patternList.length; m++) {
+                let ptName = $('#ptName_' + cntt + '_' + m).val();
+                let prrtId = $('#ptName_' + cntt + '_' + m).attr('data-patternId');
+                let ptvalue = $('#ptvalue_' + cntt + '_' + m).val();
+                let ptvalue2 = $('#ptvalue2_' + cntt + '_' + m).val();
+                let ptPatternType = $('#ptName_' + cntt + '_' + m).attr('data-patternType');
+                tmpAr.push({
+                    'patternName': ptName,
+                    'groupName': ptNa,
+                    'patternId': prrtId,
+                    'ballNumber': ptvalue,
+                    'prize': ptvalue2,
+                    'patternType': ptPatternType
+                });
+            }
+            prtnAr.push({
+                'GroupName': ptNa,
+                'PatternData': tmpAr
+            });
+            allPatternArray.push(tmpAr);
+            let sdrr = {
+                gameMode: gameMode,
+                gameId: gameId,
+                gameType: gameType,
+                day: day,
+                start_date: start_date,
+                grace_time: grace_time,
+                minTicketCount: minTicketCt,
+                totalNoTickets: totalNoTickets,
+                notificationStartTime: notificationStartTime,
+                luckyNumberPrize: luckyNumberPrize,
+                allPatternArray: allPatternArray,
+                ticketPrice: ticketPrice,
+                seconds: seconds,
+                prtnAr: prtnAr
+            }
+            $.ajax({
+                type: 'POST',
+                url: host + "/patternGame",
+                data: sdrr,
+                success: function(resultData) {
+                    if (resultData == 'success') {
+                        swal("Created!", "Game Created Successfully!!", "success");
+                        window.location.href = '/gameManagement';
+                    } else {
+                        swal("Error!", 'Something went wrong!', "error");
+                    }
+                }
+            });
+        });
+
+        let gameTypeId = '{{gameData._id}}';
+
+        $('body').on('click', '.savedGame', function() {
+
+            let priceOne, priceTwo, priceThree, priceFour, priceFive, priceSix, priceSeven, priceEight, priceNine, priceTen, priceEleven, priceTwelve, priceThirteen, priceFourteen, priceFifteen;
+            let gameMode = $("#gameMode option:selected").val();
+            let gameType = '{{gameData.type}}';
+            let ptNa = $('.ptrnVall_' + cntt).val();
+            let start_date = $("#start_date").val();
+            let grace_time = $("#grace_time").val();
+            let minTicketCt = $('#minTicketCt').val();
+            let totalNoTickets = $('#totalNoTickets').val();
+            let notificationStartTime = $('#notificationStartTime').val();
+            let luckyNumberPrize = $('#luckyNumberPrize').val();
+            let ticketPrice = $('#ticketPrice').val();
+            let seconds = $('#seconds').val();
+            let day = $('#dayDate option:selected').val();
+            priceOne = $('.priceOne').val();
+            priceTwo = $('.priceTwo').val();
+            priceThree = $('.priceThree').val();
+            priceFour = $('.priceFour').val();
+            priceFive = $('.priceFive').val();
+            priceSix = $('.priceSix').val();
+            priceSeven = $('.priceSeven').val();
+            priceEight = $('.priceEight').val();
+            priceNine = $('.priceNine').val();
+            priceTen = $('.priceTen').val();
+            priceEleven = $('.priceEleven').val();
+            priceTwelve = $('.priceTwelve').val();
+            priceThirteen = $('.priceThirteen').val();
+            let priceFourteenToTwentyone = $('.priceFourteenToTwentyone').val();
+            priceFourteen = $('.priceFourteen').val();
+            priceFifteen = $('.priceFifteen').val();
+            let gameId = '{{gameData._id}}';
+            let betAmount = $('#betAmount').val();
+            let betMultiplier = $('#betMultiplier').val();
+            let seconds2 = $('#seconds2').val();
+
+
+
+            let tmpAr = [];
+            for (let m = 0; m < patternList.length; m++) {
+                let ptName = $('#ptName_' + cntt + '_' + m).val();
+                let prrtId = $('#ptName_' + cntt + '_' + m).attr('data-patternId');
+                let ptvalue = $('#ptvalue_' + cntt + '_' + m).val();
+                let ptvalue2 = $('#ptvalue2_' + cntt + '_' + m).val();
+                let ptPatternType = $('#ptName_' + cntt + '_' + m).attr('data-patternType');
+                tmpAr.push({
+                    'patternName': ptName,
+                    'groupName': ptNa,
+                    'patternId': prrtId,
+                    'ballNumber': ptvalue,
+                    'prize': ptvalue2,
+                    'patternType': ptPatternType
+                });
+            }
+            // prtnAr.push({
+            //     'GroupName': ptNa,
+            //     'PatternData': tmpAr
+            // });
+            let arr = [{
+                    'GroupName': ptNa,
+                    'PatternData': tmpAr
+                }]
+                // allPatternArray.push(tmpAr);
+            let newArray = [...allPatternArray, ...tmpAr];
+            let newArray2 = [...prtnAr, ...arr];
+            let sdrr = {
+                gameMode: gameMode,
+                gameId: gameId,
+                gameType: gameType,
+                start_date: start_date,
+                grace_time: grace_time,
+                minTicketCount: minTicketCt,
+                totalNoTickets: totalNoTickets,
+                notificationStartTime: notificationStartTime,
+                luckyNumberPrize: luckyNumberPrize,
+                allPatternArray: newArray,
+                ticketPrice: ticketPrice,
+                seconds: seconds,
+                day: day,
+                prtnAr: newArray2,
+                priceNine: priceNine,
+                priceTen: priceTen,
+                priceEleven: priceEleven,
+                priceTwelve: priceTwelve,
+                priceThirteen: priceThirteen,
+                priceFourteenToTwentyone: priceFourteenToTwentyone,
+                gameTypeId: gameTypeId
+            }
+
+            console.log('sdrr: ', sdrr);
+
+            $.ajax({
+                type: 'POST',
+                url: host + "/addSavedGameManagement/" + gameTypeId + "/" + gameType,
+                data: sdrr,
+                success: function(resultData) {
+                    if (resultData.status == 'success') {
+                        swal("Created!", "Game Saved Successfully!!", "success");
+                    } else {
+                        swal("Error!", 'Something went wrong!', "error");
+                    }
+                }
+            });
+        });
+
+
+        $('body').on('click', '.sBtnn', function() {
+            let nN = $('.ptrnP').val();
+            let cntVl2 = $(this).attr('data-cntt');
+            $('.ptrnVall_' + cntVl2).val(nN);
+            let pVall = $('.patternList').val();
+            patternList = [];
+            prnId = [];
+            ptTy = [];
+            $('input:checkbox[name=checkboxPt]').each(function() {
+                if ($(this).is(':checked')) {
+                    patternList.push($(this).val());
+                    prnId.push($(this).attr('data-patternId'));
+                    ptTy.push($(this).attr('data-patternType'))
+                }
+            });
+            let html = ``;
+            console.log('patternList: ', patternList);
+            console.log('prnId: ', prnId);
+            fl = true;
+            for (let m = 0; m < patternList.length; m++) {
+                html += `<div class="group-number-input-inner">
+
+                            <div class="group-number-checkbox">
+                                <input type="text" class="form-control" name="ptname" id="ptName_` + cntVl2 + `_` + m + `" data-patternId="` + prnId[m] + `" data-patternType="` + ptTy[m] + `" readOnly placeholder="` + patternList[m] + `" value = "` + patternList[m] + `">
+                            </div>
+                            <div class="number-input">
+                                <input type="text" class="form-control" name="ptvalue" id="ptvalue_` + cntVl2 + `_` + m + `" placeholder="20" min="1" max="75">
+                            </div>
+                            <div class="number-input">
+                                <input type="text" class="form-control" name="ptvalue2" id="ptvalue2_` + cntVl2 + `_` + m + `"  placeholder="3500"  min="1">
+                            </div>
+                        </div>`;
+            }
+            $('.patternTotalDivList_' + cntVl2).append(html);
+        });
+        $('body').on('click', '.addGrpList', function() {
+            if (fl == true) {
+                let ptNa = $('.ptrnVall_' + cntt).val();
+                let tmpAr = [];
+                for (let m = 0; m < patternList.length; m++) {
+                    let ptName = $('#ptName_' + cntt + '_' + m).val();
+                    let prrtId = $('#ptName_' + cntt + '_' + m).attr('data-patternId');
+                    let ptvalue = $('#ptvalue_' + cntt + '_' + m).val();
+                    let ptvalue2 = $('#ptvalue2_' + cntt + '_' + m).val();
+                    let ptPatternType = $('#ptName_' + cntt + '_' + m).attr('data-patternType');
+                    tmpAr.push({
+                        'patternName': ptName,
+                        'patternId': prrtId,
+                        'ballNumber': ptvalue,
+                        'prize': ptvalue2,
+                        'patternType': ptPatternType
+                    });
+                }
+                prtnAr.push({
+                    'GroupName': ptNa,
+                    'PatternData': tmpAr
+                });
+                allPatternArray.push(tmpAr);
+                $('.addGrpList').remove();
+                let sdrVl = $(this).attr('data-cntt');
+                cntt = Number(sdrVl) + 1;
+                let html = `<div class="group-number">
+                                        <div class="group-type">
+                                                                                <input type="text" class="form-control ptrnVall_` + cntt + `" data-cntt="` + cntt + `" readonly placeholder="Group A">
+                                                                            </div>
+                                                                            <div class="group-number-input patternTotalDivList_` + cntt + `"></div>
+                                    <div class="col-lg-2 m-b-1">
+                                        <a href="#"><button type="button" class="btn addGrpList btn-primary btn-md" data-cntt="` + cntt + `"><i class="fa fa-plus"></i> Add Group</button></a>
+                                    </div>
+                                </div>`;
+
+                fl = false;
+                $('.nwCl').append(html);
+                $('.sBtnn').attr('data-cntt', cntt)
+            }
+
+        });
+
+        //And this for Change a Game Mode
+        $("#gameMode").change(function() {
+            let selectedValue = $("#gameMode option:selected").val();
+            if (selectedValue == "auto") {
+                console.log("show");
+                $("#minTicketCount").show();
+                $("#timeGrace").show();
+            } else {
+                console.log("hide");
+                $("#minTicketCount").hide();
+                $("#timeGrace").hide();
+            }
+        });
+
+        let now = new Date();
+        let newTime;
+        let utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+        newTime = utc.getTime() + 2 * 60000;
+        $('#start_date').datetimepicker({
+            minDate: newTime
+        });
+
+        let newTime2 = new Date();
+        newTime2 = utc.getTime() + 4 * 60000;
+        $('#grace_time').datetimepicker({
+            minDate: newTime2
+        });
+
+
+        // $('#startDate input').datetimepicker({
+        //     minDate: new Date(),
+        // });
+
+        $('.glyphicon1').click(function() {
+            $("#startDate input").focus();
+        });
+
+        // $('#graceTime input').datetimepicker({
+        //     minDate: new Date(),
+        // });
+
+        $('.glyphicon2').click(function() {
+            $("#graceTime input").focus();
+        });
+
+
+        //this calculates values automatically
+        // sum();
+        // $("#rangeMin").on("keydown keyup", function() {
+        //     sum();
+        //     let rangeMin = document.getElementById('rangeMin').value;
+        //     if (rangeMin === "") {
+        //         document.getElementById('rangeMax').value = parseInt(25);
+        //     }
+
+        // });
+
+        // function sum() {
+        //     let rangeMin = document.getElementById('rangeMin').value;
+        //     if (rangeMin === "") {
+        //         document.getElementById('rangeMax').value = parseInt(25);
+        //     }
+        //     let sum = parseInt(rangeMin) + parseInt(25);
+        //     if (!isNaN(sum)) {
+        //         document.getElementById('rangeMax').value = sum;
+        //     }
+        // }
+
+    });
+
+    // [ Right Key Disable ]
+    // $(document).bind("contextmenu", function(e) {
+    //     return false;
+    // });
+</script>
+
+<script>
+    $(".js-select2").select2({
+        closeOnSelect: false,
+        placeholder: "Hall 1",
+        allowHtml: true,
+        allowClear: true,
+        tags: true // создает новые опции на лету
+    });
+
+    $(".js-select4").select2({
+        closeOnSelect: false,
+        placeholder: "Game 1",
+        allowHtml: true,
+        allowClear: true,
+        tags: true // создает новые опции на лету
+    });
+</script>
+
+{% endblock %}

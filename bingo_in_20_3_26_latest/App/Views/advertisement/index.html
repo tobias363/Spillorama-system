@@ -1,0 +1,284 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+ .select2-search__field{width:100% !important;}
+</style>
+<div class="page-wrapper">
+    <div class="container-fluid">
+        
+        <section class="content-header">
+            <h1>{{translate.sms_advertisement}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+                <li class="active">{{translate.sms_advertisement}}</li>
+            </ol>
+        </section>
+       
+        {% include "partition/notification.html" %}
+       
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{translate.sms_advertisement}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <form id="notificationForm">
+                                    <div class="form-group">
+                                        <label for="notificationType">{{ translate.select_notification_type or "Select Notification Type" }}</label>
+                                        <select class="form-control" id="notificationType" name="notificationType" data-validation="required">
+                                            <option value="personal">{{ translate.send_personal_message or "Send Personal Message" }}</option>
+                                            <option value="hall">{{ translate.send_a_hall_message_to_everyone_in_a_hall or "Send a message to everyone in a hall" }}</option>
+                                            <option value="all">{{ translate.send_a_message_to_all_users or "Send a message to all users" }}</option>
+                                            <option value="group">{{ translate.send_a_message_to_a_group or "Send a message to a group" }}</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- Player Selection (for personal message) -->
+                                    <div class="form-group" id="playerSelection" style="display:none;">
+                                        <label for="playerId">{{ translate.select_player or "Select Player" }}</label>
+                                        <select class="form-control" id="playerId" name="playerId[]" style="width:100%;" multiple="multiple"></select>
+                                    </div>
+
+                                    <!-- Hall Selection (for hall message) -->
+                                    <div class="form-group" id="hallSelection" style="display:none;">
+                                        <label for="hallId">{{ translate.select_hall or "Select Hall" }}</label>
+                                        <select class="form-control" id="hallId" name="hallId[]" style="width:100%;" multiple="multiple">
+                                            {# <option value="">{{ translate.select_hall or "Select Hall" }}</option> #}
+                                        </select>
+                                    </div>
+
+                                    <!-- Group Selection (for group message) -->
+                                    <div class="form-group" id="groupSelection" style="display:none;">
+                                        <label for="groupId">{{ translate.select_group_of_halls or "Select Group of Halls" }}</label>
+                                        <select class="form-control" id="groupId" name="groupId[]" style="width:100%;" multiple="multiple">
+                                            {# <option value="">{{ translate.select_group_of_halls or "Select Group of Halls" }}</option> #}
+                                        </select>
+                                    </div>
+
+                                    <!-- Message Type -->
+                                    <div class="form-group">
+                                        <label>{{ translate.message_type or "Message Type" }}</label><br>
+                                        <label><input type="checkbox" name="sendType[]" value="sms" checked data-validation="checkbox_group" data-validation-qty="min1"> SMS </label>
+                                        <label style="margin-left:15px;"><input type="checkbox" name="sendType[]" value="push" data-validation="checkbox_group" data-validation-qty="min1"> {{ translate.push_notification or "Push Notification" }}</label>
+                                    </div>
+
+                                    <!-- Message Text -->
+                                    <div class="form-group">
+                                        <label for="message">{{ translate.message or "Message" }}</label>
+                                        <textarea class="form-control" id="message" name="message" rows="4" placeholder="{{ translate.enter_message or 'Enter your message here' }}" data-validation="required" data-validation-length="min1"></textarea>
+                                    </div>
+
+                                    {% if editFlag %}
+                                    <button type="submit" class="btn btn-primary">{{ translate.send or "Send" }}</button>
+                                    {% endif %}
+                                    <!-- Add message container -->
+                                    <div id="messageContainer" class="mt-3" style="display: none;">
+                                        <div class="alert" role="alert"></div>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
+<script>
+    $(document).ready(function () {
+        // Store the data in JavaScript variables
+        const hallsData = {{ halls | dump | safe }};
+        const groupsData = {{ group_of_halls | dump | safe }};
+       
+        // Combined function to handle both visibility and validation
+        function updateFields() {
+            const type = $('#notificationType').val();
+            
+            // Hide all selection containers
+            $('#playerSelection, #hallSelection, #groupSelection').hide();
+            
+            // Clear and reset all select2 fields
+            $('#playerId, #hallId, #groupId').val(null).trigger('change');
+            
+            // Remove validation from all select2 fields
+            $('#playerId, #hallId, #groupId').removeAttr('data-validation');
+            
+            // Show and set validation based on selected type
+            if (type === 'personal') {
+                $('#playerSelection').show();
+                $('#playerId').attr('data-validation', 'required');
+            } else if (type === 'hall') {
+                $('#hallSelection').show();
+                $('#hallId').attr('data-validation', 'required');
+            } else if (type === 'group') {
+                $('#groupSelection').show();
+                $('#groupId').attr('data-validation', 'required');
+            }
+        }
+        
+        $('#notificationType').change(updateFields);
+        updateFields();
+
+        // Initialize select2 for player search (AJAX)
+        $('#playerId').select2({
+            placeholder: "{{ translate.search_username or 'Search by User Name' }}",
+            multiple: true,
+            allowClear: true,
+            minimumInputLength: 2,
+            language: {
+                inputTooShort: function() {
+                    return "{{ translate.please_enter_2_or_more_characters or 'Please enter 2 or more characters' }}";
+                }
+            },
+            ajax: {
+                url: '/sms-advertisement/search-players',
+                dataType: 'json',
+                delay: 250,
+                data: function (params) {
+                    return { player: params.term };
+                },
+                processResults: function (data) {
+                    return {
+                        results: data.players.map(function (player) {
+                            return { 
+                                id: player._id, 
+                                text: `${player.username} / ${player.customerNumber} / ${player.phone}`
+                            };
+                        })
+                    };
+                },
+                cache: true,
+                error: function(xhr, status, error) {
+                    if (xhr.status === 500) {
+                        console.log("error", error);
+                    }
+                    return {
+                        results: []
+                    };
+                }
+            }
+        });
+
+        // Initialize select2 for hall selection
+        $('#hallId').select2({
+            placeholder: "{{ translate.select_hall or 'Select Hall' }}",
+            multiple: true,
+            allowClear: true,
+            dropdownParent: $('#hallSelection'),
+            data: hallsData.map(function(hall) {
+                return {
+                    id: hall._id,
+                    text: hall.name
+                };
+            })
+        });
+
+        // Initialize select2 for group selection
+        $('#groupId').select2({
+            placeholder: "{{ translate.select_group_of_halls or 'Select Group of Halls' }}",
+            multiple: true,
+            allowClear: true,
+            dropdownParent: $('#groupSelection'),
+            data: groupsData.map(function(group) {
+                return {
+                    id: group._id,
+                    text: group.name
+                };
+            })
+        });
+
+        // Initialize form validation
+        $.validate({
+            form: '#notificationForm',
+            onError: function($form) {
+                console.log('Validation failed');
+            },
+            onSuccess: function($form) {
+                console.log('Validation passed');
+                return true;
+            }
+        });
+
+        // Add validation attributes to form elements
+        $('#notificationType').attr('data-validation', 'required');
+        $('#playerId').attr('data-validation', 'required');
+        $('#hallId').attr('data-validation', 'required');
+        $('#groupId').attr('data-validation', 'required');
+        $('#message').attr('data-validation', 'required');
+        $('#message').attr('data-validation-length', 'min1');
+
+        // Update validation rules when notification type changes
+        $('#notificationType').on('change', function() {
+            var type = $(this).val();
+            
+            // Reset all select2 validation
+            $('#playerId, #hallId, #groupId').removeAttr('data-validation');
+            
+            // Add validation based on selected type
+            if (type === 'personal') {
+                $('#playerId').attr('data-validation', 'required');
+            } else if (type === 'hall') {
+                $('#hallId').attr('data-validation', 'required');
+            } else if (type === 'group') {
+                $('#groupId').attr('data-validation', 'required');
+            }
+        });
+
+        // Form submit
+        $('#notificationForm').on('submit', function(e) {
+            e.preventDefault();
+
+            const formData = $(this).serialize();
+            console.log(formData);
+            $.ajax({
+                url: '/sms-advertisement/send-sms-notification',
+                type: 'POST',
+                data: formData,
+                success: function(response) {
+                    console.log("response", response);
+                    $('#notificationForm')[0].reset();
+                    $('#notificationType').val('personal').trigger('change');
+                    updateFields();
+                    showMessage(response.message, response.success ? 'success' : 'danger');
+                },
+                error: function(xhr, status, error) {
+                    console.error('Error:', error);
+                    showMessage("{{ translate.something_went_wrong or 'Something went wrong. Please try again.' }}", 'error');
+                }
+            });
+        });
+
+        function showMessage(message, type = 'success', duration = 3000) {
+            const messageContainer = $('#messageContainer');
+            const alertDiv = messageContainer.find('.alert');
+            
+            // Remove existing classes and add appropriate class
+            alertDiv.removeClass('alert-success alert-danger')
+                   .addClass(`alert-${type}`);
+            
+            // Set message text
+            alertDiv.text(message);
+            
+            // Show container
+            messageContainer.show();
+            
+            // Hide after duration
+            setTimeout(function() {
+                messageContainer.fadeOut();
+            }, duration);
+        }
+
+    });
+</script>
+{% endblock %}

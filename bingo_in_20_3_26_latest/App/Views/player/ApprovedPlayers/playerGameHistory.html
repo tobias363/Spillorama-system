@@ -1,0 +1,462 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+
+    .cst {
+        display: flex;
+        justify-content: flex-end;
+        gap: 20px;
+        align-items: flex-end;
+    }
+
+    .form-horizontal button {
+        width: 50px;
+    }
+
+    /* button#search,
+    button#filterReset {
+        min-width: 55px;
+    } */
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{game.game_details}} </h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i>{{game.dashboard}}</a></li>
+                <li class="active" href="#">{{game.game_details}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-xs-12">
+                    <form>
+                        <div class="box">
+                            <div class="box-header">
+                                <h3 class="box-title">{{game.search}}</h3>
+                            </div>
+                            <div class="box-body">
+                                <div class="row">
+                                    <div class="col-lg-6 pull-left">
+                                        <div class="cst">
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <label for="fromDate">{{game.from_date}}:</label>
+                                                    <input type="date" class="dateFilter form-control" name="fromDate"
+                                                        id="fromDate">
+                                                </div>
+                                            </div>
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <label for="toDate">{{game.to_date}}:</label>
+                                                    <input type="date" class="dateFilter form-control" name="toDate"
+                                                        id="toDate">
+                                                </div>
+                                            </div>
+                                            <button type="button" class="pull-left btn btn-primary playersearch"
+                                                id="search"><i class="fa fa-search"></i></button>
+                                            <button type="reset" class="btn btn-primary pull-left clickreset"
+                                                id="filterReset">{{game.reset}}</button>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-2 pull-right">
+                                        <div class="cst">
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <label for="toDate">{{game.choose_game_type}}:</label>
+                                                    <select name="gameType" class="form-control" id="gameType">
+                                                        <!-- <option value="" selected="selected">All</option> -->
+                                                        {% for gameType in gameTypes %}
+                                                        <option value={{gameType.type}} class="select-{{gameType._id}}">
+                                                            {{gameType.name}}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{game.game_details}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                <!-- <a href="/addWallet"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add Wallet</button></a> -->
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <input type="text" class="playerId" id="playerId" value="{{playerId}}" hidden>
+                                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr id="headerField">
+                                                    <!-- <th>Game Type</th>
+                                                    <th>Game Id</th>
+                                                    <th>Start Date & Time(Parent Game)</th>
+                                                    <th>Variant Game Id</th>
+                                                    <th>Start Date & Time(Variant Game)</th>
+                                                    <th>Ticket No.</th>
+                                                    <th>Purchase Type</th>
+                                                    <th>Before Balance</th>
+                                                    <th>Ticket Price</th>
+                                                    <th>Winning Price (in Kr)</th>
+                                                    <th>After Balance (in Kr)</th> -->
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script>
+    var orderTable = "";
+    var host = window.location.origin;
+    $(document).ready(function () {
+        let timer;
+        let gameType = $("#gameType").val();
+        let ajaxUrl = host + "/getPlayerGameHistory";
+        let columns = generateColumns($('#gameType').val());
+        $("#headerField").empty();
+        $("#headerField").append(changeTableHeaders($('#gameType').val()))
+        loadData(columns);
+        let table = $('#myTable').DataTable();
+
+        $('body').on('click', '.playersearch', function (e) {
+            let columns = generateColumns($('#gameType').val());
+            $('#myTable').DataTable().clear().destroy();
+            loadData(columns);
+        });
+
+        $('body').on('click', '.clickreset', function (e) {
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                let columns = generateColumns($('#gameType').val());
+                $('#myTable').DataTable().clear().destroy();
+                $("#headerField").empty();
+                $("#headerField").append(changeTableHeaders($('#gameType').val()))
+                loadData(columns);
+            }, 1000);
+        });
+
+        $('#gameType').change(function () {
+            let columns = generateColumns($('#gameType').val());
+            $('#myTable').DataTable().clear().destroy();
+            $("#headerField").empty();
+            $("#headerField").append(changeTableHeaders($('#gameType').val()))
+            loadData(columns);
+        });
+
+        //Load Datatable
+        function loadData(columns) {
+            var startdate = $("#fromDate").val();
+            var enddate = $("#toDate").val();
+            $('#myTable').DataTable({
+                // "language": {
+                //     search: '',
+                //     searchPlaceholder: "search",
+                //     // processing: "<img style='width:50px; height:50px;' src='admin/loading.gif'/>" 
+                // },
+                "oLanguage": {
+                    "sSearch": "{{game.search}}",
+                    "sLengthMenu": "{{game.show}} _MENU_ {{game.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ game.previous }}",
+                        sNext: "{{ game.next }}"
+                    },
+                    "sEmptyTable": "{{game.no_data_available_in_table}}",
+                    "sInfo" : "{{game.showing}} _START_ to _END_ of _TOTAL_ {{game.entries}}",
+                    "sInfoEmpty": "{{game.showing}} 0 to 0 of 0 {{game.entries}}"
+                },
+                "processing": true,
+                "serverSide": true,
+                "ordering": false,
+                "order": [
+                    [4, "desc"]
+                ],
+                "autoWidth": false,
+                "pageLength": 10,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: function (data) {
+                        data.playerId = $('#playerId').val();
+                        data.gameType = $('#gameType').val();
+                        data.startdate = startdate;
+                        data.enddate = enddate;
+                    }
+                },
+                /*dom: 'lBfrtip',*/
+                lengthMenu: [
+                    [10, 25, 50, 100 ],
+                    [10, 25, 50, 100 ]
+                ],
+                /*"buttons": [
+                    // 'csv', 'excel'
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }, {
+                        extend: 'excelHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }
+                ],*/
+                "columns": columns
+            });
+        }
+
+    });
+
+    //Utility Functions
+    function createDateString(dateVal) {
+        let dt = new Date(dateVal);
+        let date = dt.getDate();
+        let month = parseInt(dt.getMonth() + 1);
+        let year = dt.getFullYear();
+        let hours = dt.getHours();
+        let minutes = dt.getMinutes();
+        let ampm = hours >= 12 ? 'pm' : 'am';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        minutes = minutes < 10 ? '0' + minutes : minutes;
+        let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+        return createdAt;
+    }
+    function generateColumns(gameType) {
+        let column = []
+        switch (gameType) {
+            case 'game_1':
+                column = [{
+                    "data": "dailyScheduleId"
+                }, {
+                    "data": "gameId"
+                }, {
+                    "data": "subGame1Id"
+                }, {
+                    "data": "createdAt",
+                    render: function (data, type, row) {
+                        return createDateString(row.updatedAt)
+                    }
+                }, {
+                    "data": "gameName"
+                }, {
+                    "data": "ticketColorName"
+                }, {
+                    "data": "ticketId"
+                }, {
+                    "data": "ticketPurchasedFrom"
+                }, {
+                    "data": "ticketPrice",
+                    render: function (data, type, row, meta) {
+                        let price = '-';
+                        if (row.ticketPrice != undefined) {
+                            price = row.ticketPrice;
+                        }
+                        return price;
+                    }
+                }, {
+                    "data": "winningStats",
+                    render: function (data, type, row, meta) {
+                        if (data.finalWonAmount > 0) {
+                            if (Array.isArray(data.lineTypeArray)) {
+                                let $select = $('<select id="select1-' + row.gameId + '" ></select>', {
+                                    "id": row.gameId,
+                                    "value": data.lineTypeArray.map(item => item.lineType)
+                                });
+                                $.each(data.lineTypeArray, function (k, v) {
+                                    let $option = $("<option></option>", {
+                                        "text": v.lineType,
+                                        "value": v.lineType
+                                    });
+                                    $select.append($option);
+                                });
+                                return $select.prop("outerHTML");
+                            } else {
+                                return data.lineTypeArray;
+                            }
+                        } else {
+                            return "-";
+                        }
+                    }
+                }, {
+                    "data": "winningStats.finalWonAmount"
+                }]
+                break;
+            case 'game_5':
+                column = [
+                    {
+                        "data": "gameName"
+                    },
+                    {
+                        "data": "gameStartDate",
+                        render: function (data, type, row) {
+                            return createDateString(row.gameStartDate)
+                        }
+                    },
+                    {
+                        "data": "ticketId",
+                        render: function (data, type, row) {
+                            return row.ticketId;
+                        }
+                    },
+                    {
+                        "data": "ticketPrice",
+                        render: function (data, type, row) {
+                            return +row.ticketPrice.toFixed(2) + " Kr";
+                        }
+                    }, {
+                        "data": "ticketPurchasedFrom"
+                    }, {
+                        "data": "winningStats",
+                        render: function (data, type, row, meta) {
+                            if (data && data.patternWon) {
+                                return `x${data.patternWon.multiplier}: ${data.finalWonAmount} Kr`;
+                            } else {
+                                return "-";
+                            }
+                        }
+                    },
+                    {
+                        "data": "extraWinnings",
+                        render: function (data, type, row) {
+                            if (row.bonusWinningStats && row.bonusWinningStats.finalWonAmount) {
+                                return +row.bonusWinningStats.finalWonAmount.toFixed(2) + " Kr";
+                            } else {
+                                return "0 Kr";
+                            }
+                        }
+                    },
+                    {
+                        "data": "totalWinning",
+                        render: function (data, type, row) {
+                            // console.log(" row row row rowrow row : ",row)
+                            return +row.totalWinningOfTicket.toFixed(2) + " Kr";
+                        }
+                    }]
+                break;
+
+            default:
+                column = [{
+                    "data": "gameType"
+                }, {
+                    "data": "gameId"
+                }, {
+                    "data": "createdAt",
+                    render: function (data, type, row) {
+                        return createDateString(row.updatedAt)
+                    }
+                }, {
+                    "data": "gameNumber"
+                }, {
+                    "data": "updatedAt",
+                    // ,
+                    render: function (data, type, row) {
+                        return createDateString(row.updatedAt)
+                    }
+                }, {
+                    "data": "ticketNumber"
+                }, {
+                    "data": "amtCategory"
+                }, {
+                    "data": "previousBalance"
+                }, {
+                    "data": "ticketPrice",
+                    render: function (data, type, row, meta) {
+                        let price = '-';
+                        if (row.ticketPrice != undefined) {
+                            price = row.ticketPrice;
+                        }
+                        return price;
+                    }
+                }, {
+                    "data": "winningPrice"
+                }, {
+                    "data": "afterBalance"
+                }]
+                break;
+        }
+        return column;
+    }
+    function changeTableHeaders(gameType) {
+        let str = "";
+        if (gameType == 'game_2' || gameType == 'game_3') {
+            str += `<th>{{ game.game_type }}</th>
+          <th>{{ game.game_id }}</th>
+          <th>{{ game.start_date_time_parent_game }}</th>
+          <th>{{ game.variant_game_id }}</th>
+          <th>{{ game.start_date_time_variant_game }}</th>
+          <th>{{ game.ticket_no }}</th>
+          <th>{{ game.purchase_type }}</th>
+          <th>{{ game.before_balance }}</th>
+          <th>{{ game.ticket_price }}</th>
+          <th>{{ game.winning_price_in_kr }}</th>
+          <th>{{ game.after_balance_in_kr }}</th>`;
+        } else if (gameType == 'game_1') {
+            str += `<th>{{ game.daily_schedule_id }}</th>
+          <th>{{ game.game_id }}</th>
+          <th>{{ game.sub_game_id }}</th>
+          <th>{{ game.start_date_time }}</th>
+          <th>{{ game.game_1_variant_game }}</th>
+          <th>{{ game.ticket_color_type }}</th>
+          <th>{{ game.ticket_no }}</th>
+          <th>{{ game.purchase_type }}</th>
+          <th>{{ game.ticket_price }}</th>
+          <th>{{ game.winning_pattern }}</th>
+          <th>{{ game.total_winnings }}</th>`
+        } else if (gameType == 'game_5') {
+            str += `
+            <th>{{ game.game_id }}</th>
+          <th>{{ game.start_date_time }}</th>
+          <th>{{ game.ticket_id }}</th>
+          <th>{{ game.ticket_price }}</th>
+          <th>{{ game.purchase_type }}</th>
+          <th>{{ game.winning_pattern }}</th>
+          <th>{{ game.jackpot_roulette_winning }}</th>
+          <th>{{ game.total_winnings }}</th>`
+        }
+        return str;
+    }
+
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

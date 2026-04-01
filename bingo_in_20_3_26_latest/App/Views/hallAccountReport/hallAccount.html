@@ -1,0 +1,683 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+  <div class="container-fluid">
+
+    <!-- Title -->
+    <section class="content-header">
+      <h1>{{hallReport.hall_account_report}}</h1>
+      <ol class="breadcrumb">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{hallReport.dashboard}}</a></li>
+        <li class="active">{{hallReport.hall_account_report}}</li>
+      </ol>
+    </section>
+    <!-- /Title -->
+    {% include "partition/notification.html" %}
+    <!-- Row -->
+    <section class="content">
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                <h6 class="panel-title txt-dark">{{hallReport.hall_account_report}}</h6>
+              </div>
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+
+                <div class="row">
+                  <div>
+                    <div class="col-sm-2">
+                      <div class="form-group">
+                        <label for="start_date" class="control-label">{{hallReport.from_date}}:</label>
+                        <div class="input-group date" id="startDate">
+                          <input type="text" class="form-control" name="start_date" id="start_date"
+                            placeholder="{{hallReport.start_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"
+                            onkeydown="return false">
+                          <span class="input-group-addon">
+                            <span class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="col-sm-2">
+                      <div class="form-group">
+                        <label for="end_date" class="control-label">{{hallReport.to_date}} :</label>
+                        <div class="input-group date" id="endDate">
+                          <input type="text" class="form-control" name="end_date" id="end_date" placeholder="{{hallReport.end_date}}"
+                            data-date-format="yyyy-mm-dd" autocomplete="off" onkeydown="return false">
+                          <span class="input-group-addon">
+                            <span class="glyphicon glyphicon2 glyphicon-calendar"></span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="col-sm-2">
+                      <div class="form-group">
+                        <label for="gameType" class="control-label">{{hallReport.game_type}} :</label>
+                        <select name="gameType" class="form-control"
+                            id="gameType">
+                            <option value="real">{{hallReport.real}}</option>
+                            <option value="bot">{{hallReport.bot}}</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="col-sm-1">
+                    <div >
+                      <input type="button" name="search" id="search" value="{{hallReport.search}}" class="btn btn-info">
+                    </div>
+                  </div>
+                  <div class="col-sm-1">
+                    <div >
+                      <input type="button" name="reset" id="reset" value="{{hallReport.reset}}" class="btn btn-info">
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <input type="hidden" name="hallId" id="hallId" value="{{hallId}}">
+                  <div class="table-wrap">
+                    <div class="table-responsive">
+                      <table id="myTable" class="table  table-bordered table-striped table-hover display  pb-30">
+                        <thead>
+                          <tr>
+                            <th>{{hallReport.date}}</th>
+                            <th>{{hallReport.week_day}}</th>
+                            <th>{{hallReport.resultat_bingonet}}</th>
+                            <th>Metronia</th>
+                            <th>OK Bingo</th>
+                            <th>Franco</th>
+                            <th>Otium</th>
+                            <th>Norsk Tipping</th>
+                            <th>Norsk Rikstoto</th>
+                            <th>Rekvisita</th>
+                            <th>Kaffe-penger</th>
+                            <th>{{hallReport.bilag}}</th>
+                            <th>{{hallReport.profit_transfer_to_bank}}</th>
+                            <th>Bank Terminal</th>
+                            <th>{{hallReport.other}}</th>
+                            <th>{{hallReport.deposit_to_dropsafe}}</th>
+                            <th>{{hallReport.cash_in_out_settlement}}</th>
+                            <th>Diff</th>
+                            <th>{{hallReport.comments}}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <th colspan="2"></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                          </tr>
+                         
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+    </section>
+  </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<link rel="stylesheet "
+  href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css "
+  integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin=" anonymous " />
+<script
+  src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js "
+  integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin=" anonymous "></script>
+<script src="https://cdn.datatables.net/buttons/2.2.3/js/dataTables.buttons.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/vfs_fonts.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.2.3/js/buttons.html5.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.3.2/js/buttons.print.min.js"></script>
+<script src="/dist/js/jszip.min.js"></script>
+
+<script>
+  function formatDate(date) {
+    let d = new Date(date),
+      month = '' + (d.getMonth() + 1),
+      day = '' + d.getDate(),
+      year = d.getFullYear();
+
+    if (month.length < 2)
+      month = '0' + month;
+    if (day.length < 2)
+      day = '0' + day;
+
+    return [year, month, day].join('-');
+  }
+
+  $(document).ready(function () {
+    let searchTimeOut;
+    var host = window.location.origin;
+
+
+    //Setting Up Start and End Date
+    $('#startDate input').datepicker({
+      autoclose: true,
+      endDate: new Date()
+    }).on('changeDate', function (ev) {
+      let minDate = new Date(ev.date.valueOf());
+      $('#endDate input').datepicker('setStartDate', minDate);
+    });
+
+
+    $("#endDate input").datepicker({
+      //settings
+      startDate: $('#startDate input').val(),
+      autoclose: true,
+      endDate: new Date()
+    }).on('changeDate', function (selected) {
+      let minDate = new Date(selected.date.valueOf());
+      $('#startDate input').datepicker('setEndDate', minDate);
+    });
+
+    $('.glyphicon1').click(function () {
+      $("#startDate input").focus();
+    });
+
+    $('.glyphicon2').click(function () {
+      $("#endDate input").focus();
+    });
+    ////Setting Up Start and End Date Done
+
+    //Setting initial Value in Start Date and End Date
+    $('#startDate input').datepicker('setDate', formatDate(new Date(new Date().setDate(new Date().getDate() - 7))));
+    $('#endDate input').datepicker('setDate', formatDate(new Date()));
+
+    //Load Table
+    fetch_data('yes', $('#start_date').val(), $('#end_date').val());
+
+    //When Click on Search
+    $('#search').click(function () {
+      let start_date = $('#start_date').val();
+      let end_date = $('#end_date').val();
+      if (start_date != '' && end_date != '') {
+        $('#myTable').DataTable().destroy();
+        fetch_data('yes', start_date, end_date);
+      } else {
+        alert("{{hallReport.both_date_required}}");
+      }
+    });
+
+    //When Filter Is Reset
+    $('#reset').on("click", function (e) {
+      $('#gameType option:first').prop('selected',true);
+      searchTimeOut = setTimeout(() => {
+        clearTimeout();
+        $('#myTable').DataTable().destroy();
+        let start_date = $('#start_date').val();
+        let end_date = $('#end_date').val();
+        fetch_data('yes', start_date, end_date);
+      }, 500);
+    });
+
+    //Table Handler
+    function fetch_data(is_date_search, start_date = '', end_date = '') {
+      $('#myTable').DataTable({
+        "searching": false,
+        "oLanguage": {
+          "sProcessing": "<img style='width:50px; height:50px;' src='admin/loading.gif' />",
+          "sEmptyTable": "{{hallReport.no_data_available_in_table}}",
+          "sInfo": "{{hallReport.showing}} _START_ to _END_ of _TOTAL_ {{hallReport.entries}}",
+          "sInfoEmpty": "{{hallReport.showing}} 0 to 0 of 0 {{hallReport.entries}}"
+        },
+        "scrollX": true,
+        "scrollY": '800px',
+        "scrollCollapse": true,
+        "paging": false,
+        "processing": true,
+        "serverSide": true,
+        "ordering": false,
+        "autoWidth": true,
+        //"dom": 'Bfrti',
+        dom: '<"row"<"col-sm-6"><"col-sm-6 text-right"B>>lfrtip',
+        "buttons": [
+          { extend: 'print', footer: true,  text: 'PDF',
+            "action": newexportaction,
+            exportOptions: {
+							orthogonal: 'export'
+						},
+            className: 'btn btn-primary pdfButton',
+            visible: false
+          },
+        ],
+        "columnDefs": [
+          { "width": "75px", "targets": '_all' }
+        ],
+        initComplete: function () {
+          $('#gameType').on('change', function () {
+            let selectedValue = $(this).val();
+            if (selectedValue === 'real') {
+              $(".pdfButton").show()
+            } else {
+              $(".pdfButton").hide()
+            }
+          });
+        },
+        "ajax": {
+          url: host + "/getHallAccountReport",
+          type: "GET",
+          data: {
+            start_date: start_date,
+            end_date: end_date,
+            hall: $('#hallId').val(),
+            playerType: $("#gameType").val()
+          },
+        },
+
+        "footerCallback": function(row, data, start, end, display) {
+          let api = this.api();
+		      let sum = 0;
+		      //let formated = 0;
+		      $(api.column(0).footer()).html('Total');
+		      for(var i=2; i<=16;i++)
+		      {
+		      	sum = api.column(i, {page:'current'}).data().reduce(function(a, b) {
+              return a + b;
+            }, 0);
+
+		      	//formated = parseFloat(sum).toLocaleString(undefined, {minimumFractionDigits:2});
+		      	$(api.column(i).footer()).html(+sum.toFixed(2));
+		      }
+          if($("#gameType").val() == "bot"){
+            let totalDiff = -(+api.column(2).footer().innerText);
+            $(api.column(i).footer()).html(+totalDiff);
+          }else{
+            let totalDiff =  -(+api.column(2).footer().innerText + +api.column(3).footer().innerText + +api.column(4).footer().innerText + +api.column(5).footer().innerText + +api.column(6).footer().innerText + +api.column(7).footer().innerText + +api.column(8).footer().innerText + +api.column(9).footer().innerText + +api.column(10).footer().innerText + +api.column(14).footer().innerText - +api.column(11).footer().innerText + +api.column(12).footer().innerText - +api.column(13).footer().innerText - +api.column(15).footer().innerText - +api.column(16).footer().innerText);
+            $(api.column(i).footer()).html(+totalDiff.toFixed(2));
+          }
+        },
+
+        "columns": [{
+          "data": "_id",
+        }, {
+          "data": "day",
+          render:function(data,type,row,meta){
+            let date = new Date(row._id);
+            let days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            return days[date.getDay()];
+            // // Parse the date manually to create a Date object
+            // const dateParts = row._id.split('-');
+            // const day = parseInt(dateParts[0], 10);
+            // const month = parseInt(dateParts[1], 10)-1; // Month is 0-indexed, so subtract 1
+            // const year = parseInt(dateParts[2], 10); // Assuming the year is in yy format (e.g., 23 for 2023)
+            // console.log("day, month and year,--", year,month,day)
+            // return new Date(year,month,day).toLocaleDateString('en-Us',{"weekday":"short"});
+          }
+        }, {
+          "data": "allGameProfit",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return data;
+            }
+          }
+        }, {
+          "data": "totalAmountMetronia",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountOkBingo",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountFranco",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountOtium",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountNorskTotalt",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountNorskRikstotoTotalt",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountRekvisita",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountSellProduct",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountBilag",
+          "render": function (data, type, row) {
+            if(data && data < 0){
+              return `<p style="color: red">${-data}</p>`
+            }else if(data && data > 0){
+              return `<p style="color: red">${+data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountTransferredByBank",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalAmountBank",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          } 
+        }, {
+          "data": "totalAmountAnnet",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "totalDropSafeAmount",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "withdrawFromtotalBalance",
+          "render": function (data, type, row) {
+            if(data && data >= 0){
+              return `<p style="color: black">${data}</p>`
+            }else if(data && data < 0){
+              return `<p style="color: red">${data}</p>`
+            }else{
+              return 0;
+            }
+          }
+        }, {
+          "data": "diff",
+          "render": function (data, type, row) {
+            if($("#gameType").val() == "bot"){
+              return -(row.allGameProfit)
+            }else{
+              let totalDiff =  -(row.allGameProfit + row.totalAmountMetronia + row.totalAmountOkBingo + row.totalAmountFranco + row.totalAmountOtium + row.totalAmountNorskTotalt + row.totalAmountNorskRikstotoTotalt + row.totalAmountRekvisita + row.totalAmountSellProduct + row.totalAmountAnnet - row.totalAmountBilag + row.totalAmountTransferredByBank - row.totalAmountBank - row.totalDropSafeAmount - row.withdrawFromtotalBalance);
+              if( totalDiff >= 0){
+                return `<p style="color: black">${totalDiff}</p>`
+              }else if( totalDiff < 0){
+                return `<p style="color: red">${totalDiff}</p>`
+              }else{
+                return totalDiff;
+              }
+            }
+            
+          }
+
+        }, {
+          "data": "settlmentNote",
+          "render": function (data, type, row) {
+            if(data && data.length > 0){
+              return renderComments(data);
+            }else{
+              return "";
+            }
+          }
+        }
+        ]
+      });
+    }
+
+  });
+
+  function saveOnChange(cell, date){
+    $.ajax({
+        type: 'POST',
+        url: host + "/hall/report/saveData",
+        data: {
+          hallId: $('#hallId').val(),
+          name: cell.name,
+          value: cell.value,
+          date: cell.dataset.date
+        },
+        success: function (resultData) {
+        }
+    });
+  }
+
+  function renderComments(comments) {
+      return comments.join(' ');
+  }
+
+  function newexportaction(e, dt, button, config) {
+    let self = this;
+    let oldStart = dt.settings()[0]._iDisplayStart;
+
+    dt.one('preXhr', function (e, s, data) {
+        // Request all data for export
+        data.start = 0;
+        data.length = 2147483647; // Set to max to fetch all data
+        
+        dt.one('preDraw', function (e, settings) {
+            // Calculate total sums for all data
+            let allDataSum = {};
+            let totalDiffSum = 0;
+            for (var i = 2; i <= 16; i++) {
+                allDataSum[i] = dt.column(i).data().reduce(function(a, b) {
+                    let value = b == null ? 0 : parseFloat(b);
+                    return a + (isNaN(value) ? 0 : value);
+                }, 0);
+            }
+
+            dt.rows({ search: 'applied' }).every(function () {
+              let rowData = this.data();console.log("rowData---", rowData)
+              let totalDiff =  -(rowData.allGameProfit + rowData.totalAmountMetronia + rowData.totalAmountOkBingo + rowData.totalAmountFranco + rowData.totalAmountOtium + rowData.totalAmountNorskTotalt + rowData.totalAmountNorskRikstotoTotalt + rowData.totalAmountRekvisita + rowData.totalAmountSellProduct + rowData.totalAmountAnnet - rowData.totalAmountBilag + rowData.totalAmountTransferredByBank - rowData.totalAmountBank - rowData.totalDropSafeAmount - rowData.withdrawFromtotalBalance);
+              totalDiffSum += totalDiff;
+            });
+            console.log("+parseFloat(totalDiffSum).toFixed(2)---", +parseFloat(totalDiffSum).toFixed(2))
+            allDataSum[17] = +parseFloat(totalDiffSum).toFixed(2); 
+
+            // Determine the export type and perform the corresponding action
+            if (button[0].className.indexOf('buttons-copy') >= 0) {
+                $.fn.dataTable.ext.buttons.copyHtml5.action.call(self, e, dt, button, config);
+            } else if (button[0].className.indexOf('buttons-excel') >= 0) {
+                handleExcelExport(dt, button, allDataSum);
+            } else if (button[0].className.indexOf('buttons-csv') >= 0) {
+                handleCsvExport(dt, button, allDataSum);
+            } else if (button[0].className.indexOf('buttons-pdf') >= 0) {
+                handlePdfExport(dt, button, allDataSum);
+            } else if (button[0].className.indexOf('buttons-print') >= 0) {
+                handlePrint(dt, button, allDataSum);
+            }
+
+            // Restore the original page after export
+            dt.one('preXhr', function (e, s, data) {
+                settings._iDisplayStart = oldStart;
+                data.start = oldStart;
+            });
+
+            setTimeout(dt.ajax.reload, 0); // Reload the data table
+            return false; // Prevent default action
+        });
+    });
+
+    dt.ajax.reload(); // Requery the server with new settings
+  }
+
+  function handlePrint(dt, button, allDataSum) {
+    // Create a new window for printing
+    let printWindow = window.open('', '_blank', 'height=600,width=800');
+    
+    // Prepare the HTML structure for printing
+    printWindow.document.write('<html><head><title>Print Table</title>');
+    printWindow.document.write('<style>');
+    printWindow.document.write('table { width: 100%; border-collapse: collapse; }');
+    printWindow.document.write('th, td { border: 1px solid #ddd; padding: 8px; text-align: right; }');
+    printWindow.document.write('th { background-color: #f2f2f2; }');
+    printWindow.document.write('</style>');
+    printWindow.document.write('</head><body>');
+    
+    // Create the table and headers
+    let printContents = '<table><thead><tr role="row">';
+    dt.columns().every(function (index) {
+        let header = this.header();
+        //if (index !== dt.columns().count() - 1) {
+            printContents += '<th rowspan="1" colspan="1">' + $(header).text() + '</th>';
+        //}
+    });
+    printContents += '</tr></thead><tbody>';
+    
+      
+    dt.rows({ search: 'applied' }).every(function () {
+      let rowData = this.data(); // Get row data
+      printContents += '<tr role="row">';
+        
+      let formattedDate = moment(rowData.date).format('DD/MM/YYYY');
+      printContents += '<td>' + formattedDate + '</td>'; 
+
+      let day = moment(rowData.date).format('ddd');
+      printContents += '<td>' + day + '</td>';
+      let totalDiff = -(rowData.allGameProfit + rowData.totalAmountMetronia + rowData.totalAmountOkBingo + rowData.totalAmountFranco + rowData.totalAmountOtium + rowData.totalAmountNorskTotalt + rowData.totalAmountNorskRikstotoTotalt + rowData.totalAmountRekvisita + rowData.totalAmountSellProduct + rowData.totalAmountAnnet - rowData.totalAmountBilag + rowData.totalAmountTransferredByBank - rowData.totalAmountBank - rowData.totalDropSafeAmount - rowData.withdrawFromtotalBalance);
+
+      dt.columns().every(function (colIdx) {
+        if (colIdx >= 2 && colIdx <= 16) {
+            let columnData = Array.isArray(rowData) ? rowData[colIdx] : rowData[this.dataSrc()];
+            printContents += '<td>' + (columnData !== null && columnData !== undefined ? columnData : '0') + '</td>'; // Show '0' if value is null or undefined
+        }else if(colIdx == 17){
+          if (totalDiff >= 0) {
+              printContents += '<td style="color: black;">' + +totalDiff.toFixed(2) + '</td>';
+          } else {
+              printContents += '<td style="color: red;">' + +totalDiff.toFixed(2) + '</td>';
+          }
+        }else if(colIdx == 18){
+          let cleanSettlmentNote = renderComments(rowData.settlmentNote)
+          printContents += '<td>' + cleanSettlmentNote + '</td>';
+        }
+      });
+      
+      printContents += '</tr>';
+    });
+    
+    // Add totals row at the end of the table
+    printContents += '<tr><th colspan="2" style="text-align: center">Total</th>';
+    for (let i = 2; i <= 17; i++) {
+        printContents += '<th>' + (allDataSum[i] || 0).toFixed(2) + '</th>';
+    }
+    printContents += '<th></th><th></th></tr>';
+
+    printContents += '</tbody></table>';
+    printWindow.document.write(printContents);
+  
+    printWindow.document.write('</body></html>');
+    printWindow.document.close(); // Close the document to trigger rendering
+    printWindow.print(); // Trigger the print dialog
+  }
+
+</script>
+{% endblock %}

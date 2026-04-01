@@ -1,0 +1,250 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<!-- Main Content -->
+<div class="page-wrapper">
+  <div class="container-fluid">
+
+    <!-- Title -->
+    <section class="content-header">
+      <h1>{{translate.sell_products_preview}}</h1>
+      <ol class="breadcrumb">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+        <li class="active">{{translate.sell_products}}</li>
+      </ol>
+    </section>
+    <!-- /Title -->
+    {% include "partition/notification.html" %}
+    <!-- Row -->
+    <section class="content">
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                <h6 class="panel-title txt-dark">{{translate.sell_products}}</h6>
+              </div>
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+                <form id="productCheckout" method="post" action="/agent/placeOrder">
+                  <input type="hidden" name="hallId" value="{{session.hall[0].id}}">
+                  <input type="hidden" id="cartId" name="cartId" value="{{cart._id}}">
+                  <div class="row">
+                    <div class="form-group">
+                      <div class="col-lg-3 col-md-3">
+                        <div class="form-group">
+                         <label for="userType">{{translate.user_type}}:</label>
+                         <input type="text" name="userType" class="form-control" value="{{cart.userType}}" readonly disabled>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <div class="form-group col-sm-3">
+                      <label class="form-label" for="userName">{{translate.customer_name}}:</label>
+                      <input type="text" class="form-control" name="userName" value="{{cart.userName}}" readonly disabled>
+                    </div>
+                  </div>
+
+                  <br>
+                  <br>
+
+                  <div class="row" id="productCart">
+                    <div class="col-sm-12">
+                      <table class="table text-center table-bordered" id="cartTable">
+                        <thead>
+                          <tr>
+                            <th>{{translate.product_name}}</th>
+                            <th>{{translate.image}}</th>
+                            <th>{{translate.price_per_quantity}}</th>
+                            <th>{{translate.quantity}}</th>
+                            <th>{{translate.total_amount}}</th>
+                            <th>{{translate.action}}</th>
+                          </tr>
+                        </thead>
+                        <tbody id="cartBody">
+                          <tr>
+                            <td colspan="6">{{translate.no_product_selected}}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div class="col-sm-12">
+                      <div class="col-sm-10">
+                        <span>{{translate.total_order_amount}} :</span> <span id="totalAmount">00.00</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <br>
+                  <br>
+                  <div class="row">
+                    <div class="form-group col-sm-3">
+                      <label for="paymentType" class="form-label">{{translate.payment_type}} :</label>
+                      <select class="form-control" name="paymentType">
+                        <option value="Cash">{{translate.cash}}</option>
+                        <option value="Online">{{translate.online_payment}}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <button class="btn btn-success" style="margin-left: 35%;" id="submitForm" type="button">{{translate.submit}}</button>
+                    <button class="btn btn-danger" style="margin-left: 20px;" id="cancelPurchase" type="button">{{translate.cancel}}</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+    </section>
+  </div>
+</div>
+
+{% endblock %}
+{% block Jscript %}
+
+<script>
+  $(document).ready(function () {
+    const cart = JSON.parse(`{{cart | dump | safe}}`) || [];
+    console.log("Cart details", cart);
+    let selectedProducts = [];
+    let productCart = cart.productList || [];
+
+    updateCart();
+
+    $('body').on('change', '[id^="quantity_"]', function (e) {
+      console.log("changed quantity for", $(this).attr('id'));
+      const input = $(this);
+      const id = $(this).attr('id').split('_')[1];
+      productCart.forEach(p => {
+        if (p.id == id) {
+          p.quantity = input.val();
+          $(`#totalAmount_${id}`).text(parseFloat(p.quantity * p.price).toFixed(2))
+        }
+      })
+      calculateTotalAmount()
+    })
+
+    $('body').on('click', '[id^="delete_"]', function (e) {
+      console.log("remove product from cart", $(this).attr('id'));
+      const input = $(this);
+      const id = $(this).attr('id').split('_')[1];
+      productCart = productCart.filter(p=>p.id != id)
+      if (!productCart.length) {
+        $('#submitForm').css("display","none");
+      }
+      updateCart();
+    })
+
+    $('#submitForm').click(function (e) {
+      if (isNaN(parseFloat($("#totalAmount").text())) || parseFloat($("#totalAmount").text()) <= 0) {
+        alert("Cart total amount is zero.");
+        return false;
+      }
+
+      swal({
+        title: "{{translate.please_confirm}}!",
+        text: "{{translate.are_you_sure_to_place_order}}?",
+        type: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#e69a2a",
+        confirmButtonText: "{{translate.yes}}",
+        cancelButtonText: "{{translate.no}}",
+        closeOnConfirm: false,
+        closeOnCancel: true
+      }, function (isConfirm) {
+        if (isConfirm) {
+          $('#productCheckout')[0].submit();
+        }
+      });
+
+    })
+
+    $('#cancelPurchase').click(function (e) {
+      $.ajax({
+        url: '/agent/cancelOrder',
+        method: 'POST',
+        data: {
+          cartId : $("#cartId").val()
+        },
+        success: function (response) {
+          console.log("response of cancel order", response)
+          if (response.status == "success") {
+          
+            swal({
+              title: "{{translate.success}}!",
+              text: "{{translate.order_cancelled_successfully}}.",
+              type: "success",
+              closeOnConfirm: false,
+            }, function (isConfirm) {
+              if (isConfirm) {
+                window.location.href = "/agent/sellProduct";
+              }
+            });
+
+          } else {
+
+            swal("Failed", response.message, "error");
+
+          }
+        }
+      });
+    })
+
+    function updateCart() {
+      $('#cartBody').html('');
+      if (productCart.length) {
+        console.log("products in the cart", productCart);
+        const tBody = $("<tbody></tbody>");
+        // Loop through permissions data to build table body rows
+        $.each(productCart, function (index, product) {
+          console.log(index, product);
+          const tableRow = $('<tr>');
+          tableRow.append(`<input type="hidden" name="productList[${index}][id]" value="${product.id}" >`)
+          tableRow.append(`<input type="hidden" name="productList[${index}][image]" value="${product.image}" >`)
+          tableRow.append(`<input type="hidden" name="productList[${index}][category]" value="${product.category}" >`);
+          tableRow.append($('<td>').append(`<input  class="form-control" type="text" name="productList[${index}][name]" readonly value="${product.name}" >`));
+          tableRow.append($('<td>').append(`<img src="${product.image}" width="50px" height="50px" />`))
+          // tableRow.append($('<td>').append(`<input type="text" name="productList[${index}][category]" readonly value="${product.category}">`));
+          tableRow.append($('<td>').append(`<input  class="form-control" type="text" name="productList[${index}][price]" readonly value="${product.price}" >`));
+          tableRow.append($('<td>').append($('<input>')
+            .attr('type', 'number')
+            .attr('min', 1)
+            .attr('name', `productList[${index}][quantity]`)
+            .attr('id', `quantity_${product.id}`)
+            .attr('required', true)
+            .val(product.quantity)
+          ));
+          tableRow.append($('<td>').attr('id', `totalAmount_${product.id}`).text(parseFloat(product.quantity * product.price).toFixed(2)));
+          tableRow.append($('<td>').append(`<button type="button" name="delete" id="delete_${product.id}"class="btn btn-danger btn-xs delete btn-delete" title="Remove Product"><i class="fa fa-trash" aria-hidden="true"></i></button>`));
+          $('#cartBody').append(tableRow);
+        });
+
+      } else {
+        const tBody = $("<tbody>");
+        const tableRow = $('<tr>');
+        tableRow.append($('<td>').attr('colspan', 6).text("{{translate.no_product_selected}}."));
+        console.log("cart is empty");
+        $('#cartBody').append(tableRow);
+      }
+      calculateTotalAmount()
+    }
+
+    function calculateTotalAmount() {
+      if (productCart.length) {
+        let amount = 0;
+        productCart.forEach(p => {
+          amount = amount + (p.price * p.quantity)
+        })
+        $('#totalAmount').text(parseFloat(amount).toFixed(2))
+      } else {
+        $('#totalAmount').text(parseFloat(0).toFixed(2))
+      }
+    }
+
+  })
+</script>
+{% endblock %}

@@ -1,0 +1,243 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>Sub Game Table</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i>Dashboard</a></li>
+                <li><a href="#">Sub Game</a></li>
+                {% if subGame %}
+                <li>Edit Sub Game</li>
+                {% else %}
+                <li>Add Sub Game</li>
+                {% endif %}
+            </ol>
+        </section>
+        <!-- /Title -->
+        <!-- Row  -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                {% if subGame %}
+                                <li>Edit Sub Game</li>
+                                {% else %}
+                                <li>Add Sub Game</li>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        {% if subGame %}
+                                        <form method="POST" action="/subGameEdit/{{subGame._id}}" name="addSubGame" class="form-horizontal">
+                                            {% else %}
+                                            <form method="POST" action="/addSubGameData" name="addSubGame" class="form-horizontal">
+                                                {% endif %}
+
+                                                <table border="0" class="table display pb-30">
+
+                                                    <div class="col-sm-8">
+                                                        <div class="panel-wrapper collapse in">
+                                                            <div class="panel-body">
+
+                                                                <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label class="mb-10 col-sm-12">Enter Game name:-</label>
+                                                                        <div class="col-sm-6">
+                                                                            <input type="text" class="form-control" data-validation="required" name="gameName" id="gameName" value="{{subGame.gameName}}">
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label class="mb-10 col-sm-12">Select Pattern/Row:-</label>
+                                                                        <div class="col-sm-6 searchHideDropdown">
+                                                                            <div class="full-width-select2">
+                                                                                <select class="js-select2" multiple="" data-validation="required" name="selectPatternRow" id="patternRowSelected">   
+                                                                                    {% for item in patternRowArr %}
+                                                                                        {% set selected = "false" %}
+                                                                                            {% for patternRowName in subGame.patternRow %}
+                                                                                                {% if patternRowName.patternId == item.patternNumber %}
+                                                                                                    {% set selected = "true" %}
+                                                                                                {% endif %}
+                                                                                            {% endfor %}
+                                                                                            
+                                                                                            <option {{ "selected" if selected == 'true' else "" }} value="{{item._id}}">{{item.patternName}}</option>
+                                                                                        {% endfor %}                                                                                
+                                                                                </select>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label class="mb-10 col-sm-12">Select Ticket Color :- </label>
+                                                                        <div class="col-sm-6 searchHideDropdown">
+                                                                            <div class="full-width-select2">
+
+                                                                                <select class="js-select2" multiple="" data-validation="required" name="selectTicketColor" id="ticketColorSelected">
+                                                                                    {% for item in ticketColors %}
+                                                                                    {% set selected = "false" %}
+                                                                                        {% for tickName in subGame.ticketColor %}
+                                                                                            {% if item == tickName.name %}
+                                                                                                {% set selected = "true" %}
+                                                                                            {% endif %}
+                                                                                        {% endfor %}
+                                                                                
+                                                                                        <option {{ "selected" if selected == 'true' else "" }}>{{item}}</option>
+                                                                                    {% endfor %}
+                                                                                </select>
+
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <!-- <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label class="mb-10 col-sm-12">Creation Date and Time:-</label>
+                                                                        <div class="col-sm-6">
+                                                                            <div class='input-group date' id='startDate'>
+                                                                                <input type='text' class="form-control" data-validation="required" name="start_date" id="start_date" value="{{creationDate}}" placeholder="Start Date" data-date-format="YYYY-MM-DD HH:mm" />
+                                                                                <span class="input-group-addon">
+                                                                                     <span class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div> -->
+
+                                                                <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label class="mb-10 col-sm-12">Status:-</label>
+                                                                        <div class="col-sm-6">
+                                                                            <div class="input-group">
+                                                                                <div class="input-group-addon"><i class="glyphicon glyphicon-thumbs-up"></i></div>
+                                                                                <select class="form-control" data-validation="required" name="status" id="status">
+                                                                                    <option value="active" {{ "selected" if subGame.status=='active' else "" }} >Active</option>
+                                                                                    <option value="inactive" {{ "selected" if subGame.status=='inactive' else "" }} >Inactive</option>
+                                                                                </select>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <tr>
+                                                        <td colspan="2 ">
+                                                            <div class="pull-left ">
+                                                                <input type="submit" class="btn btn-success btn-flat" value="submit">
+                                                                <a href="/subGame" class="btn btn-danger btn-flat">Cancel</a>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Row -->
+
+                <!-- /Row -->
+            </div>
+        </section>
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<link rel="stylesheet " href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css " integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin=" anonymous " />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js " integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin=" anonymous "></script>
+
+<link href="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/css/bootstrap-multiselect.css" rel="stylesheet" type="text/css" />
+<script src="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/js/bootstrap-multiselect.js" type="text/javascript"></script>
+<script>
+    $(document).ready(function() {
+
+        // let createdAt ="{{subGame.creationDateTime}}";
+        // if(createdAt){
+        //         let dt = new Date(createdAt);
+        //         let date = dt.getDate();
+        //         let month = parseInt(dt.getMonth() + 1);
+        //         let year = dt.getFullYear();
+        //         let hours = dt.getHours();
+        //         let minutes = dt.getMinutes();
+                
+        //         hours = hours % 12;
+        //         hours = hours<10 ? '0'+hours : 12;
+        //         minutes = minutes < 10 ? '0' + minutes : minutes;
+        //         month = month < 10 ? '0' + month : month;
+        //         let newDt = year + '-' + month + '-' + date + ' ' + hours + ':' + minutes;
+
+        //         $('#start_date').val(newDt);
+        // }        
+
+
+        $("#patternRowSelected").select2({
+            closeOnSelect: false,
+            placeholder: "Please Select Game Pattern..!!",
+            allowHtml: true,
+            allowClear: true,
+            tags: true
+        });
+
+        $("#ticketColorSelected").select2({
+            closeOnSelect: false,
+            placeholder: "Please Select Ticket Color..!!",
+            allowHtml: true,
+            allowClear: true,
+            tags: true
+        });
+
+        let now = new Date();
+        let utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+
+        $('#startDate input').datetimepicker({
+            minDate: utc.getTime()
+        });
+
+        // $("#expiryDate input").datetimepicker();
+        $('.glyphicon1').click(function() {
+            $("#startDate input").focus();
+        });
+
+        $("#gameName").keyup(function() {
+            let value = $('#gameName').val();
+            $.ajax({
+                type: 'POST',
+                data: {
+                    gameName: value
+                },
+                url: host + "/checkForGameName/",
+                success: function(resultData) {
+                    if (resultData.valid == true) {
+                        console.log("uniq");
+                        $("#removeP").remove();
+                    } else {
+                        console.log("same");
+                        $('#gameName').after('<p id="removeP" style="color:red;">Game Name must be Different</p>')
+                    }
+                }
+            });
+        });
+
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,55 @@
+{% if (success.length > 0) %}
+<div class="alert alert-success alert-dismissable notifications">
+  <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>{{success}}
+</div>
+{% endif %}
+{% if (error.length > 0) %}
+<div class="alert alert-danger alert-dismissable notifications">
+  <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>{{error}}
+</div>
+{% endif %}
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+  $(document).ready(() => {
+    setTimeout(function () {
+      $('.notifications').slideUp('slow');
+      var cells = $('.notifications');
+      setTimeout(function () {
+        cells.remove();
+      }, 1000);
+    }, 5000);
+
+    let hallId = "{{Agent.hall[0].id}}"
+    const adminSocket = io("/admin");
+
+    adminSocket.on("connect", () => {
+      adminSocket.emit("joinHall", { hallId }, (data) => {
+      })
+    })
+
+    adminSocket.on('widthdarwRequest', async function (data) {
+      let val = $(".notificationsCount").text()
+      $(".notificationsCount").text(Number(val) + 1)
+    })
+
+    adminSocket.emit('getWithdrawPenddingRequest', { hallId }, (response) => {
+      $(".notificationsCount").text(response.reqCount)
+    })
+
+    setInterval(() => {
+      let time = sessionStorage.getItem('time');
+      console.log("Time>>", time);
+      if (!time) {
+        sessionStorage.setItem('time', 1);
+      } else if (Number(time) >= 15) {
+        getDepositPending()
+        sessionStorage.setItem('time', 0);
+      } else {
+        sessionStorage.setItem('time', Number(time) + 1);
+      }
+    }, 60000);
+
+  })
+
+</script>

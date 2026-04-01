@@ -1,0 +1,409 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<style>
+  .cst {
+    display: flex;
+    justify-content: flex-end;
+    gap: 20px;
+    align-items: flex-end;
+  }
+
+  .form-horizontal button {
+    width: 50px;
+  }
+
+  button#search,
+  button#filterReset {
+    min-width: 55px;
+  }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+  <div class="container-fluid">
+
+    <!-- Title -->
+    <section class="content-header">
+      <h1>{{orderH.order_history}}</h1>
+      <ol class="breadcrumb">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{orderH.order_history}}</a></li>
+        <li class="active">{{orderH.order_history}}</li>
+      </ol>
+    </section>
+    <!-- /Title -->
+    {% include "partition/notification.html" %}
+    <!-- Row -->
+    <section class="content">
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                <h6 class="panel-title txt-dark">{{orderH.order_history}}</h6>
+              </div>
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+                <!-- Search Filter Code Start -->
+                <div class="row">
+                  <div class="col-sm-12">
+                    <form id="filterForm">
+                      <div class="row cst">
+                        <div class="col-lg-4">
+                          <div class="cst">
+                            <div class="form-horizontal">
+                              <div class="input-group">
+                                <label for="fromDate">{{orderH.from_date}} :</label>
+                                <input type="date" class="dateFilter form-control" name="fromDate" id="fromDate" onkeydown="return false">
+                              </div>
+                            </div>
+                            <div class="form-horizontal">
+                              <div class="input-group">
+                                <label for="toDate">{{orderH.to_date}} :</label>
+                                <input type="date" class="dateFilter form-control" name="toDate" id="toDate" onkeydown="return false">
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="col-lg-8">
+                          <div class="cst">
+                            <div class="form-horizontal">
+                              <div class="input-group">
+                                <span class="input-group-addon" style="padding: 4px !important;"><i class="fa fa-filter"aria-hidden="true"></i></span>
+                                <select name="paymentType" class="form-control" id="paymentType" style="padding: 1px !important">
+                                  <option value="Cash">{{orderH.cash}}</option>
+                                  <option value="Card">{{orderH.online}}</option>
+                                  <!-- <option value="customerNumber">Customer Number</option> -->
+                                </select>
+                              </div>
+                            </div>
+
+                            {% if Agent.role == 'admin' %}
+                              <div class="form-horizontal">
+                                <div class="input-group">
+                                  <select name="hallName" class="form-control" id="hallName">
+                                    <option value="" selected="selected">{{orderH.hall_name}}</option>
+                                    {% for hall in halls %}
+                                    <option value="{{hall._id}}">{{hall.name}}</option>
+                                    {% endfor %}
+                                  </select>
+                                </div>
+                              </div>
+                            {% endif %}
+                            <button type="button" class="pull-right btn btn-primary playersearch" id="search"><i class="fa fa-search"></i></button>
+                            <button type="reset" class="btn btn-primary pull-right clickreset" id="filterReset">{{orderH.reset}}</button>
+                          </div>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+                <br>
+                <!-- Search Filter Code End -->
+                <div class="table-wrap">
+                  <div class="table-responsive">
+                    <table id="myTable" class="table table-hover display  pb-30 text-center">
+                      <thead>
+                        <tr>
+                          <th>{{orderH.order_id}}</th>
+                          <th>{{orderH.date_time}}</th>
+                          <th>{{orderH.player_name}}</th>
+                          <th>{{orderH.total_order}}</th>
+                          <th>{{orderH.payment_type}}</th>
+                          {% if Agent.role == 'admin' %}
+                          <th>{{orderH.hall_name}}</th>
+                          <th>{{orderH.agent_name}}</th>
+                          {% endif %}
+                          <th>{{orderH.action}}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css" integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin="anonymous" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js" integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin="anonymous"></script>
+<script>
+
+
+  // const formatter = new Intl.NumberFormat('en-US', {
+  //   style: 'currency',
+  //   currency: 'NOK',
+  //   minimumFractionDigits: 0, 
+  //   maximumFractionDigits: 2,
+  // });
+
+  let agent = `{{ Agent | dump | safe }}`;
+  $('#startDate input,#endDate input').datepicker();
+
+  $('#startDate input,#endDate input').val(formatDate(new Date()));
+
+  $('.glyphicon1').click(function () {
+    $("#startDate input").focus();
+  });
+
+  $('.glyphicon2').click(function () {
+    $("#endDate input").focus();
+  });
+
+  let date = new Date();
+  
+  date.setHours(23, 59, 59);
+  $("#toDate").val(formatDate(date));
+  date.setDate(date.getDate() - 7);
+  $("#fromDate").val(formatDate(date));
+
+  let data = {
+    start_date: $("#fromDate").val(),
+    end_date: $("#toDate").val(),
+    hallName: '',
+    paymentType: $("#paymentType").val()
+  }
+
+  agent = JSON.parse(agent);
+  $(document).ready(function () {
+    let viewFlag = '{{viewFlag}}';
+    let host = window.location.origin;
+    let start_date = $('#fromDate').val();
+    let end_date = $('#toDate').val();
+
+    let columns = [];
+
+    if (agent.role == "admin") {
+      columns = [
+        {
+          "data": "orderId",
+          "render": function (data, type, row) {
+            return row.orderId;
+          }
+        }, {
+          "data": "createdAt",
+          "searchable": false,
+          "render": function (data, type, row) {
+            return moment(row.createdAt).format('DD/MM/YYYY hh:mm a');
+          }
+        }, {
+          "data": "userName",
+          "render": function (data, type, row) {
+            return row.userName;
+          }
+        }, {
+          "data": "totalAmount",
+          "render": function (data, type, row) {
+            return row.totalAmount;
+          }
+        }, {
+          "data": "paymentMethod",
+          "searchable": false,
+          "render": function (data, type, row) {
+            return row.paymentMethod;
+          }
+        }, {
+          "data": "hallName",
+          "searchable": false,
+          "render": function (data, type, row) {
+            return row.hallName;
+          }
+        }, {
+          "data": "agentName",
+          "render": function (data, type, row) {
+            return row.agentName;
+          }
+        }, {
+          "data": null,
+          "searchable": false,
+          "orderable": false,
+          "render": function (data, type, row) {
+            if(viewFlag){ 
+              return `<a href="/viewOrder/${row._id}" name="view" class="btn btn-info btn-xs view btn-rounded" title="{{orderH.view_order}}"> <i class="fa fa-eye" aria-hidden="true"></i></a>`;
+            }else{
+              return '';
+            }
+          }
+        }
+      ]
+    } else {
+      columns = [
+        {
+          "data": "orderId",
+          "render": function (data, type, row) {
+            return row.orderId;
+          }
+        }, {
+          "data": "createdAt",
+          "searchable": false,
+          "render": function (data, type, row) {
+            return moment(row.createdAt).format('DD/MM/YYYY hh:mm a');
+          }
+        }, {
+          "data": "userName",
+          "render": function (data, type, row) {
+            return row.userName;
+          }
+        }, {
+          "data": "totalAmount",
+          "render": function (data, type, row) {
+            return row.totalAmount;
+          }
+        }, {
+          "data": "paymentMethod",
+          "searchable": false,
+          "render": function (data, type, row) {
+            return row.paymentMethod;
+          }
+        }, {
+          "data": null,
+          "searchable": false,
+          "orderable": false,
+          "render": function (data, type, row) {
+            if(viewFlag){ 
+              return `<a href="/viewOrder/${row._id}" name="view" class="btn btn-info btn-xs view btn-rounded" title="{{orderH.view_order}}"> <i class="fa fa-eye" aria-hidden="true"></i></a>`;
+            }else{
+              return '';
+            }
+          }
+        }
+      ]
+    }
+
+    $('#search').click(function () {
+      let start_date = $('#fromDate').val();
+      let end_date = $('#toDate').val();
+      if (start_date != '' && end_date != '') {
+        $('#myTable').DataTable().destroy();
+        data.paymentType = $("#paymentType").val();
+        data.hallName = $("#hallName").val();
+        fetch_data(data);
+      } else {
+        alert("Both Date is Required");
+      }
+    });
+
+    //Reset filter after click on reset.
+    $('#filterReset').on("click", function (e) {
+      e.preventDefault();
+      $('#filterForm')[0].reset();
+      let date = new Date();
+      date.setHours(23, 59, 59);
+      $("#toDate").val(formatDate(date));
+      date.setDate(date.getDate() - 7);
+      $("#fromDate").val(formatDate(date));
+      data = {
+        start_date: $("#fromDate").val(),
+        end_date: $("#toDate").val(),
+        hallName: $('#hallName').val() ? $('#hallName').val() : '',
+        paymentType: $('#paymentType').val()
+      }
+      $('#myTable').DataTable().destroy();
+      fetch_data(data);
+    });
+
+    fetch_data(data);
+
+    function fetch_data(value) {
+      $('#myTable').DataTable({
+        "oLanguage": {
+          "sSearch": "{{orderH.search_order_id}}",
+          "sProcessing": "<img style='width:50px; height:50px;' src='admin/loading.gif'/>",
+          "sLengthMenu": "{{orderH.show}} _MENU_ {{orderH.entries}}",
+          "oPaginate": {
+            sPrevious: "{{ orderH.previous }}",
+            sNext: "{{ orderH.next }}"
+          },
+          "sEmptyTable": "{{orderH.no_data_available_in_table}}",
+          "sInfo": "{{orderH.showing}} _START_ to _END_ of _TOTAL_ {{orderH.entries}}",
+          "sInfoEmpty": "{{orderH.showing}} 0 to 0 of 0 {{orderH.entries}}",
+        },
+        "autoWidth": false,
+        "paging": true,
+        "searching": true,
+        "processing": true,
+        "serverSide": true,
+        "order": [
+          [1, "desc"]
+        ],
+        "ajax": {
+          url: host + "/getOrderHistory",
+          type: "GET",
+          data: value
+        },
+        "columns": columns
+      });
+    }
+
+    // Filter input to remove special characters
+    // $('#myTable_filter input').on('keyup', function() {
+    //     var input = $(this).val();
+    //     var cleanInput = input.replace(/[^\w\s]/gi, ''); // Remove special characters
+    //     console.log("input and clearnImput", input, cleanInput)
+    //     // If the input was changed, update the field and trigger a search
+    //     if (input !== cleanInput) {
+    //         $(this).val(cleanInput);
+            
+    //     }
+    //     if (cleanInput) {console.log("call search")
+    //       $('#myTable').DataTable().search(cleanInput).draw();
+    //     }
+    // });
+
+  });
+
+  //From Date
+  $('#fromDate').change(function () {
+    let date = $(this).val();
+    let compDate = $('#toDate').val();
+    if (compDate !== '' && date !== '' && date > compDate) {
+      alert("{{orderH.order_from_date_alert}}");
+      $('#fromDate').val('');
+    } else {
+      data.start_date = date;
+    }
+  });
+
+  //To Date
+  $('#toDate').change(function () {
+    let compDate = $('#fromDate').val();
+    let date = $(this).val();
+    if (compDate !== '' && date !== '' && date < compDate) {
+      alert("{{orderH.order_to_date_alert}}");
+      $('#toDate').val('');
+    } else {
+      data.end_date = date;
+    }
+  });
+
+  // Hall Name Change Listener 
+  $('#hallName').on('change', function () {
+    if ($(this).find(":selected").val() !== '') {
+      data.hallName = $(this).find(":selected").val().trim();
+    } else {
+      data.hallName = '';
+    }
+  });
+
+  function formatDate(date) {
+    let d = new Date(date),
+      month = '' + (d.getMonth() + 1),
+      day = '' + d.getDate(),
+      year = d.getFullYear();
+
+    if (month.length < 2)
+      month = '0' + month;
+    if (day.length < 2)
+      day = '0' + day;
+
+    return [year, month, day].join('-');
+  }
+</script>
+{% endblock %}

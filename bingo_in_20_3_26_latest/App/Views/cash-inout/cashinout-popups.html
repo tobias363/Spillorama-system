@@ -1,0 +1,173 @@
+<section class="content">
+    <div class="modal fade" id="confirmJackpotModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-backdrop="static">
+        <div class="modal-dialog" role="document" >
+            <div class="modal-content">
+                <div class="modal-body">
+                  <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                    <h4 class="modal-title" id="modalLabel">{{translate.please_confirm_the_jackpot_prize_and_draw_to_start_the_game}}.</h4>
+                  </div>
+
+                  <div class="modal-body">
+                    <div class="table-wrap">
+                      <div class="table-responsive">
+                          <form name="saveJackpot" class="form-horizontal"
+                              id="saveJackpotForm">
+                              <table border="0" class="table">
+                                  <div class="col-sm-12">
+                                      <div class="form-group">
+                                          <label class="control-label mb-10 col-sm-4"
+                                              for="saveGameName">{{translate.jackpot_prize_and_draws}}</label>
+                                          <div class="col-sm-3">
+                                              <input type="number" class="form-control jackpotPrizeYellowModal"
+                                                id="jackpotPrizeYellowModal" placeholder="{{translate.jackpot_prize_of_yellow_ticket}}"
+                                                title="Jackpot Prize of Yellow Tickets"
+                                                name="jackpotPrizeYellow"
+                                                
+                                                >
+                                          </div>
+                                          <div class="col-sm-3">
+                                            <input type="number" class="form-control jackpotPrizeWhiteModal"
+                                              id="jackpotPrizeWhiteModal"  placeholder="{{translate.jackpot_prize_of_white_ticket}}"
+                                              title="Jackpot Prize of White Tickets"
+                                              name="jackpotPrizeWhite"
+                                             
+                                              >
+                                        </div>
+                                        <div class="col-sm-3">
+                                          <input type="number" class="form-control jackpotPrizePurpleModal"
+                                            id="jackpotPrizePurpleModal" placeholder="{{translate.jackpot_prize_of_purple_ticket}}"
+                                            title="Jackpot Prize of Purple Tickets"
+                                            name="jackpotPrizePurple"
+                                            
+                                            >
+                                      </div>
+                                          <div class="col-sm-3">
+                                            <input type="number" class="form-control jackpotDrawModal"
+                                              id="jackpotDraw" placeholder="{{translate.draw}}"
+                                              name="jackpotDraw"
+                                              required
+                                              min="50" max="57"
+                                              >
+                                          </div>
+                                      </div>
+                                      <div class="form-group text-center">
+                                        <input type="submit" class="btn btn-success sbBtn btn-flat"
+                                        value="{{translate.confirm}}"> 
+                                        <a class="btn btn-danger btn-flat cancelJackpot">{{translate.cancel}}</a>
+                                      </div>
+                                  </div>
+                              </table>
+                          </form>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="clearfix"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="content">
+  <div class="modal fade" id="confirmInnsatsenJackpotModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-backdrop="static">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+          <div class="modal-body">
+            <div class="modal-header">
+              <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                  <span aria-hidden="true">&times;</span>
+              </button>
+              <h4 class="modal-title" id="modalLabel">{{translate.please_confirm_the_jackpot_draw_to_start_the_game}}.</h4>
+            </div>
+
+            <div class="modal-body">
+              <div class="table-wrap">
+                <div class="table-responsive">
+                    <form name="saveJackpot" class="form-horizontal"
+                        id="saveJackpotFormInnsatsen">
+                        <table border="0" class="table">
+                            <div class="col-sm-12">
+                              <div class="form-group">
+                                  <label class="control-label mb-10 col-sm-4"
+                                      for="saveGameName">{{translate.jackpot_draw}}</label>
+                                  <div class="col-sm-4">
+                                    <input type="number" class="form-control InnsatsenJackpotDrawModal"
+                                      id="jackpotDrawInn" placeholder="Draw"
+                                      name="jackpotDraw"
+                                      required
+                                      min="56" max="58"
+                                      >
+                                  </div>
+                              </div>
+                              <div class="form-group text-center">
+                                <input type="submit" class="btn btn-success sbBtn btn-flat"
+                                value="{{translate.confirm}}"> 
+                                <a class="btn btn-danger btn-flat cancelJackpotInn">{{translate.cancel}}</a>
+                              </div>
+                            </div>
+                        </table>
+                    </form>
+                </div>
+              </div>
+            </div>
+            
+            <div class="clearfix"></div>
+          </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="content">
+  <div class="modal fade" id="confirmWofPrizeModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-backdrop="static">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+
+        <!-- Modal Header -->
+        <div class="modal-header">
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+          </button>
+          <h4 class="modal-title text-center" id="modalLabel">{{translate.enter_wof_wining_prize}}</h4>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="modal-body">
+          <!-- Success/Error message area -->
+          <div id="wofMsg" class="text-center" style="margin-bottom: 10px;"></div>
+
+          <form name="saveWofPrizes" class="form-horizontal" id="saveWofPrizes">
+            <div class="form-group">
+              <label class="control-label col-sm-4" for="agentWofPrize">{{translate.wof_prize}}</label>
+              <div class="col-sm-6">
+                <input type="number" class="form-control"
+                  id="agentWofPrize" placeholder="{{translate.wof_prize}}"
+                  name="agentWofPrize"
+                  data-validation="number required"
+                >
+              </div>
+            </div>
+
+            <div class="form-group text-center">
+              <input type="submit" class="btn btn-success sbBtn btn-flat" value="{{translate.confirm}}">
+              <button type="button" class="btn btn-danger btn-flat" data-dismiss="modal">{{translate.cancel}}</button>
+            </div>
+            <div class="text-center" style="margin: 5px">
+              <div class="alert alert-success alert-dismissible alert-small alertWofSuccess" style="margin-bottom: 0px !important; display: none">
+                  <strong class="alert-wof-success-text"></strong>
+              </div>
+              <div class="alert alert-danger alert-dismissible alert-small alertWofError" style="margin-bottom: 0px !important; display: none">
+                  <strong class="alert-wof-error-text"></strong>
+              </div>
+          </div>
+          </form>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>

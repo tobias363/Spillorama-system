@@ -1,0 +1,284 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{gameReport.game4_report}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{gameReport.dashboard}}</a></li>
+                <li class="active">{{gameReport.game4_report}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{gameReport.game4_report}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <div class="row">
+                                    <div>
+                                        <div class="col-sm-3">
+                                            <div class="form-group">
+                                                <div class='input-group date' id='startDate'>
+                                                    <input type='text' class="form-control" name="start_date" id="start_date" placeholder="{{gameReport.start_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"/>
+                                                    <span class="input-group-addon">
+                                                                <span class="glyphicon glyphicon-calendar"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-3">
+                                            <div class="form-group">
+                                                <div class='input-group date' id='endDate'>
+                                                    <input type='text' class="form-control" name="end_date" id="end_date" placeholder="{{gameReport.end_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"/>
+                                                    <span class="input-group-addon">
+                                                                <span class="glyphicon glyphicon-calendar"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="input-group">
+                                                <span class="input-group-addon"><i class="fa fa-filter" aria-hidden="true"></i></span>
+                                                <select name="gameType" class="form-control" id="gameType">
+                                                    <option value="real">{{gameReport.real}}</option>
+                                                    <option value="bot">{{gameReport.bot}}</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-sm-4">
+                                        <input type="button" name="search" id="search" value="{{gameReport.search}}" class="btn btn-info" />
+                                    </div>
+                                </div>
+
+
+
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{gameReport.game_id}}</th>
+                                                    <th>{{gameReport.start_date_Time}}</th>
+                                                    <th>{{gameReport.ticket_price}}</th>
+                                                    <th>{{gameReport.total_winnings}}</th>
+                                                    <th>{{gameReport.net_profit}}</th>
+                                                    <th>{{gameReport.profit_percentage}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<link rel="stylesheet " href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css " integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin=" anonymous " />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js " integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin=" anonymous "></script>
+
+<script>
+    function formatDate(date) {
+        var d = new Date(date),
+            month = '' + (d.getMonth() + 1),
+            day = '' + d.getDate(),
+            year = d.getFullYear();
+
+        if (month.length < 2) 
+            month = '0' + month;
+        if (day.length < 2) 
+            day = '0' + day;
+
+        return [year, month, day].join('-');
+    }
+
+    $(document).ready(function() {
+        var host = window.location.origin;
+
+        $('#startDate input,#endDate input').datepicker();
+        $('#startDate input,#endDate input').val(formatDate(new Date()));
+
+        $('.glyphicon1').click(function() {
+            $("#startDate input").focus();
+        });
+
+        $('.glyphicon2').click(function() {
+            $("#endDate input").focus();
+        });
+
+        $('#search').click(function() {
+            var start_date = $('#start_date').val();
+            console.log("start_date", start_date);
+            var end_date = $('#end_date').val();
+            console.log("end_date", end_date);
+            if (start_date != '' && end_date != '') {
+                $('#myTable').DataTable().destroy();
+                fetch_data('yes', start_date, end_date);
+            } else {
+                alert("{{gameReport.both_date_required}}");
+            }
+        });
+
+        var start_date = $('#start_date').val();
+        var end_date = $('#end_date').val();
+
+        fetch_data('yes', start_date, end_date);
+
+        function fetch_data(is_date_search, start_date = '', end_date = '') {
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "{{gameReport.search}} {{gameReport.game_id}}",
+                    "sLengthMenu": "{{gameReport.show}} _MENU_ {{gameReport.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ gameReport.previous }}",
+                        sNext: "{{ gameReport.next }}"
+                    },
+                    "sEmptyTable": "{{gameReport.no_data_available_in_table}}",
+                    "sInfo": "{{gameReport.showing}} _START_ to _END_ of _TOTAL_ {{gameReport.entries}}",
+                    "sInfoEmpty": "{{gameReport.showing}} 0 to 0 of 0 {{gameReport.entries}}"
+                },
+                // "scrollX": true,
+                // "searching": true,
+                "processing": true,
+                "serverSide": true,
+                "order": [
+                    [6, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": [6],
+                    "visible": false
+                }, ],
+                "autoWidth": false,
+                "pageLength": 10,
+                "ajax": {
+                    url: host + "/reportGame4/getReportGame4",
+                    type: "GET",
+                    data: {
+                        is_date_search: is_date_search,
+                        start_date: start_date,
+                        end_date: end_date,
+                        gameType: $('#gameType').val()
+                    }
+                },
+                "columns": [{
+                    "data": "gameNumber"
+                }, {
+                    "data": "startDate",
+                    render: function(data, type, row, meta) {
+                        //return moment.utc(row.gameStartDate).format('DD/MM/YYYY hh:mm a');
+                        return moment(row.startDate).format('DD/MM/YYYY hh:mm a');
+                    }
+                }, {
+                    "data": "totalEarning"
+                }, {
+                    "data": "totalWinning"
+                }, {
+                    "data": "finalGameProfitAmount",
+                    "render": function(data, type, row) {
+                        let num = Math.sign(row.finalGameProfitAmount);
+                        if (num == 1) {
+                            return '<span class="badge bg-green"><i class="fa fa-caret-up"></i>&nbsp;' + +parseFloat(row.finalGameProfitAmount).toFixed(2) + '</span>';
+                        } else if (num == -1) {
+                            return '<span class="badge bg-red"><i class="fa fa-caret-down"></i>&nbsp;' + +parseFloat(row.finalGameProfitAmount).toFixed(2) + '</span>';
+                        } else if (num == 0) {
+                            return '<span class="badge bg-blue"><i class="fa fa-caret-left"></i>&nbsp;' + +parseFloat(row.finalGameProfitAmount).toFixed(2) + '</span>';
+                        }
+                    }
+                }, {
+                    "data": "otherData.profitPercentage",
+                    "render": function(data, type, row) {
+                        let percentage = row?.otherData?.profitPercentage ?? 0;
+                        let num = Math.sign(percentage);
+                        if (num == 1) {
+                            return '<span class="badge bg-green"><i class="fa fa-caret-up"></i>&nbsp;' + +parseFloat(percentage).toFixed(2) + '% </span>';
+                        } else if (num == -1) {
+                            return '<span class="badge bg-red"><i class="fa fa-caret-down"></i>&nbsp;' + +parseFloat(percentage).toFixed(2) + '% </span>';
+                        } else if (num == 0) {
+                            return '<span class="badge bg-blue"><i class="fa fa-caret-left"></i>&nbsp;' + +parseFloat(percentage).toFixed(2) + '% </span>';
+                        }
+                        //let str = row.profitPercentage;
+                        // if (str.length == 5) {
+                        //     let newVal = str.substring(0, 4);
+                        //     let strToInt = parseInt(newVal)
+                        //     let num = Math.sign(strToInt);
+                        //     if (num == 1) {
+                        //         return '<span class="badge bg-green"><i class="fa fa-caret-up"></i>&nbsp;' + strToInt + '%</span>';
+                        //     } else if (num == -1) {
+                        //         return '<span class="badge bg-red"><i class="fa fa-caret-down"></i>&nbsp;' + strToInt + '%</span>';
+                        //     } else if (num == 0) {
+                        //         return '<span class="badge bg-blue"><i class="fa fa-caret-left"></i>&nbsp;' + strToInt + '%</span>';
+                        //     }
+                        // } else if (str.length == 4) {
+                        //     let newVal = str.substring(0, 3);
+                        //     let strToInt = parseInt(newVal)
+                        //     let num = Math.sign(strToInt);
+                        //     if (num == 1) {
+                        //         return '<span class="badge bg-green"><i class="fa fa-caret-up"></i>&nbsp;' + strToInt + '%</span>';
+                        //     } else if (num == -1) {
+                        //         return '<span class="badge bg-red"><i class="fa fa-caret-down"></i>&nbsp;' + strToInt + '%</span>';
+                        //     } else if (num == 0) {
+                        //         return '<span class="badge bg-blue"><i class="fa fa-caret-left"></i>&nbsp;' + strToInt + '%</span>';
+                        //     }
+                        // } else if (str.length == 3) {
+                        //     let newVal = str.substring(0, 2);
+                        //     let strToInt = parseInt(newVal)
+                        //     let num = Math.sign(strToInt);
+                        //     if (num == 1) {
+                        //         return '<span class="badge bg-green"><i class="fa fa-caret-up"></i>&nbsp;' + strToInt + '%</span>';
+                        //     } else if (num == -1) {
+                        //         return '<span class="badge bg-red"><i class="fa fa-caret-down"></i>&nbsp;' + strToInt + '%</span>';
+                        //     } else if (num == 0) {
+                        //         return '<span class="badge bg-blue"><i class="fa fa-caret-left"></i>&nbsp;' + strToInt + '%</span>';
+                        //     }
+                        // } else
+                        // if (str.length == 2) {
+                        //     let newVal = str.substring(0, 1);
+                        //     let strToInt = parseInt(newVal)
+                        //     let num = Math.sign(strToInt);
+                        //     if (num == 1) {
+                        //         return '<span class="badge bg-green"><i class="fa fa-caret-up"></i>&nbsp;' + strToInt + '%</span>';
+                        //     } else if (num == -1) {
+                        //         return '<span class="badge bg-red"><i class="fa fa-caret-down"></i>&nbsp;' + strToInt + '%</span>';
+                        //     } else if (num == 0) {
+                        //         return '<span class="badge bg-blue"><i class="fa fa-caret-left"></i>&nbsp;' + strToInt + '%</span>';
+                        //     }
+                        // }
+                    }
+                }, {
+                    "data": "createdAt",
+                    render: function(data, type, row, meta) {
+                        //return moment.utc(row.createdAt).format('DD/MM/YYYY hh:mm a');
+                        return moment(row.createdAt).format('DD/MM/YYYY hh:mm a');
+                    }
+                }, ]
+            });
+        }
+    });
+</script>
+{% endblock %}

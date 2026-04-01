@@ -1,0 +1,182 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    .wrapperSelected {
+        height: 28px !important;
+        border: 1px solid #ABADB3;
+        margin: 0;
+        padding: 4px 0 0 0;
+        font-size: 14px;
+    }
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <div class="content-header">
+        </div>
+        <!-- Title -->
+        <section class="content-header" id="gameHeader">
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content" id="allGameDetails">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading" id="addGameID">
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive responsive-table">
+                                        
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script src="/socket.io/socket.io.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/moment.js/2.17.1/moment.min.js"></script>
+<script>
+    $(document).ready(function() {
+        let editFlag = '{{editFlag}}';
+        let deleteFlag = '{{deleteFlag}}';
+        let addFlag = '{{addFlag}}';
+        let viewFlag = '{{viewFlag}}';
+        let startFlag = '{{startFlag}}';
+        let pauseFlag = '{{pauseFlag}}';
+        let newTable
+        let selectedValue = '{{data.flagType}}';
+        let amount = '{{data.amount}}';
+        let id = '{{data.id}}';
+        // clear for internal content
+        $("#gameHeader").empty();
+        $("#addGameID").empty();
+        $("#gameHeader").hide();
+        $("#allGameDetails").hide();
+        gameDetailsGet(selectedValue);
+
+        function gameDetailsGet(values) {
+            let selectedValue = Number(values);
+            console.log("selectedValue",typeof selectedValue, selectedValue, amount);
+            $.ajax({
+                type: 'GET',
+                url: host + "/getUserTransactionHeader/" + selectedValue,
+                success: function(resultData) {
+                    if (resultData.status) {
+                        let gameData = resultData.gameData;
+                        console.log("resultData", resultData);
+                        let htmlHeader = '<h1>' + gameData.name + ' {{gameManage.table}}</h1>' +
+                            '<ol class="breadcrumb">' +
+                                '<li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>' +
+                                '<li class="active">' + gameData.name + ' </li>' +
+                            '</ol>';
+
+                            let htmlGameID= ' <div class="pull-left">' +
+                                              '<h6 class="panel-title txt-dark">' + gameData.name + ' </h6>' +
+                                           '</div>';
+                                htmlGameID += `<div class="pull-right"> - </div>  <div class="clearfix"></div>`;
+                                
+
+                            var str = "";
+                            str += '<table id="myTable" class="table table-hover display  pb-30"><thead><tr>';
+                            for (const field of resultData.theadField) {
+                                str += '<th>' + field + '</th>';
+                            }
+                            str += '</tr></thead><tbody></tbody></table>';
+
+                            $("#gameHeader").append(htmlHeader);
+                            $("#addGameID").append(htmlGameID);
+                            $(".responsive-table").append(str);
+                            $("#gameHeader").show();
+                            $("#allGameDetails").show();
+
+                            const columns = [
+                                {
+                                    "data": "username"
+                                },
+                                {
+                                    "data": "email"
+                                },
+                                {
+                                    "data": "date"
+                                },
+                                {
+                                    "data": "amount",
+                                    render: function (data, type, row) { return data ? +parseFloat(data).toFixed(2) : 0}
+                                }
+                            ];
+
+                            let host = window.location.origin;
+                            newTable = $('#myTable')?.DataTable({
+                                "oLanguage": {
+                                    // "sSearch": "{{gameManage.search}}",
+                                    "sLengthMenu": "{{gameManage.show}} _MENU_ {{gameManage.entries}}",
+                                    "oPaginate": {
+                                        sPrevious: "{{ gameManage.previous }}",
+                                        sNext: "{{ gameManage.next }}"
+                                    },
+                                    "sEmptyTable": "{{gameManage.no_data_available_in_table}}",
+                                    "sInfo": "{{gameManage.showing}} _START_ to _END_ of _TOTAL_ {{gameManage.entries}}",
+                                    "sInfoEmpty": "{{gameManage.showing}} 0 to 0 of 0 {{gameManage.entries}}",
+                                },
+                                "bSort": false,
+                                "scrollX": false,
+                                "scrollCollapse": true,
+                                "searching": false,
+                                // "searchDelay":1000,
+                                "processing": true,
+                                "serverSide": true,
+                                "order": [
+                                    [1, "desc"]
+                                ],
+                                "columnDefs": [{
+                                    "targets": [1],
+                                    "orderable": false
+                                },
+                                // textAlign
+                                ],
+                                // "fixedcolumns":true,
+                                "autoWidth": false,
+                                "pageLength": 25,
+                                "ajax": {
+                                    url: host + "/getUserTransactionList",
+                                    data: {
+                                        id: id,
+                                        flagType: Number(selectedValue),
+                                        amount: Number(amount)
+                                    }
+                                },
+                                "columns": columns
+                            });
+
+                            let table = $('#myTable')?.DataTable();
+                        } else {
+                            alert(resultData.message);
+                        }
+                    }
+                    // ajax end
+            });
+            // function end
+        }
+        // Document over
+    });
+</script>
+<script>
+</script>
+{% endblock %}

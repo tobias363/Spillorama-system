@@ -1,0 +1,852 @@
+{% extends "partition/layout.html" %}
+
+
+{% block body %}
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{unique.view_unique_id_table}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{unique.dashboard}}</a></li>
+                <!-- <li><a href="/user">User profile</a></li> -->
+            </ol>
+        </section>
+        <!-- /Title -->
+        <!-- Row  -->
+        <!-- style="width: 140px;" -->
+        <section class="content">
+            <div id="printdivcontent" style="display: none;">
+                <div class="form-group">
+                    <label class="col-sm-2 mb-10" >{{unique.unique_id}} :&nbsp;&nbsp;&nbsp;&nbsp; </label>
+                    <label class="col-sm-4 mb-10">{{userData.username}}</label>
+                </div>
+                <br>
+                <div class="form-group">
+                    <label class="col-sm-2 mb-10" >{{unique.hall_name}} :&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </label>
+                    <label class="col-sm-4 mb-10" id="hall">{{userData.hall.name}}</label>
+                </div>
+                <br>
+                <div class="form-group">
+                    <label class="col-sm-2 mb-10" >{{unique.created_by}} :&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </label>
+                    <label class="col-sm-4 mb-10" id="creator">{{createdBy.name}}</label>
+                </div>
+                <br>
+                <div class="form-group">
+                    <label class="col-sm-2 mb-10" >{{unique.purchase_date}} :&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </label>
+                    <!-- <label class="col-sm-4 mb-10" id="ptpurchasedate">{{uniquePurchaseDateP}}</label> -->
+                </div>
+                <br>
+                <div class="form-group">
+                    <label class="col-sm-2 mb-10" >{{unique.expiry_date}} :&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </label>
+                    <!-- <label class="col-sm-4 mb-10" id="ptexpirydate">{{uniqueExpiryDateP}}</label> -->
+                </div>
+                <br>
+                <div class="form-group">
+                    <label for="name" class="mb-10 col-sm-2" >{{unique.balance_amount}}
+                        :&nbsp;&nbsp;&nbsp;&nbsp; </label>
+                    <label for="name" class="mb-10 col-sm-4">{{userData.walletAmount}}</label>
+                </div>
+                <br>
+                <div class="form-group">
+                    <label for="name" class="mb-10 col-sm-2" >{{unique.hours_validity}} :&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </label>
+                    <label for="name" class="mb-10 col-sm-4">{{userData.hoursValidity}}</label>
+                </div>
+                <br>
+            </div>
+            <div id="tablePrint" style="display: none;">
+                <table style="width:auto">
+                    <tr>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                    </tr>
+                    <tr>
+                        <td>{{unique.unique_id}} :</td>
+                        <td>{{userData.username}}</td>
+                    </tr>
+                    <tr>
+                        <td>{{unique.hall_name}} :</td>
+                        <td>{{userData.hall.name}}</td>
+                    </tr>
+                    <tr>
+                        <td>{{unique.created_by}} :</td>
+                        <td>{{createdBy.name}}</td>
+                    </tr>
+                    <tr>
+                        <td>{{unique.purchase_date}} :</td>
+                        <td ><p id="ptpurchasedate">{{uniquePurchaseDate}}</p></td>
+                    </tr>
+                    <tr>
+                        <td>{{unique.expiry_date}} :</td>
+                        <td><p id="ptexpirydate">{{uniqueExpiryDate}}</p></td>
+                    </tr>
+                    <tr>
+                        <td>{{unique.balance_amount}} :</td>
+                        <td>{{+userData.walletAmount.toFixed(2)}} Kr</td>
+                    </tr>
+                    <tr>
+                        <td>{{unique.payment_type}} :</td>
+                        <td>{{userData.uniquePaymentType}}</td>
+                    </tr>
+                    <tr>
+                        <td>{{unique.hours_validity}} :</td>
+                        <td>{{userData.hoursValidity}}</td>
+                    </tr>
+
+                    <tr>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                    </tr>
+                </table>
+            </div>
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <!-- <div class="pull-right">
+                                    <h6 class="panel-title txt-dark" ><button class="btn btn-info" pid="{{userData._id}}" id="uniqueTicketAdd" type="button" name="User">Add Money</button></h6> 
+							</div>
+                            <div class="pull-right">
+                                <h6 class="panel-title txt-dark" style="margin-right: 5px;"><button pid="{{userData._id}}" class="btn btn-info" id="uniqueTicketWithdraw" type="button" name="User">Withdraw</button></h6>
+                            </div> -->
+
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="">
+                                    <div class="col-sm-12 col-xs-12">
+                                        <div class="form-wrap">
+                                            <div id="printUniqueIdView">
+                                                <div class="row form-group">
+                                                    <label for="name" class="mb-10 col-sm-2">{{unique.unique_id}}</label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control"
+                                                            value="{{userData.username}}" readonly>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label class="col-sm-2 mb-10">{{unique.group_of_hall_name}} :&nbsp;&nbsp;
+                                                    </label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control"
+                                                            value="{{userData.groupHall.name}}" readonly>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label class="col-sm-2 mb-10">{{unique.hall_name}} :&nbsp;&nbsp; </label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control"
+                                                            value="{{userData.hall.name}}" readonly>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label class="col-sm-2 mb-10">{{unique.created_by}} :&nbsp;&nbsp; </label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control"
+                                                            value="{{createdBy.name}}" readonly>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label class="col-sm-2 mb-10">{{unique.purchase_date}}</label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control" id="ppurchasedate"
+                                                            value="{{uniquePurchaseDate}}" readonly>
+                                                    </div>
+                                                </div>
+                                                <!-- data-date-format="YYYY-MM-DD"
+                                                data-date-format="YYYY-MM-DD" -->
+
+                                                <div class="row form-group">
+                                                    <label class="col-sm-2 mb-10">{{unique.expiry_date}}</label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control" id="pexpirydate"
+                                                            value="{{uniqueExpiryDate}}" readonly>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label class="col-sm-2 mb-10">{{unique.hours_validity}}</label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control" id="hoursValidaity"
+                                                            value="{{userData.hoursValidity}} hours" readonly>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label class="col-sm-2 mb-10">{{unique.status}}</label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control" id="status"
+                                                            value="{{userData.status}}" readonly>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label for="name" class="mb-10 col-sm-2">{{unique.balance_amount}}</label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control"
+                                                            value="{{+userData.uniqueBalance.toFixed(2)}}" readonly>
+                                                    </div>
+
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label for="name" class="mb-10 col-sm-2">{{unique.overall_winnings}}</label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control"
+                                                            value="{{+totalWinnings.toFixed(2)}}" readonly>
+                                                    </div>
+
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label for="name" class="mb-10 col-sm-2">{{unique.remaining_balance}}</label>
+                                                    <div class="col-sm-4">
+                                                        <input type="text" class="form-control"
+                                                            value="{{+userData.walletAmount.toFixed(2)}}" readonly>
+                                                    </div>
+
+                                                </div>
+
+                                                <div class="row form-group">
+                                                    <label for="gameType">{{unique.choose_game_type}} :</label>
+                                                    <select name="gameType" id="gameType">
+                                                        <option value="game_1">Game1</option>
+                                                        <option value="game_2">Game2</option>
+                                                        <option value="game_3">Game3</option>
+                                                        <option value="game_4">Game4</option>
+                                                        <option value="game_5">Game5</option>
+                                                    </select>
+                                                </div>
+
+                                                <div class="row">
+                                                    <div class="table-wrap">
+                                                        <div class="table-responsive">
+                                                            <table id="myTable" class="table table-hover display  pb-30"
+                                                                style="width: 100%;">
+                                                                <thead id="myHeader">
+                                                                    <tr>
+                                                                        <th>Date</th>
+                                                                        <th>{{unique.unique_ticket_id}}</th>
+                                                                        <!-- <th>Ticket Type</th> -->
+                                                                        <!-- <th>Game Name</th> -->
+                                                                        <th>{{unique.game_type}}</th>
+                                                                        <th>{{unique.game_variant}}</th>
+                                                                        <th>{{unique.ticket_price}}</th>
+                                                                        <th>{{unique.bet_amount}}</th>
+                                                                        <th>{{unique.ticket_purchased_from}}</th>
+                                                                        <th>{{unique.winning_amount}}</th>
+                                                                        <th>{{unique.Winning_row}}</th>
+                                                                        <th>{{unique.winnig_pattern}}</th>
+                                                                        <!-- <th>Spin Wheel Winnings</th>
+                                                                        <th>Treasure Chest Winnings</th>
+                                                                        <th>Mystry Winnings</th> -->
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-md-12">
+                                                    <!-- <input type="button" class="btn btn-default btn-flat " id="btnUniqueIdView" value="Print"> -->
+                                                    <button type="button" id="reprintUniqueId"
+                                                        class="btn btn-default">{{unique.re_generate_unique_id}}</button>
+                                                    <button type="button" class="btn btn-default"><a
+                                                            href="/uniqueIdList">{{unique.cancel}}</a></button>
+                                                </div>
+                                            </div>
+
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Row -->
+
+                <!-- /Row -->
+            </div>
+        </section>
+
+    </div>
+</div>
+
+{% endblock %}
+
+{% block Jscript %}
+<script>
+    var host = window.location.origin;
+    var tableObject = "";
+    let cdate = new Date();
+    let uniqueId = '{{userData.username}}';
+    let purchaseDate = '{{userData.uniquePurchaseDate}}';
+    let expiryDate = '{{userData.uniqueExpiryDate}}';
+    console.log(" purchaseDate : ", purchaseDate)
+
+
+    //$('#pexpirydate').val(dateFormat(purchaseDate));
+    $("#ppurchasedate").val(dateFormat(purchaseDate));
+    $("#ppurchasedate").attr("value", dateFormat(purchaseDate));
+
+    $("#pexpirydate").val(dateFormat(expiryDate));
+    $("#pexpirydate").attr("value", dateFormat(expiryDate));
+
+    $("#ptpurchasedate").html(dateFormat(purchaseDate));
+    $("#ptexpirydate").html(dateFormat(expiryDate));
+
+    $(document).ready(function (e) {
+        let gameType = $("#gameType").val()
+        let data = tableHeadandColumns(gameType);
+        console.log("data before first draw", data);
+        if (data.head.length) {
+            $('#myTable').DataTable().destroy();
+            $("#myHeader").empty().append(data.head);
+        }
+        dataTableData(data.columns, gameType);
+
+        //If Game Type Changes
+        $("#gameType").on('change', function () {
+            let gameType = $("#gameType option:selected").val();
+            console.log("gameType changed", gameType);
+            let data = tableHeadandColumns(gameType);
+            console.log(data);
+            if (data.head.length) {
+                $("#myHeader").empty();
+                $('#myTable').DataTable().destroy();
+                $('#myTable').empty();
+                $('<thead>', {
+                    id: '#myHeader'
+                }).html(data.head).appendTo('#myTable');
+                $('<tbody>').appendTo('#myTable');
+                // $("#myHeader").append(data.head);
+            }
+            dataTableData(data.columns, gameType);
+        })
+    })
+    window.dataTableData = (columns, type) => {
+        console.log("debug log 2");
+        $('#myTable').DataTable({
+            "oLanguage": {
+                "sLengthMenu": "{{unique.show}} _MENU_ {{unique.entries}}",
+                "oPaginate": {
+                    sPrevious: "{{ unique.previous }}",
+                    sNext: "{{ unique.next }}"
+                }
+            },
+            "processing": true,
+            "serverSide": true,
+            "ordering": false,
+            "autoWidth": false,
+            "searching": false,
+            "pageLength": 10,
+            "scrollX": true,
+            "ajax": {
+                "url": host + "/unique/viewSpaceficTicketDetails",
+                "type": "GET",
+                "data": {
+                    uniqueId: uniqueId,
+                    gameType: type
+                },
+                "dataSrc": function (json) {
+                    console.log("debug log 4");
+                    // console.log("+++++++++++json json json ++++ :",json)
+                    // $('#total_paid_ticket').val(parseFloat(totPaidAmt).toFixed(2));
+                    return json.data;
+                }
+            },
+            // "columnDefs": [
+            //     {
+            //         "targets": [0],
+            //         "visible": false,
+            //         "searchable": false
+            //     },
+            // ],
+            "columns": columns
+
+        });
+        console.log("debug log 3");
+    }
+
+    $('.sidebar-toggle').click(function () {
+        console.log("sidebar clicked");
+        $('.dataTables_scrollHeadInner').css('width', '100%');
+        $('#myTable').css('width', '100%');
+        setTimeout(function () {
+            $('#myTable').DataTable().columns.adjust().draw();
+        }, 200);
+    })
+
+    $(document).on("click", "#reprintUniqueId", function () {
+        // var divContents = document.getElementById("printdivcontent").innerHTML;
+        var divContents = document.getElementById("tablePrint").innerHTML;
+        var printWindow = window.open('', 'Unique ID Reciept', 'height=300,width=400');
+        printWindow.document.write(`<html><head><title>Print Unique ID</title>
+                                        <style type="text/css">
+                                            @page {
+                                                size: 3in 3in;
+                                                margin: 20% 10%;
+                                            }
+
+
+                                            @media print {
+                                                html, body {
+                                                    font-size: 7pt; /* changing to 4pt has no impact */
+                                                }
+                                                label {
+                                                    font-size: 7pt; /* changing to 4pt has no impact */
+                                                    line-height: 12pt;
+                                                }
+
+                                                td {
+                                                    font-size: 7pt; /* changing to 4pt has no impact */
+                                                    line-height: 12pt;
+                                                }
+                                            }
+                                        </style> 
+        `);
+
+
+        printWindow.document.write('</head><body>');
+        printWindow.document.write(divContents);
+        printWindow.document.write('</body></html>');
+        printWindow.print();
+        printWindow.close();
+    
+    });
+
+    function tableHeadandColumns(type) {
+        let head = ``;
+        let columns;
+        switch (type) {
+            case `game_1`:
+                {
+                    head += `<tr>
+                                <th>{{unique.unique_ticket_id}}</th>\
+                                <th>{{unique.game_id}}</th>\
+                                <th>{{unique.sub_game_id}}</th>\
+                                <th>{{uniquq.start_date_Time}}</th>\
+                                <th>{{unique.game_name}}</th>\
+                                <th>{{unique.ticket_colour_type}}</th>\
+                                <th>{{unique.ticket_price}}</th>\
+                                <th>{{unique.ticket_purchased_from}}</th>\
+                                <th>{{unique.winnig_pattern}}</th>\
+                                <th>{{unique.total_winnings}}</th>\
+                                <th>{{unique.spin_wheel_winnings}}</th>\
+                                <th>{{unique.treasure_chest_winnings}}</th>\
+                                <th>{{unique.mystry_winnings}}</th>\
+                                <th>{{unique.color_draft_winnings}}</th>\
+                            </tr>`
+                    columns = [
+                        {
+                            "data": "ticketId",
+                            render: function (data, type, row) {
+
+                                return row.ticketId;
+                            }
+                        },
+                        {
+                            "data": "gameId"
+                        },
+                        {
+                            "data": "subGameId"
+                        },
+                        {
+                            "data": "gameStartDate",
+                            render: function (data, type, row) {
+                                return dateFormat(row.gameStartDate);
+                            }
+                        },
+                        {
+                            "data": "gameName"
+                        },
+                        {
+                            "data": "ticketColorType"
+                        },
+                        {
+                            "data": "ticketPrice"
+                        },
+                        {
+                            "data": "ticketPurchasedFrom",
+                            render: function (data, type, row) {
+                                return (row.ticketPurchasedFrom == "realMoney") ? "Wallet" : "Points";
+                            }
+                        },
+                        {
+                            "data": "winnigPattern",
+                            render: function (data, type, row, meta) {
+
+                                console.log(" data.lineTypeArray data.lineTypeArray : ", data)
+                                if (data && data.lineTypeArray) {
+                                    let $select = $('<select id="select1-' + row._id + '"></select>', {
+                                        "id": row._id,
+                                        "value": data
+                                    });
+
+                                    $.each(data.lineTypeArray, function (k, v) {
+                                        let $option = $("<option></option>", {
+                                            "text": v.lineType + " ( " + v.wonAmount.toFixed(2) + " ) ",
+                                            "value": k
+                                        });
+                                        if (data === v) {
+                                            $option.attr("selected", "selected")
+                                        }
+                                        $select.append($option);
+                                    });
+                                    return $select.prop("outerHTML");
+                                } else {
+                                    return "-";
+                                }
+                            }
+                        },
+                        {
+                            "data": "totalWinning",
+                            render: function (data, type, row) {
+                                return +row.totalWinning.toFixed(2);
+                            }
+                        },
+                        {
+                            "data": "wofWinners",
+                            render: function (data, type, row) {
+                                return row.wofWinners;
+                            }
+                        },
+                        {
+                            "data": "tChestWinners",
+                            render: function (data, type, row) {
+                                return row.tChestWinners;
+                            }
+                        },
+                        {
+                            "data": "mystryWinners",
+                            render: function (data, type, row) {
+                                return row.mystryWinners;
+                            }
+                        },
+                        {
+                            "data": "colorDraftWinners",
+                            render: function (data, type, row) {
+                                return row.colorDraftWinners;
+                            }
+                        }
+                    ]
+                }
+                break;
+            case `game_2`:
+                {
+                    head += `<tr>
+                                <th>{{unique.unique_ticket_id}}</th>\
+                                <th>{{unique.game_id}}</th>\
+                                <th>{{unique.sub_game_id}}</th>\
+                                <th>{{uniquq.start_date_Time}}</th>\
+                                <th>{{unique.ticket_price}}</th>\
+                                <th>{{unique.ticket_purchased_from}}</th>\
+                                <th>{{unique.winning_on_jackpot_number}}</th>\
+                                <th>{{unique.total_winnings}}</th>\
+                                <th>{{unique.remark}}</th>\
+                            </tr>`
+                    columns = [
+                        {
+                            "data": "ticketId",
+                            render: function (data, type, row) {
+
+                                return row.ticketId;
+                            }
+                        },
+                        {
+                            "data": "gameId"
+                        },
+                        {
+                            "data": "subGameId"
+                        },
+                        {
+                            "data": "gameStartDate",
+                            render: function (data, type, row) {
+                                return dateFormat(row.gameStartDate);
+                            }
+                        },
+                        {
+                            "data": "ticketPrice"
+                        },
+                        {
+                            "data": "ticketPurchasedFrom",
+                            render: function (data, type, row) {
+                                // console.log(" row row row rowrow row : ",row)
+                                return (row.ticketPurchasedFrom == "realMoney") ? "Wallet" : "Points";
+                            }
+                        },
+                        {
+                            "data": "winnigPattern",
+                            render: function (data, type, row) {
+                                return row.winnigPattern.lineTypeArray ? row.winnigPattern.lineTypeArray[0].lineType : "-";
+                            }
+                        },
+                        {
+                            "data": "totalWinning",
+                            render: function (data, type, row) {
+                                // console.log(" row row row rowrow row : ",row)
+                                return +row.totalWinning.toFixed(2);
+                            }
+                        },
+                        {
+                            "data": "remark"
+                        }
+                    ]
+                }
+                break;
+            case `game_3`:
+                {
+                    head += `<tr>
+                                <th>{{unique.unique_ticket_id}}</th>\
+                                <th>{{unique.game_id}}</th>\
+                                <th>{{unique.sub_game_id}}</th>\
+                                <th>{{uniquq.start_date_Time}}</th>\
+                                <th>{{unique.ticket_price}}</th>\
+                                <th>{{unique.ticket_purchased_from}}</th>\
+                                <th>{{unique.winnig_pattern}}</th>\
+                                <th>{{unique.total_winnings}}</th>\
+                                <th>{{unique.remark}}</th>\
+                            </tr>`
+                    columns = [
+                        {
+                            "data": "ticketId",
+                            render: function (data, type, row) {
+
+                                return row.ticketId;
+                            }
+                        },
+                        {
+                            "data": "gameId"
+                        },
+                        {
+                            "data": "subGameId"
+                        },
+                        {
+                            "data": "gameStartDate",
+                            render: function (data, type, row) {
+                                return dateFormat(row.gameStartDate);
+                            }
+                        },
+                        {
+                            "data": "ticketPrice"
+                        },
+                        {
+                            "data": "ticketPurchasedFrom",
+                            render: function (data, type, row) {
+                                // console.log(" row row row rowrow row : ",row)
+                                return (row.ticketPurchasedFrom == "realMoney") ? "Wallet" : "Points";
+                            }
+                        },
+                        {
+                            "data": "winnigPattern",
+                            render: function (data, type, row, meta) {
+
+                                console.log(" data.lineTypeArray data.lineTypeArray : ", data)
+                                if (data && data.lineTypeArray) {
+                                    let $select = $('<select id="select1-' + row._id + '"></select>', {
+                                        "id": row._id,
+                                        "value": data
+                                    });
+
+                                    $.each(data.lineTypeArray, function (k, v) {
+                                        let $option = $("<option></option>", {
+                                            "text": v.lineType + " ( " + v.wonAmount.toFixed(2) + " ) ",
+                                            "value": k
+                                        });
+                                        if (data === v) {
+                                            $option.attr("selected", "selected")
+                                        }
+                                        $select.append($option);
+                                    });
+                                    return $select.prop("outerHTML");
+                                } else {
+                                    return "-";
+                                }
+
+                            }
+                        },
+                        {
+                            "data": "totalWinning",
+                            render: function (data, type, row) {
+                                // console.log(" row row row rowrow row : ",row)
+                                return +row.totalWinning.toFixed(2);
+                            }
+                        },
+                        {
+                            "data": "remark"
+                        }
+                    ]
+                }
+                break;
+            
+            case `game_4`:
+            {
+                head += `<tr>
+                            <th>{{unique.game_id}}</th>\
+                            <th>{{uniquq.start_date_Time}}</th>\
+                            <th>{{unique.ticket_id}}</th>\
+                            <th>{{unique.ticket_price}}</th>\
+                            <th>{{unique.ticket_purchased_from}}</th>\
+                            <th>{{unique.winnig_pattern}}</th>\
+                            <th>{{unique.mystry_winnings}}</th>\
+                            <th>{{unique.total_winnings}}</th>\
+                            <th>{{unique.remark}}</th>\
+                        </tr>`
+                columns = [
+                    {
+                        "data": "gameId"
+                    },
+                    {
+                        "data": "gameStartDate",
+                        render: function (data, type, row) {
+                            return dateFormat(row.gameStartDate);
+                        }
+                    },
+                    {
+                        "data": "ticketId",
+                        render: function (data, type, row) {
+
+                            return row.ticketId;
+                        }
+                    },
+                    {
+                        "data": "ticketPrice"
+                    },
+                    {
+                        "data": "ticketPurchasedFrom",
+                        render: function (data, type, row) {
+                            // console.log(" row row row rowrow row : ",row)
+                            return (row.ticketPurchasedFrom == "realMoney") ? "Wallet" : "Points";
+                        }
+                    },
+                    {
+                        "data": "winnigPattern",
+                        render: function (data, type, row, meta) {
+
+                            console.log(" data.lineTypeArray data.lineTypeArray : ", data)
+                            if (data && data.finalWonAmount && data.finalWonAmount > 0 && data.lineTypeArray && data.lineTypeArray.length > 0) {
+                                return `${data.lineTypeArray[0].lineType}: ${data.lineTypeArray[0].wonAmount} Kr`;
+                            } else {
+                                return "-";
+                            }
+
+                        }
+                    },
+                    {
+                        "data": "extraWinnings",
+                        render: function (data, type, row) {
+                            // console.log(" row row row rowrow row : ",row)
+                            return +row.extraWinnings.toFixed(2) + " Kr";
+                        }
+                    },
+                    {
+                        "data": "totalWinning",
+                        render: function (data, type, row) {
+                            // console.log(" row row row rowrow row : ",row)
+                            return +row.totalWinning.toFixed(2) + " Kr";
+                        }
+                    },
+                    {
+                        "data": "remark"
+                    }
+                ]
+            }
+            break;
+            case `game_5`:
+            {
+                head += `<tr>
+                            <th>{{unique.game_id}}</th>\
+                            <th>{{uniquq.start_date_Time}}</th>\
+                            <th>{{unique.ticket_id}}</th>\
+                            <th>{{unique.ticket_price}}</th>\
+                            <th>{{unique.ticket_purchased_from}}</th>\
+                            <th>{{unique.winnig_pattern}}</th>\
+                            <th>{{unique.jackpot_roulette_winning}}</th>\
+                            <th>{{unique.total_winnings}}</th>\
+                            <th>{{unique.remark}}</th>\
+                        </tr>`
+                columns = [
+                    {
+                        "data": "gameId"
+                    },
+                    {
+                        "data": "gameStartDate",
+                        render: function (data, type, row) {
+                            return dateFormat(row.gameStartDate);
+                        }
+                    },
+                    {
+                        "data": "ticketId",
+                        render: function (data, type, row) {
+
+                            return row.ticketId;
+                        }
+                    },
+                    {
+                        "data": "ticketPrice"
+                    },
+                    {
+                        "data": "ticketPurchasedFrom",
+                        render: function (data, type, row) {
+                            // console.log(" row row row rowrow row : ",row)
+                            return (row.ticketPurchasedFrom == "realMoney") ? "Wallet" : "Points";
+                        }
+                    },
+                    {
+                        "data": "winnigPattern",
+                        render: function (data, type, row, meta) {
+
+                            console.log(" data.lineTypeArray data.lineTypeArray : ", data)
+                            if (data && data.patternWon) {
+                                return `x${data.patternWon.multiplier}: ${data.finalWonAmount} Kr`;
+                            } else {
+                                return "-";
+                            }
+
+                        }
+                    },
+                    {
+                        "data": "extraWinnings",
+                        render: function (data, type, row) {
+                            // console.log(" row row row rowrow row : ",row)
+                            return +row.extraWinnings.toFixed(2) + " Kr";
+                        }
+                    },
+                    {
+                        "data": "totalWinning",
+                        render: function (data, type, row) {
+                            // console.log(" row row row rowrow row : ",row)
+                            return +row.totalWinning.toFixed(2) + " Kr";
+                        }
+                    },
+                    {
+                        "data": "remark"
+                    }
+                ]
+            }
+            default:
+                break;
+        }
+        let data = { head: head, columns: columns }
+        return data;
+    }
+
+
+    function dateFormat(ddt) {
+        let localTime = moment(ddt).zone(cdate.getTimezoneOffset()).format('YYYY-MM-DD hh:mm:ss a');
+        return localTime;
+    }
+</script>
+{% endblock %}
