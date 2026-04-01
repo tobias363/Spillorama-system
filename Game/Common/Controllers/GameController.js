@@ -275,10 +275,14 @@ module.exports = {
                 return createErrorResponse( 'No game types found','en', 400, false);
             }
 
-            // Transform data efficiently using map
+            // Build absolute image URLs using the same base URL as gameTypeData
+            const baseUrl =
+                process.env.RENDER_EXTERNAL_URL ||
+                Sys.Config.App[Sys.Config.Database.connectionType].url;
+
             const gameList = gameTypes.map(({ name, photo }) => ({
                 name,
-                img: resolveImageUrl(photo)
+                img: resolveImageUrl(photo, baseUrl)
             }));
 
             return createSuccessResponse(

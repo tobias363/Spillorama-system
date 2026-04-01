@@ -1266,6 +1266,7 @@ module.exports = {
             }
     
             const baseUrl =
+                process.env.RENDER_EXTERNAL_URL ||
                 Sys.Config.App[Sys.Config.Database.connectionType].url;
     
             const gameType = gameList.map(game => ({
