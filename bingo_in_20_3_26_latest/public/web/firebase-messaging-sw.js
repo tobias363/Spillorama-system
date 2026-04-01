@@ -2,13 +2,14 @@ importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js
 importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
 
 firebase.initializeApp({
-  apiKey: "AIzaSyCDX8TKN3YQhX9EmN5A2PGZ99Z-DZTBKM8",
-  authDomain: "spillorama-81245.firebaseapp.com",
-  projectId: "spillorama-81245",
-  storageBucket: "spillorama-81245.firebasestorage.app",
-  messagingSenderId: "839491165887",
-  appId: "1:839491165887:web:8e199d92d3acafbaccb00a",
-  measurementId: "G-BYWTVGSYQG"
+  apiKey: "AIzaSyCn63hcAqgw-iWLRFCxKmJk6Wa6UrK8Ucc",
+  authDomain: "spillorama-bingo-ca229.firebaseapp.com",
+  databaseURL: "https://spillorama-bingo-ca229-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "spillorama-bingo-ca229",
+  storageBucket: "spillorama-bingo-ca229.firebasestorage.app",
+  messagingSenderId: "360754039754",
+  appId: "1:360754039754:web:78c18c50fed1b2ad509d33",
+  measurementId: "G-8WZJB8ECSW"
 });
 
 const messaging = firebase.messaging();
