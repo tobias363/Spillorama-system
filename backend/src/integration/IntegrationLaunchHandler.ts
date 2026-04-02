@@ -397,6 +397,24 @@ export class IntegrationLaunchHandler {
   private async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
 
+    // BIN-125: Create integration tables idempotently
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS "${this.schema}".integration_providers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        api_key_hash TEXT NOT NULL,
+        wallet_api_base_url TEXT,
+        wallet_api_key_encrypted TEXT,
+        allowed_origins TEXT[] DEFAULT '{}',
+        webhook_url TEXT,
+        webhook_secret_encrypted TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        config JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+
     await this.pool.query(
       `CREATE TABLE IF NOT EXISTS ${this.mappingTable()} (
         provider TEXT NOT NULL,
@@ -408,6 +426,33 @@ export class IntegrationLaunchHandler {
         PRIMARY KEY (provider, external_player_id)
       )`
     );
+
+    // BIN-125: Wallet transaction audit log for integration providers
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS "${this.schema}".integration_wallet_tx_log (
+        id SERIAL PRIMARY KEY,
+        provider TEXT NOT NULL,
+        transaction_id TEXT NOT NULL UNIQUE,
+        external_player_id TEXT NOT NULL,
+        round_id TEXT,
+        tx_type TEXT NOT NULL CHECK (tx_type IN ('debit', 'credit', 'balance')),
+        amount NUMERIC(12,2),
+        currency TEXT NOT NULL DEFAULT 'NOK',
+        status TEXT NOT NULL,
+        response_time_ms INTEGER,
+        error_message TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_iwtl_provider_player
+        ON "${this.schema}".integration_wallet_tx_log (provider, external_player_id)
+    `);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_iwtl_created_at
+        ON "${this.schema}".integration_wallet_tx_log (created_at)
+    `);
 
     this.initialized = true;
   }
