@@ -14,66 +14,41 @@
       overflow: hidden;
       background: url('TemplateData/bg.png') center / cover no-repeat fixed;
     }
-    #candy-tile {
+    /* Iframe game overlay - vises over Unity når et iframe-spill startes */
+    #game-overlay {
+      display: none;
       position: fixed;
-      bottom: 40px;
-      right: 40px;
-      z-index: 1000;
-      width: 220px;
-      background: rgba(0,0,0,0.55);
-      border-radius: 16px;
-      text-align: center;
-      padding: 18px 14px 14px;
-      cursor: pointer;
-      transition: transform 0.15s, box-shadow 0.15s;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-      border: 2px solid rgba(255,255,255,0.15);
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 900;
+      background: #1a1a2e;
     }
-    #candy-tile:hover {
-      transform: scale(1.04);
-      box-shadow: 0 6px 32px rgba(0,0,0,0.5);
-      border-color: rgba(255,255,255,0.3);
-    }
-    #candy-tile img {
-      width: 160px;
-      height: auto;
-      margin-bottom: 8px;
-      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
-    }
-    #candy-tile .candy-title {
-      color: #fff;
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 18px;
-      font-weight: 700;
-      margin-bottom: 4px;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
-    }
-    #candy-tile .candy-status {
-      display: inline-block;
-      background: #4ecdc4;
-      color: #fff;
-      font-size: 12px;
-      font-weight: 600;
-      padding: 3px 14px;
-      border-radius: 12px;
-      margin-bottom: 10px;
-    }
-    #candy-tile .candy-btn {
+    #game-overlay.active {
       display: block;
-      background: #4ecdc4;
-      color: #fff;
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 16px;
-      font-weight: 700;
-      border: none;
-      border-radius: 24px;
-      padding: 10px 0;
+    }
+    #game-overlay iframe {
       width: 100%;
+      height: 100%;
+      border: none;
+    }
+    #game-overlay-back {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      z-index: 950;
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 10px;
+      padding: 10px 22px;
+      font-size: 15px;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-weight: 600;
       cursor: pointer;
       transition: background 0.15s;
+      display: none;
     }
-    #candy-tile .candy-btn:hover {
-      background: #3db8b0;
+    #game-overlay-back:hover {
+      background: rgba(0,0,0,0.85);
     }
   </style>
 
@@ -84,11 +59,9 @@
 </head>
 
 <body>
-  <!-- CandyMania game tile overlay -->
-  <div id="candy-tile" onclick="window.open('https://bingosystem-staging.onrender.com/candy/', '_blank')">
-    <span class="candy-status">Åpen</span>
-    <div class="candy-title">CandyMania</div>
-    <button class="candy-btn">Spill nå</button>
+  <!-- Iframe overlay for integrerte spill (CandyMania etc.) -->
+  <div id="game-overlay">
+    <button id="game-overlay-back" onclick="closeGameOverlay()">&#8592; Tilbake til lobby</button>
   </div>
 
   <div id="unity-container" class="unity-desktop" style="width:100%; height:100%; overflow:hidden">
@@ -271,7 +244,47 @@
 
     let existingTab = null;
 
+    // URL-er som skal åpnes i iframe-overlay istedenfor ny fane
+    // Legg til flere spill her etter hvert som de integreres
+    const iframeGames = ['/candy/', '/candy-game/'];
+
+    function isIframeGame(url) {
+      return iframeGames.some(function(path) {
+        return url.indexOf(path) !== -1;
+      });
+    }
+
+    function openGameInIframe(url) {
+      var overlay = document.getElementById('game-overlay');
+      var backBtn = document.getElementById('game-overlay-back');
+      // Fjern eventuelt eksisterende iframe
+      var oldFrame = overlay.querySelector('iframe');
+      if (oldFrame) oldFrame.remove();
+      // Opprett ny iframe
+      var iframe = document.createElement('iframe');
+      iframe.src = url;
+      iframe.allow = 'autoplay; fullscreen';
+      overlay.appendChild(iframe);
+      overlay.classList.add('active');
+      backBtn.style.display = 'block';
+    }
+
+    function closeGameOverlay() {
+      var overlay = document.getElementById('game-overlay');
+      var backBtn = document.getElementById('game-overlay-back');
+      var iframe = overlay.querySelector('iframe');
+      if (iframe) iframe.remove();
+      overlay.classList.remove('active');
+      backBtn.style.display = 'none';
+    }
+
     function OpenUrlInSameTab(url) {
+      // Sjekk om dette er et spill som skal vises i iframe
+      if (isIframeGame(url)) {
+        openGameInIframe(url);
+        return;
+      }
+      // Ellers åpne i ny fane som vanlig (bingo etc.)
       if (existingTab && !existingTab.closed) {
         existingTab.focus();
       } else {
