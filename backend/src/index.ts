@@ -151,7 +151,20 @@ const candyWebIndexFile = path.resolve(candyWebDir, "index.html");
 const projectDir = path.resolve(__dirname, "../..");
 
 const app = express();
-app.use(cors());
+
+// BIN-49: CORS — require explicit origins in production, never allow wildcard "*"
+const corsAllowedOriginsRaw = (process.env.CORS_ALLOWED_ORIGINS ?? "").trim();
+const isProduction = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
+if (isProduction && !corsAllowedOriginsRaw) {
+  console.error(
+    "FATAL: CORS_ALLOWED_ORIGINS must be set in production. Refusing to start with wildcard CORS."
+  );
+  process.exit(1);
+}
+const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
+  ? corsAllowedOriginsRaw.split(",").map((o) => o.trim()).filter(Boolean)
+  : "*";
+app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json());
 app.use(express.static(frontendDir));
 app.use(express.static(publicDir));
@@ -159,7 +172,8 @@ app.use(express.static(publicDir));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*"
+    origin: corsOrigins,
+    credentials: true
   }
 });
 
@@ -235,9 +249,16 @@ const minPlayersFloor = 1;
 const bingoMinPlayersToStart = minPlayersFloor;
 const requestedAutoRoundStartEnabled = parseBooleanEnv(process.env.AUTO_ROUND_START_ENABLED, true);
 const requestedAutoDrawEnabled = parseBooleanEnv(process.env.AUTO_DRAW_ENABLED, true);
-const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, true);
-const forceCandyAutoStart = true;
-const forceCandyAutoDraw = true;
+// BIN-47: Default to false in production — autoplay must be explicitly enabled
+const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, false);
+// BIN-47: Never force autostart — respect the autoplayAllowed guard
+const forceCandyAutoStart = false;
+const forceCandyAutoDraw = false;
+if (isProductionRuntime && !allowAutoplayInProduction && requestedAutoRoundStartEnabled) {
+  console.warn(
+    "WARNING: AUTO_ROUND_START_ENABLED=true ignored in production. Set BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION=true to override."
+  );
+}
 const enforceSingleCandyRoomPerHall = parseBooleanEnv(
   process.env.CANDY_SINGLE_ACTIVE_ROOM_PER_HALL,
   true
@@ -1184,6 +1205,27 @@ async function requireAuthenticatedPlayerAction(
   platformService.assertUserEligibleForGameplay(user);
   engine.assertWalletAllowedForGameplay(user.walletId);
   const roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+
+  // BIN-46: Derive playerId from token, NOT from client payload.
+  // The player's walletId from the authenticated token is the source of truth.
+  // We find the player in the room by matching walletId, preventing spoofing.
+  if (user.role !== "ADMIN") {
+    const snapshot = engine.getRoomSnapshot(roomCode);
+    const player = snapshot.players.find((p) => p.walletId === user.walletId);
+    if (!player) {
+      throw new DomainError("PLAYER_NOT_FOUND", "Du er ikke med i dette rommet.");
+    }
+    // Warn if client sent a mismatching playerId (potential spoofing attempt)
+    const clientPlayerId = typeof payload?.playerId === "string" ? payload.playerId.trim() : "";
+    if (clientPlayerId && clientPlayerId !== player.id) {
+      console.warn(
+        `SECURITY: playerId mismatch — client sent "${clientPlayerId}" but token resolves to "${player.id}" (user ${user.id}, room ${roomCode})`
+      );
+    }
+    return { roomCode, playerId: player.id };
+  }
+
+  // Admin: still accept payload playerId but verify it exists
   const playerId = mustBeNonEmptyString(payload?.playerId, "playerId");
   assertUserCanActAsPlayer(user, roomCode, playerId);
   return { roomCode, playerId };
