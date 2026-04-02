@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import cors from "cors";
 import express from "express";
+import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { URL, fileURLToPath } from "node:url";
@@ -140,8 +141,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 const frontendDir = path.resolve(__dirname, "../../frontend");
+const publicDir = path.resolve(__dirname, "../public");
 const adminFrontendFile = path.resolve(frontendDir, "admin/index.html");
-const candyWebDir = path.resolve(frontendDir, "web");
+// CandyWeb: prefer backend/public/web (standalone deploy) over ../../frontend/web (monorepo)
+const candyWebDir = fs.existsSync(path.resolve(publicDir, "web/index.html"))
+  ? path.resolve(publicDir, "web")
+  : path.resolve(frontendDir, "web");
 const candyWebIndexFile = path.resolve(candyWebDir, "index.html");
 const projectDir = path.resolve(__dirname, "../..");
 
@@ -149,6 +154,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static(frontendDir));
+app.use(express.static(publicDir));
 
 const server = http.createServer(app);
 const io = new Server(server, {
