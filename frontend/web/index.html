@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Candy Web</title>
     <link rel="icon" href="data:," />
+    <!-- v3: Wallet bridge for iframe integration — loads before React app -->
+    <script type="module">
+      import { walletBridge } from '/candy/wallet-bridge.js';
+      window.__walletBridge = walletBridge;
+
+      // Auto-initialize if running in iframe (embed mode)
+      if (window.self !== window.top) {
+        walletBridge.init().then(function() {
+          console.log('[CandyWeb] Wallet bridge initialized');
+          window.dispatchEvent(new CustomEvent('walletBridgeReady'));
+        }).catch(function(err) {
+          console.warn('[CandyWeb] Wallet bridge init failed (standalone mode?):', err.message);
+        });
+      }
+    </script>
     <script type="module" crossorigin src="/web/assets/index-Dr8QMDaI.js"></script>
     <link rel="stylesheet" crossorigin href="/web/assets/index--xh3mOHF.css">
   </head>
