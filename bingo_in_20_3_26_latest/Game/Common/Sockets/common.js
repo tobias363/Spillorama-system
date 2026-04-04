@@ -56,7 +56,12 @@ module.exports = function (Socket) {
         Socket.on("LoginPlayer", async function (data, responce) {
             try {
                 console.log("LoginPlayer called: ", data);
-                responce(await Sys.Game.Common.Controllers.PlayerController.playerLogin(Socket, data));
+                const result = await Sys.Game.Common.Controllers.PlayerController.playerLogin(Socket, data);
+                // BIN-134: Send authToken til webklienten så wallet-bridge og auth-guards kan bruke den
+                if (result && result.status === 'success' && result.result && result.result.authToken) {
+                    Socket.emit('_playerToken', { token: result.result.authToken });
+                }
+                responce(result);
             } catch (error) {
                 console.log("Error in LoginPlayer:", error);
                 if (responce) return responce({ status: "error", message: error.message });

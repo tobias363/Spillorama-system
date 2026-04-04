@@ -244,9 +244,44 @@
 
     let existingTab = null;
 
+    // ─── BIN-134: Lytt på _playerToken fra serveren etter vellykket login ──────
+    // Serveren (common.js) emitter '_playerToken' med authToken etter LoginPlayer.
+    // Siden Unity laster Socket.IO via WASM, monkey-patcher vi io() for å fange
+    // socket-instansen og lytte på _playerToken-eventen.
+    (function() {
+      // Vent til io er tilgjengelig (lastes av Unity-loader)
+      var _patchInterval = setInterval(function() {
+        if (typeof window.io !== 'function') return;
+        clearInterval(_patchInterval);
+        var _origIo = window.io;
+        window.io = function() {
+          var socket = _origIo.apply(this, arguments);
+          socket.on('_playerToken', function(data) {
+            if (data && data.token) {
+              SetPlayerToken(data.token);
+              console.log('BIN-134: playerToken mottatt fra server etter login');
+            }
+          });
+          return socket;
+        };
+        // Kopier statiske properties (Manager, connect, etc.)
+        Object.keys(_origIo).forEach(function(key) {
+          try { window.io[key] = _origIo[key]; } catch(e) {}
+        });
+      }, 100);
+    })();
+
     // URL-er som skal åpnes i iframe-overlay istedenfor ny fane
     // Legg til flere spill her etter hvert som de integreres
-    const iframeGames = ['/candy/', '/candy-game/'];
+    const EXTERNAL_GAMES = [
+      {
+        // BIN-135: CandyMania — korrekt URL med lobby-token
+        pattern: '/candy/',
+        iframeUrl: 'https://bingosystem-staging.onrender.com/candy/#lt=bwxALM8462CfWuQ9qXJ9Q41Iou6BOf_I'
+      },
+      { pattern: '/candy-game/', iframeUrl: null /* bruker original URL */ }
+    ];
+    const iframeGames = EXTERNAL_GAMES.map(function(g) { return g.pattern; });
 
     function isIframeGame(url) {
       return iframeGames.some(function(path) {
@@ -260,9 +295,19 @@
       // Fjern eventuelt eksisterende iframe
       var oldFrame = overlay.querySelector('iframe');
       if (oldFrame) oldFrame.remove();
+
+      // BIN-135: Bruk konfigurert iframe-URL hvis den finnes
+      var resolvedUrl = url;
+      for (var i = 0; i < EXTERNAL_GAMES.length; i++) {
+        if (url.indexOf(EXTERNAL_GAMES[i].pattern) !== -1 && EXTERNAL_GAMES[i].iframeUrl) {
+          resolvedUrl = EXTERNAL_GAMES[i].iframeUrl;
+          break;
+        }
+      }
+
       // Opprett ny iframe
       var iframe = document.createElement('iframe');
-      iframe.src = url;
+      iframe.src = resolvedUrl;
       iframe.allow = 'autoplay; fullscreen';
       overlay.appendChild(iframe);
       overlay.classList.add('active');
@@ -282,9 +327,15 @@
     // Candy-iframen sender meldinger som { type: 'candy:getBalance', requestId: '...' }
     // Lobbyen videresender til /api/integration/wallet/* og returnerer svar
     var _playerToken = null; // Settes av Unity via SetPlayerToken()
+    var _isLoggedIn = false;
 
     function SetPlayerToken(token) {
       _playerToken = token;
+      if (token) {
+        _isLoggedIn = true;
+        // BIN-134: Vis CandyMania-tile nå som brukeren er innlogget
+        document.body.classList.add('player-authenticated');
+      }
     }
 
     window.addEventListener('message', async function(event) {
@@ -363,8 +414,12 @@
     });
 
     function OpenUrlInSameTab(url) {
-      // Sjekk om dette er et spill som skal vises i iframe
+      // BIN-134: Iframe-spill krever innlogging (playerToken settes av Unity etter login)
       if (isIframeGame(url)) {
+        if (!_playerToken) {
+          console.warn('CandyMania blokkert: bruker er ikke innlogget');
+          return;
+        }
         openGameInIframe(url);
         return;
       }
@@ -388,6 +443,7 @@
     //   }
     // }
   </script>
+  <script src="external-games.js"></script>
 </body>
 
 </html>
