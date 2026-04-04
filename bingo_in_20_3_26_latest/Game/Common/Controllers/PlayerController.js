@@ -381,6 +381,14 @@ module.exports = {
                 deviceId: deviceId,
                 status: "Online"
             };
+            // BIN-134: Lagre auth-info for HTTP auth-beacon polling
+            if (!Sys._authStore) Sys._authStore = {};
+            Sys._authStore[player._id.toString()] = {
+                playerId: player._id.toString(),
+                token: authToken,
+                timestamp: Date.now()
+            };
+            console.log('[BIN-134] playerLogin: auth lagret i _authStore for', player._id.toString());
             console.log("Sys.ConnectedPlayers", Sys.ConnectedPlayers, updatedPlayer)
             // Update socket language
             socket.languageData = (!player.selectedLanguage) ? language : player.selectedLanguage;
@@ -972,7 +980,17 @@ module.exports = {
                 deviceId,
                 status: "Online"
             };
-    
+            // BIN-134: Lagre auth-info for HTTP auth-beacon polling
+            if (player?.otherData?.authToken) {
+                if (!Sys._authStore) Sys._authStore = {};
+                Sys._authStore[playerId] = {
+                    playerId: playerId,
+                    token: player.otherData.authToken,
+                    timestamp: Date.now()
+                };
+                console.log('[BIN-134] reconnectPlayer: auth lagret i _authStore for', playerId);
+            }
+
             /* -------------------- Update Player Socket -------------------- */
             await Sys.Game.Common.Services.PlayerServices.updatePlayerData(
                 { _id: playerId },
