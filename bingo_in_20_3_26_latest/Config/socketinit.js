@@ -95,6 +95,33 @@ module.exports = function socketInit(Sys, sessionMiddleware) {
         Sys.Io.on('connection', socket => {
             Sys.Log.info('[Default] Connected: ' + socket.id);
             socket.language = '';
+
+            // BIN-134: Auth-beacon — send current auth state on connect (eliminates race condition)
+            if (socket.handshake.query.role === 'authBeacon') {
+                try {
+                    const sockets = Sys.Io.sockets.sockets;
+                    // sockets is a Map in Socket.IO v4+
+                    const entries = (sockets instanceof Map) ? Array.from(sockets.values()) : Object.values(sockets || {});
+                    for (let i = 0; i < entries.length; i++) {
+                        if (entries[i].playerId && entries[i].authToken) {
+                            socket.emit('_playerAuthenticated', {
+                                playerId: entries[i].playerId,
+                                token: entries[i].authToken
+                            });
+                            Sys.Log.info('[BIN-134] Auth-beacon: sent existing auth to new beacon socket');
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[BIN-134] Auth-beacon lookup error:', e.message);
+                }
+                // Auth-beacon doesn't need game event handlers — return early
+                socket.on('disconnect', reason => {
+                    Sys.Log.info(`[Default] Auth-beacon disconnected: ${socket.id} Reason: ${reason}`);
+                });
+                return;
+            }
+
             secureSocket(socket); // Wrap all events
             // Register common sockets
             if (Sys.Game?.Common?.Sockets) {

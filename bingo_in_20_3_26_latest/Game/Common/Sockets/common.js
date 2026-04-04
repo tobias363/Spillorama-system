@@ -59,6 +59,9 @@ module.exports = function (Socket) {
                 const result = await Sys.Game.Common.Controllers.PlayerController.playerLogin(Socket, data);
                 // BIN-134: Sett authToken tilgjengelig for lobby-JS
                 if (result && result.status === 'success' && result.result && result.result.authToken) {
+                    // Lagre på socket-objektet slik at auth-beacon kan finne det ved tilkobling
+                    Socket.playerId = result.result.playerId;
+                    Socket.authToken = result.result.authToken;
                     Socket.emit('_playerToken', { token: result.result.authToken });
                     // Broadcast til alle sockets — lobby auth-beacon plukker det opp
                     if (Sys.Io) {
@@ -82,13 +85,23 @@ module.exports = function (Socket) {
                 // BIN-134: Broadcast auth-signal ved session-restore (PlayerDetails = bruker allerede innlogget)
                 if (result && result.status === 'success' && data.playerId && Sys.Io) {
                     try {
-                        const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
-                            { _id: data.playerId }, { 'otherData.authToken': 1 }
-                        );
-                        if (player?.otherData?.authToken) {
+                        // Hent token fra JWT på socket (satt av secureSocket), eller fra MongoDB
+                        let token = Socket.authToken;
+                        if (!token) {
+                            const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+                                { _id: data.playerId }, { 'otherData.authToken': 1 }
+                            );
+                            token = player?.otherData?.authToken;
+                        }
+                        if (!token && Socket.handshake?.query?.authToken) {
+                            token = Socket.handshake.query.authToken;
+                        }
+                        if (token) {
+                            Socket.playerId = data.playerId;
+                            Socket.authToken = token;
                             Sys.Io.emit('_playerAuthenticated', {
                                 playerId: data.playerId,
-                                token: player.otherData.authToken
+                                token: token
                             });
                         }
                     } catch (e) { console.warn('BIN-134: Could not emit auth on PlayerDetails:', e.message); }
@@ -147,13 +160,22 @@ module.exports = function (Socket) {
                 // BIN-134: Broadcast auth-signal ved reconnect
                 if (result && result.status === 'success' && data.playerId && Sys.Io) {
                     try {
-                        const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
-                            { _id: data.playerId }, { 'otherData.authToken': 1 }
-                        );
-                        if (player?.otherData?.authToken) {
+                        let token = Socket.authToken;
+                        if (!token) {
+                            const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+                                { _id: data.playerId }, { 'otherData.authToken': 1 }
+                            );
+                            token = player?.otherData?.authToken;
+                        }
+                        if (!token && Socket.handshake?.query?.authToken) {
+                            token = Socket.handshake.query.authToken;
+                        }
+                        if (token) {
+                            Socket.playerId = data.playerId;
+                            Socket.authToken = token;
                             Sys.Io.emit('_playerAuthenticated', {
                                 playerId: data.playerId,
-                                token: player.otherData.authToken
+                                token: token
                             });
                         }
                     } catch (e) { console.warn('BIN-134: Could not emit auth on ReconnectPlayer:', e.message); }
