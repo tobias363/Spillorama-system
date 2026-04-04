@@ -11,6 +11,7 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const Sys = require('../../Boot/Sys');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
