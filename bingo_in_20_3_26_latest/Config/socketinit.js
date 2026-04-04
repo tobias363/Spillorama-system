@@ -99,9 +99,11 @@ module.exports = function socketInit(Sys, sessionMiddleware) {
             // BIN-134: Auth-beacon — send current auth state on connect (eliminates race condition)
             if (socket.handshake.query.role === 'authBeacon') {
                 try {
-                    const sockets = Sys.Io.sockets.sockets;
-                    // sockets is a Map in Socket.IO v4+
-                    const entries = (sockets instanceof Map) ? Array.from(sockets.values()) : Object.values(sockets || {});
+                    // Socket.IO v2 uses io.sockets.connected (object), v4+ uses io.sockets.sockets (Map)
+                    const sockets = Sys.Io.sockets.connected || Sys.Io.sockets.sockets || {};
+                    const entries = (sockets instanceof Map) ? Array.from(sockets.values()) : Object.values(sockets);
+                    console.log('[BIN-134] Auth-beacon lookup:', entries.length, 'sockets,',
+                        entries.filter(s => s.playerId && s.authToken).length, 'with auth');
                     for (let i = 0; i < entries.length; i++) {
                         if (entries[i].playerId && entries[i].authToken) {
                             socket.emit('_playerAuthenticated', {
