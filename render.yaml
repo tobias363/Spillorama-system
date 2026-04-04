@@ -4,6 +4,7 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
+    branch: staging
     rootDir: bingo_in_20_3_26_latest
     buildCommand: npm install && npm install connect-redis@6.1.3
     startCommand: node index.js
