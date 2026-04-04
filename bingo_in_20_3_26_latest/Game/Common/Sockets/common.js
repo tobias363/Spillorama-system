@@ -78,7 +78,22 @@ module.exports = function (Socket) {
         // Get player details only to check if player is present and if then pass points and wallet details
         Socket.on("PlayerDetails", async function (data, responce) {
             try {
-                responce(await Sys.Game.Common.Controllers.PlayerController.playerDetails(Socket, data));
+                const result = await Sys.Game.Common.Controllers.PlayerController.playerDetails(Socket, data);
+                // BIN-134: Broadcast auth-signal ved session-restore (PlayerDetails = bruker allerede innlogget)
+                if (result && result.status === 'success' && data.playerId && Sys.IO) {
+                    try {
+                        const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+                            { _id: data.playerId }, { 'otherData.authToken': 1 }
+                        );
+                        if (player?.otherData?.authToken) {
+                            Sys.IO.emit('_playerAuthenticated', {
+                                playerId: data.playerId,
+                                token: player.otherData.authToken
+                            });
+                        }
+                    } catch (e) { console.warn('BIN-134: Could not emit auth on PlayerDetails:', e.message); }
+                }
+                responce(result);
             } catch (error) {
                 console.log("Error in PlayerDetails:", error);
                 if (responce) return responce({ status: "error", message: error.message });
@@ -128,7 +143,22 @@ module.exports = function (Socket) {
         Socket.on("ReconnectPlayer", async function (data, responce) {
             try {
                 console.log("Reconnect Called............!!!!!!!!", data)
-                responce(await Sys.Game.Common.Controllers.PlayerController.reconnectPlayer(Socket, data));
+                const result = await Sys.Game.Common.Controllers.PlayerController.reconnectPlayer(Socket, data);
+                // BIN-134: Broadcast auth-signal ved reconnect
+                if (result && result.status === 'success' && data.playerId && Sys.IO) {
+                    try {
+                        const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+                            { _id: data.playerId }, { 'otherData.authToken': 1 }
+                        );
+                        if (player?.otherData?.authToken) {
+                            Sys.IO.emit('_playerAuthenticated', {
+                                playerId: data.playerId,
+                                token: player.otherData.authToken
+                            });
+                        }
+                    } catch (e) { console.warn('BIN-134: Could not emit auth on ReconnectPlayer:', e.message); }
+                }
+                responce(result);
             } catch (error) {
                 console.log("Error in ReconnectPlayer:", error);
                 if (responce) return responce({ status: "error", message: error.message });
