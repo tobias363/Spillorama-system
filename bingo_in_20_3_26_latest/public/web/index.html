@@ -247,31 +247,29 @@
 
     let existingTab = null;
 
-    // ─── BIN-134: Lytt på _playerToken fra serveren etter vellykket login ──────
-    // Serveren (common.js) emitter '_playerToken' med authToken etter LoginPlayer.
-    // Siden Unity laster Socket.IO via WASM, monkey-patcher vi io() for å fange
-    // socket-instansen og lytte på _playerToken-eventen.
+    // ─── BIN-134: Auth-beacon — egen socket som lytter på login-broadcast ──────
+    // Unity sin Socket.IO kjører internt i WASM og er utilgjengelig fra JS.
+    // Vi laster socket.io-klienten fra serveren, oppretter en lettvekts-socket,
+    // og lytter på '_playerAuthenticated' som serveren broadcaster etter login.
     (function() {
-      // Vent til io er tilgjengelig (lastes av Unity-loader)
-      var _patchInterval = setInterval(function() {
-        if (typeof window.io !== 'function') return;
-        clearInterval(_patchInterval);
-        var _origIo = window.io;
-        window.io = function() {
-          var socket = _origIo.apply(this, arguments);
-          socket.on('_playerToken', function(data) {
-            if (data && data.token) {
-              SetPlayerToken(data.token);
-              console.log('BIN-134: playerToken mottatt fra server etter login');
-            }
-          });
-          return socket;
-        };
-        // Kopier statiske properties (Manager, connect, etc.)
-        Object.keys(_origIo).forEach(function(key) {
-          try { window.io[key] = _origIo[key]; } catch(e) {}
+      var sioScript = document.createElement('script');
+      sioScript.src = '/socket.io/socket.io.js';
+      sioScript.onload = function() {
+        var authSocket = io({ query: { role: 'authBeacon' }, transports: ['websocket'] });
+        authSocket.on('_playerAuthenticated', function(data) {
+          if (data && data.token && !_playerToken) {
+            SetPlayerToken(data.token);
+            console.log('BIN-134: playerToken mottatt via auth-beacon etter login');
+          }
         });
-      }, 100);
+        authSocket.on('connect', function() {
+          console.log('BIN-134: auth-beacon tilkoblet');
+        });
+      };
+      sioScript.onerror = function() {
+        console.warn('BIN-134: socket.io-klient utilgjengelig — auth-beacon deaktivert');
+      };
+      document.head.appendChild(sioScript);
     })();
 
     // URL-er som skal åpnes i iframe-overlay istedenfor ny fane
