@@ -84,27 +84,29 @@ module.exports = function (Socket) {
                 const result = await Sys.Game.Common.Controllers.PlayerController.playerDetails(Socket, data);
                 // BIN-134: Broadcast auth-signal ved session-restore (PlayerDetails = bruker allerede innlogget)
                 if (result && result.status === 'success' && data.playerId && Sys.Io) {
-                    try {
-                        // Hent token fra JWT på socket (satt av secureSocket), eller fra MongoDB
-                        let token = Socket.authToken;
-                        if (!token) {
+                    let token = Socket.authToken;
+                    if (!token) {
+                        try {
                             const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
                                 { _id: data.playerId }, { 'otherData.authToken': 1 }
                             );
                             token = player?.otherData?.authToken;
-                        }
-                        if (!token && Socket.handshake?.query?.authToken) {
-                            token = Socket.handshake.query.authToken;
-                        }
-                        if (token) {
-                            Socket.playerId = data.playerId;
-                            Socket.authToken = token;
-                            Sys.Io.emit('_playerAuthenticated', {
-                                playerId: data.playerId,
-                                token: token
-                            });
-                        }
-                    } catch (e) { console.warn('BIN-134: Could not emit auth on PlayerDetails:', e.message); }
+                        } catch (e) { console.warn('BIN-134: MongoDB lookup feilet i PlayerDetails:', e.message); }
+                    }
+                    if (!token) {
+                        token = Socket.handshake?.query?.authToken;
+                    }
+                    console.log('[BIN-134] PlayerDetails token chain:',
+                        'socket=', !!Socket.authToken, 'mongo=', !!(token && token !== Socket.handshake?.query?.authToken),
+                        'jwt=', !!Socket.handshake?.query?.authToken, 'final=', !!token);
+                    if (token) {
+                        Socket.playerId = data.playerId;
+                        Socket.authToken = token;
+                        Sys.Io.emit('_playerAuthenticated', {
+                            playerId: data.playerId,
+                            token: token
+                        });
+                    }
                 }
                 responce(result);
             } catch (error) {
@@ -159,26 +161,29 @@ module.exports = function (Socket) {
                 const result = await Sys.Game.Common.Controllers.PlayerController.reconnectPlayer(Socket, data);
                 // BIN-134: Broadcast auth-signal ved reconnect
                 if (result && result.status === 'success' && data.playerId && Sys.Io) {
-                    try {
-                        let token = Socket.authToken;
-                        if (!token) {
+                    let token = Socket.authToken;
+                    if (!token) {
+                        try {
                             const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
                                 { _id: data.playerId }, { 'otherData.authToken': 1 }
                             );
                             token = player?.otherData?.authToken;
-                        }
-                        if (!token && Socket.handshake?.query?.authToken) {
-                            token = Socket.handshake.query.authToken;
-                        }
-                        if (token) {
-                            Socket.playerId = data.playerId;
-                            Socket.authToken = token;
-                            Sys.Io.emit('_playerAuthenticated', {
-                                playerId: data.playerId,
-                                token: token
-                            });
-                        }
-                    } catch (e) { console.warn('BIN-134: Could not emit auth on ReconnectPlayer:', e.message); }
+                        } catch (e) { console.warn('BIN-134: MongoDB lookup feilet i ReconnectPlayer:', e.message); }
+                    }
+                    if (!token) {
+                        token = Socket.handshake?.query?.authToken;
+                    }
+                    console.log('[BIN-134] ReconnectPlayer token chain:',
+                        'socket=', !!Socket.authToken, 'mongo=', !!(token && token !== Socket.handshake?.query?.authToken),
+                        'jwt=', !!Socket.handshake?.query?.authToken, 'final=', !!token);
+                    if (token) {
+                        Socket.playerId = data.playerId;
+                        Socket.authToken = token;
+                        Sys.Io.emit('_playerAuthenticated', {
+                            playerId: data.playerId,
+                            token: token
+                        });
+                    }
                 }
                 responce(result);
             } catch (error) {
