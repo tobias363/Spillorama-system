@@ -205,6 +205,12 @@ env.addFilter('date', function(date, format) {
     return moment(date).format(format);
 });
 
+env.addFilter('resolveImageUrl', function (photo) {
+    if (!photo) return '';
+    if (photo.startsWith('http://') || photo.startsWith('https://')) return photo;
+    return '/profile/bingo/' + photo;
+});
+
 env.addFilter('removeImagePrefix', function (value) {
     return value ? value.replace('/admin/images/', '') : value;
 });

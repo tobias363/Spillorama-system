@@ -1,0 +1,554 @@
+openapi: 3.0.3
+info:
+  title: CandyWeb Game Integration Protocol (GIP)
+  version: 1.0.0
+  description: |
+    API contract between CandyWeb backend and an external provider who embeds
+    the game in an iframe. The provider owns the player wallet.
+
+    ## Flow overview
+
+    1. Provider calls `POST /api/integration/launch` with session token + player ID.
+    2. CandyWeb backend validates the session, creates/maps the internal player,
+       and returns an embed URL with a one-time launch token.
+    3. Provider loads the embed URL in an iframe.
+    4. During gameplay, CandyWeb backend calls the provider's Wallet API
+       (balance / debit / credit) for every financial operation.
+    5. After each completed round, CandyWeb sends a game-result webhook
+       to the provider's callback URL.
+
+    ## Authentication
+
+    - **Launch API**: The provider authenticates via `X-API-Key` header.
+    - **Wallet API**: CandyWeb authenticates to the provider using the
+      configured API key or bearer token.
+    - **Webhooks**: Signed with HMAC-SHA256 using a shared secret.
+
+servers:
+  - url: https://candy.example.com
+    description: CandyWeb backend (our server)
+  - url: https://provider.example.com
+    description: Provider wallet API (their server)
+
+tags:
+  - name: Launch
+    description: Game session launch (provider → CandyWeb)
+  - name: Session
+    description: Session lifecycle management (provider → CandyWeb)
+  - name: Wallet
+    description: Wallet operations (CandyWeb → provider)
+  - name: Webhooks
+    description: Game result callbacks (CandyWeb → provider)
+  - name: Compliance
+    description: Responsible gaming events (CandyWeb → provider)
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+
+  # =========================================================================
+  # LAUNCH API — hosted by CandyWeb
+  # =========================================================================
+  /api/integration/launch:
+    post:
+      operationId: integrationLaunch
+      tags: [Launch]
+      summary: Start a game session for an authenticated player
+      description: |
+        The provider calls this endpoint to launch CandyWeb for one of their
+        players. The player must already be authenticated on the provider side.
+        CandyWeb validates the session token, creates or retrieves the internal
+        player mapping, and returns an embed URL.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationLaunchRequest"
+      responses:
+        "200":
+          description: Launch successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationLaunchResponse"
+        "401":
+          description: Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Session token invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: INVALID_SESSION_TOKEN
+                  message: "The provided session token is invalid or has expired."
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # =========================================================================
+  # SESSION LIFECYCLE — hosted by CandyWeb
+  # =========================================================================
+  /api/integration/session/kill:
+    post:
+      operationId: sessionKill
+      tags: [Session]
+      summary: Force-terminate a player's session
+      description: |
+        The provider calls this to immediately revoke all active sessions
+        for a given player. CandyWeb will send a `host:closeGame` PostMessage
+        to the iframe, causing the frontend to disconnect gracefully.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId]
+              properties:
+                playerId:
+                  type: string
+                  description: Provider's player ID
+                provider:
+                  type: string
+                  default: "default"
+                  description: Provider identifier (for multi-tenant setups)
+      responses:
+        "200":
+          description: Sessions revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      revoked:
+                        type: integer
+                        description: Number of sessions revoked
+        "404":
+          description: Player not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/integration/session/refresh:
+    post:
+      operationId: sessionRefresh
+      tags: [Session]
+      summary: Extend a player's active session
+      description: |
+        Extends the expiry of all active sessions for the given player.
+        Use this to keep sessions alive during prolonged play.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId]
+              properties:
+                playerId:
+                  type: string
+                  description: Provider's player ID
+                extensionMinutes:
+                  type: integer
+                  default: 60
+                  description: Number of minutes to extend the session
+                provider:
+                  type: string
+                  default: "default"
+      responses:
+        "200":
+          description: Session extended
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      expiresAt:
+                        type: string
+                        format: date-time
+        "404":
+          description: No active session found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # =========================================================================
+  # WALLET API — hosted by the PROVIDER (we call these)
+  # =========================================================================
+  /api/wallet/balance:
+    get:
+      operationId: walletBalance
+      tags: [Wallet]
+      summary: Get player balance
+      description: |
+        CandyWeb calls this on the provider's server to fetch the player's
+        current wallet balance. Called at session start and after transactions.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: playerId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Provider's player ID
+      responses:
+        "200":
+          description: Balance retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletBalanceResponse"
+        "404":
+          description: Player not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/wallet/debit:
+    post:
+      operationId: walletDebit
+      tags: [Wallet]
+      summary: Debit player wallet (entry fee / buy-in)
+      description: |
+        Deduct an amount from the player's wallet for a game entry fee.
+
+        **Idempotency:** If the same `transactionId` is sent again, the
+        provider MUST return the original response without debiting twice.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletTransactionRequest"
+      responses:
+        "200":
+          description: Debit successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletTransactionResponse"
+        "402":
+          description: Insufficient funds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletTransactionResponse"
+              example:
+                success: false
+                balance: 5.00
+                transactionId: "txn-123"
+                errorCode: "INSUFFICIENT_FUNDS"
+                errorMessage: "Player does not have enough balance."
+
+  /api/wallet/credit:
+    post:
+      operationId: walletCredit
+      tags: [Wallet]
+      summary: Credit player wallet (prize payout)
+      description: |
+        Add an amount to the player's wallet for a prize payout.
+
+        **Idempotency:** If the same `transactionId` is sent again, the
+        provider MUST return the original response without crediting twice.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletTransactionRequest"
+      responses:
+        "200":
+          description: Credit successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletTransactionResponse"
+
+  # =========================================================================
+  # WEBHOOK — CandyWeb calls the provider's webhook URL
+  # =========================================================================
+  /api/candy/webhook:
+    post:
+      operationId: gameResultWebhook
+      tags: [Webhooks]
+      summary: Game result callback
+      description: |
+        CandyWeb sends this webhook to the provider after each completed
+        game round. The payload is signed with HMAC-SHA256.
+
+        **Signature verification:**
+        ```
+        signature = HMAC-SHA256(webhookSecret, JSON.stringify(body))
+        ```
+        Compare the `X-Webhook-Signature` header with the computed value.
+
+        **Retry policy:** On non-2xx response, CandyWeb retries with
+        exponential backoff (1s, 2s, 4s, 8s, 16s) up to 5 attempts.
+      parameters:
+        - name: X-Webhook-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 hex signature of the request body
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GameResultWebhookPayload"
+      responses:
+        "200":
+          description: Webhook received
+        "500":
+          description: Provider error (triggers retry)
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+components:
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for provider authentication against CandyWeb
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token for CandyWeb authentication against provider wallet API
+
+  schemas:
+
+    # --- Launch ---
+    IntegrationLaunchRequest:
+      type: object
+      required: [sessionToken, playerId]
+      properties:
+        sessionToken:
+          type: string
+          description: Provider's session token proving the player is authenticated
+        playerId:
+          type: string
+          description: Provider's unique player ID
+        currency:
+          type: string
+          default: "NOK"
+          description: ISO 4217 currency code
+        language:
+          type: string
+          default: "nb-NO"
+          description: BCP-47 language tag for UI localisation
+        returnUrl:
+          type: string
+          format: uri
+          description: URL to redirect to when the player exits the game
+
+    IntegrationLaunchResponse:
+      type: object
+      required: [embedUrl, launchToken, expiresAt]
+      properties:
+        embedUrl:
+          type: string
+          format: uri
+          description: Full URL to load in the iframe (includes launch token)
+          example: "https://candy.example.com/play?lt=abc123&embed=true"
+        launchToken:
+          type: string
+          description: One-time launch token (consumed on load)
+        expiresAt:
+          type: string
+          format: date-time
+          description: ISO-8601 expiry for the launch token
+
+    # --- Wallet ---
+    WalletBalanceResponse:
+      type: object
+      required: [balance, currency]
+      properties:
+        balance:
+          type: number
+          description: Player's current balance
+          example: 150.00
+        currency:
+          type: string
+          example: "NOK"
+
+    WalletTransactionRequest:
+      type: object
+      required: [playerId, amount, transactionId, roundId, currency]
+      properties:
+        playerId:
+          type: string
+          description: Provider's player ID
+        amount:
+          type: number
+          minimum: 0.01
+          description: Amount to debit or credit
+          example: 10.00
+        transactionId:
+          type: string
+          description: Unique transaction ID for idempotency
+          example: "txn-a1b2c3d4"
+        roundId:
+          type: string
+          description: Game round ID grouping related transactions
+          example: "round-x9y8z7"
+        currency:
+          type: string
+          example: "NOK"
+
+    WalletTransactionResponse:
+      type: object
+      required: [success, balance, transactionId]
+      properties:
+        success:
+          type: boolean
+        balance:
+          type: number
+          description: Player's balance after the operation
+        transactionId:
+          type: string
+          description: Transaction ID echoed back
+        errorCode:
+          type: string
+          description: Error code when success=false
+          enum:
+            - INSUFFICIENT_FUNDS
+            - DUPLICATE_TRANSACTION
+            - PLAYER_NOT_FOUND
+            - INVALID_AMOUNT
+            - INTERNAL_ERROR
+        errorMessage:
+          type: string
+          description: Human-readable error message
+
+    # --- Webhook ---
+    GameResultWebhookPayload:
+      type: object
+      required: [event, gameId, sessionId, playerId, timestamp, result]
+      properties:
+        event:
+          type: string
+          enum: [game.completed, game.cancelled]
+        gameId:
+          type: string
+        sessionId:
+          type: string
+        playerId:
+          type: string
+          description: Provider's player ID
+        timestamp:
+          type: string
+          format: date-time
+        result:
+          $ref: "#/components/schemas/GameResultDetails"
+
+    GameResultDetails:
+      type: object
+      required: [entryFee, totalPayout, netResult, currency, ticketsPlayed, numbersDrawn, patterns]
+      properties:
+        entryFee:
+          type: number
+          example: 10.00
+        totalPayout:
+          type: number
+          example: 25.00
+        netResult:
+          type: number
+          description: totalPayout - entryFee (from player perspective)
+          example: 15.00
+        currency:
+          type: string
+          example: "NOK"
+        ticketsPlayed:
+          type: integer
+          example: 4
+        numbersDrawn:
+          type: integer
+          example: 38
+        patterns:
+          type: array
+          items:
+            type: string
+          description: Won pattern names
+          example: ["Cross", "Bottom Row"]
+
+    # --- Compliance ---
+    ComplianceCallbackPayload:
+      type: object
+      required: [event, playerId, timestamp, details]
+      properties:
+        event:
+          type: string
+          enum:
+            - compliance.lossLimitReached
+            - compliance.sessionLimitReached
+            - compliance.selfExclusion
+            - compliance.timedPause
+            - compliance.breakEnded
+          description: Type of compliance event
+        playerId:
+          type: string
+          description: Provider's player ID
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: object
+          description: Event-specific details (e.g. durationMinutes for timedPause)
+        signature:
+          type: string
+          description: HMAC-SHA256 hex signature
+
+    # --- Shared ---
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+            message:
+              type: string
+              description: Human-readable description

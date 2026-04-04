@@ -1,4 +1,4 @@
-import type { Player, Ticket, ClaimType } from "../game/types.js";
+import type { Player, Ticket, ClaimType, ClaimRecord } from "../game/types.js";
 
 export interface CreateTicketInput {
   roomCode: string;
@@ -31,9 +31,33 @@ export interface ClaimLoggedInput {
   reason?: string;
 }
 
+export interface GameEndedInput {
+  roomCode: string;
+  hallId: string;
+  gameId: string;
+  entryFee: number;
+  endedReason: string;
+  drawnNumbers: number[];
+  claims: ClaimRecord[];
+  playerIds: string[];
+}
+
+/** BIN-48: Checkpoint input — critical state that must be persisted synchronously. */
+export interface CheckpointInput {
+  roomCode: string;
+  gameId: string;
+  reason: "PAYOUT" | "GAME_END" | "BUY_IN";
+  claimId?: string;
+  payoutAmount?: number;
+  transactionIds?: string[];
+}
+
 export interface BingoSystemAdapter {
   createTicket(input: CreateTicketInput): Promise<Ticket>;
   onGameStarted?(input: GameStartedInput): Promise<void>;
   onNumberDrawn?(input: NumberDrawnInput): Promise<void>;
   onClaimLogged?(input: ClaimLoggedInput): Promise<void>;
+  onGameEnded?(input: GameEndedInput): Promise<void>;
+  /** BIN-48: Synchronous checkpoint after critical events (payout, game end). */
+  onCheckpoint?(input: CheckpointInput): Promise<void>;
 }

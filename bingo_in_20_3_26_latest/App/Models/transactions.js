@@ -113,6 +113,7 @@ const ChipsSchema = new Schema({
     agentName: { type: 'string' },
     shiftId: { type: 'string' },
     paymentBy: { type: 'string' },  // Card/Cash
+    idempotencyKey: { type: 'string', default: '', index: true }, // Forhindrer duplikat-transaksjoner
     otherData: {type : Schema.Types.Mixed, default : {}},
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },

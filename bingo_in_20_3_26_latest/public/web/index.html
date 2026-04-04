@@ -14,6 +14,42 @@
       overflow: hidden;
       background: url('TemplateData/bg.png') center / cover no-repeat fixed;
     }
+    /* Iframe game overlay - vises over Unity når et iframe-spill startes */
+    #game-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 900;
+      background: #1a1a2e;
+    }
+    #game-overlay.active {
+      display: block;
+    }
+    #game-overlay iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    #game-overlay-back {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      z-index: 950;
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 10px;
+      padding: 10px 22px;
+      font-size: 15px;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: none;
+    }
+    #game-overlay-back:hover {
+      background: rgba(0,0,0,0.85);
+    }
   </style>
 
   <!-- Firebase SDKs -->
@@ -23,6 +59,11 @@
 </head>
 
 <body>
+  <!-- Iframe overlay for integrerte spill (CandyMania etc.) -->
+  <div id="game-overlay">
+    <button id="game-overlay-back" onclick="closeGameOverlay()">&#8592; Tilbake til lobby</button>
+  </div>
+
   <div id="unity-container" class="unity-desktop" style="width:100%; height:100%; overflow:hidden">
     <canvas id="unity-canvas" width=960 height=600></canvas>
     <div id="unity-loading-bar">
@@ -128,13 +169,14 @@
 
         // Initialize Firebase Cloud Messaging
         const firebaseConfig = {
-          apiKey: "AIzaSyCDX8TKN3YQhX9EmN5A2PGZ99Z-DZTBKM8",
-          authDomain: "spillorama-81245.firebaseapp.com",
-          projectId: "spillorama-81245",
-          storageBucket: "spillorama-81245.firebasestorage.app",
-          messagingSenderId: "839491165887",
-          appId: "1:839491165887:web:8e199d92d3acafbaccb00a",
-          measurementId: "G-BYWTVGSYQG"
+          apiKey: "AIzaSyCn63hcAqgw-iWLRFCxKmJk6Wa6UrK8Ucc",
+          authDomain: "spillorama-bingo-ca229.firebaseapp.com",
+          databaseURL: "https://spillorama-bingo-ca229-default-rtdb.europe-west1.firebasedatabase.app",
+          projectId: "spillorama-bingo-ca229",
+          storageBucket: "spillorama-bingo-ca229.firebasestorage.app",
+          messagingSenderId: "360754039754",
+          appId: "1:360754039754:web:78c18c50fed1b2ad509d33",
+          measurementId: "G-8WZJB8ECSW"
         };
 
         firebase.initializeApp(firebaseConfig);
@@ -152,7 +194,7 @@
           Notification.requestPermission().then((permission) => {
             if (permission === 'granted') {
               messaging.getToken({
-                vapidKey: "BBDxQ88h8BqvyGFI3aWljk-9RXmtrfieb5WzAlk8HuR4jvVpEyG21mBGVuQNxGPOinyeOt-JkwnVAUuMEaOPTCk",
+                vapidKey: "BO8GlGnlSoBYtA0oZx6SzY-dlLNdh__TeFS6WNIY5X_SWsXfejE-B5I9gsn6O6a0rCYt8eOXTCO7-lcVAOgsPMc",
                 serviceWorkerRegistration: registration
               }).then((token) => {
                 console.log("Web Push Token:", token);
@@ -202,7 +244,131 @@
 
     let existingTab = null;
 
+    // URL-er som skal åpnes i iframe-overlay istedenfor ny fane
+    // Legg til flere spill her etter hvert som de integreres
+    const iframeGames = ['/candy/', '/candy-game/'];
+
+    function isIframeGame(url) {
+      return iframeGames.some(function(path) {
+        return url.indexOf(path) !== -1;
+      });
+    }
+
+    function openGameInIframe(url) {
+      var overlay = document.getElementById('game-overlay');
+      var backBtn = document.getElementById('game-overlay-back');
+      // Fjern eventuelt eksisterende iframe
+      var oldFrame = overlay.querySelector('iframe');
+      if (oldFrame) oldFrame.remove();
+      // Opprett ny iframe
+      var iframe = document.createElement('iframe');
+      iframe.src = url;
+      iframe.allow = 'autoplay; fullscreen';
+      overlay.appendChild(iframe);
+      overlay.classList.add('active');
+      backBtn.style.display = 'block';
+    }
+
+    function closeGameOverlay() {
+      var overlay = document.getElementById('game-overlay');
+      var backBtn = document.getElementById('game-overlay-back');
+      var iframe = overlay.querySelector('iframe');
+      if (iframe) iframe.remove();
+      overlay.classList.remove('active');
+      backBtn.style.display = 'none';
+    }
+
+    // ─── Wallet-bro: PostMessage mellom iframe-spill og bingo-backend ──────
+    // Candy-iframen sender meldinger som { type: 'candy:getBalance', requestId: '...' }
+    // Lobbyen videresender til /api/integration/wallet/* og returnerer svar
+    var _playerToken = null; // Settes av Unity via SetPlayerToken()
+
+    function SetPlayerToken(token) {
+      _playerToken = token;
+    }
+
+    window.addEventListener('message', async function(event) {
+      // Sjekk at meldingen kommer fra vår egen iframe
+      if (event.origin !== window.location.origin) return;
+      var msg = event.data;
+      if (!msg || !msg.type || !msg.type.startsWith('candy:')) return;
+
+      var iframe = document.querySelector('#game-overlay iframe');
+      if (!iframe) return;
+
+      // Svar-hjelper
+      function reply(type, data) {
+        iframe.contentWindow.postMessage({ type: type, requestId: msg.requestId, data: data }, '*');
+      }
+
+      try {
+        switch (msg.type) {
+          case 'candy:ready':
+            // Spillet er klart — send spillertoken så candy kan vise saldo
+            reply('host:init', { token: _playerToken });
+            break;
+
+          case 'candy:getBalance':
+            var balRes = await fetch('/api/integration/wallet/balance', {
+              headers: { 'Authorization': 'Bearer ' + _playerToken }
+            });
+            var balData = await balRes.json();
+            reply('host:balance', balData.success ? balData.data : { error: balData.error });
+            break;
+
+          case 'candy:debit':
+            var debRes = await fetch('/api/integration/wallet/debit', {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Bearer ' + _playerToken,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                amount: msg.amount,
+                gameId: msg.gameId,
+                idempotencyKey: msg.idempotencyKey,
+                description: msg.description || 'CandyMania Bet'
+              })
+            });
+            var debData = await debRes.json();
+            reply('host:debitResult', debData.success ? debData.data : { error: debData.error });
+            break;
+
+          case 'candy:credit':
+            var credRes = await fetch('/api/integration/wallet/credit', {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Bearer ' + _playerToken,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                amount: msg.amount,
+                gameId: msg.gameId,
+                idempotencyKey: msg.idempotencyKey,
+                description: msg.description || 'CandyMania Win'
+              })
+            });
+            var credData = await credRes.json();
+            reply('host:creditResult', credData.success ? credData.data : { error: credData.error });
+            break;
+
+          case 'candy:close':
+            closeGameOverlay();
+            break;
+        }
+      } catch (err) {
+        console.error('Wallet bridge error:', err);
+        reply('host:error', { error: err.message });
+      }
+    });
+
     function OpenUrlInSameTab(url) {
+      // Sjekk om dette er et spill som skal vises i iframe
+      if (isIframeGame(url)) {
+        openGameInIframe(url);
+        return;
+      }
+      // Ellers åpne i ny fane som vanlig (bingo etc.)
       if (existingTab && !existingTab.closed) {
         existingTab.focus();
       } else {

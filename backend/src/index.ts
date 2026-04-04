@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import cors from "cors";
 import express from "express";
+import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { URL, fileURLToPath } from "node:url";
@@ -28,6 +29,12 @@ import {
   type UserRole
 } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
+import { Pool as PgPool } from "pg";
+import { IntegrationLaunchHandler } from "./integration/IntegrationLaunchHandler.js";
+import { ReconciliationService } from "./integration/ReconciliationService.js";
+import { WebhookService } from "./integration/WebhookService.js";
+import { IntegrationBingoSystemAdapter } from "./integration/IntegrationBingoSystemAdapter.js";
+import type { ExternalWalletAdapter } from "./integration/ExternalWalletAdapter.js";
 import {
   buildCandySettingsDefinition,
   buildDefaultGameSettingsDefinition,
@@ -134,18 +141,39 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 const frontendDir = path.resolve(__dirname, "../../frontend");
+const publicDir = path.resolve(__dirname, "../public");
 const adminFrontendFile = path.resolve(frontendDir, "admin/index.html");
+// CandyWeb: prefer backend/public/web (standalone deploy) over ../../frontend/web (monorepo)
+const candyWebDir = fs.existsSync(path.resolve(publicDir, "web/index.html"))
+  ? path.resolve(publicDir, "web")
+  : path.resolve(frontendDir, "web");
+const candyWebIndexFile = path.resolve(candyWebDir, "index.html");
 const projectDir = path.resolve(__dirname, "../..");
 
 const app = express();
-app.use(cors());
+
+// BIN-49: CORS — require explicit origins in production, never allow wildcard "*"
+const corsAllowedOriginsRaw = (process.env.CORS_ALLOWED_ORIGINS ?? "").trim();
+const isProduction = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
+if (isProduction && !corsAllowedOriginsRaw) {
+  console.error(
+    "FATAL: CORS_ALLOWED_ORIGINS must be set in production. Refusing to start with wildcard CORS."
+  );
+  process.exit(1);
+}
+const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
+  ? corsAllowedOriginsRaw.split(",").map((o) => o.trim()).filter(Boolean)
+  : "*";
+app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json());
 app.use(express.static(frontendDir));
+app.use(express.static(publicDir));
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*"
+    origin: corsOrigins,
+    credentials: true
   }
 });
 
@@ -221,9 +249,16 @@ const minPlayersFloor = 1;
 const bingoMinPlayersToStart = minPlayersFloor;
 const requestedAutoRoundStartEnabled = parseBooleanEnv(process.env.AUTO_ROUND_START_ENABLED, true);
 const requestedAutoDrawEnabled = parseBooleanEnv(process.env.AUTO_DRAW_ENABLED, true);
-const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, true);
-const forceCandyAutoStart = true;
-const forceCandyAutoDraw = true;
+// BIN-47: Default to false in production — autoplay must be explicitly enabled
+const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, false);
+// BIN-47: Never force autostart — respect the autoplayAllowed guard
+const forceCandyAutoStart = false;
+const forceCandyAutoDraw = false;
+if (isProductionRuntime && !allowAutoplayInProduction && requestedAutoRoundStartEnabled) {
+  console.warn(
+    "WARNING: AUTO_ROUND_START_ENABLED=true ignored in production. Set BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION=true to override."
+  );
+}
 const enforceSingleCandyRoomPerHall = parseBooleanEnv(
   process.env.CANDY_SINGLE_ACTIVE_ROOM_PER_HALL,
   true
@@ -273,7 +308,41 @@ if (isProductionRuntime && !autoplayAllowed && (requestedAutoRoundStartEnabled |
   );
 }
 
-const engine = new BingoEngine(new LocalBingoSystemAdapter(), walletAdapter, {
+// Integration: WebhookService + decorated BingoSystemAdapter.
+const integrationEnabledEarly = parseBooleanEnv(process.env.INTEGRATION_ENABLED, false);
+const integrationPool = integrationEnabledEarly
+  ? new PgPool({ connectionString: platformConnectionString })
+  : null;
+
+const webhookService = integrationEnabledEarly && process.env.INTEGRATION_WEBHOOK_URL?.trim()
+  ? new WebhookService({
+      gameResultWebhookUrl: process.env.INTEGRATION_WEBHOOK_URL.trim(),
+      complianceWebhookUrl: process.env.INTEGRATION_COMPLIANCE_WEBHOOK_URL?.trim() || process.env.INTEGRATION_WEBHOOK_URL.trim(),
+      webhookSecret: process.env.INTEGRATION_WEBHOOK_SECRET?.trim() || "",
+      timeoutMs: 10_000,
+      maxRetries: 5
+    })
+  : null;
+
+const localBingoAdapter = new LocalBingoSystemAdapter();
+const integrationSchema = process.env.APP_PG_SCHEMA?.trim() || process.env.WALLET_PG_SCHEMA?.trim() || "public";
+
+const bingoSystemAdapter = webhookService && integrationPool
+  ? new IntegrationBingoSystemAdapter({
+      inner: localBingoAdapter,
+      webhookService,
+      currency: process.env.WALLET_CURRENCY?.trim() || "NOK",
+      resolveExternalPlayerId: async (internalPlayerId: string) => {
+        const { rows } = await integrationPool.query<{ external_player_id: string }>(
+          `SELECT external_player_id FROM "${integrationSchema}".external_player_mapping WHERE internal_player_id = $1 LIMIT 1`,
+          [internalPlayerId]
+        );
+        return rows[0]?.external_player_id ?? null;
+      }
+    })
+  : localBingoAdapter;
+
+const engine = new BingoEngine(bingoSystemAdapter, walletAdapter, {
   minRoundIntervalMs: bingoMinRoundIntervalMs,
   minPlayersToStart: bingoMinPlayersToStart,
   dailyLossLimit: bingoDailyLossLimit,
@@ -314,6 +383,70 @@ const swedbankPayService = new SwedbankPayService(walletAdapter, {
 const candyLaunchTokenStore = new CandyLaunchTokenStore({
   ttlMs: candyLaunchTokenTtlMs
 });
+
+const integrationEnabled = integrationEnabledEarly;
+const integrationLaunchHandler = integrationEnabled
+  ? new IntegrationLaunchHandler({
+      pool: integrationPool!,
+      schema: integrationSchema,
+      walletAdapter,
+      launchTokenStore: candyLaunchTokenStore,
+      providerApiKey: process.env.INTEGRATION_API_KEY?.trim() || "",
+      defaultHallId: process.env.INTEGRATION_DEFAULT_HALL_ID?.trim() || "hall-default",
+      candyFrontendBaseUrl: process.env.INTEGRATION_CANDY_FRONTEND_URL?.trim() || "https://candy.example.com",
+      candyApiBaseUrl: process.env.INTEGRATION_CANDY_API_BASE_URL?.trim() || `http://localhost:${process.env.PORT || "4000"}`
+    })
+  : null;
+
+const reconciliationService = integrationEnabled && walletRuntime.provider === "external"
+  ? new ReconciliationService({
+      walletAdapter: walletAdapter as ExternalWalletAdapter,
+      alarmThreshold: 1,
+      onAlarm: (report) => {
+        console.error(`[RECONCILIATION ALARM] ${report.discrepancies.length} avvik funnet i perioden ${report.periodStart} — ${report.periodEnd}`);
+      }
+    })
+  : null;
+
+// Embed headers: allow iframe embedding from provider origins when integration is enabled.
+if (integrationEnabled) {
+  const allowedEmbedOrigins = (process.env.ALLOWED_EMBED_ORIGINS?.trim() || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  if (allowedEmbedOrigins.length > 0) {
+    app.use((_req, res, next) => {
+      res.setHeader(
+        "Content-Security-Policy",
+        `frame-ancestors 'self' ${allowedEmbedOrigins.join(" ")}`
+      );
+      next();
+    });
+  }
+}
+
+// Helper: send compliance webhook to provider (non-blocking).
+function sendComplianceWebhook(
+  event: "compliance.lossLimitReached" | "compliance.sessionLimitReached" | "compliance.selfExclusion" | "compliance.timedPause" | "compliance.breakEnded",
+  internalPlayerId: string,
+  details: Record<string, unknown>
+): void {
+  if (!webhookService || !integrationPool) return;
+  integrationPool.query<{ external_player_id: string }>(
+    `SELECT external_player_id FROM "${integrationSchema}".external_player_mapping WHERE internal_player_id = $1 LIMIT 1`,
+    [internalPlayerId]
+  ).then(({ rows }) => {
+    const externalId = rows[0]?.external_player_id;
+    if (!externalId) return;
+    const payload = webhookService.buildCompliancePayload(event, externalId, details);
+    webhookService.sendComplianceEvent(payload).catch((err) => {
+      console.error(`[compliance-webhook] Failed to send ${event} for ${externalId}:`, err);
+    });
+  }).catch((err) => {
+    console.error(`[compliance-webhook] Failed to resolve external player for ${internalPlayerId}:`, err);
+  });
+}
 
 function ackSuccess<T>(callback: (response: AckResponse<T>) => void, data: T): void {
   callback({ ok: true, data });
@@ -476,11 +609,15 @@ function readCandyLaunchSettings(
   settings: Record<string, unknown>,
   options: { requireLaunchUrl: boolean }
 ): CandyLaunchSettings {
-  const launchUrl = parseOptionalAbsoluteHttpUrl(
-    settings.launchUrl,
-    "launchUrl",
-    "INVALID_CANDY_LAUNCH_URL"
-  );
+  // Accept both absolute URLs and relative paths (e.g. "/web/").
+  const rawLaunchUrl = typeof settings.launchUrl === "string" ? settings.launchUrl.trim() : "";
+  const launchUrl = rawLaunchUrl.startsWith("/")
+    ? rawLaunchUrl
+    : parseOptionalAbsoluteHttpUrl(
+        settings.launchUrl,
+        "launchUrl",
+        "INVALID_CANDY_LAUNCH_URL"
+      );
   const apiBaseUrl = parseOptionalAbsoluteHttpUrl(
     settings.apiBaseUrl,
     "apiBaseUrl",
@@ -1068,6 +1205,27 @@ async function requireAuthenticatedPlayerAction(
   platformService.assertUserEligibleForGameplay(user);
   engine.assertWalletAllowedForGameplay(user.walletId);
   const roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+
+  // BIN-46: Derive playerId from token, NOT from client payload.
+  // The player's walletId from the authenticated token is the source of truth.
+  // We find the player in the room by matching walletId, preventing spoofing.
+  if (user.role !== "ADMIN") {
+    const snapshot = engine.getRoomSnapshot(roomCode);
+    const player = snapshot.players.find((p) => p.walletId === user.walletId);
+    if (!player) {
+      throw new DomainError("PLAYER_NOT_FOUND", "Du er ikke med i dette rommet.");
+    }
+    // Warn if client sent a mismatching playerId (potential spoofing attempt)
+    const clientPlayerId = typeof payload?.playerId === "string" ? payload.playerId.trim() : "";
+    if (clientPlayerId && clientPlayerId !== player.id) {
+      console.warn(
+        `SECURITY: playerId mismatch — client sent "${clientPlayerId}" but token resolves to "${player.id}" (user ${user.id}, room ${roomCode})`
+      );
+    }
+    return { roomCode, playerId: player.id };
+  }
+
+  // Admin: still accept payload playerId but verify it exists
   const playerId = mustBeNonEmptyString(payload?.playerId, "playerId");
   assertUserCanActAsPlayer(user, roomCode, playerId);
   return { roomCode, playerId };
@@ -1763,6 +1921,254 @@ app.post("/api/games/candy/launch-resolve", async (req, res) => {
   }
 });
 
+// ── Integration launch (provider → CandyWeb) ──────────────────────────
+app.post("/api/integration/launch", async (req, res) => {
+  try {
+    if (!integrationLaunchHandler) {
+      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
+    }
+    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
+    const result = await integrationLaunchHandler.launch(req.body ?? {});
+    apiSuccess(res, result);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+// ── Integration: session lifecycle (BIN-29) ─────────────────────────────
+app.post("/api/integration/session/kill", async (req, res) => {
+  try {
+    if (!integrationLaunchHandler) {
+      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
+    }
+    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
+    const { playerId, provider } = req.body ?? {};
+    if (!playerId || typeof playerId !== "string") {
+      throw new DomainError("INVALID_INPUT", "playerId mangler.");
+    }
+    const result = await integrationLaunchHandler.killSession(playerId, provider);
+    apiSuccess(res, result);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.post("/api/integration/session/refresh", async (req, res) => {
+  try {
+    if (!integrationLaunchHandler) {
+      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
+    }
+    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
+    const { playerId, extensionMinutes, provider } = req.body ?? {};
+    if (!playerId || typeof playerId !== "string") {
+      throw new DomainError("INVALID_INPUT", "playerId mangler.");
+    }
+    const result = await integrationLaunchHandler.refreshSession(playerId, extensionMinutes, provider);
+    apiSuccess(res, result);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+// ── Integration admin: active sessions (BIN-29) ────────────────────────
+app.get("/api/admin/integration/sessions", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "INTEGRATION_READ");
+    if (!integrationLaunchHandler) {
+      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
+    }
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    const offset = parseInt(req.query.offset as string, 10) || 0;
+    const result = await integrationLaunchHandler.listActiveSessions({ limit, offset });
+    apiSuccess(res, result);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+// ── Integration admin: player mappings (BIN-30) ────────────────────────
+app.get("/api/admin/integration/mappings", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "INTEGRATION_READ");
+    if (!integrationLaunchHandler) {
+      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
+    }
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+    const offset = parseInt(req.query.offset as string, 10) || 0;
+    const provider = (req.query.provider as string)?.trim() || undefined;
+    const result = await integrationLaunchHandler.listMappings({ limit, offset, provider });
+    apiSuccess(res, result);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/integration/mappings/:provider/:externalPlayerId", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "INTEGRATION_READ");
+    if (!integrationLaunchHandler) {
+      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
+    }
+    const mapping = await integrationLaunchHandler.getMapping(req.params.provider, req.params.externalPlayerId);
+    if (!mapping) {
+      throw new DomainError("NOT_FOUND", "Spillerkobling ikke funnet.");
+    }
+    apiSuccess(res, mapping);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+// ── Integration: provider statistics API (BIN-36) ──────────────────────
+app.get("/api/integration/statistics", async (req, res) => {
+  try {
+    if (!integrationLaunchHandler) {
+      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
+    }
+    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
+
+    const date = typeof req.query.date === "string" ? req.query.date.trim() : new Date().toISOString().slice(0, 10);
+    const hallId = typeof req.query.hallId === "string" ? req.query.hallId.trim() : undefined;
+
+    const report = engine.generateDailyReport({ date, hallId });
+    const rtp = report.totals.grossTurnover > 0
+      ? (report.totals.prizesPaid / report.totals.grossTurnover) * 100
+      : 0;
+
+    apiSuccess(res, {
+      date: report.date,
+      generatedAt: report.generatedAt,
+      summary: {
+        grossTurnover: report.totals.grossTurnover,
+        prizesPaid: report.totals.prizesPaid,
+        netRevenue: report.totals.net,
+        rtpPercent: Math.round(rtp * 100) / 100,
+        totalRounds: report.totals.stakeCount,
+        prizeEvents: report.totals.prizeCount
+      },
+      breakdown: report.rows.map((row) => ({
+        hallId: row.hallId,
+        gameType: row.gameType,
+        channel: row.channel,
+        grossTurnover: row.grossTurnover,
+        prizesPaid: row.prizesPaid,
+        netRevenue: row.net,
+        rtpPercent: row.grossTurnover > 0
+          ? Math.round((row.prizesPaid / row.grossTurnover) * 10000) / 100
+          : 0,
+        roundCount: row.stakeCount,
+        prizeCount: row.prizeCount
+      }))
+    });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+// ── Integration admin: webhook delivery log (BIN-34) ───────────────────
+app.get("/api/admin/integration/webhooks", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "INTEGRATION_READ");
+    if (!webhookService) {
+      throw new DomainError("INTEGRATION_DISABLED", "Webhook-service er ikke aktivert.");
+    }
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
+    apiSuccess(res, { deliveries: webhookService.getRecentDeliveries(limit) });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+// ── Integration admin: reconciliation (BIN-27) ─────────────────────────
+app.post("/api/admin/integration/reconciliation/run", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "INTEGRATION_READ");
+    if (!reconciliationService) {
+      throw new DomainError("INTEGRATION_DISABLED", "Reconciliation er ikke tilgjengelig.");
+    }
+    const hours = Math.min(parseInt(req.body?.hours as string, 10) || 24, 168);
+    const report = await reconciliationService.reconcileLastHours(hours);
+    apiSuccess(res, report);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/integration/reconciliation/reports", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "INTEGRATION_READ");
+    if (!reconciliationService) {
+      throw new DomainError("INTEGRATION_DISABLED", "Reconciliation er ikke tilgjengelig.");
+    }
+    apiSuccess(res, { reports: reconciliationService.getReports() });
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+app.get("/api/admin/integration/reconciliation/latest", async (req, res) => {
+  try {
+    await requireAdminPermissionUser(req, "INTEGRATION_READ");
+    if (!reconciliationService) {
+      throw new DomainError("INTEGRATION_DISABLED", "Reconciliation er ikke tilgjengelig.");
+    }
+    const report = reconciliationService.getLatestReport();
+    if (!report) {
+      throw new DomainError("NOT_FOUND", "Ingen reconciliation-rapport funnet. Kjør en rapport først.");
+    }
+    apiSuccess(res, report);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+// ── BIN-120: Integration health-check endpoint ─────────────────────────
+app.get("/api/integration/health", async (req, res) => {
+  try {
+    if (!integrationLaunchHandler) {
+      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
+    }
+    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
+
+    const health: Record<string, unknown> = {
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      integration: { enabled: true },
+      wallet: {
+        provider: walletRuntime.provider,
+        status: "unknown" as string,
+      },
+      webhook: {
+        configured: !!webhookService,
+        recentDeliveries: webhookService ? webhookService.getRecentDeliveries(5).length : 0,
+      },
+      reconciliation: {
+        configured: !!reconciliationService,
+        latestReport: reconciliationService ? reconciliationService.getLatestReport()?.status ?? "no_reports" : "disabled",
+      },
+    };
+
+    // Probe wallet health by fetching a dummy balance (catches circuit breaker state).
+    if (walletRuntime.provider === "external") {
+      try {
+        await walletAdapter.getBalance("__health-check__");
+        (health.wallet as Record<string, unknown>).status = "ok";
+      } catch (err) {
+        const walletErr = err as { code?: string; message?: string };
+        (health.wallet as Record<string, unknown>).status = "degraded";
+        (health.wallet as Record<string, unknown>).error = walletErr.code ?? walletErr.message;
+        health.status = "degraded";
+      }
+    } else {
+      (health.wallet as Record<string, unknown>).status = "ok";
+    }
+
+    apiSuccess(res, health);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
 app.get("/api/admin/games", async (req, res) => {
   try {
     await requireAdminPermissionUser(req, "GAME_CATALOG_READ");
@@ -2344,6 +2750,7 @@ app.post("/api/wallet/me/timed-pause", async (req, res) => {
       walletId: user.walletId,
       durationMinutes: durationMinutes ?? 15
     });
+    sendComplianceWebhook("compliance.timedPause", user.id, { durationMinutes: durationMinutes ?? 15 });
     apiSuccess(res, compliance);
   } catch (error) {
     apiFailure(res, error);
@@ -2364,6 +2771,7 @@ app.post("/api/wallet/me/self-exclusion", async (req, res) => {
   try {
     const user = await getAuthenticatedUser(req);
     const compliance = engine.setSelfExclusion(user.walletId);
+    sendComplianceWebhook("compliance.selfExclusion", user.id, {});
     apiSuccess(res, compliance);
   } catch (error) {
     apiFailure(res, error);
@@ -3250,6 +3658,11 @@ io.on("connection", (socket: Socket) => {
 app.get("*", (_req, res) => {
   if (_req.path === "/admin" || _req.path === "/admin/") {
     res.sendFile(adminFrontendFile);
+    return;
+  }
+  // CandyWeb SPA: serve index.html for all /web/* routes that aren't static assets.
+  if (_req.path.startsWith("/web")) {
+    res.sendFile(candyWebIndexFile);
     return;
   }
   res.sendFile(path.join(frontendDir, "index.html"));

@@ -84,29 +84,33 @@
 <!-- iCheck -->
 <script src="/vendors/iCheck/icheck.min.js"></script>
 <!-- Form validator -->
-<script src="//cdnjs.cloudflare.com/ajax/libs/jquery-form-validator/2.3.26/jquery.form-validator.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-form-validator/2.3.26/jquery.form-validator.min.js"></script>
 <script>
-  $(function () {
-    $('input').iCheck({
-      checkboxClass: 'icheckbox_square-blue',
-      radioClass: 'iradio_square-blue',
-      increaseArea: '20%' /* optional */
+  if (typeof $ !== 'undefined') {
+    $(function () {
+      $('input').iCheck({
+        checkboxClass: 'icheckbox_square-blue',
+        radioClass: 'iradio_square-blue',
+        increaseArea: '20%' /* optional */
+      });
+      $.validate({
+        modules : 'location, date, security, file',
+      });
     });
-    $.validate({
-      modules : 'location, date, security, file',
-    });
-  });
+  }
 
   function viewpassword(){
-    if($("#viewpassword").hasClass("glyphicon-eye-open")){
-      $("#password").attr("type", "text");
-      $("#viewpassword").removeClass("glyphicon-eye-open");
-      $("#viewpassword").addClass("glyphicon-eye-close");
-    }
-    else if($("#viewpassword").hasClass("glyphicon-eye-close")){
-      $("#password").attr("type", "password");
-      $("#viewpassword").removeClass("glyphicon-eye-close");
-      $("#viewpassword").addClass("glyphicon-eye-open");
+    var el = document.getElementById('viewpassword');
+    var pwd = document.getElementById('password');
+    if (!el || !pwd) return;
+    if (el.classList.contains('glyphicon-eye-open')) {
+      pwd.type = 'text';
+      el.classList.remove('glyphicon-eye-open');
+      el.classList.add('glyphicon-eye-close');
+    } else if (el.classList.contains('glyphicon-eye-close')) {
+      pwd.type = 'password';
+      el.classList.remove('glyphicon-eye-close');
+      el.classList.add('glyphicon-eye-open');
     }
   }
 </script>

@@ -86,7 +86,7 @@
                 "data": "photo",
                 render: function(data, type, row) {
                     return `<div class="image imagewidthSet">
-                                <img src="/profile/bingo/` + row.photo + `" alt="` + row.name + ` "style="width: 60%;"/>
+                                <img src="` + (row.photo && row.photo.startsWith('http') ? row.photo : '/profile/bingo/' + row.photo) + `" alt="` + row.name + ` "style="width: 60%;"/>
                             </div>`;
                 }
             }, {

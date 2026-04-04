@@ -1458,8 +1458,12 @@ export class PlatformService {
 
       await client.query(
         `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
-         VALUES ('candy', 'Candy', 'Candy-spillet (Unity) er under integrasjon mot realtime backend.', '/candy', true, 1, '{}'::jsonb)
-         ON CONFLICT (slug) DO NOTHING`
+         VALUES ('candy', 'Candy', 'Candy-spillet med realtime backend og web-frontend (candy-web).', '/candy', true, 1, '{"launchUrl":"/web/"}'::jsonb)
+         ON CONFLICT (slug) DO UPDATE SET settings_json = COALESCE(
+           CASE WHEN (${this.gamesTable()}.settings_json->>'launchUrl') IS NULL
+                THEN ${this.gamesTable()}.settings_json || '{"launchUrl":"/web/"}'::jsonb
+                ELSE ${this.gamesTable()}.settings_json
+           END, ${this.gamesTable()}.settings_json)`
       );
       await client.query(
         `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
@@ -1468,7 +1472,7 @@ export class PlatformService {
       );
       await client.query(
         `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
-         VALUES ('roma', 'Roma', 'Roma-spillet (Unity) med samme realtime-logikk som Candy.', '/roma', true, 3, '{}'::jsonb)
+         VALUES ('roma', 'Roma', 'Roma-spillet med samme realtime-logikk som Candy.', '/roma', true, 3, '{}'::jsonb)
          ON CONFLICT (slug) DO NOTHING`
       );
 

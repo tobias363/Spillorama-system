@@ -1,0 +1,169 @@
+services:
+  - type: web
+    name: bingo-system
+    runtime: node
+    region: frankfurt
+    plan: starter
+    rootDir: bingo_in_20_3_26_latest
+    buildCommand: npm install && npm install connect-redis@6.1.3
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: SESSION_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: DB_CONNECTION_TYPE
+        value: production
+      - key: DB_MODE
+        value: production
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: REDIS_TLS
+        value: "true"
+      - key: MSSQL_DB_SERVER
+        sync: false
+      - key: MSSQL_DB_DATABASE
+        sync: false
+      - key: MSSQL_DB_PORT
+        sync: false
+      - key: MSSQL_DB_USERNAME
+        sync: false
+      - key: MSSQL_DB_PASSWORD
+        sync: false
+      - key: DEFAULT_ADMIN_USER_LOGIN_EMAIL
+        sync: false
+      - key: DEFAULT_ADMIN_USER_LOGIN_PASSWORD
+        sync: false
+      - key: VERIFONE_ENTITY_ID
+        sync: false
+      - key: VERIFONE_CONTRACT_ID
+        sync: false
+      - key: VERIFONE_USER_ID
+        sync: false
+      - key: VERIFONE_API_ID
+        sync: false
+      - key: METRONIA_API_URL
+        sync: false
+      - key: METRONIA_API_TOKEN_TEST
+        sync: false
+      - key: IDKOLLEN_URL
+        sync: false
+      - key: IDKOLLEN_API_KEY
+        sync: false
+      - key: IDKOLLEN_SECRET
+        sync: false
+      - key: SVEVE_USERNAME
+        sync: false
+      - key: SVEVE_PASSWORD
+        sync: false
+      - key: SVEVE_SENDER
+        sync: false
+      - key: SWEDBANKPAY_PAYEE_ID
+        sync: false
+      - key: SWEDBANKPAY_TOKEN
+        sync: false
+      - key: SWEDBANKPAY_PAYEE_NAME
+        sync: false
+      - key: SWEDBANKPAY_PAYMENT_API_URL
+        sync: false
+      - key: SWEDBANKPAY_PAYMENT_CURRENCY_CODE
+        value: NOK
+      - key: SWEDBANKPAY_HOST_URLS
+        sync: false
+      - key: SWEDBANKPAY_PAYMENT_URL
+        sync: false
+      - key: SWEDBANKPAY_COMPLETE_URL
+        sync: false
+      - key: SWEDBANKPAY_CANCEL_URL
+        sync: false
+      - key: SWEDBANKPAY_CALLBACK_URL
+        sync: false
+      - key: SWEDBANKPAY_TERMS_OF_SERVICE_URL
+        sync: false
+      - key: FIREBASE_ADMIN_DB_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+  - type: web
+    name: candy-backend
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: staging
+    rootDir: .
+    buildCommand: npm --prefix backend run build
+    startCommand: npm --prefix backend run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: WALLET_PROVIDER
+        value: file
+      - key: INTEGRATION_ENABLED
+        value: "false"
+
+  # ── BIN-121: Staging candy-backend with integration enabled ──────
+  - type: web
+    name: candy-backend-staging
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: staging
+    rootDir: .
+    buildCommand: npm --prefix backend run build
+    startCommand: npm --prefix backend run start
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: WALLET_PROVIDER
+        value: external
+      - key: INTEGRATION_ENABLED
+        value: "true"
+      - key: WALLET_API_BASE_URL
+        sync: false
+      - key: WALLET_API_KEY
+        sync: false
+      - key: WALLET_API_TIMEOUT_MS
+        value: "5000"
+      - key: ALLOWED_EMBED_ORIGINS
+        sync: false
+      - key: INTEGRATION_WEBHOOK_URL
+        sync: false
+      - key: INTEGRATION_WEBHOOK_SECRET
+        sync: false
+      - key: INTEGRATION_API_KEY
+        sync: false
+      - key: INTEGRATION_DEFAULT_HALL_ID
+        value: hall-default
+      - key: INTEGRATION_CANDY_FRONTEND_URL
+        sync: false
+      - key: INTEGRATION_CANDY_API_BASE_URL
+        sync: false

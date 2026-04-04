@@ -30,6 +30,8 @@ export interface ClaimRecord {
   rtpBudgetBefore?: number;
   rtpBudgetAfter?: number;
   rtpCapped?: boolean;
+  /** BIN-45: Wallet transaction IDs for idempotency tracking. */
+  payoutTransactionIds?: string[];
   createdAt: string;
 }
 

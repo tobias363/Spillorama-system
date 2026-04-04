@@ -672,6 +672,22 @@ export class BingoEngine {
     const game = this.requireRunningGame(room);
     const player = this.requirePlayer(room, input.playerId);
     this.assertWalletAllowedForGameplay(player.walletId, Date.now());
+
+    // BIN-45: Idempotency — if this player already has a paid-out claim of the
+    // same type in this game, return the existing claim instead of processing again.
+    // This prevents double payouts when the client retries after a network error.
+    const existingClaim = game.claims.find(
+      (c) =>
+        c.playerId === player.id &&
+        c.type === input.type &&
+        c.valid &&
+        c.payoutAmount !== undefined &&
+        c.payoutAmount > 0
+    );
+    if (existingClaim) {
+      return existingClaim;
+    }
+
     const playerTickets = game.tickets.get(player.id);
     const playerMarks = game.marks.get(player.id);
     if (
@@ -791,6 +807,23 @@ export class BingoEngine {
           sourceAccountId: houseAccountId,
           txIds: [transfer.fromTx.id, transfer.toTx.id]
         });
+        // BIN-45: Store transaction IDs for idempotency tracking
+        claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
+        // BIN-48: Synchronous checkpoint after payout — ensures state is persisted
+        if (this.bingoAdapter.onCheckpoint) {
+          try {
+            await this.bingoAdapter.onCheckpoint({
+              roomCode: room.code,
+              gameId: game.id,
+              reason: "PAYOUT",
+              claimId: claim.id,
+              payoutAmount: payout,
+              transactionIds: [transfer.fromTx.id, transfer.toTx.id]
+            });
+          } catch (err) {
+            console.error(`CRITICAL: Checkpoint failed after LINE payout (claim ${claim.id}, game ${game.id}):`, err);
+          }
+        }
       }
       const rtpBudgetAfter = this.roundCurrency(Math.max(0, game.remainingPayoutBudget));
       claim.payoutAmount = payout;
@@ -861,6 +894,23 @@ export class BingoEngine {
           sourceAccountId: houseAccountId,
           txIds: [transfer.fromTx.id, transfer.toTx.id]
         });
+        // BIN-45: Store transaction IDs for idempotency tracking
+        claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
+        // BIN-48: Synchronous checkpoint after payout — ensures state is persisted
+        if (this.bingoAdapter.onCheckpoint) {
+          try {
+            await this.bingoAdapter.onCheckpoint({
+              roomCode: room.code,
+              gameId: game.id,
+              reason: "PAYOUT",
+              claimId: claim.id,
+              payoutAmount: payout,
+              transactionIds: [transfer.fromTx.id, transfer.toTx.id]
+            });
+          } catch (err) {
+            console.error(`CRITICAL: Checkpoint failed after BINGO payout (claim ${claim.id}, game ${game.id}):`, err);
+          }
+        }
       }
       game.remainingPrizePool = this.roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = this.roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
@@ -903,6 +953,19 @@ export class BingoEngine {
     game.endedAt = endedAt.toISOString();
     game.endedReason = input.reason?.trim() || "MANUAL_END";
     this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+
+    // BIN-48: Synchronous checkpoint after game end
+    if (this.bingoAdapter.onCheckpoint) {
+      try {
+        await this.bingoAdapter.onCheckpoint({
+          roomCode: room.code,
+          gameId: game.id,
+          reason: "GAME_END"
+        });
+      } catch (err) {
+        console.error(`CRITICAL: Checkpoint failed after game end (game ${game.id}):`, err);
+      }
+    }
   }
 
   getRoomSnapshot(roomCode: string): RoomSnapshot {
@@ -2147,6 +2210,22 @@ export class BingoEngine {
 
     for (const [walletId, hallId] of walletToHall.entries()) {
       this.finishPlaySession(walletId, hallId, endedAtMs);
+    }
+
+    // Fire onGameEnded callback (non-blocking).
+    if (this.bingoAdapter.onGameEnded) {
+      this.bingoAdapter.onGameEnded({
+        roomCode: room.code,
+        hallId: room.hallId,
+        gameId: game.id,
+        entryFee: game.entryFee,
+        endedReason: game.endedReason ?? "UNKNOWN",
+        drawnNumbers: [...game.drawnNumbers],
+        claims: [...game.claims],
+        playerIds: [...game.tickets.keys()]
+      }).catch((err) => {
+        console.error("[BingoEngine] onGameEnded callback failed:", err);
+      });
     }
   }
 
