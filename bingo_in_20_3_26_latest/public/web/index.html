@@ -50,6 +50,9 @@
     #game-overlay-back:hover {
       background: rgba(0,0,0,0.85);
     }
+    /* BIN-134: Skjul CandyMania-tile til bruker er innlogget */
+    #ext-games-wrap { display: none !important; }
+    body.player-authenticated #ext-games-wrap { display: flex !important; }
   </style>
 
   <!-- Firebase SDKs -->
