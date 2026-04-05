@@ -141,23 +141,25 @@ router.get('/api/integration/auth-beacon', async (req, res) => {
       }
     }
 
-    // No player found via authToken — debug: show what's in MongoDB
-    const debugPlayer = await Sys.Game.Common.Services.PlayerServices.getOneByData(
-      { username: 'martin' },
-      { _id: 1, username: 1, socketId: 1, 'otherData.authToken': 1, otherData: 1 }
-    );
+    // Debug: list all non-bot players in DB to understand what exists
+    const mongoose = require('mongoose');
+    const Player = mongoose.model('player');
+    const allPlayers = await Player.find(
+      { userType: { $ne: 'Bot' } },
+      { _id: 1, username: 1, socketId: 1, name: 1 }
+    ).limit(20).lean();
     return res.json({
       authenticated: false,
       reason: 'no-active-player',
-      debug: debugPlayer ? {
-        playerId: debugPlayer._id?.toString(),
-        username: debugPlayer.username,
-        socketId: debugPlayer.socketId || 'empty',
-        hasOtherData: !!debugPlayer.otherData,
-        otherDataKeys: debugPlayer.otherData ? Object.keys(debugPlayer.otherData) : [],
-        hasAuthToken: !!(debugPlayer.otherData?.authToken),
-        authTokenPreview: debugPlayer.otherData?.authToken ? debugPlayer.otherData.authToken.substring(0, 20) + '...' : null
-      } : 'no-player-named-martin'
+      debug: {
+        totalNonBotPlayers: allPlayers.length,
+        players: allPlayers.map(p => ({
+          id: p._id?.toString(),
+          username: p.username,
+          name: p.name,
+          socketId: p.socketId || ''
+        }))
+      }
     });
   } catch (err) {
     console.error('auth-beacon endpoint error:', err.message);
