@@ -15,22 +15,6 @@ const Sys = require('../../Boot/Sys');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// BIN-134 DIAG: Capture recent console.log for debugging
-const _diagLogs = [];
-const _origLog = console.log;
-console.log = function(...args) {
-  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-  if (msg.includes('BIN-134') || msg.includes('Reconnect') || msg.includes('Login') || msg.includes('common.js')) {
-    _diagLogs.push({ t: Date.now(), m: msg });
-    if (_diagLogs.length > 50) _diagLogs.shift();
-  }
-  _origLog.apply(console, args);
-};
-
-router.get('/api/integration/diag-logs', (req, res) => {
-  res.json({ logs: _diagLogs });
-});
-
 // ─── Middleware: Verifiser JWT ────────────────────────────────────────────────
 function verifyIntegrationToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -50,26 +34,7 @@ function verifyIntegrationToken(req, res, next) {
 
 // ─── GET /api/integration/health ─────────────────────────────────────────────
 router.get('/api/integration/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: Date.now(),
-    version: 'diag10',
-    sysType: typeof Sys,
-    sysKeys: Object.keys(Sys).slice(0, 20),
-    connectedPlayers: Sys.ConnectedPlayers ? Object.keys(Sys.ConnectedPlayers) : 'undefined',
-    authStore: Sys._authStore ? Object.keys(Sys._authStore) : 'undefined',
-    debugReconnect: Sys._debugReconnect || 'not-set',
-    // Check ALL namespaces for connected sockets
-    ioNamespaces: Sys.Io ? Object.keys(Sys.Io.nsps || {}).map(ns => {
-      const nsp = Sys.Io.nsps[ns];
-      const connected = nsp.connected || nsp.sockets || {};
-      const socketIds = connected instanceof Map ? Array.from(connected.keys()) : Object.keys(connected);
-      return { ns, count: socketIds.length, sockets: socketIds.slice(0, 3).map(id => {
-        const s = connected instanceof Map ? connected.get(id) : connected[id];
-        return { id, playerId: s?.playerId, hasAuthToken: !!s?.authToken };
-      })};
-    }) : 'no-io'
-  });
+  res.json({ status: 'ok', timestamp: Date.now() });
 });
 
 // ─── GET /api/integration/auth-beacon ───────────────────────────────────────
@@ -141,26 +106,7 @@ router.get('/api/integration/auth-beacon', async (req, res) => {
       }
     }
 
-    // Debug: list all non-bot players in DB to understand what exists
-    const mongoose = require('mongoose');
-    const Player = mongoose.model('player');
-    const allPlayers = await Player.find(
-      { userType: { $ne: 'Bot' } },
-      { _id: 1, username: 1, socketId: 1, name: 1 }
-    ).limit(20).lean();
-    return res.json({
-      authenticated: false,
-      reason: 'no-active-player',
-      debug: {
-        totalNonBotPlayers: allPlayers.length,
-        players: allPlayers.map(p => ({
-          id: p._id?.toString(),
-          username: p.username,
-          name: p.name,
-          socketId: p.socketId || ''
-        }))
-      }
-    });
+    return res.json({ authenticated: false, reason: 'no-active-player' });
   } catch (err) {
     console.error('auth-beacon endpoint error:', err.message);
     return res.json({ authenticated: false, reason: 'error: ' + err.message });
@@ -376,93 +322,93 @@ router.post('/api/integration/wallet/credit', verifyIntegrationToken, async (req
   }
 });
 
-// ─── POST /api/integration/seed-test-player ─────────────────────────────────
-// TEMPORARY: Create a test player so auth-beacon + wallet bridge can work.
-// Remove this endpoint once real player data is in the database.
-router.post('/api/integration/seed-test-player', async (req, res) => {
-  try {
-    const bcrypt = require('bcryptjs');
-    const mongoose = require('mongoose');
-    const Player = mongoose.model('player');
-
-    const username = req.body.username || 'martin';
-    const password = req.body.password || 'martin';
-
-    // Check if player already exists
-    const existing = await Player.findOne({ username }).lean();
-    if (existing) {
-      // Update: ensure authToken is set and wallet has balance
-      const token = jwt.sign({ id: existing._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
-      await Player.updateOne(
-        { _id: existing._id },
-        {
-          $set: {
-            'otherData.authToken': token,
-            walletAmount: existing.walletAmount || 1000,
-            socketId: 'seed-placeholder'
-          }
-        }
-      );
-      return res.json({
-        success: true,
-        action: 'updated',
-        playerId: existing._id.toString(),
-        username,
-        token
-      });
-    }
-
-    // Create new player
-    const hashedPassword = bcrypt.hashSync(password, 10);
-    const newPlayer = new Player({
-      username: username,
-      password: hashedPassword,
-      name: username,
-      walletAmount: 1000,
-      userType: 'Online',
-      hallId: [],
-      status: 'Active',
-      socketId: 'seed-placeholder',
-      otherData: {
-        authToken: null // will be set below
-      }
-    });
-
-    const saved = await newPlayer.save();
-    const token = jwt.sign({ id: saved._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
-
-    // Store the token on the player
-    await Player.updateOne(
-      { _id: saved._id },
-      { $set: { 'otherData.authToken': token } }
-    );
-
-    res.json({
-      success: true,
-      action: 'created',
-      playerId: saved._id.toString(),
-      username,
-      walletAmount: 1000,
-      token
-    });
-  } catch (err) {
-    console.error('seed-test-player error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 // ─── GET /api/integration/candy-launch ──────────────────────────────────────
-// Proxy-kall til candy-backend for å hente en fersk launch-token.
-// Lobbyen kaller dette når spilleren trykker "Spill nå" på CandyMania-tilen.
-// Admin-tokenet brukes server-side mot candy-backend; spilleren trenger kun
-// å være innlogget i bingo-systemet (verifisert via auth-beacon).
+// Proxy-kall til candy-backend for å starte CandyMania for en innlogget spiller.
+// Bruker IntegrationLaunchHandler via /api/integration/launch (med X-API-Key)
+// for å opprette spillerkobling, wallet-konto, sesjon og launch-token.
+// Faller tilbake til enkel admin-token-flyt dersom integration mode ikke er aktivt.
 const CANDY_BACKEND_URL = process.env.CANDY_BACKEND_URL || 'https://bingosystem-staging.onrender.com';
 const CANDY_ADMIN_TOKEN = process.env.CANDY_ADMIN_TOKEN || '';
+const CANDY_INTEGRATION_API_KEY = process.env.CANDY_INTEGRATION_API_KEY || '';
 
 router.get('/api/integration/candy-launch', async (req, res) => {
   try {
+    // Hent innlogget spiller fra auth-beacon (MongoDB)
+    let playerId = null;
+    let sessionToken = null;
+
+    const connected = Sys.ConnectedPlayers;
+    if (connected && typeof connected === 'object') {
+      const playerIds = Object.keys(connected);
+      if (playerIds.length > 0) {
+        playerId = playerIds[0];
+        const authEntry = Sys._authStore && Sys._authStore[playerId];
+        sessionToken = authEntry ? authEntry.token : null;
+      }
+    }
+
+    // Fallback: Finn spiller i MongoDB
+    if (!playerId) {
+      const activePlayer = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+        { 'otherData.authToken': { $exists: true, $ne: null }, userType: { $ne: 'Bot' } },
+        { _id: 1, 'otherData.authToken': 1 }
+      );
+      if (activePlayer) {
+        playerId = activePlayer._id.toString();
+        sessionToken = activePlayer.otherData?.authToken;
+      }
+    }
+
+    if (!playerId) {
+      return res.status(401).json({ success: false, error: 'Ingen innlogget spiller funnet' });
+    }
+
+    // Strategi 1: Prøv IntegrationLaunchHandler (full spillerkobling + sesjon)
+    if (CANDY_INTEGRATION_API_KEY) {
+      try {
+        const response = await fetch(CANDY_BACKEND_URL + '/api/integration/launch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': CANDY_INTEGRATION_API_KEY
+          },
+          body: JSON.stringify({
+            playerId: playerId,
+            sessionToken: sessionToken || 'bingo-session-' + playerId
+          })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.ok !== false) {
+          const result = data.data || data;
+          const embedUrl = result.embedUrl || result.launchUrl;
+          const launchToken = result.launchToken;
+
+          // Bygg iframe-URL
+          let iframeUrl;
+          if (embedUrl) {
+            iframeUrl = embedUrl;
+          } else if (launchToken) {
+            iframeUrl = CANDY_BACKEND_URL + '/candy/#lt=' + encodeURIComponent(launchToken);
+          }
+
+          if (iframeUrl) {
+            return res.json({
+              success: true,
+              data: { iframeUrl, expiresAt: result.expiresAt }
+            });
+          }
+        }
+        // Hvis integration launch feilet, fall gjennom til strategi 2
+        console.warn('Integration launch returned unexpected response, falling back to admin token');
+      } catch (integrationErr) {
+        console.warn('Integration launch failed, falling back to admin token:', integrationErr.message);
+      }
+    }
+
+    // Strategi 2: Fallback til enkel admin-token-flyt
     if (!CANDY_ADMIN_TOKEN) {
-      return res.status(503).json({ success: false, error: 'CANDY_ADMIN_TOKEN not configured' });
+      return res.status(503).json({ success: false, error: 'Candy launch not configured' });
     }
 
     const response = await fetch(CANDY_BACKEND_URL + '/api/games/candy/launch-token', {
@@ -485,10 +431,7 @@ router.get('/api/integration/candy-launch', async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        iframeUrl: iframeUrl,
-        expiresAt: data.data.expiresAt
-      }
+      data: { iframeUrl, expiresAt: data.data.expiresAt }
     });
   } catch (err) {
     console.error('candy-launch proxy error:', err);

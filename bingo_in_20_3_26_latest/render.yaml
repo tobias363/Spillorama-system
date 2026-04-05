@@ -98,3 +98,5 @@ services:
         value: https://bingosystem-staging.onrender.com
       - key: CANDY_ADMIN_TOKEN
         sync: false
+      - key: CANDY_INTEGRATION_API_KEY
+        sync: false
