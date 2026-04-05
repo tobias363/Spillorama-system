@@ -257,27 +257,38 @@
 
     let existingTab = null;
 
-    // ─── BIN-134: Auth-beacon — venter på Unity-login ──────────────────────────
-    // Starter IKKE polling med en gang — venter til brukeren har klikket på
-    // Unity-canvasen (indikerer at de har logget inn).
+    // ─── BIN-134: Auth-beacon — venter på Unity-interaksjon ─────────────────────
+    // Starter polling etter at brukeren har interagert med Unity-canvasen
+    // (mousedown fanges bedre enn click fordi Unity konsumerer click-events).
     (function() {
-      var canvasClicks = 0;
       var pollingStarted = false;
-      var unityCanvas = document.getElementById('unity-canvas');
 
+      function onCanvasInteraction() {
+        if (pollingStarted || _playerToken) return;
+        pollingStarted = true;
+        // Vent 2 sekunder etter interaksjon (tid til å logge inn)
+        setTimeout(startAuthBeaconPolling, 2000);
+      }
+
+      // Lytt på flere event-typer for å fange interaksjon
+      var unityCanvas = document.getElementById('unity-canvas');
       if (unityCanvas) {
-        unityCanvas.addEventListener('click', function() {
-          canvasClicks++;
-          // Etter 3+ klikk (brukernavn, passord, logg inn) → start polling
-          if (canvasClicks >= 3 && !pollingStarted && !_playerToken) {
+        unityCanvas.addEventListener('mousedown', onCanvasInteraction);
+        unityCanvas.addEventListener('touchstart', onCanvasInteraction);
+      }
+      // Fallback: start polling 15s etter Unity har lastet ferdig
+      // (for auto-login tilfeller der brukeren allerede er innlogget)
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          if (!pollingStarted && !_playerToken) {
             pollingStarted = true;
             startAuthBeaconPolling();
           }
-        });
-      }
+        }, 15000);
+      });
 
       function startAuthBeaconPolling() {
-        console.log('BIN-134: auth-beacon polling starter etter Unity-interaksjon');
+        console.log('BIN-134: auth-beacon polling starter');
         var pollInterval = setInterval(function() {
           if (_playerToken) {
             clearInterval(pollInterval);
