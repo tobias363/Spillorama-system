@@ -396,14 +396,15 @@
       }
     }
 
-    // Tillatte origins for postMessage (CandyMania + egen origin)
+    // Tillatte origins for cross-origin iframe-spill (CandyMania etc.)
     var ALLOWED_GAME_ORIGINS = [
       window.location.origin,
+      'https://candy-backend-ldvg.onrender.com',
       'https://bingosystem-staging.onrender.com'
     ];
 
     window.addEventListener('message', async function(event) {
-      // Sjekk at meldingen kommer fra en tillatt kilde
+      // Sjekk at meldingen kommer fra en tillatt origin
       if (ALLOWED_GAME_ORIGINS.indexOf(event.origin) === -1) return;
       var msg = event.data;
       if (!msg || !msg.type || !msg.type.startsWith('candy:')) return;
@@ -480,10 +481,6 @@
     function OpenUrlInSameTab(url) {
       // BIN-134: Iframe-spill krever innlogging (playerToken settes av Unity etter login)
       if (isIframeGame(url)) {
-        if (!_playerToken) {
-          console.warn('CandyMania blokkert: bruker er ikke innlogget');
-          return;
-        }
         openGameInIframe(url);
         return;
       }
