@@ -10,5 +10,45 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Iframe-modus: skjul connection panel og auto-start spill
+      (function() {
+        var params = new URLSearchParams(window.location.search);
+        if (params.get('embedded') !== '1') return;
+
+        // Skjul connection panel og header via CSS
+        var style = document.createElement('style');
+        style.textContent = [
+          '.connection-panel { display: none !important; }',
+          '.theme1-app__header { display: none !important; }',
+          '.theme1-app__eyebrow { display: none !important; }',
+          '.theme1-app { padding-top: 0 !important; }'
+        ].join('\n');
+        document.head.appendChild(style);
+
+        // Vent til React har mountet, deretter klikk "Bruk mock" automatisk
+        var attempts = 0;
+        var interval = setInterval(function() {
+          attempts++;
+          var buttons = document.querySelectorAll('button');
+          for (var i = 0; i < buttons.length; i++) {
+            if (buttons[i].textContent.trim() === 'Bruk mock') {
+              buttons[i].click();
+              clearInterval(interval);
+              console.log('[CandyWeb] Embedded mode: auto-started mock');
+              return;
+            }
+          }
+          if (attempts > 50) clearInterval(interval);
+        }, 100);
+
+        // Sett opp wallet bridge med parent
+        var token = params.get('accessToken');
+        if (token) {
+          window.parent.postMessage({ type: 'candy:ready' }, '*');
+          console.log('[CandyWeb] Embedded mode: wallet token received');
+        }
+      })();
+    </script>
   </body>
   </html>

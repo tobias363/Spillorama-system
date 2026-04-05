@@ -324,6 +324,12 @@
         }
       }
 
+      // Legg til auth-params slik at CandyWeb kan auto-koble
+      if (_playerToken && resolvedUrl.indexOf('/candy') !== -1) {
+        var sep = resolvedUrl.indexOf('?') === -1 ? '?' : '&';
+        resolvedUrl += sep + 'accessToken=' + encodeURIComponent(_playerToken) + '&embedded=1';
+      }
+
       // Opprett ny iframe
       var iframe = document.createElement('iframe');
       iframe.src = resolvedUrl;
