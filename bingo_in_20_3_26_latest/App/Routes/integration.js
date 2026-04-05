@@ -376,4 +376,79 @@ router.post('/api/integration/wallet/credit', verifyIntegrationToken, async (req
   }
 });
 
+// ─── POST /api/integration/seed-test-player ─────────────────────────────────
+// TEMPORARY: Create a test player so auth-beacon + wallet bridge can work.
+// Remove this endpoint once real player data is in the database.
+router.post('/api/integration/seed-test-player', async (req, res) => {
+  try {
+    const bcrypt = require('bcryptjs');
+    const mongoose = require('mongoose');
+    const Player = mongoose.model('player');
+
+    const username = req.body.username || 'martin';
+    const password = req.body.password || 'martin';
+
+    // Check if player already exists
+    const existing = await Player.findOne({ username }).lean();
+    if (existing) {
+      // Update: ensure authToken is set and wallet has balance
+      const token = jwt.sign({ id: existing._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
+      await Player.updateOne(
+        { _id: existing._id },
+        {
+          $set: {
+            'otherData.authToken': token,
+            walletAmount: existing.walletAmount || 1000,
+            socketId: 'seed-placeholder'
+          }
+        }
+      );
+      return res.json({
+        success: true,
+        action: 'updated',
+        playerId: existing._id.toString(),
+        username,
+        token
+      });
+    }
+
+    // Create new player
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    const newPlayer = new Player({
+      username: username,
+      password: hashedPassword,
+      name: username,
+      walletAmount: 1000,
+      userType: 'Online',
+      hallId: [],
+      status: 'Active',
+      socketId: 'seed-placeholder',
+      otherData: {
+        authToken: null // will be set below
+      }
+    });
+
+    const saved = await newPlayer.save();
+    const token = jwt.sign({ id: saved._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
+
+    // Store the token on the player
+    await Player.updateOne(
+      { _id: saved._id },
+      { $set: { 'otherData.authToken': token } }
+    );
+
+    res.json({
+      success: true,
+      action: 'created',
+      playerId: saved._id.toString(),
+      username,
+      walletAmount: 1000,
+      token
+    });
+  } catch (err) {
+    console.error('seed-test-player error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
