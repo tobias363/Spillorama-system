@@ -99,20 +99,21 @@
         return url;
       }
 
-      // Intercept WebSocket (Unity WASM uses this for Socket.IO)
+      // Intercept WebSocket using Proxy so instanceof checks still pass
+      // and Unity WASM doesn't get a function signature mismatch.
       var _OrigWebSocket = window.WebSocket;
-      window.WebSocket = function(url, protocols) {
-        var newUrl = rewriteUrl(url);
-        if (newUrl !== url) console.log('[WS-Rewrite] ' + OLD_HOST + ' → ' + NEW_HOST);
-        return protocols !== undefined
-          ? new _OrigWebSocket(newUrl, protocols)
-          : new _OrigWebSocket(newUrl);
-      };
-      window.WebSocket.prototype = _OrigWebSocket.prototype;
-      window.WebSocket.CONNECTING = _OrigWebSocket.CONNECTING;
-      window.WebSocket.OPEN = _OrigWebSocket.OPEN;
-      window.WebSocket.CLOSING = _OrigWebSocket.CLOSING;
-      window.WebSocket.CLOSED = _OrigWebSocket.CLOSED;
+      window.WebSocket = new Proxy(_OrigWebSocket, {
+        construct: function(target, args) {
+          if (args[0]) {
+            var newUrl = rewriteUrl(args[0]);
+            if (newUrl !== args[0]) {
+              console.log('[WS-Rewrite] ' + OLD_HOST + ' → ' + NEW_HOST);
+              args[0] = newUrl;
+            }
+          }
+          return new target(args[0], args[1]);
+        }
+      });
 
       // Intercept XMLHttpRequest (Socket.IO polling fallback)
       var _origXhrOpen = XMLHttpRequest.prototype.open;
