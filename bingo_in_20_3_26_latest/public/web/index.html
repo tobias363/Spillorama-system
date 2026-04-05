@@ -294,11 +294,11 @@
     // Legg til flere spill her etter hvert som de integreres
     const EXTERNAL_GAMES = [
       {
-        // BIN-135: CandyMania — korrekt URL med lobby-token
+        // CandyMania — bruk lokal /candy/ på samme server
         pattern: '/candy/',
-        iframeUrl: 'https://bingosystem-staging.onrender.com/candy/#lt=bwxALM8462CfWuQ9qXJ9Q41Iou6BOf_I'
+        iframeUrl: null
       },
-      { pattern: '/candy-game/', iframeUrl: null /* bruker original URL */ }
+      { pattern: '/candy-game/', iframeUrl: null }
     ];
     const iframeGames = EXTERNAL_GAMES.map(function(g) { return g.pattern; });
 
