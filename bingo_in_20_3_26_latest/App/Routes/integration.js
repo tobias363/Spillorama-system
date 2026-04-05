@@ -95,36 +95,56 @@ router.get('/api/integration/auth-beacon', async (req, res) => {
       }
     }
 
-    // Fallback: Query MongoDB for a player with a recent socketId (= active connection)
-    // Players get socketId set on login/reconnect. A non-empty socketId means active.
-    const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
-      { socketId: { $ne: '' }, 'otherData.authToken': { $exists: true, $ne: null } },
-      { _id: 1, username: 1, 'otherData.authToken': 1 }
+    // Fallback 1: Player with non-empty socketId AND authToken (= actively connected)
+    const activePlayer = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+      { socketId: { $nin: [null, ''] }, 'otherData.authToken': { $exists: true, $ne: null } },
+      { _id: 1, username: 1, 'otherData.authToken': 1, socketId: 1 }
     );
 
-    if (player && player.otherData && player.otherData.authToken) {
+    if (activePlayer && activePlayer.otherData && activePlayer.otherData.authToken) {
       return res.json({
         authenticated: true,
-        playerId: player._id.toString(),
-        token: player.otherData.authToken,
-        source: 'mongodb'
+        playerId: activePlayer._id.toString(),
+        username: activePlayer.username,
+        token: activePlayer.otherData.authToken,
+        source: 'mongodb-active'
       });
     }
 
-    // Debug: try to find ANY player with socketId or authToken
-    const anyPlayer = await Sys.Game.Common.Services.PlayerServices.getOneByData(
-      { username: 'martin' },
-      { _id: 1, username: 1, socketId: 1, 'otherData.authToken': 1 }
+    // Fallback 2: Any player with a valid authToken (socketId may be empty after server restart)
+    const tokenPlayer = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+      { 'otherData.authToken': { $exists: true, $ne: null }, userType: { $ne: 'Bot' } },
+      { _id: 1, username: 1, 'otherData.authToken': 1, socketId: 1 }
     );
+
+    if (tokenPlayer && tokenPlayer.otherData && tokenPlayer.otherData.authToken) {
+      // Verify the stored token is still valid before returning it
+      try {
+        jwt.verify(tokenPlayer.otherData.authToken, JWT_SECRET);
+        return res.json({
+          authenticated: true,
+          playerId: tokenPlayer._id.toString(),
+          username: tokenPlayer.username,
+          token: tokenPlayer.otherData.authToken,
+          source: 'mongodb-token'
+        });
+      } catch (e) {
+        // Token expired — generate a fresh one
+        const freshToken = jwt.sign({ id: tokenPlayer._id.toString() }, JWT_SECRET, { expiresIn: '1d' });
+        return res.json({
+          authenticated: true,
+          playerId: tokenPlayer._id.toString(),
+          username: tokenPlayer.username,
+          token: freshToken,
+          source: 'mongodb-fresh-token'
+        });
+      }
+    }
+
+    // No player found at all — return debug info
     return res.json({
       authenticated: false,
-      reason: 'no-active-player',
-      debug: anyPlayer ? {
-        playerId: anyPlayer._id?.toString(),
-        socketId: anyPlayer.socketId || 'empty',
-        hasAuthToken: !!(anyPlayer.otherData?.authToken),
-        authTokenLength: anyPlayer.otherData?.authToken?.length || 0
-      } : 'martin-not-found'
+      reason: 'no-active-player'
     });
   } catch (err) {
     console.error('auth-beacon endpoint error:', err.message);
