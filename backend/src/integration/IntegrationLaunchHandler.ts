@@ -1,4 +1,4 @@
-import { randomUUID, randomBytes } from "node:crypto";
+import { randomUUID, randomBytes, createHash } from "node:crypto";
 import type { Pool } from "pg";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { CandyLaunchTokenStore } from "../launch/CandyLaunchTokenStore.js";
@@ -386,7 +386,6 @@ export class IntegrationLaunchHandler {
   }
 
   private hashToken(token: string): string {
-    const { createHash } = require("node:crypto") as typeof import("node:crypto");
     return createHash("sha256").update(token).digest("hex");
   }
 
