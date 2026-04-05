@@ -170,6 +170,16 @@ module.exports = function socketInit(Sys, sessionMiddleware) {
 
                 secureSocket(socket, skipJwt);
 
+                // BIN-134: Register common sockets on game namespaces too
+                // Unity connects to game namespaces only, so ReconnectPlayer/LoginPlayer
+                // must be available there for auth-beacon to work.
+                if (!skipJwt && Sys.Game?.Common?.Sockets) {
+                    Object.keys(Sys.Game.Common.Sockets).forEach(key => {
+                        try { Sys.Game.Common.Sockets[key](socket); }
+                        catch (e) { console.error(`[SocketInit][${name}][CommonSockets] Error ${key}:`, e); }
+                    });
+                }
+
                 if (sockets) {
                     Object.keys(sockets).forEach(key => {
                         try { sockets[key](socket); }
