@@ -88,51 +88,10 @@
     // creation and rewrite it to the current host (Render) so all Socket.IO
     // traffic goes through this server instead of the legacy one.
     // This avoids having to rebuild the Unity WebGL build.
-    (function() {
-      var OLD_HOST = 'spillorama.aistechnolabs.info';
-      var NEW_HOST = window.location.host;
-
-      function rewriteUrl(url) {
-        if (typeof url === 'string' && url.indexOf(OLD_HOST) !== -1) {
-          return url.replace(OLD_HOST, NEW_HOST);
-        }
-        return url;
-      }
-
-      // Intercept WebSocket using Proxy so instanceof checks still pass
-      // and Unity WASM doesn't get a function signature mismatch.
-      var _OrigWebSocket = window.WebSocket;
-      window.WebSocket = new Proxy(_OrigWebSocket, {
-        construct: function(target, args) {
-          if (args[0]) {
-            var newUrl = rewriteUrl(args[0]);
-            if (newUrl !== args[0]) {
-              console.log('[WS-Rewrite] ' + OLD_HOST + ' → ' + NEW_HOST);
-              args[0] = newUrl;
-            }
-          }
-          return new target(args[0], args[1]);
-        }
-      });
-
-      // Intercept XMLHttpRequest (Socket.IO polling fallback)
-      var _origXhrOpen = XMLHttpRequest.prototype.open;
-      XMLHttpRequest.prototype.open = function(method, url) {
-        arguments[1] = rewriteUrl(url);
-        return _origXhrOpen.apply(this, arguments);
-      };
-
-      // Intercept fetch (in case Unity or Socket.IO uses it)
-      var _origFetch = window.fetch;
-      window.fetch = function(input, init) {
-        if (typeof input === 'string') {
-          input = rewriteUrl(input);
-        } else if (input && input.url) {
-          input = new Request(rewriteUrl(input.url), input);
-        }
-        return _origFetch.call(window, input, init);
-      };
-    })();
+    // WebSocket URL rewriting is NOT possible without breaking Unity WASM
+    // (Emscripten's invoke_iiii does strict type checks on WebSocket).
+    // Unity connects to the old server — that's fine. Login sets authToken
+    // in shared MongoDB, and auth-beacon reads it from there.
 
     var container = document.querySelector("#unity-container");
     var canvas = document.querySelector("#unity-canvas");
