@@ -1,6 +1,7 @@
 const Sys = require('../../../Boot/Sys');
 
 module.exports = function (Socket) {
+    console.log('[BIN-134-DIAG] common.js socket handler registered for socket:', Socket.id);
     try {
         // Listing of halls, used in register page
         Socket.on("HallList", async function (data, responce) {

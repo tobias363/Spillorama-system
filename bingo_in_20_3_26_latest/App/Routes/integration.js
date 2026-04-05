@@ -15,6 +15,22 @@ const Sys = require('../../Boot/Sys');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+// BIN-134 DIAG: Capture recent console.log for debugging
+const _diagLogs = [];
+const _origLog = console.log;
+console.log = function(...args) {
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  if (msg.includes('BIN-134') || msg.includes('Reconnect') || msg.includes('Login') || msg.includes('common.js')) {
+    _diagLogs.push({ t: Date.now(), m: msg });
+    if (_diagLogs.length > 50) _diagLogs.shift();
+  }
+  _origLog.apply(console, args);
+};
+
+router.get('/api/integration/diag-logs', (req, res) => {
+  res.json({ logs: _diagLogs });
+});
+
 // ─── Middleware: Verifiser JWT ────────────────────────────────────────────────
 function verifyIntegrationToken(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -37,7 +53,7 @@ router.get('/api/integration/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: Date.now(),
-    version: 'diag4',
+    version: 'diag5',
     sysType: typeof Sys,
     sysKeys: Object.keys(Sys).slice(0, 20),
     connectedPlayers: Sys.ConnectedPlayers ? Object.keys(Sys.ConnectedPlayers) : 'undefined',

@@ -86,6 +86,9 @@ module.exports = function socketInit(Sys, sessionMiddleware) {
                 }
 
                 // Replace the original data with sanitized version and continue
+                if (eventName === 'ReconnectPlayer' || eventName === 'LoginPlayer') {
+                    console.log('[BIN-134-DIAG] secureSocket passing event:', eventName, 'socketId:', socket.id, 'playerId:', cleanData?.playerId);
+                }
                 packet.data[1] = cleanData;
                 originalOnevent.call(this, packet);
             };
