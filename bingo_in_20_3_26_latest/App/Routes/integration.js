@@ -53,7 +53,7 @@ router.get('/api/integration/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: Date.now(),
-    version: 'diag9-mongodb-auth',
+    version: 'diag10',
     sysType: typeof Sys,
     sysKeys: Object.keys(Sys).slice(0, 20),
     connectedPlayers: Sys.ConnectedPlayers ? Object.keys(Sys.ConnectedPlayers) : 'undefined',
@@ -111,7 +111,21 @@ router.get('/api/integration/auth-beacon', async (req, res) => {
       });
     }
 
-    return res.json({ authenticated: false, reason: 'no-active-player' });
+    // Debug: try to find ANY player with socketId or authToken
+    const anyPlayer = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+      { username: 'martin' },
+      { _id: 1, username: 1, socketId: 1, 'otherData.authToken': 1 }
+    );
+    return res.json({
+      authenticated: false,
+      reason: 'no-active-player',
+      debug: anyPlayer ? {
+        playerId: anyPlayer._id?.toString(),
+        socketId: anyPlayer.socketId || 'empty',
+        hasAuthToken: !!(anyPlayer.otherData?.authToken),
+        authTokenLength: anyPlayer.otherData?.authToken?.length || 0
+      } : 'martin-not-found'
+    });
   } catch (err) {
     console.error('auth-beacon endpoint error:', err.message);
     return res.json({ authenticated: false, reason: 'error: ' + err.message });
