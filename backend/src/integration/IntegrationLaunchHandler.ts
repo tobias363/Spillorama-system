@@ -484,11 +484,11 @@ export class IntegrationLaunchHandler {
   }
 
   private usersTable(): string {
-    return `"${this.schema}".users`;
+    return `"${this.schema}"."app_users"`;
   }
 
   private sessionsTable(): string {
-    return `"${this.schema}".sessions`;
+    return `"${this.schema}"."app_sessions"`;
   }
 }
 
