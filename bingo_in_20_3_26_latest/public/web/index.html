@@ -261,10 +261,18 @@
         fetch('/api/integration/auth-beacon')
           .then(function(r) { return r.json(); })
           .then(function(data) {
-            if (data && data.authenticated && data.token && !_playerToken) {
-              SetPlayerToken(data.token);
+            if (data && data.authenticated && !_playerToken) {
+              // Token kan mangle om bare ConnectedPlayers er kilde — vis tile uansett
+              if (data.token) {
+                SetPlayerToken(data.token);
+              } else {
+                // Ingen token ennå, men spiller er innlogget — vis tile, poll videre for token
+                document.body.classList.add('player-authenticated');
+                console.log('BIN-134: spiller innlogget (ConnectedPlayers), venter på token');
+                return; // Ikke stopp polling — vi trenger token for wallet
+              }
               clearInterval(pollInterval);
-              console.log('BIN-134: playerToken mottatt via HTTP-polling');
+              console.log('BIN-134: playerToken mottatt via HTTP-polling, kilde:', data.source);
             }
           })
           .catch(function() { /* stille feil — prøver igjen om 3s */ });
@@ -339,9 +347,15 @@
       }
     }
 
+    // Tillatte origins for postMessage (CandyMania + egen origin)
+    var ALLOWED_GAME_ORIGINS = [
+      window.location.origin,
+      'https://bingosystem-staging.onrender.com'
+    ];
+
     window.addEventListener('message', async function(event) {
-      // Sjekk at meldingen kommer fra vår egen iframe
-      if (event.origin !== window.location.origin) return;
+      // Sjekk at meldingen kommer fra en tillatt kilde
+      if (ALLOWED_GAME_ORIGINS.indexOf(event.origin) === -1) return;
       var msg = event.data;
       if (!msg || !msg.type || !msg.type.startsWith('candy:')) return;
 

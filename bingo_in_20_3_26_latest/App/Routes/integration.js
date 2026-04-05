@@ -39,33 +39,61 @@ router.get('/api/integration/health', (req, res) => {
 
 // ─── GET /api/integration/auth-beacon ───────────────────────────────────────
 // BIN-134: HTTP-polling for auth-beacon.
-// Leser fra Sys._authStore (satt av LoginPlayer/PlayerDetails/ReconnectPlayer).
+// Primært: Leser Sys.ConnectedPlayers (garantert populert ved login).
+// Fallback: Sjekker Sys._authStore for token (satt av PlayerController).
 // Returnerer { authenticated: true, token } eller { authenticated: false }.
 // Ingen JWT-verifisering — brukes kun for å oppdage at EN spiller er innlogget.
 router.get('/api/integration/auth-beacon', (req, res) => {
   try {
-    const store = Sys._authStore;
-    if (!store) {
-      return res.json({ authenticated: false, reason: 'no-auth-store' });
-    }
-    // Finn nyeste autentiserte spiller (innen siste 24 timer)
-    const maxAge = 24 * 60 * 60 * 1000;
-    const now = Date.now();
-    const playerIds = Object.keys(store);
-    for (let i = 0; i < playerIds.length; i++) {
-      const entry = store[playerIds[i]];
-      if (entry && entry.token && (now - entry.timestamp) < maxAge) {
+    // Primær kilde: ConnectedPlayers — dette fylles ALLTID ved login og reconnect
+    const connected = Sys.ConnectedPlayers;
+    if (connected && typeof connected === 'object') {
+      const playerIds = Object.keys(connected);
+      if (playerIds.length > 0) {
+        const playerId = playerIds[0];
+        const entry = connected[playerId];
+
+        // Sjekk _authStore for JWT-token til denne spilleren
+        const authEntry = Sys._authStore && Sys._authStore[playerId];
+        const token = authEntry ? authEntry.token : null;
+
         return res.json({
           authenticated: true,
-          playerId: entry.playerId,
-          token: entry.token
+          playerId: playerId,
+          token: token,
+          source: token ? 'authStore' : 'connectedPlayers'
         });
       }
     }
+
+    // Fallback: _authStore alene (for tilfeller der ConnectedPlayers er ryddet)
+    const store = Sys._authStore;
+    if (store) {
+      const maxAge = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const storeIds = Object.keys(store);
+      for (let i = 0; i < storeIds.length; i++) {
+        const entry = store[storeIds[i]];
+        if (entry && entry.token && (now - entry.timestamp) < maxAge) {
+          return res.json({
+            authenticated: true,
+            playerId: entry.playerId,
+            token: entry.token,
+            source: 'authStoreFallback'
+          });
+        }
+      }
+    }
+
+    // Debug-info for feilsøking
     return res.json({
       authenticated: false,
-      reason: 'no-recent-auth',
-      storeSize: playerIds.length
+      reason: 'no-connected-players',
+      debug: {
+        connectedPlayersKeys: connected ? Object.keys(connected).length : 0,
+        authStoreKeys: Sys._authStore ? Object.keys(Sys._authStore).length : 0,
+        sysKeys: Object.keys(Sys).filter(k => k.startsWith('_') || k === 'ConnectedPlayers')
+      }
     });
   } catch (err) {
     console.error('auth-beacon endpoint error:', err.message);
