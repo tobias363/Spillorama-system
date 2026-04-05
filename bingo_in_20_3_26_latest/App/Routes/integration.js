@@ -37,7 +37,7 @@ router.get('/api/integration/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: Date.now(),
-    version: 'f92dd8be+diag',
+    version: 'b2cbe937+diag2',
     sysType: typeof Sys,
     sysKeys: Object.keys(Sys).slice(0, 20),
     connectedPlayers: Sys.ConnectedPlayers ? Object.keys(Sys.ConnectedPlayers) : 'undefined',
