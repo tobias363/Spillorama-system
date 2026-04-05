@@ -276,16 +276,14 @@
         unityCanvas.addEventListener('mousedown', onCanvasInteraction);
         unityCanvas.addEventListener('touchstart', onCanvasInteraction);
       }
-      // Fallback: start polling 15s etter Unity har lastet ferdig
+      // Fallback: start polling 15s etter sideinnlasting
       // (for auto-login tilfeller der brukeren allerede er innlogget)
-      window.addEventListener('load', function() {
-        setTimeout(function() {
-          if (!pollingStarted && !_playerToken) {
-            pollingStarted = true;
-            startAuthBeaconPolling();
-          }
-        }, 15000);
-      });
+      setTimeout(function() {
+        if (!pollingStarted && !_playerToken) {
+          pollingStarted = true;
+          startAuthBeaconPolling();
+        }
+      }, 15000);
 
       function startAuthBeaconPolling() {
         console.log('BIN-134: auth-beacon polling starter');
