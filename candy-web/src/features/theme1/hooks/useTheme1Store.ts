@@ -1348,15 +1348,17 @@ async function hydrateSessionFromLaunchToken(
   accessTokenSource: Theme1AccessTokenSource | null;
 }> {
   console.log("[BIN-134] hydrateSessionFromLaunchToken: accessToken=" + (session.accessToken ? "SET(" + session.accessToken.length + ")" : "EMPTY") + " roomCode=" + session.roomCode + " hallId=" + session.hallId);
-  if (session.accessToken && (session.roomCode || session.hallId)) {
-    console.log("[BIN-134] hydrate SKIP — already has accessToken + roomCode/hallId");
+  const launchToken = readLaunchTokenFromLocation();
+  // BIN-134: When a launch token is present, ALWAYS call launch-resolve
+  // to get the correct integration player's accessToken. The existing
+  // accessToken may be from a stale portal login (wrong player).
+  if (!launchToken && session.accessToken && (session.roomCode || session.hallId)) {
+    console.log("[BIN-134] hydrate SKIP — no launch token + already has session");
     return {
       session,
       accessTokenSource: null,
     };
   }
-
-  const launchToken = readLaunchTokenFromLocation();
   console.log("[BIN-134] launchToken from URL: " + (launchToken ? "SET(" + launchToken.length + ")" : "EMPTY") + " search=" + (typeof window !== "undefined" ? window.location.search.substring(0, 60) : "n/a"));
   if (!launchToken) {
     console.log("[BIN-134] hydrate SKIP — no launch token in URL");
