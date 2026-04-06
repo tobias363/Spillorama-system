@@ -83,7 +83,7 @@ interface Theme1MachineVisualPreset {
   topInsetPx: number;
 }
 
-const ALL_MACHINE_BALL_NUMBERS = Array.from({ length: 60 }, (_, index) => index + 1);
+const ALL_MACHINE_BALL_NUMBERS = Array.from({ length: 75 }, (_, index) => index + 1);
 const MOTION_SEED = 31;
 const BALL_MOTION_SPEED_MULTIPLIER = 1.9;
 const BALL_AREA_EXPANSION_PX = 5;
