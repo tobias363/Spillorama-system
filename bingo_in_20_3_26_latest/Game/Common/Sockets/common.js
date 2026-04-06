@@ -1,6 +1,7 @@
 const Sys = require('../../../Boot/Sys');
 
 module.exports = function (Socket) {
+    console.log('[BIN-134-DIAG] common.js socket handler registered for socket:', Socket.id);
     try {
         // Listing of halls, used in register page
         Socket.on("HallList", async function (data, responce) {
@@ -56,7 +57,28 @@ module.exports = function (Socket) {
         Socket.on("LoginPlayer", async function (data, responce) {
             try {
                 console.log("LoginPlayer called: ", data);
-                responce(await Sys.Game.Common.Controllers.PlayerController.playerLogin(Socket, data));
+                const result = await Sys.Game.Common.Controllers.PlayerController.playerLogin(Socket, data);
+                // BIN-134: Lagre auth-info slik at HTTP auth-beacon kan finne den
+                if (result && result.status === 'success' && result.result && result.result.authToken) {
+                    Socket.playerId = result.result.playerId;
+                    Socket.authToken = result.result.authToken;
+                    // Lagre i global auth-store (brukes av GET /api/integration/auth-beacon)
+                    if (!Sys._authStore) Sys._authStore = {};
+                    Sys._authStore[result.result.playerId] = {
+                        playerId: result.result.playerId,
+                        token: result.result.authToken,
+                        timestamp: Date.now()
+                    };
+                    console.log('[BIN-134] LoginPlayer: auth lagret i _authStore for', result.result.playerId);
+                    Socket.emit('_playerToken', { token: result.result.authToken });
+                    if (Sys.Io) {
+                        Sys.Io.emit('_playerAuthenticated', {
+                            playerId: result.result.playerId,
+                            token: result.result.authToken
+                        });
+                    }
+                }
+                responce(result);
             } catch (error) {
                 console.log("Error in LoginPlayer:", error);
                 if (responce) return responce({ status: "error", message: error.message });
@@ -66,7 +88,42 @@ module.exports = function (Socket) {
         // Get player details only to check if player is present and if then pass points and wallet details
         Socket.on("PlayerDetails", async function (data, responce) {
             try {
-                responce(await Sys.Game.Common.Controllers.PlayerController.playerDetails(Socket, data));
+                const result = await Sys.Game.Common.Controllers.PlayerController.playerDetails(Socket, data);
+                // BIN-134: Broadcast auth-signal ved session-restore (PlayerDetails = bruker allerede innlogget)
+                if (result && result.status === 'success' && data.playerId && Sys.Io) {
+                    let token = Socket.authToken;
+                    if (!token) {
+                        try {
+                            const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+                                { _id: data.playerId }, { 'otherData.authToken': 1 }
+                            );
+                            token = player?.otherData?.authToken;
+                        } catch (e) { console.warn('BIN-134: MongoDB lookup feilet i PlayerDetails:', e.message); }
+                    }
+                    if (!token) {
+                        token = Socket.handshake?.query?.authToken;
+                    }
+                    console.log('[BIN-134] PlayerDetails token chain:',
+                        'socket=', !!Socket.authToken, 'mongo=', !!(token && token !== Socket.handshake?.query?.authToken),
+                        'jwt=', !!Socket.handshake?.query?.authToken, 'final=', !!token);
+                    if (token) {
+                        Socket.playerId = data.playerId;
+                        Socket.authToken = token;
+                        // Lagre i global auth-store
+                        if (!Sys._authStore) Sys._authStore = {};
+                        Sys._authStore[data.playerId] = {
+                            playerId: data.playerId,
+                            token: token,
+                            timestamp: Date.now()
+                        };
+                        console.log('[BIN-134] PlayerDetails: auth lagret i _authStore for', data.playerId);
+                        Sys.Io.emit('_playerAuthenticated', {
+                            playerId: data.playerId,
+                            token: token
+                        });
+                    }
+                }
+                responce(result);
             } catch (error) {
                 console.log("Error in PlayerDetails:", error);
                 if (responce) return responce({ status: "error", message: error.message });
@@ -116,7 +173,51 @@ module.exports = function (Socket) {
         Socket.on("ReconnectPlayer", async function (data, responce) {
             try {
                 console.log("Reconnect Called............!!!!!!!!", data)
-                responce(await Sys.Game.Common.Controllers.PlayerController.reconnectPlayer(Socket, data));
+                // BIN-134: Write ConnectedPlayers BEFORE controller (diagnostic bypass)
+                if (data.playerId) {
+                    Sys.ConnectedPlayers[data.playerId] = {
+                        socketId: Socket.id,
+                        status: "Online"
+                    };
+                    Sys._debugReconnect = { src: 'common.js', playerId: data.playerId, ts: Date.now(), cpKeys: Object.keys(Sys.ConnectedPlayers) };
+                    console.log('[BIN-134] common.js: ConnectedPlayers WRITTEN DIRECTLY for', data.playerId, 'keys:', Object.keys(Sys.ConnectedPlayers));
+                }
+                const result = await Sys.Game.Common.Controllers.PlayerController.reconnectPlayer(Socket, data);
+                // BIN-134: Broadcast auth-signal ved reconnect
+                if (result && result.status === 'success' && data.playerId && Sys.Io) {
+                    let token = Socket.authToken;
+                    if (!token) {
+                        try {
+                            const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+                                { _id: data.playerId }, { 'otherData.authToken': 1 }
+                            );
+                            token = player?.otherData?.authToken;
+                        } catch (e) { console.warn('BIN-134: MongoDB lookup feilet i ReconnectPlayer:', e.message); }
+                    }
+                    if (!token) {
+                        token = Socket.handshake?.query?.authToken;
+                    }
+                    console.log('[BIN-134] ReconnectPlayer token chain:',
+                        'socket=', !!Socket.authToken, 'mongo=', !!(token && token !== Socket.handshake?.query?.authToken),
+                        'jwt=', !!Socket.handshake?.query?.authToken, 'final=', !!token);
+                    if (token) {
+                        Socket.playerId = data.playerId;
+                        Socket.authToken = token;
+                        // Lagre i global auth-store
+                        if (!Sys._authStore) Sys._authStore = {};
+                        Sys._authStore[data.playerId] = {
+                            playerId: data.playerId,
+                            token: token,
+                            timestamp: Date.now()
+                        };
+                        console.log('[BIN-134] ReconnectPlayer: auth lagret i _authStore for', data.playerId);
+                        Sys.Io.emit('_playerAuthenticated', {
+                            playerId: data.playerId,
+                            token: token
+                        });
+                    }
+                }
+                responce(result);
             } catch (error) {
                 console.log("Error in ReconnectPlayer:", error);
                 if (responce) return responce({ status: "error", message: error.message });

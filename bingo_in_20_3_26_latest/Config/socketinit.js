@@ -15,6 +15,8 @@ module.exports = function socketInit(Sys, sessionMiddleware) {
 
         const whitelist = [
             "LoginPlayer",
+            "ReconnectPlayer",
+            "PlayerDetails",
             "Logout",
             "HallList",
             "ScreenSaver",
@@ -86,6 +88,9 @@ module.exports = function socketInit(Sys, sessionMiddleware) {
                 }
 
                 // Replace the original data with sanitized version and continue
+                if (eventName === 'ReconnectPlayer' || eventName === 'LoginPlayer') {
+                    console.log('[BIN-134-DIAG] secureSocket passing event:', eventName, 'socketId:', socket.id, 'playerId:', cleanData?.playerId);
+                }
                 packet.data[1] = cleanData;
                 originalOnevent.call(this, packet);
             };
@@ -95,6 +100,35 @@ module.exports = function socketInit(Sys, sessionMiddleware) {
         Sys.Io.on('connection', socket => {
             Sys.Log.info('[Default] Connected: ' + socket.id);
             socket.language = '';
+
+            // BIN-134: Auth-beacon — send current auth state on connect (eliminates race condition)
+            if (socket.handshake.query.role === 'authBeacon') {
+                try {
+                    // Socket.IO v2 uses io.sockets.connected (object), v4+ uses io.sockets.sockets (Map)
+                    const sockets = Sys.Io.sockets.connected || Sys.Io.sockets.sockets || {};
+                    const entries = (sockets instanceof Map) ? Array.from(sockets.values()) : Object.values(sockets);
+                    console.log('[BIN-134] Auth-beacon lookup:', entries.length, 'sockets,',
+                        entries.filter(s => s.playerId && s.authToken).length, 'with auth');
+                    for (let i = 0; i < entries.length; i++) {
+                        if (entries[i].playerId && entries[i].authToken) {
+                            socket.emit('_playerAuthenticated', {
+                                playerId: entries[i].playerId,
+                                token: entries[i].authToken
+                            });
+                            Sys.Log.info('[BIN-134] Auth-beacon: sent existing auth to new beacon socket');
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[BIN-134] Auth-beacon lookup error:', e.message);
+                }
+                // Auth-beacon doesn't need game event handlers — return early
+                socket.on('disconnect', reason => {
+                    Sys.Log.info(`[Default] Auth-beacon disconnected: ${socket.id} Reason: ${reason}`);
+                });
+                return;
+            }
+
             secureSocket(socket); // Wrap all events
             // Register common sockets
             if (Sys.Game?.Common?.Sockets) {
@@ -137,6 +171,16 @@ module.exports = function socketInit(Sys, sessionMiddleware) {
                 }
 
                 secureSocket(socket, skipJwt);
+
+                // BIN-134: Register common sockets on game namespaces too
+                // Unity connects to game namespaces only, so ReconnectPlayer/LoginPlayer
+                // must be available there for auth-beacon to work.
+                if (!skipJwt && Sys.Game?.Common?.Sockets) {
+                    Object.keys(Sys.Game.Common.Sockets).forEach(key => {
+                        try { Sys.Game.Common.Sockets[key](socket); }
+                        catch (e) { console.error(`[SocketInit][${name}][CommonSockets] Error ${key}:`, e); }
+                    });
+                }
 
                 if (sockets) {
                     Object.keys(sockets).forEach(key => {

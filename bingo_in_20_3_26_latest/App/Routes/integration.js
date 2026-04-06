@@ -11,8 +11,25 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const Sys = require('../../Boot/Sys');
 
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// BIN-134 DIAG: Capture recent console.log for debugging
+const _diagLogs = [];
+const _origLog = console.log;
+console.log = function(...args) {
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  if (msg.includes('BIN-134') || msg.includes('Reconnect') || msg.includes('Login') || msg.includes('common.js')) {
+    _diagLogs.push({ t: Date.now(), m: msg });
+    if (_diagLogs.length > 50) _diagLogs.shift();
+  }
+  _origLog.apply(console, args);
+};
+
+router.get('/api/integration/diag-logs', (req, res) => {
+  res.json({ logs: _diagLogs });
+});
 
 // ─── Middleware: Verifiser JWT ────────────────────────────────────────────────
 function verifyIntegrationToken(req, res, next) {
@@ -33,7 +50,86 @@ function verifyIntegrationToken(req, res, next) {
 
 // ─── GET /api/integration/health ─────────────────────────────────────────────
 router.get('/api/integration/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: Date.now() });
+  res.json({
+    status: 'ok',
+    timestamp: Date.now(),
+    version: 'diag10',
+    sysType: typeof Sys,
+    sysKeys: Object.keys(Sys).slice(0, 20),
+    connectedPlayers: Sys.ConnectedPlayers ? Object.keys(Sys.ConnectedPlayers) : 'undefined',
+    authStore: Sys._authStore ? Object.keys(Sys._authStore) : 'undefined',
+    debugReconnect: Sys._debugReconnect || 'not-set',
+    // Check ALL namespaces for connected sockets
+    ioNamespaces: Sys.Io ? Object.keys(Sys.Io.nsps || {}).map(ns => {
+      const nsp = Sys.Io.nsps[ns];
+      const connected = nsp.connected || nsp.sockets || {};
+      const socketIds = connected instanceof Map ? Array.from(connected.keys()) : Object.keys(connected);
+      return { ns, count: socketIds.length, sockets: socketIds.slice(0, 3).map(id => {
+        const s = connected instanceof Map ? connected.get(id) : connected[id];
+        return { id, playerId: s?.playerId, hasAuthToken: !!s?.authToken };
+      })};
+    }) : 'no-io'
+  });
+});
+
+// ─── GET /api/integration/auth-beacon ───────────────────────────────────────
+// BIN-134: HTTP-polling for auth-beacon.
+// Strategy: Check MongoDB for a recently active player with a valid authToken.
+// Unity's Socket.IO runs in WASM and connects to a namespace inaccessible from
+// the integration layer, so we query the database directly instead.
+router.get('/api/integration/auth-beacon', async (req, res) => {
+  try {
+    // Primary: Check in-memory stores first (fast path)
+    const connected = Sys.ConnectedPlayers;
+    if (connected && typeof connected === 'object') {
+      const playerIds = Object.keys(connected);
+      if (playerIds.length > 0) {
+        const playerId = playerIds[0];
+        const authEntry = Sys._authStore && Sys._authStore[playerId];
+        return res.json({
+          authenticated: true,
+          playerId,
+          token: authEntry ? authEntry.token : null,
+          source: 'connectedPlayers'
+        });
+      }
+    }
+
+    // Fallback: Query MongoDB for a player with a recent socketId (= active connection)
+    // Players get socketId set on login/reconnect. A non-empty socketId means active.
+    const player = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+      { socketId: { $ne: '' }, 'otherData.authToken': { $exists: true, $ne: null } },
+      { _id: 1, username: 1, 'otherData.authToken': 1 }
+    );
+
+    if (player && player.otherData && player.otherData.authToken) {
+      return res.json({
+        authenticated: true,
+        playerId: player._id.toString(),
+        token: player.otherData.authToken,
+        source: 'mongodb'
+      });
+    }
+
+    // Debug: try to find ANY player with socketId or authToken
+    const anyPlayer = await Sys.Game.Common.Services.PlayerServices.getOneByData(
+      { username: 'martin' },
+      { _id: 1, username: 1, socketId: 1, 'otherData.authToken': 1 }
+    );
+    return res.json({
+      authenticated: false,
+      reason: 'no-active-player',
+      debug: anyPlayer ? {
+        playerId: anyPlayer._id?.toString(),
+        socketId: anyPlayer.socketId || 'empty',
+        hasAuthToken: !!(anyPlayer.otherData?.authToken),
+        authTokenLength: anyPlayer.otherData?.authToken?.length || 0
+      } : 'martin-not-found'
+    });
+  } catch (err) {
+    console.error('auth-beacon endpoint error:', err.message);
+    return res.json({ authenticated: false, reason: 'error: ' + err.message });
+  }
 });
 
 // ─── GET /api/integration/wallet/balance ─────────────────────────────────────
