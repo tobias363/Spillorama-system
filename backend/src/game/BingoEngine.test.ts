@@ -164,10 +164,10 @@ class FixedTicketBingoAdapter implements BingoSystemAdapter {
     return {
       grid: [
         [1, 2, 3, 4, 5],
-        [16, 17, 18, 19, 20],
-        [31, 32, 0, 33, 34],
-        [46, 47, 48, 49, 50],
-        [61, 62, 63, 64, 65]
+        [13, 14, 15, 16, 17],
+        [25, 26, 0, 27, 28],
+        [37, 38, 39, 40, 41],
+        [49, 50, 51, 52, 53]
       ]
     };
   }
@@ -291,7 +291,7 @@ test("rtp payout budget caps total payouts across line and bingo claims", async 
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 10000,
     monthlyLossLimit: 10000,
-    maxDrawsPerRound: 75
+    maxDrawsPerRound: 60
   });
 
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
@@ -316,12 +316,12 @@ test("rtp payout budget caps total payouts across line and bingo claims", async 
 
   const lineNumbers = new Set([1, 2, 3, 4, 5]);
   const bingoNumbers = new Set([
-    1, 2, 3, 4, 5, 16, 17, 18, 19, 20, 31, 32, 33, 34, 46, 47, 48, 49, 50, 61, 62, 63, 64, 65
+    1, 2, 3, 4, 5, 13, 14, 15, 16, 17, 25, 26, 27, 28, 37, 38, 39, 40, 41, 49, 50, 51, 52, 53
   ]);
   prioritizeDrawNumbers(engine, roomCode, [...bingoNumbers]);
 
   let drawGuard = 0;
-  while (lineNumbers.size > 0 && drawGuard < 75) {
+  while (lineNumbers.size > 0 && drawGuard < 60) {
     const number = await engine.drawNextNumber({
       roomCode,
       actorPlayerId: hostPlayerId
@@ -397,7 +397,7 @@ test("rtp payout budget caps total payouts across line and bingo claims", async 
 
 test("line claim includes deterministic backend bonus contract fields in claim and snapshot", async () => {
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
-    maxDrawsPerRound: 75
+    maxDrawsPerRound: 60
   });
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
     hallId: "hall-1",
@@ -418,10 +418,10 @@ test("line claim includes deterministic backend bonus contract fields in claim a
     ticketsPerPlayer: 1
   });
 
-  const secondRow = new Set([16, 17, 18, 19, 20]);
+  const secondRow = new Set([13, 14, 15, 16, 17]);
   prioritizeDrawNumbers(engine, roomCode, [...secondRow]);
   let drawGuard = 0;
-  while (secondRow.size > 0 && drawGuard < 75) {
+  while (secondRow.size > 0 && drawGuard < 60) {
     const number = await engine.drawNextNumber({
       roomCode,
       actorPlayerId: hostPlayerId
@@ -818,7 +818,7 @@ test("prize policy caps single databingo payouts and stores policy reference", a
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 20000,
     monthlyLossLimit: 20000,
-    maxDrawsPerRound: 75
+    maxDrawsPerRound: 60
   });
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
     hallId: "hall-1",
@@ -852,7 +852,7 @@ test("prize policy caps single databingo payouts and stores policy reference", a
   const needed = new Set([1, 2, 3, 4, 5]);
   prioritizeDrawNumbers(engine, roomCode, [...needed]);
   let safety = 0;
-  while (needed.size > 0 && safety < 75) {
+  while (needed.size > 0 && safety < 60) {
     const number = await engine.drawNextNumber({
       roomCode,
       actorPlayerId: hostPlayerId
@@ -953,7 +953,7 @@ test("payout audit trail includes immutable hash chain and payout metadata", asy
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 10000,
     monthlyLossLimit: 10000,
-    maxDrawsPerRound: 75
+    maxDrawsPerRound: 60
   });
 
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
@@ -981,7 +981,7 @@ test("payout audit trail includes immutable hash chain and payout metadata", asy
   const needed = new Set([1, 2, 3, 4, 5]);
   prioritizeDrawNumbers(engine, roomCode, [...needed]);
   let guard = 0;
-  while (needed.size > 0 && guard < 75) {
+  while (needed.size > 0 && guard < 60) {
     const number = await engine.drawNextNumber({
       roomCode,
       actorPlayerId: hostPlayerId

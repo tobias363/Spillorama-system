@@ -165,10 +165,10 @@ class FixedTicketBingoAdapter implements BingoSystemAdapter {
     return {
       grid: [
         [1, 2, 3, 4, 5],
-        [16, 17, 18, 19, 20],
-        [31, 32, 0, 33, 34],
-        [46, 47, 48, 49, 50],
-        [61, 62, 63, 64, 65]
+        [13, 14, 15, 16, 17],
+        [25, 26, 0, 27, 28],
+        [37, 38, 39, 40, 41],
+        [49, 50, 51, 52, 53]
       ]
     };
   }
@@ -433,7 +433,7 @@ test("compliance: enforces databingo prize caps and keeps payout audit", async (
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 20_000,
     monthlyLossLimit: 20_000,
-    maxDrawsPerRound: 75
+    maxDrawsPerRound: 60
   });
 
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
@@ -480,7 +480,7 @@ test("compliance: enforces databingo prize caps and keeps payout audit", async (
 
   const needed = new Set([1, 2, 3, 4, 5]);
   let guard = 0;
-  while (needed.size > 0 && guard < 75) {
+  while (needed.size > 0 && guard < 60) {
     const number = await engine.drawNextNumber({
       roomCode,
       actorPlayerId: hostPlayerId
