@@ -53,6 +53,17 @@
     /* BIN-134: Skjul CandyMania-tile til bruker er innlogget */
     #ext-games-wrap { display: none !important; }
     body.player-authenticated #ext-games-wrap { display: flex !important; }
+
+    /* Debug panel */
+    #debug-panel {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 9999;
+      background: rgba(0,0,0,0.88); color: #0f0; font: 11px monospace;
+      padding: 6px 10px; max-height: 180px; overflow-y: auto;
+      pointer-events: auto; border-top: 1px solid #333;
+    }
+    #debug-panel .err { color: #f44; }
+    #debug-panel .warn { color: #fa0; }
+    #debug-panel .ok { color: #4f4; }
   </style>
 
   <!-- Firebase SDKs -->
@@ -82,7 +93,21 @@
       <div id="unity-build-title">SPILLORAMA</div>
     </div>
   </div>
+  <!-- Debug panel -->
+  <div id="debug-panel"></div>
   <script>
+    // ─── Debug logger ──────────────────────────────────────────────
+    var _dbg = document.getElementById('debug-panel');
+    function dbg(msg, cls) {
+      var d = document.createElement('div');
+      d.className = cls || '';
+      d.textContent = new Date().toLocaleTimeString() + ' ' + msg;
+      _dbg.appendChild(d);
+      _dbg.scrollTop = _dbg.scrollHeight;
+      console.log('[DBG]', msg);
+    }
+    dbg('Page loaded, starting init...', 'ok');
+
     var container = document.querySelector("#unity-container");
     var canvas = document.querySelector("#unity-canvas");
     var loadingBar = document.querySelector("#unity-loading-bar");
@@ -159,12 +184,17 @@
     canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
     loadingBar.style.display = "block";
 
+    dbg('Loading Unity from: ' + loaderUrl);
     var script = document.createElement("script");
     script.src = loaderUrl;
+    script.onerror = function() { dbg('FATAL: Unity loader script failed to load: ' + loaderUrl, 'err'); };
     script.onload = () => {
+      dbg('Unity loader script loaded, creating instance...', 'ok');
       createUnityInstance(canvas, config, (progress) => {
         progressBarFull.style.width = 100 * progress + "%";
+        if (progress >= 1) dbg('Unity load progress: 100%', 'ok');
       }).then((unityInstance) => {
+        dbg('Unity instance created successfully', 'ok');
         loadingBar.style.display = "none";
         fullscreenButton.onclick = () => {
           window.vuplex.SetFullscreen(1)/*https://support.vuplex.com/articles/webgl-fullscreen*/;
@@ -234,7 +264,7 @@
         });
 
       }).catch((message) => {
-        alert(message);
+        dbg('FATAL: Unity failed to load: ' + message, 'err');
       });
     };
     document.body.appendChild(script);
@@ -252,45 +282,40 @@
     // Vi poller /api/integration/auth-beacon hvert 3. sekund for å oppdage
     // at en spiller er innlogget, og kaller SetPlayerToken() når den er det.
     (function() {
+      dbg('Auth-beacon polling startet (hver 3s)');
+      var pollCount = 0;
       var pollInterval = setInterval(function() {
         if (_playerToken) {
           clearInterval(pollInterval);
-          console.log('BIN-134: auth-beacon polling stoppet — allerede autentisert');
+          dbg('Auth-beacon polling stoppet — allerede autentisert', 'ok');
           return;
         }
+        pollCount++;
         fetch('/api/integration/auth-beacon')
-          .then(function(r) { return r.json(); })
+          .then(function(r) {
+            dbg('auth-beacon HTTP ' + r.status + ' (poll #' + pollCount + ')');
+            return r.json();
+          })
           .then(function(data) {
+            dbg('auth-beacon data: ' + JSON.stringify(data));
             if (data && data.authenticated && !_playerToken) {
-              // Token kan mangle om bare ConnectedPlayers er kilde — vis tile uansett
               if (data.token) {
+                dbg('Token mottatt fra auth-beacon, kilde: ' + (data.source || 'ukjent'), 'ok');
                 SetPlayerToken(data.token);
               } else {
-                // Ingen token ennå, men spiller er innlogget — vis tile, poll videre for token
                 document.body.classList.add('player-authenticated');
-                console.log('BIN-134: spiller innlogget (ConnectedPlayers), venter på token');
-                return; // Ikke stopp polling — vi trenger token for wallet
+                dbg('Innlogget uten token (ConnectedPlayers) — viser tile, poller videre', 'warn');
+                return;
               }
               clearInterval(pollInterval);
-              console.log('BIN-134: playerToken mottatt via HTTP-polling, kilde:', data.source);
             }
           })
-          .catch(function() { /* stille feil — prøver igjen om 3s */ });
+          .catch(function(err) { dbg('auth-beacon feil: ' + err.message, 'err'); });
       }, 3000);
-      console.log('BIN-134: auth-beacon HTTP-polling startet');
     })();
 
     // URL-er som skal åpnes i iframe-overlay istedenfor ny fane
-    // Legg til flere spill her etter hvert som de integreres
-    const EXTERNAL_GAMES = [
-      {
-        // BIN-135: CandyMania — korrekt URL med lobby-token
-        pattern: '/candy/',
-        iframeUrl: 'https://bingosystem-staging.onrender.com/candy/#lt=bwxALM8462CfWuQ9qXJ9Q41Iou6BOf_I'
-      },
-      { pattern: '/candy-game/', iframeUrl: null /* bruker original URL */ }
-    ];
-    const iframeGames = EXTERNAL_GAMES.map(function(g) { return g.pattern; });
+    const iframeGames = ['/candy/', '/candy-game/'];
 
     function isIframeGame(url) {
       return iframeGames.some(function(path) {
@@ -301,23 +326,52 @@
     function openGameInIframe(url) {
       var overlay = document.getElementById('game-overlay');
       var backBtn = document.getElementById('game-overlay-back');
-      // Fjern eventuelt eksisterende iframe
       var oldFrame = overlay.querySelector('iframe');
       if (oldFrame) oldFrame.remove();
 
-      // BIN-135: Bruk konfigurert iframe-URL hvis den finnes
-      var resolvedUrl = url;
-      for (var i = 0; i < EXTERNAL_GAMES.length; i++) {
-        if (url.indexOf(EXTERNAL_GAMES[i].pattern) !== -1 && EXTERNAL_GAMES[i].iframeUrl) {
-          resolvedUrl = EXTERNAL_GAMES[i].iframeUrl;
-          break;
-        }
+      dbg('openGameInIframe called, url=' + url);
+
+      // For candy games: fetch a fresh launch token from the proxy endpoint
+      if (url.indexOf('/candy/') !== -1 && _playerToken) {
+        dbg('Fetching launch token from /api/integration/candy-launch...');
+        fetch('/api/integration/candy-launch', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + _playerToken,
+            'Content-Type': 'application/json'
+          }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          dbg('candy-launch response: ' + JSON.stringify(data));
+          if (data && data.launchUrl) {
+            _loadIframe(overlay, backBtn, data.launchUrl);
+          } else if (data && data.url) {
+            _loadIframe(overlay, backBtn, data.url);
+          } else {
+            // Fallback: open candy-backend directly
+            var fallbackUrl = 'https://candy-backend-ldvg.onrender.com/candy/';
+            dbg('No launchUrl in response, using fallback: ' + fallbackUrl, 'warn');
+            _loadIframe(overlay, backBtn, fallbackUrl);
+          }
+        })
+        .catch(function(err) {
+          dbg('candy-launch fetch failed: ' + err.message + ', using fallback', 'err');
+          _loadIframe(overlay, backBtn, 'https://candy-backend-ldvg.onrender.com/candy/');
+        });
+        return;
       }
 
-      // Opprett ny iframe
+      // Non-candy games: use URL directly
+      _loadIframe(overlay, backBtn, url);
+    }
+
+    function _loadIframe(overlay, backBtn, resolvedUrl) {
+      dbg('Loading iframe: ' + resolvedUrl, 'ok');
       var iframe = document.createElement('iframe');
       iframe.src = resolvedUrl;
       iframe.allow = 'autoplay; fullscreen';
+      iframe.onerror = function() { dbg('Iframe load error for: ' + resolvedUrl, 'err'); };
       overlay.appendChild(iframe);
       overlay.classList.add('active');
       backBtn.style.display = 'block';
@@ -339,28 +393,35 @@
     var _isLoggedIn = false;
 
     function SetPlayerToken(token) {
+      dbg('SetPlayerToken kalt, token=' + (token ? token.substring(0,20) + '...' : 'null'));
       _playerToken = token;
       if (token) {
         _isLoggedIn = true;
-        // BIN-134: Vis CandyMania-tile nå som brukeren er innlogget
         document.body.classList.add('player-authenticated');
+        dbg('player-authenticated klasse satt på body — CandyMania tile skal nå vises', 'ok');
       }
     }
 
     // Tillatte origins for postMessage (CandyMania + egen origin)
     var ALLOWED_GAME_ORIGINS = [
       window.location.origin,
-      'https://bingosystem-staging.onrender.com'
+      'https://candy-backend-ldvg.onrender.com'
     ];
 
     window.addEventListener('message', async function(event) {
       // Sjekk at meldingen kommer fra en tillatt kilde
-      if (ALLOWED_GAME_ORIGINS.indexOf(event.origin) === -1) return;
+      if (ALLOWED_GAME_ORIGINS.indexOf(event.origin) === -1) {
+        if (event.data && event.data.type && String(event.data.type).startsWith('candy:')) {
+          dbg('PostMessage BLOKKERT fra origin: ' + event.origin + ' (ikke i ALLOWED_GAME_ORIGINS)', 'err');
+        }
+        return;
+      }
       var msg = event.data;
       if (!msg || !msg.type || !msg.type.startsWith('candy:')) return;
+      dbg('PostMessage mottatt: ' + msg.type + ' fra ' + event.origin);
 
       var iframe = document.querySelector('#game-overlay iframe');
-      if (!iframe) return;
+      if (!iframe) { dbg('PostMessage ignorert — ingen iframe funnet', 'warn'); return; }
 
       // Svar-hjelper
       function reply(type, data) {
@@ -423,18 +484,20 @@
             break;
         }
       } catch (err) {
-        console.error('Wallet bridge error:', err);
+        dbg('Wallet bridge error: ' + err.message, 'err');
         reply('host:error', { error: err.message });
       }
     });
 
     function OpenUrlInSameTab(url) {
+      dbg('OpenUrlInSameTab kalt, url=' + url);
       // BIN-134: Iframe-spill krever innlogging (playerToken settes av Unity etter login)
       if (isIframeGame(url)) {
         if (!_playerToken) {
-          console.warn('CandyMania blokkert: bruker er ikke innlogget');
+          dbg('CandyMania blokkert — ingen playerToken ennå', 'warn');
           return;
         }
+        dbg('Åpner iframe-spill: ' + url, 'ok');
         openGameInIframe(url);
         return;
       }
