@@ -1,0 +1,74 @@
+.theme1-animation-lab {
+  position: relative;
+}
+
+.theme1-animation-lab__chrome {
+  position: relative;
+}
+
+.theme1-animation-lab__badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  box-shadow: 0 14px 28px rgba(77, 8, 53, 0.18);
+  color: var(--ink);
+  backdrop-filter: blur(14px);
+}
+
+.theme1-animation-lab__badge-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.theme1-animation-lab__badge-copy span {
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.theme1-animation-lab__badge-copy strong {
+  font-size: 0.82rem;
+  font-family: "FredokaCandyBold", "FredokaCandy", sans-serif;
+}
+
+.theme1-animation-lab__badge-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(122, 31, 88, 0.1);
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-family: "FredokaCandyBold", "FredokaCandy", sans-serif;
+  text-decoration: none;
+}
+
+.theme1-animation-lab__badge-link:hover {
+  background: rgba(122, 31, 88, 0.16);
+}
+
+@media (max-width: 900px) {
+  .theme1-animation-lab__badge {
+    top: 8px;
+    left: 8px;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .theme1-animation-lab__badge-copy span {
+    font-size: 0.54rem;
+  }
+
+  .theme1-animation-lab__badge-copy strong {
+    font-size: 0.72rem;
+  }
+}
