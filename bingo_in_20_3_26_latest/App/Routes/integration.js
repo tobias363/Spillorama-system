@@ -395,10 +395,14 @@ router.post('/api/integration/candy-launch', verifyIntegrationToken, async (req,
       }
     }
 
-    // Bygg URL med token som auto-login parameter
+    // Bygg URL direkte til React SPA med accessToken som URL-param
+    // React SPA leser: accessToken, backendUrl, playerId fra URLSearchParams
     var accessToken = loginData.data.accessToken;
     var candyUserId = loginData.data.user?.id;
-    var embedUrl = CANDY_BACKEND_URL + '/?token=' + encodeURIComponent(accessToken) + '&embed=true';
+    var embedUrl = CANDY_BACKEND_URL + '/web/'
+      + '?accessToken=' + encodeURIComponent(accessToken)
+      + '&backendUrl=' + encodeURIComponent(CANDY_BACKEND_URL)
+      + '&embed=true';
 
     // Lagre mapping mellom candy-bruker og bingo-spiller for wallet-bridge
     if (candyUserId) {
