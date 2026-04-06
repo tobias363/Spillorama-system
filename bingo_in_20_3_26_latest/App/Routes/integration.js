@@ -42,10 +42,16 @@ function verifyIntegrationToken(req, res, next) {
 function verifyApiKey(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log('[EXT-WALLET] AUTH FAIL: Missing Bearer header on', req.method, req.url);
     return res.status(401).json({ success: false, errorCode: 'INVALID_API_KEY', errorMessage: 'Missing API key' });
   }
   const key = authHeader.split(' ')[1];
-  if (!INTEGRATION_API_KEY || key !== INTEGRATION_API_KEY) {
+  if (!INTEGRATION_API_KEY) {
+    console.log('[EXT-WALLET] AUTH FAIL: CANDY_INTEGRATION_API_KEY not set on bingo-system!');
+    return res.status(401).json({ success: false, errorCode: 'INVALID_API_KEY', errorMessage: 'Server API key not configured' });
+  }
+  if (key !== INTEGRATION_API_KEY) {
+    console.log('[EXT-WALLET] AUTH FAIL: Key mismatch. Received prefix:', key.substring(0, 4), 'Expected prefix:', INTEGRATION_API_KEY.substring(0, 4));
     return res.status(401).json({ success: false, errorCode: 'INVALID_API_KEY', errorMessage: 'Invalid API key' });
   }
   next();
@@ -436,14 +442,19 @@ async function resolveBingoPlayerId(candyPlayerId) {
 
 // ─── GET /api/integration/ext-wallet/balance ────────────────────────────────
 router.get('/api/integration/ext-wallet/balance', verifyApiKey, async (req, res) => {
+  const t0 = Date.now();
+  console.log('[EXT-WALLET] GET /balance', { playerId: req.query.playerId, ts: new Date().toISOString() });
   try {
     const candyPlayerId = req.query.playerId;
     if (!candyPlayerId) {
+      console.log('[EXT-WALLET] /balance → 400 missing playerId');
       return res.status(400).json({ balance: 0, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'playerId required' });
     }
 
     const bingoPlayerId = await resolveBingoPlayerId(String(candyPlayerId));
+    console.log('[EXT-WALLET] /balance resolve:', { candyPlayerId, bingoPlayerId, mapSize: _candyToBingoMap.size });
     if (!bingoPlayerId) {
+      console.log('[EXT-WALLET] /balance → 404 no mapping. Current mappings:', [..._candyToBingoMap.entries()].map(([k,v]) => k.substring(0,20) + '→' + v.substring(0,10)));
       return res.status(404).json({ balance: 0, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'No bingo player mapped for candy ID: ' + candyPlayerId });
     }
 
@@ -453,21 +464,22 @@ router.get('/api/integration/ext-wallet/balance', verifyApiKey, async (req, res)
     );
 
     if (!player) {
+      console.log('[EXT-WALLET] /balance → 404 bingo player not found in DB:', bingoPlayerId);
       return res.status(404).json({ balance: 0, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'Bingo player not found' });
     }
 
-    res.json({
-      balance: +parseFloat(player.walletAmount).toFixed(2),
-      currency: 'NOK'
-    });
+    const balance = +parseFloat(player.walletAmount).toFixed(2);
+    console.log('[EXT-WALLET] /balance → 200 OK', { balance, ms: Date.now() - t0 });
+    res.json({ balance, currency: 'NOK' });
   } catch (err) {
-    console.error('ext-wallet/balance error:', err);
+    console.error('[EXT-WALLET] /balance → 500 ERROR', { error: err.message, ms: Date.now() - t0 });
     res.status(500).json({ balance: 0, errorCode: 'INTERNAL_ERROR', errorMessage: err.message });
   }
 });
 
 // ─── POST /api/integration/ext-wallet/debit ─────────────────────────────────
 router.post('/api/integration/ext-wallet/debit', verifyApiKey, async (req, res) => {
+  console.log('[EXT-WALLET] POST /debit', { playerId: req.body?.playerId, amount: req.body?.amount, txId: req.body?.transactionId });
   try {
     const { playerId: candyPlayerId, amount, transactionId, roundId, currency } = req.body;
 
@@ -541,6 +553,7 @@ router.post('/api/integration/ext-wallet/debit', verifyApiKey, async (req, res) 
 
 // ─── POST /api/integration/ext-wallet/credit ────────────────────────────────
 router.post('/api/integration/ext-wallet/credit', verifyApiKey, async (req, res) => {
+  console.log('[EXT-WALLET] POST /credit', { playerId: req.body?.playerId, amount: req.body?.amount, txId: req.body?.transactionId });
   try {
     const { playerId: candyPlayerId, amount, transactionId, roundId, currency } = req.body;
 
@@ -617,6 +630,61 @@ router.get('/api/integration/ext-wallet/mapping', (req, res) => {
     mappings.push({ candyId, bingoId });
   });
   res.json({ count: mappings.length, mappings });
+});
+
+// ─── GET /api/integration/ext-wallet/diag ────────────────────────────────────
+// Diagnostikk-endepunkt: sjekk hele wallet-bridge kjeden uten API-key.
+// Returnerer detaljert status for debugging.
+router.get('/api/integration/ext-wallet/diag', async (req, res) => {
+  const diag = {
+    timestamp: new Date().toISOString(),
+    apiKeyConfigured: !!INTEGRATION_API_KEY,
+    apiKeyLength: INTEGRATION_API_KEY ? INTEGRATION_API_KEY.length : 0,
+    apiKeyPrefix: INTEGRATION_API_KEY ? INTEGRATION_API_KEY.substring(0, 4) + '...' : 'NOT_SET',
+    mappings: {
+      count: _candyToBingoMap.size,
+      entries: []
+    },
+    testBalance: null
+  };
+
+  // List all mappings
+  _candyToBingoMap.forEach((bingoId, candyId) => {
+    diag.mappings.entries.push({
+      candyId: candyId,
+      bingoId: bingoId
+    });
+  });
+
+  // If playerId provided, test the full balance chain
+  const testPlayerId = req.query.playerId;
+  if (testPlayerId) {
+    try {
+      const bingoId = await resolveBingoPlayerId(String(testPlayerId));
+      if (!bingoId) {
+        diag.testBalance = { step: 'resolve', error: 'No mapping found for: ' + testPlayerId };
+      } else {
+        const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
+          { _id: bingoId },
+          { walletAmount: 1, username: 1 }
+        );
+        if (!player) {
+          diag.testBalance = { step: 'db-lookup', bingoId, error: 'Player not found in DB' };
+        } else {
+          diag.testBalance = {
+            step: 'success',
+            bingoId,
+            username: player.username,
+            balance: +parseFloat(player.walletAmount).toFixed(2)
+          };
+        }
+      }
+    } catch (err) {
+      diag.testBalance = { step: 'exception', error: err.message };
+    }
+  }
+
+  res.json(diag);
 });
 
 module.exports = router;
