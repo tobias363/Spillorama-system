@@ -344,10 +344,11 @@
         .then(function(r) { return r.json(); })
         .then(function(data) {
           dbg('candy-launch response: ' + JSON.stringify(data));
-          if (data && data.launchUrl) {
+          if (data && data.embedUrl) {
+            dbg('Got embedUrl: ' + data.embedUrl, 'ok');
+            _loadIframe(overlay, backBtn, data.embedUrl);
+          } else if (data && data.launchUrl) {
             _loadIframe(overlay, backBtn, data.launchUrl);
-          } else if (data && data.url) {
-            _loadIframe(overlay, backBtn, data.url);
           } else {
             // Fallback: open candy-backend directly
             var fallbackUrl = 'https://candy-backend-ldvg.onrender.com/candy/';

@@ -341,4 +341,69 @@ router.post('/api/integration/wallet/credit', verifyIntegrationToken, async (req
   }
 });
 
+// ─── POST /api/integration/candy-launch ─────────────────────────────────────
+// Proxy: henter launch-token fra candy-backend for å åpne CandyMania i iframe.
+// Bingo-system kaller candy-backend /api/integration/launch med API-nøkkel,
+// og returnerer embedUrl til lobby-JS.
+router.post('/api/integration/candy-launch', verifyIntegrationToken, async (req, res) => {
+  const CANDY_BACKEND_URL = process.env.CANDY_BACKEND_URL;
+  const CANDY_API_KEY = process.env.CANDY_INTEGRATION_API_KEY;
+
+  if (!CANDY_BACKEND_URL || !CANDY_API_KEY) {
+    return res.status(503).json({
+      success: false,
+      error: 'CandyMania integration not configured',
+      debug: { hasCandyUrl: !!CANDY_BACKEND_URL, hasApiKey: !!CANDY_API_KEY }
+    });
+  }
+
+  try {
+    // Get the player's session token (bingo JWT) and MongoDB playerId
+    const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
+      { _id: req.playerId },
+      { username: 1, _id: 1 }
+    );
+
+    if (!player) {
+      return res.status(404).json({ success: false, error: 'Player not found' });
+    }
+
+    // Call candy-backend's integration launch endpoint
+    const launchRes = await fetch(CANDY_BACKEND_URL + '/api/integration/launch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': CANDY_API_KEY
+      },
+      body: JSON.stringify({
+        playerId: req.playerId,
+        sessionToken: req.headers.authorization.split(' ')[1]
+      })
+    });
+
+    const launchData = await launchRes.json();
+
+    if (!launchRes.ok || !launchData.ok) {
+      return res.status(launchRes.status || 502).json({
+        success: false,
+        error: launchData.error?.message || 'candy-backend launch failed',
+        debug: { status: launchRes.status, data: launchData }
+      });
+    }
+
+    res.json({
+      success: true,
+      embedUrl: launchData.data.embedUrl,
+      launchToken: launchData.data.launchToken,
+      expiresAt: launchData.data.expiresAt
+    });
+  } catch (err) {
+    console.error('candy-launch proxy error:', err.message);
+    res.status(502).json({
+      success: false,
+      error: 'Failed to reach candy-backend: ' + err.message
+    });
+  }
+});
+
 module.exports = router;

@@ -100,6 +100,11 @@ services:
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
+      # ── CandyMania integration (proxy til candy-backend) ──
+      - key: CANDY_BACKEND_URL
+        value: "https://candy-backend-ldvg.onrender.com"
+      - key: CANDY_INTEGRATION_API_KEY
+        sync: false
 
   - type: web
     name: candy-backend
@@ -122,7 +127,17 @@ services:
       - key: WALLET_PROVIDER
         value: file
       - key: INTEGRATION_ENABLED
-        value: "false"
+        value: "true"
+      - key: INTEGRATION_API_KEY
+        sync: false
+      - key: INTEGRATION_DEFAULT_HALL_ID
+        value: hall-default
+      - key: INTEGRATION_CANDY_FRONTEND_URL
+        value: "https://candy-backend-ldvg.onrender.com/candy/"
+      - key: INTEGRATION_CANDY_API_BASE_URL
+        value: "https://candy-backend-ldvg.onrender.com"
+      - key: ALLOWED_EMBED_ORIGINS
+        value: "https://bingo-system-jsso.onrender.com"
 
   # ── BIN-121: Staging candy-backend with integration enabled ──────
   - type: web
