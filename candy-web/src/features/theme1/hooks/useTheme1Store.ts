@@ -284,11 +284,11 @@ export const useTheme1Store = create<Theme1State>((set, get) => ({
       hostname: currentHostname,
       portalAuthAccessToken: readPortalAuthAccessToken(),
     }).session;
-    console.log("[BIN-134] rehydratedSession", { accessToken: rehydratedSession.accessToken ? "SET(" + rehydratedSession.accessToken.length + ")" : "EMPTY", roomCode: rehydratedSession.roomCode, hallId: rehydratedSession.hallId, playerId: rehydratedSession.playerId });
+    console.log("[BIN-134] rehydratedSession: accessToken=" + (rehydratedSession.accessToken ? "SET(" + rehydratedSession.accessToken.length + ")" : "EMPTY") + " roomCode=" + rehydratedSession.roomCode + " hallId=" + rehydratedSession.hallId);
     const hydrated = await hydrateSessionFromLaunchToken(rehydratedSession, set);
-    console.log("[BIN-134] hydrated", { accessToken: hydrated.session.accessToken ? "SET(" + hydrated.session.accessToken.length + ")" : "EMPTY", roomCode: hydrated.session.roomCode, hallId: hydrated.session.hallId, source: hydrated.accessTokenSource });
+    console.log("[BIN-134] hydrated: accessToken=" + (hydrated.session.accessToken ? "SET(" + hydrated.session.accessToken.length + ")" : "EMPTY") + " roomCode=" + hydrated.session.roomCode + " hallId=" + hydrated.session.hallId + " source=" + hydrated.accessTokenSource);
     const session = canonicalizeTheme1LiveSession(hydrated.session, currentHostname);
-    console.log("[BIN-134] canonicalized", { accessToken: session.accessToken ? "SET(" + session.accessToken.length + ")" : "EMPTY", roomCode: session.roomCode, hallId: session.hallId, playerId: session.playerId });
+    console.log("[BIN-134] canonicalized: accessToken=" + (session.accessToken ? "SET(" + session.accessToken.length + ")" : "EMPTY") + " roomCode=" + session.roomCode + " hallId=" + session.hallId + " playerId=" + session.playerId);
 
     if (
       shouldRedirectTheme1ToPortalOnLiveHost({
@@ -296,9 +296,9 @@ export const useTheme1Store = create<Theme1State>((set, get) => ({
         accessToken: session.accessToken,
       })
     ) {
-      console.log("[BIN-134] REDIRECTING TO PORTAL — accessToken empty on live host");
-      redirectTheme1ToPortal();
-      return;
+      console.error("[BIN-134] WOULD REDIRECT TO PORTAL — accessToken empty on live host. BLOCKED for debug.");
+      // redirectTheme1ToPortal();  // BIN-134 DEBUG: disabled to capture logs
+      // return;
     }
     console.log("[BIN-134] redirect check passed — continuing to connect");
 
@@ -1345,7 +1345,9 @@ async function hydrateSessionFromLaunchToken(
   session: RealtimeSession;
   accessTokenSource: Theme1AccessTokenSource | null;
 }> {
+  console.log("[BIN-134] hydrateSessionFromLaunchToken: accessToken=" + (session.accessToken ? "SET(" + session.accessToken.length + ")" : "EMPTY") + " roomCode=" + session.roomCode + " hallId=" + session.hallId);
   if (session.accessToken && (session.roomCode || session.hallId)) {
+    console.log("[BIN-134] hydrate SKIP — already has accessToken + roomCode/hallId");
     return {
       session,
       accessTokenSource: null,
@@ -1353,7 +1355,9 @@ async function hydrateSessionFromLaunchToken(
   }
 
   const launchToken = readLaunchTokenFromLocation();
+  console.log("[BIN-134] launchToken from URL: " + (launchToken ? "SET(" + launchToken.length + ")" : "EMPTY") + " search=" + (typeof window !== "undefined" ? window.location.search.substring(0, 60) : "n/a"));
   if (!launchToken) {
+    console.log("[BIN-134] hydrate SKIP — no launch token in URL");
     return {
       session,
       accessTokenSource: null,
@@ -1361,6 +1365,7 @@ async function hydrateSessionFromLaunchToken(
   }
 
   const baseUrl = resolveLaunchBaseUrl(session);
+  console.log("[BIN-134] calling launch-resolve at " + baseUrl);
   set({
     connection: {
       phase: "connecting",
@@ -1695,13 +1700,13 @@ async function autoCreateLiveRoom(
     applyLiveSnapshot(validatedSnapshot.value, "room:resume", set, get);
     console.log("[BIN-134] autoCreateLiveRoom SUCCESS — game should be visible now");
   } catch (error) {
-    console.error("[BIN-134] autoCreateLiveRoom FAILED — will redirect on non-localhost", error);
+    console.error("[BIN-134] autoCreateLiveRoom FAILED", error);
     const hostname =
       typeof window !== "undefined" ? window.location.hostname.trim().toLowerCase() : "";
     if (!isLocalTheme1RuntimeHost(hostname)) {
-      console.log("[BIN-134] REDIRECTING TO PORTAL from autoCreateLiveRoom catch");
-      redirectTheme1ToPortal();
-      return;
+      console.error("[BIN-134] WOULD REDIRECT from autoCreateLiveRoom catch — BLOCKED for debug");
+      // redirectTheme1ToPortal();  // BIN-134 DEBUG: disabled
+      // return;
     }
     const message =
       error instanceof Error
