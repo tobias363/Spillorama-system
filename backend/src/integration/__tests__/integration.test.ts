@@ -12,7 +12,7 @@ import { WalletError } from "../../adapters/WalletAdapter.js";
 // ---------------------------------------------------------------------------
 
 let mockResponses: Map<string, { status: number; body: object }>;
-let requestLog: Array<{ method: string; url: string; body?: object }>;
+let requestLog: Array<{ method: string; url: string; body?: Record<string, unknown> }>;
 
 function resetMock() {
   mockResponses = new Map();
@@ -23,7 +23,7 @@ function resetMock() {
 const originalFetch = globalThis.fetch;
 
 function installMockFetch() {
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(init.body as string) : undefined;

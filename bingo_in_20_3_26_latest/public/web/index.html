@@ -274,15 +274,7 @@
 
     // URL-er som skal åpnes i iframe-overlay istedenfor ny fane
     // Legg til flere spill her etter hvert som de integreres
-    const EXTERNAL_GAMES = [
-      {
-        // BIN-135: CandyMania — korrekt URL med lobby-token
-        pattern: '/candy/',
-        iframeUrl: 'https://bingosystem-staging.onrender.com/candy/#lt=bwxALM8462CfWuQ9qXJ9Q41Iou6BOf_I'
-      },
-      { pattern: '/candy-game/', iframeUrl: null /* bruker original URL */ }
-    ];
-    const iframeGames = EXTERNAL_GAMES.map(function(g) { return g.pattern; });
+    const iframeGames = ['/candy/', '/candy-game/'];
 
     function isIframeGame(url) {
       return iframeGames.some(function(path) {
@@ -296,19 +288,9 @@
       // Fjern eventuelt eksisterende iframe
       var oldFrame = overlay.querySelector('iframe');
       if (oldFrame) oldFrame.remove();
-
-      // BIN-135: Bruk konfigurert iframe-URL hvis den finnes
-      var resolvedUrl = url;
-      for (var i = 0; i < EXTERNAL_GAMES.length; i++) {
-        if (url.indexOf(EXTERNAL_GAMES[i].pattern) !== -1 && EXTERNAL_GAMES[i].iframeUrl) {
-          resolvedUrl = EXTERNAL_GAMES[i].iframeUrl;
-          break;
-        }
-      }
-
       // Opprett ny iframe
       var iframe = document.createElement('iframe');
-      iframe.src = resolvedUrl;
+      iframe.src = url;
       iframe.allow = 'autoplay; fullscreen';
       overlay.appendChild(iframe);
       overlay.classList.add('active');
