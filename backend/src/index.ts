@@ -1204,7 +1204,17 @@ async function requireAuthenticatedPlayerAction(
   const user = await getAuthenticatedSocketUser(payload);
   platformService.assertUserEligibleForGameplay(user);
   engine.assertWalletAllowedForGameplay(user.walletId);
-  const roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+  let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+
+  // BIN-134: SPA sends "CANDY1" as canonical room alias.
+  if (roomCode === "CANDY1" && enforceSingleCandyRoomPerHall) {
+    const hallId = (payload as any)?.hallId || "hall-default";
+    const canonicalRoom = getCanonicalCandyRoomForHall(hallId);
+    if (canonicalRoom) {
+      roomCode = canonicalRoom.code;
+      console.log("[BIN-134] requireAuthenticatedPlayerAction CANDY1 → canonical room", roomCode);
+    }
+  }
 
   // BIN-46: Derive playerId from token, NOT from client payload.
   // The player's walletId from the authenticated token is the source of truth.
@@ -3541,7 +3551,10 @@ io.on("connection", (socket: Socket) => {
 
           socket.join(canonicalRoom.code);
           const snapshot = await emitRoomUpdate(canonicalRoom.code);
-          ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
+          // BIN-134: Return "CANDY1" so SPA's session.roomCode matches af() alias
+          const clientRoomCode = enforceSingleCandyRoomPerHall ? "CANDY1" : canonicalRoom.code;
+          console.log("[BIN-134] room:create → existing canonical", { actual: canonicalRoom.code, clientRoomCode, playerId });
+          ackSuccess(callback, { roomCode: clientRoomCode, playerId, snapshot });
           return;
         }
       }
@@ -3554,8 +3567,10 @@ io.on("connection", (socket: Socket) => {
       });
       socket.join(roomCode);
       const snapshot = await emitRoomUpdate(roomCode);
-      console.log("[BIN-134] room:create SUCCESS", { roomCode, playerId });
-      ackSuccess(callback, { roomCode, playerId, snapshot });
+      // BIN-134: Return "CANDY1" so SPA's session.roomCode matches af() alias
+      const clientRoomCode = enforceSingleCandyRoomPerHall ? "CANDY1" : roomCode;
+      console.log("[BIN-134] room:create SUCCESS", { actual: roomCode, clientRoomCode, playerId });
+      ackSuccess(callback, { roomCode: clientRoomCode, playerId, snapshot });
     } catch (error) {
       console.error("[BIN-134] room:create FAILED", { error: (error as Error).message, code: (error as any).code });
       ackFailure(callback, error);
@@ -3564,9 +3579,16 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("room:join", async (payload: JoinRoomPayload, callback: (response: AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>) => void) => {
     try {
-      const roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+      let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
       const identity = await resolveIdentityFromPayload(payload);
       if (enforceSingleCandyRoomPerHall) {
+        // BIN-134: resolve CANDY1 alias
+        if (roomCode === "CANDY1") {
+          const canonicalRoom = getCanonicalCandyRoomForHall(identity.hallId);
+          if (canonicalRoom) {
+            roomCode = canonicalRoom.code;
+          }
+        }
         const canonicalRoom = getCanonicalCandyRoomForHall(identity.hallId);
         if (canonicalRoom && canonicalRoom.code !== roomCode) {
           throw new DomainError(
@@ -3748,7 +3770,20 @@ io.on("connection", (socket: Socket) => {
   socket.on("room:state", async (payload: RoomStatePayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
     try {
       const user = await getAuthenticatedSocketUser(payload);
-      const roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+      let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+
+      // BIN-134: SPA sends "CANDY1" as canonical room code.
+      // Map it to the actual canonical room for the hall.
+      if (roomCode === "CANDY1" && enforceSingleCandyRoomPerHall) {
+        const hallId = (payload as any)?.hallId || "hall-default";
+        const canonicalRoom = getCanonicalCandyRoomForHall(hallId);
+        if (canonicalRoom) {
+          roomCode = canonicalRoom.code;
+          console.log("[BIN-134] room:state CANDY1 → canonical room", roomCode);
+        }
+        // If no canonical room exists, fall through — ROOM_NOT_FOUND triggers SPA auto-create
+      }
+
       assertUserCanAccessRoom(user, roomCode);
       const snapshot = buildRoomUpdatePayload(engine.getRoomSnapshot(roomCode));
       ackSuccess(callback, { snapshot });
