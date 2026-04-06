@@ -14,22 +14,12 @@ const crypto = require('crypto');
 const Sys = require('../../Boot/Sys');
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const INTEGRATION_API_KEY = process.env.CANDY_INTEGRATION_API_KEY;
 
-// BIN-134 DIAG: Capture recent console.log for debugging
-const _diagLogs = [];
-const _origLog = console.log;
-console.log = function(...args) {
-  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-  if (msg.includes('BIN-134') || msg.includes('Reconnect') || msg.includes('Login') || msg.includes('common.js')) {
-    _diagLogs.push({ t: Date.now(), m: msg });
-    if (_diagLogs.length > 50) _diagLogs.shift();
-  }
-  _origLog.apply(console, args);
-};
-
-router.get('/api/integration/diag-logs', (req, res) => {
-  res.json({ logs: _diagLogs });
-});
+// ─── Player mapping: candyUserId → bingoPlayerId ────────────────────────────
+// Populated during candy-launch, used by ext-wallet endpoints.
+const _candyToBingoMap = new Map(); // candyUserId → bingoPlayerId
+const _bingoToCandyMap = new Map(); // bingoPlayerId → candyUserId
 
 // ─── Middleware: Verifiser JWT ────────────────────────────────────────────────
 function verifyIntegrationToken(req, res, next) {
@@ -48,12 +38,26 @@ function verifyIntegrationToken(req, res, next) {
   }
 }
 
+// ─── Middleware: Verifiser API-nøkkel (for ext-wallet kall fra candy-backend) ─
+function verifyApiKey(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, errorCode: 'INVALID_API_KEY', errorMessage: 'Missing API key' });
+  }
+  const key = authHeader.split(' ')[1];
+  if (!INTEGRATION_API_KEY || key !== INTEGRATION_API_KEY) {
+    return res.status(401).json({ success: false, errorCode: 'INVALID_API_KEY', errorMessage: 'Invalid API key' });
+  }
+  next();
+}
+
 // ─── GET /api/integration/health ─────────────────────────────────────────────
 router.get('/api/integration/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: Date.now(),
-    version: 'diag10',
+    version: 'wallet-bridge-v1',
+    walletMappings: _candyToBingoMap.size,
     sysType: typeof Sys,
     sysKeys: Object.keys(Sys).slice(0, 20),
     connectedPlayers: Sys.ConnectedPlayers ? Object.keys(Sys.ConnectedPlayers) : 'undefined',
@@ -342,68 +346,291 @@ router.post('/api/integration/wallet/credit', verifyIntegrationToken, async (req
 });
 
 // ─── POST /api/integration/candy-launch ─────────────────────────────────────
-// Proxy: henter launch-token fra candy-backend for å åpne CandyMania i iframe.
-// Bingo-system kaller candy-backend /api/integration/launch med API-nøkkel,
-// og returnerer embedUrl til lobby-JS.
+// Auto-login: Oppretter/logger inn en candy-backend bruker for bingo-spilleren.
+// Returnerer URL med accessToken som candy-frontenden leser automatisk.
 router.post('/api/integration/candy-launch', verifyIntegrationToken, async (req, res) => {
-  const CANDY_BACKEND_URL = process.env.CANDY_BACKEND_URL;
-  const CANDY_API_KEY = process.env.CANDY_INTEGRATION_API_KEY;
-
-  if (!CANDY_BACKEND_URL || !CANDY_API_KEY) {
-    return res.status(503).json({
-      success: false,
-      error: 'CandyMania integration not configured',
-      debug: { hasCandyUrl: !!CANDY_BACKEND_URL, hasApiKey: !!CANDY_API_KEY }
-    });
-  }
+  const CANDY_BACKEND_URL = process.env.CANDY_BACKEND_URL || 'https://candy-backend-ldvg.onrender.com';
 
   try {
-    // Get the player's session token (bingo JWT) and MongoDB playerId
+    // Hent bingo-spillerens info
     const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
       { _id: req.playerId },
-      { username: 1, _id: 1 }
+      { username: 1, _id: 1, email: 1 }
     );
 
     if (!player) {
       return res.status(404).json({ success: false, error: 'Player not found' });
     }
 
-    // Call candy-backend's integration launch endpoint
-    const launchRes = await fetch(CANDY_BACKEND_URL + '/api/integration/launch', {
+    // Generer deterministisk e-post og passord for denne bingo-spilleren
+    const email = 'bingo-' + req.playerId + '@spillorama.system';
+    const password = 'BingoAuto_' + crypto.createHash('sha256').update(req.playerId + (process.env.JWT_SECRET || 'salt')).digest('hex').slice(0, 16);
+    const displayName = player.username || 'Bingo-' + req.playerId.slice(-6);
+
+    // Forsøk login først
+    var loginRes = await fetch(CANDY_BACKEND_URL + '/api/auth/login', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': CANDY_API_KEY
-      },
-      body: JSON.stringify({
-        playerId: req.playerId,
-        sessionToken: req.headers.authorization.split(' ')[1]
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
     });
+    var loginData = await loginRes.json();
 
-    const launchData = await launchRes.json();
-
-    if (!launchRes.ok || !launchData.ok) {
-      return res.status(launchRes.status || 502).json({
-        success: false,
-        error: launchData.error?.message || 'candy-backend launch failed',
-        debug: { status: launchRes.status, data: launchData }
+    // Hvis brukeren ikke finnes, registrer først, så login
+    if (!loginRes.ok || !loginData.ok) {
+      var regRes = await fetch(CANDY_BACKEND_URL + '/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, displayName })
       });
+      var regData = await regRes.json();
+
+      if (regRes.ok && regData.ok) {
+        loginData = regData; // Register returnerer også accessToken
+      } else {
+        return res.status(502).json({
+          success: false,
+          error: 'Kunne ikke opprette candy-bruker: ' + (regData.error?.message || 'ukjent feil'),
+          debug: { registerStatus: regRes.status, data: regData }
+        });
+      }
+    }
+
+    // Bygg URL med token som auto-login parameter
+    var accessToken = loginData.data.accessToken;
+    var candyUserId = loginData.data.user?.id;
+    var embedUrl = CANDY_BACKEND_URL + '/?token=' + encodeURIComponent(accessToken) + '&embed=true';
+
+    // Lagre mapping mellom candy-bruker og bingo-spiller for wallet-bridge
+    if (candyUserId) {
+      _candyToBingoMap.set(String(candyUserId), req.playerId);
+      _bingoToCandyMap.set(req.playerId, String(candyUserId));
+      console.log('BIN-134: Mapped candy=' + candyUserId + ' → bingo=' + req.playerId);
     }
 
     res.json({
       success: true,
-      embedUrl: launchData.data.embedUrl,
-      launchToken: launchData.data.launchToken,
-      expiresAt: launchData.data.expiresAt
+      embedUrl: embedUrl,
+      accessToken: accessToken,
+      candyUserId: candyUserId,
+      bingoPlayerId: req.playerId
     });
   } catch (err) {
-    console.error('candy-launch proxy error:', err.message);
+    console.error('candy-launch auto-login error:', err.message);
     res.status(502).json({
       success: false,
-      error: 'Failed to reach candy-backend: ' + err.message
+      error: 'Failed to auto-login on candy-backend: ' + err.message
     });
   }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// External Wallet API — kalles av candy-backend ExternalWalletAdapter
+// Autentiseres med API-nøkkel, IKKE JWT.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Helper: Resolve candyPlayerId → bingoPlayerId
+// First checks in-memory map, then falls back to email-pattern lookup in DB
+async function resolveBingoPlayerId(candyPlayerId) {
+  // 1. In-memory map (set during candy-launch)
+  const mapped = _candyToBingoMap.get(candyPlayerId);
+  if (mapped) return mapped;
+
+  // 2. Fallback: the candyPlayerId might BE the bingoPlayerId (direct mapping)
+  //    Check if it exists as a bingo player
+  try {
+    const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
+      { _id: candyPlayerId },
+      { _id: 1 }
+    );
+    if (player) return candyPlayerId;
+  } catch (_) { /* not a valid ObjectId, continue */ }
+
+  return null;
+}
+
+// ─── GET /api/integration/ext-wallet/balance ────────────────────────────────
+router.get('/api/integration/ext-wallet/balance', verifyApiKey, async (req, res) => {
+  try {
+    const candyPlayerId = req.query.playerId;
+    if (!candyPlayerId) {
+      return res.status(400).json({ balance: 0, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'playerId required' });
+    }
+
+    const bingoPlayerId = await resolveBingoPlayerId(String(candyPlayerId));
+    if (!bingoPlayerId) {
+      return res.status(404).json({ balance: 0, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'No bingo player mapped for candy ID: ' + candyPlayerId });
+    }
+
+    const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
+      { _id: bingoPlayerId },
+      { walletAmount: 1 }
+    );
+
+    if (!player) {
+      return res.status(404).json({ balance: 0, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'Bingo player not found' });
+    }
+
+    res.json({
+      balance: +parseFloat(player.walletAmount).toFixed(2),
+      currency: 'NOK'
+    });
+  } catch (err) {
+    console.error('ext-wallet/balance error:', err);
+    res.status(500).json({ balance: 0, errorCode: 'INTERNAL_ERROR', errorMessage: err.message });
+  }
+});
+
+// ─── POST /api/integration/ext-wallet/debit ─────────────────────────────────
+router.post('/api/integration/ext-wallet/debit', verifyApiKey, async (req, res) => {
+  try {
+    const { playerId: candyPlayerId, amount, transactionId, roundId, currency } = req.body;
+
+    if (!candyPlayerId || !amount || amount <= 0 || !transactionId) {
+      return res.status(400).json({ success: false, balance: 0, transactionId: transactionId || '', errorCode: 'INVALID_AMOUNT', errorMessage: 'Missing required fields' });
+    }
+
+    const bingoPlayerId = await resolveBingoPlayerId(String(candyPlayerId));
+    if (!bingoPlayerId) {
+      return res.status(404).json({ success: false, balance: 0, transactionId, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'No bingo player for candy ID: ' + candyPlayerId });
+    }
+
+    // Idempotency: check if this transactionId already processed
+    const existingTx = await Sys.Game.Common.Services.PlayerServices.getTransactionByData({ idempotencyKey: transactionId });
+    if (existingTx) {
+      return res.json({ success: true, balance: existingTx.afterBalance, transactionId, errorCode: 'DUPLICATE_TRANSACTION' });
+    }
+
+    // Get player and check balance
+    const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
+      { _id: bingoPlayerId },
+      { walletAmount: 1, username: 1, hallId: 1 }
+    );
+    if (!player) {
+      return res.status(404).json({ success: false, balance: 0, transactionId, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'Bingo player not found' });
+    }
+
+    if (player.walletAmount < amount) {
+      return res.status(402).json({ success: false, balance: +parseFloat(player.walletAmount).toFixed(2), transactionId, errorCode: 'INSUFFICIENT_FUNDS', errorMessage: 'Insufficient balance' });
+    }
+
+    // Debit
+    const updatedPlayer = await Sys.App.Services.PlayerServices.findOneandUpdatePlayer(
+      { _id: bingoPlayerId },
+      { $inc: { walletAmount: -amount } },
+      { new: true }
+    );
+
+    // Transaction log
+    const internalTxId = 'TRN' + await Sys.Helper.bingo.ordNumFunction(Date.now()) + '' + Math.floor(100000 + Math.random() * 900000);
+    await Sys.Game.Common.Services.PlayerServices.createTransaction({
+      transactionId: internalTxId,
+      idempotencyKey: transactionId,
+      playerId: bingoPlayerId,
+      playerName: player.username,
+      hallId: player.hallId,
+      category: 'debit',
+      differenceAmount: amount,
+      typeOfTransactionTotalAmount: amount,
+      typeOfTransaction: 'CandyMania Bet (round: ' + (roundId || 'unknown') + ')',
+      previousBalance: +parseFloat(player.walletAmount).toFixed(2),
+      afterBalance: +parseFloat(updatedPlayer.walletAmount).toFixed(2),
+      defineSlug: 'candyGame',
+      amtCategory: 'realMoney',
+      status: 'success',
+      paymentBy: 'Wallet',
+      gameId: roundId || null,
+      createdAt: Date.now(),
+    });
+
+    res.json({
+      success: true,
+      balance: +parseFloat(updatedPlayer.walletAmount).toFixed(2),
+      transactionId: transactionId
+    });
+  } catch (err) {
+    console.error('ext-wallet/debit error:', err);
+    res.status(500).json({ success: false, balance: 0, transactionId: req.body?.transactionId || '', errorCode: 'WALLET_API_ERROR', errorMessage: err.message });
+  }
+});
+
+// ─── POST /api/integration/ext-wallet/credit ────────────────────────────────
+router.post('/api/integration/ext-wallet/credit', verifyApiKey, async (req, res) => {
+  try {
+    const { playerId: candyPlayerId, amount, transactionId, roundId, currency } = req.body;
+
+    if (!candyPlayerId || !amount || amount <= 0 || !transactionId) {
+      return res.status(400).json({ success: false, balance: 0, transactionId: transactionId || '', errorCode: 'INVALID_AMOUNT', errorMessage: 'Missing required fields' });
+    }
+
+    const bingoPlayerId = await resolveBingoPlayerId(String(candyPlayerId));
+    if (!bingoPlayerId) {
+      return res.status(404).json({ success: false, balance: 0, transactionId, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'No bingo player for candy ID: ' + candyPlayerId });
+    }
+
+    // Idempotency
+    const existingTx = await Sys.Game.Common.Services.PlayerServices.getTransactionByData({ idempotencyKey: transactionId });
+    if (existingTx) {
+      return res.json({ success: true, balance: existingTx.afterBalance, transactionId, errorCode: 'DUPLICATE_TRANSACTION' });
+    }
+
+    // Get player
+    const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
+      { _id: bingoPlayerId },
+      { walletAmount: 1, username: 1, hallId: 1 }
+    );
+    if (!player) {
+      return res.status(404).json({ success: false, balance: 0, transactionId, errorCode: 'PLAYER_NOT_FOUND', errorMessage: 'Bingo player not found' });
+    }
+
+    // Credit
+    const updatedPlayer = await Sys.App.Services.PlayerServices.findOneandUpdatePlayer(
+      { _id: bingoPlayerId },
+      { $inc: { walletAmount: amount } },
+      { new: true }
+    );
+
+    // Transaction log
+    const internalTxId = 'TRN' + await Sys.Helper.bingo.ordNumFunction(Date.now()) + '' + Math.floor(100000 + Math.random() * 900000);
+    await Sys.Game.Common.Services.PlayerServices.createTransaction({
+      transactionId: internalTxId,
+      idempotencyKey: transactionId,
+      playerId: bingoPlayerId,
+      playerName: player.username,
+      hallId: player.hallId,
+      category: 'credit',
+      differenceAmount: amount,
+      typeOfTransactionTotalAmount: amount,
+      typeOfTransaction: 'CandyMania Win (round: ' + (roundId || 'unknown') + ')',
+      winningPrice: amount,
+      previousBalance: +parseFloat(player.walletAmount).toFixed(2),
+      afterBalance: +parseFloat(updatedPlayer.walletAmount).toFixed(2),
+      defineSlug: 'candyGame',
+      amtCategory: 'realMoney',
+      status: 'success',
+      paymentBy: 'Wallet',
+      gameId: roundId || null,
+      createdAt: Date.now(),
+    });
+
+    res.json({
+      success: true,
+      balance: +parseFloat(updatedPlayer.walletAmount).toFixed(2),
+      transactionId: transactionId
+    });
+  } catch (err) {
+    console.error('ext-wallet/credit error:', err);
+    res.status(500).json({ success: false, balance: 0, transactionId: req.body?.transactionId || '', errorCode: 'WALLET_API_ERROR', errorMessage: err.message });
+  }
+});
+
+// ─── GET /api/integration/ext-wallet/mapping ────────────────────────────────
+// Debug: sjekk gjeldende mapping
+router.get('/api/integration/ext-wallet/mapping', (req, res) => {
+  const mappings = [];
+  _candyToBingoMap.forEach((bingoId, candyId) => {
+    mappings.push({ candyId, bingoId });
+  });
+  res.json({ count: mappings.length, mappings });
 });
 
 module.exports = router;

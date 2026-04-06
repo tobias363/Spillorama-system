@@ -335,6 +335,21 @@
       </div>
     </div>
 
+    <script>
+      // Auto-login fra bingo-lobby: ?token=ACCESS_TOKEN&embed=true
+      // Kjører FØR app.js slik at appen finner sesjonen i localStorage
+      (function() {
+        var params = new URLSearchParams(window.location.search);
+        var token = params.get('token');
+        if (token) {
+          localStorage.setItem('bingo.portal.auth', JSON.stringify({ accessToken: token }));
+          // Fjern token fra URL (sikkerhet)
+          params.delete('token');
+          var clean = window.location.pathname + (params.toString() ? '?' + params.toString() : '') + window.location.hash;
+          window.history.replaceState({}, '', clean);
+        }
+      })();
+    </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js?v=wallet-transfer-20260304-4"></script>
   </body>

@@ -125,7 +125,13 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: WALLET_PROVIDER
-        value: file
+        value: external
+      - key: WALLET_API_BASE_URL
+        value: "https://bingo-system-jsso.onrender.com/api/integration/ext-wallet"
+      - key: WALLET_API_KEY
+        sync: false
+      - key: WALLET_API_TIMEOUT_MS
+        value: "8000"
       - key: INTEGRATION_ENABLED
         value: "true"
       - key: INTEGRATION_API_KEY
