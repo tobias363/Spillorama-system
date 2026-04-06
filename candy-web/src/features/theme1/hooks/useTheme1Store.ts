@@ -206,9 +206,11 @@ function redirectTheme1ToPortal(): void {
   }
 
   const targetUrl = resolveTheme1PortalUrl();
-  if (window.location.href !== targetUrl) {
-    window.location.replace(targetUrl);
-  }
+  console.error("[BIN-134] redirectTheme1ToPortal BLOCKED — would go to: " + targetUrl + " | trace:", new Error().stack);
+  // BIN-134 DEBUG: ALL redirects disabled to diagnose iframe double-load
+  // if (window.location.href !== targetUrl) {
+  //   window.location.replace(targetUrl);
+  // }
 }
 
 function resolveTheme1LiveConnectionErrorMessage(message: string, hostname: string): string {
