@@ -366,13 +366,42 @@
       var iframe = document.createElement('iframe');
       iframe.src = resolvedUrl;
       iframe.allow = 'autoplay; fullscreen';
-      iframe.onerror = function() { dbg('Iframe load error for: ' + resolvedUrl, 'err'); };
+      iframe.style.background = '#1a1a2e';
+      iframe.onerror = function() { dbg('IFRAME onerror fired', 'err'); };
+      iframe.onload = function() {
+        dbg('IFRAME onload fired', 'ok');
+        try {
+          dbg('IFRAME location: ' + iframe.contentWindow.location.href, 'ok');
+        } catch(e) {
+          dbg('IFRAME location: cross-origin (expected)', 'warn');
+        }
+        // Monitor for unexpected navigation
+        var checkCount = 0;
+        var navCheck = setInterval(function() {
+          checkCount++;
+          try {
+            var loc = iframe.contentWindow.location.href;
+            dbg('IFRAME nav check #' + checkCount + ': ' + loc);
+          } catch(e) {
+            // cross-origin = still on candy-backend (OK)
+          }
+          if (!document.body.contains(iframe) || !overlay.classList.contains('active')) {
+            dbg('IFRAME removed or overlay closed at check #' + checkCount, 'err');
+            clearInterval(navCheck);
+          }
+          if (checkCount > 20) clearInterval(navCheck);
+        }, 1000);
+      };
       overlay.appendChild(iframe);
       overlay.classList.add('active');
       backBtn.style.display = 'block';
+      dbg('Overlay activated, iframe added to DOM', 'ok');
     }
 
     function closeGameOverlay() {
+      dbg('closeGameOverlay called', 'warn');
+      // Stack trace to find what's calling close
+      try { throw new Error('close-trace'); } catch(e) { dbg('Close called from: ' + e.stack.split('\n').slice(1,4).join(' | '), 'warn'); }
       var overlay = document.getElementById('game-overlay');
       var backBtn = document.getElementById('game-overlay-back');
       var iframe = overlay.querySelector('iframe');
@@ -403,11 +432,19 @@
       'https://candy-backend-ldvg.onrender.com'
     ];
 
+    // Log ALL postMessages for debugging
+    window.addEventListener('message', function(event) {
+      var d = event.data;
+      if (d && typeof d === 'object' && d.type) {
+        dbg('PM [' + event.origin + ']: ' + d.type + ' ' + JSON.stringify(d).substring(0, 200));
+      }
+    });
+
     window.addEventListener('message', async function(event) {
       // Sjekk at meldingen kommer fra en tillatt kilde
       if (ALLOWED_GAME_ORIGINS.indexOf(event.origin) === -1) {
         if (event.data && event.data.type && String(event.data.type).startsWith('candy:')) {
-          dbg('PostMessage BLOKKERT fra origin: ' + event.origin + ' (ikke i ALLOWED_GAME_ORIGINS)', 'err');
+          dbg('PostMessage BLOKKERT fra origin: ' + event.origin, 'err');
         }
         return;
       }
