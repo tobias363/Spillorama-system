@@ -116,7 +116,10 @@ export class IntegrationLaunchHandler {
     return {
       embedUrl,
       launchToken: issued.launchToken,
-      expiresAt: issued.expiresAt
+      expiresAt: issued.expiresAt,
+      // BIN-134: Expose mapping for wallet-bridge on provider side
+      internalPlayerId: mapping.internalPlayerId,
+      internalWalletId: mapping.internalWalletId
     };
   }
 

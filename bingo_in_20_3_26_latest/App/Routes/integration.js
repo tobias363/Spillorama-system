@@ -346,83 +346,65 @@ router.post('/api/integration/wallet/credit', verifyIntegrationToken, async (req
 });
 
 // ─── POST /api/integration/candy-launch ─────────────────────────────────────
-// Auto-login: Oppretter/logger inn en candy-backend bruker for bingo-spilleren.
-// Returnerer URL med accessToken som candy-frontenden leser automatisk.
+// Bruker candy-backendets integrasjons-launch endepunkt (designet for dette).
+// Returnerer embedUrl med launch token (?lt=TOKEN) som React SPA håndterer.
 router.post('/api/integration/candy-launch', verifyIntegrationToken, async (req, res) => {
   const CANDY_BACKEND_URL = process.env.CANDY_BACKEND_URL || 'https://candy-backend-ldvg.onrender.com';
+  const CANDY_API_KEY = process.env.CANDY_INTEGRATION_API_KEY;
 
   try {
-    // Hent bingo-spillerens info
-    const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
-      { _id: req.playerId },
-      { username: 1, _id: 1, email: 1 }
-    );
-
-    if (!player) {
-      return res.status(404).json({ success: false, error: 'Player not found' });
-    }
-
-    // Generer deterministisk e-post og passord for denne bingo-spilleren
-    const email = 'bingo-' + req.playerId + '@spillorama.system';
-    const password = 'BingoAuto_' + crypto.createHash('sha256').update(req.playerId + (process.env.JWT_SECRET || 'salt')).digest('hex').slice(0, 16);
-    const displayName = player.username || 'Bingo-' + req.playerId.slice(-6);
-
-    // Forsøk login først
-    var loginRes = await fetch(CANDY_BACKEND_URL + '/api/auth/login', {
+    // Kall candy-backendets integration launch endepunkt
+    // Dette oppretter en intern spiller, wallet-mapping og launch token i ett kall
+    var launchRes = await fetch(CANDY_BACKEND_URL + '/api/integration/launch', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': CANDY_API_KEY
+      },
+      body: JSON.stringify({
+        sessionToken: req.headers.authorization.split(' ')[1], // bingo JWT
+        playerId: req.playerId,
+        currency: 'NOK'
+      })
     });
-    var loginData = await loginRes.json();
+    var launchData = await launchRes.json();
 
-    // Hvis brukeren ikke finnes, registrer først, så login
-    if (!loginRes.ok || !loginData.ok) {
-      var regRes = await fetch(CANDY_BACKEND_URL + '/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, displayName })
+    if (!launchRes.ok || !launchData.ok) {
+      console.error('candy integration launch failed:', launchData);
+      return res.status(502).json({
+        success: false,
+        error: 'Integration launch failed: ' + (launchData.error?.message || launchData.error?.code || 'unknown'),
+        debug: { status: launchRes.status, data: launchData }
       });
-      var regData = await regRes.json();
-
-      if (regRes.ok && regData.ok) {
-        loginData = regData; // Register returnerer også accessToken
-      } else {
-        return res.status(502).json({
-          success: false,
-          error: 'Kunne ikke opprette candy-bruker: ' + (regData.error?.message || 'ukjent feil'),
-          debug: { registerStatus: regRes.status, data: regData }
-        });
-      }
     }
 
-    // Bygg URL direkte til React SPA med accessToken som URL-param
-    // React SPA leser: accessToken, backendUrl, playerId fra URLSearchParams
-    var accessToken = loginData.data.accessToken;
-    var candyUserId = loginData.data.user?.id;
-    var embedUrl = CANDY_BACKEND_URL + '/web/'
-      + '?accessToken=' + encodeURIComponent(accessToken)
-      + '&backendUrl=' + encodeURIComponent(CANDY_BACKEND_URL)
-      + '&embed=true';
+    var embedUrl = launchData.data.embedUrl;
+    var internalPlayerId = launchData.data.internalPlayerId;
+    var internalWalletId = launchData.data.internalWalletId;
 
-    // Lagre mapping mellom candy-bruker og bingo-spiller for wallet-bridge
-    if (candyUserId) {
-      _candyToBingoMap.set(String(candyUserId), req.playerId);
-      _bingoToCandyMap.set(req.playerId, String(candyUserId));
-      console.log('BIN-134: Mapped candy=' + candyUserId + ' → bingo=' + req.playerId);
+    // Lagre mapping for wallet-bridge (ExternalWalletAdapter sender internalWalletId som playerId)
+    if (internalWalletId) {
+      _candyToBingoMap.set(String(internalWalletId), req.playerId);
+      console.log('BIN-134: Mapped walletId=' + internalWalletId + ' → bingo=' + req.playerId);
     }
+    if (internalPlayerId) {
+      _candyToBingoMap.set(String(internalPlayerId), req.playerId);
+      console.log('BIN-134: Mapped playerId=' + internalPlayerId + ' → bingo=' + req.playerId);
+    }
+    _bingoToCandyMap.set(req.playerId, String(internalWalletId || internalPlayerId || ''));
 
     res.json({
       success: true,
       embedUrl: embedUrl,
-      accessToken: accessToken,
-      candyUserId: candyUserId,
-      bingoPlayerId: req.playerId
+      bingoPlayerId: req.playerId,
+      internalPlayerId: internalPlayerId,
+      internalWalletId: internalWalletId
     });
   } catch (err) {
-    console.error('candy-launch auto-login error:', err.message);
+    console.error('candy-launch error:', err.message);
     res.status(502).json({
       success: false,
-      error: 'Failed to auto-login on candy-backend: ' + err.message
+      error: 'Failed to launch candy: ' + err.message
     });
   }
 });

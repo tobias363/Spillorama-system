@@ -81,6 +81,10 @@ export interface IntegrationLaunchResponse {
   launchToken: string;
   /** ISO-8601 expiry for the launch token. */
   expiresAt: string;
+  /** Internal player ID (for provider wallet mapping). */
+  internalPlayerId?: string;
+  /** Internal wallet account ID (for provider wallet mapping). */
+  internalWalletId?: string;
 }
 
 // ---------------------------------------------------------------------------
