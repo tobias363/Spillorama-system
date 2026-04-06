@@ -2224,6 +2224,54 @@ app.get("/api/integration/wallet-diag", async (_req, res) => {
   res.json(diag);
 });
 
+// BIN-134: Test auth + room creation readiness for a given accessToken
+app.post("/api/integration/test-auth", async (req, res) => {
+  const diag: Record<string, unknown> = { timestamp: new Date().toISOString() };
+  const token = req.body?.accessToken;
+  if (!token) {
+    diag.error = "accessToken required in request body";
+    return res.json(diag);
+  }
+  try {
+    const user = await platformService.getUserFromAccessToken(token);
+    diag.userFound = true;
+    diag.userId = user.id;
+    diag.displayName = user.displayName;
+    diag.walletId = user.walletId;
+    diag.balance = user.balance;
+    diag.role = user.role;
+
+    // Test hallId resolution
+    try {
+      const hallId = await requireActiveHallIdFromInput(req.body?.hallId || "hall-default");
+      diag.hallId = hallId;
+      diag.hallResolved = true;
+    } catch (err) {
+      diag.hallResolved = false;
+      diag.hallError = (err as Error).message;
+    }
+
+    // Test wallet operations
+    try {
+      await walletAdapter.ensureAccount(user.walletId);
+      diag.walletEnsureAccount = "ok";
+    } catch (err) {
+      diag.walletEnsureAccount = (err as Error).message;
+    }
+    try {
+      const bal = await walletAdapter.getBalance(user.walletId);
+      diag.walletGetBalance = bal;
+    } catch (err) {
+      diag.walletGetBalance = (err as Error).message;
+    }
+  } catch (err) {
+    diag.userFound = false;
+    diag.error = (err as Error).message;
+    diag.code = (err as any).code;
+  }
+  res.json(diag);
+});
+
 app.get("/api/admin/games", async (req, res) => {
   try {
     await requireAdminPermissionUser(req, "GAME_CATALOG_READ");
