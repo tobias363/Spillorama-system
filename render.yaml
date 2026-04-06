@@ -133,7 +133,7 @@ services:
       - key: INTEGRATION_DEFAULT_HALL_ID
         value: hall-default
       - key: INTEGRATION_CANDY_FRONTEND_URL
-        value: "https://candy-backend-ldvg.onrender.com/candy/"
+        value: "https://candy-backend-ldvg.onrender.com/web/"
       - key: INTEGRATION_CANDY_API_BASE_URL
         value: "https://candy-backend-ldvg.onrender.com"
       - key: ALLOWED_EMBED_ORIGINS
