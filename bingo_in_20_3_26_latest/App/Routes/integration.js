@@ -11,15 +11,64 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const Sys = require('../../Boot/Sys');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const INTEGRATION_API_KEY = process.env.CANDY_INTEGRATION_API_KEY;
 
 // ─── Player mapping: candyUserId → bingoPlayerId ────────────────────────────
-// Populated during candy-launch, used by ext-wallet endpoints.
+// In-memory cache + MongoDB persistence. Survives restarts via DB.
 const _candyToBingoMap = new Map(); // candyUserId → bingoPlayerId
 const _bingoToCandyMap = new Map(); // bingoPlayerId → candyUserId
+
+// ─── MongoDB model for persistent wallet mapping ────────────────────────────
+const candyMappingSchema = new mongoose.Schema({
+  candyId: { type: String, required: true, unique: true, index: true },
+  bingoId: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+const CandyMapping = mongoose.model('CandyMapping', candyMappingSchema);
+
+// Persist a mapping to MongoDB + in-memory cache
+async function persistMapping(candyId, bingoId) {
+  _candyToBingoMap.set(String(candyId), String(bingoId));
+  try {
+    await CandyMapping.findOneAndUpdate(
+      { candyId: String(candyId) },
+      { candyId: String(candyId), bingoId: String(bingoId), updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+  } catch (err) {
+    console.error('[EXT-WALLET] Failed to persist mapping to DB:', err.message);
+  }
+}
+
+// Load a mapping from DB if not in memory
+async function resolveFromDb(candyId) {
+  const doc = await CandyMapping.findOne({ candyId: String(candyId) });
+  if (doc) {
+    _candyToBingoMap.set(doc.candyId, doc.bingoId); // Warm cache
+    return doc.bingoId;
+  }
+  return null;
+}
+
+// Load all mappings from DB on startup
+async function loadMappingsFromDb() {
+  try {
+    const docs = await CandyMapping.find({});
+    for (const doc of docs) {
+      _candyToBingoMap.set(doc.candyId, doc.bingoId);
+    }
+    console.log('[EXT-WALLET] Loaded', docs.length, 'mappings from DB');
+  } catch (err) {
+    console.error('[EXT-WALLET] Failed to load mappings from DB:', err.message);
+  }
+}
+// Load on module init (will run once Mongoose is connected)
+setTimeout(() => loadMappingsFromDb(), 5000);
 
 // ─── Middleware: Verifiser JWT ────────────────────────────────────────────────
 function verifyIntegrationToken(req, res, next) {
@@ -389,12 +438,13 @@ router.post('/api/integration/candy-launch', verifyIntegrationToken, async (req,
     var internalWalletId = launchData.data.internalWalletId;
 
     // Lagre mapping for wallet-bridge (ExternalWalletAdapter sender internalWalletId som playerId)
+    // Persisteres til MongoDB så mappinger overlever restarter.
     if (internalWalletId) {
-      _candyToBingoMap.set(String(internalWalletId), req.playerId);
+      await persistMapping(internalWalletId, req.playerId);
       console.log('BIN-134: Mapped walletId=' + internalWalletId + ' → bingo=' + req.playerId);
     }
     if (internalPlayerId) {
-      _candyToBingoMap.set(String(internalPlayerId), req.playerId);
+      await persistMapping(internalPlayerId, req.playerId);
       console.log('BIN-134: Mapped playerId=' + internalPlayerId + ' → bingo=' + req.playerId);
     }
     _bingoToCandyMap.set(req.playerId, String(internalWalletId || internalPlayerId || ''));
@@ -421,14 +471,17 @@ router.post('/api/integration/candy-launch', verifyIntegrationToken, async (req,
 // ═════════════════════════════════════════════════════════════════════════════
 
 // Helper: Resolve candyPlayerId → bingoPlayerId
-// First checks in-memory map, then falls back to email-pattern lookup in DB
+// Checks: 1) in-memory cache, 2) MongoDB, 3) direct bingo player lookup
 async function resolveBingoPlayerId(candyPlayerId) {
-  // 1. In-memory map (set during candy-launch)
+  // 1. In-memory cache (fastest)
   const mapped = _candyToBingoMap.get(candyPlayerId);
   if (mapped) return mapped;
 
-  // 2. Fallback: the candyPlayerId might BE the bingoPlayerId (direct mapping)
-  //    Check if it exists as a bingo player
+  // 2. MongoDB (survives restarts)
+  const dbMapped = await resolveFromDb(candyPlayerId);
+  if (dbMapped) return dbMapped;
+
+  // 3. Fallback: the candyPlayerId might BE the bingoPlayerId (direct mapping)
   try {
     const player = await Sys.App.Services.PlayerServices.getSinglePlayerData(
       { _id: candyPlayerId },
@@ -641,20 +694,30 @@ router.get('/api/integration/ext-wallet/diag', async (req, res) => {
     apiKeyConfigured: !!INTEGRATION_API_KEY,
     apiKeyLength: INTEGRATION_API_KEY ? INTEGRATION_API_KEY.length : 0,
     apiKeyPrefix: INTEGRATION_API_KEY ? INTEGRATION_API_KEY.substring(0, 4) + '...' : 'NOT_SET',
-    mappings: {
+    memoryMappings: {
       count: _candyToBingoMap.size,
+      entries: []
+    },
+    dbMappings: {
+      count: 0,
       entries: []
     },
     testBalance: null
   };
 
-  // List all mappings
+  // List in-memory mappings
   _candyToBingoMap.forEach((bingoId, candyId) => {
-    diag.mappings.entries.push({
-      candyId: candyId,
-      bingoId: bingoId
-    });
+    diag.memoryMappings.entries.push({ candyId, bingoId });
   });
+
+  // List DB mappings
+  try {
+    const dbDocs = await CandyMapping.find({}).lean();
+    diag.dbMappings.count = dbDocs.length;
+    diag.dbMappings.entries = dbDocs.map(d => ({ candyId: d.candyId, bingoId: d.bingoId, updatedAt: d.updatedAt }));
+  } catch (err) {
+    diag.dbMappings.error = err.message;
+  }
 
   // If playerId provided, test the full balance chain
   const testPlayerId = req.query.playerId;
