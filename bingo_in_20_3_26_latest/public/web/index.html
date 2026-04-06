@@ -331,9 +331,9 @@
 
       dbg('openGameInIframe called, url=' + url);
 
-      // For candy games: fetch a fresh launch token from the proxy endpoint
-      if (url.indexOf('/candy/') !== -1 && _playerToken) {
-        dbg('Fetching launch token from /api/integration/candy-launch...');
+      // For candy games: get auto-login token and load React SPA directly
+      if (url.indexOf('/candy') !== -1 && _playerToken) {
+        dbg('Fetching candy auto-login from /api/integration/candy-launch...');
         fetch('/api/integration/candy-launch', {
           method: 'POST',
           headers: {
@@ -344,21 +344,15 @@
         .then(function(r) { return r.json(); })
         .then(function(data) {
           dbg('candy-launch response: ' + JSON.stringify(data));
-          if (data && data.embedUrl) {
-            dbg('Got embedUrl: ' + data.embedUrl, 'ok');
+          if (data && data.success && data.embedUrl) {
+            dbg('Loading candy game directly: ' + data.embedUrl, 'ok');
             _loadIframe(overlay, backBtn, data.embedUrl);
-          } else if (data && data.launchUrl) {
-            _loadIframe(overlay, backBtn, data.launchUrl);
           } else {
-            // Fallback: open candy-backend directly
-            var fallbackUrl = 'https://candy-backend-ldvg.onrender.com/candy/';
-            dbg('No launchUrl in response, using fallback: ' + fallbackUrl, 'warn');
-            _loadIframe(overlay, backBtn, fallbackUrl);
+            dbg('candy-launch failed: ' + JSON.stringify(data), 'err');
           }
         })
         .catch(function(err) {
-          dbg('candy-launch fetch failed: ' + err.message + ', using fallback', 'err');
-          _loadIframe(overlay, backBtn, 'https://candy-backend-ldvg.onrender.com/candy/');
+          dbg('candy-launch fetch failed: ' + err.message, 'err');
         });
         return;
       }
