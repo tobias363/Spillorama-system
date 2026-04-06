@@ -341,16 +341,38 @@
       (function() {
         var params = new URLSearchParams(window.location.search);
         var token = params.get('token');
+        var isEmbed = params.get('embed') === 'true';
         if (token) {
           localStorage.setItem('bingo.portal.auth', JSON.stringify({ accessToken: token }));
-          // Fjern token fra URL (sikkerhet)
           params.delete('token');
           var clean = window.location.pathname + (params.toString() ? '?' + params.toString() : '') + window.location.hash;
           window.history.replaceState({}, '', clean);
         }
+        // Marker embed-modus globalt slik at auto-launch kan trigges etter auth
+        if (isEmbed) window.__EMBED_MODE = true;
       })();
     </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js?v=wallet-transfer-20260304-4"></script>
+    <script>
+      // Embed auto-launch: etter app.js har autentisert, start candy-spillet direkte
+      (function() {
+        if (!window.__EMBED_MODE) return;
+        var attempts = 0;
+        var timer = setInterval(function() {
+          attempts++;
+          var btn = document.getElementById('candyPlayBtn');
+          if (btn && !btn.disabled) {
+            clearInterval(timer);
+            console.log('[EMBED] Auto-launching candy game...');
+            btn.click();
+          }
+          if (attempts > 40) { // 20 sekunder
+            clearInterval(timer);
+            console.error('[EMBED] Gave up waiting for candy play button');
+          }
+        }, 500);
+      })();
+    </script>
   </body>
 </html>
