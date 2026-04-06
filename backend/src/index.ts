@@ -392,7 +392,7 @@ const integrationLaunchHandler = integrationEnabled
       walletAdapter,
       launchTokenStore: candyLaunchTokenStore,
       providerApiKey: process.env.INTEGRATION_API_KEY?.trim() || "",
-      defaultHallId: process.env.INTEGRATION_DEFAULT_HALL_ID?.trim() || "hall-default",
+      defaultHallId: process.env.INTEGRATION_DEFAULT_HALL_ID?.trim() || "default-hall",
       candyFrontendBaseUrl: process.env.INTEGRATION_CANDY_FRONTEND_URL?.trim() || "https://candy.example.com",
       candyApiBaseUrl: process.env.INTEGRATION_CANDY_API_BASE_URL?.trim() || `http://localhost:${process.env.PORT || "4000"}`
     })
@@ -1208,7 +1208,7 @@ async function requireAuthenticatedPlayerAction(
 
   // BIN-134: SPA sends "CANDY1" as canonical room alias.
   if (roomCode === "CANDY1" && enforceSingleCandyRoomPerHall) {
-    const hallId = (payload as any)?.hallId || "hall-default";
+    const hallId = (payload as any)?.hallId || "default-hall";
     const canonicalRoom = getCanonicalCandyRoomForHall(hallId);
     if (canonicalRoom) {
       roomCode = canonicalRoom.code;
@@ -2253,7 +2253,7 @@ app.post("/api/integration/test-auth", async (req, res) => {
 
     // Test hallId resolution
     try {
-      const hallId = await requireActiveHallIdFromInput(req.body?.hallId || "hall-default");
+      const hallId = await requireActiveHallIdFromInput(req.body?.hallId || "default-hall");
       diag.hallId = hallId;
       diag.hallResolved = true;
     } catch (err) {
@@ -3551,10 +3551,8 @@ io.on("connection", (socket: Socket) => {
 
           socket.join(canonicalRoom.code);
           const snapshot = await emitRoomUpdate(canonicalRoom.code);
-          // BIN-134: Return "CANDY1" so SPA's session.roomCode matches af() alias
-          const clientRoomCode = enforceSingleCandyRoomPerHall ? "CANDY1" : canonicalRoom.code;
-          console.log("[BIN-134] room:create → existing canonical", { actual: canonicalRoom.code, clientRoomCode, playerId });
-          ackSuccess(callback, { roomCode: clientRoomCode, playerId, snapshot });
+          console.log("[BIN-134] room:create → existing canonical", { roomCode: canonicalRoom.code, playerId });
+          ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
           return;
         }
       }
@@ -3563,14 +3561,14 @@ io.on("connection", (socket: Socket) => {
         playerName: identity.playerName,
         hallId: identity.hallId,
         walletId: identity.walletId,
-        socketId: socket.id
+        socketId: socket.id,
+        // BIN-134: Use "CANDY1" as actual room code so SPA alias = real code
+        roomCode: enforceSingleCandyRoomPerHall ? "CANDY1" : undefined
       });
       socket.join(roomCode);
       const snapshot = await emitRoomUpdate(roomCode);
-      // BIN-134: Return "CANDY1" so SPA's session.roomCode matches af() alias
-      const clientRoomCode = enforceSingleCandyRoomPerHall ? "CANDY1" : roomCode;
-      console.log("[BIN-134] room:create SUCCESS", { actual: roomCode, clientRoomCode, playerId });
-      ackSuccess(callback, { roomCode: clientRoomCode, playerId, snapshot });
+      console.log("[BIN-134] room:create SUCCESS", { roomCode, playerId });
+      ackSuccess(callback, { roomCode, playerId, snapshot });
     } catch (error) {
       console.error("[BIN-134] room:create FAILED", { error: (error as Error).message, code: (error as any).code });
       ackFailure(callback, error);
@@ -3775,7 +3773,7 @@ io.on("connection", (socket: Socket) => {
       // BIN-134: SPA sends "CANDY1" as canonical room code.
       // Map it to the actual canonical room for the hall.
       if (roomCode === "CANDY1" && enforceSingleCandyRoomPerHall) {
-        const hallId = (payload as any)?.hallId || "hall-default";
+        const hallId = (payload as any)?.hallId || "default-hall";
         const canonicalRoom = getCanonicalCandyRoomForHall(hallId);
         if (canonicalRoom) {
           roomCode = canonicalRoom.code;

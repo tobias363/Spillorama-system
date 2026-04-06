@@ -35,6 +35,8 @@ interface CreateRoomInput {
   hallId: string;
   walletId?: string;
   socketId?: string;
+  /** Optional fixed room code (e.g. "CANDY1"). Skips random generation. */
+  roomCode?: string;
 }
 
 interface JoinRoomInput extends CreateRoomInput {
@@ -439,7 +441,10 @@ export class BingoEngine {
       socketId: input.socketId
     };
 
-    const code = makeRoomCode(new Set(this.rooms.keys()));
+    const existingCodes = new Set(this.rooms.keys());
+    const code = input.roomCode && !existingCodes.has(input.roomCode)
+      ? input.roomCode
+      : makeRoomCode(existingCodes);
     const room: RoomState = {
       code,
       hallId,
