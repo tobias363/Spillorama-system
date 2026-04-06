@@ -1742,7 +1742,7 @@ function resolveDefaultBackendUrl(): string {
     return "http://127.0.0.1:4000";
   }
 
-  return "https://bingosystem-staging.onrender.com";
+  return window.location.origin;
 }
 
 export function isLocalTheme1RuntimeHost(hostname: string): boolean {
@@ -1798,7 +1798,7 @@ function resolveLaunchBaseUrl(session: RealtimeSession): string {
   const normalizedSession = normalizeSession(session);
   const hasLaunchToken = readLaunchTokenFromLocation().length > 0;
   if (hasLaunchToken && isLocalhostUrl(normalizedSession.baseUrl)) {
-    return "https://bingosystem-staging.onrender.com";
+    return window.location.origin;
   }
 
   if (!isLocalhostUrl(normalizedSession.baseUrl) || isRunningLocally()) {
