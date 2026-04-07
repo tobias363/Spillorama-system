@@ -524,6 +524,7 @@ export class BingoEngine {
     const gameType: LedgerGameType = "DATABINGO";
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.makeHouseAccountId(room.hallId, gameType, channel);
+    await this.walletAdapter.ensureAccount(houseAccountId);
     if (entryFee > 0) {
       await this.ensureSufficientBalance(players, entryFee);
       for (const player of players) {

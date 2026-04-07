@@ -1948,53 +1948,6 @@ function applyPendingDrawPresentation(
   }, THEME1_DRAW_PRESENTATION_MS);
 }
 
-function commitPreviousPendingDrawPresentation(
-  set: (partial: Partial<Theme1State>) => void,
-  get: () => Theme1State,
-  nextPendingDrawNumber: number,
-): void {
-  const currentState = get();
-  const previousPendingDrawNumber = currentState.runtime.pendingDrawNumber;
-
-  if (
-    previousPendingDrawNumber === null ||
-    previousPendingDrawNumber === nextPendingDrawNumber
-  ) {
-    return;
-  }
-
-  if (currentState.mode === "live" && currentState.roomSnapshot) {
-    const session = normalizeSession(currentState.session);
-    const result = mapRoomSnapshotToTheme1(currentState.roomSnapshot, {
-      session,
-      connectionPhase: "connected",
-    });
-    const nextSession =
-      result.resolvedPlayerId && result.resolvedPlayerId !== session.playerId
-        ? { ...session, playerId: result.resolvedPlayerId }
-        : session;
-
-    writeSession(nextSession);
-    set({
-      session: nextSession,
-      snapshot: result.model,
-      runtime: {
-        ...currentState.runtime,
-        pendingDrawNumber: null,
-      },
-    });
-    return;
-  }
-
-  set({
-    snapshot: applyTheme1DrawPresentation(currentState.snapshot, null),
-    runtime: {
-      ...currentState.runtime,
-      pendingDrawNumber: null,
-    },
-  });
-}
-
 function clearPendingDrawTimer(): void {
   if (!pendingDrawTimer) {
     return;
