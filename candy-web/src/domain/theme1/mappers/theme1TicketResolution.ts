@@ -20,7 +20,12 @@ export function resolvePlayerContext(
   const gameTicketMap = snapshot.currentGame?.tickets ?? {};
   const preRoundTicketMap = snapshot.preRoundTickets ?? {};
   const currentGameStatus = snapshot.currentGame?.status;
-  const shouldUseCurrentGameTickets = currentGameStatus === "RUNNING";
+  const hasPreRoundTickets = Object.keys(preRoundTicketMap).length > 0;
+  // Use currentGame tickets when RUNNING. Also when FINISHED/ENDED and there
+  // are no preRoundTickets yet — keeps boards visible between rounds.
+  const shouldUseCurrentGameTickets =
+    currentGameStatus === "RUNNING" ||
+    ((currentGameStatus === "FINISHED" || currentGameStatus === "ENDED") && !hasPreRoundTickets);
   const normalizedPreferredPlayerId = preferredPlayerId?.trim();
 
   if (normalizedPreferredPlayerId) {
