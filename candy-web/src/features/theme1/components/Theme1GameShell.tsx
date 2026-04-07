@@ -17,7 +17,8 @@ export type Theme1BonusTestMode = "random" | "win";
 const THEME1_LIVE_STAGE_WIDTH = 1365;
 const THEME1_LIVE_STAGE_HEIGHT = 768;
 const THEME1_POST_ROUND_COUNTDOWN_DELAY_MS = 5000;
-const THEME1_LIVE_BOOTSTRAP_SETTLE_MS = 6000;
+// Settle delay removed — show game immediately when roomSnapshot is ready.
+// Previously waited 6000ms after connection, hiding the game behind a spinner.
 
 function resolveTheme1StageScale() {
   if (typeof window === "undefined") {
@@ -120,26 +121,21 @@ export function Theme1GameShell() {
   const [displayedRecentBalls, setDisplayedRecentBalls] = useState<number[]>(snapshot.recentBalls);
   const [frozenRoundBalls, setFrozenRoundBalls] = useState<number[]>([]);
   const [countdownHiddenUntilMs, setCountdownHiddenUntilMs] = useState(0);
-  const [liveChromeSettleComplete, setLiveChromeSettleComplete] = useState(
-    () => isLocalTheme1RuntimeHost(hostname),
-  );
+  // Always true — no settle delay. Game visible as soon as roomSnapshot exists.
+  const liveChromeSettleComplete = true;
   const handledBonusSearchRef = useRef<string>("");
   const previousGameStatusRef = useRef(snapshot.meta.gameStatus);
   const isBonusActive = bonus.status !== "idle";
+  // Only block chrome while we're actively connecting and have no data yet.
+  // Once roomSnapshot exists OR we're on localhost, show the game immediately.
   const shouldDeferChrome = shouldDeferTheme1LiveChrome({
     hostname,
     mode,
     connectionPhase: connection.phase,
     hasRoomSnapshot: roomSnapshot !== null,
   });
-  const shouldHoldChromeDuringSettle = shouldHoldTheme1LiveChromeDuringSettle({
-    hostname,
-    mode,
-    connectionPhase: connection.phase,
-    hasRoomSnapshot: roomSnapshot !== null,
-    settleDelayComplete: liveChromeSettleComplete,
-  });
-  const shouldBlockChrome = shouldDeferChrome || shouldHoldChromeDuringSettle;
+  const shouldHoldChromeDuringSettle = false; // settle delay removed
+  const shouldBlockChrome = shouldDeferChrome;
   const shouldShowBootstrapError =
     shouldBlockChrome === false &&
     !isLocalTheme1RuntimeHost(hostname) &&
@@ -214,35 +210,8 @@ export function Theme1GameShell() {
     previousGameStatusRef.current = currentGameStatus;
   }, [snapshot.meta.gameStatus]);
 
-  useEffect(() => {
-    if (isLocalTheme1RuntimeHost(hostname)) {
-      setLiveChromeSettleComplete(true);
-      return undefined;
-    }
-
-    if (shouldDeferChrome || connection.phase === "error" || roomSnapshot === null) {
-      setLiveChromeSettleComplete(false);
-      return undefined;
-    }
-
-    if (liveChromeSettleComplete) {
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setLiveChromeSettleComplete(true);
-    }, THEME1_LIVE_BOOTSTRAP_SETTLE_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [
-    hostname,
-    shouldDeferChrome,
-    connection.phase,
-    roomSnapshot,
-    liveChromeSettleComplete,
-  ]);
+  // Settle delay useEffect removed — liveChromeSettleComplete is always true.
+  // Game chrome is shown immediately when roomSnapshot is available.
 
   useEffect(() => {
     if (!shouldTickCountdownClock || snapshot.meta.gameStatus === "RUNNING") {
