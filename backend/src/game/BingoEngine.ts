@@ -514,20 +514,33 @@ export class BingoEngine {
     }
     const normalizedPayoutPercent = Math.round(payoutPercent * 100) / 100;
 
-    const players = [...room.players.values()];
-    this.assertPlayersNotInAnotherRunningGame(room.code, players);
-    this.assertPlayersNotBlockedByRestriction(players, nowMs);
-    this.assertPlayersNotOnRequiredPause(players, nowMs);
+    const allPlayers = [...room.players.values()];
+    // Filter out ineligible players instead of blocking the entire room.
+    // The room runs continuously — players on pause, blocked, or with
+    // insufficient balance simply skip this round.
+    const players = allPlayers.filter((player) => {
+      if (this.isPlayerInAnotherRunningGame(room.code, player)) return false;
+      if (this.isPlayerBlockedByRestriction(player, nowMs)) return false;
+      if (this.isPlayerOnRequiredPause(player, nowMs)) return false;
+      return true;
+    });
+    if (players.length === 0) {
+      // No eligible players — silently skip this round, don't throw.
+      return this.getRoomSnapshot(room.code);
+    }
     await this.refreshPlayerObjectsFromWallet(players);
-    await this.assertLossLimitsBeforeBuyIn(players, entryFee, nowMs, room.hallId);
+    // Filter out players who exceed loss limits or can't afford entry fee.
+    const eligiblePlayers = await this.filterEligiblePlayers(players, entryFee, nowMs, room.hallId);
+    if (eligiblePlayers.length === 0) {
+      return this.getRoomSnapshot(room.code);
+    }
     const gameId = randomUUID();
     const gameType: LedgerGameType = "DATABINGO";
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.makeHouseAccountId(room.hallId, gameType, channel);
     await this.walletAdapter.ensureAccount(houseAccountId);
     if (entryFee > 0) {
-      await this.ensureSufficientBalance(players, entryFee);
-      for (const player of players) {
+      for (const player of eligiblePlayers) {
         const transfer = await this.walletAdapter.transfer(
           player.walletId,
           houseAccountId,
@@ -561,7 +574,7 @@ export class BingoEngine {
     const tickets = new Map<string, Ticket[]>();
     const marks = new Map<string, Set<number>[]>();
 
-    for (const player of players) {
+    for (const player of eligiblePlayers) {
       const playerTickets: Ticket[] = [];
       const playerMarks: Set<number>[] = [];
 
@@ -2076,6 +2089,55 @@ export class BingoEngine {
     const latest = Math.max(...candidates);
     this.roomLastRoundStartMs.set(room.code, latest);
     return latest;
+  }
+
+  private async filterEligiblePlayers(
+    players: Player[],
+    entryFee: number,
+    nowMs: number,
+    hallId: string,
+  ): Promise<Player[]> {
+    const eligible: Player[] = [];
+    for (const player of players) {
+      if (entryFee > 0 && player.balance < entryFee) continue;
+      if (this.wouldExceedLossLimit(player, entryFee, nowMs, hallId)) continue;
+      eligible.push(player);
+    }
+    return eligible;
+  }
+
+  private wouldExceedLossLimit(player: Player, entryFee: number, nowMs: number, hallId: string): boolean {
+    if (entryFee <= 0) return false;
+    const limits = this.getEffectiveLossLimits(player.walletId, hallId);
+    const netLoss = this.calculateNetLoss(player.walletId, nowMs, hallId);
+    return (netLoss.daily + entryFee) > limits.daily || (netLoss.monthly + entryFee) > limits.monthly;
+  }
+
+  private isPlayerOnRequiredPause(player: Player, nowMs: number): boolean {
+    const state = this.playStateByWallet.get(player.walletId);
+    if (!state?.pauseUntilMs) return false;
+    if (state.pauseUntilMs > nowMs) return true;
+    // Pause expired — clear it
+    state.pauseUntilMs = undefined;
+    state.accumulatedMs = 0;
+    this.playStateByWallet.set(player.walletId, state);
+    return false;
+  }
+
+  private isPlayerBlockedByRestriction(player: Player, nowMs: number): boolean {
+    const state = this.playStateByWallet.get(player.walletId);
+    if (!state?.selfExclusionUntilMs) return false;
+    return state.selfExclusionUntilMs > nowMs;
+  }
+
+  private isPlayerInAnotherRunningGame(roomCode: string, player: Player): boolean {
+    for (const [code, room] of this.rooms) {
+      if (code === roomCode) continue;
+      if (room.currentGame?.status === "RUNNING" && room.players.has(player.id)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private assertPlayersNotOnRequiredPause(players: Player[], nowMs: number): void {
