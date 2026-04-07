@@ -407,8 +407,9 @@ export function shouldAutoBootstrapDefaultLiveSession(
     hasLaunchToken?: boolean;
   } = {},
 ): boolean {
-  void options;
-  return false;
+  if (options.hasLaunchToken) return false;
+  const hostname = options.hostname ?? (typeof window !== "undefined" ? window.location.hostname : "");
+  return isLocalTheme1RuntimeHost(hostname);
 }
 
 export function shouldAttemptLiveRoomRecoveryFromSyncFailure(
