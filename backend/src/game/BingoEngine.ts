@@ -624,7 +624,7 @@ export class BingoEngine {
         roomCode: room.code,
         gameId,
         entryFee,
-        playerIds: players.map((player) => player.id)
+        playerIds: eligiblePlayers.map((player) => player.id)
       });
     }
   }
