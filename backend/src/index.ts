@@ -11,7 +11,8 @@ import { LocalBingoSystemAdapter } from "./adapters/LocalBingoSystemAdapter.js";
 import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
-import type { ClaimType, RoomSnapshot, RoomSummary } from "./game/types.js";
+import { generateTraditional75Ticket } from "./game/ticket.js";
+import type { ClaimType, RoomSnapshot, RoomSummary, Ticket } from "./game/types.js";
 import { CandyLaunchTokenStore } from "./launch/CandyLaunchTokenStore.js";
 import {
   ADMIN_ACCESS_POLICY,
@@ -1322,6 +1323,28 @@ const lastAutoDrawAtByRoom = new Map<string, number>();
 const roomConfiguredEntryFeeByRoom = new Map<string, number>();
 /** Per-room set of player IDs who have armed their bet for the next round. */
 const armedPlayerIdsByRoom = new Map<string, Set<string>>();
+/** Cached display tickets for unarmed players — stable until game changes. */
+const displayTicketCache = new Map<string, Ticket[]>();
+
+function getOrCreateDisplayTickets(roomCode: string, playerId: string, count: number): Ticket[] {
+  const key = `${roomCode}:${playerId}`;
+  const cached = displayTicketCache.get(key);
+  if (cached && cached.length === count) return cached;
+  const tickets: Ticket[] = [];
+  for (let i = 0; i < count; i++) {
+    tickets.push(generateTraditional75Ticket());
+  }
+  displayTicketCache.set(key, tickets);
+  return tickets;
+}
+
+function clearDisplayTicketCache(roomCode: string): void {
+  for (const key of displayTicketCache.keys()) {
+    if (key.startsWith(`${roomCode}:`)) {
+      displayTicketCache.delete(key);
+    }
+  }
+}
 const roomSchedulerLocks = new Set<string>();
 
 function getArmedPlayerIds(roomCode: string): string[] {
@@ -1488,9 +1511,20 @@ function buildRoomSchedulerState(snapshot: RoomSnapshot, nowMs: number): Record<
 function buildRoomUpdatePayload(
   snapshot: RoomSnapshot,
   nowMs = Date.now()
-): RoomSnapshot & { scheduler: Record<string, unknown> } {
+): RoomSnapshot & { scheduler: Record<string, unknown>; preRoundTickets: Record<string, Ticket[]> } {
+  // Generate display tickets for players who are in the room but didn't
+  // get game tickets (not armed). This ensures their boards always show
+  // numbers — just without marking.
+  const preRoundTickets: Record<string, Ticket[]> = {};
+  const gameTickets = snapshot.currentGame?.tickets ?? {};
+  const ticketsPerPlayer = runtimeCandyManiaSettings.autoRoundTicketsPerPlayer;
+  for (const player of snapshot.players) {
+    if (gameTickets[player.id] && gameTickets[player.id].length > 0) continue;
+    preRoundTickets[player.id] = getOrCreateDisplayTickets(snapshot.code, player.id, ticketsPerPlayer);
+  }
   return {
     ...snapshot,
+    preRoundTickets,
     scheduler: buildRoomSchedulerState(snapshot, nowMs)
   };
 }
@@ -1643,6 +1677,7 @@ async function processAutoStart(summary: ReturnType<typeof engine.listRoomSummar
       });
       // Disarm all after round starts — players must re-arm for next round
       disarmAllPlayers(roomCode);
+      clearDisplayTicketCache(roomCode);
     } catch (error) {
       if (
         error instanceof DomainError &&
