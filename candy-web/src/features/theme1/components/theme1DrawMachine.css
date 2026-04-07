@@ -81,6 +81,11 @@
   transform: translate(-50%, -75%);
 }
 
+.theme1-draw-machine--integrated-live .theme1-draw-machine__floating-ball,
+.theme1-draw-machine--integrated-live .theme1-draw-machine__output-ball {
+  display: none;
+}
+
 .theme1-draw-machine__scene[data-variant="integrated-live"] .theme1-draw-machine__machine-image {
   object-fit: contain;
 }

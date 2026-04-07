@@ -6,6 +6,7 @@
     "dev": "npm --prefix backend run dev",
     "check": "npm --prefix backend run check",
     "build": "npm --prefix backend run build",
+    "test:ball-animation": "node scripts/soak-ball-animation.mjs",
     "test:compliance": "npm --prefix backend run test:compliance",
     "check:unity": "bash scripts/unity-compile-check.sh",
     "check:all": "npm run check && npm run build && npm run test:compliance && npm run check:unity",

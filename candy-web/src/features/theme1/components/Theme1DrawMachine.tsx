@@ -211,6 +211,7 @@ export function Theme1DrawMachine({
   suppressedOutputBallNumber = null,
 }: Theme1DrawMachineProps) {
   const preset = THEME1_DRAW_MACHINE_PRESETS[variant];
+  const showsMachineBallPresentation = variant !== "integrated-live";
   const sceneRef = useRef<HTMLDivElement | null>(null);
   const globeRigRef = useRef<HTMLDivElement | null>(null);
   const clusterRef = useRef<HTMLDivElement | null>(null);
@@ -879,14 +880,16 @@ export function Theme1DrawMachine({
           <div className="theme1-draw-machine__emerge-ring" aria-hidden="true" />
           <div className="theme1-draw-machine__emerge-burst" aria-hidden="true" />
 
-          <div
-            ref={ejectBallRef}
-            className={`theme1-draw-machine__floating-ball${ejectBallNumber === null ? " theme1-draw-machine__floating-ball--hidden" : ""}`.trim()}
-          >
-            {ejectBallNumber !== null ? (
-              <img src={getTheme1BallSpriteUrl(ejectBallNumber) ?? ""} alt="" aria-hidden="true" />
-            ) : null}
-          </div>
+          {showsMachineBallPresentation ? (
+            <div
+              ref={ejectBallRef}
+              className={`theme1-draw-machine__floating-ball${ejectBallNumber === null ? " theme1-draw-machine__floating-ball--hidden" : ""}`.trim()}
+            >
+              {ejectBallNumber !== null ? (
+                <img src={getTheme1BallSpriteUrl(ejectBallNumber) ?? ""} alt="" aria-hidden="true" />
+              ) : null}
+            </div>
+          ) : null}
 
           <img
             className="theme1-draw-machine__machine-image theme1-draw-machine__machine-image--glass"
@@ -912,14 +915,16 @@ export function Theme1DrawMachine({
           <div ref={holeMaskRef} className="theme1-draw-machine__hole-mask" />
         </div>
 
-        <div
-          ref={outputBallRef}
-          className={`theme1-draw-machine__output-ball${outputBallNumber === null || outputBallNumber === suppressedOutputBallNumber ? " theme1-draw-machine__output-ball--hidden" : ""}`.trim()}
-        >
-          {outputBallNumber !== null ? (
-            <img src={getTheme1BallSpriteUrl(outputBallNumber) ?? ""} alt="" aria-hidden="true" />
-          ) : null}
-        </div>
+        {showsMachineBallPresentation ? (
+          <div
+            ref={outputBallRef}
+            className={`theme1-draw-machine__output-ball${outputBallNumber === null || outputBallNumber === suppressedOutputBallNumber ? " theme1-draw-machine__output-ball--hidden" : ""}`.trim()}
+          >
+            {outputBallNumber !== null ? (
+              <img src={getTheme1BallSpriteUrl(outputBallNumber) ?? ""} alt="" aria-hidden="true" />
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </section>
   );

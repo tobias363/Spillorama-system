@@ -5,7 +5,7 @@ import { theme1MockSnapshot } from "@/features/theme1/data/theme1MockSnapshot";
 import type { Theme1RoundRenderModel } from "@/domain/theme1/renderModel";
 
 /**
- * Simulation of 2000 draw rounds to verify:
+ * Simulation of 3000 draw rounds (100 full 30-draw games) to verify:
  * 1. Only 1 ball is featured at any time (never 0 during presentation, never 2+)
  * 2. The draw interval (backend source of truth) is respected — no balls arrive faster
  * 3. No "blinking" — ball doesn't disappear and reappear during its presentation window
@@ -19,7 +19,7 @@ import type { Theme1RoundRenderModel } from "@/domain/theme1/renderModel";
 
 const DRAW_INTERVAL_MS = 2000;
 const ROOM_UPDATE_DELAY_MS = 100;
-const SIMULATION_ROUNDS = 2000;
+const SIMULATION_ROUNDS = 3000;
 
 interface SimulationEvent {
   timeMs: number;
