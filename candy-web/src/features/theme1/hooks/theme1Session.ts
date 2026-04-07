@@ -1,4 +1,32 @@
+/**
+ * theme1Session.ts — session resolution, storage, and URL helpers for Theme1.
+ *
+ * Extracted from useTheme1Store.ts to keep the Zustand store focused on
+ * runtime state management. Every function here is pure or side-effect-scoped
+ * to localStorage / window.location and does NOT depend on Zustand.
+ */
+
 import type { RealtimeSession } from "@/domain/realtime/contracts";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+export const STORAGE_KEY = "candy-web.realtime-session";
+export const PORTAL_AUTH_STORAGE_KEY = "bingo.portal.auth";
+export const DEFAULT_CANDY_HALL_ID = "default-hall";
+export const DEFAULT_CANDY_ROOM_CODE = "CANDY1";
+export const THEME1_RECOVERABLE_SYNC_ERROR_CODES = new Set([
+  "FORBIDDEN",
+  "PLAYER_NOT_FOUND",
+  "ROOM_NOT_FOUND",
+  "ROOM_BLOCKED_NON_CANONICAL",
+  "SINGLE_ROOM_ONLY",
+]);
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export type Theme1AccessTokenSource =
   | "url"
@@ -8,17 +36,9 @@ export type Theme1AccessTokenSource =
   | "manual"
   | "none";
 
-const STORAGE_KEY = "candy-web.realtime-session";
-const PORTAL_AUTH_STORAGE_KEY = "bingo.portal.auth";
-const DEFAULT_CANDY_HALL_ID = "default-hall";
-const DEFAULT_CANDY_ROOM_CODE = "CANDY1";
-const THEME1_RECOVERABLE_SYNC_ERROR_CODES = new Set([
-  "FORBIDDEN",
-  "PLAYER_NOT_FOUND",
-  "ROOM_NOT_FOUND",
-  "ROOM_BLOCKED_NON_CANONICAL",
-  "SINGLE_ROOM_ONLY",
-]);
+// ---------------------------------------------------------------------------
+// URL / hostname helpers
+// ---------------------------------------------------------------------------
 
 export function resolveDefaultBackendUrl(): string {
   const envValue =
@@ -41,8 +61,6 @@ export function resolveDefaultBackendUrl(): string {
 
   return window.location.origin;
 }
-
-const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 
 export function isLocalTheme1RuntimeHost(hostname: string): boolean {
   const normalizedHostname = hostname.trim().toLowerCase();
@@ -74,9 +92,13 @@ export function resolveHostnameFromBaseUrl(baseUrl: string): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Session normalisation & persistence
+// ---------------------------------------------------------------------------
+
 export function normalizeSession(session: RealtimeSession): RealtimeSession {
   return {
-    baseUrl: session.baseUrl.trim() || DEFAULT_BACKEND_URL,
+    baseUrl: session.baseUrl.trim() || resolveDefaultBackendUrl(),
     roomCode: session.roomCode.trim(),
     playerId: session.playerId.trim(),
     accessToken: session.accessToken.trim(),
@@ -110,6 +132,10 @@ export function writeSession(session: RealtimeSession): void {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
 }
 
+// ---------------------------------------------------------------------------
+// Portal auth
+// ---------------------------------------------------------------------------
+
 export function readPortalAuthAccessToken(): string {
   if (typeof window === "undefined") {
     return "";
@@ -128,9 +154,17 @@ export function readPortalAuthAccessToken(): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Room / auto-create helpers
+// ---------------------------------------------------------------------------
+
 export function canAutoCreateRoom(session: RealtimeSession): boolean {
   return session.accessToken.trim().length > 0 && session.hallId.trim().length > 0;
 }
+
+// ---------------------------------------------------------------------------
+// Redirect & portal helpers
+// ---------------------------------------------------------------------------
 
 export function shouldRedirectTheme1ToPortalOnLiveHost(input: {
   hostname: string;
@@ -198,6 +232,10 @@ export function resolveTheme1LiveConnectionErrorMessage(message: string, hostnam
   return message;
 }
 
+// ---------------------------------------------------------------------------
+// Launch-token helpers
+// ---------------------------------------------------------------------------
+
 export function readLaunchTokenFromLocation(): string {
   if (typeof window === "undefined") {
     return "";
@@ -251,8 +289,12 @@ export function resolveLaunchBaseUrl(session: RealtimeSession): string {
     return normalizedSession.baseUrl;
   }
 
-  return DEFAULT_BACKEND_URL;
+  return resolveDefaultBackendUrl();
 }
+
+// ---------------------------------------------------------------------------
+// Initial session seed
+// ---------------------------------------------------------------------------
 
 export function readInitialSessionSeed(): {
   session: RealtimeSession;
@@ -261,7 +303,7 @@ export function readInitialSessionSeed(): {
   if (typeof window === "undefined") {
     return {
       session: normalizeSession({
-        baseUrl: DEFAULT_BACKEND_URL,
+        baseUrl: resolveDefaultBackendUrl(),
         roomCode: "",
         playerId: "",
         accessToken: "",
@@ -314,7 +356,7 @@ export function resolveTheme1InitialSessionSeed(input: {
   const session = canonicalizeTheme1LiveSession(
     isLocalRuntimeHost
       ? {
-          baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || DEFAULT_BACKEND_URL,
+          baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || resolveDefaultBackendUrl(),
           roomCode: params.get("roomCode") || input.storedSession.roomCode || "",
           playerId: params.get("playerId") || input.storedSession.playerId || "",
           accessToken: resolvedAccessToken,
@@ -324,7 +366,7 @@ export function resolveTheme1InitialSessionSeed(input: {
             (resolvedAccessToken ? fallbackHallId : ""),
         }
       : {
-          baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || DEFAULT_BACKEND_URL,
+          baseUrl: params.get("backendUrl") || input.storedSession.baseUrl || resolveDefaultBackendUrl(),
           roomCode: params.get("roomCode") || DEFAULT_CANDY_ROOM_CODE,
           playerId: params.get("playerId") || "",
           accessToken: resolvedAccessToken,
@@ -354,6 +396,10 @@ export function resolveTheme1InitialSessionSeed(input: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Auto-bootstrap & recovery
+// ---------------------------------------------------------------------------
+
 export function shouldAutoBootstrapDefaultLiveSession(
   _session: RealtimeSession,
   options: {
@@ -361,9 +407,8 @@ export function shouldAutoBootstrapDefaultLiveSession(
     hasLaunchToken?: boolean;
   } = {},
 ): boolean {
-  if (options.hasLaunchToken) return false;
-  const hostname = options.hostname ?? (typeof window !== "undefined" ? window.location.hostname : "");
-  return isLocalTheme1RuntimeHost(hostname);
+  void options;
+  return false;
 }
 
 export function shouldAttemptLiveRoomRecoveryFromSyncFailure(
@@ -380,14 +425,4 @@ export function shouldAttemptLiveRoomRecoveryFromSyncFailure(
   }
 
   return Boolean(errorCode && THEME1_RECOVERABLE_SYNC_ERROR_CODES.has(errorCode));
-}
-
-export function buildTheme1SessionKey(session: RealtimeSession): string {
-  return [
-    session.baseUrl.trim(),
-    session.roomCode.trim(),
-    session.playerId.trim(),
-    session.accessToken.trim(),
-    session.hallId.trim(),
-  ].join("::");
 }
