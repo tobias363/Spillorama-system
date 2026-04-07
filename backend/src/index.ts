@@ -1455,7 +1455,10 @@ function normalizeRoomNextAutoStartAt(roomCode: string, nowMs: number): number {
 }
 
 function setNextRoundForRoom(roomCode: string, nowMs: number): number {
-  const nextStartAt = getNextRoundBoundaryMs(nowMs + 1);
+  // Always wait at least the full interval from now.
+  // getNextRoundBoundaryMs rounds up to the next boundary which could be
+  // only seconds away — that's not enough pause between rounds.
+  const nextStartAt = nowMs + runtimeCandyManiaSettings.autoRoundStartIntervalMs;
   nextAutoStartAtByRoom.set(roomCode, nextStartAt);
   return nextStartAt;
 }
@@ -1733,6 +1736,13 @@ async function processAutoDraw(summary: ReturnType<typeof engine.listRoomSummari
       }
     } finally {
       lastAutoDrawAtByRoom.set(roomCode, currentNow);
+    }
+
+    // If the draw ended the round (max draws reached), schedule next round
+    // with the configured interval so there's a 30s pause between rounds.
+    const postDrawSnapshot = engine.getRoomSnapshot(roomCode);
+    if (postDrawSnapshot.currentGame?.status !== "RUNNING") {
+      setNextRoundForRoom(roomCode, Date.now());
     }
 
     await emitRoomUpdate(roomCode);
