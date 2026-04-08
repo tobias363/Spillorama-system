@@ -171,17 +171,91 @@ const GAME_SHOWCASE_THEME = Object.freeze({
     accentSoft: "rgba(217, 106, 12, 0.28)",
     background:
       "linear-gradient(115deg, rgba(51, 21, 13, 0.9) 0%, rgba(100, 45, 27, 0.75) 38%, rgba(16, 26, 44, 0.48) 100%), radial-gradient(circle at 14% 20%, rgba(255, 190, 125, 0.24), transparent 36%), radial-gradient(circle at 78% 74%, rgba(220, 84, 35, 0.28), transparent 44%)",
+    image: "/assets/games/godterihuset.png",
     fallbackPrizePool: 1792.52,
     fallbackPlayers: 159,
     fallbackTicketPrice: 1,
     fallbackNextDrawMinutes: 1,
     badge: 75
   },
+  papirbingo: {
+    accent: "#7b3fa0",
+    accentSoft: "rgba(123, 63, 160, 0.28)",
+    background:
+      "linear-gradient(112deg, rgba(38, 14, 56, 0.92) 0%, rgba(78, 32, 110, 0.74) 42%, rgba(20, 12, 36, 0.56) 100%), radial-gradient(circle at 16% 20%, rgba(200, 150, 240, 0.22), transparent 35%), radial-gradient(circle at 82% 76%, rgba(160, 80, 220, 0.24), transparent 42%)",
+    image: "/assets/games/papirbingo.png",
+    fallbackPrizePool: 2400,
+    fallbackPlayers: 28,
+    fallbackTicketPrice: 1,
+    fallbackNextDrawMinutes: 2,
+    badge: 90
+  },
+  lynbingo: {
+    accent: "#e8a035",
+    accentSoft: "rgba(232, 160, 53, 0.28)",
+    background:
+      "linear-gradient(112deg, rgba(58, 38, 10, 0.92) 0%, rgba(110, 72, 22, 0.74) 42%, rgba(22, 16, 8, 0.56) 100%), radial-gradient(circle at 16% 20%, rgba(255, 200, 120, 0.22), transparent 35%), radial-gradient(circle at 82% 76%, rgba(200, 130, 40, 0.24), transparent 42%)",
+    image: "/assets/games/bingo_1.png",
+    fallbackPrizePool: 3200,
+    fallbackPlayers: 45,
+    fallbackTicketPrice: 2,
+    fallbackNextDrawMinutes: 1,
+    badge: 60
+  },
+  bingobonanza: {
+    accent: "#3d6be9",
+    accentSoft: "rgba(61, 107, 233, 0.26)",
+    background:
+      "linear-gradient(108deg, rgba(14, 27, 61, 0.92) 0%, rgba(44, 69, 120, 0.72) 42%, rgba(12, 22, 38, 0.52) 100%), radial-gradient(circle at 19% 23%, rgba(133, 181, 255, 0.24), transparent 35%), radial-gradient(circle at 79% 74%, rgba(84, 117, 255, 0.25), transparent 42%)",
+    image: "/assets/games/bingo_3.png",
+    fallbackPrizePool: 2789,
+    fallbackPlayers: 36,
+    fallbackTicketPrice: 1,
+    fallbackNextDrawMinutes: 2,
+    badge: 80
+  },
+  turbomania: {
+    accent: "#e04040",
+    accentSoft: "rgba(224, 64, 64, 0.28)",
+    background:
+      "linear-gradient(108deg, rgba(52, 14, 14, 0.92) 0%, rgba(100, 30, 30, 0.74) 42%, rgba(22, 10, 10, 0.56) 100%), radial-gradient(circle at 18% 22%, rgba(255, 140, 140, 0.22), transparent 35%), radial-gradient(circle at 80% 76%, rgba(220, 60, 60, 0.24), transparent 42%)",
+    image: "/assets/games/bingo_4.png",
+    fallbackPrizePool: 4500,
+    fallbackPlayers: 52,
+    fallbackTicketPrice: 2,
+    fallbackNextDrawMinutes: 1,
+    badge: 70
+  },
+  spinngo: {
+    accent: "#2eac6e",
+    accentSoft: "rgba(46, 172, 110, 0.28)",
+    background:
+      "linear-gradient(108deg, rgba(10, 36, 24, 0.92) 0%, rgba(22, 80, 52, 0.74) 42%, rgba(8, 20, 14, 0.56) 100%), radial-gradient(circle at 18% 22%, rgba(120, 240, 180, 0.22), transparent 35%), radial-gradient(circle at 80% 76%, rgba(60, 200, 120, 0.24), transparent 42%)",
+    image: "/assets/games/galopp.png",
+    fallbackPrizePool: 3100,
+    fallbackPlayers: 38,
+    fallbackTicketPrice: 2,
+    fallbackNextDrawMinutes: 1,
+    badge: 55
+  },
+  spillorama: {
+    accent: "#e8a035",
+    accentSoft: "rgba(232, 160, 53, 0.28)",
+    background:
+      "linear-gradient(112deg, rgba(58, 18, 10, 0.92) 0%, rgba(110, 52, 22, 0.74) 42%, rgba(22, 16, 8, 0.56) 100%), radial-gradient(circle at 16% 20%, rgba(255, 200, 120, 0.22), transparent 35%), radial-gradient(circle at 82% 76%, rgba(200, 130, 40, 0.24), transparent 42%)",
+    image: "/assets/games/spillorama.png",
+    fallbackPrizePool: 5000,
+    fallbackPlayers: 42,
+    fallbackTicketPrice: 2,
+    fallbackNextDrawMinutes: 2,
+    badge: 60
+  },
   roma: {
     accent: "#c58a3d",
     accentSoft: "rgba(197, 138, 61, 0.28)",
     background:
       "linear-gradient(112deg, rgba(45, 22, 16, 0.92) 0%, rgba(96, 53, 34, 0.74) 41%, rgba(18, 22, 31, 0.56) 100%), radial-gradient(circle at 18% 22%, rgba(234, 176, 110, 0.22), transparent 35%), radial-gradient(circle at 80% 76%, rgba(190, 108, 52, 0.22), transparent 42%)",
+    image: "/assets/games/gold-digger.png",
     fallbackPrizePool: 2100,
     fallbackPlayers: 84,
     fallbackTicketPrice: 1,
@@ -193,6 +267,7 @@ const GAME_SHOWCASE_THEME = Object.freeze({
     accentSoft: "rgba(61, 107, 233, 0.26)",
     background:
       "linear-gradient(108deg, rgba(14, 27, 61, 0.92) 0%, rgba(44, 69, 120, 0.72) 42%, rgba(12, 22, 38, 0.52) 100%), radial-gradient(circle at 19% 23%, rgba(133, 181, 255, 0.24), transparent 35%), radial-gradient(circle at 79% 74%, rgba(84, 117, 255, 0.25), transparent 42%)",
+    image: "/assets/games/bingo_2.png",
     fallbackPrizePool: 2789.3,
     fallbackPlayers: 13,
     fallbackTicketPrice: 1,
@@ -204,6 +279,7 @@ const GAME_SHOWCASE_THEME = Object.freeze({
     accentSoft: "rgba(255, 61, 61, 0.28)",
     background:
       "linear-gradient(108deg, rgba(52, 14, 22, 0.92) 0%, rgba(86, 38, 46, 0.74) 45%, rgba(14, 20, 32, 0.56) 100%), radial-gradient(circle at 21% 25%, rgba(255, 137, 137, 0.24), transparent 35%), radial-gradient(circle at 84% 74%, rgba(251, 77, 77, 0.25), transparent 42%)",
+    image: "/assets/games/spillorama.png",
     fallbackPrizePool: 3996,
     fallbackPlayers: 22,
     fallbackTicketPrice: 2,
@@ -1048,6 +1124,20 @@ function renderGameLobby() {
     const left = document.createElement("div");
     left.className = "game-showcase-left";
 
+    if (theme.image) {
+      const imgWrap = document.createElement("div");
+      imgWrap.className = "game-showcase-image";
+      const img = document.createElement("img");
+      img.src = theme.image;
+      img.alt = game.title || game.slug;
+      img.loading = "lazy";
+      imgWrap.appendChild(img);
+      left.appendChild(imgWrap);
+    }
+
+    const textBlock = document.createElement("div");
+    textBlock.className = "game-showcase-text";
+
     const badge = document.createElement("span");
     badge.className = "game-showcase-badge";
     badge.textContent = String(stats.badgeValue);
@@ -1064,10 +1154,11 @@ function renderGameLobby() {
     description.className = "game-showcase-description";
     description.textContent = game.description || "Ingen beskrivelse tilgjengelig.";
 
-    left.appendChild(badge);
-    left.appendChild(title);
-    left.appendChild(meta);
-    left.appendChild(description);
+    textBlock.appendChild(badge);
+    textBlock.appendChild(title);
+    textBlock.appendChild(meta);
+    textBlock.appendChild(description);
+    left.appendChild(textBlock);
 
     const right = document.createElement("div");
     right.className = "game-showcase-right";
