@@ -165,6 +165,24 @@
     canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
     loadingBar.style.display = "block";
 
+    // ─── BIN-134: XHR interceptor for CORS-blocked game tile images ─────
+    // Unity loads tile images via XHR from spillorama.aistechnolabs.info
+    // which blocks CORS from the Render domain. Rewrite those URLs to
+    // use the same-origin /api/proxy/img/ endpoint instead.
+    (function() {
+      var _origOpen = XMLHttpRequest.prototype.open;
+      var EXTERNAL_IMG_PREFIX = 'https://spillorama.aistechnolabs.info/admin/images/';
+      XMLHttpRequest.prototype.open = function(method, url) {
+        if (typeof url === 'string' && url.indexOf(EXTERNAL_IMG_PREFIX) === 0) {
+          var filename = url.substring(EXTERNAL_IMG_PREFIX.length);
+          url = '/api/proxy/img/' + filename;
+          dbg('XHR rewrite: ' + arguments[1] + ' → ' + url);
+        }
+        return _origOpen.apply(this, [method, url].concat(Array.prototype.slice.call(arguments, 2)));
+      };
+      dbg('XHR image proxy interceptor installed');
+    })();
+
     dbg('Loading Unity from: ' + loaderUrl);
     var script = document.createElement("script");
     script.src = loaderUrl;

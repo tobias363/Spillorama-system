@@ -754,4 +754,31 @@ router.get('/api/integration/ext-wallet/diag', async (req, res) => {
   res.json(diag);
 });
 
+// ─── Image proxy: bypass CORS for game tile images from external server ──────
+// Unity WebGL loads tile images via XMLHttpRequest from the old server
+// (spillorama.aistechnolabs.info), which doesn't send CORS headers for
+// the Render domain. This route proxies those requests same-origin.
+router.get('/api/proxy/img/:filename', async (req, res) => {
+  const filename = req.params.filename;
+  // Whitelist: only allow image file extensions
+  if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(filename)) {
+    return res.status(400).json({ error: 'Only image files allowed' });
+  }
+  const upstream = 'https://spillorama.aistechnolabs.info/admin/images/' + encodeURIComponent(filename);
+  try {
+    const imgRes = await fetch(upstream);
+    if (!imgRes.ok) {
+      return res.status(imgRes.status).end();
+    }
+    res.set('Content-Type', imgRes.headers.get('content-type') || 'image/png');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Access-Control-Allow-Origin', '*');
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    res.send(buffer);
+  } catch (err) {
+    console.error('Image proxy error:', err.message);
+    res.status(502).end();
+  }
+});
+
 module.exports = router;
