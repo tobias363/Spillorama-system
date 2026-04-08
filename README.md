@@ -142,6 +142,84 @@ Thumbnails hentet fra Spillorama Unity-prosjektet ligger i `frontend/assets/game
 
 ---
 
+## Deploy-flyt — slik pusher du endringer
+
+### Branch protection
+
+`main`-branchen er **beskyttet**. Du kan ikke pushe direkte. Alle endringer ma ga via **Pull Request (PR)** med godkjente status checks.
+
+### Steg-for-steg: Bingosystem Spillorama
+
+```bash
+# 1. Ga til prosjektmappa
+cd /Users/tobiashaugen/Projects/Bingo-system
+
+# 2. Opprett feature-branch fra main
+git checkout main && git pull
+git checkout -b feat/min-endring
+
+# 3. Gjor endringer, stage og commit
+git add <filer>
+git commit -m "feat: beskrivelse av endring"
+
+# 4. Push branch og lag PR
+git push -u origin feat/min-endring
+gh pr create --base main --title "feat: beskrivelse"
+
+# 5. Merge PR pa GitHub (krever godkjente status checks)
+# -> Render deployer automatisk fra main (3-5 min)
+```
+
+### Steg-for-steg: CandyMania
+
+```bash
+# 1. Ga til prosjektmappa
+cd /Users/tobiashaugen/Projects/Candy
+
+# 2. Gjor endringer i candy-web eller backend
+# ... rediger filer ...
+
+# 3. Commit og push direkte til main (ingen branch protection)
+git add <filer>
+git commit -m "feat: beskrivelse av endring"
+git push origin main
+# -> Render deployer automatisk (3-5 min)
+```
+
+### Oppdatere CandyMania-frontenden i Bingosystem Spillorama
+
+Nar du endrer CandyMania (`candy-web/`), ma du **ogsa oppdatere builden i Bingosystem** for at endringene vises i lobbyen:
+
+```bash
+# 1. Bygg candy-web
+cd /Users/tobiashaugen/Projects/Candy/candy-web
+npm install && npm run build
+
+# 2. Kopier build til Bingosystem
+cp -r dist/* /Users/tobiashaugen/Projects/Bingo-system/backend/public/web/
+cp -r dist/* /Users/tobiashaugen/Projects/Bingo-system/frontend/web/
+
+# 3. Commit og push via PR i Bingosystem
+cd /Users/tobiashaugen/Projects/Bingo-system
+git checkout -b feat/update-candy-build
+git add backend/public/web/ frontend/web/
+git commit -m "chore: oppdater candy-web build"
+git push -u origin feat/update-candy-build
+gh pr create --base main --title "chore: oppdater candy-web build"
+```
+
+> **Viktig:** Begge steg er nodvendige. Candy-backenden og Bingosystemet deployer separat. Hvis du bare pusher til `candy-web`, vil endringene kun vises pa `candy-backend-ldvg.onrender.com`, men **ikke** i lobbyen pa `bingo-system-jsso.onrender.com`.
+
+### Oversikt: hva trigger deploy hvor?
+
+| Handling | Resultat |
+|----------|----------|
+| Merge PR til `main` i `tobias363/bingosystem` | Bingo System deployer pa Render |
+| Push til `main` i `tobias363/candy-web` | CandyMania-backend deployer pa Render |
+| Endre candy-web uten a oppdatere Bingosystem | Endringer vises KUN pa candy-backend, IKKE i lobbyen |
+
+---
+
 ## Lokal utvikling
 
 ```bash
@@ -160,7 +238,7 @@ npm run dev                             # http://localhost:4000
 
 ## Tjenester (Render)
 
-| Tjeneste | URL | Repo |
-|----------|-----|------|
-| Bingo System (lobby + alt) | `bingo-system-jsso.onrender.com` | `tobias363/bingosystem` |
-| CandyMania (kun spillet) | `candy-backend-ldvg.onrender.com` | `tobias363/candy-web` |
+| Tjeneste | URL | Repo | Branch |
+|----------|-----|------|--------|
+| Bingo System (lobby + alt) | `bingo-system-jsso.onrender.com` | `tobias363/bingosystem` | `main` |
+| CandyMania (kun spillet) | `candy-backend-ldvg.onrender.com` | `tobias363/candy-web` | `main` |
