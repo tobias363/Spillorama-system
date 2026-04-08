@@ -754,17 +754,21 @@ router.get('/api/integration/ext-wallet/diag', async (req, res) => {
   res.json(diag);
 });
 
-// ─── Image proxy: bypass CORS for game tile images from external server ──────
-// Unity WebGL loads tile images via XMLHttpRequest from the old server
-// (spillorama.aistechnolabs.info), which doesn't send CORS headers for
-// the Render domain. This route proxies those requests same-origin.
-router.get('/api/proxy/img/:filename', async (req, res) => {
-  const filename = req.params.filename;
+// ─── Image proxy: bypass CORS for images from external server ────────────────
+// Unity WebGL loads images via XHR and fetch() from spillorama.aistechnolabs.info,
+// which doesn't send CORS headers for the Render domain. This proxies those
+// requests same-origin. Handles both /admin/images/* and /profile/bingo/* paths.
+router.get('/api/proxy/extimg/*', async (req, res) => {
+  const imgPath = req.params[0];
   // Whitelist: only allow image file extensions
-  if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(filename)) {
+  if (!/\.(png|jpe?g|gif|webp|svg)$/i.test(imgPath)) {
     return res.status(400).json({ error: 'Only image files allowed' });
   }
-  const upstream = 'https://spillorama.aistechnolabs.info/admin/images/' + encodeURIComponent(filename);
+  // Only allow known safe path prefixes
+  if (!/^(admin\/images|profile\/bingo)\//.test(imgPath)) {
+    return res.status(400).json({ error: 'Path not allowed' });
+  }
+  const upstream = 'https://spillorama.aistechnolabs.info/' + imgPath;
   try {
     const imgRes = await fetch(upstream);
     if (!imgRes.ok) {

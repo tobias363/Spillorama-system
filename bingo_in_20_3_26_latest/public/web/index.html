@@ -165,22 +165,49 @@
     canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
     loadingBar.style.display = "block";
 
-    // ─── BIN-134: XHR interceptor for CORS-blocked game tile images ─────
-    // Unity loads tile images via XHR from spillorama.aistechnolabs.info
+    // ─── BIN-134: intercept CORS-blocked image requests from external server ──
+    // Unity loads images via both XHR and fetch() from spillorama.aistechnolabs.info
     // which blocks CORS from the Render domain. Rewrite those URLs to
-    // use the same-origin /api/proxy/img/ endpoint instead.
+    // use the same-origin /api/proxy/extimg/ endpoint instead.
     (function() {
-      var _origOpen = XMLHttpRequest.prototype.open;
-      var EXTERNAL_IMG_PREFIX = 'https://spillorama.aistechnolabs.info/admin/images/';
-      XMLHttpRequest.prototype.open = function(method, url) {
-        if (typeof url === 'string' && url.indexOf(EXTERNAL_IMG_PREFIX) === 0) {
-          var filename = url.substring(EXTERNAL_IMG_PREFIX.length);
-          url = '/api/proxy/img/' + filename;
-          dbg('XHR rewrite: ' + arguments[1] + ' → ' + url);
+      var EXT_HOST = 'https://spillorama.aistechnolabs.info/';
+
+      function rewriteUrl(url) {
+        if (typeof url === 'string' && url.indexOf(EXT_HOST) === 0) {
+          var path = url.substring(EXT_HOST.length);
+          if (/\.(png|jpe?g|gif|webp|svg)/i.test(path)) {
+            var newUrl = '/api/proxy/extimg/' + path;
+            dbg('Image proxy: ' + path);
+            return newUrl;
+          }
         }
+        return null;
+      }
+
+      // Intercept XMLHttpRequest
+      var _origOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(method, url) {
+        var rewritten = rewriteUrl(url);
+        if (rewritten) url = rewritten;
         return _origOpen.apply(this, [method, url].concat(Array.prototype.slice.call(arguments, 2)));
       };
-      dbg('XHR image proxy interceptor installed');
+
+      // Intercept fetch()
+      var _origFetch = window.fetch;
+      window.fetch = function(input) {
+        var url = typeof input === 'string' ? input : (input && input.url);
+        var rewritten = rewriteUrl(url);
+        if (rewritten) {
+          if (typeof input === 'string') {
+            arguments[0] = rewritten;
+          } else if (input && input.url) {
+            arguments[0] = new Request(rewritten, input);
+          }
+        }
+        return _origFetch.apply(this, arguments);
+      };
+
+      dbg('Image proxy interceptor installed (XHR + fetch)');
     })();
 
     dbg('Loading Unity from: ' + loaderUrl);
