@@ -2,8 +2,9 @@
 
 const socket = io();
 const AUTH_STORAGE_KEY = "bingo.portal.auth";
-const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["candy", "roma", "bingo"]);
+const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["candy", "roma", "bingo", "spillorama"]);
 const INSTANT_LAUNCH_GAME_SLUGS = new Set(["candy", "roma"]);
+const DIRECT_LAUNCH_GAME_SLUGS = new Set(["spillorama"]);
 const TOPUP_PRESET_AMOUNTS = [50, 100, 200, 300, 500, 1000];
 
 const state = {
@@ -1123,6 +1124,13 @@ function renderGameLobby() {
       event.stopPropagation();
       state.selectedGameSlug = game.slug;
       renderSelectedGame();
+      if (DIRECT_LAUNCH_GAME_SLUGS.has(game.slug)) {
+        const launchUrl = resolveGameLaunchUrl(game);
+        if (launchUrl) {
+          window.location.assign(launchUrl);
+        }
+        return;
+      }
       if (INSTANT_LAUNCH_GAME_SLUGS.has(game.slug)) {
         onCandyPlay();
         return;

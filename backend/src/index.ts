@@ -148,6 +148,8 @@ const candyWebDir = fs.existsSync(path.resolve(publicDir, "web/index.html"))
   ? path.resolve(publicDir, "web")
   : path.resolve(frontendDir, "web");
 const candyWebIndexFile = path.resolve(candyWebDir, "index.html");
+const gameIndexFile = path.resolve(publicDir, "game/index.html");
+const viewGameIndexFile = path.resolve(publicDir, "view-game/index.html");
 const projectDir = path.resolve(__dirname, "../..");
 
 const app = express();
@@ -3663,6 +3665,16 @@ app.get("*", (_req, res) => {
   // CandyWeb SPA: serve index.html for all /web/* routes that aren't static assets.
   if (_req.path.startsWith("/web")) {
     res.sendFile(candyWebIndexFile);
+    return;
+  }
+  // Spillorama WebGL: serve game/index.html for /game/* paths.
+  if (_req.path.startsWith("/game")) {
+    res.sendFile(gameIndexFile);
+    return;
+  }
+  // SpilloramaTv: serve view-game/index.html for /view-game/* paths.
+  if (_req.path.startsWith("/view-game")) {
+    res.sendFile(viewGameIndexFile);
     return;
   }
   res.sendFile(path.join(frontendDir, "index.html"));

@@ -1,12 +1,19 @@
 node_modules/
-/dist/
-.env
-scripts/release.env
+backend/dist/
 backend/.env
-npm-debug.log*
 .DS_Store
-backend/data/
-CandyBuilds/
-Roma/
-Candy/mono_crash.*.json
-*.tsbuildinfo
+*.log
+
+# Unity (Spillorama er for stor for git — bruk git-lfs eller separat repo)
+Spillorama/
+*.csproj
+*.sln
+*.suo
+*.user
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/

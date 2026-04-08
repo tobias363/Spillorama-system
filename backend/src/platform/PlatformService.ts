@@ -1475,6 +1475,11 @@ export class PlatformService {
          VALUES ('roma', 'Roma', 'Roma-spillet med samme realtime-logikk som Candy.', '/roma', true, 3, '{}'::jsonb)
          ON CONFLICT (slug) DO NOTHING`
       );
+      await client.query(
+        `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
+         VALUES ('spillorama', 'Spillorama', 'Unity WebGL bingo med 5 spillvarianter og Candy-integrasjon via iframe.', '/game', true, 4, '{"launchUrl":"/game/"}'::jsonb)
+         ON CONFLICT (slug) DO NOTHING`
+      );
 
       await client.query(
         `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, is_active)
