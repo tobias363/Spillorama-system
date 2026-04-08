@@ -144,6 +144,37 @@ services:
         value: "https://candy-backend-ldvg.onrender.com"
       - key: ALLOWED_EMBED_ORIGINS
         value: "https://bingo-system-jsso.onrender.com"
+      # ── Game / timing settings ──
+      - key: BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION
+        value: "true"
+      - key: AUTO_ROUND_START_ENABLED
+        value: "true"
+      - key: AUTO_ROUND_START_INTERVAL_MS
+        value: "30000"
+      - key: AUTO_DRAW_ENABLED
+        value: "true"
+      - key: AUTO_DRAW_INTERVAL_MS
+        value: "1200"
+      - key: AUTO_ROUND_MIN_PLAYERS
+        value: "1"
+      - key: AUTO_ROUND_TICKETS_PER_PLAYER
+        value: "4"
+      - key: AUTO_ROUND_ENTRY_FEE
+        value: "0"
+      - key: BINGO_MIN_ROUND_INTERVAL_MS
+        value: "30000"
+      # ── Compliance limits ──
+      - key: BINGO_DAILY_LOSS_LIMIT
+        value: "900"
+      - key: BINGO_MONTHLY_LOSS_LIMIT
+        value: "4400"
+      - key: BINGO_PLAY_SESSION_LIMIT_MS
+        value: "3600000"
+      - key: BINGO_PAUSE_DURATION_MS
+        value: "300000"
+      # ── RTP / payout ──
+      - key: CANDY_PAYOUT_PERCENT
+        value: "80"
 
   # ── BIN-121: Staging candy-backend with integration enabled ──────
   - type: web
