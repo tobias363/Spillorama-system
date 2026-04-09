@@ -1,2 +1,0 @@
-# The following line improves loading performance for uncompressed builds
-AddType application/wasm .wasm

@@ -2,8 +2,7 @@
 
 const socket = io();
 const AUTH_STORAGE_KEY = "bingo.portal.auth";
-const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["candy", "roma", "bingo", "spillorama"]);
-const INSTANT_LAUNCH_GAME_SLUGS = new Set(["candy", "roma"]);
+const CUSTOMER_VISIBLE_GAME_SLUGS = new Set(["bingo", "spillorama"]);
 const DIRECT_LAUNCH_GAME_SLUGS = new Set(["spillorama"]);
 const TOPUP_PRESET_AMOUNTS = [50, 100, 200, 300, 500, 1000];
 
@@ -118,10 +117,6 @@ const els = {
   safetyClearSelfExclusionBtn: document.getElementById("safetyClearSelfExclusionBtn"),
   safetyStatus: document.getElementById("safetyStatus"),
 
-  candyView: document.getElementById("candyView"),
-  candyPlayBtn: document.getElementById("candyPlayBtn"),
-  candyStatus: document.getElementById("candyStatus"),
-
   bingoView: document.getElementById("bingoView"),
   bingoHallId: document.getElementById("bingoHallId"),
   bingoPlayerAlias: document.getElementById("bingoPlayerAlias"),
@@ -148,8 +143,6 @@ const els = {
   adminGameRoute: document.getElementById("adminGameRoute"),
   adminGameSortOrder: document.getElementById("adminGameSortOrder"),
   adminGameEnabled: document.getElementById("adminGameEnabled"),
-  adminCandyPayoutField: document.getElementById("adminCandyPayoutField"),
-  adminCandyPayoutPercent: document.getElementById("adminCandyPayoutPercent"),
   adminGameSettingsJson: document.getElementById("adminGameSettingsJson"),
   adminSaveGameBtn: document.getElementById("adminSaveGameBtn"),
   adminGameStatus: document.getElementById("adminGameStatus")
@@ -653,14 +646,6 @@ function getVisiblePortalGames(allGames) {
   return allGames.filter((game) => CUSTOMER_VISIBLE_GAME_SLUGS.has(game?.slug));
 }
 
-function getCandyGame() {
-  const selected = currentGame();
-  if (selected && INSTANT_LAUNCH_GAME_SLUGS.has(selected.slug)) {
-    return selected;
-  }
-  return state.games.find((game) => INSTANT_LAUNCH_GAME_SLUGS.has(game.slug)) || null;
-}
-
 function currentAdminGame() {
   if (!state.adminGames.length) {
     return null;
@@ -695,31 +680,6 @@ function resolveGameLaunchUrl(game) {
   }
 
   return "";
-}
-
-function appendLaunchTokenToUrl(launchUrl, launchToken) {
-  const token = String(launchToken ?? "").trim();
-  if (!token) {
-    throw new Error("Mangler launch-token.");
-  }
-
-  const hashIndex = launchUrl.indexOf("#");
-  if (hashIndex === -1) {
-    return `${launchUrl}#lt=${encodeURIComponent(token)}`;
-  }
-
-  const beforeHash = launchUrl.slice(0, hashIndex);
-  const existingHash = launchUrl.slice(hashIndex + 1);
-  const separator = existingHash.length > 0 ? "&" : "";
-  return `${beforeHash}#${existingHash}${separator}lt=${encodeURIComponent(token)}`;
-}
-
-function parseCandyPayoutPercent(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
-    throw new Error("Candy utbetaling (%) må være et tall mellom 0 og 100.");
-  }
-  return Math.round(parsed * 100) / 100;
 }
 
 function parseOptionalNonNegativeNumber(value, label) {
@@ -1171,10 +1131,6 @@ function renderGameLobby() {
         if (launchUrl) window.location.assign(launchUrl);
         return;
       }
-      if (INSTANT_LAUNCH_GAME_SLUGS.has(game.slug)) {
-        onCandyPlay();
-        return;
-      }
       const target = els.bingoView;
       if (target && !target.classList.contains("hidden")) {
         target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1207,82 +1163,6 @@ function renderGamesNav() {
   }
   renderGameLobby();
   renderHeroPanel();
-}
-
-function renderCandyCard() {
-  const game = getCandyGame() || currentGame();
-  const gameTitle = game?.title || "spillet";
-  if (els.candyPlayBtn) {
-    els.candyPlayBtn.disabled = !game;
-  }
-  if (!game) {
-    setStatusBox(els.candyStatus, "Ingen launch-spill (Candy/Roma) er aktivert i game-katalogen.", "error");
-    return;
-  }
-
-  const lines = [
-    `Slug: ${game.slug}`,
-    `Route: ${game.route}`,
-    `Aktivt: ${game.isEnabled ? "Ja" : "Nei"}`,
-    "Spill nå oppretter one-time launch-token og åpner game.settings.launchUrl.",
-    `Sett launchUrl i /admin > Candy (spill + drift) for ${gameTitle}.`,
-    "",
-    game.description || "Ingen beskrivelse.",
-    "",
-    `Settings: ${JSON.stringify(game.settings || {}, null, 2)}`
-  ];
-  setStatusBox(els.candyStatus, lines.join("\n"));
-}
-
-async function onCandyPlay() {
-  const game = getCandyGame() || currentGame();
-  const gameTitle = game?.title || "spill";
-  if (!game) {
-    setStatusBox(els.candyStatus, "Fant ikke spilldata for launch-spill.", "error");
-    return;
-  }
-
-  if (els.candyPlayBtn) {
-    els.candyPlayBtn.disabled = true;
-  }
-
-  setStatusBox(els.candyStatus, "Forbereder sikker Candy-launch...", "success");
-
-  try {
-    const requestedHallId = String(state.selectedHallId ?? "").trim();
-    const launchSession = await api("/api/games/candy/launch-token", {
-      method: "POST",
-      body: {
-        hallId: requestedHallId || undefined
-      }
-    });
-
-    const launchToken = String(launchSession?.launchToken ?? "").trim();
-    const launchUrl = String(launchSession?.launchUrl ?? resolveGameLaunchUrl(game)).trim();
-    if (!launchUrl) {
-      throw new Error("Mangler launchUrl for Candy.");
-    }
-    if (!launchToken) {
-      throw new Error("Mangler launch-token fra backend.");
-    }
-
-    const targetUrl = appendLaunchTokenToUrl(launchUrl, launchToken);
-    setStatusBox(els.candyStatus, `Starter Candy fra ${launchUrl}`, "success");
-    window.location.assign(targetUrl);
-  } catch (error) {
-    setStatusBox(
-      els.candyStatus,
-      [
-        error?.message || "Klarte ikke starte Candy.",
-        `Kontroller launchUrl i /admin > Candy (spill + drift) for ${gameTitle}.`
-      ].join("\n"),
-      "error"
-    );
-  } finally {
-    if (els.candyPlayBtn) {
-      els.candyPlayBtn.disabled = !game;
-    }
-  }
 }
 
 function renderWalletMini() {
@@ -1785,17 +1665,11 @@ function renderSelectedGame() {
 
   const game = currentGame();
   const slug = game?.slug || "";
-  const showCandyPanel = INSTANT_LAUNCH_GAME_SLUGS.has(slug);
   const showBingoPanel = slug === "bingo";
-
-  if (els.candyView) {
-    els.candyView.classList.toggle("hidden", !showCandyPanel);
-  }
   if (els.bingoView) {
     els.bingoView.classList.toggle("hidden", !showBingoPanel);
   }
 
-  renderCandyCard();
   if (showBingoPanel) {
     renderBingoHallSelect();
     renderBingoState();
@@ -2609,9 +2483,6 @@ els.bingoEndGameBtn.addEventListener("click", onBingoEndGame);
 els.bingoDrawNextBtn.addEventListener("click", onBingoDrawNext);
 els.bingoClaimLineBtn.addEventListener("click", () => onBingoClaim("LINE"));
 els.bingoClaimBingoBtn.addEventListener("click", () => onBingoClaim("BINGO"));
-if (els.candyPlayBtn) {
-  els.candyPlayBtn.addEventListener("click", onCandyPlay);
-}
 
 if (els.adminSaveGameBtn) {
   els.adminSaveGameBtn.addEventListener("click", onAdminSaveGame);
