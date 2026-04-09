@@ -18,6 +18,10 @@ const SettingSchema = new Schema({
 			},
 			maintenance:Schema.Types.Mixed,	
 			BackupDetails:Schema.Types.Mixed,
+			supportMessage: {
+				type: 'string',
+				default: ''
+			},
 			chipsBought: {
 				type: 'number',
 				default: 0,
@@ -56,18 +60,23 @@ const SettingSchema = new Schema({
 			},
 			disable_store_link:{
 				type: 'string',
+				default: 'Yes'
 			},
 			android_store_link:{
-				type: 'string'
+				type: 'string',
+				default: ''
 			},
 			ios_store_link:{
 				type: 'string',
+				default: ''
 			},
 			windows_store_link:{
-				type: 'string'
+				type: 'string',
+				default: ''
 			},
 			webgl_store_link:{
-				type: 'string'
+				type: 'string',
+				default: ''
 			},
 			multitable_status:{
 				type: 'string',

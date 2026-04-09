@@ -66,7 +66,7 @@ module.exports = {
         "monthly_spending",
       ]
       let translate = await Sys.Helper.bingo.getTraslateData(keys, req.session.details.language)
-      let settings = await Sys.App.Services.SettingsServices.getSettingsData();
+      let settings = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
       var data = {
         App: Sys.Config.App.details, Agent: req.session.details,
         error: req.flash("error"),
@@ -131,7 +131,7 @@ module.exports = {
           // expireTime: req.body.expireTime
         });
 
-        Sys.Setting = await Sys.App.Services.SettingsServices.getSettingsData({});
+        Sys.Setting = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
 
         // Send PlayerHallLimit broadcast to all socket players
         if(req.body.daily_spending != settings.daily_spending || req.body.monthly_spending != settings.monthly_spending ){
@@ -180,11 +180,15 @@ module.exports = {
         wind_linux_version: req.body.wind_linux_version,
         disable_store_link: req.body.disable_store_link,
         windows_store_link: req.body.windows_store_link,
+        webgl_version: req.body.webgl_version,
+        webgl_store_link: req.body.webgl_store_link,
+        daily_spending: req.body.daily_spending,
+        monthly_spending: req.body.monthly_spending,
         //  multitable_status: req.body.multitable_status,
         // expireTime: req.body.expireTime
       });
 
-      Sys.Setting = await Sys.App.Services.SettingsServices.getSettingsData({});
+      Sys.Setting = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
 
       req.flash('success', await Sys.Helper.bingo.getSingleTraslateData(["settings_created_successfully"], req.session.details.language)) //'Settings created successfully');
       res.redirect('/settings');
@@ -217,7 +221,7 @@ module.exports = {
             'status': 'inactive'
           }
         });
-        Sys.Setting = await Sys.App.Services.SettingsServices.getSettingsData({});
+        Sys.Setting = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
       }
 
       let resPromise = new Promise((resolve, reject) => {
@@ -252,7 +256,7 @@ module.exports = {
 
   /*maintenanceStatusChange: async function(req, res){
     try{
-      let settings = await Sys.App.Services.SettingsServices.getSettingsData();
+      let settings = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
       if (settings || settings.length >0) {
         
         if(settings.maintenance.status == 'active'){
@@ -284,7 +288,7 @@ module.exports = {
 
       let keys = []
       let translate = await Sys.Helper.bingo.getTraslateData(keys, req.session.details.language)
-      let settings = await Sys.App.Services.SettingsServices.getSettingsData();
+      let settings = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
       let maintenance_start_date = moment(settings.maintenance.maintenance_start_date).format("YYYY-MM-DD HH:mm");
       if (settings.maintenance.maintenance_start_date == null || settings.maintenance.maintenance_start_date == undefined || settings.maintenance.maintenance_start_date == '') {
         let maintenance_start_date = moment(settings.maintenance.maintenance_start_date).format("YYYY-MM-DD HH:mm");
@@ -330,7 +334,7 @@ module.exports = {
           }
         });
 
-        Sys.Setting = await Sys.App.Services.SettingsServices.getSettingsData({});
+        Sys.Setting = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
 
         //START: chirag 31-08-2019 game under maintenance code 
         if (req.body.status == "active") {
@@ -536,7 +540,7 @@ module.exports = {
       let end_date = new Date();
       end_date.toLocaleString()
       end_date.setMinutes(start_date.getMinutes() + 5)
-      let settings = await Sys.App.Services.SettingsServices.getSettingsData();
+      let settings = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
       // let req={}
       req.params.id = settings._id
       req.body.maintenance_start_date = start_date
@@ -599,7 +603,7 @@ module.exports = {
 
   checkBackupStatus: async function (req, res) {
     try {
-      let settings = await Sys.App.Services.SettingsServices.getSettingsData(); console.log(settings);
+      let settings = await Sys.App.Services.SettingsServices.getOrCreateSettingsData(); console.log(settings);
       var currentDate = moment(new Date()).format("YYYY-MM-DD"); console.log("current date", currentDate)
       if (settings.BackupDetails && settings.BackupDetails.db_backup_days && settings.BackupDetails.db_next_backup_date && currentDate == settings.BackupDetails.db_next_backup_date) {
         let expiryDate = moment(new Date()).subtract(3, 'months').format("YYYY-MM-DD"); // months
@@ -680,7 +684,7 @@ module.exports = {
         return res.redirect('/settings');
       }
 
-      let settings = await Sys.App.Services.SettingsServices.getSettingsData();
+      let settings = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
 
       let imageDatainSetting = settings.imageTime
 
@@ -729,7 +733,7 @@ module.exports = {
         imageTime: imageData
       })
 
-      Sys.Setting = await Sys.App.Services.SettingsServices.getSettingsData({});
+      Sys.Setting = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
       Sys.Io.emit('updateScreenSaver', {
         screenSaver: screenSaver,
         screenSaverTime: screenSaverTime,
@@ -781,7 +785,7 @@ module.exports = {
         "add",
       ]
       let translate = await Sys.Helper.bingo.getTraslateData(keys, req.session.details.language)
-      let settings = await Sys.App.Services.SettingsServices.getSettingsData();
+      let settings = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
       
       var data = {
         App: Sys.Config.App.details, Agent: req.session.details,
@@ -807,7 +811,7 @@ module.exports = {
     try {
       console.log("********", req.body);
 
-      let setting = await Sys.App.Services.SettingsServices.getSettingsData({});
+      let setting = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
 
       console.log("🚀 ~ setting:", setting);
 
@@ -816,7 +820,7 @@ module.exports = {
       }, {
         systemInformationData: req.body.content
       });
-      Sys.Setting = await Sys.App.Services.SettingsServices.getSettingsData({});
+      Sys.Setting = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
 
       return res.send({ status: "success", message: "Success" });
 

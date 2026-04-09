@@ -458,7 +458,7 @@ mongoose.connection.on('connected', async function () {
     Sys.Namespace = [];
     Sys.Log.info('Mongoose Default Connection Open To [ ' + dbURI + ' ]');
     Sys.Log.info('Loading... Setting');
-    Sys.Setting = await Sys.App.Services.SettingsServices.getSettingsData({});
+    Sys.Setting = await Sys.App.Services.SettingsServices.getOrCreateSettingsData();
     let ptrnCount = await Sys.App.Services.patternServices.getSelectedGamePatternCount({ gameType: "game_3", patternName: { $in: ['Row 1', 'Row 2', 'Row 3', 'Row 4'] } });
     console.log('ptrnCount', ptrnCount);
     if (ptrnCount < 4) {
