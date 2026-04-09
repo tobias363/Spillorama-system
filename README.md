@@ -70,7 +70,14 @@ Live bingo kan fortsatt kjenne til Candy som et eksternt spill på generisk niv�
 ## Les disse dokumentene for full detalj
 
 - `docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md`
+- `docs/CANDY_SEPARATION_AND_FUTURE_OPERATING_MODEL_2026-04-09.md`
 - `docs/UNITY_JS_BRIDGE_CONTRACT.md`
+
+## Render-navnstatus
+
+Repo og Blueprint bruker nå navnet `Spillorama-system` / `spillorama-system`.
+
+Live host er fortsatt `https://bingo-system-jsso.onrender.com/`, som er et historisk Render-hostname. Bytte av offentlig hostname gjøres i Render-plattformen, ikke via repoet alene.
 
 ## Kort regel
 

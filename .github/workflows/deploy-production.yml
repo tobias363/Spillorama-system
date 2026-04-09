@@ -1,4 +1,4 @@
-name: Deploy Production
+name: Deploy Production Hook (Manual)
 
 # Deaktivert: Render auto-deployer fra main via render.yaml.
 # Denne workflowen trigget deploy hook i tillegg, som ga 409 Conflict.
@@ -48,12 +48,28 @@ jobs:
           fi
 
           echo "Trigger production deploy hook ..."
-          curl -fsS \
+          http_code="$(curl -sS \
             --retry "${RENDER_DEPLOY_CURL_RETRIES}" \
             --retry-all-errors \
             --connect-timeout 10 \
+            -o /tmp/render-production-hook-response.txt \
+            -w "%{http_code}" \
             -X POST \
-            "${RENDER_DEPLOY_HOOK_URL}" >/dev/null
+            "${RENDER_DEPLOY_HOOK_URL}")"
+
+          case "${http_code}" in
+            200|201|202|204)
+              echo "Production deploy hook accepted (${http_code})."
+              ;;
+            409)
+              echo "Render svarte 409 Conflict. Dette betyr normalt at en deploy allerede er i gang. Fortsetter til healthcheck i stedet for å feile workflowen."
+              ;;
+            *)
+              echo "Uventet respons fra Render deploy hook: HTTP ${http_code}" >&2
+              cat /tmp/render-production-hook-response.txt >&2 || true
+              exit 1
+              ;;
+          esac
 
           echo "Venter på healthcheck: ${RENDER_HEALTHCHECK_URL}"
           start_ts="$(date +%s)"
