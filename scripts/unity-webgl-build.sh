@@ -13,7 +13,7 @@ if [[ -f "$RELEASE_ENV_FILE" ]]; then
   echo "[unity-webgl-build] Lastet env fra: $RELEASE_ENV_FILE"
 fi
 
-PROJECT_PATH="${UNITY_PROJECT_PATH:-"$ROOT_DIR/Candy"}"
+PROJECT_PATH="${UNITY_PROJECT_PATH:-"$ROOT_DIR/Spillorama"}"
 UNITY_BIN="${UNITY_BIN:-}"
 if [[ -z "$UNITY_BIN" ]]; then
   PROJECT_VERSION_FILE="$PROJECT_PATH/ProjectSettings/ProjectVersion.txt"
@@ -36,13 +36,13 @@ if [[ -z "$UNITY_BIN" ]]; then
   echo "[unity-webgl-build] Fallback Unity-bin i bruk: $UNITY_BIN"
 fi
 
-RELEASE_VERSION="${CANDY_RELEASE_VERSION:-$(date -u +"%Y%m%d-%H%M%S")}"
-RELEASE_COMMIT="${CANDY_RELEASE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
-OUTPUT_DIR="${CANDY_WEBGL_OUTPUT_DIR:-"$ROOT_DIR/CandyBuilds/releases/$RELEASE_VERSION"}"
-LOG_DIR="${CANDY_BUILD_LOG_DIR:-"$ROOT_DIR/CandyBuilds/logs"}"
+RELEASE_VERSION="${SYSTEM_RELEASE_VERSION:-$(date -u +"%Y%m%d-%H%M%S")}"
+RELEASE_COMMIT="${SYSTEM_RELEASE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+OUTPUT_DIR="${UNITY_WEBGL_OUTPUT_DIR:-"$ROOT_DIR/SpilloramaBuilds/releases/$RELEASE_VERSION"}"
+LOG_DIR="${UNITY_BUILD_LOG_DIR:-"$ROOT_DIR/SpilloramaBuilds/logs"}"
 LOG_FILE="${UNITY_WEBGL_BUILD_LOG:-"$LOG_DIR/webgl-build-$RELEASE_VERSION.log"}"
-RUN_COMPILE_CHECK="${CANDY_RUN_UNITY_COMPILE_CHECK:-true}"
-RUN_THEME2_SMOKE="${CANDY_RUN_THEME2_SMOKE:-false}"
+RUN_COMPILE_CHECK="${RUN_UNITY_COMPILE_CHECK:-true}"
+RUN_THEME2_SMOKE="${RUN_THEME2_SMOKE:-false}"
 
 is_true() {
   local value

@@ -8,13 +8,13 @@ Planlagt Wave 1 pilot: `2026-03-09`
 
 Dette er en pilotklar leveranse for første hall (Wave 1) med:
 
-- hardening av realtime-flyt i Candy-klient
+- hardening av realtime-flyt i Spillorama-klient
 - oppstrammet backend-konfigurasjon og compliance-kontroller
 - operativ dokumentpakke for pilot, rollback og go/no-go
 
 ## Viktigste endringer
 
-### 1) Candy klient/editor
+### 1) Spillorama klient/editor
 
 - Play-knapp støtter nå deterministisk realtime-start/trekk.
 - Bedre håndtering av join/create-pending for å unngå duplikate room-kall.

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: bingo-system
+    name: spillorama-system
     runtime: node
     region: frankfurt
     plan: starter

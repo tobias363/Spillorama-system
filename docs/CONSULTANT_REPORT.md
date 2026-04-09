@@ -1,7 +1,7 @@
 # Arkitekturgjennomgang: Frontend Portal (Historisk Consultant Report)
 
-> Historisk rapport fra perioden før Candy/demo-backend ble skilt ut av `Bingo-system`.
-> Gjeldende repo-grense er dokumentert i [LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md](/Users/tobiashaugen/Projects/Bingo-system/docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md).
+> Historisk rapport fra perioden før Candy/demo-backend ble skilt ut av `Spillorama-system`.
+> Gjeldende repo-grense er dokumentert i [LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md](/Users/tobiashaugen/Projects/Spillorama-system/docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md).
 > Referanser her til `bingo_in_20_3_26_latest/`, `backend/public/game/index.html` eller Candy-spesifikk wallet-bridge skal leses som historisk analyse, ikke som dagens arkitektur.
 
 Etter å ha byttet ut "Lobby-fikser-hatten" med "Konsulent-brillene", har jeg tatt et dypdykk i selve fundamentet (spesielt `index.html` og samspillet med innlogging). Selv om vi nå har skissert moduler og Alpine.js for å rydde opp i grensesnittet, finnes det **fire dypere tekniske gjeldsposter** som burde adresseres før systemet lanseres til hundretusenvis av betalende spillere.

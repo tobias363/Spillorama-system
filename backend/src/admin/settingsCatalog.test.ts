@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildCandySettingsDefinition } from "./settingsCatalog.js";
+import { buildBingoSettingsDefinition } from "./settingsCatalog.js";
 
-test("candy settings-katalog inkluderer payoutPercent med grenser", () => {
-  const definition = buildCandySettingsDefinition({
+test("bingo settings-katalog inkluderer payoutPercent med grenser", () => {
+  const definition = buildBingoSettingsDefinition({
     minRoundIntervalMs: 30000,
     minPlayersToStart: 1,
     maxTicketsPerPlayer: 5,
@@ -20,8 +20,8 @@ test("candy settings-katalog inkluderer payoutPercent med grenser", () => {
   assert.equal(payoutField?.max, 100);
 });
 
-test("candy settings-katalog setter lock når runde kjører", () => {
-  const definition = buildCandySettingsDefinition({
+test("bingo settings-katalog setter lock når runde kjører", () => {
+  const definition = buildBingoSettingsDefinition({
     minRoundIntervalMs: 30000,
     minPlayersToStart: 1,
     maxTicketsPerPlayer: 5,

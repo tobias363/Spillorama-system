@@ -159,18 +159,6 @@ const NOK_INTEGER_FORMATTER = new Intl.NumberFormat("nb-NO", {
 });
 
 const GAME_SHOWCASE_THEME = Object.freeze({
-  candy: {
-    accent: "#d96a0c",
-    accentSoft: "rgba(217, 106, 12, 0.28)",
-    background:
-      "linear-gradient(115deg, rgba(51, 21, 13, 0.9) 0%, rgba(100, 45, 27, 0.75) 38%, rgba(16, 26, 44, 0.48) 100%), radial-gradient(circle at 14% 20%, rgba(255, 190, 125, 0.24), transparent 36%), radial-gradient(circle at 78% 74%, rgba(220, 84, 35, 0.28), transparent 44%)",
-    image: "/assets/games/godterihuset.png",
-    fallbackPrizePool: 1792.52,
-    fallbackPlayers: 159,
-    fallbackTicketPrice: 1,
-    fallbackNextDrawMinutes: 1,
-    badge: 75
-  },
   papirbingo: {
     accent: "#7b3fa0",
     accentSoft: "rgba(123, 63, 160, 0.28)",
@@ -242,18 +230,6 @@ const GAME_SHOWCASE_THEME = Object.freeze({
     fallbackTicketPrice: 2,
     fallbackNextDrawMinutes: 2,
     badge: 60
-  },
-  roma: {
-    accent: "#c58a3d",
-    accentSoft: "rgba(197, 138, 61, 0.28)",
-    background:
-      "linear-gradient(112deg, rgba(45, 22, 16, 0.92) 0%, rgba(96, 53, 34, 0.74) 41%, rgba(18, 22, 31, 0.56) 100%), radial-gradient(circle at 18% 22%, rgba(234, 176, 110, 0.22), transparent 35%), radial-gradient(circle at 80% 76%, rgba(190, 108, 52, 0.22), transparent 42%)",
-    image: "/assets/games/gold-digger.png",
-    fallbackPrizePool: 2100,
-    fallbackPlayers: 84,
-    fallbackTicketPrice: 1,
-    fallbackNextDrawMinutes: 1,
-    badge: 80
   },
   bingo: {
     accent: "#3d6be9",

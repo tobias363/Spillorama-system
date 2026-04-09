@@ -13,7 +13,7 @@ Detailed execution breakdown:
 ## 1. Assumptions
 
 - Team: 3 full-time developers (backend, client, full-stack), 1 QA (50-100%), 1 ops/devops (25-50%).
-- Existing stack in use: TypeScript backend, Unity client (`Candy`), Postgres wallet adapter.
+- Existing stack in use: TypeScript backend, Unity client (`Spillorama`), Postgres wallet adapter.
 - Compliance target: "go-live ready for controlled pilot", then staged rollout to all halls.
 - This backlog prioritizes legal/compliance-critical features before UX enhancements.
 

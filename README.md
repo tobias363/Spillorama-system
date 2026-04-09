@@ -1,4 +1,4 @@
-# Bingo-system
+# Spillorama-system
 
 > Scope-beslutning 9. april 2026: dette repoet er kun for live bingo-systemet. Hvis denne README-en er i konflikt med `docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md`, er det dokumentet styrende.
 
@@ -19,7 +19,7 @@ Det eier ikke Candy demo-login, Candy demo-admin eller Candy demo-settings.
 
 | System | Lokal mappe | Repo | Produksjon | Eier |
 |---|---|---|---|---|
-| Live bingo | `/Users/tobiashaugen/Projects/Bingo-system/` | `tobias363/bingosystem` | `https://bingo-system-jsso.onrender.com/` | portal, wallet, auth, compliance, admin, Unity-lobby |
+| Live bingo | `/Users/tobiashaugen/Projects/Spillorama-system/` | `tobias363/Spillorama-system` | `https://bingo-system-jsso.onrender.com/` | portal, wallet, auth, compliance, admin, Unity-lobby |
 | Candy | `/Users/tobiashaugen/Projects/Candy/` | `tobias363/candy-web` | Candy-klient og spillkode | selve spillet, UI, assets, gameplay |
 | demo-backend | `/Users/tobiashaugen/Projects/demo-backend/` | `tobias363/demo-backend` | `https://candy-backend-ldvg.onrender.com/` | demo-login, demo-admin, demo-settings, demo-drift |
 
@@ -55,9 +55,9 @@ Samme route-navn på to forskjellige domener betyr ikke samme system.
 
 | Jeg vil endre | Riktig kodebase | Kommentar |
 |---|---|---|
-| Live portal eller live admin | `Bingo-system` | jobb i `frontend/` eller `backend/src/admin/` |
-| Live wallet, auth eller compliance | `Bingo-system` | jobb i `backend/src/` |
-| Live Unity-lobby eller live Unity-spill | `Bingo-system` | jobb i `Spillorama/` |
+| Live portal eller live admin | `Spillorama-system` | jobb i `frontend/` eller `backend/src/admin/` |
+| Live wallet, auth eller compliance | `Spillorama-system` | jobb i `backend/src/` |
+| Live Unity-lobby eller live Unity-spill | `Spillorama-system` | jobb i `Spillorama/` |
 | Candy gameplay, UI eller assets | `Candy` | jobb i Candy-repoet |
 | Candy demo-login, demo-admin eller demo-settings | `demo-backend` | jobb i `demo-backend`-repoet |
 

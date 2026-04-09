@@ -45,7 +45,7 @@ export interface AdminSettingsCatalog {
   games: GameSettingsDefinition[];
 }
 
-export interface CandySettingsCatalogContext {
+export interface BingoSettingsCatalogContext {
   minRoundIntervalMs: number;
   minPlayersToStart: number;
   maxTicketsPerPlayer: number;
@@ -66,7 +66,7 @@ function flattenSections(sections: GameSettingsSectionDefinition[]): GameSetting
   return sections.flatMap((section) => section.fields.map((field) => cloneField(field)));
 }
 
-export function buildCandySettingsDefinition(context: CandySettingsCatalogContext): GameSettingsDefinition {
+export function buildBingoSettingsDefinition(context: BingoSettingsCatalogContext): GameSettingsDefinition {
   const lockReason = context.runningRoundLockActive
     ? "Kan ikke endres mens en runde kjører. Planlegg endring med effectiveFrom."
     : "";
@@ -196,9 +196,9 @@ export function buildCandySettingsDefinition(context: CandySettingsCatalogContex
   ];
 
   return {
-    slug: "candy",
-    title: "Candy",
-    description: "Typed driftsinnstillinger for Candy.",
+    slug: "bingo",
+    title: "Bingo",
+    description: "Typed driftsinnstillinger for live bingo.",
     sections,
     fields: flattenSections(sections)
   };

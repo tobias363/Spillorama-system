@@ -22,8 +22,8 @@ Backend er kilde til sannhet. UI kan skjule/låse handlinger, men backend avvise
 - `effectiveFrom`: valgfri fremtidig aktiveringstid for planlagt endring.
 
 ## Låser under aktiv runde
-Når en Candy-runde kjører (`runningRoundLockActive=true`):
-- Direkte endring av Candy-settings avvises.
+Når en bingo-runde kjører (`runningRoundLockActive=true`):
+- Direkte endring av bingo-settings avvises.
 - Bruk planlagt endring med `effectiveFrom` i fremtid.
 - Formål: unngå inkonsistent runtime-state midt i aktiv runde.
 
@@ -33,15 +33,15 @@ Når en Candy-runde kjører (`runningRoundLockActive=true`):
 3. Finn siste stabile endring (se `source`, `effektFra`, `payload`).
 4. Re-appliser tidligere verdier via korrekt admin-endepunkt:
 - For katalog/settings: `PUT /api/admin/games/:slug`
-- For Candy runtime/scheduler: `PUT /api/admin/candy-mania/settings`
+- For typed spillsettings: `PUT /api/admin/settings/games/:slug`
 5. Ved aktiv runde: sett `effectiveFrom` frem i tid.
 6. Verifiser etterpå:
 - ny linje i endringslogg
-- forventet runtime i Candy settings
+- forventet runtime i bingo settings
 - ingen `FORBIDDEN` eller valideringsfeil for riktig rolle
 
 ## Operativ feilhåndtering
 - `FORBIDDEN`: rolle mangler permission. Ikke bypass UI; bruk korrekt rolle.
 - `UNAUTHORIZED`: token utløpt/ugyldig, logg inn på nytt.
 - `INVALID_INPUT`: korriger feltverdier/format.
-- `CANDY_SETTINGS_LOCKED_DURING_RUNNING_GAME`: bruk planlagt endring (`effectiveFrom`).
+- `GAME_SETTINGS_LOCKED_DURING_RUNNING_GAME`: bruk planlagt endring (`effectiveFrom`).

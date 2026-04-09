@@ -39,7 +39,7 @@ interface CreateRoomInput {
   hallId: string;
   walletId?: string;
   socketId?: string;
-  /** Optional fixed room code (e.g. "CANDY1"). Skips random generation. */
+  /** Optional fixed room code (e.g. "BINGO1"). Skips random generation. */
   roomCode?: string;
 }
 

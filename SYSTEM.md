@@ -2,7 +2,7 @@
 
 > **Viktig:** Denne filen er historisk systemdokumentasjon og skal ikke brukes som kildesannhet for repo-grenser, deploy-root eller Candy-ansvar.
 
-> **Kildesannhet fra 9. april 2026:** Se [docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md](/Users/tobiashaugen/Projects/Bingo-system/docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md). Det dokumentet overstyrer alle referanser i denne filen til `bingo_in_20_3_26_latest/`, `/api/integration/*`, demo-login, demo-admin og Candy-spesifikk backend.
+> **Kildesannhet fra 9. april 2026:** Se [docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md](/Users/tobiashaugen/Projects/Spillorama-system/docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md). Det dokumentet overstyrer alle referanser i denne filen til `bingo_in_20_3_26_latest/`, `/api/integration/*`, demo-login, demo-admin og Candy-spesifikk backend.
 
 ## Innholdsfortegnelse
 
@@ -67,7 +67,7 @@
 ## Mappestruktur
 
 ```
-Bingo-system/
+Spillorama-system/
 ├── SYSTEM.md                          # <-- Denne filen
 ├── GAME-INTEGRATION.md                # Detaljert spill-integrasjonsdokumentasjon
 ├── env.conf                           # Legacy env (gammel backend, IKKE bruk)
@@ -761,7 +761,7 @@ AUTO_ROUND_START_ENABLED=true
 AUTO_ROUND_START_INTERVAL_MS=180000
 AUTO_DRAW_ENABLED=true
 AUTO_DRAW_INTERVAL_MS=1200
-CANDY_PAYOUT_PERCENT=100
+BINGO_PAYOUT_PERCENT=100
 
 # === Swedbank Pay ===
 SWEDBANK_PAY_API_BASE_URL=https://api.externalintegration.payex.com
@@ -780,9 +780,8 @@ ALLOWED_EMBED_ORIGINS=
 ### Release (scripts/release.env)
 
 ```bash
-CANDY_RELEASE_CHANNEL=staging|production
-CANDY_PUBLISH_MODE=none|local|rsync|s3
-CANDY_PROMOTE_LIVE=false
+SYSTEM_RELEASE_CHANNEL=staging|production
+RUN_UNITY_BUILD=false
 RENDER_DEPLOY_HOOK_URL=
 RENDER_HEALTHCHECK_URL=
 ```

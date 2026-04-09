@@ -26,7 +26,7 @@
 - `limit` fungerer.
 - Rad viser: aktør, rolle, tidspunkt, source, effektFra, payload-sammendrag.
 
-## 5. Candy lock-atferd
+## 5. Bingo lock-atferd
 - Ved aktiv runde avvises direkte settings-endring.
 - Planlagt endring med `effectiveFrom` godtas.
 

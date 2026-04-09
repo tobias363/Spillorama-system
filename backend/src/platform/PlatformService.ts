@@ -1513,11 +1513,6 @@ export class PlatformService {
          ON CONFLICT (slug) DO NOTHING`
       );
       await client.query(
-        `DELETE FROM ${this.gamesTable()}
-         WHERE slug IN ('candy', 'roma')`
-      );
-
-      await client.query(
         `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, is_active)
          VALUES ($1, $2, 'Default hall', 'NO', '', true)
          ON CONFLICT DO NOTHING`,

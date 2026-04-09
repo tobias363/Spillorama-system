@@ -335,7 +335,6 @@
             <h2>Meny</h2>
             <nav class="admin-nav">
               <a href="#section-game-settings">Spillinnstillinger</a>
-              <a href="#section-candy-mania">Candy (spill + drift)</a>
               <a href="#section-games">Spillkatalog (andre spill)</a>
               <a href="#section-halls">Haller</a>
               <a href="#section-terminals">Terminaler</a>
@@ -389,7 +388,7 @@
             <h2>Spillkatalog (andre spill)</h2>
             <p id="adminIdentity" class="muted"></p>
           </div>
-          <p class="muted">Candy styres i egen seksjon: <strong>Candy (spill + drift)</strong>.</p>
+          <p class="muted">Styr spillkatalogen som eksponeres i live bingo-systemet.</p>
           <div class="grid">
             <div class="field full">
               <label for="gameSelect">Velg spill</label>
@@ -542,141 +541,6 @@
             <button id="reloadConfigBtn" class="secondary">Oppdater fra backend</button>
           </div>
           <pre id="configStatus" class="status">Ingen konfig lastet.</pre>
-        </article>
-
-        <article id="section-candy-mania" class="card admin-section">
-          <h2>Candy (spill + drift)</h2>
-          <p class="muted">
-            Alt som gjelder Candy styres her: spillkatalog-felt, scheduler, auto-trekk og RTP.
-          </p>
-          <h3>Candy spillkatalog</h3>
-          <div class="grid">
-            <div class="field">
-              <label for="candyGameTitle">Tittel</label>
-              <input id="candyGameTitle" />
-            </div>
-            <div class="field">
-              <label for="candyGameRoute">Route</label>
-              <input id="candyGameRoute" />
-            </div>
-            <div class="field full">
-              <label for="candyGameDescription">Beskrivelse</label>
-              <textarea id="candyGameDescription"></textarea>
-            </div>
-            <div class="field">
-              <label for="candyGameSortOrder">Sortering</label>
-              <input id="candyGameSortOrder" type="number" />
-            </div>
-            <div class="field">
-              <label for="candyGameEnabled">Aktivert</label>
-              <select id="candyGameEnabled">
-                <option value="true">Ja</option>
-                <option value="false">Nei</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="candyGameLaunchUrl">Launch URL (påkrevd)</label>
-              <input id="candyGameLaunchUrl" placeholder="https://candy-eksempel.no" />
-            </div>
-            <div class="field">
-              <label for="candyGameApiBaseUrl">API Base URL (valgfri)</label>
-              <input id="candyGameApiBaseUrl" placeholder="https://bingosystem-3.onrender.com" />
-            </div>
-            <div class="field full">
-              <label for="candyGameSettingsJson">Candy settings JSON</label>
-              <textarea id="candyGameSettingsJson"></textarea>
-            </div>
-          </div>
-          <div class="toolbar">
-            <button id="candyLoadGameBtn" class="secondary">Last Candy-spill</button>
-            <button id="candySaveGameBtn">Lagre Candy-spill</button>
-          </div>
-          <pre id="candyGameStatus" class="status">Ingen Candy-spilldata lastet.</pre>
-          <h3>Candy drift og RTP</h3>
-          <p class="muted">
-            Backend-styring for auto-trekning og realtime-runder. Endringer lagres i Candy settings og brukes uten redeploy.
-          </p>
-          <div class="grid">
-            <div class="field">
-              <label for="candyAutoRoundStartEnabled">Auto start runder</label>
-              <select id="candyAutoRoundStartEnabled">
-                <option value="true">Ja</option>
-                <option value="false">Nei</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="candyAutoRoundStartIntervalSeconds">Trekning hvert (sekunder)</label>
-              <input id="candyAutoRoundStartIntervalSeconds" type="number" min="30" step="1" />
-            </div>
-            <div class="field">
-              <label for="candyAutoRoundMinPlayers">Min spillere for auto-start</label>
-              <input id="candyAutoRoundMinPlayers" type="number" min="1" step="1" />
-            </div>
-            <div class="field">
-              <label for="candyAutoRoundTicketsPerPlayer">Bonger per spiller (auto)</label>
-              <input id="candyAutoRoundTicketsPerPlayer" type="number" min="1" max="5" step="1" value="4" />
-            </div>
-            <div class="field">
-              <label for="candyAutoRoundEntryFee">Default innsats per runde</label>
-              <input id="candyAutoRoundEntryFee" type="number" min="0" step="0.01" />
-            </div>
-            <div class="field">
-              <label for="candyPayoutPercent">RTP / utbetaling (%)</label>
-              <input id="candyPayoutPercent" type="number" min="0" max="100" step="0.01" />
-            </div>
-            <div class="field">
-              <label for="candyEffectiveFrom">Aktiver fra (valgfri)</label>
-              <input id="candyEffectiveFrom" type="datetime-local" step="1" />
-            </div>
-            <div class="field">
-              <label for="candyAutoDrawEnabled">Auto trekk i aktiv runde</label>
-              <select id="candyAutoDrawEnabled">
-                <option value="true">Ja</option>
-                <option value="false">Nei</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="candyAutoDrawIntervalSeconds">Trekk-intervall (sekunder)</label>
-              <input id="candyAutoDrawIntervalSeconds" type="number" min="0.25" step="0.05" />
-            </div>
-            <div class="field">
-              <label for="candySchedulerTickMs">Scheduler tick (ms, readonly)</label>
-              <input id="candySchedulerTickMs" type="number" readonly />
-            </div>
-          </div>
-          <div class="toolbar">
-            <button id="candyLoadSettingsBtn" class="secondary">Last fra backend</button>
-            <button id="candySaveSettingsBtn">Lagre Candy-drift</button>
-          </div>
-          <h3>Candy spillkontroll</h3>
-          <p class="muted">
-            Velg hall og rom, og styr trekning. Kun ett rom per hall er tillatt.
-          </p>
-          <div class="grid">
-            <div class="field">
-              <label for="candyQuickHallSelect">Hall</label>
-              <select id="candyQuickHallSelect"></select>
-            </div>
-            <div class="field">
-              <label for="candyQuickRoomSelect">Aktivt rom</label>
-              <select id="candyQuickRoomSelect"></select>
-            </div>
-          </div>
-          <div class="toolbar">
-            <button id="candyQuickStartNowBtn">Start ny runde</button>
-            <button id="candyQuickDrawNextBtn" class="secondary">Trekk neste</button>
-            <button id="candyQuickEndRoomBtn" class="secondary">Avslutt runde</button>
-            <button id="candyQuickRefreshRoomsBtn" class="secondary">Oppdater</button>
-          </div>
-          <!-- Hidden elements kept for JS compatibility -->
-          <div style="display:none">
-            <input id="candyQuickEntryFee" type="hidden" value="0" />
-            <input id="candyQuickTicketsPerPlayer" type="hidden" value="4" />
-            <button id="candyQuickCreateStartBtn"></button>
-            <button id="candyQuickStartExistingBtn"></button>
-          </div>
-          <pre id="candyQuickStatus" class="status">Ingen Candy rom-kjøring startet.</pre>
-          <pre id="candySettingsStatus" class="status">Ingen Candy-driftinnstillinger lastet.</pre>
         </article>
 
         <article id="section-wallet-compliance" class="card admin-section">

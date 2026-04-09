@@ -97,7 +97,7 @@ npm --prefix backend run test:compliance
 npm --prefix backend run build
 ```
 
-If Unity/Candy changed, also run:
+If Unity/Spillorama changed, also run:
 
 ```bash
 npm run check:unity

@@ -6,7 +6,7 @@ Target rollout window: `2026-03-09` (Wave 1 pilot hall)
 
 ## 1. Scope Included In This Package
 
-- Candy client/editor updates for realtime play flow and safer scene cleanup.
+- Spillorama client/editor updates for realtime play flow and safer scene cleanup.
 - Backend runtime hardening for local env loading and configurable minimum players.
 - Compliance gate and dedicated compliance test suite.
 - Pilot operations documentation (`BG-027`, `BG-028`, sign-off docs).
@@ -15,14 +15,14 @@ Target rollout window: `2026-03-09` (Wave 1 pilot hall)
 
 Commit order is optimized for review and rollback isolation.
 
-### Commit 1: `candy: realtime play flow + editor cleanup guardrails`
+### Commit 1: `spillorama: realtime play flow + editor cleanup guardrails`
 
 Files:
 
-- `Candy/Assets/Script/APIManager.cs`
-- `Candy/Assets/Script/BingoRealtimeClient.cs`
-- `Candy/Assets/Script/UIManager.cs`
-- `Candy/Assets/Editor/RemoveMissingScriptsTool.cs`
+- `Spillorama/Assets/Script/APIManager.cs`
+- `Spillorama/Assets/Script/BingoRealtimeClient.cs`
+- `Spillorama/Assets/Script/UIManager.cs`
+- `Spillorama/Assets/Editor/RemoveMissingScriptsTool.cs`
 
 Intent:
 

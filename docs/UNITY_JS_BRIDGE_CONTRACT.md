@@ -1,6 +1,6 @@
 # Unity WebGL ↔ Host Page JavaScript Bridge Contract
 
-Dette dokumentet beskriver den gjeldende JS-broen mellom live bingo sine Unity-hosts og HTML-host-sidene i `Bingo-system`.
+Dette dokumentet beskriver den gjeldende JS-broen mellom live bingo sine Unity-hosts og HTML-host-sidene i `Spillorama-system`.
 
 Candy wallet-bridge, Candy iframe-overlay og Candy demo-hosting er ikke lenger del av dette repoet.
 
@@ -70,7 +70,7 @@ Brukes av hall-displayet for fokus/lukking av TV-vindu.
 | `SendMessage('Panel - Bingo Hall Display', 'AdminHallDisplayRoomIdCall', jsonData)` | `/view-game/` | Etter `requestGameData()` |
 | `SendMessage('Panel - Bingo Hall Display', 'ReceiveDeviceType', deviceType)` | `/view-game/` | Etter `sendDeviceTypeToUnity()` |
 
-## 4. Det som ikke lenger finnes i `Bingo-system`
+## 4. Det som ikke lenger finnes i `Spillorama-system`
 
 Følgende er fjernet fra live bingo-repoet og skal ikke reintroduseres her:
 

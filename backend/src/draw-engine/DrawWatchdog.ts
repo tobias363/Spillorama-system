@@ -27,7 +27,7 @@ export interface DrawWatchdogConfig {
   checkIntervalMs?: number;
   /**
    * Multiplier applied to `drawIntervalMs` to determine the stuck threshold.
-   * Default 3 (i.e. 3 × 2000ms = 6s for CandyMania).
+   * Default 3 (i.e. 3 × 2000ms = 6s).
    */
   stuckThresholdMultiplier?: number;
   /** The normal draw interval (ms). Default 2000. */

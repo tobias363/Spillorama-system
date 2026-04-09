@@ -15,7 +15,7 @@ const logger = rootLogger.child({ module: "redis-lock" });
 export interface RedisSchedulerLockOptions {
   /** Redis connection URL (default: redis://localhost:6379) */
   url?: string;
-  /** Lock key prefix (default: candy:lock:) */
+  /** Lock key prefix (default: bingo:lock:) */
   keyPrefix?: string;
   /** Default lock timeout in ms (default: 5000) */
   defaultTimeoutMs?: number;
@@ -38,7 +38,7 @@ export class RedisSchedulerLock {
       maxRetriesPerRequest: 3,
       lazyConnect: false
     });
-    this.keyPrefix = options?.keyPrefix ?? "candy:lock:";
+    this.keyPrefix = options?.keyPrefix ?? "bingo:lock:";
     this.defaultTimeoutMs = options?.defaultTimeoutMs ?? 5000;
     this.instanceId = options?.instanceId ?? `instance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 

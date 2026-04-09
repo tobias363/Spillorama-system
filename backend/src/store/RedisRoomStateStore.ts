@@ -8,7 +8,7 @@
  * On mutation: persist() writes serialized state to Redis.
  * On shutdown: all pending writes flushed.
  *
- * Redis keys: `candy:room:{roomCode}` with configurable TTL.
+ * Redis keys: `bingo:room:{roomCode}` with configurable TTL.
  */
 
 import { Redis } from "ioredis";
@@ -21,7 +21,7 @@ const logger = rootLogger.child({ module: "redis-room-store" });
 export interface RedisRoomStateStoreOptions {
   /** Redis connection URL (default: redis://localhost:6379) */
   url?: string;
-  /** Key prefix (default: candy:room:) */
+  /** Key prefix (default: bingo:room:) */
   keyPrefix?: string;
   /** TTL in seconds for room state (default: 86400 = 24h) */
   ttlSeconds?: number;
@@ -39,7 +39,7 @@ export class RedisRoomStateStore implements RoomStateStore {
       maxRetriesPerRequest: 3,
       lazyConnect: true
     });
-    this.keyPrefix = options?.keyPrefix ?? "candy:room:";
+    this.keyPrefix = options?.keyPrefix ?? "bingo:room:";
     this.ttlSeconds = options?.ttlSeconds ?? 86_400;
 
     this.redis.on("error", (err: Error) => {
