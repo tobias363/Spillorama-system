@@ -1,6 +1,13 @@
 # Render + GitHub Actions Setup
 
-Dette dokumentet beskriver minimum oppsett for automatisk staging/production deploy fra GitHub Actions.
+Dette dokumentet beskriver minimum oppsett for staging deploy via GitHub Actions og production deploy via Render.
+
+Per 9. april 2026 er production i `Spillorama-system` satt opp slik:
+
+- Render auto-deployer fra `main`
+- GitHub Actions brukes fortsatt for CI og compliance
+- den manuelle workflowen `Deploy Production Hook (Manual)` finnes kun som nødverktøy
+- hvis den manuelle hooken kjøres mens Render allerede deployer, kan Render svare `409 Conflict`
 
 ## 1) Opprett to Render services
 
@@ -42,9 +49,10 @@ Repo variables (`Settings` -> `Secrets and variables` -> `Actions` -> `Variables
 - `Deploy Staging`:
   - trigges automatisk ved `push` til `staging`
   - kan også kjøres manuelt (`workflow_dispatch`)
-- `Deploy Production`:
-  - trigges automatisk etter grønn `CI` på `main`
-  - kan også kjøres manuelt (`workflow_dispatch`)
+- `Deploy Production Hook (Manual)`:
+  - trigges kun manuelt (`workflow_dispatch`)
+  - skal bare brukes hvis dere bevisst vil trigge Render deploy hook direkte
+  - hvis Render allerede deployer fra `main`, kan hooken returnere `409 Conflict`
 
 ## 5) Sikkerhet
 
@@ -61,4 +69,5 @@ Repo variables (`Settings` -> `Secrets and variables` -> `Actions` -> `Variables
 3. Merge PR til `main`.
 4. Cherry-pick eller merge samme endring til `staging`.
 5. Verifiser at `Deploy Staging` starter på push til `staging` og passerer healthcheck.
-6. Verifiser at `Deploy Production` starter etter grønn `CI` på `main` og passerer healthcheck.
+6. Verifiser at Render faktisk deployer automatisk fra `main`.
+7. Bruk bare `Deploy Production Hook (Manual)` når dere trenger en eksplisitt manuell trigger.

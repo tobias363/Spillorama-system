@@ -49,6 +49,8 @@ Det betyr også:
 
 Samme navn på route betyr ikke samme system. Domene avgjør eierskap.
 
+Merk: `render.yaml` i dette repoet bruker tjenestenavnet `spillorama-system`, men den offentlige live-adressen er fortsatt det historiske Render-hostnavnet `https://bingo-system-jsso.onrender.com/`. Offentlig hostname styres i Render-plattformen, ikke bare i repoet.
+
 ## 4. Integrasjonsmodellen vi er enige om
 
 Candy skal kunne kobles mot flere ulike bingo-leverandører. Derfor skal Candy-backenden være sentral og ligge utenfor `Spillorama-system`.
@@ -144,3 +146,5 @@ så er dokumentet historisk og ikke kildesannhet.
 `Candy` = Candy-spillet.
 
 `demo-backend` = Candy-backend, demo-login, demo-admin og demo-settings.
+
+Se også `docs/CANDY_SEPARATION_AND_FUTURE_OPERATING_MODEL_2026-04-09.md` for komplett redegjørelse, oppryddingsstatus og fremtidig arbeidsmodell.
