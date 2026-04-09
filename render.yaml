@@ -97,3 +97,10 @@ services:
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
+      # Candy integration
+      - key: EXT_GAME_WALLET_API_KEY
+        sync: false
+      - key: CANDY_BACKEND_URL
+        value: https://candy-backend-ldvg.onrender.com
+      - key: CANDY_INTEGRATION_API_KEY
+        sync: false

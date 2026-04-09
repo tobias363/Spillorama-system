@@ -38,6 +38,7 @@ import {
 import { DrawScheduler, type SchedulerSettings } from "./draw-engine/DrawScheduler.js";
 import { SocketRateLimiter } from "./middleware/socketRateLimit.js";
 import { register as promRegister, metrics as promMetrics } from "./util/metrics.js";
+import { createExternalGameWalletRouter } from "./integration/externalGameWallet.js";
 
 interface AckResponse<T> {
   ok: boolean;
@@ -164,6 +165,16 @@ const io = new Server(server, {
 
 const walletRuntime = createWalletAdapter(projectDir);
 const walletAdapter = walletRuntime.adapter;
+
+// External game wallet bridge (Candy/demo-backend calls these)
+const extGameWalletApiKey = (process.env.EXT_GAME_WALLET_API_KEY ?? "").trim();
+if (extGameWalletApiKey) {
+  app.use("/api/ext-wallet", createExternalGameWalletRouter({
+    walletAdapter,
+    apiKey: extGameWalletApiKey
+  }));
+}
+
 const platformConnectionString =
   process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim();
 if (!platformConnectionString) {
@@ -1627,6 +1638,65 @@ app.get("/api/games", async (req, res) => {
     await getAuthenticatedUser(req);
     const games = await platformService.listGames({ includeDisabled: false });
     apiSuccess(res, games);
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
+// Launch external game (e.g. Candy) — calls demo-backend's integration API
+app.post("/api/games/:slug/launch", async (req, res) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const slug = req.params.slug?.trim();
+    if (!slug) throw new DomainError("INVALID_INPUT", "Mangler game slug.");
+
+    const game = await platformService.getGame(slug);
+    if (!game || !game.isEnabled) {
+      throw new DomainError("GAME_NOT_FOUND", `Spillet '${slug}' finnes ikke eller er deaktivert.`);
+    }
+
+    const candyBackendUrl = (process.env.CANDY_BACKEND_URL ?? "").trim();
+    const candyApiKey = (process.env.CANDY_INTEGRATION_API_KEY ?? "").trim();
+    if (!candyBackendUrl || !candyApiKey) {
+      throw new DomainError("INTEGRATION_NOT_CONFIGURED", "Candy-integrasjon er ikke konfigurert.");
+    }
+
+    const hallId = typeof req.body?.hallId === "string" ? req.body.hallId.trim() : "hall-default";
+    const returnUrl = typeof req.body?.returnUrl === "string"
+      ? req.body.returnUrl.trim()
+      : `${req.protocol}://${req.get("host") ?? "localhost"}/`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(`${candyBackendUrl}/api/integration/launch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": candyApiKey
+        },
+        body: JSON.stringify({
+          sessionToken: getAccessTokenFromRequest(req),
+          playerId: user.walletId,
+          currency: "NOK",
+          language: "nb-NO",
+          returnUrl
+        }),
+        signal: controller.signal
+      });
+
+      const body = await response.json() as { ok?: boolean; data?: { embedUrl?: string; expiresAt?: string }; error?: unknown };
+      if (!response.ok || !body.ok || !body.data?.embedUrl) {
+        throw new DomainError("LAUNCH_FAILED", "Kunne ikke starte spillet.");
+      }
+
+      apiSuccess(res, {
+        embedUrl: body.data.embedUrl,
+        expiresAt: body.data.expiresAt
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   } catch (error) {
     apiFailure(res, error);
   }
