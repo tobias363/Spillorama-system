@@ -14,7 +14,7 @@ Se `CANDY_SEPARATION_AND_FUTURE_OPERATING_MODEL_2026-04-09.md` for eiermodell og
 ```
 Spiller (nettleser)
   |
-  |-- HTTPS --> Spillorama portal (bingo-system-jsso.onrender.com)
+  |-- HTTPS --> Spillorama portal (spillorama-system.onrender.com)
   |               |
   |               |-- POST /api/games/candy/launch --> Spillorama backend
   |               |     |
@@ -95,7 +95,7 @@ Content-Type: application/json
   "playerId": "{spillerens-wallet-id}",
   "currency": "NOK",
   "language": "nb-NO",
-  "returnUrl": "https://bingo-system-jsso.onrender.com/"
+  "returnUrl": "https://spillorama-system.onrender.com/"
 }
 ```
 
@@ -126,7 +126,7 @@ Spillorama portalen laster embedUrl i en iframe:
 ></iframe>
 ```
 
-CSP frame-ancestors pa demo-backend: `ALLOWED_EMBED_ORIGINS=https://bingo-system-jsso.onrender.com`
+CSP frame-ancestors pa demo-backend: `ALLOWED_EMBED_ORIGINS=https://spillorama-system.onrender.com`
 
 ---
 
@@ -380,10 +380,10 @@ X-API-Key: {CANDY_INTEGRATION_API_KEY}
 | `INTEGRATION_ENABLED` | Aktiver integrasjonsmodus | Nei | `true` |
 | `INTEGRATION_API_KEY` | Motta launch-kall fra Spillorama | Ja | `ik_live_xyz789` |
 | `WALLET_PROVIDER` | Ma vaere `external` | Nei | `external` |
-| `WALLET_API_BASE_URL` | Spillorama wallet-endepunkt | Nei | `https://bingo-system-jsso.onrender.com/api/ext-wallet` |
+| `WALLET_API_BASE_URL` | Spillorama wallet-endepunkt | Nei | `https://spillorama-system.onrender.com/api/ext-wallet` |
 | `WALLET_API_KEY` | Bearer-token for wallet-kall | Ja | `sk_live_abc123` |
-| `ALLOWED_EMBED_ORIGINS` | Spillorama origin for iframe | Nei | `https://bingo-system-jsso.onrender.com` |
-| `INTEGRATION_WEBHOOK_URL` | Spillorama webhook-endepunkt | Nei | `https://bingo-system-jsso.onrender.com/api/webhooks/candy` |
+| `ALLOWED_EMBED_ORIGINS` | Spillorama origin for iframe | Nei | `https://spillorama-system.onrender.com` |
+| `INTEGRATION_WEBHOOK_URL` | Spillorama webhook-endepunkt | Nei | `https://spillorama-system.onrender.com/api/webhooks/candy` |
 | `INTEGRATION_WEBHOOK_SECRET` | Delt HMAC-hemmelighet | Ja | `whsec_abc123` |
 
 ### 7.3 Delte secrets
