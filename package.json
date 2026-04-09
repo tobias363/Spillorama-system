@@ -1,5 +1,5 @@
 {
-  "name": "bingo",
+  "name": "spillorama-system",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,9 +9,6 @@
     "test:compliance": "npm --prefix backend run test:compliance",
     "check:unity": "bash scripts/unity-compile-check.sh",
     "check:all": "npm run check && npm run build && npm run test:compliance && npm run check:unity",
-    "deploy:backend": "bash scripts/deploy-backend.sh",
-    "build:candy:webgl": "bash scripts/unity-webgl-build.sh",
-    "release:candy": "bash scripts/release-candy.sh",
-    "release:all": "bash scripts/release-all.sh"
+    "deploy:backend": "bash scripts/deploy-backend.sh"
   }
 }

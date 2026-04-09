@@ -19,7 +19,7 @@ Alle merkbare endringer i dette prosjektet dokumenteres her.
 
 ### Changed
 
-- Candy-klient:
+- Spillorama-klient:
   - Play-knapp kan starte + drive realtime runde via `PlayRealtimeRound`.
   - Bedre guardrails for join/create-pending og auth-bootstrap.
   - Bedre editor-sikkerhet for manglende scripts før Play Mode.

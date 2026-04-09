@@ -33,7 +33,7 @@ export function makeShuffledBallBag(maxNumber = 60): number[] {
 }
 
 export function generateTraditional75Ticket(): Ticket {
-  // CandyMania uses 60 balls — 5 columns of 12 numbers each (1-12, 13-24, 25-36, 37-48, 49-60)
+  // Denne varianten bruker 60 baller fordelt på 5 kolonner med 12 tall hver.
   // Frontend expects a 3×5 grid (15 cells) — all cells must contain a number.
   const columns = [
     pickUniqueInRange(1, 12, BOARD_ROWS),

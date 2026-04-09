@@ -13,11 +13,11 @@ if [[ -f "$RELEASE_ENV_FILE" ]]; then
   echo "[release-all] Lastet env fra: $RELEASE_ENV_FILE"
 fi
 
-RELEASE_COMMIT="${CANDY_RELEASE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
-RELEASE_VERSION="${CANDY_RELEASE_VERSION:-$(date -u +"%Y%m%d-%H%M%S")-$RELEASE_COMMIT}"
+RELEASE_COMMIT="${SYSTEM_RELEASE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+RELEASE_VERSION="${SYSTEM_RELEASE_VERSION:-$(date -u +"%Y%m%d-%H%M%S")-$RELEASE_COMMIT}"
 RUN_BACKEND_CHECK="${RUN_BACKEND_CHECK:-true}"
 RUN_BACKEND_DEPLOY="${RUN_BACKEND_DEPLOY:-true}"
-RUN_CANDY_RELEASE="${RUN_CANDY_RELEASE:-true}"
+RUN_UNITY_BUILD="${RUN_UNITY_BUILD:-false}"
 RUN_ROOT_CHECK_ALL="${RUN_ROOT_CHECK_ALL:-false}"
 
 is_true() {
@@ -28,8 +28,8 @@ is_true() {
 
 echo "[release-all] Release: $RELEASE_VERSION ($RELEASE_COMMIT)"
 
-export CANDY_RELEASE_VERSION="$RELEASE_VERSION"
-export CANDY_RELEASE_COMMIT="$RELEASE_COMMIT"
+export SYSTEM_RELEASE_VERSION="$RELEASE_VERSION"
+export SYSTEM_RELEASE_COMMIT="$RELEASE_COMMIT"
 
 if is_true "$RUN_BACKEND_CHECK"; then
   echo "[release-all] Kjører backend check..."
@@ -46,9 +46,9 @@ if is_true "$RUN_BACKEND_DEPLOY"; then
   bash "$ROOT_DIR/scripts/deploy-backend.sh"
 fi
 
-if is_true "$RUN_CANDY_RELEASE"; then
-  echo "[release-all] Kjør Candy release..."
-  bash "$ROOT_DIR/scripts/release-candy.sh"
+if is_true "$RUN_UNITY_BUILD"; then
+  echo "[release-all] Kjør Unity WebGL build..."
+  bash "$ROOT_DIR/scripts/unity-webgl-build.sh"
 fi
 
 echo "[release-all] Ferdig."

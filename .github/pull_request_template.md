@@ -4,7 +4,7 @@
 ## Scope
 - [ ] Backend
 - [ ] Frontend
-- [ ] Candy/Unity
+- [ ] Spillorama/Unity
 - [ ] DevOps/CI
 
 ## Risk

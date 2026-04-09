@@ -1,4 +1,8 @@
-# Bingo System - Komplett Systemdokumentasjon
+# Bingo System - Arkivert Historisk Systemdokumentasjon
+
+> **Viktig:** Denne filen er historisk systemdokumentasjon og skal ikke brukes som kildesannhet for repo-grenser, deploy-root eller Candy-ansvar.
+
+> **Kildesannhet fra 9. april 2026:** Se [docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md](/Users/tobiashaugen/Projects/Spillorama-system/docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md). Det dokumentet overstyrer alle referanser i denne filen til `bingo_in_20_3_26_latest/`, `/api/integration/*`, demo-login, demo-admin og Candy-spesifikk backend.
 
 ## Innholdsfortegnelse
 
@@ -8,14 +12,16 @@
 4. [Frontend & Admin](#frontend--admin)
 5. [Spillorama (Unity)](#spillorama-unity)
 6. [SpilloramaTv (Unity)](#spilloramatv-unity)
-7. [Candy Game (Unity)](#candy-game-unity)
-8. [Candy-integrasjon (iframe)](#candy-integrasjon-iframe)
+7. [Bingo Game (Unity)](#bingo-game-unity)
+8. [Spill-integrasjon (iframe)](#spill-integrasjon-iframe)
 9. [Utvikling og bygging](#utvikling-og-bygging)
 10. [Deploy](#deploy)
 11. [Tredjeparts-tjenester](#tredjeparts-tjenester)
 12. [Miljøvariabler](#miljøvariabler)
 
 ---
+
+> **Historisk terminologi i resten av filen:** Referanser til `Bingo Game`, `game-backend`, `bingo_in_20_3_26_latest/` eller egen demo-launchflyt beskriver gammel arkitektur og må ikke brukes som grunnlag for nye endringer.
 
 ## Systemarkitektur
 
@@ -24,7 +30,7 @@
 │                        Spillere (nettleser / app)               │
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐│
-│  │  Spillorama  │  │ SpilloramaTv │  │   Candy (iframe)       ││
+│  │  Spillorama  │  │ SpilloramaTv │  │   Bingo Game (iframe)  ││
 │  │  WebGL       │  │ WebGL        │  │   WebGL                ││
 │  │  (spillerkl.)│  │ (hall-TV)    │  │   (selvstendig spill)  ││
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬─────────────┘│
@@ -52,7 +58,7 @@
 
 1. **Spillorama** (hovedspillet) kobler til backend via Socket.IO for sanntids bingospill
 2. **SpilloramaTv** kobler til backend for å vise spillstatus på hall-TV
-3. **Candy** kjører som selvstendig WebGL-app i iframe, kommuniserer via Socket.IO med egen launch-token-flyt
+3. **Bingo Game** kjører som selvstendig WebGL-app i iframe, kommuniserer via Socket.IO med egen launch-token-flyt
 4. **Frontend** (portalen) viser spillkatalog, wallet, og launcher for alle spill
 5. **Admin** gir operatører kontroll over haller, spill, compliance og romkontroll
 
@@ -61,9 +67,9 @@
 ## Mappestruktur
 
 ```
-Bingo-system/
+Spillorama-system/
 ├── SYSTEM.md                          # <-- Denne filen
-├── CANDY-INTEGRATION.md               # Detaljert Candy-dokumentasjon
+├── GAME-INTEGRATION.md                # Detaljert spill-integrasjonsdokumentasjon
 ├── env.conf                           # Legacy env (gammel backend, IKKE bruk)
 │
 ├── Spillorama/                        # Unity-prosjekt: Spillorama + SpilloramaTv
@@ -90,7 +96,7 @@ Bingo-system/
 │   └── Packages/
 │       └── manifest.json
 │
-├── bingo_in_20_3_26_latest/          # Backend + Frontend + Candy
+├── bingo_in_20_3_26_latest/          # Backend + Frontend + Game
 │   ├── backend/
 │   │   ├── src/
 │   │   │   ├── index.ts             # Hovedserver (Express + Socket.IO)
@@ -99,11 +105,11 @@ Bingo-system/
 │   │   │   ├── adapters/            # Wallet-adaptere (file/http/pg/extern)
 │   │   │   ├── integration/         # Tredjeparts-integrasjon
 │   │   │   ├── payments/            # SwedbankPayService
-│   │   │   ├── launch/              # CandyLaunchTokenStore
+│   │   │   ├── launch/              # LaunchTokenStore
 │   │   │   ├── admin/               # Settings catalog
 │   │   │   └── compliance/          # Compliance-tester
 │   │   ├── public/
-│   │   │   └── web/                 # Kompilert Candy Web SPA
+│   │   │   └── web/                 # Kompilert Game Web SPA
 │   │   │       ├── index.html
 │   │   │       └── assets/          # React-build (hashed filer)
 │   │   ├── data/
@@ -120,10 +126,10 @@ Bingo-system/
 │   │   ├── admin/
 │   │   │   ├── index.html           # Admin-panel
 │   │   │   └── app.js               # Admin-logikk
-│   │   ├── web/                     # Fallback Candy Web-assets
+│   │   ├── web/                     # Fallback Game Web-assets
 │   │   └── assets/                  # Bilder, ikoner
 │   │
-│   ├── Candy/                        # Unity-prosjekt: Candy Mania
+│   ├── Game/                         # Unity-prosjekt: Bingo Game
 │   │   ├── Assets/
 │   │   │   ├── Script/              # 33 C# game scripts
 │   │   │   ├── Scenes/              # Theme1, Theme2, Bonus
@@ -133,11 +139,11 @@ Bingo-system/
 │   │   │   └── ProjectVersion.txt   # Unity 6000.3.10f1
 │   │   └── Packages/
 │   │
-│   ├── candy-web/                    # TypeScript wrapper (kompilert)
+│   ├── game-web/                     # TypeScript wrapper (kompilert)
 │   │
 │   ├── scripts/
-│   │   ├── unity-webgl-build.sh     # Bygger Candy WebGL
-│   │   ├── release-candy.sh         # Bygger + publiserer Candy
+│   │   ├── unity-webgl-build.sh     # Bygger Game WebGL
+│   │   ├── release-game.sh          # Bygger + publiserer spill
 │   │   ├── deploy-backend.sh        # Trigger Render deploy
 │   │   ├── release-all.sh           # Full release-pipeline
 │   │   ├── release.env.example      # Mal for release-config
@@ -206,7 +212,7 @@ Wallet-provider velges via `WALLET_PROVIDER`:
 |----------|--------|---------------------|
 | Autentisering | `/api/auth/` | register, login, logout, me |
 | KYC | `/api/kyc/` | verify, me |
-| Spillkatalog | `/api/games/` | list, candy launch-token |
+| Spillkatalog | `/api/games/` | list, launch-token |
 | Haller | `/api/halls/` | list |
 | Wallet | `/api/wallet/me/` | balance, compliance, loss-limits |
 | Betaling | `/api/payments/swedbank/` | topup-intent, confirm |
@@ -257,14 +263,14 @@ Backend håndhever:
 
 **Funksjonalitet:**
 - Innlogging/registrering
-- Spillkatalog med tre spill: Candy, Roma, Bingo
+- Spillkatalog med tre spill: Bingo Game, Roma, Bingo
 - Wallet-håndtering med Swedbank Pay
 - KYC-verifisering
 - Compliance-kontroller (tapsgrenser, pauser, selvutelukking)
 - Profilhåndtering
 
 **Spillstart:**
-- **Candy/Roma** ("Instant Launch"): Henter launch-token → åpner Candy Web i ny side/iframe
+- **Bingo Game/Roma** ("Instant Launch"): Henter launch-token → åpner Game Web i ny side/iframe
 - **Bingo**: Direkte Socket.IO-tilkobling for live-spill i portalen
 
 ### Admin-panel
@@ -274,7 +280,7 @@ Backend håndhever:
 
 **Seksjoner:**
 - Spillinnstillinger (per spill)
-- Candy Mania (scheduler, auto-draw, RTP)
+- Spillinnstillinger (scheduler, auto-draw, RTP)
 - Spillkatalog
 - Haller og terminaler
 - Hall-spillregler
@@ -408,13 +414,13 @@ Templaten inkluderer JavaScript-funksjoner som Unity kaller:
 
 ---
 
-## Candy Game (Unity)
+## Bingo Game (Unity)
 
 ### Prosjektinfo
 
 | | |
 |-|-|
-| **Prosjektsti** | `bingo_in_20_3_26_latest/Candy/` |
+| **Prosjektsti** | `bingo_in_20_3_26_latest/Game/` |
 | **Unity-versjon** | 6000.3.10f1 (Unity 6) |
 | **Plattform** | WebGL |
 | **Backend** | bingosystem-3.onrender.com |
@@ -429,7 +435,7 @@ Templaten inkluderer JavaScript-funksjoner som Unity kaller:
 
 ### Spillmekanikk
 
-Candy er et bingo-basert spill med 4 kort (5x3 grid, 15 tall per kort):
+Bingo Game er et bingo-basert spill med 4 kort (5x3 grid, 15 tall per kort):
 
 1. **Kortgenerering** - NumberGenerator lager 4 kort med tilfeldige tall
 2. **Balltrekning** - BallManager animerer baller (75 mulige)
@@ -440,7 +446,7 @@ Candy er et bingo-basert spill med 4 kort (5x3 grid, 15 tall per kort):
 
 ### Sanntid vs. lokal modus
 
-Candy støtter to moduser:
+Spillet støtter to moduser:
 - **Realtime** (`useRealtimeBackend = true`): Socket.IO mot backend, multiplayer
 - **Lokal**: Enkelspiller uten server (for testing)
 
@@ -460,9 +466,9 @@ Candy støtter to moduser:
 | BonusControl.cs | 423 | Bonusrunde |
 | BingoAutoLogin.cs | 581 | Automatisk innlogging |
 
-### Socket.IO-protokoll (Candy)
+### Socket.IO-protokoll (Bingo Game)
 
-Candy implementerer sin egen Socket.IO-klient med `ClientWebSocket`:
+Bingo Game implementerer sin egen Socket.IO-klient med `ClientWebSocket`:
 
 ```
 Tilkobling: ws://backend/socket.io/?EIO=4&transport=websocket
@@ -486,38 +492,38 @@ NONE → WAITING → RUNNING → ENDED → CLEANUP → (loop)
 
 ### WebGL Build
 
-Candy har et dedikert build-script i `Assets/Editor/WebGLBuild.cs`:
+Spillet har et dedikert build-script i `Assets/Editor/WebGLBuild.cs`:
 
 ```bash
 # Bygg fra kommandolinje
 cd bingo_in_20_3_26_latest
 bash scripts/unity-webgl-build.sh
 
-# Eller fra Unity: Tools → Candy → Build → WebGL
+# Eller fra Unity: Tools → Game → Build → WebGL
 ```
 
 ---
 
-## Candy-integrasjon (iframe)
+## Spill-integrasjon (iframe)
 
-> Se også [CANDY-INTEGRATION.md](CANDY-INTEGRATION.md) for full teknisk dokumentasjon.
+> Se også [GAME-INTEGRATION.md](GAME-INTEGRATION.md) for full teknisk dokumentasjon.
 
 ### Oversikt
 
-Candy kjører som et **selvstendig produkt** som embeddes via iframe. Dette designet gjør det mulig å:
-- Leie ut Candy til andre bingosystemer
-- Oppdatere Candy uavhengig av hovedsystemet
+Bingo Game kjører som et **selvstendig produkt** som embeddes via iframe. Dette designet gjør det mulig å:
+- Leie ut spillet til andre bingosystemer
+- Oppdatere spillet uavhengig av hovedsystemet
 - Isolere wallet-transaksjoner via adapter-mønster
 
 ### Launch-flyt (eget system)
 
 ```
 1. Spiller klikker "Spill nå" i portalen
-2. Frontend kaller POST /api/games/candy/launch-token
+2. Frontend kaller POST /api/games/launch/launch-token
 3. Backend validerer spiller, lager launch-token (120s TTL)
-4. Frontend redirecter til Candy Web med ?launchToken=xxx
-5. Candy Web kaller POST /api/games/candy/launch-resolve
-6. Candy Web initialiserer med credentials → Socket.IO tilkobling
+4. Frontend redirecter til Game Web med ?launchToken=xxx
+5. Game Web kaller POST /api/games/launch/launch-resolve
+6. Game Web initialiserer med credentials → Socket.IO tilkobling
 ```
 
 ### Launch-flyt (tredjepartssystem)
@@ -526,8 +532,8 @@ Candy kjører som et **selvstendig produkt** som embeddes via iframe. Dette desi
 1. Tredjepart kaller POST /api/integration/launch med API-nøkkel
 2. Backend mapper ekstern spiller → intern spiller/wallet
 3. Backend returnerer embed-URL med launch-token
-4. Tredjepart viser iframe med Candy
-5. Candy spiller med wallet debit/credit mot tredjeparts API
+4. Tredjepart viser iframe med spillet
+5. Spillet kjører med wallet debit/credit mot tredjeparts API
 6. Backend sender spillresultater via webhook til tredjepart
 ```
 
@@ -558,7 +564,7 @@ Backend har innebygd:
 | **Node.js** | v20+ | Backend |
 | **PostgreSQL** | 15+ | Database |
 | **Unity Hub** | Nyeste | Unity-prosjekthåndtering |
-| **Unity 6000.3.10f1** | | Candy-prosjektet |
+| **Unity 6000.3.10f1** | | Bingo Game-prosjektet |
 | **Unity 6000.0.58f2** | | Spillorama-prosjektet |
 
 ### Lokal utvikling - Backend
@@ -580,11 +586,11 @@ npm install
 npm run dev    # http://localhost:4000
 ```
 
-### Lokal utvikling - Candy
+### Lokal utvikling - Bingo Game
 
 ```bash
 # 1. Åpne Unity Hub
-# 2. Add project → velg bingo_in_20_3_26_latest/Candy/
+# 2. Add project → velg bingo_in_20_3_26_latest/Game/
 # 3. Åpne med Unity 6000.3.10f1
 # 4. Åpne scene: Assets/Scenes/Theme1.unity
 # 5. Gjør endringer
@@ -593,7 +599,7 @@ npm run dev    # http://localhost:4000
 cd bingo_in_20_3_26_latest
 bash scripts/unity-webgl-build.sh
 
-# Eller i Unity: Tools → Candy → Build → WebGL
+# Eller i Unity: Tools → Game → Build → WebGL
 ```
 
 ### Lokal utvikling - Spillorama
@@ -667,7 +673,7 @@ RENDER_DEPLOY_HOOK_URL=https://api.render.com/deploy/srv-...
 RENDER_HEALTHCHECK_URL=https://din-backend.onrender.com/admin/
 ```
 
-### Candy Release
+### Game Release
 
 ```bash
 cd bingo_in_20_3_26_latest
@@ -676,13 +682,13 @@ cd bingo_in_20_3_26_latest
 bash scripts/unity-webgl-build.sh
 
 # 2. Publiser (lokal, rsync, eller S3)
-bash scripts/release-candy.sh
+bash scripts/release-game.sh
 ```
 
 Publiseringsmodus i `release.env`:
-- `CANDY_PUBLISH_MODE=local` - Kopierer til lokal mappe
-- `CANDY_PUBLISH_MODE=rsync` - Rsync til server
-- `CANDY_PUBLISH_MODE=s3` - Last opp til S3 + CloudFront
+- `GAME_PUBLISH_MODE=local` - Kopierer til lokal mappe
+- `GAME_PUBLISH_MODE=rsync` - Rsync til server
+- `GAME_PUBLISH_MODE=s3` - Last opp til S3 + CloudFront
 
 ### CI/CD (GitHub Actions)
 
@@ -755,7 +761,7 @@ AUTO_ROUND_START_ENABLED=true
 AUTO_ROUND_START_INTERVAL_MS=180000
 AUTO_DRAW_ENABLED=true
 AUTO_DRAW_INTERVAL_MS=1200
-CANDY_PAYOUT_PERCENT=100
+BINGO_PAYOUT_PERCENT=100
 
 # === Swedbank Pay ===
 SWEDBANK_PAY_API_BASE_URL=https://api.externalintegration.payex.com
@@ -774,9 +780,8 @@ ALLOWED_EMBED_ORIGINS=
 ### Release (scripts/release.env)
 
 ```bash
-CANDY_RELEASE_CHANNEL=staging|production
-CANDY_PUBLISH_MODE=none|local|rsync|s3
-CANDY_PROMOTE_LIVE=false
+SYSTEM_RELEASE_CHANNEL=staging|production
+RUN_UNITY_BUILD=false
 RENDER_DEPLOY_HOOK_URL=
 RENDER_HEALTHCHECK_URL=
 ```

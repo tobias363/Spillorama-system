@@ -353,25 +353,5 @@
     </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>
-    <script>
-      // Embed auto-launch: etter app.js har autentisert, start candy direkte
-      (function() {
-        if (!window.__EMBED_MODE) return;
-        var attempts = 0;
-        var timer = setInterval(function() {
-          attempts++;
-          var btn = document.getElementById('candyPlayBtn');
-          if (btn && !btn.disabled) {
-            clearInterval(timer);
-            console.log('[EMBED] Auto-launching candy game...');
-            btn.click();
-          }
-          if (attempts > 40) {
-            clearInterval(timer);
-            console.error('[EMBED] Gave up waiting for candy play button');
-          }
-        }, 500);
-      })();
-    </script>
   </body>
 </html>

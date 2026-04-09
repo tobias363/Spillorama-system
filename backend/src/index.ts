@@ -1,7 +1,6 @@
 import dotenv from "dotenv";
 import cors from "cors";
 import express from "express";
-import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { URL, fileURLToPath } from "node:url";
@@ -14,7 +13,6 @@ import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
 import { generateTraditional75Ticket } from "./game/ticket.js";
 import type { ClaimType, RoomSnapshot, RoomSummary, Ticket } from "./game/types.js";
-import { CandyLaunchTokenStore } from "./launch/CandyLaunchTokenStore.js";
 import {
   ADMIN_ACCESS_POLICY,
   assertAdminPermission,
@@ -31,14 +29,8 @@ import {
   type UserRole
 } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
-import { Pool as PgPool } from "pg";
-import { IntegrationLaunchHandler } from "./integration/IntegrationLaunchHandler.js";
-import { ReconciliationService } from "./integration/ReconciliationService.js";
-import { WebhookService } from "./integration/WebhookService.js";
-import { IntegrationBingoSystemAdapter } from "./integration/IntegrationBingoSystemAdapter.js";
-import type { ExternalWalletAdapter } from "./integration/ExternalWalletAdapter.js";
 import {
-  buildCandySettingsDefinition,
+  buildBingoSettingsDefinition,
   buildDefaultGameSettingsDefinition,
   type AdminSettingsCatalog,
   type GameSettingsDefinition
@@ -109,7 +101,7 @@ interface ExtraDrawPayload extends RoomActionPayload {
   packageId?: string;
 }
 
-interface CandyManiaSchedulerSettings {
+interface BingoSchedulerSettings {
   autoRoundStartEnabled: boolean;
   autoRoundStartIntervalMs: number;
   autoRoundMinPlayers: number;
@@ -120,12 +112,12 @@ interface CandyManiaSchedulerSettings {
   autoDrawIntervalMs: number;
 }
 
-interface PendingCandyManiaSettingsUpdate {
+interface PendingBingoSettingsUpdate {
   effectiveFromMs: number;
-  settings: CandyManiaSchedulerSettings;
+  settings: BingoSchedulerSettings;
 }
 
-interface PersistCandySettingsOptions {
+interface PersistBingoSettingsOptions {
   changedBy?: {
     userId: string;
     displayName: string;
@@ -135,26 +127,12 @@ interface PersistCandySettingsOptions {
   effectiveFromMs?: number;
 }
 
-interface CandyLaunchSettings {
-  launchUrl?: string;
-  apiBaseUrl?: string;
-}
-
-interface NormalizeGameSettingsOptions {
-  requireCandyLaunchUrl?: boolean;
-}
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 const frontendDir = path.resolve(__dirname, "../../frontend");
 const publicDir = path.resolve(__dirname, "../public");
 const adminFrontendFile = path.resolve(frontendDir, "admin/index.html");
-// CandyWeb: prefer backend/public/web (standalone deploy) over ../../frontend/web (monorepo)
-const candyWebDir = fs.existsSync(path.resolve(publicDir, "web/index.html"))
-  ? path.resolve(publicDir, "web")
-  : path.resolve(frontendDir, "web");
-const candyWebIndexFile = path.resolve(candyWebDir, "index.html");
 const projectDir = path.resolve(__dirname, "../..");
 
 const app = express();
@@ -173,9 +151,6 @@ const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
   : "*";
 app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json());
-// BIN-134: Vite builds candy-web with base="/candy/", so asset URLs are /candy/assets/*.
-// Mount candyWebDir at /candy so images, CSS, and JS resolve correctly in the iframe.
-app.use("/candy", express.static(candyWebDir));
 app.use(express.static(frontendDir));
 app.use(express.static(publicDir));
 
@@ -259,24 +234,24 @@ const minPlayersFloor = 1;
 const bingoMinPlayersToStart = minPlayersFloor;
 const requestedAutoRoundStartEnabled = parseBooleanEnv(process.env.AUTO_ROUND_START_ENABLED, true);
 const requestedAutoDrawEnabled = parseBooleanEnv(process.env.AUTO_DRAW_ENABLED, true);
-const candyFixedAutoDrawIntervalMs = 2000;
+const fixedAutoDrawIntervalMs = 2000;
 // BIN-47: Default to false in production — autoplay must be explicitly enabled
 const allowAutoplayInProduction = parseBooleanEnv(process.env.BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION, false);
 // BIN-47: Never force autostart — respect the autoplayAllowed guard
-const forceCandyAutoStart = false;
-const forceCandyAutoDraw = false;
+const forceAutoStart = false;
+const forceAutoDraw = false;
 if (isProductionRuntime && !allowAutoplayInProduction && requestedAutoRoundStartEnabled) {
   console.warn(
     "WARNING: AUTO_ROUND_START_ENABLED=true ignored in production. Set BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION=true to override."
   );
 }
-const enforceSingleCandyRoomPerHall = parseBooleanEnv(
-  process.env.CANDY_SINGLE_ACTIVE_ROOM_PER_HALL,
+const enforceSingleRoomPerHall = parseBooleanEnv(
+  process.env.BINGO_SINGLE_ACTIVE_ROOM_PER_HALL,
   true
 );
 const autoplayAllowed = !isProductionRuntime || allowAutoplayInProduction;
-const runtimeCandyManiaSettings: CandyManiaSchedulerSettings = {
-  autoRoundStartEnabled: forceCandyAutoStart
+const runtimeBingoSettings: BingoSchedulerSettings = {
+  autoRoundStartEnabled: forceAutoStart
     ? true
     : autoplayAllowed
       ? requestedAutoRoundStartEnabled
@@ -295,45 +270,24 @@ const runtimeCandyManiaSettings: CandyManiaSchedulerSettings = {
     Math.max(1, parsePositiveIntEnv(process.env.AUTO_ROUND_TICKETS_PER_PLAYER, 4))
   ),
   payoutPercent: Math.round(
-    Math.min(100, Math.max(0, parseNonNegativeNumberEnv(process.env.CANDY_PAYOUT_PERCENT, 80))) * 100
+    Math.min(100, Math.max(0, parseNonNegativeNumberEnv(process.env.BINGO_PAYOUT_PERCENT, 80))) * 100
   ) / 100,
-  autoDrawEnabled: forceCandyAutoDraw ? true : autoplayAllowed ? requestedAutoDrawEnabled : false,
-  autoDrawIntervalMs: candyFixedAutoDrawIntervalMs
+  autoDrawEnabled: forceAutoDraw ? true : autoplayAllowed ? requestedAutoDrawEnabled : false,
+  autoDrawIntervalMs: fixedAutoDrawIntervalMs
 };
-let candyManiaSettingsEffectiveFromMs = Date.now();
-let pendingCandyManiaSettingsUpdate: PendingCandyManiaSettingsUpdate | null = null;
+let bingoSettingsEffectiveFromMs = Date.now();
+let pendingBingoSettingsUpdate: PendingBingoSettingsUpdate | null = null;
 const schedulerTickMs = parsePositiveIntEnv(process.env.AUTO_ROUND_SCHEDULER_TICK_MS, 250);
 const dailyReportJobEnabled = parseBooleanEnv(process.env.DAILY_REPORT_JOB_ENABLED, true);
 const dailyReportJobIntervalMs = Math.max(
   60_000,
   parsePositiveIntEnv(process.env.DAILY_REPORT_JOB_INTERVAL_MS, 60 * 60 * 1000)
 );
-const candyLaunchTokenTtlMs = Math.max(
-  15_000,
-  parsePositiveIntEnv(process.env.CANDY_LAUNCH_TOKEN_TTL_SECONDS, 120) * 1000
-);
-
 if (isProductionRuntime && !autoplayAllowed && (requestedAutoRoundStartEnabled || requestedAutoDrawEnabled)) {
   console.warn(
     "[scheduler] Autoplay er deaktivert i production (sett BINGO_ALLOW_AUTOPLAY_IN_PRODUCTION=true for aa tillate AUTO_ROUND_START_ENABLED/AUTO_DRAW_ENABLED)."
   );
 }
-
-// Integration: WebhookService + decorated BingoSystemAdapter.
-const integrationEnabledEarly = parseBooleanEnv(process.env.INTEGRATION_ENABLED, false);
-const integrationPool = integrationEnabledEarly
-  ? new PgPool({ connectionString: platformConnectionString })
-  : null;
-
-const webhookService = integrationEnabledEarly && process.env.INTEGRATION_WEBHOOK_URL?.trim()
-  ? new WebhookService({
-      gameResultWebhookUrl: process.env.INTEGRATION_WEBHOOK_URL.trim(),
-      complianceWebhookUrl: process.env.INTEGRATION_COMPLIANCE_WEBHOOK_URL?.trim() || process.env.INTEGRATION_WEBHOOK_URL.trim(),
-      webhookSecret: process.env.INTEGRATION_WEBHOOK_SECRET?.trim() || "",
-      timeoutMs: 10_000,
-      maxRetries: 5
-    })
-  : null;
 
 // BIN-159: Use PostgreSQL adapter for game checkpointing when a DB connection is available
 const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
@@ -372,24 +326,7 @@ if (roomStateProvider === "redis") {
 if (useRedisLock) {
   console.log("[BIN-171] Scheduler lock: Redis (distributed)");
 }
-const integrationSchema = process.env.APP_PG_SCHEMA?.trim() || process.env.WALLET_PG_SCHEMA?.trim() || "public";
-
-const bingoSystemAdapter = webhookService && integrationPool
-  ? new IntegrationBingoSystemAdapter({
-      inner: localBingoAdapter,
-      webhookService,
-      currency: process.env.WALLET_CURRENCY?.trim() || "NOK",
-      resolveExternalPlayerId: async (internalPlayerId: string) => {
-        const { rows } = await integrationPool.query<{ external_player_id: string }>(
-          `SELECT external_player_id FROM "${integrationSchema}".external_player_mapping WHERE internal_player_id = $1 LIMIT 1`,
-          [internalPlayerId]
-        );
-        return rows[0]?.external_player_id ?? null;
-      }
-    })
-  : localBingoAdapter;
-
-const engine = new BingoEngine(bingoSystemAdapter, walletAdapter, {
+const engine = new BingoEngine(localBingoAdapter, walletAdapter, {
   minRoundIntervalMs: bingoMinRoundIntervalMs,
   minPlayersToStart: bingoMinPlayersToStart,
   dailyLossLimit: bingoDailyLossLimit,
@@ -427,73 +364,6 @@ const swedbankPayService = new SwedbankPayService(walletAdapter, {
   termsOfServiceUrl: process.env.SWEDBANK_PAY_TERMS_URL,
   requestTimeoutMs: parsePositiveIntEnv(process.env.SWEDBANK_PAY_REQUEST_TIMEOUT_MS, 10000)
 });
-const candyLaunchTokenStore = new CandyLaunchTokenStore({
-  ttlMs: candyLaunchTokenTtlMs
-});
-
-const integrationEnabled = integrationEnabledEarly;
-const integrationLaunchHandler = integrationEnabled
-  ? new IntegrationLaunchHandler({
-      pool: integrationPool!,
-      schema: integrationSchema,
-      walletAdapter,
-      launchTokenStore: candyLaunchTokenStore,
-      providerApiKey: process.env.INTEGRATION_API_KEY?.trim() || "",
-      defaultHallId: process.env.INTEGRATION_DEFAULT_HALL_ID?.trim() || "default-hall",
-      candyFrontendBaseUrl: process.env.INTEGRATION_CANDY_FRONTEND_URL?.trim() || "https://candy.example.com",
-      candyApiBaseUrl: process.env.INTEGRATION_CANDY_API_BASE_URL?.trim() || `http://localhost:${process.env.PORT || "4000"}`
-    })
-  : null;
-
-const reconciliationService = integrationEnabled && walletRuntime.provider === "external"
-  ? new ReconciliationService({
-      walletAdapter: walletAdapter as ExternalWalletAdapter,
-      alarmThreshold: 1,
-      onAlarm: (report) => {
-        console.error(`[RECONCILIATION ALARM] ${report.discrepancies.length} avvik funnet i perioden ${report.periodStart} — ${report.periodEnd}`);
-      }
-    })
-  : null;
-
-// Embed headers: allow iframe embedding from provider origins when integration is enabled.
-if (integrationEnabled) {
-  const allowedEmbedOrigins = (process.env.ALLOWED_EMBED_ORIGINS?.trim() || "")
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean);
-
-  if (allowedEmbedOrigins.length > 0) {
-    app.use((_req, res, next) => {
-      res.setHeader(
-        "Content-Security-Policy",
-        `frame-ancestors 'self' ${allowedEmbedOrigins.join(" ")}`
-      );
-      next();
-    });
-  }
-}
-
-// Helper: send compliance webhook to provider (non-blocking).
-function sendComplianceWebhook(
-  event: "compliance.lossLimitReached" | "compliance.sessionLimitReached" | "compliance.selfExclusion" | "compliance.timedPause" | "compliance.breakEnded",
-  internalPlayerId: string,
-  details: Record<string, unknown>
-): void {
-  if (!webhookService || !integrationPool) return;
-  integrationPool.query<{ external_player_id: string }>(
-    `SELECT external_player_id FROM "${integrationSchema}".external_player_mapping WHERE internal_player_id = $1 LIMIT 1`,
-    [internalPlayerId]
-  ).then(({ rows }) => {
-    const externalId = rows[0]?.external_player_id;
-    if (!externalId) return;
-    const payload = webhookService.buildCompliancePayload(event, externalId, details);
-    webhookService.sendComplianceEvent(payload).catch((err) => {
-      console.error(`[compliance-webhook] Failed to send ${event} for ${externalId}:`, err);
-    });
-  }).catch((err) => {
-    console.error(`[compliance-webhook] Failed to resolve external player for ${internalPlayerId}:`, err);
-  });
-}
 
 function ackSuccess<T>(callback: (response: AckResponse<T>) => void, data: T): void {
   callback({ ok: true, data });
@@ -652,80 +522,15 @@ function parseOptionalAbsoluteHttpUrl(
   return normalizeAbsoluteHttpUrl(value, fieldName, errorCode);
 }
 
-function readCandyLaunchSettings(
-  settings: Record<string, unknown>,
-  options: { requireLaunchUrl: boolean }
-): CandyLaunchSettings {
-  // Accept both absolute URLs and relative paths (e.g. "/web/").
-  const rawLaunchUrl = typeof settings.launchUrl === "string" ? settings.launchUrl.trim() : "";
-  const launchUrl = rawLaunchUrl.startsWith("/")
-    ? rawLaunchUrl
-    : parseOptionalAbsoluteHttpUrl(
-        settings.launchUrl,
-        "launchUrl",
-        "INVALID_CANDY_LAUNCH_URL"
-      );
-  const apiBaseUrl = parseOptionalAbsoluteHttpUrl(
-    settings.apiBaseUrl,
-    "apiBaseUrl",
-    "INVALID_CANDY_API_BASE_URL"
-  );
-
-  if (options.requireLaunchUrl && !launchUrl) {
-    throw new DomainError(
-      "INVALID_CANDY_LAUNCH_URL",
-      "Candy launchUrl må settes og være en gyldig http/https URL."
-    );
-  }
-
-  return {
-    launchUrl,
-    apiBaseUrl
-  };
-}
-
 function normalizeGameSettingsForUpdate(
   gameSlug: string,
-  settings: Record<string, unknown> | undefined,
-  options: NormalizeGameSettingsOptions = {}
+  settings: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
+  void gameSlug;
   if (!settings) {
     return undefined;
   }
-
-  const normalizedSlug = gameSlug.trim().toLowerCase();
-  if (normalizedSlug !== "candy") {
-    return settings;
-  }
-
-  const nextSettings: Record<string, unknown> = { ...settings };
-  const launchSettings = readCandyLaunchSettings(nextSettings, {
-    requireLaunchUrl: options.requireCandyLaunchUrl === true
-  });
-  if (launchSettings.launchUrl) {
-    nextSettings.launchUrl = launchSettings.launchUrl;
-  } else {
-    delete nextSettings.launchUrl;
-  }
-  if (launchSettings.apiBaseUrl) {
-    nextSettings.apiBaseUrl = launchSettings.apiBaseUrl;
-  } else {
-    delete nextSettings.apiBaseUrl;
-  }
-
-  const payoutRaw = nextSettings.payoutPercent;
-
-  if (payoutRaw === undefined || payoutRaw === null || payoutRaw === "") {
-    return nextSettings;
-  }
-
-  const payoutPercent = Number(payoutRaw);
-  if (!Number.isFinite(payoutPercent) || payoutPercent < 0 || payoutPercent > 100) {
-    throw new DomainError("INVALID_PAYOUT_PERCENT", "Candy utbetaling (%) må være mellom 0 og 100.");
-  }
-
-  nextSettings.payoutPercent = Math.round(payoutPercent * 100) / 100;
-  return nextSettings;
+  return settings;
 }
 
 function parseOptionalBooleanInput(value: unknown, fieldName: string): boolean | undefined {
@@ -761,7 +566,7 @@ function parseOptionalIsoTimestampMs(value: unknown, fieldName: string): number 
   return parsed;
 }
 
-function parseCandyManiaSettingsPatch(value: unknown): Partial<CandyManiaSchedulerSettings> {
+function parseBingoSettingsPatch(value: unknown): Partial<BingoSchedulerSettings> {
   if (value === undefined || value === null) {
     return {};
   }
@@ -770,7 +575,7 @@ function parseCandyManiaSettingsPatch(value: unknown): Partial<CandyManiaSchedul
   }
 
   const payload = value as Record<string, unknown>;
-  const patch: Partial<CandyManiaSchedulerSettings> = {};
+  const patch: Partial<BingoSchedulerSettings> = {};
 
   const autoRoundStartEnabled = parseOptionalBooleanInput(payload.autoRoundStartEnabled, "autoRoundStartEnabled");
   if (autoRoundStartEnabled !== undefined) {
@@ -817,24 +622,24 @@ function parseCandyManiaSettingsPatch(value: unknown): Partial<CandyManiaSchedul
   }
 
   const autoDrawIntervalMs = parseOptionalPositiveInteger(payload.autoDrawIntervalMs, "autoDrawIntervalMs");
-  if (autoDrawIntervalMs !== undefined && autoDrawIntervalMs !== candyFixedAutoDrawIntervalMs) {
+  if (autoDrawIntervalMs !== undefined && autoDrawIntervalMs !== fixedAutoDrawIntervalMs) {
     throw new DomainError(
       "INVALID_INPUT",
-      `autoDrawIntervalMs er låst til ${candyFixedAutoDrawIntervalMs} ms.`
+      `autoDrawIntervalMs er låst til ${fixedAutoDrawIntervalMs} ms.`
     );
   }
   if (autoDrawIntervalMs !== undefined) {
-    patch.autoDrawIntervalMs = candyFixedAutoDrawIntervalMs;
+    patch.autoDrawIntervalMs = fixedAutoDrawIntervalMs;
   }
 
   return patch;
 }
 
-function normalizeCandyManiaSchedulerSettings(
-  current: CandyManiaSchedulerSettings,
-  patch: Partial<CandyManiaSchedulerSettings>
-): CandyManiaSchedulerSettings {
-  const next: CandyManiaSchedulerSettings = {
+function normalizeBingoSchedulerSettings(
+  current: BingoSchedulerSettings,
+  patch: Partial<BingoSchedulerSettings>
+): BingoSchedulerSettings {
+  const next: BingoSchedulerSettings = {
     autoRoundStartEnabled:
       patch.autoRoundStartEnabled !== undefined
         ? patch.autoRoundStartEnabled
@@ -861,21 +666,21 @@ function normalizeCandyManiaSchedulerSettings(
     bingoMinRoundIntervalMs,
     Math.floor(next.autoRoundStartIntervalMs)
   );
-  if (forceCandyAutoStart) {
+  if (forceAutoStart) {
     next.autoRoundStartEnabled = true;
   }
-  if (forceCandyAutoDraw) {
+  if (forceAutoDraw) {
     next.autoDrawEnabled = true;
   }
   next.autoRoundMinPlayers = Math.max(bingoMinPlayersToStart, Math.floor(next.autoRoundMinPlayers));
   next.autoRoundTicketsPerPlayer = Math.min(5, Math.max(1, Math.floor(next.autoRoundTicketsPerPlayer)));
   next.autoRoundEntryFee = Math.max(0, Math.round(next.autoRoundEntryFee * 100) / 100);
   next.payoutPercent = Math.min(100, Math.max(0, Math.round(next.payoutPercent * 100) / 100));
-  next.autoDrawIntervalMs = candyFixedAutoDrawIntervalMs;
+  next.autoDrawIntervalMs = fixedAutoDrawIntervalMs;
 
   if (
     !autoplayAllowed &&
-    ((next.autoRoundStartEnabled && !forceCandyAutoStart) || (next.autoDrawEnabled && !forceCandyAutoDraw))
+    ((next.autoRoundStartEnabled && !forceAutoStart) || (next.autoDrawEnabled && !forceAutoDraw))
   ) {
     throw new DomainError(
       "INVALID_INPUT",
@@ -886,7 +691,7 @@ function normalizeCandyManiaSchedulerSettings(
   return next;
 }
 
-function candyManiaSettingsCoreToRecord(settings: CandyManiaSchedulerSettings): Record<string, unknown> {
+function bingoSettingsCoreToRecord(settings: BingoSchedulerSettings): Record<string, unknown> {
   return {
     autoRoundStartEnabled: settings.autoRoundStartEnabled,
     autoRoundStartIntervalMs: settings.autoRoundStartIntervalMs,
@@ -899,29 +704,29 @@ function candyManiaSettingsCoreToRecord(settings: CandyManiaSchedulerSettings): 
   };
 }
 
-function candyManiaSettingsToRecord(): Record<string, unknown> {
+function bingoSettingsToRecord(): Record<string, unknown> {
   return {
-    ...candyManiaSettingsCoreToRecord(runtimeCandyManiaSettings),
-    schedulerCurrentEffectiveFrom: new Date(candyManiaSettingsEffectiveFromMs).toISOString(),
-    schedulerPending: pendingCandyManiaSettingsUpdate
+    ...bingoSettingsCoreToRecord(runtimeBingoSettings),
+    schedulerCurrentEffectiveFrom: new Date(bingoSettingsEffectiveFromMs).toISOString(),
+    schedulerPending: pendingBingoSettingsUpdate
       ? {
-          effectiveFrom: new Date(pendingCandyManiaSettingsUpdate.effectiveFromMs).toISOString(),
-          settings: candyManiaSettingsCoreToRecord(pendingCandyManiaSettingsUpdate.settings)
+          effectiveFrom: new Date(pendingBingoSettingsUpdate.effectiveFromMs).toISOString(),
+          settings: bingoSettingsCoreToRecord(pendingBingoSettingsUpdate.settings)
         }
       : null
   };
 }
 
-function readCandyManiaSettingsFromRecord(settings: Record<string, unknown> | undefined): Partial<CandyManiaSchedulerSettings> {
+function readBingoSettingsFromRecord(settings: Record<string, unknown> | undefined): Partial<BingoSchedulerSettings> {
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
     return {};
   }
-  return parseCandyManiaSettingsPatch(settings);
+  return parseBingoSettingsPatch(settings);
 }
 
-function readPendingCandyManiaSettingsFromRecord(
+function readPendingBingoSettingsFromRecord(
   settings: Record<string, unknown> | undefined
-): PendingCandyManiaSettingsUpdate | null {
+): PendingBingoSettingsUpdate | null {
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
     return null;
   }
@@ -930,35 +735,35 @@ function readPendingCandyManiaSettingsFromRecord(
     return null;
   }
   if (typeof pendingRaw !== "object" || Array.isArray(pendingRaw)) {
-    throw new DomainError("INVALID_INPUT", "Ugyldig schedulerPending i Candy settings.");
+    throw new DomainError("INVALID_INPUT", "Ugyldig schedulerPending i bingo settings.");
   }
   const pending = pendingRaw as Record<string, unknown>;
   const effectiveFromMs = parseOptionalIsoTimestampMs(pending.effectiveFrom, "schedulerPending.effectiveFrom");
   if (effectiveFromMs === undefined) {
     return null;
   }
-  const patch = parseCandyManiaSettingsPatch(pending.settings);
-  const normalizedSettings = normalizeCandyManiaSchedulerSettings(runtimeCandyManiaSettings, patch);
+  const patch = parseBingoSettingsPatch(pending.settings);
+  const normalizedSettings = normalizeBingoSchedulerSettings(runtimeBingoSettings, patch);
   return {
     effectiveFromMs,
     settings: normalizedSettings
   };
 }
 
-function hasAnyRunningCandyManiaRound(summaries?: ReturnType<typeof engine.listRoomSummaries>): boolean {
+function hasAnyRunningBingoRound(summaries?: ReturnType<typeof engine.listRoomSummaries>): boolean {
   const roomSummaries = summaries ?? engine.listRoomSummaries();
   return roomSummaries.some((summary) => summary.gameStatus === "RUNNING");
 }
 
-function getCandyManiaAdminSettingsResponse(): Record<string, unknown> {
-  const lockActive = hasAnyRunningCandyManiaRound();
+function getBingoAdminSettingsResponse(): Record<string, unknown> {
+  const lockActive = hasAnyRunningBingoRound();
   return {
-    ...runtimeCandyManiaSettings,
-    effectiveFrom: new Date(candyManiaSettingsEffectiveFromMs).toISOString(),
-    pendingUpdate: pendingCandyManiaSettingsUpdate
+    ...runtimeBingoSettings,
+    effectiveFrom: new Date(bingoSettingsEffectiveFromMs).toISOString(),
+    pendingUpdate: pendingBingoSettingsUpdate
       ? {
-          effectiveFrom: new Date(pendingCandyManiaSettingsUpdate.effectiveFromMs).toISOString(),
-          settings: { ...pendingCandyManiaSettingsUpdate.settings }
+          effectiveFrom: new Date(pendingBingoSettingsUpdate.effectiveFromMs).toISOString(),
+          settings: { ...pendingBingoSettingsUpdate.settings }
         }
       : null,
     schedulerTickMs,
@@ -966,15 +771,15 @@ function getCandyManiaAdminSettingsResponse(): Record<string, unknown> {
       runtime: isProductionRuntime ? "production" : "non-production",
       autoplayAllowed,
       allowAutoplayInProduction,
-      forceCandyAutoStart,
-      forceCandyAutoDraw,
+      forceAutoStart,
+      forceAutoDraw,
       minRoundIntervalMs: bingoMinRoundIntervalMs,
       minPlayersToStart: bingoMinPlayersToStart,
       maxDrawsPerRound: bingoMaxDrawsPerRound,
       maxTicketsPerPlayer: 5,
       minPayoutPercent: 0,
       maxPayoutPercent: 100,
-      fixedAutoDrawIntervalMs: candyFixedAutoDrawIntervalMs,
+      fixedAutoDrawIntervalMs: fixedAutoDrawIntervalMs,
       runningRoundLockActive: lockActive
     },
     locks: {
@@ -1013,15 +818,15 @@ function extractAdminGameSettingsPayload(
 }
 
 function buildAdminSettingsDefinitionForGame(game: GameDefinition): GameSettingsDefinition {
-  if (game.slug === "candy") {
-    return buildCandySettingsDefinition({
+  if (game.slug === "bingo") {
+    return buildBingoSettingsDefinition({
       minRoundIntervalMs: bingoMinRoundIntervalMs,
       minPlayersToStart: bingoMinPlayersToStart,
       maxTicketsPerPlayer: 5,
-      fixedAutoDrawIntervalMs: candyFixedAutoDrawIntervalMs,
-      forceAutoStart: forceCandyAutoStart,
-      forceAutoDraw: forceCandyAutoDraw,
-      runningRoundLockActive: hasAnyRunningCandyManiaRound()
+      fixedAutoDrawIntervalMs: fixedAutoDrawIntervalMs,
+      forceAutoStart,
+      forceAutoDraw,
+      runningRoundLockActive: hasAnyRunningBingoRound()
     });
   }
   return buildDefaultGameSettingsDefinition(game);
@@ -1035,124 +840,24 @@ function buildAdminSettingsCatalogResponse(games: GameDefinition[]): AdminSettin
 }
 
 function buildAdminGameSettingsResponse(game: GameDefinition): Record<string, unknown> {
-  if (game.slug !== "candy") {
-    return {
-      slug: game.slug,
-      title: game.title,
-      description: game.description,
-      updatedAt: game.updatedAt,
-      settings: { ...(game.settings ?? {}) },
-      locks: {
-        runningRoundLockActive: false
-      }
-    };
-  }
-
-  const candySettings = getCandyManiaAdminSettingsResponse();
-  const {
-    effectiveFrom,
-    pendingUpdate,
-    constraints,
-    locks,
-    schedulerTickMs,
-    ...typedSettings
-  } = candySettings;
-
   return {
     slug: game.slug,
     title: game.title,
     description: game.description,
     updatedAt: game.updatedAt,
-    settings: typedSettings,
-    effectiveFrom,
-    pendingUpdate,
-    schedulerTickMs,
-    constraints,
-    locks
+    settings: { ...(game.settings ?? {}) },
+    locks: {
+      runningRoundLockActive: false
+    }
   };
 }
 
-async function persistCandyManiaSettingsToCatalog(options?: PersistCandySettingsOptions): Promise<void> {
-  const candyGame = await platformService.getGame("candy");
-  const nextSettings = normalizeGameSettingsForUpdate("candy", {
-    ...(candyGame.settings ?? {}),
-    ...candyManiaSettingsToRecord()
-  });
-  await platformService.updateGame("candy", {
-    settings: nextSettings
-  }, {
-    changedBy: options?.changedBy,
-    source: options?.source ?? "CANDY_SETTINGS_SYNC",
-    effectiveFrom:
-      options?.effectiveFromMs !== undefined
-        ? new Date(options.effectiveFromMs).toISOString()
-        : new Date(candyManiaSettingsEffectiveFromMs).toISOString()
-  });
+async function persistBingoSettingsToCatalog(options?: PersistBingoSettingsOptions): Promise<void> {
+  void options;
 }
 
-async function hydrateCandyManiaSettingsFromCatalog(): Promise<void> {
-  try {
-    const candyGame = await platformService.getGame("candy");
-    const patch = readCandyManiaSettingsFromRecord(candyGame.settings);
-    const normalized = normalizeCandyManiaSchedulerSettings(runtimeCandyManiaSettings, patch);
-    Object.assign(runtimeCandyManiaSettings, normalized);
-    const currentEffectiveFromMs = parseOptionalIsoTimestampMs(
-      (candyGame.settings as Record<string, unknown> | undefined)?.schedulerCurrentEffectiveFrom,
-      "schedulerCurrentEffectiveFrom"
-    );
-    if (currentEffectiveFromMs !== undefined) {
-      candyManiaSettingsEffectiveFromMs = currentEffectiveFromMs;
-    }
-    pendingCandyManiaSettingsUpdate = readPendingCandyManiaSettingsFromRecord(candyGame.settings);
-  } catch (error) {
-    console.warn("[candy-mania] Klarte ikke laste scheduler settings fra game-catalog. Bruker env/default.", error);
-  }
-}
-
-function readForwardedHeaderValue(value: string | string[] | undefined): string {
-  if (Array.isArray(value)) {
-    return value.length > 0 ? value[0] : "";
-  }
-  return typeof value === "string" ? value.split(",")[0].trim() : "";
-}
-
-function deriveRequestApiBaseUrl(req: express.Request): string {
-  const forwardedProto = readForwardedHeaderValue(req.headers["x-forwarded-proto"]);
-  const forwardedHost = readForwardedHeaderValue(req.headers["x-forwarded-host"]);
-  const protocolCandidate = (forwardedProto || req.protocol || "https").trim().toLowerCase();
-  const protocol = protocolCandidate === "http" || protocolCandidate === "https" ? protocolCandidate : "https";
-  const host = (forwardedHost || req.get("host") || "").trim();
-
-  if (!host) {
-    throw new DomainError("INVALID_CONFIG", "Kunne ikke utlede apiBaseUrl fra request.");
-  }
-
-  return normalizeAbsoluteHttpUrl(`${protocol}://${host}`, "apiBaseUrl", "INVALID_CANDY_API_BASE_URL");
-}
-
-async function resolveCandyLaunchHallId(inputHallId: unknown): Promise<string> {
-  if (typeof inputHallId === "string" && inputHallId.trim()) {
-    const hall = await platformService.requireActiveHall(inputHallId);
-    return hall.id;
-  }
-
-  const halls = await platformService.listHalls({ includeInactive: false });
-  if (halls.length === 0) {
-    throw new DomainError("HALL_NOT_FOUND", "Fant ingen aktiv hall for Candy-launch.");
-  }
-
-  return halls[0].id;
-}
-
-async function getCandyLaunchSettingsForRuntime(requireLaunchUrl = true): Promise<CandyLaunchSettings> {
-  const candyGame = await platformService.getGame("candy");
-  const settings = normalizeGameSettingsForUpdate("candy", candyGame.settings ?? {}, {
-    requireCandyLaunchUrl: requireLaunchUrl
-  });
-  if (!settings) {
-    throw new DomainError("INVALID_CANDY_LAUNCH_URL", "Candy settings mangler.");
-  }
-  return readCandyLaunchSettings(settings, { requireLaunchUrl });
+async function hydrateBingoSettingsFromCatalog(): Promise<void> {
+  return Promise.resolve();
 }
 
 function getAccessTokenFromRequest(req: express.Request): string {
@@ -1261,13 +966,13 @@ async function requireAuthenticatedPlayerAction(
   engine.assertWalletAllowedForGameplay(user.walletId);
   let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
 
-  // BIN-134: SPA sends "CANDY1" as canonical room alias.
-  if (roomCode === "CANDY1" && enforceSingleCandyRoomPerHall) {
+  // BIN-134: SPA sends "BINGO1" as canonical room alias.
+  if (roomCode === "BINGO1" && enforceSingleRoomPerHall) {
     const hallId = (payload as any)?.hallId || "default-hall";
-    const canonicalRoom = getCanonicalCandyRoomForHall(hallId);
+    const canonicalRoom = getPrimaryRoomForHall(hallId);
     if (canonicalRoom) {
       roomCode = canonicalRoom.code;
-      console.log("[BIN-134] requireAuthenticatedPlayerAction CANDY1 → canonical room", roomCode);
+      console.log("[BIN-134] requireAuthenticatedPlayerAction BINGO1 → canonical room", roomCode);
     }
   }
 
@@ -1408,9 +1113,9 @@ function disarmPlayer(roomCode: string, playerId: string): void {
 function disarmAllPlayers(roomCode: string): void {
   armedPlayerIdsByRoom.get(roomCode)?.clear();
 }
-// ── Room priority (used by getCanonicalCandyRoomForHall) ──────────────
+// ── Room priority (used by getPrimaryRoomForHall) ──────────────
 
-function compareCandyRoomPriority(a: RoomSummary, b: RoomSummary): number {
+function compareRoomPriority(a: RoomSummary, b: RoomSummary): number {
   const runA = a.gameStatus === "RUNNING" ? 1 : 0;
   const runB = b.gameStatus === "RUNNING" ? 1 : 0;
   if (runA !== runB) return runB - runA;
@@ -1423,12 +1128,12 @@ function compareCandyRoomPriority(a: RoomSummary, b: RoomSummary): number {
   return a.code.localeCompare(b.code);
 }
 
-function getCanonicalCandyRoomForHall(hallId: string, summaries = engine.listRoomSummaries()): RoomSummary | null {
+function getPrimaryRoomForHall(hallId: string, summaries = engine.listRoomSummaries()): RoomSummary | null {
   const hallSummaries = summaries.filter((summary) => summary.hallId === hallId);
   if (hallSummaries.length === 0) {
     return null;
   }
-  hallSummaries.sort(compareCandyRoomPriority);
+  hallSummaries.sort(compareRoomPriority);
   return hallSummaries[0];
 }
 
@@ -1443,7 +1148,7 @@ function findPlayerInRoomByWallet(snapshot: RoomSnapshot, walletId: string): Roo
 function getRoomConfiguredEntryFee(roomCode: string): number {
   const configured = roomConfiguredEntryFeeByRoom.get(roomCode);
   if (configured === undefined || !Number.isFinite(configured)) {
-    return runtimeCandyManiaSettings.autoRoundEntryFee;
+    return runtimeBingoSettings.autoRoundEntryFee;
   }
   return configured;
 }
@@ -1455,29 +1160,29 @@ function setRoomConfiguredEntryFee(roomCode: string, entryFee: number): number {
 }
 
 function buildRoomSchedulerState(snapshot: RoomSnapshot, nowMs: number): Record<string, unknown> {
-  const nextStartAtMs = runtimeCandyManiaSettings.autoRoundStartEnabled
+  const nextStartAtMs = runtimeBingoSettings.autoRoundStartEnabled
     ? drawScheduler.normalizeNextAutoStartAt(snapshot.code, nowMs)
     : null;
   const millisUntilNextStart = nextStartAtMs === null ? null : Math.max(0, nextStartAtMs - nowMs);
   const canStartNow =
-    runtimeCandyManiaSettings.autoRoundStartEnabled &&
+    runtimeBingoSettings.autoRoundStartEnabled &&
     snapshot.currentGame?.status !== "RUNNING" &&
-    snapshot.players.length >= runtimeCandyManiaSettings.autoRoundMinPlayers &&
+    snapshot.players.length >= runtimeBingoSettings.autoRoundMinPlayers &&
     millisUntilNextStart !== null &&
     millisUntilNextStart <= Math.max(1000, schedulerTickMs * 2);
 
   const currentDrawCount = snapshot.currentGame?.drawnNumbers?.length ?? 0;
 
   return {
-    enabled: runtimeCandyManiaSettings.autoRoundStartEnabled,
+    enabled: runtimeBingoSettings.autoRoundStartEnabled,
     liveRoundsIndependentOfBet: true,
-    intervalMs: runtimeCandyManiaSettings.autoRoundStartIntervalMs,
-    minPlayers: runtimeCandyManiaSettings.autoRoundMinPlayers,
+    intervalMs: runtimeBingoSettings.autoRoundStartIntervalMs,
+    minPlayers: runtimeBingoSettings.autoRoundMinPlayers,
     playerCount: snapshot.players.length,
     armedPlayerCount: getArmedPlayerIds(snapshot.code).length,
     armedPlayerIds: getArmedPlayerIds(snapshot.code),
     entryFee: getRoomConfiguredEntryFee(snapshot.code),
-    payoutPercent: runtimeCandyManiaSettings.payoutPercent,
+    payoutPercent: runtimeBingoSettings.payoutPercent,
     drawCapacity: bingoMaxDrawsPerRound,
     currentDrawCount,
     remainingDrawCapacity: Math.max(0, bingoMaxDrawsPerRound - currentDrawCount),
@@ -1497,7 +1202,7 @@ function buildRoomUpdatePayload(
   // numbers — just without marking.
   const preRoundTickets: Record<string, Ticket[]> = {};
   const gameTickets = snapshot.currentGame?.tickets ?? {};
-  const ticketsPerPlayer = runtimeCandyManiaSettings.autoRoundTicketsPerPlayer;
+  const ticketsPerPlayer = runtimeBingoSettings.autoRoundTicketsPerPlayer;
   for (const player of snapshot.players) {
     if (gameTickets[player.id] && gameTickets[player.id].length > 0) continue;
     preRoundTickets[player.id] = getOrCreateDisplayTickets(snapshot.code, player.id, ticketsPerPlayer);
@@ -1518,8 +1223,8 @@ function cleanupRoomConfiguredEntryFees(activeRoomCodes: Set<string>): void {
   }
 }
 
-/** Convert CandyManiaSchedulerSettings → SchedulerSettings for DrawScheduler. */
-function toSchedulerSettings(s: CandyManiaSchedulerSettings): SchedulerSettings {
+/** Convert BingoSchedulerSettings → SchedulerSettings for DrawScheduler. */
+function toDrawSchedulerSettings(s: BingoSchedulerSettings): SchedulerSettings {
   return {
     autoRoundStartEnabled: s.autoRoundStartEnabled,
     autoRoundStartIntervalMs: s.autoRoundStartIntervalMs,
@@ -1529,41 +1234,41 @@ function toSchedulerSettings(s: CandyManiaSchedulerSettings): SchedulerSettings 
   };
 }
 
-async function applyPendingCandyManiaSettingsIfDue(
+async function applyPendingBingoSettingsIfDue(
   nowMs: number,
   summaries: ReturnType<typeof engine.listRoomSummaries>
 ): Promise<boolean> {
-  if (!pendingCandyManiaSettingsUpdate) {
+  if (!pendingBingoSettingsUpdate) {
     return false;
   }
-  if (pendingCandyManiaSettingsUpdate.effectiveFromMs > nowMs) {
+  if (pendingBingoSettingsUpdate.effectiveFromMs > nowMs) {
     return false;
   }
-  if (hasAnyRunningCandyManiaRound(summaries)) {
+  if (hasAnyRunningBingoRound(summaries)) {
     return false;
   }
 
-  const previous: CandyManiaSchedulerSettings = { ...runtimeCandyManiaSettings };
-  const previousEffectiveFromMs = candyManiaSettingsEffectiveFromMs;
+  const previous: BingoSchedulerSettings = { ...runtimeBingoSettings };
+  const previousEffectiveFromMs = bingoSettingsEffectiveFromMs;
   const pendingToApply = {
-    effectiveFromMs: pendingCandyManiaSettingsUpdate.effectiveFromMs,
-    settings: { ...pendingCandyManiaSettingsUpdate.settings }
+    effectiveFromMs: pendingBingoSettingsUpdate.effectiveFromMs,
+    settings: { ...pendingBingoSettingsUpdate.settings }
   };
-  pendingCandyManiaSettingsUpdate = null;
-  Object.assign(runtimeCandyManiaSettings, pendingToApply.settings);
-  candyManiaSettingsEffectiveFromMs = pendingToApply.effectiveFromMs;
-  drawScheduler.syncAfterSettingsChange(toSchedulerSettings(previous));
+  pendingBingoSettingsUpdate = null;
+  Object.assign(runtimeBingoSettings, pendingToApply.settings);
+  bingoSettingsEffectiveFromMs = pendingToApply.effectiveFromMs;
+  drawScheduler.syncAfterSettingsChange(toDrawSchedulerSettings(previous));
 
   try {
-    await persistCandyManiaSettingsToCatalog({
-      source: "CANDY_SETTINGS_AUTO_APPLY",
+    await persistBingoSettingsToCatalog({
+      source: "BINGO_SETTINGS_AUTO_APPLY",
       effectiveFromMs: pendingToApply.effectiveFromMs
     });
   } catch (error) {
-    Object.assign(runtimeCandyManiaSettings, previous);
-    candyManiaSettingsEffectiveFromMs = previousEffectiveFromMs;
-    pendingCandyManiaSettingsUpdate = pendingToApply;
-    drawScheduler.syncAfterSettingsChange(toSchedulerSettings(pendingToApply.settings));
+    Object.assign(runtimeBingoSettings, previous);
+    bingoSettingsEffectiveFromMs = previousEffectiveFromMs;
+    pendingBingoSettingsUpdate = pendingToApply;
+    drawScheduler.syncAfterSettingsChange(toDrawSchedulerSettings(pendingToApply.settings));
     throw error;
   }
 
@@ -1582,8 +1287,8 @@ drawScheduler = new DrawScheduler({
   lockTimeoutMs: 5_000,
   watchdogIntervalMs: 5_000,
   watchdogStuckMultiplier: 3,
-  fixedDrawIntervalMs: candyFixedAutoDrawIntervalMs,
-  enforceSingleRoomPerHall: enforceSingleCandyRoomPerHall,
+  fixedDrawIntervalMs: fixedAutoDrawIntervalMs,
+  enforceSingleRoomPerHall: enforceSingleRoomPerHall,
   onRoomRescheduled: async (roomCode) => {
     // Ensure clients receive an updated scheduler state (nextStartAt / millisUntilNextStart)
     // when we reschedule without drawing or starting a new round.
@@ -1615,16 +1320,16 @@ drawScheduler = new DrawScheduler({
     }
   },
 
-  getSettings: () => toSchedulerSettings(runtimeCandyManiaSettings),
+  getSettings: () => toDrawSchedulerSettings(runtimeBingoSettings),
   listRoomSummaries: () => engine.listRoomSummaries(),
   getRoomSnapshot: (roomCode) => engine.getRoomSnapshot(roomCode),
   getAllRoomCodes: () => engine.getAllRoomCodes(),
 
   applyPendingSettings: async (nowMs, summaries) => {
     // Adapter: DrawScheduler passes its own RoomSummary[], but
-    // applyPendingCandyManiaSettingsIfDue expects the engine's type.
+    // applyPendingBingoSettingsIfDue expects the engine's type.
     // They are structurally compatible.
-    return applyPendingCandyManiaSettingsIfDue(nowMs, summaries as ReturnType<typeof engine.listRoomSummaries>);
+    return applyPendingBingoSettingsIfDue(nowMs, summaries as ReturnType<typeof engine.listRoomSummaries>);
   },
 
   onAutoStart: async (roomCode, hostPlayerId) => {
@@ -1634,8 +1339,8 @@ drawScheduler = new DrawScheduler({
         roomCode,
         actorPlayerId: hostPlayerId,
         entryFee: getRoomConfiguredEntryFee(roomCode),
-        ticketsPerPlayer: runtimeCandyManiaSettings.autoRoundTicketsPerPlayer,
-        payoutPercent: runtimeCandyManiaSettings.payoutPercent,
+        ticketsPerPlayer: runtimeBingoSettings.autoRoundTicketsPerPlayer,
+        payoutPercent: runtimeBingoSettings.payoutPercent,
         armedPlayerIds: getArmedPlayerIds(roomCode),
       });
       disarmAllPlayers(roomCode);
@@ -1656,7 +1361,7 @@ drawScheduler = new DrawScheduler({
     // Publish the RUNNING snapshot so clients transition UI before the first draw.
     await emitRoomUpdate(roomCode);
 
-    if (!runtimeCandyManiaSettings.autoDrawEnabled) {
+    if (!runtimeBingoSettings.autoDrawEnabled) {
       return { firstDrawAtMs };
     }
 
@@ -1927,403 +1632,6 @@ app.get("/api/games", async (req, res) => {
   }
 });
 
-app.post("/api/games/candy/launch-token", async (req, res) => {
-  try {
-    const accessToken = getAccessTokenFromRequest(req);
-    const user = await platformService.getUserFromAccessToken(accessToken);
-    platformService.assertUserEligibleForGameplay(user);
-    engine.assertWalletAllowedForGameplay(user.walletId);
-
-    const launchSettings = await getCandyLaunchSettingsForRuntime(true);
-    const hallId = await resolveCandyLaunchHallId(req.body?.hallId);
-    const apiBaseUrl = launchSettings.apiBaseUrl || deriveRequestApiBaseUrl(req);
-    const issued = candyLaunchTokenStore.issue({
-      accessToken,
-      hallId,
-      playerName: user.displayName,
-      walletId: user.walletId,
-      apiBaseUrl
-    });
-
-    apiSuccess(res, {
-      launchToken: issued.launchToken,
-      issuedAt: issued.issuedAt,
-      expiresAt: issued.expiresAt,
-      launchUrl: launchSettings.launchUrl
-    });
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-app.post("/api/games/candy/launch-resolve", async (req, res) => {
-  try {
-    const launchToken = mustBeNonEmptyString(req.body?.launchToken, "launchToken");
-    const resolved = candyLaunchTokenStore.consume(launchToken);
-    if (!resolved) {
-      throw new DomainError(
-        "INVALID_LAUNCH_TOKEN",
-        "Launch-token er ugyldig eller utløpt. Start spillet på nytt fra portalen."
-      );
-    }
-
-    apiSuccess(res, resolved);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// ── Integration launch (provider → CandyWeb) ──────────────────────────
-app.post("/api/integration/launch", async (req, res) => {
-  try {
-    if (!integrationLaunchHandler) {
-      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
-    }
-    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
-    const result = await integrationLaunchHandler.launch(req.body ?? {});
-    apiSuccess(res, result);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// ── Integration: session lifecycle (BIN-29) ─────────────────────────────
-app.post("/api/integration/session/kill", async (req, res) => {
-  try {
-    if (!integrationLaunchHandler) {
-      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
-    }
-    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
-    const { playerId, provider } = req.body ?? {};
-    if (!playerId || typeof playerId !== "string") {
-      throw new DomainError("INVALID_INPUT", "playerId mangler.");
-    }
-    const result = await integrationLaunchHandler.killSession(playerId, provider);
-    apiSuccess(res, result);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-app.post("/api/integration/session/refresh", async (req, res) => {
-  try {
-    if (!integrationLaunchHandler) {
-      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
-    }
-    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
-    const { playerId, extensionMinutes, provider } = req.body ?? {};
-    if (!playerId || typeof playerId !== "string") {
-      throw new DomainError("INVALID_INPUT", "playerId mangler.");
-    }
-    const result = await integrationLaunchHandler.refreshSession(playerId, extensionMinutes, provider);
-    apiSuccess(res, result);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// ── Integration admin: active sessions (BIN-29) ────────────────────────
-app.get("/api/admin/integration/sessions", async (req, res) => {
-  try {
-    await requireAdminPermissionUser(req, "INTEGRATION_READ");
-    if (!integrationLaunchHandler) {
-      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
-    }
-    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
-    const offset = parseInt(req.query.offset as string, 10) || 0;
-    const result = await integrationLaunchHandler.listActiveSessions({ limit, offset });
-    apiSuccess(res, result);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// ── Integration admin: player mappings (BIN-30) ────────────────────────
-app.get("/api/admin/integration/mappings", async (req, res) => {
-  try {
-    await requireAdminPermissionUser(req, "INTEGRATION_READ");
-    if (!integrationLaunchHandler) {
-      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
-    }
-    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
-    const offset = parseInt(req.query.offset as string, 10) || 0;
-    const provider = (req.query.provider as string)?.trim() || undefined;
-    const result = await integrationLaunchHandler.listMappings({ limit, offset, provider });
-    apiSuccess(res, result);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-app.get("/api/admin/integration/mappings/:provider/:externalPlayerId", async (req, res) => {
-  try {
-    await requireAdminPermissionUser(req, "INTEGRATION_READ");
-    if (!integrationLaunchHandler) {
-      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
-    }
-    const mapping = await integrationLaunchHandler.getMapping(req.params.provider, req.params.externalPlayerId);
-    if (!mapping) {
-      throw new DomainError("NOT_FOUND", "Spillerkobling ikke funnet.");
-    }
-    apiSuccess(res, mapping);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// ── Integration: provider statistics API (BIN-36) ──────────────────────
-app.get("/api/integration/statistics", async (req, res) => {
-  try {
-    if (!integrationLaunchHandler) {
-      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
-    }
-    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
-
-    const date = typeof req.query.date === "string" ? req.query.date.trim() : new Date().toISOString().slice(0, 10);
-    const hallId = typeof req.query.hallId === "string" ? req.query.hallId.trim() : undefined;
-
-    const report = engine.generateDailyReport({ date, hallId });
-    const rtp = report.totals.grossTurnover > 0
-      ? (report.totals.prizesPaid / report.totals.grossTurnover) * 100
-      : 0;
-
-    apiSuccess(res, {
-      date: report.date,
-      generatedAt: report.generatedAt,
-      summary: {
-        grossTurnover: report.totals.grossTurnover,
-        prizesPaid: report.totals.prizesPaid,
-        netRevenue: report.totals.net,
-        rtpPercent: Math.round(rtp * 100) / 100,
-        totalRounds: report.totals.stakeCount,
-        prizeEvents: report.totals.prizeCount
-      },
-      breakdown: report.rows.map((row) => ({
-        hallId: row.hallId,
-        gameType: row.gameType,
-        channel: row.channel,
-        grossTurnover: row.grossTurnover,
-        prizesPaid: row.prizesPaid,
-        netRevenue: row.net,
-        rtpPercent: row.grossTurnover > 0
-          ? Math.round((row.prizesPaid / row.grossTurnover) * 10000) / 100
-          : 0,
-        roundCount: row.stakeCount,
-        prizeCount: row.prizeCount
-      }))
-    });
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// ── Integration admin: webhook delivery log (BIN-34) ───────────────────
-app.get("/api/admin/integration/webhooks", async (req, res) => {
-  try {
-    await requireAdminPermissionUser(req, "INTEGRATION_READ");
-    if (!webhookService) {
-      throw new DomainError("INTEGRATION_DISABLED", "Webhook-service er ikke aktivert.");
-    }
-    const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
-    apiSuccess(res, { deliveries: webhookService.getRecentDeliveries(limit) });
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// ── Integration admin: reconciliation (BIN-27) ─────────────────────────
-app.post("/api/admin/integration/reconciliation/run", async (req, res) => {
-  try {
-    await requireAdminPermissionUser(req, "INTEGRATION_READ");
-    if (!reconciliationService) {
-      throw new DomainError("INTEGRATION_DISABLED", "Reconciliation er ikke tilgjengelig.");
-    }
-    const hours = Math.min(parseInt(req.body?.hours as string, 10) || 24, 168);
-    const report = await reconciliationService.reconcileLastHours(hours);
-    apiSuccess(res, report);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-app.get("/api/admin/integration/reconciliation/reports", async (req, res) => {
-  try {
-    await requireAdminPermissionUser(req, "INTEGRATION_READ");
-    if (!reconciliationService) {
-      throw new DomainError("INTEGRATION_DISABLED", "Reconciliation er ikke tilgjengelig.");
-    }
-    apiSuccess(res, { reports: reconciliationService.getReports() });
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-app.get("/api/admin/integration/reconciliation/latest", async (req, res) => {
-  try {
-    await requireAdminPermissionUser(req, "INTEGRATION_READ");
-    if (!reconciliationService) {
-      throw new DomainError("INTEGRATION_DISABLED", "Reconciliation er ikke tilgjengelig.");
-    }
-    const report = reconciliationService.getLatestReport();
-    if (!report) {
-      throw new DomainError("NOT_FOUND", "Ingen reconciliation-rapport funnet. Kjør en rapport først.");
-    }
-    apiSuccess(res, report);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// ── BIN-120: Integration health-check endpoint ─────────────────────────
-app.get("/api/integration/health", async (req, res) => {
-  try {
-    if (!integrationLaunchHandler) {
-      throw new DomainError("INTEGRATION_DISABLED", "Integrasjonsmodus er ikke aktivert.");
-    }
-    integrationLaunchHandler.validateApiKey(req.headers["x-api-key"] as string | undefined);
-
-    const health: Record<string, unknown> = {
-      status: "ok",
-      timestamp: new Date().toISOString(),
-      integration: { enabled: true },
-      wallet: {
-        provider: walletRuntime.provider,
-        status: "unknown" as string,
-      },
-      webhook: {
-        configured: !!webhookService,
-        recentDeliveries: webhookService ? webhookService.getRecentDeliveries(5).length : 0,
-      },
-      reconciliation: {
-        configured: !!reconciliationService,
-        latestReport: reconciliationService ? reconciliationService.getLatestReport()?.status ?? "no_reports" : "disabled",
-      },
-    };
-
-    // Probe wallet health by fetching a dummy balance (catches circuit breaker state).
-    if (walletRuntime.provider === "external") {
-      try {
-        await walletAdapter.getBalance("__health-check__");
-        (health.wallet as Record<string, unknown>).status = "ok";
-      } catch (err) {
-        const walletErr = err as { code?: string; message?: string };
-        (health.wallet as Record<string, unknown>).status = "degraded";
-        (health.wallet as Record<string, unknown>).error = walletErr.code ?? walletErr.message;
-        health.status = "degraded";
-      }
-    } else {
-      (health.wallet as Record<string, unknown>).status = "ok";
-    }
-
-    apiSuccess(res, health);
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-// BIN-134: Wallet bridge diagnostic — tests actual HTTP call to bingo-system
-app.get("/api/integration/wallet-diag", async (_req, res) => {
-  const diag: Record<string, unknown> = {
-    timestamp: new Date().toISOString(),
-    walletProvider: walletRuntime.provider,
-    integrationEnabled: !!integrationLaunchHandler,
-    walletApiBaseUrl: process.env.WALLET_API_BASE_URL || "NOT_SET",
-    walletApiKeySet: !!process.env.WALLET_API_KEY,
-    walletApiKeyLength: (process.env.WALLET_API_KEY || "").length,
-    walletApiKeyPrefix: process.env.WALLET_API_KEY ? process.env.WALLET_API_KEY.substring(0, 4) + "..." : "NOT_SET",
-  };
-
-  // Test actual HTTP call to bingo-system ext-wallet
-  if (walletRuntime.provider === "external" && process.env.WALLET_API_BASE_URL) {
-    const testUrl = `${process.env.WALLET_API_BASE_URL}/balance?playerId=wallet-ext-default-b3e4b752-5585-4229-9928-21b0b841155f`;
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
-      const headers: Record<string, string> = { Accept: "application/json" };
-      if (process.env.WALLET_API_KEY) {
-        headers.Authorization = `Bearer ${process.env.WALLET_API_KEY}`;
-      }
-      const resp = await fetch(testUrl, { method: "GET", headers, signal: controller.signal });
-      clearTimeout(timeout);
-      const text = await resp.text();
-      diag.testCall = {
-        url: testUrl,
-        status: resp.status,
-        statusText: resp.statusText,
-        body: text.substring(0, 500),
-      };
-    } catch (err) {
-      diag.testCall = {
-        url: testUrl,
-        error: (err as Error).message,
-        name: (err as Error).name,
-      };
-    }
-  }
-
-  // Also try the diag endpoint on bingo-system (no auth needed)
-  if (process.env.WALLET_API_BASE_URL) {
-    try {
-      const diagUrl = `${process.env.WALLET_API_BASE_URL}/diag`;
-      const resp2 = await fetch(diagUrl, { signal: AbortSignal.timeout(5000) });
-      const text2 = await resp2.text();
-      diag.bingoSystemDiag = JSON.parse(text2);
-    } catch (err) {
-      diag.bingoSystemDiag = { error: (err as Error).message };
-    }
-  }
-
-  res.json(diag);
-});
-
-// BIN-134: Test auth + room creation readiness for a given accessToken
-app.post("/api/integration/test-auth", async (req, res) => {
-  const diag: Record<string, unknown> = { timestamp: new Date().toISOString() };
-  const token = req.body?.accessToken;
-  if (!token) {
-    diag.error = "accessToken required in request body";
-    return res.json(diag);
-  }
-  try {
-    const user = await platformService.getUserFromAccessToken(token);
-    diag.userFound = true;
-    diag.userId = user.id;
-    diag.displayName = user.displayName;
-    diag.walletId = user.walletId;
-    diag.balance = user.balance;
-    diag.role = user.role;
-
-    // Test hallId resolution
-    try {
-      const hallId = await requireActiveHallIdFromInput(req.body?.hallId || "default-hall");
-      diag.hallId = hallId;
-      diag.hallResolved = true;
-    } catch (err) {
-      diag.hallResolved = false;
-      diag.hallError = (err as Error).message;
-    }
-
-    // Test wallet operations
-    try {
-      await walletAdapter.ensureAccount(user.walletId);
-      diag.walletEnsureAccount = "ok";
-    } catch (err) {
-      diag.walletEnsureAccount = (err as Error).message;
-    }
-    try {
-      const bal = await walletAdapter.getBalance(user.walletId);
-      diag.walletGetBalance = bal;
-    } catch (err) {
-      diag.walletGetBalance = (err as Error).message;
-    }
-  } catch (err) {
-    diag.userFound = false;
-    diag.error = (err as Error).message;
-    diag.code = (err as any).code;
-  }
-  res.json(diag);
-});
-
 app.get("/api/admin/games", async (req, res) => {
   try {
     await requireAdminPermissionUser(req, "GAME_CATALOG_READ");
@@ -2359,93 +1667,22 @@ app.put("/api/admin/settings/games/:slug", async (req, res) => {
   try {
     const adminUser = await requireAdminPermissionUser(req, "GAME_CATALOG_WRITE");
     const slug = mustBeNonEmptyString(req.params.slug, "slug");
-    const normalizedSlug = slug.trim().toLowerCase();
     const { settings, effectiveFromMs } = extractAdminGameSettingsPayload(req.body);
-
-    if (normalizedSlug !== "candy") {
-      const updated = await platformService.updateGame(slug, {
-        settings: normalizeGameSettingsForUpdate(slug, settings)
-      }, {
-        changedBy: {
-          userId: adminUser.id,
-          displayName: adminUser.displayName,
-          role: adminUser.role
-        },
-        source: "ADMIN_TYPED_GAME_SETTINGS_WRITE",
-        effectiveFrom:
-          effectiveFromMs !== undefined
-            ? new Date(effectiveFromMs).toISOString()
-            : new Date().toISOString()
-      });
-      apiSuccess(res, buildAdminGameSettingsResponse(updated));
-      return;
-    }
-
-    const patch = parseCandyManiaSettingsPatch(settings);
-    const nowMs = Date.now();
-    const wantsFutureActivation = effectiveFromMs !== undefined && effectiveFromMs > nowMs;
-    if (wantsFutureActivation) {
-      const baseSettings = pendingCandyManiaSettingsUpdate?.settings ?? runtimeCandyManiaSettings;
-      const scheduledSettings = normalizeCandyManiaSchedulerSettings(baseSettings, patch);
-      pendingCandyManiaSettingsUpdate = {
-        effectiveFromMs,
-        settings: scheduledSettings
-      };
-      await persistCandyManiaSettingsToCatalog({
-        changedBy: {
-          userId: adminUser.id,
-          displayName: adminUser.displayName,
-          role: adminUser.role
-        },
-        source: "ADMIN_TYPED_CANDY_SETTINGS_SCHEDULED",
-        effectiveFromMs
-      });
-      const refreshed = await platformService.getGame("candy");
-      apiSuccess(res, buildAdminGameSettingsResponse(refreshed));
-      return;
-    }
-
-    const runningSummaries = engine.listRoomSummaries();
-    if (Object.keys(patch).length > 0 && hasAnyRunningCandyManiaRound(runningSummaries)) {
-      throw new DomainError(
-        "CANDY_SETTINGS_LOCKED_DURING_RUNNING_GAME",
-        "Kan ikke endre Candy-innstillinger mens en runde kjører. Bruk effectiveFrom for planlagt aktivering."
-      );
-    }
-
-    const previous: CandyManiaSchedulerSettings = { ...runtimeCandyManiaSettings };
-    const previousEffectiveFromMs = candyManiaSettingsEffectiveFromMs;
-    const previousPending = pendingCandyManiaSettingsUpdate
-      ? { ...pendingCandyManiaSettingsUpdate, settings: { ...pendingCandyManiaSettingsUpdate.settings } }
-      : null;
-    const next = normalizeCandyManiaSchedulerSettings(runtimeCandyManiaSettings, patch);
-
-    pendingCandyManiaSettingsUpdate = null;
-    Object.assign(runtimeCandyManiaSettings, next);
-    candyManiaSettingsEffectiveFromMs = effectiveFromMs ?? nowMs;
-    drawScheduler.syncAfterSettingsChange(toSchedulerSettings(previous));
-
-    try {
-      await persistCandyManiaSettingsToCatalog({
-        changedBy: {
-          userId: adminUser.id,
-          displayName: adminUser.displayName,
-          role: adminUser.role
-        },
-        source: "ADMIN_TYPED_CANDY_SETTINGS_APPLIED",
-        effectiveFromMs: candyManiaSettingsEffectiveFromMs
-      });
-    } catch (error) {
-      Object.assign(runtimeCandyManiaSettings, previous);
-      candyManiaSettingsEffectiveFromMs = previousEffectiveFromMs;
-      pendingCandyManiaSettingsUpdate = previousPending;
-      drawScheduler.syncAfterSettingsChange(toSchedulerSettings(next));
-      throw error;
-    }
-
-    await emitManyRoomUpdates(engine.getAllRoomCodes());
-    const refreshed = await platformService.getGame("candy");
-    apiSuccess(res, buildAdminGameSettingsResponse(refreshed));
+    const updated = await platformService.updateGame(slug, {
+      settings: normalizeGameSettingsForUpdate(slug, settings)
+    }, {
+      changedBy: {
+        userId: adminUser.id,
+        displayName: adminUser.displayName,
+        role: adminUser.role
+      },
+      source: "ADMIN_TYPED_GAME_SETTINGS_WRITE",
+      effectiveFrom:
+        effectiveFromMs !== undefined
+          ? new Date(effectiveFromMs).toISOString()
+          : new Date().toISOString()
+    });
+    apiSuccess(res, buildAdminGameSettingsResponse(updated));
   } catch (error) {
     apiFailure(res, error);
   }
@@ -2470,29 +1707,17 @@ app.put("/api/admin/games/:slug", async (req, res) => {
   try {
     const adminUser = await requireAdminPermissionUser(req, "GAME_CATALOG_WRITE");
     const slug = mustBeNonEmptyString(req.params.slug, "slug");
-    const normalizedSlug = slug.trim().toLowerCase();
     const rawSettings =
       req.body?.settings && typeof req.body.settings === "object" && !Array.isArray(req.body.settings)
         ? (req.body.settings as Record<string, unknown>)
         : undefined;
-    if (normalizedSlug === "candy" && rawSettings) {
-      const candySettingsPatch = parseCandyManiaSettingsPatch(rawSettings);
-      if (Object.keys(candySettingsPatch).length > 0 && hasAnyRunningCandyManiaRound()) {
-        throw new DomainError(
-          "CANDY_SETTINGS_LOCKED_DURING_RUNNING_GAME",
-          "Kan ikke endre Candy-innstillinger mens en runde kjører. Bruk Candy Mania-panelet med effectiveFrom."
-        );
-      }
-    }
     const updated = await platformService.updateGame(slug, {
       title: typeof req.body?.title === "string" ? req.body.title : undefined,
       description: typeof req.body?.description === "string" ? req.body.description : undefined,
       route: typeof req.body?.route === "string" ? req.body.route : undefined,
       isEnabled: typeof req.body?.isEnabled === "boolean" ? req.body.isEnabled : undefined,
       sortOrder: Number.isFinite(req.body?.sortOrder) ? Number(req.body.sortOrder) : undefined,
-      settings: normalizeGameSettingsForUpdate(slug, rawSettings, {
-        requireCandyLaunchUrl: normalizedSlug === "candy"
-      })
+      settings: normalizeGameSettingsForUpdate(slug, rawSettings)
     }, {
       changedBy: {
         userId: adminUser.id,
@@ -2502,24 +1727,6 @@ app.put("/api/admin/games/:slug", async (req, res) => {
       source: "ADMIN_GAME_CATALOG_WRITE",
       effectiveFrom: new Date().toISOString()
     });
-    if (normalizedSlug === "candy") {
-      const previous: CandyManiaSchedulerSettings = { ...runtimeCandyManiaSettings };
-      const patch = readCandyManiaSettingsFromRecord(updated.settings);
-      const next = normalizeCandyManiaSchedulerSettings(runtimeCandyManiaSettings, patch);
-      pendingCandyManiaSettingsUpdate = null;
-      Object.assign(runtimeCandyManiaSettings, next);
-      candyManiaSettingsEffectiveFromMs = Date.now();
-      drawScheduler.syncAfterSettingsChange(toSchedulerSettings(previous));
-      await persistCandyManiaSettingsToCatalog({
-        changedBy: {
-          userId: adminUser.id,
-          displayName: adminUser.displayName,
-          role: adminUser.role
-        },
-        source: "ADMIN_CANDY_SYNC_AFTER_GAME_WRITE",
-        effectiveFromMs: candyManiaSettingsEffectiveFromMs
-      });
-    }
     apiSuccess(res, updated);
   } catch (error) {
     apiFailure(res, error);
@@ -2666,88 +1873,6 @@ app.put("/api/admin/halls/:hallId/game-config/:gameSlug", async (req, res) => {
   }
 });
 
-app.get("/api/admin/candy-mania/settings", async (req, res) => {
-  try {
-    await requireAdminPermissionUser(req, "ROOM_CONTROL_READ");
-    apiSuccess(res, getCandyManiaAdminSettingsResponse());
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
-app.put("/api/admin/candy-mania/settings", async (req, res) => {
-  try {
-    const adminUser = await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
-    const patch = parseCandyManiaSettingsPatch(req.body);
-    const effectiveFromMs = parseOptionalIsoTimestampMs(req.body?.effectiveFrom, "effectiveFrom");
-    const nowMs = Date.now();
-    const wantsFutureActivation = effectiveFromMs !== undefined && effectiveFromMs > nowMs;
-
-    if (wantsFutureActivation) {
-      const baseSettings = pendingCandyManiaSettingsUpdate?.settings ?? runtimeCandyManiaSettings;
-      const scheduledSettings = normalizeCandyManiaSchedulerSettings(baseSettings, patch);
-      pendingCandyManiaSettingsUpdate = {
-        effectiveFromMs,
-        settings: scheduledSettings
-      };
-      await persistCandyManiaSettingsToCatalog({
-        changedBy: {
-          userId: adminUser.id,
-          displayName: adminUser.displayName,
-          role: adminUser.role
-        },
-        source: "ADMIN_CANDY_SETTINGS_SCHEDULED",
-        effectiveFromMs
-      });
-      apiSuccess(res, getCandyManiaAdminSettingsResponse());
-      return;
-    }
-
-    const runningSummaries = engine.listRoomSummaries();
-    if (hasAnyRunningCandyManiaRound(runningSummaries)) {
-      throw new DomainError(
-        "CANDY_SETTINGS_LOCKED_DURING_RUNNING_GAME",
-        "Kan ikke endre Candy-innstillinger mens en runde kjører. Sett effectiveFrom i fremtiden."
-      );
-    }
-
-    const previous: CandyManiaSchedulerSettings = { ...runtimeCandyManiaSettings };
-    const previousEffectiveFromMs = candyManiaSettingsEffectiveFromMs;
-    const previousPending = pendingCandyManiaSettingsUpdate
-      ? { ...pendingCandyManiaSettingsUpdate, settings: { ...pendingCandyManiaSettingsUpdate.settings } }
-      : null;
-    const next = normalizeCandyManiaSchedulerSettings(runtimeCandyManiaSettings, patch);
-
-    pendingCandyManiaSettingsUpdate = null;
-    Object.assign(runtimeCandyManiaSettings, next);
-    candyManiaSettingsEffectiveFromMs = effectiveFromMs ?? nowMs;
-    drawScheduler.syncAfterSettingsChange(toSchedulerSettings(previous));
-
-    try {
-      await persistCandyManiaSettingsToCatalog({
-        changedBy: {
-          userId: adminUser.id,
-          displayName: adminUser.displayName,
-          role: adminUser.role
-        },
-        source: "ADMIN_CANDY_SETTINGS_APPLIED",
-        effectiveFromMs: candyManiaSettingsEffectiveFromMs
-      });
-    } catch (error) {
-      Object.assign(runtimeCandyManiaSettings, previous);
-      candyManiaSettingsEffectiveFromMs = previousEffectiveFromMs;
-      pendingCandyManiaSettingsUpdate = previousPending;
-      drawScheduler.syncAfterSettingsChange(toSchedulerSettings(next));
-      throw error;
-    }
-
-    await emitManyRoomUpdates(engine.getAllRoomCodes());
-    apiSuccess(res, getCandyManiaAdminSettingsResponse());
-  } catch (error) {
-    apiFailure(res, error);
-  }
-});
-
 app.get("/api/admin/rooms", async (req, res) => {
   try {
     await requireAdminPermissionUser(req, "ROOM_CONTROL_READ");
@@ -2784,12 +1909,12 @@ app.post("/api/admin/rooms", async (req, res) => {
     const hallId = await requireActiveHallIdFromInput(req.body?.hallId);
 
     // Enforce single room per hall — block creation if a canonical room already exists
-    if (enforceSingleCandyRoomPerHall) {
-      const canonicalRoom = getCanonicalCandyRoomForHall(hallId);
+    if (enforceSingleRoomPerHall) {
+      const canonicalRoom = getPrimaryRoomForHall(hallId);
       if (canonicalRoom) {
         throw new DomainError(
           "SINGLE_ROOM_ONLY",
-          `Kun ett Candy-rom er tillatt per hall. Rom ${canonicalRoom.code} er allerede aktivt.`
+          `Kun ett bingo-rom er tillatt per hall. Rom ${canonicalRoom.code} er allerede aktivt.`
         );
       }
     }
@@ -2806,7 +1931,7 @@ app.post("/api/admin/rooms", async (req, res) => {
       hallId,
       playerName: requestedHostName,
       walletId: requestedHostWalletId,
-      roomCode: enforceSingleCandyRoomPerHall ? "CANDY1" : undefined
+      roomCode: enforceSingleRoomPerHall ? "BINGO1" : undefined
     });
     const snapshot = await emitRoomUpdate(roomCode);
     apiSuccess(res, {
@@ -2841,7 +1966,7 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
     const requestedTicketsPerPlayer = parseOptionalTicketsPerPlayerInput(req.body?.ticketsPerPlayer);
     const ticketsPerPlayer =
       requestedTicketsPerPlayer ??
-      Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
+      Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeBingoSettings.autoRoundTicketsPerPlayer);
     assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
     const beforeStartSnapshot = engine.getRoomSnapshot(roomCode);
     await engine.startGame({
@@ -2849,7 +1974,7 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
       actorPlayerId: beforeStartSnapshot.hostPlayerId,
       entryFee,
       ticketsPerPlayer,
-      payoutPercent: runtimeCandyManiaSettings.payoutPercent
+      payoutPercent: runtimeBingoSettings.payoutPercent
     });
     const snapshot = await emitRoomUpdate(roomCode);
     apiSuccess(res, {
@@ -2934,7 +2059,6 @@ app.post("/api/wallet/me/timed-pause", async (req, res) => {
       walletId: user.walletId,
       durationMinutes: durationMinutes ?? 15
     });
-    sendComplianceWebhook("compliance.timedPause", user.id, { durationMinutes: durationMinutes ?? 15 });
     apiSuccess(res, compliance);
   } catch (error) {
     apiFailure(res, error);
@@ -2955,7 +2079,6 @@ app.post("/api/wallet/me/self-exclusion", async (req, res) => {
   try {
     const user = await getAuthenticatedUser(req);
     const compliance = engine.setSelfExclusion(user.walletId);
-    sendComplianceWebhook("compliance.selfExclusion", user.id, {});
     apiSuccess(res, compliance);
   } catch (error) {
     apiFailure(res, error);
@@ -3680,8 +2803,8 @@ io.on("connection", (socket: Socket) => {
     try {
       const identity = await resolveIdentityFromPayload(payload);
       console.log("[BIN-134] room:create identity resolved", { playerName: identity.playerName, walletId: identity.walletId, hallId: identity.hallId });
-      if (enforceSingleCandyRoomPerHall) {
-        const canonicalRoom = getCanonicalCandyRoomForHall(identity.hallId);
+      if (enforceSingleRoomPerHall) {
+        const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
         if (canonicalRoom) {
           const canonicalSnapshot = engine.getRoomSnapshot(canonicalRoom.code);
           const existingPlayer = findPlayerInRoomByWallet(canonicalSnapshot, identity.walletId);
@@ -3713,8 +2836,8 @@ io.on("connection", (socket: Socket) => {
         hallId: identity.hallId,
         walletId: identity.walletId,
         socketId: socket.id,
-        // BIN-134: Use "CANDY1" as actual room code so SPA alias = real code
-        roomCode: enforceSingleCandyRoomPerHall ? "CANDY1" : undefined
+        // BIN-134: Use "BINGO1" as actual room code so SPA alias = real code
+        roomCode: enforceSingleRoomPerHall ? "BINGO1" : undefined
       });
       socket.join(roomCode);
       const snapshot = await emitRoomUpdate(roomCode);
@@ -3730,19 +2853,19 @@ io.on("connection", (socket: Socket) => {
     try {
       let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
       const identity = await resolveIdentityFromPayload(payload);
-      if (enforceSingleCandyRoomPerHall) {
-        // BIN-134: resolve CANDY1 alias
-        if (roomCode === "CANDY1") {
-          const canonicalRoom = getCanonicalCandyRoomForHall(identity.hallId);
+      if (enforceSingleRoomPerHall) {
+        // BIN-134: resolve BINGO1 alias
+        if (roomCode === "BINGO1") {
+          const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
           if (canonicalRoom) {
             roomCode = canonicalRoom.code;
           }
         }
-        const canonicalRoom = getCanonicalCandyRoomForHall(identity.hallId);
+        const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
         if (canonicalRoom && canonicalRoom.code !== roomCode) {
           throw new DomainError(
             "SINGLE_ROOM_ONLY",
-            `Kun ett Candy-rom er aktivt per hall. Bruk rom ${canonicalRoom.code}.`
+            `Kun ett bingo-rom er aktivt per hall. Bruk rom ${canonicalRoom.code}.`
           );
         }
       }
@@ -3834,14 +2957,14 @@ io.on("connection", (socket: Socket) => {
       const hallGameConfig = await resolveBingoHallGameConfigForRoom(roomCode);
       const ticketsPerPlayer =
         requestedTicketsPerPlayer ??
-        Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeCandyManiaSettings.autoRoundTicketsPerPlayer);
+        Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeBingoSettings.autoRoundTicketsPerPlayer);
       assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
       await engine.startGame({
         roomCode,
         actorPlayerId: playerId,
         entryFee: payload?.entryFee ?? getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer,
-        payoutPercent: runtimeCandyManiaSettings.payoutPercent
+        payoutPercent: runtimeBingoSettings.payoutPercent
       });
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { snapshot });
@@ -3937,14 +3060,14 @@ io.on("connection", (socket: Socket) => {
       const user = await getAuthenticatedSocketUser(payload);
       let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
 
-      // BIN-134: SPA sends "CANDY1" as canonical room code.
+      // BIN-134: SPA sends "BINGO1" as canonical room code.
       // Map it to the actual canonical room for the hall.
-      if (roomCode === "CANDY1" && enforceSingleCandyRoomPerHall) {
+      if (roomCode === "BINGO1" && enforceSingleRoomPerHall) {
         const hallId = (payload as any)?.hallId || "default-hall";
-        const canonicalRoom = getCanonicalCandyRoomForHall(hallId);
+        const canonicalRoom = getPrimaryRoomForHall(hallId);
         if (canonicalRoom) {
           roomCode = canonicalRoom.code;
-          console.log("[BIN-134] room:state CANDY1 → canonical room", roomCode);
+          console.log("[BIN-134] room:state BINGO1 → canonical room", roomCode);
         }
         // If no canonical room exists, fall through — ROOM_NOT_FOUND triggers SPA auto-create
       }
@@ -3968,18 +3091,17 @@ app.get("*", (_req, res) => {
     res.sendFile(adminFrontendFile);
     return;
   }
-  // CandyWeb SPA: serve index.html for /web/* and /candy/* routes that aren't static assets.
-  if (_req.path.startsWith("/web") || _req.path.startsWith("/candy")) {
-    res.sendFile(candyWebIndexFile);
+  if (_req.path.startsWith("/web")) {
+    res.sendFile(path.join(publicDir, "web/index.html"));
     return;
   }
   res.sendFile(path.join(frontendDir, "index.html"));
 });
 
 const PORT = Number(process.env.PORT ?? 4000);
-hydrateCandyManiaSettingsFromCatalog()
+hydrateBingoSettingsFromCatalog()
   .catch((error) => {
-    console.warn("[candy-mania] Oppstart med env/default settings pga last-feil.", error);
+    console.warn("[bingo] Oppstart med env/default settings pga last-feil.", error);
   })
   .finally(async () => {
     // BIN-170: Load rooms from Redis on startup (if Redis provider)
@@ -4016,10 +3138,10 @@ hydrateCandyManiaSettingsFromCatalog()
         `[compliance] minRoundInterval=${bingoMinRoundIntervalMs}ms minPlayersToStart=${bingoMinPlayersToStart} maxDrawsPerRound=${bingoMaxDrawsPerRound} dailyLoss=${bingoDailyLossLimit} monthlyLoss=${bingoMonthlyLossLimit} playSessionLimit=${bingoPlaySessionLimitMs}ms pauseDuration=${bingoPauseDurationMs}ms selfExclusionMin=${bingoSelfExclusionMinMs}ms`
       );
       console.log(
-        `[scheduler] autoStart=${runtimeCandyManiaSettings.autoRoundStartEnabled} autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} forceAutoStart=${forceCandyAutoStart} forceAutoDraw=${forceCandyAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleCandyRoomPerHall} interval=${runtimeCandyManiaSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeCandyManiaSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeCandyManiaSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeCandyManiaSettings.autoRoundEntryFee} payoutPercent=${runtimeCandyManiaSettings.payoutPercent}`
+        `[scheduler] autoStart=${runtimeBingoSettings.autoRoundStartEnabled} autoDraw=${runtimeBingoSettings.autoDrawEnabled} forceAutoStart=${forceAutoStart} forceAutoDraw=${forceAutoDraw} autoAllowedInProd=${allowAutoplayInProduction} singleRoomPerHall=${enforceSingleRoomPerHall} interval=${runtimeBingoSettings.autoRoundStartIntervalMs}ms minPlayers=${runtimeBingoSettings.autoRoundMinPlayers} ticketsPerPlayer=${runtimeBingoSettings.autoRoundTicketsPerPlayer} entryFee=${runtimeBingoSettings.autoRoundEntryFee} payoutPercent=${runtimeBingoSettings.payoutPercent}`
       );
       console.log(
-        `[scheduler] autoDraw=${runtimeCandyManiaSettings.autoDrawEnabled} interval=${runtimeCandyManiaSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms`
+        `[scheduler] autoDraw=${runtimeBingoSettings.autoDrawEnabled} interval=${runtimeBingoSettings.autoDrawIntervalMs}ms tick=${schedulerTickMs}ms`
       );
       console.log(
         `[daily-report] enabled=${dailyReportJobEnabled} interval=${dailyReportJobIntervalMs}ms lastDate=${lastDailyReportDateKey || "-"}`
