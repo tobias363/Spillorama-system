@@ -1,195 +1,242 @@
 /**
- * External Games Overlay — dynamisk posisjonert i Unity-lobbyens 3x2 grid.
+ * Full HTML Game Grid — erstatter Unity-canvasens spillkort med
+ * identisk-designede HTML-tiles i et 3x2 CSS Grid.
  *
- * Leser Unity-canvasens posisjon/størrelse og beregner nøyaktig
- * kolonne 3, rad 2. Skalerer med canvasen ved resize.
+ * Unity-header (logo, wallet, nav) forblir synlig over gridet.
+ * Unity-spill åpnes ved syntetisk klikk på canvasen.
+ * Candy Mania åpnes via iframe.
  */
 (function () {
   'use strict';
 
-  var EXTERNAL_GAMES = [
+  // ── Spillkatalog ──────────────────────────────────────────────
+  // type: 'unity'    → klikk sendes til Unity-canvas
+  // type: 'external' → openGameInIframe()
+  var GAMES = [
     {
-      id: 'candy-mania',
-      name: 'Candy Mania',
-      url: '/candy/',
-      status: 'Åpen',
-      statusColor: '#5bbf72',
-      closedColor: '#e74c3c',
-      badge: 'NYTT!',
-      badgeColor: '#ff4444',
-      image: '/web/assets/games/candy.png'
+      id: 'papir-bingo', name: 'Papir bingo',
+      image: '/web/assets/games/papirbingo.png',
+      status: 'Stengt', statusColor: '#5bbf72', closedColor: '#e74c3c',
+      type: 'unity', canvasXY: [0.28, 0.42]
+    },
+    {
+      id: 'lynbingo', name: 'Lynbingo',
+      image: '/web/assets/games/bingo_1.png',
+      status: 'Åpen', statusColor: '#5bbf72',
+      btnText: 'Spill nå',
+      type: 'unity', canvasXY: [0.52, 0.42]
+    },
+    {
+      id: 'bingo-bonanza', name: 'BingoBonanza',
+      image: '/web/assets/games/bingo_3.png',
+      status: 'Åpen', statusColor: '#5bbf72',
+      btnText: 'Spill nå',
+      type: 'unity', canvasXY: [0.78, 0.42]
+    },
+    {
+      id: 'turbomania', name: 'Turbomania',
+      image: '/web/assets/games/bingo_4.png',
+      status: 'Åpen', statusColor: '#5bbf72',
+      btnText: 'Spill nå',
+      type: 'unity', canvasXY: [0.28, 0.85]
+    },
+    {
+      id: 'spinngo', name: 'SpinnGo',
+      image: '/web/assets/games/gold-digger.png',
+      status: 'Åpen', statusColor: '#5bbf72',
+      btnText: 'Spill nå',
+      type: 'unity', canvasXY: [0.52, 0.85]
+    },
+    {
+      id: 'candy-mania', name: 'Candy Mania',
+      image: '/web/assets/games/candy.png',
+      status: 'Åpen', statusColor: '#5bbf72',
+      badge: 'NYTT!', badgeColor: '#ff4444',
+      btnText: 'Spill nå',
+      type: 'external', url: '/candy/'
     }
   ];
 
-  // Unity grid-koordinater (prosent av canvas-størrelse).
-  // Estimert fra de 5 eksisterende tilene:
-  //   Rad 1: Papir bingo(28%) | Lynbingo(52%)    | BingoBonanza(78%)
-  //   Rad 2: Turbomania(28%)  | SpinnGo(52%)     | Candy Mania(78%)
-  var GRID = {
-    centerX: 0.78,    // kolonne 3 horisontalt senter
-    topY:    0.585,   // rad 2 topp (der tittel starter)
-    tileW:   0.195    // tile-bredde som andel av canvas
-  };
+  // ── CSS ────────────────────────────────────────────────────────
+  var css = document.createElement('style');
+  css.textContent = '\
+#ext-games-wrap {\
+  position: fixed;\
+  z-index: 100;\
+  top: 12%;\
+  left: 0; right: 0; bottom: 0;\
+  display: grid;\
+  grid-template-columns: 1fr 1fr 1fr;\
+  grid-template-rows: 1fr 1fr;\
+  gap: 10px 0;\
+  padding: 10px 5%;\
+  pointer-events: none;\
+  background: url("TemplateData/bg.png") center / cover no-repeat fixed;\
+}\
+\
+.ext-cell {\
+  display: flex;\
+  align-items: center;\
+  justify-content: center;\
+  pointer-events: none;\
+}\
+\
+.ext-tile {\
+  pointer-events: auto;\
+  width: 80%;\
+  max-width: 300px;\
+  text-align: center;\
+  color: #fff;\
+  cursor: pointer;\
+  position: relative;\
+  font-family: "Segoe UI", Arial, sans-serif;\
+}\
+\
+.ext-tile-name {\
+  font-size: clamp(14px, 1.5vw, 22px);\
+  font-weight: 700;\
+  margin-bottom: 0.3em;\
+  text-shadow: 0 2px 8px rgba(0,0,0,0.6);\
+  letter-spacing: 0.5px;\
+}\
+\
+.ext-tile-img-wrap {\
+  position: relative;\
+  width: 100%;\
+  aspect-ratio: 16 / 10;\
+  overflow: hidden;\
+  border-radius: 10px;\
+  margin-bottom: 0.5em;\
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);\
+}\
+.ext-tile-img {\
+  width: 100%; height: 100%;\
+  object-fit: cover;\
+  display: block;\
+}\
+\
+.ext-tile-status {\
+  position: absolute;\
+  top: 6px; left: 6px;\
+  z-index: 2;\
+  padding: 2px 14px;\
+  border-radius: 20px;\
+  font-size: clamp(10px, 0.9vw, 13px);\
+  font-weight: 600;\
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);\
+  color: #fff;\
+}\
+\
+.ext-tile-badge {\
+  position: absolute;\
+  top: -6px; right: 0;\
+  padding: 2px 10px;\
+  border-radius: 6px;\
+  font-size: clamp(8px, 0.7vw, 11px);\
+  font-weight: 700;\
+  text-transform: uppercase;\
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);\
+  z-index: 3;\
+  color: #fff;\
+}\
+\
+.ext-tile-btn {\
+  display: block;\
+  width: 100%;\
+  padding: clamp(6px, 0.8vw, 14px) 0;\
+  border: none;\
+  border-radius: 30px;\
+  background: linear-gradient(135deg, #5bc4ac 0%, #4aad96 100%);\
+  color: #fff;\
+  font-size: clamp(12px, 1.2vw, 17px);\
+  font-weight: 700;\
+  cursor: pointer;\
+  letter-spacing: 0.5px;\
+  transition: background 0.15s, transform 0.1s;\
+  box-shadow: 0 4px 15px rgba(91,196,172,0.35);\
+}\
+.ext-tile-btn:hover {\
+  background: linear-gradient(135deg, #6bd4bc 0%, #5cc8ae 100%);\
+  transform: translateY(-1px);\
+}\
+.ext-tile-btn:active { transform: translateY(1px); }\
+.ext-tile-btn:disabled {\
+  background: #666;\
+  cursor: not-allowed;\
+  box-shadow: none;\
+}\
+';
+  document.head.appendChild(css);
 
-  var style = document.createElement('style');
-  style.textContent = [
-    '#ext-games-wrap {',
-    '  position: fixed;',
-    '  z-index: 100;',
-    '  pointer-events: none;',
-    '  display: flex;',
-    '  flex-direction: column;',
-    '  align-items: center;',
-    '  justify-content: flex-start;',
-    '}',
-    '.ext-tile {',
-    '  pointer-events: auto;',
-    '  width: 100%;',
-    '  text-align: center;',
-    '  color: #fff;',
-    '  cursor: pointer;',
-    '  position: relative;',
-    '  font-family: "Segoe UI", Arial, sans-serif;',
-    '}',
-    '.ext-tile-name {',
-    '  font-weight: 700;',
-    '  margin-bottom: 0.3em;',
-    '  text-shadow: 0 2px 8px rgba(0,0,0,0.6);',
-    '  letter-spacing: 0.5px;',
-    '}',
-    '.ext-tile-img-wrap {',
-    '  position: relative;',
-    '  width: 100%;',
-    '  aspect-ratio: 16 / 10;',
-    '  overflow: hidden;',
-    '  border-radius: 8px;',
-    '  margin: 0 auto 0.4em;',
-    '  box-shadow: 0 4px 16px rgba(0,0,0,0.3);',
-    '}',
-    '.ext-tile-img {',
-    '  width: 100%;',
-    '  height: 100%;',
-    '  object-fit: cover;',
-    '  display: block;',
-    '}',
-    '.ext-tile-status {',
-    '  position: absolute;',
-    '  top: 6px; left: 6px;',
-    '  z-index: 2;',
-    '  padding: 2px 12px;',
-    '  border-radius: 20px;',
-    '  font-weight: 600;',
-    '  box-shadow: 0 2px 6px rgba(0,0,0,0.3);',
-    '}',
-    '.ext-tile-badge {',
-    '  position: absolute;',
-    '  top: -6px; right: 0;',
-    '  padding: 2px 8px;',
-    '  border-radius: 6px;',
-    '  font-weight: 700;',
-    '  text-transform: uppercase;',
-    '  box-shadow: 0 2px 6px rgba(0,0,0,0.4);',
-    '  z-index: 3;',
-    '}',
-    '.ext-tile-btn {',
-    '  display: block;',
-    '  width: 100%;',
-    '  border: none;',
-    '  border-radius: 30px;',
-    '  background: linear-gradient(135deg, #5bc4ac 0%, #4aad96 100%);',
-    '  color: #fff;',
-    '  font-weight: 700;',
-    '  cursor: pointer;',
-    '  letter-spacing: 0.5px;',
-    '  transition: background 0.15s, transform 0.1s;',
-    '  box-shadow: 0 4px 15px rgba(91,196,172,0.35);',
-    '}',
-    '.ext-tile-btn:hover {',
-    '  background: linear-gradient(135deg, #6bd4bc 0%, #5cc8ae 100%);',
-    '  transform: translateY(-1px);',
-    '}',
-    '.ext-tile-btn:active { transform: translateY(1px); }',
-    '.ext-tile-btn:disabled { background:#555; cursor:not-allowed; box-shadow:none; }'
-  ].join('\n');
-  document.head.appendChild(style);
-
-  // ── Bygg tile-HTML ────────────────────────────────────────────
-  var wrap = document.createElement('div');
-  wrap.id = 'ext-games-wrap';
-
-  EXTERNAL_GAMES.forEach(function (game) {
-    var isOpen = game.status === 'Åpen';
-    var tile = document.createElement('div');
-    tile.className = 'ext-tile';
-    tile.setAttribute('data-game-id', game.id);
-    var statusBg = isOpen ? game.statusColor : (game.closedColor || '#e74c3c');
-
-    var html = '';
-    if (game.badge) html += '<div class="ext-tile-badge" style="background:' + game.badgeColor + '">' + game.badge + '</div>';
-    html += '<div class="ext-tile-name">' + game.name + '</div>';
-    if (game.image) {
-      html += '<div class="ext-tile-img-wrap">';
-      html += '<div class="ext-tile-status" style="background:' + statusBg + '">' + game.status + '</div>';
-      html += '<img class="ext-tile-img" src="' + game.image + '" alt="' + game.name + '" />';
-      html += '</div>';
-    }
-    html += '<button class="ext-tile-btn"' + (isOpen ? '' : ' disabled') + '>' + (isOpen ? 'Spill nå' : game.status) + '</button>';
-    tile.innerHTML = html;
-
-    if (isOpen) {
-      tile.addEventListener('click', function () {
-        if (typeof openGameInIframe === 'function') openGameInIframe(game.url);
-        else window.open(game.url, '_blank');
-      });
-    }
-    wrap.appendChild(tile);
-  });
-
-  document.body.appendChild(wrap);
-
-  // ── Dynamisk posisjonering — leser Unity-canvas og beregner ───
-  function reposition() {
+  // ── Syntetisk klikk på Unity-canvas ───────────────────────────
+  function clickUnityCanvas(normX, normY) {
     var canvas = document.getElementById('unity-canvas');
     if (!canvas) return;
     var r = canvas.getBoundingClientRect();
-    if (r.width === 0) return;
+    var cx = r.left + r.width * normX;
+    var cy = r.top + r.height * normY;
+    var opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
 
-    var tilePxW = r.width * GRID.tileW;
-    var centerX = r.left + r.width * GRID.centerX;
-    var topY    = r.top  + r.height * GRID.topY;
+    // Fjern pointer-events midlertidig slik at canvas mottar klikket
+    wrap.style.pointerEvents = 'none';
+    var tiles = wrap.querySelectorAll('.ext-tile');
+    for (var i = 0; i < tiles.length; i++) tiles[i].style.pointerEvents = 'none';
 
-    wrap.style.left   = (centerX - tilePxW / 2) + 'px';
-    wrap.style.top    = topY + 'px';
-    wrap.style.width  = tilePxW + 'px';
+    canvas.dispatchEvent(new PointerEvent('pointerdown', opts));
+    setTimeout(function () {
+      canvas.dispatchEvent(new PointerEvent('pointerup', opts));
+      canvas.dispatchEvent(new MouseEvent('click', opts));
+      setTimeout(function () {
+        wrap.style.pointerEvents = '';
+        for (var j = 0; j < tiles.length; j++) tiles[j].style.pointerEvents = '';
+      }, 100);
+    }, 50);
+  }
 
-    // Skaler fonter og padding proporsjonalt med tile-bredden
-    var s = tilePxW / 280;
-    var els = {
-      '.ext-tile-name':   { fontSize: Math.max(12, 22 * s) },
-      '.ext-tile-status': { fontSize: Math.max(9, 13 * s) },
-      '.ext-tile-badge':  { fontSize: Math.max(8, 11 * s) },
-      '.ext-tile-btn':    { fontSize: Math.max(11, 17 * s), padding: Math.max(6, 12 * s) + 'px 0' }
-    };
-    for (var sel in els) {
-      var nodes = wrap.querySelectorAll(sel);
-      for (var i = 0; i < nodes.length; i++) {
-        for (var prop in els[sel]) {
-          nodes[i].style[prop] = typeof els[sel][prop] === 'number' ? els[sel][prop] + 'px' : els[sel][prop];
-        }
-      }
+  // ── Bygg grid ─────────────────────────────────────────────────
+  var wrap = document.createElement('div');
+  wrap.id = 'ext-games-wrap';
+
+  GAMES.forEach(function (game) {
+    var isOpen = game.status === 'Åpen';
+    var statusBg = isOpen ? game.statusColor : (game.closedColor || '#e74c3c');
+    var btnLabel = game.btnText || (isOpen ? 'Spill nå' : game.status);
+
+    var cell = document.createElement('div');
+    cell.className = 'ext-cell';
+
+    var tile = document.createElement('div');
+    tile.className = 'ext-tile';
+    tile.setAttribute('data-game-id', game.id);
+
+    var h = '';
+    if (game.badge) {
+      h += '<div class="ext-tile-badge" style="background:' + (game.badgeColor || '#ff4444') + '">' + game.badge + '</div>';
     }
-  }
+    h += '<div class="ext-tile-name">' + game.name + '</div>';
+    h += '<div class="ext-tile-img-wrap">';
+    h += '  <div class="ext-tile-status" style="background:' + statusBg + '">' + game.status + '</div>';
+    h += '  <img class="ext-tile-img" src="' + game.image + '" alt="' + game.name + '" />';
+    h += '</div>';
+    h += '<button class="ext-tile-btn"' + (isOpen ? '' : ' disabled') + '>' + btnLabel + '</button>';
+    tile.innerHTML = h;
 
-  // Kjør ved resize og når canvas er klar
-  window.addEventListener('resize', reposition);
-  var poll = setInterval(function () {
-    var c = document.getElementById('unity-canvas');
-    if (c && c.getBoundingClientRect().width > 0) { clearInterval(poll); reposition(); }
-  }, 200);
-  if (typeof ResizeObserver !== 'undefined') {
-    var roWait = setInterval(function () {
-      var c = document.getElementById('unity-canvas');
-      if (c) { clearInterval(roWait); new ResizeObserver(reposition).observe(c); }
-    }, 200);
-  }
+    if (isOpen) {
+      (function (g) {
+        tile.addEventListener('click', function () {
+          if (g.type === 'external') {
+            if (typeof openGameInIframe === 'function') openGameInIframe(g.url);
+            else window.open(g.url, '_blank');
+          } else if (g.type === 'unity' && g.canvasXY) {
+            clickUnityCanvas(g.canvasXY[0], g.canvasXY[1]);
+          }
+        });
+      })(game);
+    }
+
+    cell.appendChild(tile);
+    wrap.appendChild(cell);
+  });
+
+  document.body.appendChild(wrap);
 })();
