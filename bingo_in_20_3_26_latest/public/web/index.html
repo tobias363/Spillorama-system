@@ -53,6 +53,82 @@
     /* BIN-134: Skjul spillgrid til bruker er innlogget */
     #ext-games-wrap { display: none !important; }
     body.player-authenticated #ext-games-wrap { display: grid !important; }
+    #debug-panel {
+      display: none;
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      width: min(520px, calc(100vw - 24px));
+      max-height: 42vh;
+      z-index: 2000;
+      background: rgba(12, 16, 22, 0.92);
+      border: 1px solid rgba(126, 249, 171, 0.35);
+      border-radius: 12px;
+      color: #d7ffe4;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      overflow: hidden;
+    }
+    body.debug-enabled #debug-panel {
+      display: flex;
+      flex-direction: column;
+    }
+    #debug-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 12px;
+      background: rgba(126, 249, 171, 0.08);
+      border-bottom: 1px solid rgba(126, 249, 171, 0.15);
+    }
+    #debug-panel-title {
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #debug-panel-actions {
+      display: flex;
+      gap: 8px;
+    }
+    #debug-panel-actions button {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      border-radius: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font: inherit;
+    }
+    #debug-panel-status {
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      color: #bce8ca;
+      background: rgba(255, 255, 255, 0.03);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #debug-panel-log {
+      padding: 8px 12px 12px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .debug-line {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .debug-line.debug-warn {
+      color: #ffe28c;
+    }
+    .debug-line.debug-error {
+      color: #ff9a90;
+    }
+    .debug-line.debug-ok {
+      color: #7ef9ab;
+    }
   </style>
 
   <!-- Firebase SDKs -->
@@ -65,6 +141,17 @@
   <!-- Iframe overlay for integrerte spill (CandyMania etc.) -->
   <div id="game-overlay">
     <button id="game-overlay-back" onclick="closeGameOverlay()">&#8592; Tilbake til lobby</button>
+  </div>
+  <div id="debug-panel" aria-live="polite">
+    <div id="debug-panel-header">
+      <div id="debug-panel-title">Web Debug</div>
+      <div id="debug-panel-actions">
+        <button type="button" onclick="copyDebugLog()">Copy</button>
+        <button type="button" onclick="clearDebugLog()">Clear</button>
+      </div>
+    </div>
+    <div id="debug-panel-status">Aktiver med ?debug=1</div>
+    <div id="debug-panel-log"></div>
   </div>
 
   <div id="unity-container" class="unity-desktop" style="width:100%; height:100%; overflow:hidden">
@@ -83,8 +170,101 @@
     </div>
   </div>
   <script>
-    // ─── Logging (console only) ────────────────────────────────────
-    function dbg(msg) { console.log('[BIN-134]', msg); }
+    var debugSearchParams = new URLSearchParams(window.location.search);
+    var debugPanelEnabled = (function() {
+      try {
+        if (debugSearchParams.get('debug') === '1') {
+          localStorage.setItem('spilloramaDebug', '1');
+          return true;
+        }
+        if (debugSearchParams.get('debug') === '0') {
+          localStorage.removeItem('spilloramaDebug');
+          return false;
+        }
+        return localStorage.getItem('spilloramaDebug') === '1';
+      } catch (err) {
+        return debugSearchParams.get('debug') === '1';
+      }
+    })();
+
+    var debugPanelLog = document.getElementById('debug-panel-log');
+    var debugPanelStatus = document.getElementById('debug-panel-status');
+    window.__spilloramaDebug = { enabled: debugPanelEnabled, events: [] };
+
+    if (debugPanelEnabled) {
+      document.body.classList.add('debug-enabled');
+    }
+
+    function updateDebugStatus(message) {
+      if (!debugPanelStatus) return;
+      debugPanelStatus.textContent = message;
+    }
+
+    function appendDebugLine(entry) {
+      if (!debugPanelEnabled || !debugPanelLog) return;
+      var row = document.createElement('div');
+      row.className = 'debug-line debug-' + entry.cssLevel;
+      row.textContent = entry.time + ' [' + entry.level + '] ' + entry.message;
+      debugPanelLog.appendChild(row);
+      while (debugPanelLog.children.length > 250) {
+        debugPanelLog.removeChild(debugPanelLog.firstChild);
+      }
+      debugPanelLog.scrollTop = debugPanelLog.scrollHeight;
+    }
+
+    function dbg(msg, level) {
+      var rawLevel = (level || 'info').toLowerCase();
+      var consoleLevel = rawLevel === 'err' ? 'error' : (rawLevel === 'warn' ? 'warn' : 'log');
+      var cssLevel = rawLevel === 'err' ? 'error' : (rawLevel === 'warn' ? 'warn' : (rawLevel === 'ok' ? 'ok' : 'info'));
+      var entry = {
+        time: new Date().toISOString().slice(11, 19),
+        level: rawLevel.toUpperCase(),
+        cssLevel: cssLevel,
+        message: String(msg)
+      };
+      window.__spilloramaDebug.events.push(entry);
+      appendDebugLine(entry);
+      console[consoleLevel]('[BIN-134]', entry.message);
+      updateDebugStatus(entry.message);
+    }
+
+    function clearDebugLog() {
+      window.__spilloramaDebug.events = [];
+      if (debugPanelLog) debugPanelLog.innerHTML = '';
+      updateDebugStatus('Debuglogg nullstilt');
+      console.log('[BIN-134]', 'Debuglogg nullstilt');
+    }
+
+    function copyDebugLog() {
+      var dump = window.__spilloramaDebug.events
+        .map(function(entry) {
+          return entry.time + ' [' + entry.level + '] ' + entry.message;
+        })
+        .join('\n');
+
+      if (!navigator.clipboard || !navigator.clipboard.writeText) {
+        dbg('Clipboard API er ikke tilgjengelig i denne nettleseren', 'warn');
+        return;
+      }
+
+      navigator.clipboard.writeText(dump)
+        .then(function() {
+          dbg('Debuglogg kopiert til utklippstavlen', 'ok');
+        })
+        .catch(function(err) {
+          dbg('Kunne ikke kopiere debuglogg: ' + err.message, 'err');
+        });
+    }
+
+    window.addEventListener('error', function(event) {
+      dbg('window.error: ' + event.message, 'err');
+    });
+
+    window.addEventListener('unhandledrejection', function(event) {
+      var reason = event && event.reason;
+      var message = reason && reason.message ? reason.message : String(reason);
+      dbg('unhandledrejection: ' + message, 'err');
+    });
 
     // ─── Auth-gating: Unity must be loaded before tile is shown ────
     var _unityLoaded = false;
@@ -164,6 +344,54 @@
 
     canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
     loadingBar.style.display = "block";
+
+    function unitySendMessage(gameObjectName, methodName, payload) {
+      if (!window.unityInstance || typeof window.unityInstance.SendMessage !== 'function') {
+        dbg('SendMessage venter: unityInstance er ikke klar for ' + gameObjectName + '.' + methodName, 'warn');
+        return false;
+      }
+
+      try {
+        window.unityInstance.SendMessage(gameObjectName, methodName, payload);
+        dbg('SendMessage OK -> ' + gameObjectName + '.' + methodName + '(' + payload + ')', 'ok');
+        return true;
+      } catch (err) {
+        dbg('SendMessage FEIL -> ' + gameObjectName + '.' + methodName + ': ' + err.message, 'err');
+        return false;
+      }
+    }
+
+    var _requestDomainDataRetryTimer = null;
+    function requestDomainData() {
+      var host = window.location.origin;
+      dbg('requestDomainData called, host=' + host);
+
+      if (unitySendMessage('Socket And Event Manager', 'DomainDataCall', host)) {
+        return;
+      }
+
+      if (_requestDomainDataRetryTimer) {
+        dbg('requestDomainData retry kjører allerede', 'warn');
+        return;
+      }
+
+      var attempts = 0;
+      _requestDomainDataRetryTimer = setInterval(function() {
+        attempts++;
+        if (unitySendMessage('Socket And Event Manager', 'DomainDataCall', host)) {
+          clearInterval(_requestDomainDataRetryTimer);
+          _requestDomainDataRetryTimer = null;
+          dbg('requestDomainData retry lykkes etter ' + attempts + ' forsok', 'ok');
+          return;
+        }
+
+        if (attempts >= 50) {
+          clearInterval(_requestDomainDataRetryTimer);
+          _requestDomainDataRetryTimer = null;
+          dbg('requestDomainData ga opp etter 50 forsok', 'err');
+        }
+      }, 100);
+    }
 
     // ─── BIN-134: intercept CORS-blocked image requests from external server ──
     // Unity loads images via both XHR and fetch() from spillorama.aistechnolabs.info
