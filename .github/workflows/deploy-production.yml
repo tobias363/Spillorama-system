@@ -1,11 +1,9 @@
 name: Deploy Production
 
+# Deaktivert: Render auto-deployer fra main via render.yaml.
+# Denne workflowen trigget deploy hook i tillegg, som ga 409 Conflict.
+# Behold filen for manuell bruk via workflow_dispatch ved behov.
 on:
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
   workflow_dispatch:
 
 concurrency:
