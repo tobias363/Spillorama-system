@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en-us">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>SPILLORAMA</title>
+  <link rel="shortcut icon" href="TemplateData/favicon.ico">
+  <link rel="stylesheet" href="TemplateData/style.css">
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: url('TemplateData/bg.png') center / cover no-repeat fixed;
+    }
+
+    body.candy-overlay-open {
+      overflow: hidden;
+    }
+
+    #candy-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(21, 4, 18, 0.8);
+      backdrop-filter: blur(8px);
+      z-index: 10000;
+    }
+
+    #candy-overlay.is-open {
+      display: flex;
+    }
+
+    #candy-shell {
+      position: relative;
+      width: min(1480px, calc(100vw - 40px));
+      height: min(930px, calc(100vh - 40px));
+      border-radius: 22px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 237, 248, 0.98));
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    }
+
+    #candy-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+    }
+
+    #candy-close-btn {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      z-index: 3;
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: 700 14px/1 sans-serif;
+      color: #fff;
+      background: rgba(124, 17, 79, 0.92);
+      cursor: pointer;
+      box-shadow: 0 12px 30px rgba(124, 17, 79, 0.32);
+    }
+
+    #candy-close-btn:hover {
+      background: rgba(149, 21, 95, 0.96);
+    }
+
+    #candy-loading {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: #fff;
+      background: linear-gradient(180deg, rgba(121, 15, 95, 0.82), rgba(54, 0, 38, 0.9));
+    }
+
+    #candy-loading[hidden] {
+      display: none;
+    }
+
+    #candy-loading-spinner {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.24);
+      border-top-color: #fff;
+      animation: candy-spin 0.9s linear infinite;
+    }
+
+    #candy-status {
+      position: absolute;
+      left: 18px;
+      bottom: 18px;
+      z-index: 3;
+      max-width: calc(100% - 140px);
+      padding: 10px 14px;
+      border-radius: 14px;
+      font: 600 13px/1.35 sans-serif;
+      color: #4a1733;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 10px 28px rgba(64, 18, 52, 0.16);
+    }
+
+    #candy-status[data-state="error"] {
+      color: #8e1026;
+      background: rgba(255, 238, 242, 0.96);
+    }
+
+    @keyframes candy-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+
+</head>
+
+<body>
+  <div id="unity-container" class="unity-desktop" style="width:100%; height:100%; overflow:hidden">
+    <canvas id="unity-canvas" width=960 height=600></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
+    </div>
+    <div id="unity-warning"> </div>
+    <div id="unity-footer">
+      <div id="unity-webgl-logo"></div>
+      <div id="unity-fullscreen-button"></div>
+      <div id="unity-build-title">SPILLORAMA</div>
+    </div>
+  </div>
+  <script>
+    var container = document.querySelector("#unity-container");
+    var canvas = document.querySelector("#unity-canvas");
+    var loadingBar = document.querySelector("#unity-loading-bar");
+    var progressBarFull = document.querySelector("#unity-progress-bar-full");
+    var fullscreenButton = document.querySelector("#unity-fullscreen-button");
+    var warningBanner = document.querySelector("#unity-warning");
+    var recoveryOrigin = window.location.origin;
+    var recoverySocketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var legacyHosts = new Set([
+      'spillorama.aistechnolabs.info',
+      'bingoadmin.aistechnolabs.pro',
+      'bingoadmin.aistechnolabs.in'
+    ]);
+
+    function normalizeUrlInput(rawUrl) {
+      if (!rawUrl) {
+        return null;
+      }
+
+      if (typeof rawUrl === 'string') {
+        return rawUrl;
+      }
+
+      if (typeof URL !== 'undefined' && rawUrl instanceof URL) {
+        return rawUrl.toString();
+      }
+
+      if (typeof rawUrl.href === 'string') {
+        return rawUrl.href;
+      }
+
+      try {
+        return String(rawUrl);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function rewriteLegacyUrl(rawUrl, socketProtocol) {
+      var normalizedUrl = normalizeUrlInput(rawUrl);
+      if (!normalizedUrl) {
+        return rawUrl;
+      }
+
+      try {
+        var parsed = new URL(normalizedUrl, recoveryOrigin);
+        if (!legacyHosts.has(parsed.host)) {
+          return rawUrl;
+        }
+
+        if (socketProtocol) {
+          parsed.protocol = socketProtocol;
+        } else {
+          parsed.protocol = window.location.protocol;
+        }
+        parsed.host = window.location.host;
+
+        var rewritten = parsed.toString();
+        if (rewritten !== normalizedUrl) {
+          console.log('Rewriting legacy URL', normalizedUrl, '->', rewritten);
+        }
+        return rewritten;
+      } catch (error) {
+        return rawUrl;
+      }
+    }
+
+    // Recovery host patch: the shipped WebGL build is still wired to legacy AISTech hosts.
+    // Rewrite those URLs to the current origin so the same build can be smoke-tested locally.
+    var NativeWebSocket = window.WebSocket;
+    window.WebSocket = function(url, protocols) {
+      var rewrittenUrl = rewriteLegacyUrl(url, recoverySocketProtocol);
+      console.log('Recovery WebSocket open', normalizeUrlInput(url), '->', rewrittenUrl);
+      return protocols === undefined
+        ? new NativeWebSocket(rewrittenUrl)
+        : new NativeWebSocket(rewrittenUrl, protocols);
+    };
+    window.WebSocket.prototype = NativeWebSocket.prototype;
+    Object.setPrototypeOf(window.WebSocket, NativeWebSocket);
+
+    var nativeFetch = window.fetch.bind(window);
+    window.fetch = function(resource, init) {
+      if (typeof resource === 'string') {
+        resource = rewriteLegacyUrl(resource);
+      } else if (resource instanceof Request) {
+        var rewrittenRequestUrl = rewriteLegacyUrl(resource.url);
+        if (rewrittenRequestUrl !== resource.url) {
+          resource = new Request(rewrittenRequestUrl, resource);
+        }
+      }
+      return nativeFetch(resource, init);
+    };
+
+    var nativeXhrOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      var rewrittenUrl = rewriteLegacyUrl(url);
+      return nativeXhrOpen.apply(this, [method, rewrittenUrl].concat(Array.prototype.slice.call(arguments, 2)));
+    };
+
+    // Shows a temporary message banner/ribbon for a few seconds, or
+    // a permanent error message on top of the canvas if type=='error'.
+    // If type=='warning', a yellow highlight color is used.
+    // Modify or remove this function to customize the visually presented
+    // way that non-critical warnings and error messages are presented to the
+    // user.
+    function unityShowBanner(msg, type) {
+      function updateBannerVisibility() {
+        warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+      }
+      var div = document.createElement('div');
+      div.innerHTML = msg;
+      warningBanner.appendChild(div);
+      if (type == 'error') div.style = 'background: red; padding: 10px;';
+      else {
+        if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+        setTimeout(function () {
+          warningBanner.removeChild(div);
+          updateBannerVisibility();
+        }, 5000);
+      }
+      updateBannerVisibility();
+    }
+
+    var buildUrl = "Build";
+    var loaderUrl = buildUrl + "/Spillorama.loader.js";
+    var config = {
+      dataUrl: buildUrl + "/Spillorama.data.unityweb",
+      frameworkUrl: buildUrl + "/Spillorama.framework.js.unityweb",
+        codeUrl: buildUrl + "/Spillorama.wasm.unityweb",
+      streamingAssetsUrl: "StreamingAssets",
+        companyName: "AIS Technolabs",
+        productName: "SPILLORAMA",
+        productVersion: "8.1",
+        showBanner: unityShowBanner,
+      };
+
+    // By default Unity keeps WebGL canvas render target size matched with
+    // the DOM size of the canvas element (scaled by window.devicePixelRatio)
+    // Set this to false if you want to decouple this synchronization from
+    // happening inside the engine, and you would instead like to size up
+    // the canvas DOM size and WebGL render target sizes yourself.
+    // config.matchWebGLToCanvasSize = false;
+
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      // Mobile device style: fill the whole browser client area with the game canvas:
+
+      var meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+      document.getElementsByTagName('head')[0].appendChild(meta);
+      container.className = "unity-mobile";
+      canvas.className = "unity-mobile";
+
+      // To lower canvas resolution on mobile devices to gain some
+      // performance, uncomment the following line:
+      // config.devicePixelRatio = 1;
+
+      //unityShowBanner('WebGL builds are not supported on mobile devices.');
+    } else {
+      // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
+
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+    }
+
+    canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
+    loadingBar.style.display = "block";
+
+    function flushPendingDomainData() {
+      if (!unityInstanceRef || !pendingDomainData) {
+        return false;
+      }
+
+      var serverUrl = window.location.origin;
+      console.log("Flushing pending DomainDataCall", serverUrl);
+      unityInstanceRef.SendMessage('Socket And Event Manager', 'DomainDataCall', serverUrl);
+      pendingDomainData = false;
+      return true;
+    }
+
+    // DynamicWebgl: Unity kaller denne for å hente backend-origin ved oppstart.
+    function requestDomainData() {
+      var serverUrl = window.location.origin;
+      console.log("requestDomainData called", serverUrl);
+      if (unityInstanceRef) {
+        unityInstanceRef.SendMessage('Socket And Event Manager', 'DomainDataCall', serverUrl);
+      } else {
+        pendingDomainData = true;
+        console.log("Deferring DomainDataCall until Unity instance is ready");
+      }
+    }
+    var unityInstanceRef = null;
+    var pendingDomainData = false;
+
+    var script = document.createElement("script");
+    script.src = loaderUrl;
+    script.onload = () => {
+      createUnityInstance(canvas, config, (progress) => {
+        progressBarFull.style.width = 100 * progress + "%";
+      }).then((unityInstance) => {
+        unityInstanceRef = unityInstance;
+        flushPendingDomainData();
+        loadingBar.style.display = "none";
+        fullscreenButton.onclick = () => {
+          window.vuplex.SetFullscreen(1)/*https://support.vuplex.com/articles/webgl-fullscreen*/;
+        };
+
+        // Initialize Firebase Cloud Messaging
+        const firebaseConfig = {
+          apiKey: "AIzaSyCDX8TKN3YQhX9EmN5A2PGZ99Z-DZTBKM8",
+          authDomain: "spillorama-81245.firebaseapp.com",
+          projectId: "spillorama-81245",
+          storageBucket: "spillorama-81245.firebasestorage.app",
+          messagingSenderId: "839491165887",
+          appId: "1:839491165887:web:8e199d92d3acafbaccb00a",
+          measurementId: "G-BYWTVGSYQG"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const messaging = firebase.messaging();
+
+        // Get the path where index.html is hosted (like /web/, /game/, / or /custom/path/)
+        let swDir = window.location.pathname.replace(/[^\/]+$/, '');
+        let swPath = swDir + 'firebase-messaging-sw.js';
+
+        navigator.serviceWorker.register(swPath, {
+          scope: swDir
+        }).then((registration) => {
+          console.log("✅ Service worker registered");
+          // ✅ Call getToken with service worker reference
+          Notification.requestPermission().then((permission) => {
+            if (permission === 'granted') {
+              messaging.getToken({
+                vapidKey: "BBDxQ88h8BqvyGFI3aWljk-9RXmtrfieb5WzAlk8HuR4jvVpEyG21mBGVuQNxGPOinyeOt-JkwnVAUuMEaOPTCk",
+                serviceWorkerRegistration: registration
+              }).then((token) => {
+                console.log("Web Push Token:", token);
+                unityInstance.SendMessage('FirebaseManager', 'OnWebTokenReceived', token);
+              }).catch((err) => {
+                console.error("FCM getToken error:", err);
+              });
+            } else {
+              console.warn("Notification permission not granted");
+            }
+          });
+        });
+
+        // Foreground push messages
+        messaging.onMessage((payload) => {
+          console.log('Push received in foreground:', payload);
+          unityInstance.SendMessage('FirebaseManager', 'OnWebMessageReceived', JSON.stringify(payload));
+                // Forward to service worker for native notification
+                const title = payload.notification?.title || 'Notification';
+    const body = payload.notification?.body || '';
+    const icon = '/TemplateData/favicon.ico';
+    const staticURL = new URL('./', window.location.href).toString();
+
+    if (Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        icon,
+        data: { url: staticURL }
+      }).onclick = function (event) {
+        event.preventDefault();
+        window.open(staticURL, '_blank');
+      };
+    }
+        });
+
+      }).catch((message) => {
+        alert(message);
+      });
+    };
+    document.body.appendChild(script);
+    const channel = new BroadcastChannel("focusSpiloramaWeb");
+    channel.onmessage = (event) => {
+      if (event.data === "focus-tab") {
+        window.focus();
+      }
+    };
+
+    const CANDY_ROUTE = "/candy/";
+    let existingTab = null;
+    let candyPlayerToken = "";
+    let candyEmbedOrigin = null;
+    let candyOverlay = null;
+    let candyShell = null;
+    let candyFrame = null;
+    let candyStatus = null;
+    let candyLoading = null;
+    let candyLoadingMessage = null;
+
+    function isCandyRoute(url) {
+      return typeof url === "string" && /(^|\/)candy(\/|$|\?)/.test(url);
+    }
+
+    function ensureCandyOverlay() {
+      if (candyOverlay) {
+        return;
+      }
+
+      candyOverlay = document.createElement("div");
+      candyOverlay.id = "candy-overlay";
+      candyOverlay.innerHTML = `
+        <div id="candy-shell">
+          <button id="candy-close-btn" type="button">Lukk</button>
+          <iframe id="candy-frame" title="Candy Mania" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+          <div id="candy-loading">
+            <div id="candy-loading-spinner"></div>
+            <div id="candy-loading-message">Starter Candy Mania...</div>
+          </div>
+          <div id="candy-status"></div>
+        </div>
+      `;
+      document.body.appendChild(candyOverlay);
+
+      candyShell = candyOverlay.querySelector("#candy-shell");
+      candyFrame = candyOverlay.querySelector("#candy-frame");
+      candyStatus = candyOverlay.querySelector("#candy-status");
+      candyLoading = candyOverlay.querySelector("#candy-loading");
+      candyLoadingMessage = candyOverlay.querySelector("#candy-loading-message");
+
+      candyOverlay.querySelector("#candy-close-btn").addEventListener("click", () => {
+        closeGameOverlay();
+      });
+
+      candyFrame.addEventListener("load", () => {
+        setCandyLoading(false);
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && candyOverlay.classList.contains("is-open")) {
+          closeGameOverlay();
+        }
+      });
+    }
+
+    function setCandyStatus(message, isError) {
+      ensureCandyOverlay();
+      candyStatus.textContent = message || "";
+      candyStatus.dataset.state = isError ? "error" : "info";
+    }
+
+    function setCandyLoading(isLoading, message) {
+      ensureCandyOverlay();
+      candyLoading.hidden = !isLoading;
+      if (typeof message === "string" && message.length > 0) {
+        candyLoadingMessage.textContent = message;
+      }
+    }
+
+    function openCandyOverlay() {
+      ensureCandyOverlay();
+      candyOverlay.classList.add("is-open");
+      document.body.classList.add("candy-overlay-open");
+    }
+
+    function resetCandyOverlayState() {
+      if (!candyOverlay) {
+        return;
+      }
+
+      candyOverlay.classList.remove("is-open");
+      document.body.classList.remove("candy-overlay-open");
+      setCandyLoading(false);
+      setCandyStatus("", false);
+      candyEmbedOrigin = null;
+      if (candyFrame) {
+        candyFrame.src = "about:blank";
+      }
+      if (candyShell) {
+        candyShell.style.width = "";
+        candyShell.style.height = "";
+      }
+    }
+
+    function closeGameOverlay(options) {
+      const notifyIframe = !options || options.notifyIframe !== false;
+      if (notifyIframe && candyFrame && candyFrame.contentWindow) {
+        try {
+          candyFrame.contentWindow.postMessage({ type: "host:closeGame", payload: {} }, candyEmbedOrigin || "*");
+        } catch (_error) {
+        }
+      }
+
+      resetCandyOverlayState();
+    }
+
+    async function launchCandyOverlay() {
+      if (!candyPlayerToken) {
+        unityShowBanner("Candy krever en aktiv Spillorama-session. Logg inn på nytt.", "error");
+        return;
+      }
+
+      openCandyOverlay();
+      setCandyLoading(true, "Starter Candy Mania...");
+      setCandyStatus("Starter Candy Mania...", false);
+
+      try {
+        const response = await fetch("/api/games/candy/launch", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + candyPlayerToken
+          },
+          body: JSON.stringify({
+            returnUrl: window.location.origin + window.location.pathname
+          })
+        });
+
+        const body = await response.json().catch(() => null);
+        if (!response.ok || !body || !body.ok || !body.data || !body.data.embedUrl) {
+          throw new Error(body && body.error && body.error.message ? body.error.message : "Kunne ikke starte Candy Mania.");
+        }
+
+        candyEmbedOrigin = new URL(body.data.embedUrl, window.location.origin).origin;
+        candyFrame.src = body.data.embedUrl;
+        setCandyStatus("Candy Mania lastes...", false);
+      } catch (error) {
+        console.error("Candy launch failed", error);
+        resetCandyOverlayState();
+        unityShowBanner(error && error.message ? error.message : "Kunne ikke starte Candy Mania.", "error");
+      }
+    }
+
+    function handleCandyResize(payload) {
+      if (!payload || typeof payload !== "object" || !candyShell) {
+        return;
+      }
+
+      const width = Number(payload.width);
+      const height = Number(payload.height);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        return;
+      }
+
+      candyShell.style.width = Math.min(Math.max(width + 32, 960), window.innerWidth - 40) + "px";
+      candyShell.style.height = Math.min(Math.max(height + 32, 640), window.innerHeight - 40) + "px";
+    }
+
+    window.addEventListener("message", (event) => {
+      const data = event.data;
+      if (!data || typeof data !== "object" || typeof data.type !== "string" || !data.type.startsWith("candy:")) {
+        return;
+      }
+
+      if (candyEmbedOrigin && event.origin !== candyEmbedOrigin) {
+        return;
+      }
+
+      switch (data.type) {
+        case "candy:ready":
+          setCandyLoading(false);
+          setCandyStatus("Candy Mania er klar.", false);
+          break;
+        case "candy:balanceChanged":
+          setCandyLoading(false);
+          setCandyStatus("Saldo oppdatert i Spillorama.", false);
+          if (unityInstanceRef) {
+            unityInstanceRef.SendMessage("UIManager", "RefreshPlayerWalletFromHost", "");
+          }
+          break;
+        case "candy:gameStarted":
+          setCandyStatus("Candy Mania er i gang.", false);
+          break;
+        case "candy:gameEnded":
+          setCandyStatus("Spillet er avsluttet.", false);
+          if (unityInstanceRef) {
+            unityInstanceRef.SendMessage("UIManager", "RefreshPlayerWalletFromHost", "");
+          }
+          break;
+        case "candy:error":
+          setCandyLoading(false);
+          setCandyStatus(
+            data.payload && typeof data.payload.message === "string"
+              ? data.payload.message
+              : "Candy rapporterte en feil.",
+            true
+          );
+          break;
+        case "candy:resize":
+          handleCandyResize(data.payload);
+          break;
+      }
+    });
+
+    function SetPlayerToken(token) {
+      candyPlayerToken = typeof token === "string" ? token.trim() : "";
+    }
+
+    function ClearPlayerToken() {
+      candyPlayerToken = "";
+      closeGameOverlay({ notifyIframe: false });
+    }
+
+    function OpenUrlInSameTab(url) {
+      if (isCandyRoute(url)) {
+        launchCandyOverlay();
+        return;
+      }
+
+      if (existingTab && !existingTab.closed) {
+        existingTab.focus();
+      } else {
+        existingTab = window.open(url, 'myUniqueTab');
+      }
+    }
+
+    // function ShowBrowserNotification(title, body) {
+    //   if (Notification.permission === "granted") {
+    //     new Notification(title, { body: body });
+    //   } else if (Notification.permission !== "denied") {
+    //     Notification.requestPermission().then(function (permission) {
+    //       if (permission === "granted") {
+    //         new Notification(title, { body: body });
+    //       }
+    //     });
+    //   }
+    // }
+  </script>
+</body>
+
+</html>

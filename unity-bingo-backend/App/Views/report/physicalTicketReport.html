@@ -1,0 +1,226 @@
+{% extends "partition/layout.html" %}
+
+
+{% block body %}
+
+
+	<!-- Main Content -->
+	<div class="page-wrapper">
+		<div class="container-fluid">
+
+			<!-- Title -->
+			<section class="content-header">
+			    <h1>{{gameReport.physical_ticket_report}} {{gameReport.table}}</h1>
+			    <ol class="breadcrumb">
+			        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{gameReport.dashboard}}</a></li>
+			        <!-- <li class="active">User profile</li> -->
+			    </ol>
+			</section>
+			<!-- /Title -->
+			{% include "partition/notification.html" %}
+			<!-- Row -->
+			<section class="content">
+				<div class="row">
+					<div class="col-sm-12">
+						<div class="panel panel-default card-view">
+							<div class="panel-heading">
+								<div class="pull-left">
+									<h6 class="panel-title txt-dark">{{gameReport.physical_ticket_report}}</h6>
+								</div>
+								<!-- <div class="pull-right">
+									<a href="/addUser"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add User</button></a>
+								</div> -->
+								<div class="clearfix"></div>
+							</div>
+							<div class="panel-wrapper collapse in">
+								<div class="panel-body">
+
+                                    <div class="table-data__tool-left row">
+                                        <div class="col-md-3 col-md-offset-2"> 
+                                            <!-- <label>Game : </label>
+                                            <select id="game_menu_placeholder">
+                                                    <option value="">All</option>
+                                                    <option value="game_1">Game 1</option>
+                                                    <option value="game_2">Game 2</option>
+                                                    <option value="game_3">Game 3</option>
+                                                    <option value="game_4">Game 4</option>
+                                            </select> -->
+                                        </div>
+                                        
+                                    </div>
+
+									<div class="table-wrap">
+										<div class="table-responsive">
+											<table id="myTable" class="table  table-hover display  pb-30" >
+												<thead>
+													<tr>
+														<th>{{gameReport.ticket_number}}</th>
+                                                        <!-- <th>{{gameReport.physical_ticket_report_table}}Unique Number</th> -->
+                                                        <th>{{gameReport.game_id}}</th>
+                                                        <th>{{gameReport.group_of_hall_name}}</th>
+                                                        <th>{{gameReport.hall_name}}</th>
+														<th>{{gameReport.start_date_Time}}</th>
+														<th>{{gameReport.game_name}}</th>
+														<th>{{gameReport.ticket_color_type}}</th>
+														<th>{{gameReport.ticket_price}}</th>
+													</tr>
+												</thead>
+												<tbody>
+												</tbody>
+											</table>
+										</div>
+									</div>
+                                    <label class="control-label mb-8 col-sm-8">{{gameReport.total_amount_received_by_selling_ticket}}:- <span class="badge bg-green" id="totalTicketPurchasePrice">{{totalTicketPrice[0].ticketsPrice}}</span> </label>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+		</div>
+	</div>	
+
+{% endblock %}
+
+{% block Jscript %}
+<script>
+
+	var host = window.location.origin;
+	var tableObject="";
+	window.dataTableData =()=>{
+		if(tableObject){
+            $('#myTable').dataTable().fnDestroy();
+        }
+
+		tableObject = $('#myTable').DataTable({
+           
+			"oLanguage": {
+				"sSearch": "{{gameReport.search}} {{gameReport.ticket_number}}",
+                "sLengthMenu": "{{gameReport.show}} _MENU_ {{gameReport.entries}}",
+                "oPaginate": {
+                    sPrevious: "{{ gameReport.previous }}",
+                    sNext: "{{ gameReport.next }}"
+                },
+                "sEmptyTable": "{{gameReport.no_data_available_in_table}}",
+                "sInfo": "{{gameReport.showing}} _START_ to _END_ of _TOTAL_ {{gameReport.entries}}",
+                "sInfoEmpty": "{{gameReport.showing}} 0 to 0 of 0 {{gameReport.entries}}"
+			},
+            "processing": true,
+            "serverSide": true,
+            "ordering": false,
+            "autoWidth": false,
+            "searching": true,
+            "pageLength": 10,
+            "scrollX": true,
+            "ajax":{
+                "url":host + "/reportPhysical/physicalTicketReport",
+                "type":"GET",
+                "data":{games: $('#game_menu_placeholder').val()},
+                "dataSrc": function (json){
+                    console.log("+++++++++++json json json ++++ :",json)
+
+                    // $('#total_paid_ticket').val(parseFloat(totPaidAmt).toFixed(2));
+                    return json.data;
+                }
+            },
+           
+            "columns": [
+                { "data": "ticketId",
+                    render: function(data, type, row) {
+                        console.log("++++++++++++++++++++++++ : ",row)
+                        return ((row.ticketId)?(row.ticketId):'-');
+                    } 
+                },
+				// { "data": "uniquePlayerId",
+                //     render: function(data, type, row) {
+                //         return (row.userType == "Physical") ? "-" :  ((row.uniquePlayerId)?(row.uniquePlayerId):'-');
+                //     } 
+                // },
+                {
+                    "data":"gameId"
+                },
+                {
+                    "data": "groupHallName"
+                },
+                {
+                    "data": "hallName"
+                },
+				{ "data": "createdAt",
+                    render: function(data, type, row) {
+                        let dt = new Date(row.createdAt);
+                        let date = dt.getDate();
+                        let month = parseInt(dt.getMonth() + 1);
+                        let year = dt.getFullYear();
+                        let hours = dt.getHours();
+                        let minutes = dt.getMinutes();
+                        let ampm = hours >= 12 ? 'pm' : 'am';
+                        hours = hours % 12;
+                        hours = hours ? hours : 12;
+                        minutes = minutes < 10 ? '0' + minutes : minutes;
+                        let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+                        return createdAt;
+                    }
+                },
+				{ "data": "gameName",
+                    render: function(data, type, row) {
+                        return ((row.gameName)?(row.gameName):'-');
+                    } 
+                },
+				{ "data": "ticketColorName",
+                    render: function(data, type, row) {
+                        return ((row.ticketColorName)?(row.ticketColorName):'-');
+                    } 
+                },
+				{ "data": "ticketPrice",
+                    render: function(data, type, row) {
+                        return ((row.ticketPrice)?(row.ticketPrice):'-');
+                    } 
+                }
+			],
+            "initComplete": function() {
+                
+            }
+
+        });
+
+	}
+
+
+    $(document).on("change",'#game_menu_placeholder', function(){
+        console.log("++++++++++++++++++ : , #game_menu_placeholder ");
+        dataTableData();
+    });
+
+	
+$(document).ready( function () {
+
+		$('#startDate input,#endDate input').datepicker();
+
+        $('.glyphicon1').click(function() {
+            $("#startDate input").focus();
+        });
+
+        $('.glyphicon2').click(function() {
+            $("#endDate input").focus();
+        });
+
+
+        dataTableData();
+
+        $('#search').click(function() {
+            dataTableData();
+        });
+
+    $('.sidebar-toggle').click(function () {
+        console.log("sidebar clicked");
+        $('.dataTables_scrollHeadInner').css('width', '100%');
+        $('#myTable').css('width', '100%');
+        setTimeout(function () {
+            $('#myTable').DataTable().columns.adjust().draw();
+        }, 200);
+    })
+} );
+
+
+</script>
+{% endblock %}

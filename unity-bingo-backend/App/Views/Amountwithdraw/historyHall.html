@@ -1,0 +1,393 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{withdraw.withdraw_history_table}} </h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{withdraw.dashboard}}</a></li>
+                <li class="active" href="/withdraw/history">{{withdraw.withdraw_history_hall}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{withdraw.withdraw_history_hall}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                <button class="btn btn-success btn-xs btn-rounded" onClick="$('#myTable').DataTable().ajax.reload();">{{withdraw.refresh_table}}</button>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <div class="row">
+                                    <div class="col-sm-2">
+                                        <div class="form-group">
+                                            <label for="start_date" class="control-label">{{withdraw.from_date}} :</label>
+                                            <div class='input-group date' id='startDate'>
+                                                <input type='text' class="form-control" name="start_date" id="start_date" placeholder="{{withdraw.start_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"/>
+                                                <span class="input-group-addon">
+                                                    <span class="glyphicon glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-sm-2">
+                                        <div class="form-group">
+                                            <label for="end_date" class="control-label">{{withdraw.to_date}} :</label>
+                                            <div class='input-group date' id='endDate'>
+                                                <input type='text' class="form-control" name="end_date" id="end_date" placeholder="{{withdraw.end_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"/>
+                                                <span class="input-group-addon">
+                                                    <span class="glyphicon glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% if Agent.role == "admin" %}
+                                    <div>
+                                        <div class="col-sm-3">
+                                            <div class="form-group">
+                                                <label for="withdraw_by" class="control-label">{{withdraw.group_of_hall_name}} :</label>
+                                                <div class="input-group">
+                                                    <span class="input-group-addon"><i class="fa fa-filter" aria-hidden="true"></i></span>
+                                                    <select name="groupHall" class="form-control" id="groupHall">
+                                                        <option value="" selected="selected">{{withdraw.group_of_hall_name}}
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div class="col-sm-3">
+                                            <div class="form-group">
+                                                <label for="withdraw_by" class="control-label">{{withdraw.hall_name}} :</label>
+                                                <div class="input-group">
+                                                    <select name="hall" class="form-control" id="hallName" disabled>
+                                                        <option value="" selected="selected">{{withdraw.hall_name}}
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    <div class="col-sm-2">
+                                        <div class="form-group">
+                                            <label for="withdraw_by" class="control-label">   </label>
+                                            <div class="input-group">
+                                                <input type="button" name="search" id="search" value="{{withdraw.search}}" class="btn btn-info" />
+                                            </div>
+                                        </div>
+                                        
+                                    </div>
+                                </div>
+
+                                <!-- <div class="panel-wrapper collapse in"> -->
+                                    <!-- <div class="panel-body"> -->
+                                        <div class="table-wrap">
+                                            <div class="table-responsive">
+                                                <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                                <table id="myTable" class="table table-bordered table-striped">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>{{withdraw.date_time}}</th>
+                                                            <th>{{withdraw.transaction_id}}</th>
+                                                            <th>{{withdraw.customer_number}}</th>
+                                                            <th>{{withdraw.fullname}}</th>
+                                                            <th>{{withdraw.amount}}</th>
+                                                            <th>{{withdraw.hall}}</th>
+                                                            <!--{{withdraw.withdraw_history_table}} <th>Bank Account Number</th> -->
+                                                            <th>{{withdraw.status}}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    <!-- </div> -->
+                                <!-- </div> -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script>
+    function formatDate(date) {
+        let d = new Date(date),
+            month = '' + (d.getMonth() + 1),
+            day = '' + d.getDate(),
+            year = d.getFullYear();
+
+        if (month.length < 2) 
+            month = '0' + month;
+        if (day.length < 2) 
+            day = '0' + day;
+
+        return [year, month, day].join('-');
+    }
+    let orderTable = "";
+    
+    $(document).ready(function() {
+        let ajaxUrl = host + "/withdraw/history/hall/get";
+        $('#startDate input,#endDate input').datepicker();
+        $('#startDate input,#endDate input').val(formatDate(new Date()));
+
+        /*let today = new Date();
+        let endDate = new Date(today.getTime()); // today
+        let startDate = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days ago
+        $('#startDate').datepicker('setDate', startDate);
+        $('#endDate').datepicker('setDate', endDate);
+        
+        $('#startDate').datepicker({
+            autoclose: true,
+            format: 'yyyy-mm-dd',
+            endDate: today,
+            startDate: startDate,
+        }).on('changeDate', function(selected){
+            startDate = new Date(selected.date.valueOf());
+            startDate.setDate(startDate.getDate());
+            $('#endDate').datepicker('setStartDate', startDate);
+            $('#endDate').datepicker('setEndDate', new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000)); // Set the end date to be 7 days after the selected start date
+            $('#end_date').val('');
+        });
+
+        $('#endDate').datepicker({
+            autoclose: true,
+            format: 'yyyy-mm-dd',
+            startDate: startDate,
+            endDate: today,
+        })*/
+
+        let start_date = $('#start_date').val();
+        let end_date = $('#end_date').val();
+        fetch_data('yes', start_date, end_date);
+
+        function fetch_data(is_date_search, start_date = '', end_date = '') {
+        
+            let groupHall = $('#groupHall').val();
+            let hall = $('#hallName').val();
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "{{withdraw.search}} {{withdraw.fullname}}/{{withdraw.customer_number}}",
+                    "sLengthMenu": "{{withdraw.show}} _MENU_ {{withdraw.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ withdraw.previous }}",
+                        sNext: "{{ withdraw.next }}"
+                    },
+                    "sEmptyTable": "{{withdraw.no_data_available_in_table}}",
+                    "sInfo": "{{withdraw.showing}} _START_ to _END_ of _TOTAL_ {{withdraw.entries}}",
+                    "sInfoEmpty": "{{withdraw.showing}} 0 to 0 of 0 {{withdraw.entries}}"
+                },
+                "processing": true,
+                "serverSide": true,
+                "order": [
+                    [0, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": [2, 4,5],
+                    "orderable": false
+                }],
+                "autoWidth": false,
+                "pageLength": 10,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: {
+                        is_date_search: is_date_search,
+                        start_date: start_date,
+                        end_date: end_date,
+                        transactionType: $("#transactionType").val(),
+                        groupHall: groupHall ? groupHall : '',
+                        hall: hall ? hall : ''
+                    }
+                },
+                //dom: 'lBfrtip',
+                //dom: '<"pull-left"B><"pull-right"f>rt<"row"<"col-sm-4"l><"col-sm-4"i><"col-sm-4"p>>',
+                dom:
+                   "<'row'<'col-sm-3'l><'col-sm-4 text-center'B><'col-sm-5'f>>" +
+                        "<'row'<'col-sm-12'tr>>" +
+                        "<'row'<'col-sm-5'i><'col-sm-7'p>>",
+                lengthMenu: [
+                    [10, 100, -1],
+                    [10, 100, "All"]
+                ],
+                "buttons": [
+                    // 'csv', 'excel'
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5, 6]
+                        }
+                    }, {
+                        extend: 'excelHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5, 6]
+                        }
+                    }
+                ],
+                "columns": [
+                    {
+                        "data": "updatedAt",
+                        render: function(data, type, row, meta) {
+                            return moment(row.updatedAt).format('DD/MM/YYYY hh:mm a'); //moment.utc(row.updatedAt).format('DD/MM/YYYY hh:mm a');
+                        }
+                    },
+                    {
+                        "data": "transactionId"
+                    }, {
+                    "data": "customerNumber",
+                        render: function (data, type, row) {
+                            let customerNumber = ''
+                            if (data) {
+                                customerNumber = data;
+                            }
+                            return customerNumber;
+                        }
+                    }, {
+                        "data": "name"
+                    }, {
+                        "data": "withdrawAmount"
+                    }, {
+                        "data": "hallName"
+                    }, 
+                    {
+                        "data": "status",
+                        render: function(data, type, row) {
+                            if (row.status == "pending") {
+                                return '<span class="badge bg-blue"> In Progress </span>';
+                            } else if (row.status == "completed") {
+                                return '<span class="badge bg-green"> Completed </span>';
+                            } else if (row.status == "failed") {
+                                return '<span class="badge bg-red"> Failed </span>';
+                            } else if (row.status == "rejected") {
+                                return '<span class="badge bg-red"> Rejected </span>';
+                            }
+                        }
+                    }, 
+                ]
+            });
+        }
+
+        loadGroupHalls();
+        //Load Group Halls
+        function loadGroupHalls() {
+            console.log("loading group halls");
+            $.ajax({
+                type: 'GET',
+                url: host + "/getAllGroupHalls",
+                success: function (resultData) {
+                    console.log("List of GroupHalls", resultData);
+                    if (resultData.status == 'success') {
+                        console.log(resultData);
+                        if (resultData.groups.length) {
+                            for (const val of resultData.groups) {
+                                $('#groupHall').append($(document.createElement('option')).prop({
+                                    value: val._id,
+                                    text: val.name
+                                }));
+                            }
+                        }
+                    } else {
+                        console.log("something went wrong");
+                    }
+                }
+            });
+
+        }
+
+        //Group Hall Name Change Listener
+        $('#groupHall').on('change', function () {
+            let value = $(this).val();
+            console.log("groupHall selection", value);
+            $("#hallName > option").each(function () {
+                if (this.value !== '') {
+                    $(this).remove();
+                } else {
+                    $(this).attr('selected', true);
+                }
+            });
+            if (value == "") {
+                $('#hallName').prop('disabled', true);
+            } else {
+                //Load Hall DropDown Options
+                loadHalls(value);
+            }
+        });
+        
+        //Load Halls
+        function loadHalls(value) {
+            console.log("loading halls",value);
+            $.ajax({
+                type: 'GET',
+                url: host + "/getHalls",
+                data: {
+                    id: value
+                },
+                success: function (resultData) {
+                    console.log("List of Halls", resultData);
+                    if (resultData.status == 'success') {
+                        console.log(resultData);
+                        if (resultData.halls.length) {
+                            for (const val of resultData.halls) {
+                                $('#hallName').append($(document.createElement('option')).prop({
+                                    value: val._id,
+                                    text: val.name
+                                }));
+                            }
+                        }
+                        $('#hallName').prop('disabled', false);
+                    } else {
+                        console.log("something went wrong");
+                    }
+                }
+            });
+
+        }
+    
+
+        $('#search').click(function() {
+            let start_date = $('#start_date').val();
+            let end_date = $('#end_date').val();
+            if (start_date != '' && end_date != '') {
+                $('#myTable').DataTable().destroy();
+                fetch_data('yes', start_date, end_date);
+            } else {
+                alert("Both Date is Required");
+            }
+        });
+        
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

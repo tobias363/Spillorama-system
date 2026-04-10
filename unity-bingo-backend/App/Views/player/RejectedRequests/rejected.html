@@ -1,0 +1,532 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+
+    .reason {
+        white-space: nowrap;
+        width: 70px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        /* border: 1px solid #000000; */
+    }
+
+    .popover-body {
+        height: 50px;
+        width: 150px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        word-break: break-all;
+    }
+
+    .cst {
+        display: flex;
+        justify-content: flex-end;
+        gap: 20px;
+        align-items: flex-end;
+    }
+
+    .form-horizontal button {
+        width: 50px;
+    }
+
+    button#search,
+    button#filterReset {
+        min-width: 55px;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{rejectRequest.reject_request}} </h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{rejectRequest.dashboard}}</a></li>
+                <li class="active" href="/player/rejectedRequests">{{rejectRequest.reject_request}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+
+            <!-- Search Filter Code Start -->
+
+            <div class="row">
+                <div class="col-sm-12">
+                    <form id="filterForm">
+                        <div class="box">
+                            <div class="box-header">
+                                <h3 class="box-title">{{rejectRequest.search_by_filter}}</h3>
+                            </div>
+                            <div class="box-body">
+                                <div class="row cst">
+                                    <div class="col-lg-6">
+                                        <div class="cst">
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <label for="fromDate">{{rejectRequest.from_date}} :</label>
+                                                    <input type="date" class="dateFilter form-control" name="fromDate" id="fromDate"
+                                                        onkeydown="return false">
+                                                </div>
+                                            </div>
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <label for="toDate">{{rejectRequest.to_date}} :</label>
+                                                    <input type="date" class="dateFilter form-control" name="toDate" id="toDate"
+                                                        onkeydown="return false">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-6">
+                                        <div class="cst">
+                                            {% if Agent.role == 'admin'%}
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <select name="hallName" class="form-control" id="hallName">
+                                                        <option value="" selected="selected">{{rejectRequest.hall_name}}</option>
+                                                        {% if halls.length %}
+                                                         {% for hall in halls %}
+                                                          <option value="{{hall.id}}">{{hall.name}}</option>
+                                                         {% endfor %}
+                                                        {% endif %}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            {% endif %}
+                                            <button type="button" class="pull-right btn btn-primary playersearch"
+                                                id="search"><i class="fa fa-search"></i></button>
+                                            <button type="reset" class="btn btn-primary pull-right clickreset" id="filterReset">{{rejectRequest.reset}}</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <!-- Search Filter Code End -->
+
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{rejectRequest.reject_request}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <!-- DataTable Code Start -->
+                                <div class="row">
+                                    <div class="col-sm-12">
+                                        <div class="table-wrap">
+                                            <div class="table-responsive">
+                                                <input type="text" name="agent" id="agent" value="{{Agent.role}}"
+                                                    hidden>
+                                                <table id="myTable" class="table table-bordered table-striped">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>{{rejectRequest.customer_number}}</th>
+                                                            <th>{{rejectRequest.username}}</th>
+                                                            <th>{{rejectRequest.reject_date_time}}</th>
+                                                            <th>{{rejectRequest.emailId}}</th>
+                                                            <th>{{rejectRequest.phone_number}}</th>
+                                                            <th>{{rejectRequest.hall_name}}</th>
+                                                            <th>{{rejectRequest.reject_by}}</th>
+                                                            <th>{{rejectRequest.rejection_reason}}</th>
+                                                            <th>{{rejectRequest.action}}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- DataTable Code End -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    var orderTable = "";
+    var table;
+    var host = window.location.origin;
+    let data = {
+        fromDate: '',
+        toDate: '',
+        hallId: ''
+    }
+    $(document).ready(function () {
+        console.log("document Loaded", data);
+        let ajaxUrl = host + "/player/getRejected";
+        let isAllPlayers = "{{allPlayers}}";
+        let agent = $('#agent').val();
+        let deleteFlag = '{{deleteFlag}}';
+        let viewFlag = '{{viewFlag}}';
+        let editFlag = '{{editFlag}}';
+        if (isAllPlayers == 'true') { };
+
+        dataLoad(data);
+        function dataLoad(params) {
+            //Drawing Datatable
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "{{rejectRequest.search}} {{rejectRequest.username}}/{{rejectRequest.customer_number}}",
+                    "sLengthMenu": "{{rejectRequest.show}} _MENU_ {{rejectRequest.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ rejectRequest.previous }}",
+                        sNext: "{{ rejectRequest.next }}"
+                    },
+                    "sEmptyTable": "{{rejectRequest.no_data_available_in_table}}",
+                    "sInfo": "{{rejectRequest.showing}} _START_ to _END_ of _TOTAL_ {{rejectRequest.entries}}",
+                    "sInfoEmpty": "{{rejectRequest.showing}} 0 to 0 of 0 {{rejectRequest.entries}}",
+                },
+                drawCallback: function () {
+                    $('[data-toggle="popover"]').popover({
+                        'container': 'body'
+                    });
+                },
+                "processing": true,
+                "serverSide": true,
+                "order": [
+                    [0, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": [7, 5],
+                    "orderable": false
+                }],
+                "autoWidth": false,
+                "pageLength": 100,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: function (data) {
+                        data.params = params;
+                    }
+                },
+                "pageLength": 25,
+                "buttons": [
+                    // 'csv', 'excel'
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }, {
+                        extend: 'excelHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }
+                ],
+                "columns": [{
+                    "data": "customerNumber"
+                }, {
+                    "data": "username"
+                }, {
+                    "data": "rejectTimeDate",
+                    render: function (data, type, row) {
+                        let dt = new Date(row.updatedAt);
+                        let date = dt.getDate();
+                        let month = parseInt(dt.getMonth() + 1);
+                        let year = dt.getFullYear();
+                        let hours = dt.getHours();
+                        let minutes = dt.getMinutes();
+                        let ampm = hours >= 12 ? 'pm' : 'am';
+                        hours = hours % 12;
+                        hours = hours ? hours : 12;
+                        minutes = minutes < 10 ? '0' + minutes : minutes;
+                        let rejectTime = (date > 9 ? date : '0' + date) + '/' + (month > 9 ? month : '0' + month) + '/' + year + ' ' + (hours > 9 ? hours : '0' + hours) + ':' + minutes + ' ' + ampm;
+                        return rejectTime;
+                    }
+                }, {
+                    "data": "email"
+                }, {
+                    "data": "phone"
+                },
+                // {
+                //     "data": 'hallName',
+                //     render: function (data, type, row) {
+                //         return row.hall.name;
+                //     }
+                // }, 
+                {
+                    "data": "approvedHalls",
+                    render: function (data, type, row) {
+                        if (!data || data.length === 0) {
+                            return '';
+                        }
+                        let $select = $('<select id="select1-' + row._id + '" class="form-control"></select>', {
+                            "id": row[3],
+                            "value": data.map(item => item.name)
+                        });
+                        $.each(data, function(k, v) {
+                            let $option = $("<option></option>", {
+                                "text": v.name,
+                                "value": v.id
+                            });
+                            $select.append($option);
+                        });
+                        return $select.prop("outerHTML");
+                    }
+                },
+                {
+                    "data": "rejectBy",
+                    render: function (data, type, row) {
+                        if (row.hall.actionBy && row.hall.actionBy.name) {
+                            return row.hall.actionBy.name;
+                        } else {
+                            if(row.hallApprovedBy && row.hallApprovedBy.name){
+                                val = row.hallApprovedBy.name
+                            }else{
+                                val = "";
+                            }
+                            return val;
+                        }
+                    }
+                }, {
+                    "data": "rejectReason",
+                    render: function (data, type, row) {
+                        let html = '';
+                        if(row.hall?.reason){
+                            html = `<p class="reason" data-toggle="popover" data-placement="bottom" title="Reason" data-content="${row.hall.reason}" data-trigger="manual">` + row.hall.reason + `</p>`;
+                        }
+                        return html;
+                    }
+                }, {
+                    "data": "action",
+                    render: function (data, type, row) {
+                        let html = '<div style="display: flex;">';
+                        if (viewFlag == 'true') {
+                            html += `<a href="/viewRejectedPlayer/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="{{rejectRequest.view_player}}" style="margin-right: 2px">
+                                    <i class="fa fa-eye" aria-hidden="true"></i>
+                                </a>`
+                        } else {
+                            html += `  `;
+                        }
+
+                        if (deleteFlag == 'true') {
+                            html += ` <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="{{rejectRequest.delete_player}}" style="margin-right: 2px"><i class="fa fa-trash" aria-hidden="true"></i></button>`;
+                        } else {
+                            html += `  `;
+                        }
+
+                        if (editFlag == 'true' && agent == "admin") {
+                            html += ` <button type="button" name="approve" id="` + row._id + `" class="btn btn-success btn-xs approve btn-rounded" title="{{rejectRequest.approve_player}}"><i class="fa fa-check" aria-hidden="true"></i></button>`;
+                        }
+                        html += '</div>'
+                        return html;
+                    }
+                }]
+            });
+            table = $('#myTable').DataTable();
+        }
+
+        $(function () {
+            "use strict";
+
+            var SweetAlert = function () { };
+
+            SweetAlert.prototype.init = function () {
+
+                //Parameter
+                $('body').on('click', '.delete', function (e) {
+                    var id = $(this).attr('id');
+                    var thisElement = this;
+                    swal({
+                        title: "{{rejectRequest.are_you_sure}}?",
+                        text: "{{rejectRequest.you_will_not_be_able_to_recover_this_player}}",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{rejectRequest.delete_button}}",
+                        cancelButtonText: "{{rejectRequest.cancel_button}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/player/deleteRejected",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData) {
+                                    // alert(resultData)
+                                    console.log("Rejected Player Delete Response", resultData);
+                                    if (resultData == 'success') {
+                                        // $(thisElement).parent().parent().hide(700);
+                                        table.destroy();
+                                        dataLoad(data);
+                                        swal("{{player.success}}", "{{rejectRequest.player_delete_successfully}}", "success");
+                                    } else {
+                                        alert("Something went wrong")
+                                    }
+                                    // alert("Save Complete")
+                                }
+                            });
+                            swal("{{player.success}}", "{{rejectRequest.player_delete_successfully}}", "success");
+                        } else {
+                            swal("{{player.cancelled}}", "{{rejectRequest.player_not_deleted}}", "error");
+                        }
+                    });
+                    return false;
+                });
+
+                // Approve Rejected Player
+                $('body').on('click', '.approve', function (e) {
+                    var id = $(this).attr('id');
+                    var thisElement = this;
+                    console.log("Approve Player", id);
+                    swal({
+                        title: "{{rejectRequest.approve_player}}",
+                        text: "{{rejectRequest.are_you_sure}}?",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{rejectRequest.yes_approve_it}}",
+                        cancelButtonText: "{{rejectRequest.cancel_button}}",
+                        closeOnConfirm: false,
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/player/approveRejected",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData) {
+                                    table.destroy();
+                                    dataLoad(data);
+                                    swal({
+                                        title: resultData.action,
+                                        text: resultData.message,
+                                        type: resultData.status,
+                                        showCancelButton: false,
+                                        confirmButtonText: "OK"
+                                    });
+                                },
+                                error: function(xhr) {
+                                    let response = xhr.responseJSON || {};
+                                    swal({
+                                        title: response.action || "Failed",
+                                        text: response.message || "Something went wrong",
+                                        type: "error",
+                                        showCancelButton: false,
+                                        confirmButtonText: "OK"
+                                    });
+                                }
+                            });
+                        }
+                    });
+                });
+
+            },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+        // Hide popover on click if any open
+        $('body').on('click', function (e) {
+            //did not click a popover toggle, or icon in popover toggle, or popover
+            if ($(e.target).data('toggle') !== 'popover' && $(e.target).parents('[data-toggle="popover"]').length === 0
+                && $(e.target).parents('.popover.in').length === 0) {
+                console.log("coming in body");
+                $('[data-toggle="popover"]').popover('hide');
+            } else {
+                $("[data-toggle='popover']").not(e.target).popover('hide');
+                $(e.target).popover('toggle');
+            }
+        });
+        
+        //Search after click on search button
+        $('#search').on("click", function () {
+            table.destroy();
+            dataLoad(data);
+        });
+
+        //Reset filter after click on reset.
+        $('#filterReset').on("click", function (e) {
+            e.preventDefault();
+            data = {
+                fromDate: '',
+                toDate: '',
+                hallId: ''
+            }
+            // console.log(e);
+            // let form = e.toElement.form;
+            $('#filterForm')[0].reset();
+            table.destroy();
+            dataLoad(data);
+            console.log(data, 'after from reset filter');
+        });
+    });
+
+
+    //Update values in of query object for change.
+
+    //From Date
+    $('#fromDate').change(function () {
+        let date = $(this).val();
+        let compDate = $('#toDate').val();
+        console.log("fromDate compdate", typeof compDate);
+        if (compDate !== '' && date !== '' && date > compDate) {
+            alert("From Date cannot be greater than To Date :(");
+            $('#fromDate').val('');
+        } else {
+            console.log(date, 'change from date');
+            data.fromDate = date;
+            console.log(data, 'after from date change');
+        }
+    });
+
+    //To Date
+    $('#toDate').change(function () {
+        let compDate = $('#fromDate').val();
+        console.log("toDate compdate", compDate);
+        let date = $(this).val();
+        if (compDate !== '' && date !== '' && date < compDate) {
+            alert("To Date cannot be less than From Date :(");
+            $('#toDate').val('');
+        } else {
+            console.log(date, 'change to date');
+            data.toDate = date;
+            console.log(data, 'after to date change');
+        }
+    });
+
+    //Hall Name Change
+    $('#hallName').on('change', function () {
+        if ($(this).find(":selected").val() !== '') {
+            data.hallId = $(this).find(":selected").val();
+        } else {
+            data.hallId = '';
+        }
+    });
+</script>
+
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+
+{% endblock %}

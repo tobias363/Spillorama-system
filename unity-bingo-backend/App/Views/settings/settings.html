@@ -1,0 +1,641 @@
+{% extends "partition/layout.html" %}
+
+
+
+{% block body %}
+
+<style>
+	input[type='file'] {
+		width: 400px;
+		height: 25px;
+		opacity: 0
+	}
+
+	.imageButton {
+		cursor: pointer;
+		display: block;
+		width: 90px;
+		background-color: purple;
+		height: 25px;
+		color: white;
+		position: absolute;
+		right: 0;
+		top: 0;
+		font-size: 11px;
+		line-height: 25px;
+		text-align: center;
+		-webkit-transition: 500ms all;
+		-moz-transition: 500ms all;
+		transition: 500ms all;
+	}
+
+	.imageNameField {
+		width: 400px;
+		height: 25px;
+		position: absolute;
+		top: 0;
+		left: 0;
+		font-size: 13px;
+		line-height: 25px;
+		text-indent: 10px;
+		pointer-events: none;
+		overflow: hidden;
+	}
+
+	.imageDiv {
+		width: 400px;
+		/* height: 25px; */
+		background-color: white;
+		box-shadow: 1px 2px 3px #ededed;
+		position: relative;
+		border: 1px solid #d8d8d8;
+		margin: 10px
+	}
+</style>
+
+<!-- Main Content -->
+<div class="page-wrapper">
+	<div class="container-fluid">
+
+		<!-- Breadcrumb -->
+		<section class="content-header">
+			<h1>{{settings.settings}} {{settings.table}}</h1>
+			<ol class="breadcrumb">
+				<li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{settings.dashboard}}</a></li>
+				<li class="active">{{settings.settings}}</li>
+			</ol>
+		</section>
+		<!-- /Breadcrumb -->
+
+		<!-- /Title -->
+		{% include "partition/notification.html" %}
+		<!-- Row -->
+		<section class="content">
+			<div class="row">
+				<div class="col-sm-12">
+					<div class="panel panel-default card-view">
+						<div class="panel-heading">
+							<div class="pull-left">
+								<h6 class="panel-title txt-dark">{{settings.settings}}</h6>
+							</div>
+							<div class="clearfix"></div>
+						</div>
+						<div class="panel-wrapper collapse in">
+							<div class="panel-body">
+								<div class="table-wrap">
+									<div class="table-responsive">
+										{% if setting %}
+										<form method="POST" action="/settings/update" class="form-horizontal">
+											{% else %}
+											<form method="POST" action="/settings/add" class="form-horizontal">
+												{% endif %}
+												<table border="0" class="table display  pb-30">
+													<div class="col-sm-12">
+														<div class="panel-wrapper collapse in">
+															<div class="panel-body">
+																<input type="hidden" name="id" value="{{setting.id}}">
+																<!-- <div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="pwd_hr">Default Chips:</label>
+																<div class="col-sm-6"> 
+																	<input type="text" class="form-control" id="chips" placeholder="Enter Chips" required data-validation="number" name="chips" value="{{setting.defaultChips}}">
+																</div>
+															</div>
+															<div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="processId">Process Id:</label>
+																<div class="col-sm-6"> 
+																	<input type="text" class="form-control" id="processId" placeholder="Enter Game ProcessId"  name="processId" value="{{setting.processId}}">
+																</div>
+															</div> -->
+
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="android_version">{{settings.android_version}}:</label>
+																	<div class="col-sm-6">
+																		<input type="text" class="form-control"
+																			id="android_version"
+																			placeholder="{{settings.enter}} {{settings.android_version}}"
+																			data-validation="required number"
+																			data-validation-allowing="float"
+																			name="android_version"
+																			value="{{setting.android_version}}"
+																			data-validation-error-msg="{{settings.enter}} {{settings.android_version}}">
+																	</div>
+																</div>
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="android_store_link">{{settings.android_store_link}}:</label>
+																	<div class="col-sm-6">
+																		<input type="text" class="form-control"
+																			id="android_store_link"
+																			placeholder="{{settings.enter}} {{settings.android_store_link}}"
+																			name="android_store_link"
+																			value="{{setting.android_store_link}}"
+																			data-validation=""
+																			data-validation-error-msg="{{settings.enter}} {{settings.android_store_link}}">
+																	</div>
+																</div>
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="ios_version">
+																		{{settings.ios_version}}:</label>
+																	<div class="col-sm-6">
+																		<input type="text" class="form-control"
+																			id="ios_version"
+																			placeholder="{{settings.enter}} {{settings.ios_version}}"
+																			data-validation="required number"
+																			data-validation-allowing="float"
+																			data-validation-error-msg="{{settings.enter}} {{settings.ios_version}}"
+																			name="ios_version"
+																			value="{{setting.ios_version}}">
+																	</div>
+																</div>
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="ios_store_link">{{settings.ios_store_link}}:</label>
+																	<div class="col-sm-6">
+																		<input type="text" class="form-control"
+																			id="ios_store_link"
+																			placeholder="{{settings.enter}} {{settings.ios_store_link}}"
+																			name="ios_store_link"
+																			value="{{setting.ios_store_link}}"
+																			data-validation=""
+																			data-validation-error-msg="{{settings.enter}} {{settings.ios_store_link}}">
+																	</div>
+																</div>
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="wind_linux_version">{{settings.windows_version}}:</label>
+																	<div class="col-sm-6">
+																		<input type="text" class="form-control"
+																			id="wind_linux_version"
+																			placeholder="{{settings.enter}} {{settings.windows_version}}"
+																			data-validation="required number"
+																			data-validation-allowing="float"
+																			data-validation-error-msg="{{settings.enter}} {{settings.windows_version}}"
+																			name="wind_linux_version"
+																			value="{{setting.wind_linux_version}}">
+																	</div>
+																</div>
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="windows_store_link">{{settings.windows_store_link}}:</label>
+																	<div class="col-sm-6">
+																		<input type="text" class="form-control"
+																			id="windows_store_link"
+																			placeholder="{{settings.enter}} {{settings.windows_store_link}}"
+																			name="windows_store_link"
+																			value="{{setting.windows_store_link}}"
+																			data-validation=""
+																			data-validation-error-msg="{{settings.enter}} {{settings.windows_store_link}}">
+																	</div>
+																</div>
+
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="webgl_version">{{settings.webgl_version}}:</label>
+																	<div class="col-sm-6">
+																		<input type="text" class="form-control"
+																			id="webgl_version"
+																			placeholder="{{settings.enter}} {{settings.webgl_version}}"
+																			data-validation="required number"
+																			data-validation-allowing="float"
+																			data-validation-error-msg="{{settings.enter}} {{settings.webgl_version}}"
+																			name="webgl_version"
+																			value="{{setting.webgl_version}}">
+																	</div>
+																</div>
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="webgl_store_link">{{settings.webgl_store_link}}:</label>
+																	<div class="col-sm-6">
+																		<input type="text" class="form-control"
+																			id="webgl_store_link"
+																			placeholder="{{settings.enter}} {{settings.webgl_store_link}}"
+																			name="webgl_store_link"
+																			value="{{setting.webgl_store_link}}"
+																			data-validation=""
+																			data-validation-error-msg="{{settings.enter}} {{settings.webgl_store_link}}">
+																	</div>
+																</div>
+
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="disable_store_link">{{settings.disable_store_link}}:</label>
+																	<div class="col-sm-6">
+																		<select class="form-control"
+																			name="disable_store_link"
+																			id="disable_store_link">
+																			<option value="Yes" {{ "selected" if
+																				setting.disable_store_link=='Yes'
+																				else "" }}>{{settings.yes}}</option>
+																			<option value="No" {{ "selected" if
+																				setting.disable_store_link=='No' else ""
+																				}}>{{settings.no}}</option>
+																		</select>
+																	</div>
+																</div>
+
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="daily_spending">{{settings.daily_spending}}:</label>
+																	<div class="col-sm-6">
+																		<input type="number" class="form-control"
+																			id="daily_spending"
+																			min="0"
+																			placeholder="{{settings.enter}} {{settings.daily_spending}}"
+																			data-validation="required number"
+																			data-validation-allowing="number"
+																			data-validation-error-msg="{{settings.enter}} {{settings.daily_spending}}"
+																			name="daily_spending"
+																			value="{{setting.daily_spending}}">
+																	</div>
+																</div>
+
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="monthly_spending">{{settings.monthly_spending}}:</label>
+																	<div class="col-sm-6">
+																		<input type="number" class="form-control"
+																			id="monthly_spending"
+																			placeholder="{{settings.enter}} {{settings.monthly_spending}}"
+																			min="0"
+																			data-validation="required number"
+																			data-validation-allowing="number"
+																			data-validation-error-msg="{{settings.enter}} {{settings.monthly_spending}}"
+																			name="monthly_spending"
+																			value="{{setting.monthly_spending}}">
+																	</div>
+																</div>
+
+																<!-- <div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="multitable_status">Multitable Status:</label>
+																<div class="col-sm-6"> 
+																	<select class="form-control" name="multitable_status" id="multitable_status">
+																		<option value="inactive" {{ "selected" if setting.multitable_status=='inactive' else "" }} >Inactive</option>
+																		<option value="active" {{ "selected" if setting.multitable_status=='active' else "" }} >Active</option>
+																	</select>
+																</div>
+															</div>  -->
+																<!-- <hr> -->
+																<!-- <div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="withdrawLimit">Withdraw Limit:</label>
+																<div class="col-sm-6"> 
+																	<input type="text" class="form-control" id="withdrawLimit" placeholder="Enter Withdraw Limit" required data-validation="number" name="withdrawLimit" value="{{setting.withdrawLimit}}">
+																</div>
+															</div> -->
+																<!-- <div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="amount">Amount:</label>
+																<div class="col-sm-6"> 
+																	<input type="text" class="form-control" id="amount" placeholder="Enter Amount"  name="amount" value="{{setting.amount}}">
+																</div>
+															</div>
+															<div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="commission">Commission:</label>
+																<div class="col-sm-6"> 
+																	<input type="text" class="form-control" id="commission" placeholder="Enter Commission"  name="commission" value="{{setting.commission}}">
+																</div>
+															</div> -->
+
+																<!-- <hr> -->
+																<!-- <div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="db_backup_days">Database Backup(In Days):</label>
+																<div class="col-sm-6">
+																	<input type="number" class="form-control" id="db_backup_days" placeholder="Backup in days"  name="db_backup_days" value="{{setting.BackupDetails.db_backup_days}}" data-validation="" 
+																	data-validation-error-msg="Database Backup days is required">
+																</div>
+															</div>
+															<div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="db_host">Server:</label>
+																<div class="col-sm-6">
+																	<input type="text" class="form-control" id="db_host" placeholder="localhost:27017"  name="db_host" value="{{setting.BackupDetails.db_host}}" data-validation="" 
+																	data-validation-error-msg="Hostname is required">
+																</div>
+															</div>
+															<div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="db_username">Database Username:</label>
+																<div class="col-sm-6">
+																	<input type="text" class="form-control" id="db_username" placeholder="Enter Database username"  name="db_username" value="{{setting.BackupDetails.db_username}}" data-validation="" 
+																	data-validation-error-msg="Database Username is required">
+																</div>
+															</div>
+															<div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="db_password">Database Password:</label>
+																<div class="col-sm-6">
+																	<input type="text" class="form-control" id="db_password" placeholder="Enter Database Password"  name="db_password" value="{{setting.BackupDetails.db_password}}" data-validation="" 
+																	data-validation-error-msg="Database Password is required">
+																</div>
+															</div>
+															<div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="db_name">Database Name:</label>
+																<div class="col-sm-6">
+																	<input type="text" class="form-control" id="db_name" placeholder="Enter Database Name"  name="db_name" value="{{setting.BackupDetails.db_name}}" data-validation="" 
+																	data-validation-error-msg="Database Name is required">
+																</div>
+															</div> -->
+																<!-- <div class="form-group">
+																<label class="control-label mb-10 col-sm-2" for="username">Default Expire Time:</label>
+																<div class="col-sm-6">
+																	<input type="text" class="form-control" id="expireTime" placeholder="Enter Expire Time" required data-validation="number" name="expireTime" value="{{setting.expireTime}}">
+																</div>
+															</div> -->
+															</div>
+														</div>
+													</div>
+													<tr>
+														<td colspan="2">
+															{% if editFlag %}
+															<input type="submit" class="btn btn-success btn-flat"
+																style="margin-left: 5%;width: 10%;"
+																value="{{settings.submit}}">
+															{% endif %}
+															<!-- <a href="/settings" class="btn btn-info btn-lg">Cancel</a> -->
+														</td>
+													</tr>
+												</table>
+											</form>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="panel panel-default card-view">
+						<div class="panel-heading">
+							<div class="pull-left">
+								<h6 class="panel-title txt-dark">{{settings.settings}}</h6>
+							</div>
+							<div class="clearfix"></div>
+						</div>
+						<div class="panel-wrapper collapse in">
+							<div class="panel-body">
+								<div class="table-wrap">
+									<div class="table-responsive">
+										{% if setting %}
+										<form method="POST" action="/settings/addScreenSaverData"
+											class="form-horizontal" enctype="multipart/form-data">
+											{% else %}
+											<form method="POST" action="/settings/addScreenSaverData"
+												class="form-horizontal" enctype="multipart/form-data">
+												{% endif %}
+												<table border="0" class="table display  pb-30">
+													<div class="col-sm-12">
+														<div class="panel-wrapper collapse in">
+															<div class="panel-body">
+																<input type="hidden" name="id" value="{{setting.id}}">
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="disable_store_link">{{settings.screen_saver}}
+																		: </label>
+																	<div class="col-sm-6">
+																		<div id="app-cover">
+																			<div class="row">
+																				<div class="toggle-button-cover">
+																					<div class="button r" id="button-1">
+																						<input type="checkbox"
+																							class="checkbox"
+																							name="screenSaver" {% if
+																							setting.screenSaver %}
+																							checked {%endif%} />
+																						<div class="knobs"></div>
+																						<div class="layer"></div>
+																					</div>
+																				</div>
+																			</div>
+																		</div>
+																	</div>
+																</div>
+
+																<div class="form-group">
+																	<label class="control-label mb-10 col-sm-2"
+																		for="webgl_version">{{settings.screen_saver_time}}:</label>
+																	<div class="col-sm-6">
+																		<select name="screenSaverTime" id=""
+																			class="form-control">
+																			{% for i in range(1, 21) %}
+																			<option value="{{i}}" {% if
+																				setting.screenSaverTime==i %} selected
+																				{% endif %}>{{i}} {{settings.minutes}}</option>
+																			{% endfor %}
+																		</select>
+																	</div>
+																</div>
+																<div class="form-group">
+
+																</div>
+																<div class="form-group">
+																	<div class="col-3">
+																		<label class="control-label mb-10 col-sm-2"
+																			for="webgl_version">{{settings.image_time}}</label>
+																		<label class="control-label mb-10"
+																			for="webgl_version">(
+																			{{settings.image_time}} {{settings.please_upload_only_1920_1080_image}}) :</label>
+																	</div>
+																	<div class="col-9">
+																		<div id="imageData">
+																			{% if setting.imageTime.length %}
+																			{%for data in setting.imageTime %}
+																			<div class="col-sm-12" id="row{{data.id}}">
+																				<input type="hidden" name="imageId"
+																					value="{{data.id}}">
+																				<div class="col-sm-7 imageDiv">
+
+																					<input type="file"
+																						class="form-control fileImage" ,
+																						name="image{{data.id}}"
+																						data-validation="mime dimension"
+																						data-validation-allowing="jpg, png"
+																						data-validation-dimension="1920x1080-1920x1080"
+																						title=" " accept="image/*"
+																						id="a{{data.id}}"
+																						style="opacity:0">
+																					<span id='imageName{{data.id}}'
+																						class="imageNameField">{{data.image
+																						| removeImagePrefix}}</span>
+																					<span id='imageButton{{data.id}}'
+																						class="imageButton">{{settings.select_file}}</span>
+																					<span
+																						id="imageSizeErrora{{data.id}}"
+																						style="color: red; display: none;">{{settings.image_size_must_be_less_then_5mb}}.</span>
+
+																				</div>
+
+																				<div class="col-sm-5">
+
+																					<select name="time{{data.id}}" id=""
+																						class="form-control">
+																						{% for i in range(1, 61) %}
+																						<option value="{{i}}" {% if
+																							data.time==i %} selected {%
+																							endif %}>{{i}} {{settings.seconds}}
+																						</option>
+																						{% endfor %}
+																					</select>
+																					</select>
+																				</div>
+																				{%if loop.index == '1' %}
+																				<span
+																					class="input-group-text btn btn-icon"
+																					id="add">
+																					<i class="fa fa-solid fa-plus"></i>
+																				</span>
+																				{%else%}
+																				<span
+																					class="input-group-text btn btn-icon remove"
+																					id="{{data.id}}">
+																					<i class="fa fa-solid fa-trash"></i>
+																				</span>
+																				{% endif %}
+																			</div>
+																			{% endfor %}
+																			{% else %}
+																			<div class="col-sm-12">
+																				<input type="hidden" name="imageId"
+																					value="11">
+																				<div class="col-sm-5 imageDiv">
+																					<input type="file"
+																						class="form-control fileImage" ,
+																						name="image11"
+																						data-validation="mime dimension"
+																						data-validation-allowing="jpg, png"
+																						data-validation-dimension="1920x1080-1920x1080"
+																						id="a11">
+																					<span id='imageName11'
+																						class="imageNameField">{{data.image}}</span>
+																					<span id='imageButton11'
+																						class="imageButton">{{settings.select_file}}</span>
+																					<span id="imageSizeErrora11"
+																						style="color: red; display: none;">{{settings.image_size_must_be_less_then_5mb}}.</span>
+																				</div>
+
+																				<div class="col-sm-5">
+																					<select name="time11" id=""
+																						class="form-control">
+																						{% for i in range(1, 61) %}
+																						<option value="{{i}}">
+																							{{i}} {{settings.second}}
+																						</option>
+																						{% endfor %}
+																					</select>
+																					</select>
+																				</div>
+																				<span
+																					class="input-group-text btn btn-icon"
+																					id="add">
+																					<i class="fa fa-solid fa-plus"></i>
+																				</span>
+																			</div>
+																			{% endif %}
+																		</div>
+																	</div>
+																</div>
+																<tr>
+																	<td colspan="2">
+																		{% if editFlag %}
+																		<input type="submit"
+																			class="btn btn-success btn-flat"
+																			style="margin-left: 5%;width: 10%;"
+																			value="{{settings.submit}}">
+																		{% endif %}
+																		<!-- <a href="/settings" class="btn btn-info btn-lg">Cancel</a> -->
+																	</td>
+																</tr>
+															</div>
+														</div>
+													</div>
+
+												</table>
+											</form>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+		</section>
+		<!-- /Row -->
+	</div>
+</div>
+
+{% endblock %}
+
+{% block Jscript %}
+<script>
+	$(document).ready(function () {
+		var host = window.location.origin;
+		initializeValidator();
+
+		function initializeValidator() {
+			$.validate({
+				validateOnEvent: true,
+			});
+		}
+		$("#add").on("click", () => {
+			let random = Date.now()
+			let html = `<div class="col-sm-12" id="row${random}"> 
+				            <input type="hidden" name="imageId" value="${random}">
+				            <div class="col-sm-5 imageDiv"> 
+				                <input type="file" class="form-control fileImage"
+								name="image${random}"
+								data-validation="required mime dimension"
+								data-validation-allowing="jpg, png"
+								data-validation-dimension="1920x1080-1920x1080"
+								accept="image/*"
+								 id="a${random}">
+
+								<span id='imageName${random}' class="imageNameField"></span>
+        						<span id='imageButton${random}' class="imageButton">Select File</span>
+								
+								<span id="imageSizeErrora${random}" style="color: red; display: none;">{{settings.image_size_must_be_less_then_5mb}}.</span>
+							</div>
+							<div class="col-sm-5">
+							    <select name="time${random}" id=""
+									class="form-control">
+									{% for i in range(1, 61) %}
+										<option value="{{ i }}">{{ i }} {{settings.seconds}}</option>
+									{% endfor %}
+								</select>
+							</div>
+							<span class="input-group-text btn btn-icon remove"
+								 id="${random}">
+								<i class="fa fa-solid fa-trash"></i>
+							</span>
+						</div>`
+
+			$("#imageData").append(html)
+		})
+		//data-validation-error-msg="Please upload image"
+		$(document).on("change", ".fileImage", function (event) {
+			let id = $(this).attr("id");
+			console.log("Id", id);
+			const file = event.target.files[0];
+			const maxSizeInMB = 5;
+			const maxSizeInBytes = maxSizeInMB * 1024 * 1024;
+			console.log("file.size > maxSizeInBytes", file.size > maxSizeInBytes, "imageSizeError" + id);
+			if (file.size > maxSizeInBytes) {
+				$('#imageSizeError' + id).show();
+				event.target.value = ''; // Clear the input value
+			} else {
+				$('#imageSizeError' + id).hide();
+			}
+		})
+
+		$(document).on("click", ".remove", function () {
+			var button_id = $(this).attr("id");
+			console.log("button_id", button_id);
+			$('#row' + button_id + '').remove();
+		})
+
+		$(document).on('click', '[id^=imageButton]', function () {
+			let index = $(this).attr('id').replace('imageButton', '');
+			$('#a' + index).trigger('click');
+		});
+
+		// Handle file input change to display the file name
+		$(document).on('change', 'input[type="file"]', function () {
+			let index = $(this).attr('id').replace('a', '');
+			console.log("index of file id", index)
+			$('#imageName' + index).text(this.value.replace(/C:\\fakepath\\/i, ''));
+		});
+
+	});
+</script>
+{% endblock %}

@@ -1,0 +1,333 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .popover {
+        max-width: 600px;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>Withdraw Amount Table</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>
+                <li class="active" href="/withdrawAmt">Withdraw</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">Withdraw Amount</h6>
+                            </div>
+                            <div class="pull-right">
+                                <!-- <a href="/addPlayer"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add Player</button></a> -->
+                                <button class="btn btn-success btn-xs btn-rounded" onClick="$('#myTable').DataTable().ajax.reload();">Refresh Table</button>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <div class="row">
+                                    <div class="col-sm-4">
+                                        <div class="form-group">
+                                            <div class='input-group date' id='startDate'>
+                                                <input type='text' class="form-control" name="start_date" id="start_date" placeholder="Start Date" data-date-format="yyyy-mm-dd" />
+                                                <span class="input-group-addon">
+                                                            <span class="glyphicon glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-sm-4">
+                                        <div class="form-group">
+                                            <div class='input-group date' id='endDate'>
+                                                <input type='text' class="form-control" name="end_date" id="end_date" placeholder="End Date" data-date-format="yyyy-mm-dd" />
+                                                <span class="input-group-addon">
+                                                            <span class="glyphicon glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-sm-4">
+                                        <input type="button" name="search" id="search" value="Search" class="btn btn-info" />
+                                    </div>
+                                </div>
+
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>Player name</th>
+                                                    <th>Status</th>
+                                                    <th>Wallet Amount</th>
+                                                    <th>Withdraw Amount</th>
+                                                    <th>Date</th>
+                                                    <th>Remark</th>
+                                                    <th>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+        var host = window.location.origin;
+        let url = host + "/withdrawAmount/getAllTXN";
+
+        let isAllPlayers = "{{withdrawAmt  }}";
+        if (isAllPlayers == 'true') {
+            ajaxUrl = host + "/withdrawAmount/getAllTXN";
+            ajaxExportUrl = host + "/withdrawAmount/getAllTXN?export=all";
+        }
+
+        // setInterval(function() {
+        //     $('#myTable').DataTable().ajax.reload();
+        // }, 30000);
+
+        let acceptFlag = '{{acceptFlag}}';
+        let rejectFlag = '{{rejectFlag}}';
+
+        $('#startDate input,#endDate input').datepicker();
+
+
+        fetch_data('no');
+
+        function fetch_data(is_date_search, start_date = '', end_date = '') {
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "Search Fullname",
+                },
+                "processing": true,
+                "serverSide": true,
+                "order": [
+                    [0, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": [6],
+                    "orderable": false
+                }],
+                "autoWidth": false,
+                "pageLength": 10,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: {
+                        is_date_search: is_date_search,
+                        start_date: start_date,
+                        end_date: end_date
+                    }
+                },
+                "dom": 'Bfrtip',
+                "buttons": [
+                    'csv', 'excel'
+                ],
+                "columns": [{
+                    "data": "name"
+                }, {
+                    "data": "status",
+                    render: function(data, type, row) {
+                        return '<span id="status' + row._id + '">' + row.status + '</span>';
+
+                    }
+                }, {
+                    "data": "playerKr",
+                    render: function(data, type, row) {
+                        return '<span id="playerChips' + row._id + '">' + parseFloat(parseFloat(row.playerKr).toFixed(2)) + '</span>';
+
+                    }
+                }, {
+                    "data": "withdrawAmount",
+                    render: function(data, type, row) {
+                        return '<span id="withdrawAmount' + row._id + '">' + parseFloat(parseFloat(row.withdrawAmount).toFixed(2)) + '</span>';
+
+                    }
+                }, {
+                    "data": "createdAt",
+                    render: function(data, type, row, meta) {
+                        //return moment.utc(row.createdAt).format('DD/MM/YYYY hh:mm a');
+                        return moment(row.createdAt).format('DD/MM/YYYY hh:mm a');
+                    }
+                }, {
+                    "data": "remark",
+                    render: function(data, type, row) {
+
+                        return '<span id="' + row._id + '"><input type="text" class="remark" id="remark-' + row._id + '"/></span>';
+
+                    }
+                }, {
+                    "data": "action",
+                    render: function(data, type, row) {
+                        let html = '';
+
+
+                        if (acceptFlag == 'true') {
+                            html += `<button type="button" title="acceptRequest" class="btn btn-xs btn-rounded btn-success playerChipsAction" id="` + row._id + `" ><i class="fa fa-check" aria-hidden="true"></i>Accept</button>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp`
+                        } else {
+                            html += `  `;
+                        }
+
+                        if (rejectFlag == 'true') {
+                            html += `<button type="button" title="Delete Player" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs btn-rounded delete"><i class="fa fa-times" aria-hidden="true"></i>Reject</button>`;
+                        } else {
+                            html += `  `;
+                        }
+
+                        return html;
+
+                    }
+                }]
+            });
+        }
+
+        $('#search').click(function() {
+            var start_date = $('#start_date').val();
+            var end_date = $('#end_date').val();
+            if (start_date != '' && end_date != '') {
+                $('#myTable').DataTable().destroy();
+                fetch_data('yes', start_date, end_date);
+            } else {
+                alert("Both Date is Required");
+            }
+        });
+
+        $(function() {
+            "use strict";
+
+            var SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    //Parameter
+                    $('body').on('click', '.delete', function(e) {
+                        var id = $(this).attr('id');
+                        var remark = $('#remark-' + id).val();
+                        //console.log("player id ----------->", id, remark);
+                        var thisElement = this;
+                        swal({
+                            title: "Are you sure?",
+                            text: "You will not be able to recover this request!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes, reject it!",
+                            cancelButtonText: "No, cancel please!",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/withdrawAmount/getPlayerDelete",
+                                    data: {
+                                        id: id,
+                                        remark: remark
+                                    },
+                                    success: function(resultData) {
+                                        // alert(resultData)
+                                        //console.log("resultData:>>>>>>", resultData);
+                                        if (resultData == 'success') {
+                                            $('#remark-' + id).val('');
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("Rejected!", "Withdraw request rejected.", "success");
+                                            //$('#myTable').DataTable().ajax.reload();
+
+                                            // setTimeout(function() {
+                                            //     sendRequest();
+                                            // }, 5000);
+
+                                        } else {
+                                            swal("Cancelled", "Because Remark is empty..", "error");
+                                        }
+                                    }
+                                });
+                            } else {
+                                swal("Cancelled", "Request Not Rejected.", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+
+                    $('body').on('click', '.playerChipsAction', function(e) {
+                        var withdrawId = $(this).attr('id');
+                        var remark = $('#remark-' + withdrawId).val();
+                        var thisElement = this;
+
+                        let reqdata = {
+                            withdrawId: withdrawId,
+                            remark: remark
+                        }
+                        swal({
+                            title: "Are you sure?",
+                            text: "Do you want to Accept this request?",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes,Request Accepted it!",
+                            cancelButtonText: "No, cancel please !",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/withdrawAmount/chipsAction",
+                                    data: reqdata,
+                                    success: function(resultData) {
+                                        console.log(resultData);
+                                        if (resultData == 'success') {
+                                            console.log(thisElement);
+                                            $('#remark-' + withdrawId).val('');
+                                            $(thisElement).parent().parent().hide(700);
+                                            /*                 $('#status' + playerId).html(resultData.data.status);
+                                                            $('#playerChips' + playerId).html(resultData.data.playerChips);
+                                                            $('#withdrawAmount' + playerId).html(resultData.data.withdrawAmount); */
+                                            swal("Accepted!", "Player Request Accepted Successfully..", "success");
+
+                                            // $('#myTable').DataTable().ajax.reload();
+                                        } else {
+                                            swal("Cancelled", "Because Remark is empty..", "error");
+                                        }
+                                    }
+                                });
+                            } else {
+                                swal("Cancelled", "Player Payment Accept Request Cancel", "error");
+                            }
+                        });
+                        return false;
+                    });
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

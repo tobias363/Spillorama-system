@@ -1,0 +1,202 @@
+{% extends "partition/layout.html" %}
+
+
+{% block body %}
+		<!-- Main Content -->
+		<div class="page-wrapper">
+			<div class="container-fluid">
+
+				<!-- Title -->
+				<section class="content-header">
+				    <h1>Cash Transaction Table </h1>
+				    <ol class="breadcrumb">
+				        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>
+				        <li class="active">Cash Transaction History</li>
+				    </ol>
+				</section>
+				<!-- /Title -->
+				{% include "partition/notification.html" %}
+				<section class="content">
+					<!-- Row -->
+					<div class="row">
+						<div class="col-sm-12">
+							<div class="panel panel-default card-view">
+								<div class="panel-heading">
+									<div class="pull-left">
+										<h6 class="panel-title txt-dark">Cash Transaction Table</h6>
+									</div>
+									<div class="pull-right">
+									</div>
+									<div class="clearfix"></div>
+								</div>
+								<input type="hidden" id="playerId" value="{{playerId}}">
+								<div class="panel-wrapper collapse in">
+									<div class="panel-body">
+										<div class="table-wrap">
+											<div class="table-responsive">
+												<table id="myTable" class="table table-bordered table-striped" >
+													<thead>
+														{% if(player.isCash == true) %}
+															<tr>
+																<th>Tx.Number</th>
+																<th>Provider Email</th>
+																<!-- <th>Chips</th> -->
+																<th>Before Balance</th>
+																 <th>After Balance</th> 
+																<th>In</th>
+																<th>Out</th>
+																<th>Status</th>
+																<th>Date</th>
+																<!-- <th>Action</th> -->
+															</tr>
+														{% else %}
+															<tr>
+																<th>Tx.Number</th>
+																<th>Chips</th>
+																<th>Before Balance</th>
+																 <th>After Balance</th> 
+																<th>Status</th>
+																<th>Date</th>
+															</tr>
+														{% endif %}
+													</thead>
+													<tbody>
+													</tbody>
+												</table>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</section>
+				
+			</div>
+		</div>
+
+
+{% endblock %}
+
+{% block Jscript %}
+<script>
+$(document).ready( function () {
+	var userCashType = "{{player.isCash}}";
+	var host = window.location.origin;
+	var playerId = $('#playerId').val();
+
+	if(userCashType == 'true'){
+		var dataTableCol = [
+			// { "data": "_id" },
+			{ "data": "transactionNumber" },
+			{ "data": "providerEmail" },
+			//{ "data": "chips" },
+			{ "data": "beforeBalance" ,render: function(data,type,row){
+				return row.beforeBalance ? parseFloat(row.beforeBalance).toFixed(4) : parseFloat(row.previousBalance).toFixed(4)
+			 	} },
+			{ "data": "afterBalance"  ,render: function(data,type,row){
+				return row.afterBalance ? parseFloat(row.afterBalance).toFixed(4) : 0
+			 	} },
+		  	//{ "data": "type" },
+		  	{ "data": "type",
+				render: function(data,type,row){
+					if( row.category == 'credit' ){
+						//return "<p style='color:green;'>"+row.type+"</p>";
+						return "<p style='color:green;'>"+row.chips+"</p>";
+					}
+					else{
+						return '-'
+					}
+				  
+			 	} 
+			},
+			{ "data": "type",
+				render: function(data,type,row){
+					if( row.category != 'credit' ){
+						//return "<p style='color:red;'>"+row.type+"</p>";
+						return "<p style='color:red;'>"+row.chips+"</p>";
+					}
+					else{
+						return '-'
+					}
+			 	} 
+			},
+		  	{ "data": "status" },
+			{ "data": "createdAt",
+				render: function(data,type,row){
+				  let dt = new Date(row.createdAt);
+			      let date = dt.getDate();
+			      let month = parseInt(dt.getMonth()+1);
+			      let year = dt.getFullYear();
+			      let hours = dt.getHours();
+			      let minutes = dt.getMinutes();
+			      let ampm = hours >= 12 ? 'pm' : 'am';
+			      hours = hours % 12;
+			      hours = hours ? hours : 12;
+			      minutes = minutes < 10 ? '0'+ minutes : minutes;
+			      let createdAt = year + '/' + month + '/' + date + ' ' + hours + ':' + minutes + ' ' + ampm;
+			      return createdAt;
+			 	} 
+			},	
+		];
+	}else{
+		var dataTableCol = [
+			{ "data": "transactionNumber" },
+			{ "data": "chips" },
+			{ "data": "beforeBalance" },
+			{ "data": "afterBalance" },
+		  	{ "data": "status" },
+			{ "data": "createdAt",
+				render: function(data,type,row){
+				  let dt = new Date(row.createdAt);
+			      let date = dt.getDate();
+			      let month = parseInt(dt.getMonth()+1);
+			      let year = dt.getFullYear();
+			      let hours = dt.getHours();
+			      let minutes = dt.getMinutes();
+			      let ampm = hours >= 12 ? 'pm' : 'am';
+			      hours = hours % 12;
+			      hours = hours ? hours : 12;
+			      minutes = minutes < 10 ? '0'+ minutes : minutes;
+			      let createdAt = year + '/' + month + '/' + date + ' ' + hours + ':' + minutes + ' ' + ampm;
+			      return createdAt;
+			 	} 
+			},				
+		];
+	}
+	//if(userCashType == 'true'){
+		$('#myTable').DataTable({
+			"oLanguage": {
+				"sSearch": "Search BY Transaction Id"
+			},
+			// "scrollX": true,
+			"processing": true,
+			"serverSide": true,
+			// "searching": false,
+			"ordering": false,
+			"autoWidth": false,
+			"pageLength": 25,
+			"ajax": host + "/player/getCashTransactionHistory/" + playerId,
+			"columns": dataTableCol
+		});
+	/*}else{
+		$('#myTable').DataTable({
+			"oLanguage": {
+				"sSearch": "Search BY Transaction Id"
+			},
+			// "scrollX": true,
+			"processing": true,
+			"serverSide": true,
+			// "searching": false,
+			"ordering": false,
+			"autoWidth": false,
+			"pageLength": 25,
+			"ajax": host + "/player/getCashTransactionHistory/" + playerId,
+			"columns": 
+		});
+	}*/
+	
+} );
+
+</script>
+{% endblock %}

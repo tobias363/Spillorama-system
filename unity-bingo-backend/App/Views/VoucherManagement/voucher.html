@@ -1,0 +1,209 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{voucher.voucher}} {{voucher.table}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{voucher.dashboard}}</a></li>
+                <li class="active">{{voucher.voucher}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{voucher.voucher}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                {% if addFlag %}
+                                <a href="/addVoucher"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i>{{voucher.add_voucher}}</button></a>
+                                {% endif %}
+                                <!-- [ No Permission Add ] -->
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{voucher.voucher_id}}</th>
+                                                    <th>{{voucher.voucher_type}}</th>
+                                                    <th>{{voucher.expiry_date}}</th>
+                                                    <th>{{voucher.points}}</th>
+                                                    <th>{{voucher.status}}</th>
+                                                    <th>{{voucher.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+        var host = window.location.origin;
+        let editFlag = '{{editFlag}}';
+        let deleteFlag = '{{deleteFlag}}';
+        let viewFlag = '{{viewFlag}}';
+
+        $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "{{voucher.search_voucher_type}}",
+                "sLengthMenu": "{{voucher.show}} _MENU_ {{voucher.entries}}",
+                "oPaginate": {
+                    sPrevious: "{{ voucher.previous }}",
+                    sNext: "{{ voucher.next }}"
+                },
+                "sEmptyTable": "{{voucher.no_data_available_in_table}}",
+                "sInfo": "{{voucher.showing}} _START_ to _END_ of _TOTAL_ {{voucher.entries}}",
+                "sInfoEmpty": "{{physical.showing}} 0 to 0 of 0 {{physical.entries}}",
+            },
+            // "scrollX": true,
+            // "searching": false,
+            "processing": true,
+            "serverSide": true,
+            "order": [
+                [0, "desc"]
+            ],
+            "columnDefs": [{
+                "targets": [5],
+                "orderable": false
+            }],
+            "autoWidth": false,
+            "pageLength": 25,
+            "ajax": host + "/voucher/getVoucher",
+            "columns": [{
+                "data": "voucherId"
+            }, {
+                "data": "voucherType"
+            }, {
+                "data": "expiryDate",
+                render: function(data, type, row, meta) {
+                    //return moment.utc(row.expiryDate).format('DD/MM/YYYY hh:mm a');
+                    return moment(row.expiryDate).format('DD/MM/YYYY hh:mm a');
+                }
+
+                // ,
+                // render: function(data, type, row) {
+                //     let dt = new Date(row.expiryDate);
+                //     let date = dt.getDate();
+                //     let month = parseInt(dt.getMonth() + 1);
+                //     let year = dt.getFullYear();
+                //     let hours = dt.getHours();
+                //     let minutes = dt.getMinutes();
+                //     let ampm = hours >= 12 ? 'pm' : 'am';
+                //     hours = hours % 12;
+                //     hours = hours ? hours : 12;
+                //     minutes = minutes < 10 ? '0' + minutes : minutes;
+                //     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+                //     return createdAt;
+                // }
+            }, {
+                "data": "points"
+            }, {
+                "data": "status",
+                render: function(data, type, row) {
+                    let html;
+                    if (data == "active") {
+
+                        html = '<span style="color:green;">Active</span>';
+                    } else {
+                        html = '<span style="color:red;">Inactive</span>';
+                    }
+                    return html;
+                }
+            }, {
+                "data": "action",
+                render: function(data, type, row) {
+                    let html = '';
+                    if (viewFlag == 'true') {
+                        html += `<a href="/viewVoucher/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="{{voucher.view}}"><i class="fa fa-eye" aria-hidden="true"></i></a>`
+                    }
+                    if (editFlag == 'true') {
+                        html += `<a class="m-lr-3" href="/voucherEdit/` + row._id + `"><button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a>`;
+                    }
+                    if (deleteFlag == 'true') {
+                        html += `<button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>`;
+                    }
+                    return html;
+                }
+            }]
+        });
+
+        $(function() {
+            "use strict";
+
+            var SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    //Parameter
+                    $('body').on('click', '.delete', function(e) {
+                        var id = $(this).attr('id');
+                        var thisElement = this;
+                        swal({
+                            title: "{{voucher.are_you_sure}}?",
+                            text: "{{voucher.you_will_not_be_able_to_recover_this_voucher}}!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "{{voucher.delete_button}}",
+                            cancelButtonText: "{{voucher.cancel_button}}",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/voucher/getVoucherDelete",
+                                    data: {
+                                        id: id
+                                    },
+                                    success: function(resultData) {
+                                        console.log(resultData);
+                                        if (resultData == 'success') {
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("{{voucher.deleted}}!", "{{voucher.voucher_deleted_successfully}}.", "success");
+                                        }
+                                        // alert("Save Complete")
+                                    }
+                                });
+                                swal("{{voucher.deleted}}!", "{{voucher.voucher_deleted_successfully}}.", "success");
+                            } else {
+                                swal("{{voucher.cancelled}}", "{{voucher.voucher_not_deleted}}", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+    });
+</script>
+{% endblock %}

@@ -19,6 +19,113 @@
       overflow: hidden;
       background: url('TemplateData/bg.png') center / cover no-repeat fixed;
     }
+
+    body.candy-overlay-open {
+      overflow: hidden;
+    }
+
+    #candy-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(21, 4, 18, 0.8);
+      backdrop-filter: blur(8px);
+      z-index: 10000;
+    }
+
+    #candy-overlay.is-open {
+      display: flex;
+    }
+
+    #candy-shell {
+      position: relative;
+      width: min(1480px, calc(100vw - 40px));
+      height: min(930px, calc(100vh - 40px));
+      border-radius: 22px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 237, 248, 0.98));
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    }
+
+    #candy-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+    }
+
+    #candy-close-btn {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      z-index: 3;
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: 700 14px/1 sans-serif;
+      color: #fff;
+      background: rgba(124, 17, 79, 0.92);
+      cursor: pointer;
+      box-shadow: 0 12px 30px rgba(124, 17, 79, 0.32);
+    }
+
+    #candy-close-btn:hover {
+      background: rgba(149, 21, 95, 0.96);
+    }
+
+    #candy-loading {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: #fff;
+      background: linear-gradient(180deg, rgba(121, 15, 95, 0.82), rgba(54, 0, 38, 0.9));
+    }
+
+    #candy-loading[hidden] {
+      display: none;
+    }
+
+    #candy-loading-spinner {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.24);
+      border-top-color: #fff;
+      animation: candy-spin 0.9s linear infinite;
+    }
+
+    #candy-status {
+      position: absolute;
+      left: 18px;
+      bottom: 18px;
+      z-index: 3;
+      max-width: calc(100% - 140px);
+      padding: 10px 14px;
+      border-radius: 14px;
+      font: 600 13px/1.35 sans-serif;
+      color: #4a1733;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 10px 28px rgba(64, 18, 52, 0.16);
+    }
+
+    #candy-status[data-state="error"] {
+      color: #8e1026;
+      background: rgba(255, 238, 242, 0.96);
+    }
+
+    @keyframes candy-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
   </style>
 
   <!-- Firebase SDKs -->
@@ -216,9 +323,226 @@
       }
     };
 
+    const CANDY_ROUTE = "/candy/";
     let existingTab = null;
+    let candyPlayerToken = "";
+    let candyEmbedOrigin = null;
+    let candyOverlay = null;
+    let candyShell = null;
+    let candyFrame = null;
+    let candyStatus = null;
+    let candyLoading = null;
+    let candyLoadingMessage = null;
+
+    function isCandyRoute(url) {
+      return typeof url === "string" && /(^|\/)candy(\/|$|\?)/.test(url);
+    }
+
+    function ensureCandyOverlay() {
+      if (candyOverlay) {
+        return;
+      }
+
+      candyOverlay = document.createElement("div");
+      candyOverlay.id = "candy-overlay";
+      candyOverlay.innerHTML = `
+        <div id="candy-shell">
+          <button id="candy-close-btn" type="button">Lukk</button>
+          <iframe id="candy-frame" title="Candy Mania" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+          <div id="candy-loading">
+            <div id="candy-loading-spinner"></div>
+            <div id="candy-loading-message">Starter Candy Mania...</div>
+          </div>
+          <div id="candy-status"></div>
+        </div>
+      `;
+      document.body.appendChild(candyOverlay);
+
+      candyShell = candyOverlay.querySelector("#candy-shell");
+      candyFrame = candyOverlay.querySelector("#candy-frame");
+      candyStatus = candyOverlay.querySelector("#candy-status");
+      candyLoading = candyOverlay.querySelector("#candy-loading");
+      candyLoadingMessage = candyOverlay.querySelector("#candy-loading-message");
+
+      candyOverlay.querySelector("#candy-close-btn").addEventListener("click", () => {
+        closeGameOverlay();
+      });
+
+      candyFrame.addEventListener("load", () => {
+        setCandyLoading(false);
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && candyOverlay.classList.contains("is-open")) {
+          closeGameOverlay();
+        }
+      });
+    }
+
+    function setCandyStatus(message, isError) {
+      ensureCandyOverlay();
+      candyStatus.textContent = message || "";
+      candyStatus.dataset.state = isError ? "error" : "info";
+    }
+
+    function setCandyLoading(isLoading, message) {
+      ensureCandyOverlay();
+      candyLoading.hidden = !isLoading;
+      if (typeof message === "string" && message.length > 0) {
+        candyLoadingMessage.textContent = message;
+      }
+    }
+
+    function openCandyOverlay() {
+      ensureCandyOverlay();
+      candyOverlay.classList.add("is-open");
+      document.body.classList.add("candy-overlay-open");
+    }
+
+    function resetCandyOverlayState() {
+      if (!candyOverlay) {
+        return;
+      }
+
+      candyOverlay.classList.remove("is-open");
+      document.body.classList.remove("candy-overlay-open");
+      setCandyLoading(false);
+      setCandyStatus("", false);
+      candyEmbedOrigin = null;
+      if (candyFrame) {
+        candyFrame.src = "about:blank";
+      }
+      if (candyShell) {
+        candyShell.style.width = "";
+        candyShell.style.height = "";
+      }
+    }
+
+    function closeGameOverlay(options) {
+      const notifyIframe = !options || options.notifyIframe !== false;
+      if (notifyIframe && candyFrame && candyFrame.contentWindow) {
+        try {
+          candyFrame.contentWindow.postMessage({ type: "host:closeGame", payload: {} }, candyEmbedOrigin || "*");
+        } catch (_error) {
+        }
+      }
+
+      resetCandyOverlayState();
+    }
+
+    async function launchCandyOverlay() {
+      if (!candyPlayerToken) {
+        unityShowBanner("Candy krever en aktiv Spillorama-session. Logg inn på nytt.", "error");
+        return;
+      }
+
+      openCandyOverlay();
+      setCandyLoading(true, "Starter Candy Mania...");
+      setCandyStatus("Starter Candy Mania...", false);
+
+      try {
+        const response = await fetch("/api/games/candy/launch", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + candyPlayerToken
+          },
+          body: JSON.stringify({
+            returnUrl: window.location.origin + window.location.pathname
+          })
+        });
+
+        const body = await response.json().catch(() => null);
+        if (!response.ok || !body || !body.ok || !body.data || !body.data.embedUrl) {
+          throw new Error(body && body.error && body.error.message ? body.error.message : "Kunne ikke starte Candy Mania.");
+        }
+
+        candyEmbedOrigin = new URL(body.data.embedUrl, window.location.origin).origin;
+        candyFrame.src = body.data.embedUrl;
+        setCandyStatus("Candy Mania lastes...", false);
+      } catch (error) {
+        console.error("Candy launch failed", error);
+        resetCandyOverlayState();
+        unityShowBanner(error && error.message ? error.message : "Kunne ikke starte Candy Mania.", "error");
+      }
+    }
+
+    function handleCandyResize(payload) {
+      if (!payload || typeof payload !== "object" || !candyShell) {
+        return;
+      }
+
+      const width = Number(payload.width);
+      const height = Number(payload.height);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) {
+        return;
+      }
+
+      candyShell.style.width = Math.min(Math.max(width + 32, 960), window.innerWidth - 40) + "px";
+      candyShell.style.height = Math.min(Math.max(height + 32, 640), window.innerHeight - 40) + "px";
+    }
+
+    window.addEventListener("message", (event) => {
+      const data = event.data;
+      if (!data || typeof data !== "object" || typeof data.type !== "string" || !data.type.startsWith("candy:")) {
+        return;
+      }
+
+      if (candyEmbedOrigin && event.origin !== candyEmbedOrigin) {
+        return;
+      }
+
+      switch (data.type) {
+        case "candy:ready":
+          setCandyLoading(false);
+          setCandyStatus("Candy Mania er klar.", false);
+          break;
+        case "candy:balanceChanged":
+          setCandyLoading(false);
+          setCandyStatus("Saldo oppdatert i Spillorama.", false);
+          if (unityInstanceRef) {
+            unityInstanceRef.SendMessage("UIManager", "RefreshPlayerWalletFromHost", "");
+          }
+          break;
+        case "candy:gameStarted":
+          setCandyStatus("Candy Mania er i gang.", false);
+          break;
+        case "candy:gameEnded":
+          setCandyStatus("Spillet er avsluttet.", false);
+          if (unityInstanceRef) {
+            unityInstanceRef.SendMessage("UIManager", "RefreshPlayerWalletFromHost", "");
+          }
+          break;
+        case "candy:error":
+          setCandyLoading(false);
+          setCandyStatus(
+            data.payload && typeof data.payload.message === "string"
+              ? data.payload.message
+              : "Candy rapporterte en feil.",
+            true
+          );
+          break;
+        case "candy:resize":
+          handleCandyResize(data.payload);
+          break;
+      }
+    });
+
+    function SetPlayerToken(token) {
+      candyPlayerToken = typeof token === "string" ? token.trim() : "";
+    }
+
+    function ClearPlayerToken() {
+      candyPlayerToken = "";
+      closeGameOverlay({ notifyIframe: false });
+    }
 
     function OpenUrlInSameTab(url) {
+      if (isCandyRoute(url)) {
+        launchCandyOverlay();
+        return;
+      }
+
       if (existingTab && !existingTab.closed) {
         existingTab.focus();
       } else {

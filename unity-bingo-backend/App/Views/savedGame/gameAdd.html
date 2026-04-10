@@ -1,0 +1,2044 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    .m-b-1 {
+        margin-bottom: 1em;
+    }
+
+    .weekDays-selector input {
+        display: none !important;
+    }
+
+    .weekDays-selector input[type=checkbox]+label {
+        display: inline-block;
+        border-radius: 6px;
+        background: #dddddd;
+        height: 40px;
+        width: 50px;
+        margin-right: 3px;
+        line-height: 40px;
+        text-align: center;
+        cursor: pointer;
+    }
+
+    .weekDays-selector input[type=checkbox]:checked+label {
+        background: #0583d7;
+        color: #ffffff;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{translate.edit_text}} {{gameData.name}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+                <li href="#">{{gameData.name}}</li>
+                <li class="active">{{translate.edit_text}} {{gameData.name}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content">
+            <!-- {{Game|dump}} -->
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{translate.edit_text}} {{gameData.name}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper">
+                            <div class="panel-body">
+                                <!-- <div class="table-wrap"> -->
+                                <form method="POST" id="editSaveGame"
+                                    action="/savedGameManagementEdit/{{gameData._id}}/{{Game._id}}">
+                                    <!-- <table border="0" class="table display  pb-30"> -->
+                                    <div class="table display pb-30">
+                                        <input type="hidden" name="ctimezone" value="Europe/Oslo">
+                                        <div class="">
+                                            {% if gameData.type=='game_1' or gameData.type=='game_2' or
+                                            gameData.type=='game_3' %}
+
+                                            <!-- Game Mode and Name -->
+                                            <div class="row">
+                                                <!-- {% if gameData.type =='game_2' or gameData.type =='game_3' %} -->
+                                                <div class="col-lg-6 col-sm-6">
+                                                    <div class="form-group">
+                                                        <label>{{translate.game_name}} :-</label>
+                                                        <input type="text" class="form-control" name="mainGameName"
+                                                            placeholder="{{translate.enter}} {{translate.game_name}}"
+                                                            value="{{Game.mainGameName if (gameData.type=='game_1') else Game.gameName}}"
+                                                            id="mainGameName" data-validation="required">
+                                                    </div>
+                                                </div>
+                                                <!--Auto mode selected automatically -->
+                                                <div class="col-lg-6 col-sm-6" {{ "hidden" if (gameData.type=='game_2'
+                                                    or gameData.type=='game_3' ) else "" }}>
+                                                    <div class="form-group">
+                                                        <label>Select Game Mode :-</label>
+                                                        <select id="gameMode" name="gameMode" data-validation="required"
+                                                            data-validation-event="click" class="form-control">
+                                                            <option value="">Choose Game Mode</option>
+                                                            <option value="auto" selected>Auto</option>
+                                                            <!-- <option value="manual" {{ "selected" if Game.gameMode=='manual' else "" }}>Manual</option> -->
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <!-- {% endif %} -->
+                                            </div>
+
+
+                                            <!--Game if auto so Time Grace-->
+                                            {% if gameData.type =='game_1' %}
+                                            <div class="row">
+                                                <div class="col-lg-6 col-sm-6" id="timeGrace">
+                                                    <label>Grace Period (Select Time):-</label>
+                                                    <div class='input-group date' id='graceTime'>
+                                                        <input type='text' class="form-control" name="grace_time"
+                                                            id="grace_time" value=""
+                                                            data-validation="required graceDate"
+                                                            placeholder="Grace Period (If your grace time is less then current time then it will be not selected)"
+                                                            data-date-format="YYYY-MM-DD HH:mm" />
+                                                        <span class="input-group-addon">
+                                                            <span
+                                                                class="glyphicon glyphicon2 glyphicon-calendar"></span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endif %}
+                                            {% if gameData.type=='game_2' or gameData.type=='game_3' %}
+                                            <div class="row">
+                                                <!-- Game Start Date and Time -->
+                                                <div class="col-lg-6 col-sm-6">
+                                                    <div class="form-group">
+                                                        <label class="">{{translate.start_date_and_time}}:-</label>
+                                                        <div class='input-group date' id='startDate'>
+                                                            <input onkeydown="return false" type='text'
+                                                                class="form-control" name="start_date" id="start_date"
+                                                                value="" placeholder="{{translate.start_date}}" required
+                                                                data-validation="required startDate"
+                                                                data-date-format="YYYY-MM-DD" autocomplete="off" />
+                                                            <span class="input-group-addon">
+                                                                <span class="glyphicon glyphicon-calendar"></span>
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-lg-6 col-sm-6">
+                                                    <div class="form-group">
+                                                        <label>{{translate.end_date_and_time}}:-</label>
+                                                        <div class='input-group date' id='endDate'>
+                                                            <input onkeydown="return false" type='text'
+                                                                class="form-control" name="end_date" id="end_date"
+                                                                value="" required data-validation="required endDate"
+                                                                placeholder="{{translate.end_date}}" data-date-format="YYYY-MM-DD"
+                                                                autocomplete="off" />
+                                                            <span class="input-group-addon">
+                                                                <span
+                                                                    class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endif %}
+                                            {% if gameData.type=='game_2' or gameData.type=='game_3' %}
+                                            <!--Days Selection Selection-->
+                                            {% set week = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"] %}
+                                            <div class="row">
+                                                <div class="weekDays-selector col-sm-12">
+                                                    {% for val in week %}
+                                                    {% set add = "false" %}
+                                                    {% for day in days %}
+                                                    {% if val == day %}
+                                                    {% set add = "true"%}
+                                                    {% endif %}
+                                                    {% endfor %}
+                                                    <input type="checkbox" id="weekday-{{val}}" {{ "checked" if
+                                                        add=='true' else "" }} class="weekday" />
+                                                    <label for="weekday-{{val}}">{{val}}</label>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                            <hr>
+                                            <h5><b>{{translate.time_period}} :</b></h5>
+                                            <hr>
+                                            <!--Time Selection Selection for Selected Day-->
+                                            <div class="row days">
+                                                {% for day in days %}
+                                                <div class="day col-md-12">
+                                                    <div id="day_{{day}}" class="col-sm-2">
+                                                        <input type="text" class="form-control " readonly disabled
+                                                            value="{{day}}">
+                                                    </div>
+                                                    <div id="time_{{day}}" class="col-sm-10">
+                                                        <div class="form-group start_time col-sm-6"
+                                                            style="display:flex;align-items: center;justify-content: space-evenly;">
+                                                            <label class="col-sm-4" style="text-align:end;"
+                                                                for="days[{{day}}][]">{{translate.start_time}} :</label>
+                                                            <div class="col-sm-7">
+                                                                <input type='text' class="form-control start_time1"
+                                                                    name="days[{{day}}][]" id="{{day}}_startTime"
+                                                                    data-validation="required startTime"
+                                                                    placeholder="{{translate.select}} {{translate.start_time}}"
+                                                                    data-date-format="HH:mm"
+                                                                    value="{{timings[loop.index-1][0]}}"
+                                                                    autocomplete="off" />
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group  end_time col-sm-6"
+                                                            style="display:flex;align-items: center;justify-content: space-evenly;">
+                                                            <label class="col-sm-3" style="text-align:end;"
+                                                                for="days[{{day}}][]">{{translate.end_time}} : </label>
+                                                            <div class="col-sm-7">
+                                                                <input type='text' class="form-control end_time1"
+                                                                    name="days[{{day}}][]" id="{{day}}_endTime"
+                                                                    data-validation="required endTime"
+                                                                    placeholder="{{translate.select}} {{translate.end_time}}"
+                                                                    data-date-format="HH:mm"
+                                                                    value="{{timings[loop.index-1][1]}}"
+                                                                    autocomplete="off" />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {% endfor %}
+                                            </div>
+                                            <hr>
+                                            {% endif %}
+
+                                            <!-- Group Hall-->
+                                            <div class="row">
+                                                {% if gameData.type=='game_2' or gameData.type=='game_3' %}
+                                                <div class="col-lg-6 col-md-6">
+                                                    <label>{{translate.select}} {{translate.group_hall}}</label>
+                                                    <select data-placeholder="{{translate.choose}} {{translate.group_hall}}..." multiple
+                                                        class="chosen-select form-control" id="groupHallSelected"
+                                                        name="groupHalls">
+                                                        {# {% for grpHall in groupHalls %}
+                                                        {% set selected = "false" %}
+                                                        {% for groupHall in Game.groupHalls %}
+                                                        {% if groupHall.id == grpHall.id %}
+                                                        {% set selected = "true" %}
+                                                        {% endif %}
+                                                        {% endfor %}
+                                                        <!-- <option selected value="{{groupHall.id}}">{{groupHall.name}}</option> -->
+                                                        <option {{ "selected" if selected=='true' else "" }}
+                                                            value="{{grpHall.id}}">{{grpHall.name}}</option>
+                                                        {% endfor %} #}
+                                                    </select>
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                            <br>
+
+                                            <div class="row">
+                                                <div class="col-lg-6 col-sm-6">
+                                                    <!-- Minimum Ticket Count-->
+                                                    <div class="form-group " id="minTicketCount">
+                                                        <label>{{translate.minimum_ticket_count}} :-</label>
+                                                        <input type="number" class="form-control" name="minTicketCount"
+                                                            placeholder="{{translate.enter}} {{translate.minimum_ticket_count}}"
+                                                            value="{{Game.minTicketCount}}" id="minTicketCt" readonly
+                                                            disabled>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Game 1 All Details -->
+                                            {% if Game.gameType=='game_1' %}
+
+                                            <div class="row">
+                                                <div class="col-lg-6 col-sm-6">
+                                                    <div class="" form-group>
+                                                        <label>Hall Name</label>
+                                                        <div class="row full-width-select2 searchHide">
+                                                            <div class="col-lg-12">
+                                                                <select class="js-select2" multiple=""
+                                                                    name="hallSelecteds" id="hallSelected">
+                                                                    {% if session.role == 'admin' %}
+                                                                    <!--[ All Halls ]-->
+                                                                    {% for hall in hallArray %}
+                                                                    {% set selected = "false" %}
+                                                                    <!--[ Game Halls ]-->
+                                                                    {% for hallsData in Game.halls %}
+                                                                    <!--[ Check Condition if halls hallId and game.hall hall.hallId is match so option was selected  ]-->
+                                                                    {% if hallsData.hallId == hall.hallId %}
+                                                                    {% set selected = "true" %}
+                                                                    {% endif %}
+                                                                    {% endfor %}
+                                                                    <option {{ "selected" if selected=='true' else "" }}
+                                                                        value="{{hall._id}}">{{hall.name}}</option>
+                                                                    {% endfor %}
+                                                                    {# Agent Halls #} {% else %}
+                                                                    <!--[ Agent All Halls ]-->
+                                                                    {% for hall in agentHallArray %}
+                                                                    {% set selected = "false" %}
+                                                                    <!--[ Game Halls ]-->
+                                                                    {% for hallsData in Game.halls %}
+                                                                    <!--[ Check Condition if halls hallId and game.hall hall.hallId is match so option was selected  ]-->
+                                                                    {% if hallsData.hallId == hall.hallId %}
+                                                                    {% set selected = "true" %}
+                                                                    {% endif %}
+                                                                    {% endfor %}
+                                                                    <option {{ "selected" if selected=='true' else "" }}
+                                                                        value="{{hall._id}}">{{hall.name}}</option>
+                                                                    {% endfor %}
+                                                                    {% endif %}
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-lg-6 col-sm-6">
+                                                    <div class="">
+
+                                                        <label>Master Hall</label>
+
+                                                        <div class="row full-width-select2">
+                                                            <div class="col-lg-12">
+                                                                <select id="masterHallOption" class="form-control"
+                                                                    name="masterHallSelected">
+
+                                                                    {% set selct=false %}
+                                                                    {% for objhall in Game.halls %}
+                                                                    {% if(Game.masterHall._id==objhall._id) %}
+                                                                    {% set selct=true %}
+                                                                    {% endif %}
+                                                                    <option {{('selected' if(selct) else '' )}}
+                                                                        value="{{objhall._id}}">{{objhall.name}}
+                                                                    </option>
+                                                                    {% endfor %}
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-lg-6 col-sm-6">
+                                                    <div class="">
+                                                        <label>Game Name</label>
+                                                        <div class="row full-width-select2 searchHide">
+                                                            <div class="col-lg-12">
+                                                                <select class="js-select4 form-control" multiple=""
+                                                                    id="gameNameSelect" name="gameNameSelect">
+                                                                    <!--[ All Subgames ]-->
+                                                                    {% for item in subGameList %}
+                                                                    {% set selected = "false" %}
+                                                                    <!--[ Game Subgames ]-->
+                                                                    {% for subGamesData in Game.subGames %}
+                                                                    {% if subGamesData.gameType == item.gameType %}
+                                                                    {% set selected = "true" %}
+                                                                    {% endif %}
+                                                                    {% endfor %}
+
+                                                                    <option {{ "selected" if selected=='true' else "" }}
+                                                                        value="{{item._id}}|{{item.gameName}}|{{item.gameType}}">
+                                                                        {{item.gameName}}</option>
+                                                                    {% endfor %}
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <hr>
+                                            <!-- Game Ticket color & its Price -->
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <label>Game Ticket color & its Price :</label>
+                                                </div>
+                                            </div>
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <div class="ctm-list-design">
+                                                        <ul class="clsli gameColorTicketPrice row">
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <hr>
+                                            <!-- Generate Number of tickets for ticket color/type -->
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <label>Generate Number of tickets for ticket color/type</label>
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <div class="color_pr">
+
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <hr>
+                                            <!-- Game & its Jackpot Prize & Drawse -->
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <label>Game & its Jackpot Prize & Draws</label>
+                                                </div>
+                                            </div>
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <div class="price_draws">
+                                                        <div
+                                                            class="row d-block full-width-box tket-color-type mb-10 jackpotPriceDraws">
+
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <hr class="hrTag" style="border: 1px solid black;">
+                                            <!-- Game Name and Row/Pattern Prize -->
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <label>Game Name and Row/Pattern Prize</label>
+                                                </div>
+                                            </div>
+
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <span class="basicHtml3">Select Game <span class="text-blue"> &nbsp;
+                                                            <b> [ This Data Automatically Added ] </b></span></span>
+
+                                                    <div class="pattern_price">
+
+                                                    </div>
+                                                </div>
+
+                                            </div>
+                                            {% endif %}
+
+
+                                            <br>
+                                            <!--Notification Time-->
+                                            <div class="row ">
+                                                <div class="col-lg-6">
+                                                    <label>{{translate.prize_of_lucky_number}}:</label>
+                                                    <input type="number" class="form-control"
+                                                        onkeypress="return event.charCode >= 48" min="1" required
+                                                        name="luckyNumberPrize" placeholder="{{translate.enter}} {{translate.prize_of_lucky_number}}"
+                                                        value="{{Game.luckyNumberPrize}}" id="luckyNumberPrize"
+                                                        data-validation="required ">
+                                                </div>
+                                            </div>
+                                            <br>
+                                            <div class="row ">
+                                                <div class="col-lg-6">
+                                                    <label>{{translate.notification_start_time}}:</label>
+                                                    <select name="notificationStartTime" class="form-control"
+                                                        id="notificationStartTime">
+                                                        <option value="10s" {{ "selected" if
+                                                            Game.notificationStartTime=='10s' else "" }}>10s</option>
+                                                        <option value="15s" {{ "selected" if
+                                                            Game.notificationStartTime=='15s' else "" }}>15s</option>
+                                                        <option value="20s" {{ "selected" if
+                                                            Game.notificationStartTime=='20s' else "" }}>20s</option>
+                                                        <option value="30s" {{ "selected" if
+                                                            Game.notificationStartTime=='30s' else "" }}>30s</option>
+                                                        <option value="40s" {{ "selected" if
+                                                            Game.notificationStartTime=='40s' else "" }}>40s</option>
+                                                        <option value="50s" {{ "selected" if
+                                                            Game.notificationStartTime=='50s' else "" }}>50s</option>
+                                                        <option value="1m" {{ "selected" if
+                                                            Game.notificationStartTime=='1m' else "" }}>1m</option>
+                                                        <option value="2m" {{ "selected" if
+                                                            Game.notificationStartTime=='2m' else "" }}>2m</option>
+                                                        <option value="3m" {{ "selected" if
+                                                            Game.notificationStartTime=='3m' else "" }}>3m</option>
+                                                        <option value="4m" {{ "selected" if
+                                                            Game.notificationStartTime=='4m' else "" }}>4m</option>
+                                                        <option value="5m" {{ "selected" if
+                                                            Game.notificationStartTime=='5m' else "" }}>5m</option>
+                                                        {% if gameData.type =='game_2' %}
+                                                        <option value="0s" {{ "selected" if
+                                                            Game.notificationStartTime=='0s' else "" }}>0s</option>
+                                                        {% endif %}
+                                                    </select>
+                                                </div>
+                                            </div>
+
+
+                                            <!--Luckynumber price-->
+
+
+                                            {% endif %}
+                                            {% if gameData.type=='game_4' %}
+
+                                            <div class="form-group">
+                                                <div class="">
+                                                    <label class="mb-10 col-sm-12">Pattern Name & it's Prize </label>
+                                                    <div class="col-sm-12">
+                                                        <div class="row">
+
+                                                            {% for pattern in patternData %}
+                                                            <div class="col-lg-2 m-b-1">
+                                                                <input type="number " class="form-control" readonly
+                                                                    disabled value="{{pattern.patternName}}">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1">
+                                                                <input type="number" class="form-control"
+                                                                    onkeypress="return event.charCode >= 48" min="1"
+                                                                    required name="{{pattern.name}}" placeholder="1000"
+                                                                    value="{{pattern.price}}"
+                                                                    data-validation="required ">
+                                                            </div>
+                                                            {% endfor %}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group ">
+                                                <div class="row ">
+                                                    <label class="mb-10 col-sm-12 ">Bet Multiplier:</label>
+                                                    <div class="col-sm-12 ">
+                                                        <input type="number" class="form-control numericCls32" min="1"
+                                                            max="4" required name="betMultiplier"
+                                                            placeholder="Enter Bet Multiplier ( 1 to 4 )"
+                                                            value="{{Game.betMultiplier}}" id="betMultiplier"
+                                                            data-validation="required">
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <div class="row">
+                                                    <label class="mb-10 col-sm-12">Bet Amount</label>
+                                                    <div class="col-sm-12">
+                                                        <div class="row addNewBox">
+
+                                                            <div class="col-lg-3 m-b-1">
+                                                                <input type="number " class="form-control" readonly=""
+                                                                    disabled="" value="Ticket 1">
+                                                            </div>
+                                                            <div class="col-lg-3 m-b-1">
+                                                                <input type="number " class="form-control" readonly=""
+                                                                    disabled="" value="Ticket 2">
+                                                            </div>
+                                                            <div class="col-lg-3 m-b-1">
+                                                                <input type="number " class="form-control" readonly=""
+                                                                    disabled="" value="Ticket 3">
+                                                            </div>
+                                                            <div class="col-lg-3 m-b-1">
+                                                                <input type="number " class="form-control" readonly=""
+                                                                    disabled="" value="Ticket 4">
+                                                            </div>
+
+                                                            {% for bet in Game.betAmount %}
+
+                                                            <div class="col-lg-3 m-b-1">
+                                                                <input type="number " class="form-control" required
+                                                                    name="betAmount" value="{{bet}}">
+                                                            </div>
+
+                                                            {% endfor %}
+
+
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {% endif %}
+                                            <br>
+                                            <!--Seconds-->
+
+                                            <div class="row ">
+                                                <div class="col-lg-6">
+                                                    <label>{{translate.total_seconds_to_display_ball}}:</label>
+                                                    {% if gameData.type=='game_4' %}
+                                                    <div class="row">
+                                                        &nbsp Example: 1 to 18 Balls [ 1 Ball = 0.5sec ]
+                                                        <input type="number" step="any" class="form-control numericCls"
+                                                            min="0.001" max="60" required name="seconds"
+                                                            placeholder="Enter Seconds" value="{{seconds}}" id="seconds"
+                                                            data-validation="required ">
+                                                    </div>
+
+                                                    <hr>
+
+                                                    <div class="row">
+                                                        &nbsp Example: 19 to 33 Balls [ 1 Ball = 1sec ]
+                                                        <input type="number" step="any" class="form-control numericCls"
+                                                            min="0.001" max="60" required name="seconds2"
+                                                            placeholder="Enter Seconds" value="{{seconds2}}"
+                                                            id="seconds" data-validation="required ">
+                                                    </div>
+                                                    {% elif gameData.type=='game_1' %}
+                                                    <input type="number" class="form-control"
+                                                        onkeypress="return event.charCode >= 48" min="1" max="60"
+                                                        required name="seconds" placeholder="Enter Seconds "
+                                                        value="{{seconds}}" id="seconds"
+                                                        data-validation="required number minimumCount">
+                                                    {% else %}
+                                                    <input type="number" class="form-control"
+                                                        onkeypress="return event.charCode >= 48" min="1" max="60"
+                                                        required name="seconds" placeholder="{{translate.enter}} {{translate.seconds}}"
+                                                        value="{{seconds}}" id="seconds" data-validation="required ">
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+
+                                            <!-- Bot game -->
+                                            {% if gameData.type=='game_2' %}
+                                                <br>
+                                                <div class="row">
+                                                    <div class="col-lg-6 col-md-6">
+                                                        <div class="form-group ">
+                                                            <label>{{translate.is_bot_game}}:</label>
+                                                            <select name="isBotGame"
+                                                                id="isBotGame" class="form-control"
+                                                                required />
+                                                                <option value="No" {{ "selected" if
+                                                                    Game.otherData.isBotGame == false else "" }}>{{translate.no}}
+                                                                </option>
+                                                                <option value="Yes" {{ "selected" if
+                                                                    Game.otherData.isBotGame == true else "" }}>{{translate.yes}}
+                                                                </option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {% set showBotFieldsClass = "" %}
+                                                {% if slug=="Add" or Game.otherData.isBotGame == false %}
+                                                    {% set showBotFieldsClass = "hidden" %}
+                                                {% endif %}
+                                                
+                                                
+                                                <div class="row botGame {{showBotFieldsClass}}">
+                                                    <div class="col-lg-6 col-md-6">
+                                                        <div class="form-group">
+                                                            <label>{{translate.how_many_bot_game_to_run}}? :</label>
+                                                            <input type="number" class="form-control"
+                                                                onkeypress="return event.charCode >= 48" 
+                                                                name="botGameCount"
+                                                                min="1"
+                                                                placeholder="{{translate.total_bot_game_to_run}}"
+                                                                value="{{Game.otherData.botGameCount}}" id="botGameCount"
+                                                                data-validation="required">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            {% endif %}
+                                            <!-- Bot game -->
+
+                                            <!--Sub Gams and Total Ticket-->
+                                            {% if Game.gameType=='game_2' or Game.gameType=='game_3' %}
+                                            <br>
+                                            <div class="col-12" id="subGamesContainer"
+                                                style="max-height: 600px;overflow-y:auto;">
+                                                <!-- SubGames will be added here -->
+                                                {% if Game.subGames.length %}
+                                                {% for subGame in Game.subGames %}
+                                                <div class="ch col-lg-11"
+                                                    style="border : 1px solid black;margin-top:10px;">
+                                                    <div style="margin-top:10px;">
+                                                        <button type="button" name="delete"
+                                                            class="pull-right btn btn-danger btn-xs deleteSubGame btn-delete"
+                                                            title="Delete Game">
+                                                            <i class="fa fa-trash" aria-hidden="true"></i>
+                                                        </button>
+                                                    </div>
+                                                    <div class="clearfix"></div>
+                                                    <div class="row">
+                                                        <div class="col-lg-6 col-sm-6">
+                                                            <div class="form-group">
+                                                                <label>{{translate.sub_game_name}} :-</label>
+                                                                <input type="text" class="form-control"
+                                                                    name="subGame[{{loop.index}}][name]"
+                                                                    value="{{subGame.name}}"
+                                                                    placeholder="{{translate.enter}} {{translate.sub_game_name}}" value=""
+                                                                    data-validation="required">
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-lg-6 col-md-6">
+                                                            <div class="form-group">
+                                                                <label>{{translate.ticket_price}}:-</label>
+                                                                <input type="number" class="form-control"
+                                                                    onkeypress="return event.charCode >= 48" min="1"
+                                                                    required value="{{subGame.ticketPrice}}"
+                                                                    name="subGame[{{loop.index}}][ticketPrice]"
+                                                                    placeholder="{{translate.enter}} {{translate.ticket_price}}"
+                                                                    data-validation="required">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        {% set pool = 100 %}
+                                                        {% if not subGame.priceNine.isCash %}
+                                                        {% set pool = pool - subGame.priceNine.price %}
+                                                        {% endif %}
+                                                        {% if not subGame.priceTen.isCash %}
+                                                        {% set pool = pool - subGame.priceTen.price %}
+                                                        {% endif %}
+                                                        {% if not subGame.priceEleven.isCash %}
+                                                        {% set pool = pool - subGame.priceEleven.price %}
+                                                        {% endif %}
+                                                        {% if not subGame.priceTwelve.isCash %}
+                                                        {% set pool = pool - subGame.priceTwelve.price %}
+                                                        {% endif %}
+                                                        {% if not subGame.priceThirteen.isCash %}
+                                                        {% set pool = pool - subGame.priceThirteen.price %}
+                                                        {% endif %}
+                                                        {% if not subGame.priceFourteenToTwentyone.isCash %}
+                                                        {% set pool = pool - subGame.priceFourteenToTwentyone.price %}
+                                                        {% endif %}
+                                                        <label>{{translate.jackpot_number_and_prize}} </label>
+                                                        <div class="row" data-subgame="{{loop.index}}"
+                                                            data-pool="{{pool}}">
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number" class="form-control " readonly
+                                                                    disabled value="9">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number" class="form-control priceNine kr"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceNine]"
+                                                                    placeholder="In Kr"
+                                                                    value='{{subGame.priceNine.price if subGame.priceNine.isCash else "0"}}'
+                                                                    data-validation="required " min="0">
+                                                                <input type="number" class="form-control percent"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceNinePercent]"
+                                                                    placeholder="In %"
+                                                                    value='{{"0" if subGame.priceNine.isCash else subGame.priceNine.price }}'
+                                                                    data-previous="0" data-validation="required" min="0">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1">
+                                                                <input type="number" class="form-control" readonly
+                                                                    disabled value="10">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number" class="form-control priceTen kr"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceTen]"
+                                                                    placeholder="In Kr"
+                                                                    value='{{subGame.priceTen.price if subGame.priceTen.isCash else "0"}}'
+                                                                    data-validation="required " min="0">
+                                                                <input type="number" class="form-control percent"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceTenPercent]"
+                                                                    placeholder="In %"
+                                                                    value='{{"0" if subGame.priceTen.isCash else subGame.priceTen.price }}'
+                                                                    data-previous="0" data-validation="required" min="0">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number" class="form-control" readonly
+                                                                    disabled value="11">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+
+                                                                <input type="number" class="form-control priceEleven kr"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceEleven]"
+                                                                    placeholder="In Kr"
+                                                                    value='{{subGame.priceEleven.price if subGame.priceEleven.isCash else "0"}}'
+                                                                    data-validation="required " min="0">
+                                                                <input type="number" class="form-control percent"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceElevenPercent]"
+                                                                    placeholder="In %"
+                                                                    value='{{"0" if subGame.priceEleven.isCash else subGame.priceEleven.price }}'
+                                                                    data-previous="0" data-validation="required" min="0">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number" class="form-control" readonly
+                                                                    disabled value="12">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number" class="form-control priceTwelve kr"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceTwelve]"
+                                                                    placeholder="In Kr"
+                                                                    value='{{subGame.priceTwelve.price if subGame.priceTwelve.isCash else "0"}}'
+                                                                    data-validation="required " min="0">
+                                                                <input type="number" class="form-control percent"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceTwelvePercent]"
+                                                                    placeholder="In %"
+                                                                    value='{{"0" if subGame.priceTwelve.isCash else subGame.priceTwelve.price }}'
+                                                                    data-previous="0" data-validation="required" min="0">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number" class="form-control" readonly
+                                                                    disabled value="13">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number"
+                                                                    class="form-control priceThirteen kr"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceThirteen]"
+                                                                    placeholder="In Kr"
+                                                                    value='{{subGame.priceThirteen.price if subGame.priceThirteen.isCash else "0"}}'
+                                                                    data-validation="required " min="0">
+                                                                <input type="number" class="form-control percent"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceThirteenPercent]"
+                                                                    placeholder="In %"
+                                                                    value='{{"0" if subGame.priceThirteen.isCash else subGame.priceThirteen.price }}'
+                                                                    data-previous="0" data-validation="required" min="0">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="text" class="form-control " readonly
+                                                                    disabled value="14 to 21">
+                                                            </div>
+                                                            <div class="col-lg-2 m-b-1 ">
+                                                                <input type="number"
+                                                                    class="form-control priceFourteenToTwentyone kr"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceFourteenToTwentyone]"
+                                                                    placeholder="In Kr"
+                                                                    value='{{subGame.priceFourteenToTwentyone.price if subGame.priceFourteenToTwentyone.isCash else "0"}}'
+                                                                    data-validation="required " min="0">
+                                                                <input type="number" class="form-control percent"
+                                                                    onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                                                    name="subGame[{{loop.index}}][priceFourteenToTwentyonePercent]"
+                                                                    placeholder="In %"
+                                                                    value='{{"0" if subGame.priceFourteenToTwentyone.isCash else subGame.priceFourteenToTwentyone.price }}'
+                                                                    data-previous="0" data-validation="required" min="0">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {% endfor %}
+                                                {% endif %}
+                                            </div>
+                                            <br>
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <input type="button" id="addSBGame" class="btn btn-primary btn-flat"
+                                                        value="Add Sub Game">
+                                                </div>
+                                            </div>
+                                            {#<div class="row ">
+                                                <div class="col-lg-6">
+                                                    <label>Total number of tickets allocate for this game::</label>
+                                                    <input type="number" class="form-control"
+                                                        onkeypress="return event.charCode >= 48" min="30" max="1000"
+                                                        required name="totalNoTickets"
+                                                        placeholder="Enter Total No Tickets"
+                                                        value="{{Game.totalNoTickets}}" id="totalNoTickets"
+                                                        data-validation="required ">
+                                                </div>
+                                            </div>#}
+                                            {% endif %}
+                                        </div>
+
+                                    </div>
+                                    <tr>
+                                        <td colspan="2 ">
+                                            <div class="pull-left ">
+                                                {% if gameData.type=='game_3' %}
+                                                <input type="button" class="btn btn-success sbBtn btn-flat"
+                                                    value="{{translate.submit}}"> {% else %}
+                                                <input type="submit" class="btn btn-success btn-flat onsub"
+                                                    value="{{translate.submit}}"> {% endif %}
+                                                <a href="/savedGameList" class="btn btn-danger btn-flat ">{{translate.cancel}}</a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <!-- </table> -->
+                                </form>
+                                <!-- </div> -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- /Row -->
+    </div>
+</div>
+
+{% if gameData.type=='game_3' %}
+<div class="modal fade add-pattern-modal" id="addNewWordModal">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <h4 class="modal-title">Add Pattern</h4>
+            </div>
+            <div class="modal-body">
+                <div class="pattern-name">
+                    <label>Group Name</label>
+                    <input type="text" class="form-control ptrnP" placeholder="Group Test" value="Group Test" required>
+                </div>
+
+                <div class="pattern-group">
+                    <label>Pattern Group</label>
+                    <ul class="pattern-group-ul patternList">
+                        {% for ptrn in pattern %}
+                        <li rel="{{ptrn.patternName}}">
+                            <div class="checkbox">
+                                <label>
+                                    <input type="checkbox" name="checkboxPt" data-patternId="{{ptrn._id}}"
+                                        value="{{ptrn.patternName}}" data-patternType="{{ptrn.patternType}}">
+                                    {{ptrn.patternName}}
+                                </label>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    <button type="submit" class="btn sBtnn btn-primary" data-cntt="0" data-dismiss="modal">Add</button>
+                </div>
+                <div class="clearfix"></div>
+            </div>
+        </div>
+        <!-- /.modal-content -->
+    </div>
+</div>
+{% endif %}{% endblock %} {% block Jscript %}
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+<script src="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.jquery.min.js "></script>
+<link href="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.min.css " rel="stylesheet " />
+<link rel="stylesheet "
+    href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css "
+    integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin=" anonymous " />
+<script
+    src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js "
+    integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin=" anonymous "></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.13.0/moment.min.js"></script>
+<!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/3.1.4/css/bootstrap-datetimepicker.min.css" />
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/3.1.4/js/bootstrap-datetimepicker.min.js"></script> -->
+
+<script>
+    let subGameColorRow = "{{subGameColorRow}}";
+    let GameOfSubGame = '{{gameSubGames}}';
+    let GamesData = '{{GameJSON}}';
+</script>
+<script src="/dist/js/saveGameOne.js" type="text/javascript"></script>
+
+<script>
+
+    $.formUtils.addValidator({
+        name: 'graceDate',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let startDate = document.getElementById("start_date").value;
+            console.log(" validation value : " + startDate + " value value : ")
+            return value > startDate
+            //return false;
+        },
+        errorMessage: 'Grace Period Must be greater than Start Date',
+        errorMessageKey: 'graceDate'
+    });
+
+    $.formUtils.addValidator({
+        name: 'endDate',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let startDate = document.getElementById("start_date").value;
+            startDate = moment(new Date(startDate)).startOf("day");
+            let endDate = moment(new Date(value)).endOf("day");
+            let diff = endDate.diff(startDate, "days");
+            setTimeout(groupHallOptions, 100);
+            return diff >= 6;
+        },
+        errorMessage: '{{translate.min_day_gap_7_days}}',
+        errorMessageKey: 'endDate'
+    });
+
+    $.formUtils.addValidator({
+        name: 'startDate',
+        validatorFunction: function (value, $el, config, language, $form) {
+            // console.log(document.getElementById("end_date"));
+            let graceDate = document.getElementById("end_date").value;
+            if (graceDate == "") {
+                return true;
+            } else {
+                // let diff = moment(new Date(graceDate)).diff(new Date(value), "days");
+                let startDate = moment(new Date(value)).startOf("day");
+                graceDate = moment(new Date(graceDate)).endOf("day");
+                let diff = graceDate.diff(startDate, "days");
+                console.log("start end", diff);
+                setTimeout(groupHallOptions, 100);
+                return diff >= 6;
+            }
+        },
+        errorMessage: '{{translate.min_day_gap_7_days}}',
+        errorMessageKey: 'startDate'
+    });
+
+    $.formUtils.addValidator({
+        name: 'minimumCount',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let seconds = $("#seconds").val();
+            //console.log("mincount", seconds);
+            return parseInt(seconds) >= 4;
+        },
+        errorMessage: 'Minimum Seconds must be greater than 3',
+        errorMessageKey: 'totalNoTickets'
+    });
+
+    $.formUtils.addValidator({
+        name: 'minTicketsCount',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let totalTicketCount = $("#totalNoTickets").val();
+            console.log("totalTicketCount", totalTicketCount);
+            if (totalTicketCount > 0) {
+                return parseInt(totalTicketCount) >= parseInt(value);
+            }
+        },
+        errorMessage: 'Minimum Ticket Count must be less or equal to Total number of Tickets',
+        errorMessageKey: 'minTicketsCount'
+    });
+
+    //Time Validation
+    $.formUtils.addValidator({
+        name: 'startTime',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let startTime = value.split(":");
+            startTime = (+startTime[0]) * 60 + (+startTime[1]);
+            let day = $el.attr("id").slice(0, 3)
+            console.log("day", day);
+            let endTime = $(`#${day}_endTime`).val();
+            endTime = endTime.split(":");
+            endTime = (+endTime[0]) * 60 + (+endTime[1]);
+            console.log("startTime type and val", typeof startTime, startTime, "endTime type and val", typeof endTime, endTime);
+            if (!isNaN(endTime)) {
+                return startTime < endTime;
+            } else {
+                return true;
+            }
+        },
+        errorMessage: '{{translate.start_time_must_be_less_than_end_time}}',
+        errorMessageKey: 'startTimeError'
+    });
+
+    $.formUtils.addValidator({
+        name: 'endTime',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let endTime = value.split(":");
+            endTime = (+endTime[0]) * 60 + (+endTime[1]);
+            let day = $el.attr("id").slice(0, 3);
+            console.log("day", day);
+            let startTime = $(`#${day}_startTime`).val();
+            startTime = startTime.split(":");
+            startTime = (+startTime[0]) * 60 + (+startTime[1]);
+            console.log("startTime type and val", typeof startTime, startTime, "endTime type and val", typeof endTime, endTime);
+            if (!isNaN(startTime)) {
+                return endTime > startTime;
+            } else {
+                return true;
+            }
+        },
+        errorMessage: '{{translate.end_time_must_be_greater_than_start_time}}',
+        errorMessageKey: 'endTimeError'
+    });
+
+
+
+
+
+    $(document).ready(function () {
+        let subGameNum = 0;
+        subGameNum = $("#subGamesContainer").children('div.ch').length;
+        $(".chosen-select").chosen({
+            no_results_text: "Oops, nothing found!"
+        });
+        $('#groupHallSelected').trigger("chosen:updated");
+        let grpHallArr = $("#groupHallSelected").val();
+        console.log("#groupHallSelected", grpHallArr);
+        if (grpHallArr.length) {
+            //Put already selected grphall in storage
+            sessionStorage.setItem('groupHallSelected', grpHallArr);
+        }
+        $('input[name="ctimezone"]').val(Intl.DateTimeFormat().resolvedOptions().timeZone);
+        $("#minTicketCount").hide();
+        initializeValidator()
+        // $('body').on('click', '.btnn', function() {
+        //     $('input:checkbox[name=checkboxPt]').each(function() {
+        //         $(this).prop('checked', false);
+        //     });
+        //     $('#addNewWordModal').modal({
+        //         backdrop: 'static',
+        //         keyboard: false
+        //     })
+        // });
+
+        // [ Game 1 Started Here  ]
+
+        $(".js-select2").select2({
+            closeOnSelect: false,
+            placeholder: "Hall 1",
+            allowHtml: true,
+            allowClear: true,
+            tags: true
+        });
+
+        $(".js-select4").select2({
+            closeOnSelect: false,
+            placeholder: "Game 1",
+            allowHtml: true,
+            allowClear: true,
+            tags: true
+        });
+
+        // [ Game 1 Hall Select ] 
+        $("#hallSelected").on('change', function () {
+            let valueHall = $(this).val();
+            let textValue = $('#hallSelected option:selected').toArray().map(item => item.text);
+            $('#masterHallOption').empty();
+            for (let i = 0; i < valueHall.length; i++) {
+                $('#masterHallOption').append($('<option>', {
+                    value: valueHall[i],
+                    text: textValue[i]
+                }));
+            }
+        });
+
+        // let gGroupHalls = `{{ gGroupHalls | dump | safe }}`;
+        // gGroupHalls = JSON.parse(gGroupHalls);
+        // console.log('gGroupHalls',gGroupHalls);
+        // let x = gGroupHalls.length;
+        // let grpHallArray = [];
+        // for(let a = 0; a < gGroupHalls.length; a++){
+        //     grpHallArray.push(gGroupHalls[a].id);
+        // }
+        // console.log('grpHallArray out:',grpHallArray);
+        // let x = 0;
+        // $("#groupHallSelected").on('change', function() {
+        //     let valueHall = $(this).val();
+        //     let grpHAall = $(`#groupHallSelected option:selected`).toArray().map(item => item.value);
+        //     let grpHallArr = $(`#groupHallSelected option:selected`).map(function(){
+        //                             let hallArray ={
+        //                                 groupHallId:this.value,
+        //                                 name:this.text
+        //                             }
+        //                             return hallArray; // If you want text of select boxes.
+        //                         }).get();
+        //     let isRemoved = true;
+        //     for(let i = 0; i < grpHallArr.length; i++){
+        //         console.log(`${i}`,grpHallArr[i]);
+        //         if($(`#${grpHallArr[i].groupHallId}`).length == 0){
+        //             // x += 1;
+        //             $.ajax({
+        //                 type: 'GET',
+        //                 url: "/getGroupHallData",
+        //                 data: {id:grpHallArr[i].groupHallId},
+        //                 success: function(resultData) {
+        //                     if (resultData.status == 'success') {
+        //                         let halls = resultData.halls;
+        //                         console.log('halls',halls);
+        //                         `{set halls = ${halls}}`
+        //                         //04/11/2022
+        //                         // let selectData = `<div class="col-lg-6 col-md-6" id="${grpHallArr[i].groupHallId}">
+        //                         //                 <label>Select Hall for ${grpHallArr[i].name}:</label>
+        //                         //                 <select data-placeholder="Choose halls..." multiple class="chosen-select${x} form-control" id="HallSelected" required name="halls[${x}]">`
+        //                         //                     for(let i =0; i < halls.length; i++){
+        //                         //                 selectData +=` <option value="${halls[i].id}">${halls[i].hallName}</option>`
+        //                         //                     }
+        //                         //                 selectData +=`</select>
+        //                         //         </div>`;
+        //                         // $('#groupHallOption').append(selectData);
+        //                         // $(`.chosen-select${x}`).chosen();
+        //                         grpHallArray.push(grpHallArr[i].groupHallId);
+        //                         x++;
+        //                         /*swal("Created!", "Game Saved Successfully!!", "success");*/
+        //                     } else {
+        //                         swal("Error!", 'Something went wrong!', "error");
+        //                     }
+        //                 }
+        //             });
+        //             isRemoved = false;
+        //             console.log('grpHallArray if',grpHallArray);
+        //             break;
+        //         }
+        //     }
+        //     if(isRemoved){
+        //         x -= 1;
+        //         console.log('grpHallArray',grpHallArray);
+        //         console.log('grpHAall',grpHAall);
+        //         let unique1 = grpHallArray.filter((o) => grpHAall.indexOf(o) === -1);
+        //         $(`#${unique1[0]}`).remove();
+        //     }
+        //     if(grpHallArr.length == 0 && grpHallArray.length > 0 ){
+        //         for(let m = 0; m < grpHallArray.length; m++){
+        //             $(`#${grpHallArray[m]}`).remove();
+        //         }
+        //         grpHallArray = [];
+        //     }
+        // });
+
+        // [ Game 1 Over Here ] 
+
+        $('body').on('.numericCls', 'keyup', function () {
+            this.value = this.value.replace(/[^0-9\.]/g, '');
+        });
+
+        $('body').on('.numericCls32', 'keyup', function () {
+            this.value = this.value.replace(/[^1-4\.]/g, '');
+        });
+
+        // [ Game 4 ]
+        $("#betMultiplier").on("change paste keyup", function () {
+            let numb = $(this).val();
+            let html = ``;
+            let oldHtml = ` <div class="col-lg-3 m-b-1">
+                                <input type="number " class="form-control" readonly="" disabled="" value="Ticket 1">
+                            </div>
+                            <div class="col-lg-3 m-b-1">
+                                <input type="number " class="form-control" readonly="" disabled="" value="Ticket 2">
+                            </div>
+                            <div class="col-lg-3 m-b-1">
+                                <input type="number " class="form-control" readonly="" disabled="" value="Ticket 3">
+                            </div>
+                            <div class="col-lg-3 m-b-1">
+                                <input type="number " class="form-control" readonly="" disabled="" value="Ticket 4">
+                            </div>`;
+            for (let i = 0; i < numb * 4; i++) {
+                html += `<div class="col-lg-3 m-b-1">
+                            <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" required name="betAmount" placeholder="Enter Price" value="" data-validation="required ">
+                         </div>`;
+            }
+            $('.addNewBox').html(oldHtml);
+            $('.addNewBox').append(html);
+        });
+
+        $("#timeGrace").hide();
+        let cn = '{{gameData.type}}';
+        let cnLn = '{{gL}}';
+
+        let cntt = 0
+        if (cn == 'game_3') {
+            cntt = Number(cnLn);
+        }
+
+        let prtnAr = [];
+        let allPatternArray = [];
+        let patternList = [];
+        let prnId = [];
+        let ptTy = [];
+
+        //{Only for Edit} if value is selected Preselected
+        let selectedValue = $("#gameMode option:selected").val();
+
+        // [ it's check a game time is right or wrong ]
+        $('form').on('submit', function (e) {
+            let err = false;
+            let gameMode = $("#gameMode option:selected").val();
+            let start_date = $("#start_date").val();
+            let groupHall = $("#groupHallSelected").val();
+            if (!$("#editSaveGame").isValid()) {
+                err = true;
+            }
+            if (groupHall.length == 0 && !err) {
+                err = true;
+                setTimeout(alert("{{translate.select_one_goh}}"), 500);
+            }
+
+            if (start_date == '' && !err) {
+                err = true;
+                setTimeout(alert("Please Enter Start Time"), 500);
+            }
+
+            // if (new Date(moment.utc(start_date)) <= new Date(moment.utc())) {
+            //     err = true;
+            //     alert("Please Enter Future Date");
+            //     return false;
+            // }
+
+            let days = 0;
+            days = $(".weekday:checkbox:checked").length
+            if (days <= 0 && !err) {
+                err = true;
+                setTimeout(alert("{{translate.selct_atleast_one_day_in_week}}."), 500);
+            }
+            let subGame = 0;
+            subGame = $("#subGamesContainer").children('div.ch').length;
+            if (subGame <= 0 && !err) {
+                err = true;
+                setTimeout(alert("Please Add Atleast One Sub Game For this Game."), 500);
+            }
+            let grace_time = $("#grace_time").val();
+            if (gameMode == 'auto' && (cn !== "game_2" && cn !== "game_3")) {
+                if (grace_time == '') {
+                    err = true;
+                    alert("Please Enter Grace Time");
+                    return false;
+                }
+                let newTime2 = new Date(moment.utc(start_date));
+                newTime2 = newTime2.getTime() + 2 * 60000;
+                if (new Date(moment.utc(grace_time)) <= newTime2) {
+                    err = true;
+                    alert("Please Select 2 Min After Start Time");
+                    return false;
+                }
+            }
+
+            if (err) {
+                e.preventDefault();
+            }
+        });
+
+        let fl = false;
+
+        // [ it's for if auto minTicketCount and timeGrace show otherwise hide]
+        console.log("this is mode of this game", selectedValue);
+        if (selectedValue == 'auto') {
+            $("#minTicketCount").show();
+            $("#timeGrace").show();
+        } else {
+            // $("#minTicketCount").hide();
+            $("#timeGrace").hide();
+        }
+
+        // [ Pattern ]
+        // $('body').on('click', '.btnn', function() {
+
+        //     console.log(".btnn part 1 calling");
+
+        //     let vall = $('.ptrnVall_' + cntt).val();
+        //     let cntVl = $('.ptrnVall_' + cntt).attr('data-cntt');
+        //     $('.ptrnP').val(vall);
+        //     $('.sBtn').attr('data-cntt', cntVl);
+        //     $('#addNewWordModal').modal('show');
+        // });
+
+
+        // [ Game 3 Create from here ] // [ Made By Darshan ]
+        $('body').on('click', '.sbBtn', function () {
+
+            console.log(".sbBtn part 1 calling");
+
+            let gameMode = $("#gameMode option:selected").val();
+            if (gameMode == '') {
+                alert("Please Enter GameMode");
+                return false;
+            }
+            let start_date = $("#start_date").val();
+            if (start_date == '') {
+                alert("Please Enter Time");
+                return false;
+            }
+            console.log('startTime: ', start_date);
+            console.log('new Date(): ', new Date(moment.utc()));
+            if (new Date(moment.utc(start_date)) <= new Date(moment.utc())) {
+                alert("Please Enter Future Date");
+                return false;
+            }
+            let grace_time = $("#grace_time").val();
+            let gameId = '{{Game._id}}';
+            let minTicketCt = $('#minTicketCt').val();
+            if (gameMode == 'auto') {
+                if (grace_time == '') {
+                    alert("Please Enter Grace Time");
+                    return false;
+                }
+                let newTime2 = new Date(moment.utc(start_date));
+                newTime2 = newTime2.getTime() + 2 * 60000;
+                if (new Date(moment.utc(grace_time)) <= newTime2) {
+                    alert("Please Select 2 Min After Start Time");
+                    return false;
+                }
+            }
+
+            let totalNoTickets = $('#totalNoTickets').val();
+            if (totalNoTickets == '') {
+                alert("Please Enter Total Numbers of tickets");
+                return false;
+            }
+            let notificationStartTime = $('#notificationStartTime').val();
+            if (notificationStartTime == '') {
+                alert("Please Enter notificationStartTime");
+                return false;
+            }
+            let luckyNumberPrize = $('#luckyNumberPrize').val();
+            if (luckyNumberPrize == '') {
+                alert("Please Enter luckyNumberPrize");
+                return false;
+            }
+            let ticketPrice = $('#ticketPrice').val();
+            if (ticketPrice == '') {
+                alert("Please Enter ticketPrice");
+                return false;
+            }
+            let seconds = $('#seconds').val();
+            if (seconds == '') {
+                alert("Please Enter seconds");
+                return false;
+            }
+
+            let gameType = '{{gameData.type}}';
+            let dayNew = $('#dayDate option:selected').val();
+            let tmpAr = [];
+            let allPattern = $('.shivay').val();
+            cntt = allPattern;
+            let ptNa, oldName;
+            prtnAr = [];
+            let checkAr = [];
+            for (let m = 1; m <= allPattern; m++) {
+                let ptName = $('#ptName_' + m + '_' + m).val();
+                let prrtId = $('#ptName_' + m + '_' + m).attr('data-patternId');
+                ptNa = $('#ptName_' + m + '_' + m).attr('data-gname');
+                if (m == 1) {
+                    window.temp = ptNa;
+                }
+                let ptvalue = $('#ptvalue_' + m + '_' + m).val();
+                let ptvalue2 = $('#ptvalue2_' + m + '_' + m).val();
+                let ptPatternType = $('#ptName_' + m + '_' + m).attr('data-patternType');
+
+                if (window.temp != ptNa) {
+                    prtnAr.push({
+                        'GroupName': window.temp,
+                        'PatternData': checkAr
+                    });
+                    // oldName = ptNa;
+                    checkAr = [];
+                    window.temp = ptNa;
+                    checkAr.push({
+                        'patternName': ptName,
+                        'groupName': ptNa,
+                        'patternId': prrtId,
+                        'ballNumber': ptvalue,
+                        'prize': ptvalue2,
+                        'patternType': ptPatternType
+                    });
+                } else {
+                    checkAr.push({
+                        'patternName': ptName,
+                        'groupName': ptNa,
+                        'patternId': prrtId,
+                        'ballNumber': ptvalue,
+                        'prize': ptvalue2,
+                        'patternType': ptPatternType
+                    });
+                }
+
+                if (m == allPattern) {
+                    prtnAr.push({
+                        'GroupName': window.temp,
+                        'PatternData': checkAr
+                    });
+                }
+
+                tmpAr.push({
+                    'patternName': ptName,
+                    'groupName': ptNa,
+                    'patternId': prrtId,
+                    'ballNumber': ptvalue,
+                    'prize': ptvalue2,
+                    'patternType': ptPatternType
+                });
+            }
+
+            allPatternArray.push(tmpAr);
+            let sdrr = {
+                day: dayNew,
+                gameMode: gameMode,
+                gameId: gameId,
+                gameType: gameType,
+                start_date: start_date,
+                grace_time: grace_time,
+                minTicketCount: minTicketCt,
+                totalNoTickets: totalNoTickets,
+                notificationStartTime: notificationStartTime,
+                luckyNumberPrize: luckyNumberPrize,
+                allPatternArray: allPatternArray,
+                ticketPrice: ticketPrice,
+                seconds: seconds,
+                prtnAr: prtnAr,
+                isSavedGame: true,
+                ctimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            }
+
+            $.ajax({
+                type: 'POST',
+                url: host + "/patternGame",
+                data: sdrr,
+                success: function (resultData) {
+                    if (resultData == 'success') {
+                        swal("Created!", "Game Created Successfully!!", "success");
+                        window.location.href = '/savedGameList';
+                    } else {
+                        swal("Error!", 'Something went wrong!', "error");
+                    }
+                }
+            });
+        });
+
+        let gameTypeId = '{{gameData._id}}';
+
+
+        //[ Pattern Group from here for Game 3 ]  // [ Made By Darshan ]
+        $('body').on('click', '.sBtnn', function () {
+
+            console.log(".sBtnn   part 1 calling");
+
+            let nN = $('.ptrnP').val();
+            let cntVl2 = $(this).attr('data-cntt');
+            $('.ptrnVall_' + cntVl2).val(nN);
+            let pVall = $('.patternList').val();
+            patternList = [];
+            prnId = [];
+            ptTy = [];
+            $('input:checkbox[name=checkboxPt]').each(function () {
+                if ($(this).is(':checked')) {
+                    patternList.push($(this).val());
+                    prnId.push($(this).attr('data-patternId'));
+                    ptTy.push($(this).attr('data-patternType'))
+                }
+            });
+            let html = ``;
+            fl = true;
+            for (let m = 0; m < patternList.length; m++) {
+                html += `<div class="group-number-input-inner">
+                            
+                            <div class="group-number-checkbox">
+                                <input type="text" class="form-control" name="ptname" id="ptName_` + cntVl2 + `_` + m + `" data-patternId="` + prnId[m] + `" data-patternType="` + ptTy[m] + `" readOnly placeholder="` + patternList[m] + `" value = "` + patternList[m] + `">
+                            </div>
+                            <div class="number-input">
+                                <input type="text" class="form-control" name="ptvalue" id="ptvalue_` + cntVl2 + `_` + m + `" placeholder="20" min="1" max="75">
+                            </div>
+                            <div class="number-input">
+                                <input type="text" class="form-control" name="ptvalue2" id="ptvalue2_` + cntVl2 + `_` + m + `"  placeholder="3500"  min="1">
+                            </div>
+                        </div>`;
+            }
+            $('.patternTotalDivList_' + cntVl2).append(html);
+        })
+
+        // [ Add Group from here for Game 3 ]  // [ Made By Darshan ]
+
+        $('body').on('click', '.addGrpList', function () {
+            if (fl == true) {
+                let ptNa = $('.ptrnVall_' + cntt).val();
+                let tmpAr = [];
+                for (let m = 0; m < patternList.length; m++) {
+                    let ptName = $('#ptName_' + cntt + '_' + m).val();
+                    let prrtId = $('#ptName_' + cntt + '_' + m).attr('data-patternId');
+                    let ptvalue = $('#ptvalue_' + cntt + '_' + m).val();
+                    let ptvalue2 = $('#ptvalue2_' + cntt + '_' + m).val();
+                    let ptPatternType = $('#ptName_' + cntt + '_' + m).attr('data-patternType');
+                    tmpAr.push({
+                        'patternName': ptName,
+                        'patternId': prrtId,
+                        'ballNumber': ptvalue,
+                        'prize': ptvalue2,
+                        'patternType': ptPatternType
+                    });
+                }
+                prtnAr.push({
+                    'GroupName': ptNa,
+                    'PatternData': tmpAr
+                });
+                allPatternArray.push(tmpAr);
+                $('.addGrpList').remove();
+                let sdrVl = $(this).attr('data-cntt');
+                cntt = Number(sdrVl) + 1;
+                let html = `<div class="group-number">
+                                        <div class="group-type">
+                                                                                <input type="text" class="form-control ptrnVall_` + cntt + `" data-cntt="` + cntt + `" readonly placeholder="Group A">
+                                                                            </div>
+                                                                            <div class="group-number-input patternTotalDivList_` + cntt + `"></div>
+                                    <div class="col-lg-2 m-b-1">
+                                        <a href="#"><button type="button" class="btn addGrpList btn-primary btn-md" data-cntt="` + cntt + `"><i class="fa fa-plus"></i> Add Group</button></a>
+                                    </div>
+                                </div>`;
+
+                fl = false;
+                $('.nwCl').append(html);
+                $('.sBtnn').attr('data-cntt', cntt)
+            }
+
+        });
+
+        // [ And this for Change a Game Mode ]
+        $("#gameMode").change(function () {
+            let selectedValue = $("#gameMode option:selected").val();
+            if (selectedValue == "auto") {
+                $("#minTicketCount").show();
+                $("#timeGrace").show();
+            } else {
+                // $("#minTicketCount").hide();
+                $("#timeGrace").hide();
+            }
+        });
+
+        //  //And this for Change a Game Mode
+        //  $("#gameMode").change(function() {
+        //     let selectedValue = $("#gameMode option:selected").val();
+        //     if (selectedValue == "auto") {
+        //         console.log("show");
+        //         $("#minTicketCount").show();
+        //         $("#timeGrace").show();
+        //     } else {
+        //         console.log("hide");
+        //         $("#minTicketCount").hide();
+        //         $("#timeGrace").hide();
+        //     }
+        // });
+
+
+        // [ Start Time and Grace Time in Show UTC ]
+        // [ In Start Time add 2 min automatic not clash between games ]
+        // [ Same as thing Grace time add 4 min becuase for Start time between grace time no for clash  ] 
+
+        let now = new Date();
+        let newTime;
+        let utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+        // newTime = utc.getTime() + 2 * 60000;
+        newTime = utc.getTime() + (1000 * 3600 * 24);
+        $('#start_date').datetimepicker({
+            minDate: moment().startOf('day').utc(), //.add(1, "day"),//newTime,
+            useCurrent: false,
+            format: "l"
+        });
+
+        $('#end_date').datetimepicker({
+            minDate: moment().endOf('day').utc(),  //.add(1, "day"),//newTime,
+            useCurrent: false,
+            format: "l"
+        });
+        let newTime2 = new Date();
+        newTime2 = utc.getTime() + 4 * 60000;
+        $('#grace_time').datetimepicker({
+            minDate: moment() //newTime2
+        });
+
+        $('.glyphicon1').click(function () {
+            $("#startDate input").focus();
+        });
+
+        $('.glyphicon2').click(function () {
+            $("#graceTime input").focus();
+        });
+
+        // [ Step 1 ] [ Checkbox Change Value Store in Input ]
+        $(document).on('change', '.dropdown-list input[type=checkbox]', function () {
+
+            console.log(" step 2")
+
+
+            let total = 0;
+            let className32 = $(this).parent('.dropdown-option').parent('.dropdown-list').attr('data-class');
+
+            $('.' + className32 + ' input:checked').each(function () {
+                let rs = $(this).parent().find("input[type=text]").val();
+                if (rs != '') {
+                    total = total + Number(rs);
+                }
+            });
+            $(this).parent().parent().parent().parent().parent().children('.select-input').children().val(total);
+        });
+
+
+        // [ Step 1.2 ] [ Checkbox Input Value Change Then Main Input Value ]
+        $(document).on('change paste keyup', '.bx_in', function () {
+            let total = 0;
+            let className32 = $(this).parent('.dropdown-option').parent('.dropdown-list').attr('data-class');
+            $('.' + className32 + ' input:checked').each(function () {
+                let rs = $(this).parent().find("input[type=text]").val();
+                if (rs != '') {
+                    total = total + Number(rs);
+                }
+            });
+
+            $(this).parent().parent().parent().parent().parent().children('.select-input').children().val(total);
+        });
+
+        $(".weekday").on("click", function (e) {
+            console.log("clicked on weekday");
+            let dayName = $(this).attr("id");
+            dayName = dayName.split("-");
+            dayName = dayName[1];
+            console.log(`weekdate is ${dayName}`);
+            let isChecked = $(this).prop("checked");
+            if (isChecked) {
+                let dayHoursHTML = `<div class="day col-md-12">
+                                        <div id="day_${dayName}" class="col-sm-2">
+                                            <input type="text" class="form-control " readonly disabled value="${dayName}">
+                                        </div>
+                                        <div id="time_${dayName}" class="col-sm-10">
+                                            <div class="form-group start_time col-sm-6" style="display:flex;align-items: center;justify-content: space-evenly;">
+                                                <label class="col-sm-4" style="text-align:end;" for="days[${dayName}][]">{{translate.start_time}} :</label>
+                                                <div class="col-sm-7">
+                                                    <input type='text' class="form-control" name="days[${dayName}][]" id="${dayName}_startTime" value=""
+                                                    data-validation="required startTime" placeholder="{{translate.select}} {{translate.start_time}}" data-date-format="HH:mm" autocomplete="off"/>
+                                                </div>
+                                            </div>
+                                            <div class="form-group  end_time col-sm-6" style="display:flex;align-items: center;justify-content: space-evenly;">
+                                                <label class="col-sm-3" style="text-align:end;" for="days[${dayName}][]">{{translate.end_time}} : </label>
+                                                <div class="col-sm-7">
+                                                    <input type='text' class="form-control" name="days[${dayName}][]" id="${dayName}_endTime" value="" data-validation="required endTime"
+                                                    placeholder="{{translate.select}} {{translate.end_time}}" data-date-format="HH:mm" autocomplete="off" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>`;
+                $(".days").append(dayHoursHTML);
+                $(`#${dayName}_startTime`).datetimepicker({
+                    format: 'LT'
+                });
+                $(`#${dayName}_endTime`).datetimepicker({
+                    format: 'LT'
+                });
+                initializeValidator();
+            } else {
+                $(`#day_${dayName}`).parent(".day").remove();
+            }
+        });
+
+        //If Editing Game then intialize all Time Slots for available days
+        $('.start_time1').datetimepicker({                   //
+            format: "LT"                                     //           
+        });                                                  //
+        $('.end_time1').datetimepicker({                     //
+            format: "LT"                                     //
+        });                                                  //   
+
+        $('body').on('click', '.onsub', function (e) {
+            try {
+                $("#groupHallSelected").removeAttr("disabled");
+            } catch (error) {
+                console.log("error on onsub click", error);
+            }
+        });
+
+        //------------------------------------------------------------------------------------------------
+        //-------------------------------New Add SubGame Logic Start--------------------------------------
+        //------------------------------------------------------------------------------------------------
+
+        //Add SubGame Dynamically           
+        $('#addSBGame').on('click', function () {
+            console.log("clicked add subgame button", subGameNum);
+            let html = `<div class="ch col-lg-11" style="border: 1px solid #00000033;margin-top:10px;">
+                            <div style="margin-top:10px;">
+                                <button type="button" name="delete" class="pull-right btn btn-danger btn-xs deleteSubGame btn-delete" title="Delete Game">
+                                    <i class="fa fa-trash" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                            <div class="clearfix"></div>
+                            <div class="row">
+                                <div class="col-lg-6 col-sm-6">
+                                    <div class="form-group">
+                                        <label>{{translate.sub_game_name}} :-</label>
+                                        <input type="text" class="form-control subGame[${subGameNum}]" required name="subGame[${subGameNum}][name]" maxlength="15" placeholder="{{translate.enter}} {{translate.sub_game_name}}" value="" data-validation="required" data-percent="100">
+                                    </div>
+                                </div>
+                                <div class="col-lg-6 col-md-6">
+                                    <div class="form-group">
+                                        <label>{{translate.ticket_price}}:-</label>
+                                        <input type="number" class="form-control" 
+                                        onkeypress="return event.charCode >= 48" min="1" required name="subGame[${subGameNum}][ticketPrice]"
+                                        placeholder="{{translate.enter}} {{translate.ticket_price}}" data-validation="required">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>{{translate.jackpot_number_and_prize}} </label>
+                                <div class="row" data-subgame="${subGameNum}" data-pool="100">
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control " readonly disabled value="9">
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control priceNine kr" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                         name="subGame[${subGameNum}][priceNine]" placeholder="In Kr" value="" data-validation="required" min="0">
+                                        <input type="number" class="form-control percent" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                         name="subGame[${subGameNum}][priceNinePercent]" placeholder="In %" value="" data-previous="0" data-validation="required" min="0"> 
+                                    </div>
+                                    <div class="col-lg-2 m-b-1">
+                                        <input type="number" class="form-control" readonly disabled value="10">
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control priceTen kr" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                        name="subGame[${subGameNum}][priceTen]" placeholder="In Kr" data-validation="required" min="0">
+                                        <input type="number" class="form-control percent" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                         name="subGame[${subGameNum}][priceTenPercent]" placeholder="In %" data-previous="0" data-validation="required" min="0">     
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control" readonly disabled value="11">
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control priceEleven kr" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                        name="subGame[${subGameNum}][priceEleven]" placeholder="In Kr" data-validation="required" min="0">
+                                        <input type="number" class="form-control percent" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                        name="subGame[${subGameNum}][priceElevenPercent]" placeholder="In %" data-previous="0" data-validation="required" min="0">
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control" readonly disabled value="12">
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control priceTwelve kr" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                         name="subGame[${subGameNum}][priceTwelve]" placeholder="In Kr" data-validation="required" min="0">
+                                        <input type="number" class="form-control percent" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                         name="subGame[${subGameNum}][priceTwelvePercent]" placeholder="In %" data-previous="0" data-validation="required" min="0">                                            
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control" readonly disabled value="13">
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control priceThirteen kr" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                         name="subGame[${subGameNum}][priceThirteen]" placeholder="In Kr" data-validation="required" min="0">
+                                        <input type="number" class="form-control percent" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                         name="subGame[${subGameNum}][priceThirteenPercent]" placeholder="In %" data-previous="0" data-validation="required" min="0">    
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="text" class="form-control " readonly disabled value="14 to 21">
+                                    </div>
+                                    <div class="col-lg-2 m-b-1 ">
+                                        <input type="number" class="form-control priceFourteenToTwentyone kr" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)" 
+                                         name="subGame[${subGameNum}][priceFourteenToTwentyone]" placeholder="In Kr" data-validation="required" min="0">
+                                        <input type="number" class="form-control percent" onkeypress="return (event.charCode >= 48 || event.charCode == 190 || event.charCode==110 || event.charCode == 46)"
+                                         name="subGame[${subGameNum}][priceFourteenToTwentyonePercent]" placeholder="In %" data-previous="0" data-validation="required" min="0">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>`;
+            $('#subGamesContainer').append(html);
+            subGameNum++;
+            initializeValidator();
+        });
+
+        //Remove SubGame Dynamically   
+        $('body').on('click', '.deleteSubGame', function (e) {
+            $(this).parent().parent().remove();
+        });
+
+        //When Value in Grouphall Changes
+        $('#groupHallSelected').on("change", function (e) {
+            console.log("change in groupHallSelected");
+            sessionStorage.clear();
+            let list = $('#groupHallSelected').val();
+            if (list.length) {
+                sessionStorage.setItem('groupHallSelected', list);
+            }
+            console.log(sessionStorage.getItem('groupHallSelected'));
+        })
+        //------------------------------------------------------------------------------------------------
+        //-------------------------------New Add SubGame Logic End----------------------------------------
+        //------------------------------------------------------------------------------------------------
+
+
+
+        //Input on KR box 
+        $('body').on('input', '.kr', function (e) {
+            console.log("Clicked on KR box", $(this).parent().parent());
+            const valueOfCash = $(this).val();
+            const valueOfPercent = $(this).siblings(".percent").val();
+            console.log("Value of Input 1: " + valueOfCash);
+            console.log("Value of Input 2: " + valueOfPercent);
+            if (valueOfPercent > 0) {
+                $(this).val("0");
+                return false;
+            } else {
+                if (parseFloat(valueOfCash) > 0) {
+                    $(this).siblings(".percent").val('0');
+                } else {
+                    $(this).siblings(".percent").val('');
+                }
+            }
+        });
+
+
+        //Input on Percent box 
+        $('body').on('input', '.percent', function (e) {
+            const pool = $(this).parent().parent().data('pool');
+            console.log("Clicked on Percent box", pool);
+            const valueOfPercent = $(this).val();
+            const valueOfCash = $(this).siblings(".kr").val();
+            console.log("Value of Input 1: " + valueOfPercent);
+            console.log("Value of Input 2: " + valueOfCash);
+            if (parseFloat(valueOfCash) > 0) {
+                $(this).val("0");
+                return false;
+            } else {
+                //Now we will validate the percent value
+                const previousValue = $(this).data('previous');
+                console.log("previous percent value", previousValue);
+                const availablePool = parseFloat(pool) + parseFloat(previousValue);
+                console.log("Entered Percent Value", valueOfPercent);
+                console.log("Final Available Pool", availablePool);
+                if (valueOfPercent && !isNaN(valueOfPercent)) {
+                    if (parseFloat(valueOfPercent) == 0) {
+                        $(this).parent().parent().data('pool', parseFloat(availablePool));
+                        $(this).data("previous", '0');
+                        $(this).siblings(".kr").val('');
+                    } else {
+                        console.log("Entered Value is a valid input");
+                        const finalPool = parseFloat(availablePool) - parseFloat(valueOfPercent);
+                        console.log("Final Pool", finalPool);
+                        // if (finalPool >= 0) {
+                        //     console.log("valid value");
+                        //     $(this).parent().parent().data('pool', finalPool);
+                        //     $(this).data("previous", valueOfPercent);
+                        //     $(this).siblings(".kr").val('0');
+                        // } else {
+                        //     $(this).val(previousValue);
+                        //     setTimeout(() => {
+                        //         alert('Overall Percent winnings exeeded available 100% pool value.');
+                        //     }, 500);
+                        //     return false;
+                        // }
+
+                        if (valueOfPercent <= 100) {
+                            console.log("valid value");
+                            $(this).parent().parent().data('pool', finalPool);
+                            $(this).data("previous", valueOfPercent);
+                            $(this).siblings(".kr").val('0');
+                        } else {
+                            $(this).val(previousValue);
+                            setTimeout(() => {
+                                alert('{{translate.overall_percentage_increase}}.');
+                            }, 500);
+                            return false;
+                        }
+                    }
+                } else {
+                    console.log("logging here", pool, previousValue);
+                    const finalPool = parseFloat(pool) + parseFloat(previousValue);
+                    $(this).parent().parent().data('pool', finalPool);
+                    $(this).data("previous", 0);
+                }
+
+            }
+        });
+
+
+        groupHallOptions();
+        initializeValidator();
+    });
+
+
+    $(document).bind("contextmenu", function (e) {
+        return true;
+    });
+
+    //Fetch available groupofHalls
+    function groupHallOptions() {
+        console.log($("#start_date").parent().parent(), $("#end_date").parent().parent());
+        let flagStart = $("#start_date").parent().parent().hasClass("has-error");
+        let flagEnd = $("#end_date").parent().parent().hasClass("has-error");
+        console.log(flagStart, flagEnd);
+        if ((flagStart === false && flagEnd === false) && ($("#start_date").val() && $("#end_date").val())) {
+            let gameId = `{{Game._id}}`;
+            $.ajax({
+                type: "GET",
+                url: `/getAvailableGroupHalls/{{gameData.type}}`,
+                data: {
+                    startDate: $('#start_date').val(),
+                    endDate: $('#end_date').val(),
+                    id: gameId ? gameId : ''
+                },
+                success: function (response) {
+                    console.log(response);
+                    if (response.status == "success") {
+                        let selectedHalls = sessionStorage.getItem('groupHallSelected');
+                        if (selectedHalls) {
+                            selectedHalls = selectedHalls.split(",");
+                        }
+                        let groupHalls = response.groupHalls;
+                        let options = ``;
+                        if (groupHalls.length) {
+                            for (let i = 0; i < groupHalls.length; i++) {
+                                if (selectedHalls && selectedHalls.length) {
+                                    if (selectedHalls.findIndex(e => e == groupHalls[i]._id) > -1) {
+                                        options += `<option value="${groupHalls[i]._id}" selected="${true}">${groupHalls[i].name}</option>`;
+                                        continue;
+                                    }
+                                }
+                                options += `<option value="${groupHalls[i]._id}">${groupHalls[i].name}</option>`;
+                            }
+                        }
+                        $('#groupHallSelected').empty()
+                            .append(options)
+                            // .removeAttr('disabled')
+                            .trigger("chosen:updated");
+                        let grpHallArr = $("#groupHallSelected").val();
+                        if (grpHallArr.length) {
+                            sessionStorage.setItem('groupHallSelected', grpHallArr);
+                        }
+                    }
+                }
+            });
+        } else {
+            console.log("here2");
+            $('#groupHallSelected').empty().append(``).trigger("chosen:updated");
+            sessionStorage.clear();
+        }
+    }
+
+    let StartDateTemp = "{{StartDate}}";
+    console.log("createdAt date >>>>>", StartDateTemp)
+    let dt = new Date(StartDateTemp);
+    let date = dt.getDate();
+    let month = parseInt(dt.getMonth() + 1);
+    let year = dt.getFullYear();
+    let hours = dt.getHours();
+    let minutes = dt.getMinutes();
+    let ampm = hours >= 12 ? 'pm' : 'am';
+    hours = hours % 24;
+    hours = hours ? hours : 12;
+    minutes = minutes < 10 ? '0' + minutes : minutes;
+    // let StartDates = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    let StartDates = year + '-' + month + '-' + date + ' ' + hours + ':' + minutes;
+    console.log("createdAt date", StartDates)
+    $("#start_date").val(StartDates);
+
+
+    let EndTimetemp = "{{EndDate}}";
+    console.log("endAt date >>>>>", EndTimetemp)
+    let gdt = new Date(EndTimetemp);
+    let gdate = gdt.getDate();
+    let gmonth = parseInt(gdt.getMonth() + 1);
+    let gyear = gdt.getFullYear();
+    let ghours = gdt.getHours();
+    let gminutes = gdt.getMinutes();
+    // let gampm = ghours >= 12 ? 'pm' : 'am';
+    ghours = ghours % 24;
+    ghours = ghours ? ghours : 12;
+    gminutes = gminutes < 10 ? '0' + gminutes : gminutes;
+    let EndTime = gyear + '-' + gmonth + '-' + gdate + ' ' + ghours + ':' + gminutes;
+    console.log("createdAt EndTime", EndTime);
+    $("#end_date").val(EndTime);
+    function initializeValidator() {
+        $.validate({
+            validateOnEvent: true,
+        });
+    }
+
+    // Bot game 
+    $("#isBotGame").change(function(){
+        let value = $(this).val();
+        if(value == "Yes"){
+            $("#notificationStartTime").val("0s").change();
+            $(".botGame").removeClass("hidden");
+        }else{
+            if( $(".botGame").hasClass("hidden") == false ) {
+                $(".botGame").addClass("hidden");
+            }
+            $("#notificationStartTime").val("10s").change();
+        }
+        toggleValidation();
+    });
+
+    function toggleValidation() {
+        if ($(".botGame").is(":visible")) {
+            $("#botGameCount").attr("min", "1");
+        } else {console.log(" not visible")
+            $("#botGameCount").removeAttr("min");
+        }
+    }
+
+    // Run on page load
+    toggleValidation();
+</script>
+{% endblock %}

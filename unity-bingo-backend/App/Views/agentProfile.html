@@ -1,0 +1,224 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <section class="content-header">
+            <h1>{{profile.agent}} {{profile.user_profile}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{profile.dashboard}}</a></li>
+                <li class="active">{{profile.agent}} {{profile.user_profile}}</li>
+            </ol>
+        </section>
+
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="row">
+
+                            <div class="col-md-6">
+                                <div class="panel panel-default card-view">
+                                    <div class="panel-heading">
+                                        <div class="pull-left">
+                                            <h6 class="panel-title txt-dark">{{profile.agent}} {{profile.edit_profile}}</h6>
+                                        </div>
+                                        <div class="clearfix"></div>
+                                    </div>
+                                    <div class="panel-wrapper collapse in">
+                                        <div class="panel-body">
+                                            <div class="row">
+                                                <div class="col-sm-12 col-xs-12">
+                                                    <div class="form-wrap">
+                                                        <form class="form-horizontal" action="/profile/agent/update" method="post">
+                                                            <input type="hidden" name="id" value="{{user.id}}">
+                                                            <div class="form-group">
+                                                                <label for="exampleInputuname_3" class="col-sm-3 control-label">{{profile.fullname}}*</label>
+                                                                <div class="col-sm-9">
+                                                                    <div class="input-group">
+                                                                        <div class="input-group-addon"><i class="glyphicon glyphicon-user"></i></div>
+                                                                        <input type="text" class="form-control" id="name" placeholder="{{profile.enter}} {{profile.fullname}}" required name="name" value="{{user.name}}" data-validation="length required" data-validation-length="" data-validation-error-msg="Username is required">
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label for="exampleInputEmail_3" class="col-sm-3 control-label">{{profile.email}}*</label>
+                                                                <div class="col-sm-9">
+                                                                    <div class="input-group">
+                                                                        <div class="input-group-addon"><i class="glyphicon glyphicon-envelope"></i></div>
+                                                                        <input type="email" class="form-control" required name="email" id="email" value="{{user.email}}" data-validation="email">
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group mb-0">
+                                                                <div class="col-sm-offset-3 col-sm-9">
+                                                                    <button type="submit" class="btn btn-success ">{{profile.update}}</button>
+                                                                </div>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <div class="panel panel-default card-view">
+                                    <div class="panel-heading">
+                                        <div class="pull-left">
+                                            <h6 class="panel-title txt-dark">{{profile.change_password}}</h6>
+                                        </div>
+                                        <div class="clearfix"></div>
+                                    </div>
+                                    <div class="panel-wrapper collapse in">
+                                        <div class="panel-body">
+                                            <div class="row">
+                                                <div class="col-sm-12 col-xs-12">
+                                                    <div class="form-wrap">
+                                                        <form class="form-horizontal" action="/profile/agent/changePwd" method="post">
+                                                            <input type="hidden" name="id" value="{{user.id}}">
+                                                            <div class="form-group">
+                                                                <label for="exampleInputuname_4" class="col-sm-3 control-label">{{profile.new_password}}*</label>
+                                                                <div class="col-sm-9">
+                                                                    <div class="input-group">
+                                                                        <div class="input-group-addon"><i class="glyphicon glyphicon-lock"></i></div>
+                                                                        <input type="password" class="form-control" id="password" placeholder="{{profile.enter}} {{profile.fullname}}" name="pass_confirmation" data-validation="length" data-validation-length="min6">
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label for="exampleInputEmail_4" class="col-sm-3 control-label">{{profile.confirm_password}}*</label>
+                                                                <div class="col-sm-9">
+                                                                    <div class="input-group">
+                                                                        <div class="input-group-addon"><i class="glyphicon glyphicon-lock"></i></div>
+                                                                        <input type="password" class="form-control" placeholder="{{profile.enter}} {{profile.confirm_password}}" name="pass" data-validation="confirmation">
+
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group mb-0">
+                                                                <div class="col-sm-offset-3 col-sm-9">
+                                                                    <button type="submit" class="btn btn-success ">{{profile.change_password}}</button>
+                                                                </div>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <div class="panel panel-default card-view">
+                                    <div class="panel-heading">
+                                        <div class="pull-left">
+                                            <h6 class="panel-title txt-dark">{{profile.change_avatar}}</h6>
+                                        </div>
+                                        <div class="clearfix"></div>
+                                    </div>
+                                    <div class="panel-wrapper collapse in">
+                                        <div class="panel-body">
+                                            <div class="row">
+                                                <div class="col-sm-12 col-xs-12">
+                                                    <div class="form-wrap">
+                                                        <form class="form-horizontal" action="/profile/agent/changeAvatar" method="post" enctype="multipart/form-data">
+                                                            <input type="hidden" name="id" value="{{user.id}}">
+                                                            <div class="form-group">
+                                                                <label for="avatar" class="col-sm-3 control-label">{{profile.new_avatar}}</label>
+                                                                <div class="col-sm-9">
+                                                                    <div class="input-group">
+                                                                        <div class="input-group-addon"><i class="glyphicon glyphicon-picture"></i></div>
+                                                                        <input type="file" class="form-control" id="avatar" name="avatar" required accept="image/*">
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group mb-0">
+                                                                <div class="col-sm-offset-3 col-sm-9">
+                                                                    <button type="submit" class="btn btn-success ">{{profile.update_avatar}}</button>
+                                                                </div>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <div class="panel panel-default card-view">
+                                    <div class="panel-heading">
+                                        <div class="pull-left">
+                                            <h6 class="panel-title txt-dark">{{profile.language}}</h6>
+                                        </div>
+                                        <div class="clearfix"></div>
+                                    </div>
+                                    <div class="panel-wrapper collapse in">
+                                        <div class="panel-body">
+                                            <div class="row">
+                                                <div class="col-sm-12 col-xs-12">
+                                                    <div class="form-wrap">
+                                                        <form class="form-horizontal" action="/profile/agent/updateLanguage" method="post">
+                                                            <input type="hidden" name="id" value="{{user.id}}">
+
+                                                            <div class="form-group">
+                                                                <label class="col-sm-3 control-label">{{profile.language}}*</label>
+                                                                <div class="col-sm-9">
+                                                                    <div class="input-group">
+                                                                        <select class="form-control" name="language" id="language">
+                                                                            <option value="english" {% if user.language == 'english' %} selected {%endif%}>English</option>
+                                                                            <option value="norwegian" {% if user.language == 'norwegian' %} selected {%endif%}>Norwegian</option>
+                                                                        </select>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group mb-0">
+                                                                <div class="col-sm-offset-3 col-sm-9">
+                                                                    <button type="submit" class="btn btn-success ">{{profile.update}}</button>
+                                                                </div>
+                                                            </div>
+
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- /Row -->
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+        var host = window.location.origin;
+    });
+
+    $.validate({
+        modules: 'security',
+        onModulesLoaded: function() {
+            // Show strength of password
+            $('input[name="pass_confirmation"]').displayPasswordStrength();
+        }
+    });
+</script>
+
+{% endblock %}

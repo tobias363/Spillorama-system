@@ -1,0 +1,273 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+
+    .cst {
+        display: flex;
+        justify-content: flex-end;
+        gap: 20px;
+        align-items: flex-end;
+    }
+
+    .form-horizontal button {
+        width: 50px;
+    }
+
+    /* button#search,
+    button#filterReset {
+        min-width: 55px;
+    } */
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{transaction.transaction_history}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i>{{transaction.dashboard}}</a></li>
+                <li class="active" href="#">{{transaction.transaction_history}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+				<div class="col-xs-12">
+					<form>
+						<div class="box">
+							<div class="box-header">
+								<h3 class="box-title">{{transaction.search}}</h3>
+							</div>
+							<div class="box-body">
+                                    <div class="row">
+                                        <div class="col-lg-6 pull-left">
+                                            <div class="cst">
+                                                <div class="form-horizontal">
+                                                    <div class="input-group">
+                                                        <label for="fromDate">{{transaction.from_date}}:</label>
+                                                        <input type="date" class="dateFilter form-control" name="fromDate" id="fromDate">
+                                                    </div>
+                                                </div>
+                                                <div class="form-horizontal">
+                                                    <div class="input-group">
+                                                        <label for="toDate">{{transaction.to_date}}:</label>
+                                                        <input type="date" class="dateFilter form-control" name="toDate" id="toDate">
+                                                    </div>
+                                                </div>
+                                                <button type="button" class="pull-left btn btn-primary playersearch" id="search"><i
+                                                        class="fa fa-search"></i></button>
+                                                <button type="reset" class="btn btn-primary pull-left clickreset" id="filterReset">{{transaction.reset}}</button>
+                                            </div>
+                                        </div>
+                                        <div class="col-lg-2 pull-right">
+                                            <div class="cst">
+                                                <div class="form-horizontal">
+                                                    <div class="input-group">
+                                                        <label for="toDate">&nbsp;</label>
+                                                        <select name="tstatus" class="form-control" id="tstatus">
+                                                            <option value="" selected="selected">{{transaction.all}}</option>
+                                                            <option value="Pending">{{transaction.pending}}</option>
+                                                            <option value="success">{{transaction.success}}</option>
+                                                            <option value="fail">{{transaction.fail}}</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+							</div>
+						</div>
+					</form>
+				</div>
+			</div>
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{transaction.transaction_history}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                <!-- <a href="/addWallet"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add Wallet</button></a> -->
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <input type="text" class="playerId" id="playerId" value="{{playerId}}" hidden>
+                                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{transaction.order_number}}</th>
+                                                    <th>{{transaction.tranaction_id}}</th>
+                                                    <th>{{transaction.date_time}}</th>
+                                                    <th>{{transaction.tranaction_type}}</th>
+                                                    <th>{{transaction.amount}}</th>
+                                                    <th>{{transaction.status}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script>
+    var orderTable = "";
+    var host = window.location.origin;
+    $(document).ready(function() {
+
+        let ajaxUrl = host + "/getPlayerTransactions";
+        function loadData() {
+            var startdate = $("#fromDate").val();
+            var enddate = $("#toDate").val();
+            $('#myTable').DataTable({
+                //"language": { search: '', searchPlaceholder: "search" },
+                "oLanguage": {
+                    "sSearch": "{{transaction.search}}",
+                    "sLengthMenu": "{{transaction.show}} _MENU_ {{transaction.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ transaction.previous }}",
+                        sNext: "{{ transaction.next }}"
+                    },
+                    "sEmptyTable": "{{transaction.no_data_available_in_table}}",
+                    "sInfo" : "{{transaction.showing}} _START_ to _END_ of _TOTAL_ {{transaction.entries}}",
+                    "sInfoEmpty": "{{transaction.showing}} 0 to 0 of 0 {{transaction.entries}}"
+                },
+                "processing": true,
+                "serverSide": true,
+                "ordering": false,
+                "order": [
+                    [2, "desc"]
+                ],
+                "autoWidth": false,
+                "pageLength": 10,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: function (data) {
+                        data.playerId = $('#playerId').val();
+                        data.tstatus = $('#tstatus').val();
+                        data.startdate = startdate;
+                        data.enddate = enddate;
+                    }
+                },
+                /*dom: 'lBfrtip',*/
+                lengthMenu: [
+                    [10, 100, -1],
+                    [10, 100, "All"]
+                ],
+                /*"buttons": [
+                    // 'csv', 'excel'
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }, {
+                        extend: 'excelHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }
+                ],*/
+                "columns": [{
+                "data": "transactionId"
+            }, {
+                "data": "transactionId"
+            }, {
+                "data": "updatedAt",
+                // render: function(data, type, row, meta) {
+                //     return moment.utc(row.updatedAt).format('DD/MM/YYYY hh:mm a');
+                // }
+
+                // ,
+                render: function(data, type, row) {
+                    let dt = new Date(row.updatedAt);
+                    let date = dt.getDate();
+                    let month = parseInt(dt.getMonth() + 1);
+                    let year = dt.getFullYear();
+                    let hours = dt.getHours();
+                    let minutes = dt.getMinutes();
+                    let ampm = hours >= 12 ? 'pm' : 'am';
+                    hours = hours % 12;
+                    hours = hours ? hours : 12;
+                    minutes = minutes < 10 ? '0' + minutes : minutes;
+                    let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+                    return createdAt;
+                }
+            }, {
+                "data": "category"
+            }, {
+                "data": "typeOfTransactionTotalAmount",
+                render: function(data, type, row, meta){
+                    let amount = 0;
+                    if(row.typeOfTransactionTotalAmount != undefined){
+                        amount = row.typeOfTransactionTotalAmount;
+                    }
+                    return amount;
+                }
+            }, {
+                "data": "status",
+                render: function(data, type, row) {
+                    if (row.status == "pending") {
+                        return '<span class="badge bg-blue">In Progress</span>';
+                    } else if (row.status == "success") {
+                        return '<span class="badge bg-green">' + row.status + '</span>';
+                    } else if (row.status == "fail") {
+                        return '<span class="badge bg-red">' + row.status + '</span>';
+                    } else if (row.status == "rejected") {
+                        return '<span class="badge bg-red">' + row.status + '</span>';
+                    }
+                }
+            }, ]
+            });
+        }
+        loadData();
+
+        var table = $('#myTable').DataTable();
+
+        $('body').on('click', '.playersearch', function (e) {
+            $('#myTable').DataTable().clear().destroy();
+            loadData();
+        });
+
+        $('body').on('click', '.clickreset', function (e) {
+			setTimeout(function () {
+				$('#myTable').DataTable().clear().destroy();
+                loadData();
+			}, 1000);
+		});
+
+        $('#tstatus').change(function() {
+            $('#myTable').DataTable().clear().destroy();
+            loadData();
+        });
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

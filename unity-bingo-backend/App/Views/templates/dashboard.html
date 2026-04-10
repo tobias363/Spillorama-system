@@ -1,0 +1,1433 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    ul#topPlayers {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 30px;
+    }
+
+    .users-list>li {
+        width: 23% !important;
+        /* float: left; */
+        padding: 0px 0px !important;
+        text-align: center !important;
+    }
+
+    .users-list>li img {
+        border-radius: 50% !important;
+        max-width: 100% !important;
+        height: 79px !important;
+    }
+</style>
+<!-- Breadcrumb -->
+<section class="content-header">
+    <h1>
+        {{App.name}}
+        <small>{{dashboardTraslate.version}} {{App.version}}</small>
+    </h1>
+    <ol class="breadcrumb">
+        <li><a href="javascript:void(0)"><i class="fa fa-dashboard"></i>{{dashboardTraslate.home}} </a></li>
+        <li class="active">Dashboard</li>
+    </ol>
+</section>
+
+<!-- /Title -->
+{% include "partition/notification.html" %}
+<!-- Row -->
+
+<!-- /Main Content -->
+<section class="content">
+
+    <div class="row">
+
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-blue"><i class="fa fa-users"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text">Total Players <br/>  Registered</span>
+                    <span class="info-box-number">{{totalPlayer}}</span>
+                </div>
+                //.info-box-content 
+            </div>
+            //.info-box 
+        </div> -->
+        <!-- /.col -->
+
+        <!-- /.col -->
+
+        {% if (session.role != 'admin' and 'Players Management' in Agent.isPermission) or (session.role == 'admin') %}
+        <a href="/player">
+            {% endif %}
+
+            <div class="col-md-3 col-sm-6 col-xs-12">
+                <div class="info-box">
+                    <span class="info-box-icon bg-blue"><i class="fa fa-users"></i></span>
+
+                    <div class="info-box-content">
+                        <span class="info-box-text" style="font-size: 11px;">{{dashboardTraslate.total_numbers_of}}
+                            <br />{{dashboardTraslate.approved_players}} </span>
+                        <span class="info-box-number">{{totalPlayer}}</span>
+                    </div>
+                    <!-- /.info-box-content -->
+                </div>
+                <!-- /.info-box -->
+            </div>
+            {% if (session.role != 'admin' and 'Players Management' in Agent.isPermission) or (session.role == 'admin')
+            %}
+        </a>
+        {% endif %}
+
+
+        <!-- /.col -->
+        {% if session.role == 'admin' %}
+        <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-blue"><i class="fa fa-user-secret"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text" style="font-size: 11px;">{{dashboardTraslate.total_numbers_of_active}}
+                        <br /> {{dashboardTraslate.agents}}</span>
+                    <span class="info-box-number">{{activeAgents}}/{{agentCount}}</span>
+                </div>
+                <!-- /.info-box-content -->
+            </div>
+            <!-- /.info-box -->
+        </div>
+        <!-- /.col -->
+
+
+        <!-- /.col -->
+        <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-yellow"><i class="fa fa-building"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text"
+                        style="font-size: 11px;">{{dashboardTraslate.total_numbers_of_active}}<br />{{dashboardTraslate.group_of_halls}}</span>
+                    <span class="info-box-number">{{activeGroupHalls}}/{{totalGroupHall}}</span>
+                </div>
+                <!-- /.info-box-content -->
+            </div>
+            <!-- /.info-box -->
+        </div>
+        <!-- /.col -->
+
+
+        <!-- /.col -->
+        <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-green"><i class="fa fa-building"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text" style="font-size: 11px;">{{dashboardTraslate.total_numbers_of_active}}
+                        <br /> {{dashboardTraslate.halls}}</span>
+                    <span class="info-box-number">{{activeHalls}}/{{totalHall}}</span>
+                </div>
+                <!-- /.info-box-content -->
+            </div>
+            <!-- /.info-box -->
+        </div>
+        <!-- /.col -->
+        {% endif %}
+
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-green"><i class="fa fa-link"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text">Total number of <br/> Links</span>
+                    <span class="info-box-number">{{totalLinks}}</span>
+                </div>
+                
+            </div>
+            
+        </div> -->
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-red"><i class="fa fa-gamepad"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text"> Total Games <br/>Played in Halls </span>
+                    <span class="info-box-number">{{totalGamesPlayedHall}}</span>
+                </div> -->
+        <!-- /.info-box-content -->
+        <!-- </div> -->
+        <!-- /.info-box -->
+        <!-- </div> -->
+        <!-- /.col -->
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-green"><i class="fa fa-gamepad"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text"> Total Number of <br/> Games Played <br/>Online</span>
+                    <span class="info-box-number">{{totalGames}}</span>
+                </div> -->
+        <!-- /.info-box-content -->
+        <!-- </div> -->
+        <!-- /.info-box -->
+        <!-- </div> -->
+        <!-- /.col -->
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-blue"><i class="fa fa-ticket"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text">Total number of<br/>Tickets sold <br/>in Halls </span>
+                    <span class="info-box-number">{{totalTicketsSoldHall}}</span>
+                </div> -->
+        <!-- /.info-box-content -->
+        <!-- </div> -->
+        <!-- /.info-box -->
+        <!-- </div> -->
+        <!-- /.col -->
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-red"><i class="fa fa-ticket"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text">Total number of<br/>Tickets sold <br/>in Online </span>
+                    <span class="info-box-number">{{totalTicketsSoldOnline}}</span>
+                </div> -->
+        <!-- /.info-box-content -->
+        <!-- </div> -->
+        <!-- /.info-box -->
+        <!-- </div> -->
+        <!-- /.col -->
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-yellow"><i class="ion ion-ios-people-outline"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text">Total number of<br/>players in <br/>Game 1 </span>
+                    <span class="info-box-number">{{totalPlayersInGame1}}</span>
+                </div> -->
+        <!-- /.info-box-content -->
+        <!-- </div> -->
+        <!-- /.info-box -->
+        <!-- </div> -->
+        <!-- /.col -->
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-red"><i class="ion ion-ios-people-outline"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text">Total number of<br/>players in <br/>Game 2 </span>
+                    <span class="info-box-number">{{totalPlayersInGame2}}</span>
+                </div> -->
+        <!-- /.info-box-content -->
+        <!-- </div> -->
+        <!-- /.info-box -->
+        <!-- </div> -->
+        <!-- /.col -->
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-green"><i class="ion ion-ios-people-outline"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text">Total number of<br/>players in <br/>Game 3 </span>
+                    <span class="info-box-number">{{totalPlayersInGame3}}</span>
+                </div> -->
+        <!-- /.info-box-content -->
+        <!-- </div> -->
+        <!-- /.info-box -->
+        <!-- </div> -->
+        <!-- /.col -->
+        <!-- /.col -->
+        <!-- <div class="col-md-3 col-sm-6 col-xs-12">
+            <div class="info-box">
+                <span class="info-box-icon bg-blue"><i class="ion ion-ios-people-outline"></i></span>
+
+                <div class="info-box-content">
+                    <span class="info-box-text">Total number of<br/>players in <br/>Game 4 </span>
+                    <span class="info-box-number">{{totalPlayersInGame4}}</span>
+                </div> -->
+        <!-- /.info-box-content -->
+        <!-- </div> -->
+        <!-- /.info-box -->
+        <!-- </div> -->
+        <!-- /.col -->
+    </div>
+    <!-- /.row -->
+
+    <div class="row">
+
+        <!-- <div class="col-md-12"> -->
+        <!-- <div class="box">
+                <div class="box-header with-border">
+                    <h3 class="box-title">Monthly Recap Report</h3>
+                    <div class="box-tools pull-right">
+                    </div>
+
+                    
+                    <div class="box-body">
+                        <div class="row">
+                            <div class="col-md-12">
+                                <p class="text-center">
+                                    <strong>Game Played By Players from: {{chartStartDate}} - {{chartEndDate}} </strong>
+                                </p>
+                                <div class="chart">
+                                    
+                                    <canvas id="monthlyPlayedGameChart" style="height: 180px;"></canvas>
+                                </div>
+                               
+                            </div>
+                            
+                        </div>
+                    </div>
+
+                </div>
+            </div> -->
+
+        <!-- <div class="col-md-12">
+	          <div class="box">
+	            <div class="box-header with-border">
+	              <h3 class="box-title">Live Memory Usage</h3>
+	              <div class="box-tools pull-right">
+	            </div>
+
+	           
+	            <div class="box-body">
+	              <div class="row">
+	                <div class="col-md-12">
+	                  <p class="text-center">
+	                    <strong> Memory Usage By Game Play </strong>
+	                  </p>
+	                  <div class="chart">
+	                   
+	                    <canvas id="memoryUsage" style="height: 180px;"></canvas>
+	                  </div>
+	                </div>
+	              </div>
+	            </div>
+	          </div>
+	        </div> -->
+        <!-- </div>  -->
+        <!-- /.row -->
+        <!-- Main row -->
+
+        <!-- Left col -->
+        <div class="col-md-8">
+
+            <div class="row">
+                <div class="col-md-12">
+                    <!-- USERS LIST -->
+                    <div class="box box-danger">
+                        <div class="box-header with-border">
+                            <h3 class="box-title">{{dashboardTraslate.latest_request}}</h3>
+
+                            <div class="box-tools pull-right">
+                                <span class="label label-danger"> {{dashboardTraslate.total_pending_request}}
+                                    {{totalPendingRequest}}</span>
+                                <button type="button" class="btn btn-box-tool" data-widget="collapse"><i
+                                        class="fa fa-minus"></i>
+                                </button>
+                                <button type="button" class="btn btn-box-tool" data-widget="remove"><i
+                                        class="fa fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- /.box-header -->
+                        <div class="box-body no-padding">
+                            <!-- /.users-list -->
+                            <table class="table table-striped text-center">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">{{dashboardTraslate.username}}</th>
+                                        <th scope="col">{{dashboardTraslate.emailId}}</th>
+                                        {% if session.role == 'admin' %}
+                                        <th scope="col">{{dashboardTraslate.hall}}</th>
+                                        <th scope="col">{{dashboardTraslate.agents}}</th>
+                                        {% endif %}
+                                        <th scope="col">{{dashboardTraslate.requested_date_and_time}}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {%if latestRequest.length %}
+                                    {%for request in latestRequest %}
+                                    <tr>
+                                        <td>{{request.username}}</td>
+                                        <td>{{request.email}}</td>
+                                        {% if session.role == 'admin' %}
+                                        <td>{{request.hall.name}}</td>
+                                        <td>{{request.hall.agent.name}}</td>
+                                        {% endif %}
+                                        <td>{{request.createdAt | date('DD/MM/YYYY, h:mm a')}}</td>
+                                    </tr>
+                                    {% endfor %}
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="5" style="text-align:center;">
+                                            {{dashboardTraslate.no_data_available_in_table}}
+                                        </td>
+                                    </tr>
+                                    {% endif %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <!-- /.box-body -->
+                        <div class="box-footer text-center">
+                            {% if session.role == 'admin' %}
+                            <a href="/pendingRequests"
+                                class="uppercase">{{dashboardTraslate.view_all_pending_request}}</a>
+                            <!-- Is Sub Admin -->
+                            {% else %} {% if 'Players Management' in Agent.isPermission %}
+                            <a href="/pendingRequests"
+                                class="uppercase">{{dashboardTraslate.view_all_pending_request}}</a> {% else %}
+                            {%endif%} {%endif%}
+                        </div>
+                        <!-- /.box-footer -->
+                    </div>
+                    <!--/.box -->
+                </div>
+                <!-- /.col -->
+            </div>
+            <!-- /.row -->
+        </div>
+        <!-- /.col -->
+
+        <div class="col-md-4">
+            {#<div class="box box-default">
+                <div class="box-header with-border">
+                    <h3 class="box-title">Game Usage</h3>
+
+                    <div class="box-tools pull-right">
+                        <button type="button" class="btn btn-box-tool" data-widget="collapse"><i
+                                class="fa fa-minus"></i>
+                        </button>
+                        <button type="button" class="btn btn-box-tool" data-widget="remove"><i
+                                class="fa fa-times"></i></button>
+                    </div>
+                </div>
+                <!-- /.box-header -->
+                <div class="box-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="chart-responsive">
+                                <canvas id="gameUsages" height="150"></canvas>
+                            </div>
+                            <!-- ./chart-responsive -->
+                        </div>
+                        <!-- /.col -->
+                        <div class="col-md-4">
+                            <ul class="chart-legend clearfix">
+
+                                <li><i class="fa fa-circle-o text-green"></i> Android</li>
+                                <li><i class="fa fa-circle-o text-blue"></i>IOS</li>
+                                <li><i class="fa fa-circle-o text-red"></i>Other</li>
+                            </ul>
+                        </div>
+                        <!-- /.col -->
+                    </div>
+                    <!-- /.row -->
+                </div>
+                <!-- /.box-body -->
+                <div class="box-footer no-padding">
+                    <ul class="nav nav-pills nav-stacked">
+                        <li>
+                            <a href="javascript:void(0)">Android
+                                <span class="pull-right text-green">
+                                    <i class="fa fa-angle-up chartAndroid">
+                                        0%
+                                    </i>
+                                </span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="javascript:void(0)">IOS
+                                <span class="pull-right text-blue">
+                                    <i class="fa fa-angle-up chartIos">
+                                        0%
+                                    </i>
+                                </span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="javascript:void(0)">Other
+                                <span class="pull-right text-red">
+                                    <i class="fa fa-angle-up chartOther">
+                                        0%
+                                    </i>
+                                </span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <!-- /.footer -->
+            </div>#}
+            <!-- /.box -->
+
+            <!-- TOP PLAYERS -->
+            {# <div class="box box-primary">
+                <div class="box-header with-border">
+                    <h3 class="box-title">Top Players</h3>
+
+                    <div class="box-tools pull-right">
+                        <button type="button" class="btn btn-box-tool" data-widget="collapse"><i
+                                class="fa fa-minus"></i>
+                        </button>
+                        <button type="button" class="btn btn-box-tool" data-widget="remove"><i
+                                class="fa fa-times"></i></button>
+                    </div>
+                </div>
+                <!-- /.box-header -->
+                <div class="box-body">
+                    <ul class="products-list product-list-in-box">
+                        {% for player in topPlayers %}
+                        <li class="item">
+                            <div class="product-img">
+                                <img src="{{player.profilePic}}" alt="Product Image">
+                            </div>
+                            <div class="product-info">
+                                <!-- Is Main Admin -->
+                                {% if session.role == 'admin' %}
+                                <a class="product-title" href="/viewPlayer/{{player._id}}">{{player.username}}</a>
+                                <!-- Is Sub Admin -->
+                                {% else %} {% if 'Players Management' in Agent.isPermission %}
+                                <!-- Is Check Permission -->
+                                {% if 'view' in Agent.isPermission['Players Management'] %}
+                                <!-- Is View Check Permission -->
+                                <a class="product-title" href="/viewPlayer/{{player._id}}">{{player.username}}</a> {%
+                                else %}
+                                <span class="product-title">{{player.username}}</span>
+                                <!-- Over for Permission -->
+                                {%endif%}
+                                <!-- Is No Permission -->
+                                {% else %}
+                                <span class="product-title">{{player.username}}</span>
+                                <!-- Over for sub admin -->
+                                {%endif%}
+                                <!-- Over for admin -->
+                                {%endif%}
+                                <span class="label label-warning pull-right">{{player.points}}</span></a>
+                                <span class="product-description">
+                                    {{player.points}} Points
+                                </span>
+                            </div>
+                        </li>
+                        {% endfor%}
+
+                    </ul>
+                </div>
+
+                <!-- /.box-body -->
+                <div class="box-footer text-center">
+                    {% if session.role == 'admin' %}
+                    <a href="/player" class="uppercase">View All Users</a>
+                    <!-- Is Sub Admin -->
+                    {% else %} {% if 'Players Management' in Agent.isPermission %}
+                    <a href="/player" class="uppercase">View All Users</a> {% else %} {%endif%} {%endif%}
+                </div>
+                <!-- /.box-footer -->
+
+            </div> #}
+
+            <!-- TOP 5 PLAYERS -->
+            <div class="box box-danger">
+                <div class="box-header with-border">
+                    <h3 class="box-title">{{dashboardTraslate.top_5_players}}</h3>
+                    <div class="box-tools pull-right">
+                        <button type="button" class="btn btn-box-tool" data-widget="collapse"><i
+                                class="fa fa-minus"></i>
+                        </button>
+                        <button type="button" class="btn btn-box-tool" data-widget="remove"><i class="fa fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="box-body no-padding">
+                    <ul class="users-list clearfix" id="topPlayers">
+                        {% if topPlayers.length %}
+                        {% for player in topPlayers %}
+                        <li class="item">
+                            {% if player.profilePic is string %}
+                            <img src="{{player.profilePic}}" alt="User Image">
+                            {% else %}
+                            {% if player.profilePic.length == 0 %}
+                            <img src="dist/img/user.png" alt="User Image">
+                            {% else %}
+                            <img src="{{player.profilePic[0]}}" alt="User Image">
+                            {% endif %}
+                            {% endif %}
+
+                            {% if (session.role != 'admin' and 'Players Management' in Agent.isPermission) or
+                            (session.role == 'admin') %}
+                            <a class="users-list-name" href="/viewPlayer/{{player._id}}">{{player.username}}</a>
+                            {% else %}
+                            <a class="users-list-name">{{player.username}}</a>
+                            {% endif %}
+
+                            <span class="users-list-data">{{player.walletAmount | int}} Kr</span>
+                        </li>
+                        {% endfor %}
+                        {% else %}
+
+                        <div colspan="5" style="text-align:center;">
+                            {{dashboardTraslate.no_data_available}}
+                        </div>
+
+                        {% endif %}
+                    </ul>
+                </div>
+
+
+                <div class="box-footer text-center">
+                    {% if (session.role != 'admin' and 'Players Management' in Agent.isPermission) or (session.role ==
+                    'admin') %}
+                    <a href="/player" class="uppercase">{{dashboardTraslate.view_all_users}}</a>
+                    {% endif %}
+                </div>
+
+
+            </div>
+            <!-- /.box -->
+        </div>
+        <!-- /.col -->
+
+        <!-- /.row  -->
+    </div>
+    <div class="row">
+        <div class="col-md-12">
+            <!-- TABLE: Game Details -->
+            <div class="box box-info">
+                <div class="box-header with-border text-center">
+                    <h3 class="box-title text-bold">{{dashboardTraslate.ongoing_game}}</h3>
+                    <div class="box-tools pull-right">
+                        <button type="button" class="btn btn-box-tool" data-widget="collapse"><i
+                                class="fa fa-minus"></i>
+                        </button>
+                        <button type="button" class="btn btn-box-tool" data-widget="remove"><i
+                                class="fa fa-times"></i></button>
+                    </div>
+                </div>
+                <!-- /.box-header -->
+                <div class="box-body">
+                    <div class="container-fluid">
+                        <ul class="nav nav-tabs" style="display: flex;justify-content: center;">
+                            <li name="Game1">
+                                <a href="#OngoingGames1" onclick="getGameData('myGame1')"
+                                    data-toggle="tab">{{dashboardTraslate.game1}}</a>
+                            </li>
+                            <li class="active" name="Game2">
+                                <a href="#OngoingGames2" onclick="getGameData('myGame2')"
+                                    data-toggle="tab">{{dashboardTraslate.game2}}</a>
+                            </li>
+                            <li name="Game3">
+                                <a href="#OngoingGames3" onclick="getGameData('myGame3')"
+                                    data-toggle="tab">{{dashboardTraslate.game3}}</a>
+                            </li>
+                            <li name="Game4">
+                                <a href="#OngoingGames4" onclick="getGameData('myGame4')"
+                                    data-toggle="tab">{{dashboardTraslate.game4}}</a>
+                            </li>
+                            <li name="Game4">
+                                <a href="#OngoingGames5" onclick="getGameData('myGame5')"
+                                    data-toggle="tab">{{dashboardTraslate.game5}}</a>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="tab-content">
+                        <div id="OngoingGames1" class="tab-pane table-responsive">
+                            <table class="table no-margin" id="myGame1">
+                                <thead>
+                                    <tr>
+                                        <th>{{dashboardTraslate.daily_schedule_id}}</th>
+                                        <th>{{dashboardTraslate.start_date_end_date}}</th>
+                                        <th>{{dashboardTraslate.group_of_halls}}</th>
+                                        <th>{{dashboardTraslate.master_halls}}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="OngoingGames2" class="tab-pane fade in active table-responsive">
+                            <table class="table no-margin" id="myGame2">
+                                <thead>
+                                    <tr>
+                                        <th>{{dashboardTraslate.main_game_id}}</th>
+                                        <th>{{dashboardTraslate.game_name}}</th>
+                                        <th>{{dashboardTraslate.start_date}}</th>
+                                        <th>{{dashboardTraslate.end_date}}</th>
+                                        <th>{{dashboardTraslate.prize_of_lucky_number}}</th>
+                                        <th>{{dashboardTraslate.notification_start_time}}</th>
+                                        <th>{{dashboardTraslate.group_of_halls}}</th>
+                                        <th>{{dashboardTraslate.total_seconds_to_display_ball}}</th>
+                                        <th>{{dashboardTraslate.number_of_minimum_tickets_to_start_the_game}}</th>
+                                        <th>{{dashboardTraslate.status}}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="OngoingGames3" class="tab-pane table-responsive">
+                            <table class="table no-margin" id="myGame3">
+                                <thead>
+                                    <tr>
+                                        <th>{{dashboardTraslate.main_game_id}}</th>
+                                        <th>{{dashboardTraslate.game_name}}</th>
+                                        <th>{{dashboardTraslate.start_date_end_date}}</th>
+                                        <th>{{dashboardTraslate.group_of_halls}}</th>
+                                        <th>{{dashboardTraslate.status}}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="OngoingGames4" class="tab-pane table-responsive">
+                            <table class="table no-margin" id="myGame4">
+                                <thead>
+                                    <tr>
+                                        <th>{{dashboardTraslate.main_game_id}}</th>
+                                        <th>{{dashboardTraslate.game_name}}</th>
+                                        <th>{{dashboardTraslate.start_date}}</th>
+                                        <th>{{dashboardTraslate.end_date}}</th>
+                                        <th>{{dashboardTraslate.prize_of_lucky_number}}</th>
+                                        <th>{{dashboardTraslate.notification_start_time}}</th>
+                                        <th>{{dashboardTraslate.group_of_halls}}</th>
+                                        <th>{{dashboardTraslate.total_seconds_to_display_ball}}</th>
+                                        <th>{{dashboardTraslate.number_of_minimum_tickets_to_start_the_Game}}</th>
+                                        <th>{{dashboardTraslate.status}}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="OngoingGames5" class="tab-pane table-responsive">
+                            <table class="table no-margin" id="myGame5">
+                                <thead>
+                                    <tr>
+                                        <th>{{dashboardTraslate.game_number}}</th>
+                                        <th>{{dashboardTraslate.start_date}}</th>
+                                        <th>{{dashboardTraslate.hall_name}}</th>
+                                        <th>{{dashboardTraslate.total_seconds_to_display_ball}}</th>
+                                        <th>{{dashboardTraslate.total_bet}}</th>
+                                        <th>{{dashboardTraslate.status}}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <!-- /.box-body -->
+                <div class="box-footer clearfix text-center">
+                    {% if session.role == 'admin' %}
+                    <a href="/gameManagement" class="btn btn-sm btn-info btn-flat">{{dashboardTraslate.view_all_game}}</a>
+                    {% else %} {% if 'Games Management' in Agent.isPermission %}
+                    <a href="/gameManagement" class="btn btn-sm btn-info btn-flat">{{dashboardTraslate.view_all_game}}</a>
+                    {%endif%}
+                    {%endif%}
+                </div>
+                <!-- /.box-footer -->
+            </div>
+            <!-- /.box -->
+        </div>
+    </div>
+
+</section>
+<!-- /.content -->
+
+</div>
+<!-- /.content-wrapper -->
+
+<!-- Footer -->
+<footer class="main-footer">
+    <div class="pull-right hidden-xs">
+        <b>{{dashboardTraslate.version}}</b> 2.1.0
+    </div>
+    <strong>{{dashboardTraslate.copyright}} &copy; 2025-2026 <a href="javascript:void(0)"> Spillorama Bingo Game</a></strong>
+</footer>
+<!-- /Footer -->
+
+</div>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.2.0/socket.io.js"></script>
+{% endblock %} {% block Jscript %}
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    var gameId = '';
+    $(document).ready(function () {
+        var host = window.location.origin;
+        $('#myTable').DataTable({
+            // "scrollX": true,
+            "oLanguage": {
+                "sEmptyTable": "{{dashboardTraslate.no_data_available_in_table}}"
+            },
+            "searching": false,
+            "autoWidth": false,
+            "bLengthChange": false,
+            "bPaginate": false,
+            "bInfo": false,
+            "order": [
+                [1, "desc"]
+            ],
+            "ajax": {
+                url: host + "/dashboard/ongoingGames",       //url: host + "/dashboard/gameHistory",
+                dataSrc: ""
+            },
+            "columns": [{
+                "data": "gameNumber",
+                render: function (data, type, row) {
+                    return `<a href="/viewGameDetails/` + row.gameTypeId + `/` + row._id + `" title="Game Details">\
+                        ` + row.gameNumber + `</a>`
+                }
+            }, {
+                "data": "gameName"
+            }, {
+                "data": "startDate",
+                render: function (data, type, row) {
+                    return creteDateString(row.startDate);
+                }
+            }, {
+                "data": "endDate",
+                render: function (data, type, row) {
+                    return creteDateString(row.endDate);
+                }
+            }, {
+                "data": "luckyNumberPrize"
+            }, {
+                "data": "notificationStartTime"
+            }, {
+                "data": "groupOfHalls",
+                render: function (data, type, row) {
+                    let $select = $('<select id="select1-' + row._id + '" ></select>', {
+                        "id": row[7],
+                        "value": data.map(item => item.name)
+                    });
+                    $.each(data, function (k, v) {
+                        let $option = $("<option></option>", {
+                            "text": v.name,
+                            "value": v.id
+                        });
+                        $select.append($option);
+                    });
+                    return $select.prop("outerHTML");
+                }
+            }, {
+                "data": "seconds",
+                render: function (data, type, row) {
+                    return `${row.seconds / 1000}s`
+                }
+            }, {
+                "data": "minTicketCount",
+                render: function (data, type, row) {
+                    if (row.minTicketCount) {
+                        return row.minTicketCount;
+                    } else {
+                        return 0;
+                    }
+                }
+            }, {
+                "data": null,
+                render: function (data, type, row) {
+                    return "Active"
+                }
+            }]
+        });
+
+        getGameData('myGame2');
+
+        // Game Play Chart
+        var theMonths = ["January", "February", "March", "April", "May",
+            "June", "July", "August", "September", "October", "November", "December"
+        ];
+        var labels = [];
+        for (var i = 0; i <= 11; i++) {
+            labels.push(theMonths[i]);
+        }
+
+        var host = window.location.origin;
+        if ($('#monthlyPlayedGameChart').length > 0) {
+            // Get context with jQuery - using jQuery's .get() method.
+            var GameCanvas = $('#monthlyPlayedGameChart').get(0).getContext('2d');
+            // This will get the first returned node in the jQuery collection.
+            $.ajax({
+                type: 'GET',
+                url: host + "/dashboardChart/getMonthlyPlayedGameChart",
+                success: function (res) { },
+                complete: function (data) {
+                    var gameConfig = {
+                        type: 'line',
+                        data: {
+                            labels: data.responseJSON.dateArray,
+                            datasets: [{
+                                label: 'Game Played By Player',
+                                backgroundColor: "#3b8bba",
+                                borderColor: "rgba(60,141,188,0.8)",
+                                data: data.responseJSON.dailyGamePlayedArray,
+                                fill: true,
+                            }],
+                        },
+                        options: {
+                            display: false,
+                            responsive: true,
+                            legend: {
+                                //position: 'top',
+                                display: false,
+                            },
+                        }
+                    };
+                    var chart = new Chart(GameCanvas, gameConfig)
+                }
+            })
+        }
+
+
+
+        // Platform Chart
+
+        if ($('#gameUsages').length > 0) {
+            $.ajax({
+                type: 'GET',
+                url: host + "/dashboardChart/getGameUsageChart",
+                success: function (res) { },
+                complete: function (data) {
+
+                    //console.log('data: ', data);
+
+                    var pieChartCanvas = $('#gameUsages').get(0).getContext('2d');
+
+                    let webCount = 0;
+                    let androidCount = 0;
+                    let iosCount = 0;
+                    //console.log(data.responseJSON.webCount);
+                    if (data.responseJSON.android.length > 0) {
+                        androidCount = data.responseJSON.android[0].count
+                    };
+                    if (data.responseJSON.ios.length > 0) {
+                        iosCount = data.responseJSON.ios[0].count
+                    };
+                    if (data.responseJSON.webCount) {
+                        webCount = data.responseJSON.webCount.length; //data.responseJSON.webCount.count;
+                    };
+                    /* if ( ('android' in data.responseJSON)) {
+                        androidCount=data.responseJSON.android[0].percentage 
+                    }
+                     if ( ('ios' in data.responseJSON)) {
+                        iosCount=data.responseJSON.ios[0].percentage
+                    } */
+                    $('.chartAndroid').html(androidCount);
+                    $('.chartIos').html(iosCount);
+                    $('.chartOther').html(webCount);
+
+                    var config = {
+                        type: 'doughnut',
+                        data: {
+                            datasets: [{
+                                data: [
+
+                                    androidCount,
+                                    iosCount,
+                                    webCount,
+                                ],
+                                backgroundColor: [
+                                    "#00a65a",
+                                    "#0000FF",
+                                    "#FF0000",
+                                ],
+                            }],
+                            labels: [
+                                'Android',
+                                'IOS',
+                                'Other'
+                            ]
+                        },
+                        options: {
+                            display: false,
+                            responsive: true,
+                            legend: {
+                                //position: 'top',
+                                display: false,
+                            },
+                            animation: {
+                                animateScale: false,
+                                animateRotate: true,
+                                animationSteps: 100,
+                                animationEasing: 'easeOutBounce',
+                            },
+                            segmentShowStroke: true,
+                            segmentStrokeColor: '#fff',
+                            segmentStrokeWidth: 1,
+                            percentageInnerCutout: 50, // This is 0 for Pie charts
+                            maintainAspectRatio: false,
+                            tooltipTemplate: '<%=value %> <%=label%> users'
+                        }
+                    };
+
+                    var myDoughnutChart = new Chart(pieChartCanvas, config);
+
+
+                }
+            })
+        }
+
+
+
+        // Memory Usage Chart
+
+        //
+        /*let ctx = $('#memoryUsage').get(0).getContext('2d');
+
+            let data = {
+                        labels: ['Start'],
+                        datasets: [{
+                            data: [0],
+                            label: 'RSS',
+                            backgroundColor: '#ff6600',
+                            fill: false,
+                        },
+                        {
+                            data: [0],
+                            label: 'HEAP',
+                            backgroundColor: '#4543b5',
+                            fill: false
+                        }]
+            }
+
+        	
+            let optionsAnimations = { 
+                animation: false,
+            }
+            let chart = new Chart(ctx, {
+                type: 'line',
+                data: data,
+                options: optionsAnimations
+            })
+     
+            const socket = io(host);
+             
+            socket.emit('dashboardconnection',"Hi Server")
+              socket.on('live_memory', function (responce) {
+                var length = data.labels.length
+                    if (length >= 60) {
+                    data.datasets[0].data.shift();
+                    data.datasets[1].data.shift();
+                    data.labels.shift()
+                    }
+
+                data.labels.push(moment().format('mm:ss'))
+                data.datasets[0].data.push(responce.rss);
+                data.datasets[1].data.push(responce.heap)
+                chart.update()  
+            })  */
+
+        // Platform Chart
+        /*
+                if( $('#gameUsages').length > 0 ){
+                  $.ajax({
+                    type: 'GET',
+                    url :host + "/dashboardChart/getGameUsageChart",
+                    success:function(res){
+                    },
+                    complete: function(data){
+                      
+                      var pieChartCanvas = $('#gameUsages').get(0).getContext('2d');
+                     
+                      let webCount=0;
+                      let androidCount=0;
+                      let iosCount=0;
+
+                      //if(data.responseJSON.android.length > 0){ androidCount=data.responseJSON.android[0].count };
+                      //if(data.responseJSON.ios.length > 0){iosCount=data.responseJSON.ios[0].count };
+                      if ( ('android' in data.responseJSON)) {
+                          androidCount=data.responseJSON.android[0].count 
+                      }
+                       if ( ('ios' in data.responseJSON)) {
+                          iosCount=data.responseJSON.ios[0].count
+                      }
+                        $('.chartAndroid').html(androidCount+'%');
+                        $('.chartIos').html(iosCount+'%');
+
+
+                          var config = {
+                                type: 'doughnut',
+                                data: {
+                                    datasets: [{
+                                        data: [
+                                            webCount,
+                                            androidCount,
+                                            iosCount,
+                                        ],
+                                        backgroundColor: [
+                                            "#f56954",
+                                            "#00a65a",
+                                            "#f39c12"
+                                        ],
+                                    }],
+                                    labels: [
+                                        'Web',
+                                        'Android',
+                                        'IOS',
+                                    ]
+                                },
+                                options: {
+                                    display: false,
+                                    responsive: true,
+                                    legend: {
+                                        //position: 'top',
+                                        display: false,
+                                    },
+                                    animation: {
+                                        animateScale: false,
+                                        animateRotate: true,
+                                        animationSteps : 100,
+                                        animationEasing : 'easeOutBounce',
+                                    },
+                                    segmentShowStroke    : true,
+                                    segmentStrokeColor   : '#fff',
+                                        segmentStrokeWidth   : 1,
+                                    percentageInnerCutout: 50, // This is 0 for Pie charts
+                                    maintainAspectRatio  : false,
+                                    tooltipTemplate      : '<%=value %> <%=label%> users'
+                                }
+                          };
+
+                              var myDoughnutChart = new Chart(pieChartCanvas, config );
+                     
+
+                    }
+                  })
+                }  
+        */
+
+        // $("#groupHallFilter").change(function(){
+        //     console.log("value of groupHall",$(this).val());
+        //     $.ajax({
+        //         method : "GET",
+        //         url: host + "/dashboard/getTopPlayers/"+ ($(this).val() !== ''? $(this).val():"0"),
+        //         success:function(response) {
+        //             try {
+        //                 console.log("response from server", response);
+        //                 if (response.status === "success") {
+        //                     $('#topPlayers').empty();
+        //                     if (response.result.length) {
+        //                         console.table(response.result);
+        //                         for (let i = 0; i < response.result.length; i++) {
+        //                             const element = response.result[i];
+        //                             console.log("player",element);
+        //                             let html = `<li class="item">
+        //                                         <img src="${Array.isArray(element.profilePic)? element.profilePic[0]: element.profilePic}" alt="User Image">
+        //                                         <a class="users-list-name" href="/viewPlayer/${element._id}">${element.username}</a>
+        //                                         <span class="users-list-data">${element.points} Points</span>
+        //                                         </li>`;
+        //                             $('#topPlayers').append(html);
+        //                         }
+        //                     }else{
+        //                         $('#topPlayers').append("<div style='text-align:center;'>No Player Found in this Group of Hall</div>");
+        //                     }
+        //                 } else {
+        //                     console.log("error response from server", response);
+        //                 }
+        //                 return;
+        //             } catch (error) {
+        //                 console.log("Error on change #groupHallFilter", error);
+        //                 return;
+        //             }   
+        //         }
+        //     });
+        //     return;
+        // });
+    });
+
+    function getGameData(game) {
+        console.log('gameId', gameId);
+        if (gameId != '') {
+            $(`#${gameId}`).DataTable().clear().destroy();
+        }
+        let columns = [];
+        if (game == 'myGame1') {
+            columns = [{
+                "data": "dailyScheduleId",
+                render: function (data, type, row) {
+                    return `<a href="/viewDailySchduleDetails/` + row._id + `" title="Schedule Details">\
+                        ` + row.dailyScheduleId + `</a>`
+                }
+            }, {
+                "data": "startEndDate",
+                render: function (data, type, row) {
+                    let startDate = creteDateString(row.startDate);
+                    let endDate = creteDateString(row.endDate);
+                    return startDate + '-' + endDate;
+                }
+            }, {
+                "data": "groupHalls",
+                render: function (data, type, row) {
+                    let $select = $('<select id="select1-' + row._id + '" ></select>', {
+                        "id": row[2],
+                        "value": data.map(item => item.name)
+                    });
+                    $.each(data, function (k, v) {
+                        let $option = $("<option></option>", {
+                            "text": v.name,
+                            "value": v.id
+                        });
+                        $select.append($option);
+                    });
+                    return $select.prop("outerHTML");
+                }
+            }, {
+                "data": "masterHall.name",
+            }];
+        } else if (game == 'myGame2') {
+            columns = [{
+                "data": "gameNumber",
+                render: function (data, type, row) {
+                    return `<a href="/viewGameDetails/` + row.gameTypeId + `/` + row._id + `" title="Game Details">\
+                        ` + row.gameNumber + `</a>`
+                }
+            }, {
+                "data": "gameName"
+            }, {
+                "data": "startDate",
+                render: function (data, type, row) {
+                    return creteDateString(row.startDate);
+                }
+            }, {
+                "data": "endDate",
+                render: function (data, type, row) {
+                    return creteDateString(row.endDate);
+                }
+            }, {
+                "data": "luckyNumberPrize"
+            }, {
+                "data": "notificationStartTime"
+            }, {
+                "data": "groupOfHalls",
+                render: function (data, type, row) {
+                    let $select = $('<select id="select1-' + row._id + '" ></select>', {
+                        "id": row[7],
+                        "value": data.map(item => item.name)
+                    });
+                    $.each(data, function (k, v) {
+                        let $option = $("<option></option>", {
+                            "text": v.name,
+                            "value": v.id
+                        });
+                        $select.append($option);
+                    });
+                    return $select.prop("outerHTML");
+                }
+            }, {
+                "data": "seconds",
+                render: function (data, type, row) {
+                    return `${row.seconds / 1000}s`
+                }
+            }, {
+                "data": "minTicketCount",
+                render: function (data, type, row) {
+                    if (row.minTicketCount) {
+                        return row.minTicketCount;
+                    } else {
+                        return 0;
+                    }
+                }
+            }, {
+                "data": null,
+                render: function (data, type, row) {
+                    return "Active"
+                }
+            }];
+        } else if (game == 'myGame3') {
+            columns = [{
+                "data": "gameNumber",
+                render: function (data, type, row) {
+                    return `<a href="/viewGameDetails/` + row.gameTypeId + `/` + row._id + `" title="Game Details">\
+                        ` + row.gameNumber + `</a>`
+                }
+            }, {
+                "data": "gameName"
+            }, {
+                "data": "startDate",
+                render: function (data, type, row) {
+                    let startDate = creteDateString(row.startDate);
+                    let endDate = creteDateString(row.endDate);
+                    return `${startDate}-${endDate}`;
+                }
+            }, {
+                "data": "groupOfHalls",
+                render: function (data, type, row) {
+                    let $select = $('<select id="select1-' + row._id + '" ></select>', {
+                        "id": row[7],
+                        "value": data.map(item => item.name)
+                    });
+                    $.each(data, function (k, v) {
+                        let $option = $("<option></option>", {
+                            "text": v.name,
+                            "value": v.id
+                        });
+                        $select.append($option);
+                    });
+                    return $select.prop("outerHTML");
+                }
+            }, {
+                "data": null,
+                render: function (data, type, row) {
+                    return "Active"
+                }
+            }];
+        } else if (game == 'myGame4') {
+            columns = [{
+                "data": "gameNumber",
+                render: function (data, type, row) {
+                    return `<a href="/viewGameDetails/` + row.gameTypeId + `/` + row._id + `" title="Game Details">\
+                        ` + row.gameNumber + `</a>`
+                }
+            }, {
+                "data": "gameName"
+            }, {
+                "data": "startDate",
+                render: function (data, type, row) {
+                    return creteDateString(row.startDate);
+                }
+            }, {
+                "data": "endDate",
+                render: function (data, type, row) {
+                    return creteDateString(row.endDate);
+                }
+            }, {
+                "data": "ticketPrice"
+            }, {
+                "data": "luckyNumberPrize"
+            }, {
+                "data": "notificationStartTime"
+            }, {
+                "data": "groupOfHalls",
+                render: function (data, type, row) {
+                    let $select = $('<select id="select1-' + row._id + '" ></select>', {
+                        "id": row[7],
+                        "value": data.map(item => item.name)
+                    });
+                    $.each(data, function (k, v) {
+                        let $option = $("<option></option>", {
+                            "text": v.name,
+                            "value": v.id
+                        });
+                        $select.append($option);
+                    });
+                    return $select.prop("outerHTML");
+                }
+            }, {
+                "data": "seconds",
+                render: function (data, type, row) {
+                    return `${row.seconds / 1000}s`
+                }
+            }, {
+                "data": "minTicketCount",
+                render: function (data, type, row) {
+                    if (row.minTicketCount) {
+                        return row.minTicketCount;
+                    } else {
+                        return 0;
+                    }
+                }
+            }, {
+                "data": null,
+                render: function (data, type, row) {
+                    return "Active"
+                }
+            }];
+        } else if (game == 'myGame5') {
+            columns = [
+                {
+                    "data": "gameNumber"
+                }, {
+                    "data": "startDate",
+                    render: function (data, type, row, meta) {
+                        //return moment.utc(row.gameStartDate).format('DD/MM/YYYY hh:mm a');
+                        return moment(row.startDate).format('DD/MM/YYYY hh:mm a');
+                    }
+                }, {
+                    "data": "halls",
+                    render: function (data, type, row, meta) {
+                        return row.halls[0].name
+                    }
+                }, {
+                    "data": "seconds",
+                    render: function (data, type, row, meta) {
+                        return row.seconds / 1000;
+                    }
+                }, {
+                    "data": "earnedFromTickets"
+                }, {
+                    "data": "status"
+                }
+            ];
+        }
+
+        console.log('game', game);
+        $(`#${game}`).DataTable({
+            // "scrollX": true,
+            "searching": false,
+            "oLanguage": {
+                "sEmptyTable": "{{dashboardTraslate.no_data_available_in_table}}"
+            },
+            "autoWidth": false,
+            "bLengthChange": false,
+            "bPaginate": false,
+            "bInfo": false,
+            "order": [
+                [1, "desc"]
+            ],
+            "ajax": {
+                url: host + "/dashboard/ongoingGames/" + game,       //url: host + "/dashboard/gameHistory",
+                dataSrc: ""
+            },
+            "columns": columns,
+        });
+        gameId = game;
+    }
+    function creteDateString(data) {
+        let dt = new Date(data);
+        let date = dt.getDate();
+        let month = parseInt(dt.getMonth() + 1);
+        let year = dt.getFullYear();
+        let hours = dt.getHours();
+        let minutes = dt.getMinutes();
+        let ampm = hours >= 12 ? 'pm' : 'am';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        minutes = minutes < 10 ? '0' + minutes : minutes;
+        data = (date > 9 ? date : '0' + date) + '/' + (month > 9 ? month : '0' + month) + '/' + year;
+        return data;
+    }
+
+
+    const adminSocket = io("/admin");
+    let hallId = "{{Agent.hall[0].id}}"
+
+    function getDepositPending() {
+
+        adminSocket.emit('getWithdrawPenddingRequest', { hallId }, (response) => {
+            console.log("response", response);
+
+            if (response && response.status == 'success' && response.reqCount > 0) {
+                swal("Pending Deposit Request", ' You have pending deposit requests from players awaiting action. Please review and process these requests.', "warning");
+            }
+
+        });
+    }
+
+
+</script>
+
+{% endblock %}

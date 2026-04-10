@@ -1,0 +1,346 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .buttonRight {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        display: inline-block;
+        margin-left: -10px;
+        margin-right: 4px;
+        margin-bottom: 4px;
+    }
+</style>
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+
+        <section class="content-header">
+            <h1>Player Profile</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>
+                <li class="active" href="/player">player</li>
+                <li class="active" href="/player">profile</li>
+            </ol>
+        </section>
+
+        {% include "partition/notification.html" %}
+
+        <!-- profile information start -->
+        <section class="content ">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="box box-primary">
+                        <div class="box-header with-border">
+                            <h3 class="box-title">Profile Information</h3>
+                        </div>
+                        <form action="/playerEdit/{{player._id}}" method="post" enctype="multipart/form-data" id="form_id">
+                            <div class="box-body">
+                                <div class="profile-edit">
+                                    <div class="profile-upload">
+                                        <div class="circle"><img class="profile-pic" src="{{player.profilePic}}"></div>
+                                        <div class="p-image ">
+                                            <i class="fa fa-pencil upload-button"></i>
+                                            <input class="file-upload" type="file" name="profilePic" accept="image/jpeg, image/png">
+                                        </div>
+                                    </div>
+                                    <div class="pe-name">
+                                        <input type="text" class="form-control" name="username" placeholder="username" value="{{player.username}}">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="input-group">
+                                        <span class="input-group-addon"><i class="fa fa-envelope"></i></span>
+                                        <input type="email" class="form-control" name="email" placeholder="Email" value="{{player.email}}">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="input-group">
+                                        <span class="input-group-addon"><i class="fa fa-user"></i></span>
+                                        <input type="text" class="form-control" name="nickname" placeholder="nickname" value="{{player.nickname}}">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="input-group">
+                                        <span class="input-group-addon"><i class="fa fa-mobile"></i></span>
+                                        <input type="mobile" class="form-control" name="phone" placeholder="1234567890" value="{{player.phone}}">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+
+                                    <div class="input-group">
+                                        <span class="input-group-addon"><i class="fa fa-university"></i></span>
+                                        <select multiple="multiple" style=" height: 28px;  width: 414px; " id="hallData" name="hall">
+                                            {% for item in hall %}
+                                            {% set selected = "false" %}
+                                            {% set status = "" %}
+                                                {% for hallName in player.hall %}
+                                                    {% if item.hallId == hallName.hallId %}
+                                                        {% set selected = "true" %}
+                                                        {% set readonly = "true" %}
+                                                        {% set status = hallName.status %}
+                                                    {% endif %}
+                                                {% endfor %}
+                                                <option {{ "selected" if selected == 'true' else "" }} value={{item._id}} class="select-{{item._id}}">{{item.name}} ( {{status}} )</option>
+                                           
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <div class="input-group">
+                                        <span class="input-group-addon"><i class="fa fa-building"></i></span>
+                                        <input type="text" class="form-control" name="bankId" value="{{player.bankId}}">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <button type="submit" id="Submit" class="btn btn-primary">Submit</button>
+                                    <a href="/player" class="btn btn-danger btn-flat">Cancel</a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <!-- /.box -->
+
+
+                </div>
+
+
+                <div class="col-md-6">
+                    <div class="box box-primary">
+                        <div class="box-header with-border">
+                            <h3 class="box-title">Change Password</h3>
+                        </div>
+                        <form role="form" action="/changePwd/{{player._id}}" method="post">
+                            <div class="box-body">
+                                <div class="form-group has-feedback">
+                                    <span class="glyphicon glyphicon-lock form-control-feedback" style="left: 0 !important;"></span>
+                                    <input type="password" class="form-control" id="password" name="oldPassword" data-minlength="6" data-validation="length" data-validation-length="min6" placeholder="Old Password" style="padding-left: 42.5px;">
+                                    <!-- <span class="glyphicon glyphicon-eye-open form-control-feedback" id="viewpassword" onclick="viewpassword();" style="cursor: pointer; pointer-events: all;"></span> -->
+                                </div>
+
+                                <div class="form-group has-feedback">
+                                    <span class="glyphicon glyphicon-lock form-control-feedback" style="left: 0 !important;"></span>
+                                    <input type="password" class="form-control" id="newPassword" name="newPassword" data-minlength="6" data-validation="length" data-validation-length="min6" placeholder="New Password" style="padding-left: 42.5px;">
+                                    <!-- <span class="glyphicon glyphicon-eye-open form-control-feedback" id="viewpassword" onclick="viewpassword();" style="cursor: pointer; pointer-events: all;"></span> -->
+                                </div>
+
+                                <div class="form-group has-feedback">
+                                    <span class="glyphicon glyphicon-lock form-control-feedback" style="left: 0 !important;"></span>
+                                    <input type="password" class="form-control" id="verifyPassword" name="verifyNewPassword" data-minlength="6" data-validation="length" data-validation-length="min6" placeholder="Confirm Password" style="padding-left: 42.5px;">
+                                    <!-- <span class="glyphicon glyphicon-eye-open form-control-feedback" id="viewpassword-{{player.id}}" onclick="viewpassword();" style="cursor: pointer; pointer-events: all;"></span> -->
+                                    <div class="registrationFormAlert" style="color:red;" id="CheckPasswordMatch2"></div>
+                                </div>
+                                <div class="form-group">
+                                    <button type="submit" class="btn btn-primary">Submit</button>
+                                    <a href="/player" class="btn btn-danger btn-flat">Cancel</a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <!-- /.box -->
+
+
+                </div>
+
+            </div>
+
+        </section>
+        <!-- profile information end -->
+
+        <div class="buttonRight">
+            <button class="btn btn-primary btn-flat unblockPlayer" id="{{player._id}}">Unblock Player</button>
+            <button class="btn btn-danger btn-flat deletePlayer" id="{{player._id}}">Delete Player</button>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<link href="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/css/bootstrap-multiselect.css" rel="stylesheet" type="text/css" />
+<script src="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/js/bootstrap-multiselect.js" type="text/javascript"></script>
+<script>
+    $(document).ready(function() {
+
+        $('#hallData').multiselect({});
+
+
+        $("#hallData option").each(function() {
+            if ($(this).attr("selected") == "selected") {
+                $('.select-' + $(this).val()).attr('onclick', 'return false');
+            } else {
+                $('.select-' + $(this).val()).attr('onclick', 'return true');
+            }
+        });
+
+        $("#newPassword").keyup(checkPasswordMatch32);
+        $("#verifyPassword").keyup(checkPasswordMatch32);
+
+        function checkPasswordMatch32() {
+            var password = $("#newPassword").val();
+            var confirmPassword = $("#verifyPassword").val();
+            console.log('password: ', password);
+            console.log('confirmPassword: ', confirmPassword);
+            if (password != confirmPassword) {
+                $("#CheckPasswordMatch2").html("Passwords does not match");
+                $("#CheckPasswordMatch2").css("color", "red");
+            } else {
+                $("#CheckPasswordMatch2").html("Passwords match");
+                $("#CheckPasswordMatch2").css("color", "green");
+                setTimeout(function() {
+                    $("#CheckPasswordMatch2").html("");
+                }, 500)
+            }
+        }
+
+        // function viewpassword() {
+        //     if ($("#viewpassword").hasClass("glyphicon-eye-open")) {
+        //         $("#password").attr("type", "text");
+        //         $("#viewpassword").removeClass("glyphicon-eye-open");
+        //         $("#viewpassword").addClass("glyphicon-eye-close");
+        //     } else if ($("#viewpassword").hasClass("glyphicon-eye-close")) {
+        //         $("#password").attr("type", "password");
+        //         $("#viewpassword").removeClass("glyphicon-eye-close");
+        //         $("#viewpassword").addClass("glyphicon-eye-open");
+        //     }
+        // }
+
+        $(function() {
+            "use strict";
+
+            var SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    //Parameter
+                    $('body').on('click', '.deletePlayer', function(e) {
+                        var id = $(this).attr('id');
+                        var thisElement = this;
+                        swal({
+                            title: "Are you sure?",
+                            text: "You will not be able to recover this Player!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes, delete it!",
+                            cancelButtonText: "No, cancel Plz!",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/player/getPlayerDelete",
+                                    data: {
+                                        id: id
+                                    },
+                                    success: function(resultData) {
+                                        // alert(resultData)
+                                        //console.log(resultData);
+                                        if (resultData == 'success') {
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                                        } else {
+                                            alert("Something went wrong")
+                                        }
+                                        // alert("Save Complete")
+                                    }
+                                });
+                                swal("Deleted!", "Player Deleted Succesfully.", "success");
+                            } else {
+                                swal("Cancelled", "Player Not Deleted)", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+                    // Active & Deactive
+
+                    $('body').on('click', '.playerActive', function(e) {
+                        var id = $(this).attr('id');
+                        let $this = $(this);
+                        let st = $(this).attr('data-st');
+                        var thisElement = this;
+                        swal({
+                            title: "Are You Sure?",
+                            text: "Do You Want To Update The Status?",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes, Update It!",
+                            cancelButtonText: "No, Cancel It!",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/player/active",
+                                    data: {
+                                        id: id
+                                    },
+                                    success: function(resultData, data) {
+                                        //console.log(data);
+                                        if (resultData == 'success') {
+                                            swal("Update!", "Player Status Updated Successfully..", "success");
+                                        } else {
+                                            alert("Something went wrong")
+                                        }
+                                    }
+                                });
+                                swal("Success!", "Player Status Updated Succesfully.", "success");
+                            } else {
+                                swal("Cancelled", "Player Status not Updated)", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+    })
+</script>
+
+<!-- select 2 checkbox -->
+<!-- <script>
+    $(".js-select2").select2({
+        closeOnSelect: false,
+        placeholder: "Hall 1",
+        allowHtml: true,
+        allowClear: true,
+        tags: true // создает новые опции на лету
+    });
+</script> -->
+<!-- select 2 checkbox -->
+
+<!-- profile image upload -->
+<script>
+    $(document).ready(function() {
+        var readURL = function(input) {
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+
+                reader.onload = function(e) {
+                    $('.profile-pic').attr('src', e.target.result);
+                }
+
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+
+        $(".file-upload").on('change', function() {
+            readURL(this);
+        });
+
+        $(".upload-button").on('click', function() {
+            $(".file-upload").click();
+        });
+    });
+</script>
+<!-- profile image upload -->
+
+{% endblock %}

@@ -1,0 +1,206 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Breadcrumb -->
+        <section class="content-header">
+            <h1>{{gameReport.view_ticket}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{gameReport.dashboard}}</a></li>
+                <li class="active">{{gameReport.view_ticket}}</li>
+            </ol>
+        </section>
+        <!-- /Breadcrumb -->
+
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{gameReport.view_ticket}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                
+                                <!--Total Number display -->
+                                <div class="form-group ">
+                                    <div class="row">
+                                        <label class="mb-10 col-sm-12">{{gameReport.count_total_number_displayed}}:</label>
+                                        <div class="col-sm-12">
+                                            <p class="col-md-1">{{Game.withdrawNumberList|length}} </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+
+                                <!--Total Number display -->
+                                <div class="form-group ">
+                                    
+                                    <div class="row ">
+                                        <label class="mb-10 col-sm-12 ">{{gameReport.total_number_displayed}}:</label>
+                                        <div class="col-sm-12 ">
+                                            {% for item in Game.withdrawNumberList %}
+                                            
+                                            <!-- <div class="row" style="overflow: auto"> -->
+                                            <p class="col-md-1">{{item.number}} </p>
+                                            <!-- </div> -->
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                </div>
+
+
+                                <h4>{{gameReport.ticket_display}}:</h4>
+                                <div class="ticket-coupon ticket5">
+                                    <!-- {{Game|dump}} -->
+                                    {% if(Game.gameType=='game_2') %}
+                                        <div class="coupon" style="width: 140px;">
+                                            <div class="coupon-top">
+                                                <div class="coupon-top-left">{{ticketData.ticketId}}</div>
+                                                <div class="coupon-top-right">{{ticketData.ticketPrice}}kr</div>
+                                            </div>
+                                            <ul class="coupon-botm">
+                                                {% for row in ticketData.tickets %}
+                                                <li style="flex: 0 0 28.21%;">{{row}}</li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    {% elif(Game.gameType=='game_1') %}
+                                        <div class="coupon" style="width:239px">
+                                            <div class="coupon-top">
+                                                <div class="coupon-top-left">{{ticketData.ticketId}}</div>
+                                                <div class="coupon-top-right">{{ticketData.ticketPrice}}kr</div>
+                                            </div>
+                                            <ul class="coupon-botm">
+                                                {% for row in ticketData.tickets %}
+                                                    {% for objectArray in row %}
+                                                     <li style="flex: 0 0 17.21%;">{{objectArray.Number}}</li>
+                                                    {% endfor %}
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    {% else %}
+                                    <div class="coupon" style="width:239px">
+                                        <div class="coupon-top">
+                                            <div class="coupon-top-left">{{ticketData.ticketId}}</div>
+                                            <div class="coupon-top-right">{{ticketData.ticketPrice}}kr</div>
+                                        </div>
+                                        <ul class="coupon-botm">
+                                            {% for row in ticketData.tickets %}
+                                            <li style="flex: 0 0 17.21%;">{{row}}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                 {% endif %}    
+                                </div>
+                                <div class="form-group">
+                                    <div class="">  
+                                        <label class="mb-10 col-sm-12 ">{{gameReport.winner_type}}:</label>
+                                        <div class="col-sm-6">
+                                            <table class="table table-bordered" style="border: 1px solid black;">
+                                                <thead>
+                                                    <tr>
+                                                        <th>{{gameReport.win_pattern}}</th>
+                                                        <th>{{gameReport.winning_amount}}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% if(Game.gameType=='game_1' and Game.sttaus != "finish" ) %}
+                                                        {% for row in ticketData.otherData.winningStats %}
+                                                            <tr>
+                                                                <th>
+                                                                    {% if ( ticketData.gameName == "Jackpot" and row.isJackpotWon == true) %}
+                                                                        {{row.lineType}}/Jackpot
+                                                                    {% elif (ticketData.gameName == "Wheel of Fortune" and row.lineType == "Full House" ) %}
+                                                                        Wheel Of Fortune
+                                                                    {% elif (ticketData.gameName == "Treasure Chest" and row.lineType == "Full House" ) %}
+                                                                        Treasure Chest
+                                                                    {% elif ( ticketData.gameName == "Innsatsen" and row.isJackpotWon == true) %}
+                                                                        {{row.lineType}}/Jackpot
+                                                                    {% elif (ticketData.gameName == "Mystery" and row.lineType == "Full House" ) %}
+                                                                        Mystery
+                                                                    {% elif (ticketData.gameName == "Color Draft" and row.lineType == "Full House" ) %}
+                                                                        Color Draft
+                                                                    {% else %}
+                                                                        {{row.lineType}}
+                                                                    {% endif %}
+                                                                
+                                                                </th>
+                                                                <th>
+                                                                    {{row.wonAmount}}
+                                                                </th>
+                                                            </tr>  
+                                                        {% endfor %}
+                                                    {% else %}
+                                                        {% for row in ticketData.winningStats.lineTypeArray %}
+                                                            <tr>
+                                                                <th>
+                                                                    {% if (ticketData.gameType=='game_1' and  ticketData.gameName == "Jackpot" and row.isJackpotWon == true) %}
+                                                                        {{row.lineType}}/Jackpot
+                                                                    {% elif (ticketData.gameType=='game_1' and ticketData.gameName == "Wheel of Fortune" and row.lineType == "Full House" ) %}
+                                                                        Wheel Of Fortune
+                                                                    {% elif (ticketData.gameType=='game_1' and ticketData.gameName == "Treasure Chest" and row.lineType == "Full House" ) %}
+                                                                        Treasure Chest
+                                                                    {% elif (ticketData.gameType=='game_1' and  ticketData.gameName == "Innsatsen" and row.isJackpotWon == true) %}
+                                                                        {{row.lineType}}/Jackpot
+                                                                    {% elif (ticketData.gameType=='game_1' and ticketData.gameName == "Mystery" and row.lineType == "Full House" ) %}
+                                                                        Mystery
+                                                                    {% elif (ticketData.gameType=='game_1' and ticketData.gameName == "Color Draft" and row.lineType == "Full House" ) %}
+                                                                        Color Draft
+                                                                    {% else %}
+                                                                        {{row.lineType}}
+                                                                    {% endif %}
+                                                                
+                                                                </th>
+                                                                <th>
+                                                                    {{row.wonAmount}}
+                                                                </th>
+                                                            </tr>  
+                                                        {% endfor %}
+                                                    {% endif %}
+
+                                                    
+                                                    {% if(ticketData.luckyNumberWinningStats) %}
+                                                        <tr>
+                                                            <th>
+                                                                {{ticketData.luckyNumberWinningStats.lineType}}
+                                                            </th>
+                                                            <th>
+                                                                {{ticketData.luckyNumberWinningStats.wonAmount}}
+                                                            </th>
+                                                        </tr>
+                                                    {% endif %}
+                                                </tbody>       
+                                            </table>
+                                            
+                                        </div>
+                                        <div class="clearfix"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- /Row -->
+        </div>
+    </div>
+
+    {% endblock %} {% block Jscript %}
+    <script>
+        $(document).ready(function() {
+            var host = window.location.origin;
+        });
+    </script>
+    {% endblock %}

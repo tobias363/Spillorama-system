@@ -1,0 +1,159 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>Transactions Management Table </h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i>Dashboard</a></li>
+                <li class="active" href="#">Transaction</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">Transactions Management</h6>
+                            </div>
+                            <div class="pull-right">
+                                <!-- <a href="/addWallet"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add Wallet</button></a> -->
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>Order Number</th>
+                                                    <th>Transaction Id</th>
+                                                    <th>Username</th>
+                                                    <th>Date & Time</th>
+                                                    <th>Amount</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script>
+    var orderTable = "";
+    var host = window.location.origin;
+    $(document).ready(function() {
+
+        let ajaxUrl = host + "/getTransactions";
+
+        $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "Search Username"
+            },
+            "processing": true,
+            "serverSide": true,
+            "order": [
+                [3, "desc"]
+            ],
+            "autoWidth": false,
+            "pageLength": 100,
+            "ajax": {
+                url: ajaxUrl,
+                type: "GET",
+            },
+            dom: 'lBfrtip',
+            lengthMenu: [
+                [10, 100, -1],
+                [10, 100, "All"]
+            ],
+            "buttons": [
+                // 'csv', 'excel'
+                {
+                    extend: 'csvHtml5',
+                    exportOptions: {
+                        columns: [0, 1, 2, 3, 4, 5]
+                    }
+                }, {
+                    extend: 'excelHtml5',
+                    exportOptions: {
+                        columns: [0, 1, 2, 3, 4, 5]
+                    }
+                }
+            ],
+            "columns": [{
+                "data": "orderNumber"
+            }, {
+                "data": "transactionID"
+            }, {
+                "data": "playerName"
+            }, {
+                "data": "updatedAt",
+                render: function(data, type, row, meta) {
+                    return moment(row.updatedAt).format('DD/MM/YYYY hh:mm a'); //moment.utc(row.updatedAt).format('DD/MM/YYYY hh:mm a');
+                }
+
+                // ,
+                // render: function(data, type, row) {
+                //     let dt = new Date(row.updatedAt);
+                //     let date = dt.getDate();
+                //     let month = parseInt(dt.getMonth() + 1);
+                //     let year = dt.getFullYear();
+                //     let hours = dt.getHours();
+                //     let minutes = dt.getMinutes();
+                //     let ampm = hours >= 12 ? 'pm' : 'am';
+                //     hours = hours % 12;
+                //     hours = hours ? hours : 12;
+                //     minutes = minutes < 10 ? '0' + minutes : minutes;
+                //     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+                //     return createdAt;
+                // }
+            }, {
+                "data": "amount"
+            }, {
+                "data": "status",
+                render: function(data, type, row) {
+                    if (row.status == "pending") {
+                        return '<span class="badge bg-blue"> In Progress </span>';
+                    } else if (row.status == "completed") {
+                        return '<span class="badge bg-green"> Completed </span>';
+                    } else if (row.status == "failed") {
+                        return '<span class="badge bg-red"> Failed </span>';
+                    }
+                }
+            }, ]
+        });
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

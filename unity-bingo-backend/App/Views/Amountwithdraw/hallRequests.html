@@ -1,0 +1,358 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .popover {
+        max-width: 600px;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{withdraw.withdraw_request_in_hall}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{withdraw.dashboard}}</a></li>
+                <li class="active" href="/withdraw/requests/hall">{{withdraw.withdraw_request_in_hall}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{withdraw.withdraw_request}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                <!-- <a href="/addPlayer"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add Player</button></a> -->
+                                <button class="btn btn-success btn-xs btn-rounded"
+                                    onClick="$('#myTable').DataTable().ajax.reload();">{{withdraw.refresh_table}}</button>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <div class="row">
+                                    <div class="col-sm-3">
+                                        <div class="form-group">
+                                            <div class='input-group date' id='startDate'>
+                                                <input type='text' class="form-control" name="start_date"
+                                                    id="start_date" placeholder="{{withdraw.start_date}}"
+                                                    data-date-format="yyyy-mm-dd" autocomplete="off" />
+                                                <span class="input-group-addon">
+                                                    <span class="glyphicon glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-sm-3">
+                                        <div class="form-group">
+                                            <div class='input-group date' id='endDate'>
+                                                <input type='text' class="form-control" name="end_date" id="end_date"
+                                                    placeholder="{{withdraw.end_date}}" data-date-format="yyyy-mm-dd"
+                                                    autocomplete="off" />
+                                                <span class="input-group-addon">
+                                                    <span class="glyphicon glyphicon-calendar"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-sm-3">
+                                        <input type="button" name="search" id="search" value="{{withdraw.search}}"
+                                            class="btn btn-info" />
+                                    </div>
+                                </div>
+
+                                <!-- <div class="panel-wrapper collapse in"> -->
+                                <!-- <div class="panel-body"> -->
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{withdraw.date}}</th>
+                                                    <th>{{withdraw.customer_number}}</th>
+                                                    <th>{{withdraw.fullname}}</th>
+                                                    <th>{{withdraw.withdraw_amount}}</th>
+                                                    <th>{{withdraw.hall_name}}</th>
+                                                    <th>{{withdraw.status}}</th>
+                                                    <th>{{withdraw.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <!-- </div> -->
+                                <!-- </div> -->
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    function formatDate(date) {
+        let d = new Date(date),
+            month = '' + (d.getMonth() + 1),
+            day = '' + d.getDate(),
+            year = d.getFullYear();
+
+        if (month.length < 2)
+            month = '0' + month;
+        if (day.length < 2)
+            day = '0' + day;
+
+        return [year, month, day].join('-');
+    }
+    $(document).ready(function () {
+        let host = window.location.origin;
+        let ajaxUrl = host + "/withdraw/requests/hall/get";
+
+        let acceptFlag = '{{acceptFlag}}';
+        let rejectFlag = '{{rejectFlag}}';
+
+        $('#startDate input,#endDate input').datepicker();
+        $('#startDate input,#endDate input').val(formatDate(new Date()));
+
+        let start_date = $('#start_date').val();
+        let end_date = $('#end_date').val();
+        fetch_data('yes', start_date, end_date);
+
+        function fetch_data(is_date_search, start_date = '', end_date = '') {
+            $('#myTable').DataTable({
+               
+                "oLanguage": {
+                    "sSearch": "{{withdraw.serach}} {{withdraw.fullname}}/{{withdraw.customer_number}}",
+                    "sLengthMenu": "{{withdraw.show}} _MENU_ {{withdraw.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ withdraw.previous }}",
+                        sNext: "{{ withdraw.next }}"
+                    },
+                    "sEmptyTable": "{{withdraw.no_data_available_in_table}}",
+                    "sInfo": "{{withdraw.showing}} _START_ to _END_ of _TOTAL_ {{withdraw.entries}}",
+                    "sInfoEmpty": "{{withdraw.showing}} 0 to 0 of 0 {{withdraw.entries}}"
+                },
+                "processing": true,
+                "serverSide": true,
+                "order": [
+                    [0, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": [1, 4, 5, 6],
+                    "orderable": false
+                }],
+                "autoWidth": false,
+                "pageLength": 10,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: {
+                        is_date_search: is_date_search,
+                        start_date: start_date,
+                        end_date: end_date,
+                        transactionType: "hall"
+                    }
+                },
+                //"dom": 'Bfrtip',
+                dom:
+                    "<'row'<'col-sm-3'l><'col-sm-4 text-center'B><'col-sm-5'f>>" +
+                    "<'row'<'col-sm-12'tr>>" +
+                    "<'row'<'col-sm-5'i><'col-sm-7'p>>",
+                "buttons": [
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5, 6]
+                        }
+                    }, {
+                        extend: 'excelHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5, 6]
+                        }
+                    }
+                ],
+                "columns":
+                    [
+                        {
+                            "data": "createdAt",
+                            render: function (data, type, row, meta) {
+                                return moment(row.createdAt).format('DD/MM/YYYY hh:mm a');
+                            }
+                        },
+                        {
+                            "data": "customerNumber",
+                            render: function (data, type, row) {
+                                let customerNumber = ''
+                                if (data) {
+                                    customerNumber = data;
+                                }
+                                return customerNumber;
+                            }
+                        },
+                        {
+                            "data": "name"
+                        },
+                        {
+                            "data": "withdrawAmount"
+                        },
+                        {
+                            "data": "hallName"
+                        },
+                        {
+                            "data": "status",
+                            render: function (data, type, row) {
+                                if (row.status == "pending") {
+                                    return '<span class="badge bg-blue"> Pending </span>';
+                                } else if (row.status == "completed") {
+                                    return '<span class="badge bg-green"> Completed </span>';
+                                } else if (row.status == "failed") {
+                                    return '<span class="badge bg-red"> Failed </span>';
+                                }
+                            }
+                        },
+                        {
+                            "data": "action",
+                            render: function (data, type, row) {
+                                let html = '';
+                                if (acceptFlag == 'true') {
+                                    html += `<button type="button" title="acceptRequest" class="btn btn-xs btn-rounded btn-success acceptRequest" id="` + row._id + `" ><i class="fa fa-check" aria-hidden="true"></i>{{withdraw.acceptbtn}}</button>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp`
+                                } else {
+                                    html += `  `;
+                                }
+
+                                if (rejectFlag == 'true') {
+                                    html += `<button type="button" title="Delete Player" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs btn-rounded rejectRequest"><i class="fa fa-times" aria-hidden="true"></i>{{withdraw.rejectbtn}}</button>`;
+                                } else {
+                                    html += `  `;
+                                }
+                                return html;
+                            }
+                        }
+                    ]
+            });
+        }
+
+        $('#search').click(function () {
+            let start_date = $('#start_date').val();
+            let end_date = $('#end_date').val();
+            if (start_date != '' && end_date != '') {
+                $('#myTable').DataTable().destroy();
+                fetch_data('yes', start_date, end_date);
+            } else {
+                alert("Both Date is Required");
+            }
+        });
+
+        $(function () {
+            "use strict";
+
+            var SweetAlert = function () { };
+
+            SweetAlert.prototype.init = function () {
+
+                //Parameter
+                $('body').on('click', '.rejectRequest', function (e) {
+                    let id = $(this).attr('id');
+                    let thisElement = this;
+                    swal({
+                        title: "{{withdraw.are_you_sure}}?",
+                        text: "{{withdraw.you_will_not_be_able_to_recover_this_request}}!",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{withdraw.yes_reject_it}}",
+                        cancelButtonText: "{{withdraw.cancel_button}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/withdraw/requests/reject",
+                                data: {
+                                    id: id,
+                                },
+                                success: function (resultData) {
+                                    if (resultData.status == 'success') {
+                                        $(thisElement).parent().parent().hide(700);
+                                        swal("{{withdraw.rejected}}!", "{{withdraw.withdraw_request_is_rejected_successfully}}.", "success");
+                                    } else {
+                                        swal("Cancelled", resultData.message, "error");
+                                    }
+                                    let ajax_source = ajaxUrl;
+                                    let table = $("#myTable").DataTable();
+                                    table.ajax.url(ajax_source).load();
+                                }
+                            });
+                        } else {
+                            swal("{{withdraw.cancelled}}", "{{withdraw.request_has_been_cancelled}}.", "error");
+                        }
+                    });
+                    return false;
+                });
+
+                $('body').on('click', '.acceptRequest', function (e) {
+                    let id = $(this).attr('id');
+                    let thisElement = this;
+                    swal({
+                        title: "{{withdraw.are_you_sure}}?",
+                        text: "{{withdraw.do_you_want_to_accept_this_request}}?",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{withdraw.yes_accept_it}}",
+                        cancelButtonText: "{{withdraw.cancel_button}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/withdraw/requests/accept",
+                                data: { id: id },
+                                success: function (resultData) {
+                                    console.log(resultData);
+                                    if (resultData.status == 'success') {
+                                        console.log(thisElement);
+                                        $(thisElement).parent().parent().hide(700);
+                                        swal("{{withdraw.accepted}}!", "{{withdraw.withdraw_request_accepted_successfully}}.", "success");
+                                    } else {
+                                        swal("{{withdraw.cancelled}}", resultData.message, "error");
+                                    }
+                                    let ajax_source = ajaxUrl;
+                                    let table = $("#myTable").DataTable();
+                                    table.ajax.url(ajax_source).load();
+                                }
+                            });
+                        } else {
+                            swal("{{withdraw.cancelled}}", "{{withdraw.withdraw_request_has_been_cancelled}}.", "error");
+                        }
+                    });
+                    return false;
+                });
+            },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

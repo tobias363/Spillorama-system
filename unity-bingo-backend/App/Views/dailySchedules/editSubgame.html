@@ -1,0 +1,1337 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    ul {
+        list-style-type: none;
+    }
+
+    select:invalid {
+        height: 0px !important;
+        opacity: 0 !important;
+        position: absolute !important;
+        display: flex !important;
+    }
+
+    select:invalid[multiple] {
+        margin-top: 15px !important;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{translate.edit}} {{translate.sub_game}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+                <li class="active">{{translate.edit}} {{translate.sub_game}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{translate.edit}} {{translate.sub_game}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <form method="POST" id="addGameData" action="/edit-subgame/{{game._id}}" class="">
+
+                                    <div class="table display pb-30">
+                                        <input type="hidden" name="ctimezone" value="Europe/Oslo">
+                                        <!-- Pattern Add / Buttons add -->
+                                        <div class="">
+
+                                            <div class="col-12" id="subGamesContainer">
+
+                                                {% if game.subGames.length > 0 and slug=="Edit" %}
+
+                                                {% set subGameNum = 1 %}
+
+                                                {% set ticketTypeArr = {} %}
+                                                {% set patterns = {} %}
+                                                {% for item in subGameList %}
+                                                {% if game.gameName|string() == item.gameName|string() %}
+                                                {% set ticketTypeArr = item.ticketType %}
+                                                {% set patterns = item.WinningPatterns %}
+                                                {% endif %}
+                                                {% endfor %}
+
+                                                <div class="ch col-lg-11 subGame[{{subGameNum}}]">
+
+                                                    <div class="clearfix"></div>
+
+                                                    <div class="row">
+                                                        <div class="col-lg-6 col-md-6">
+                                                            <div class="form-group">
+                                                                <label>{{translate.sub_game}}* :</label>
+                                                                <input type="text" class="form-control"
+                                                                    value="{{game.gameName}}" disabled>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+
+                                                    <div class="row">
+                                                        <div class="col-lg-6 col-sm-6">
+                                                            <div class="form-group">
+                                                                <label>{{translate.start_time}}*:</label>
+                                                                <div class='input-group date'
+                                                                    id='subGame[{{subGameNum}}][startTime]'>
+                                                                    <input type='text'
+                                                                        class="form-control subGame_{{subGameNum}}_start_time"
+                                                                        value="{{startDate}}" data-date-format="HH:mm"
+                                                                        autocomplete="off"
+                                                                        data-gameNumber='{{subGameNum}}' disabled />
+                                                                    <span class="input-group-addon">
+                                                                        <span
+                                                                            class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-lg-6 col-sm-6">
+                                                            <div class="form-group">
+                                                                <label>{{translate.end_time_with_last_game_note}}</label>
+                                                                <div class='input-group date'
+                                                                    id='subGame[{{subGameNum}}][endTime]'>
+                                                                    <input type='text'
+                                                                        class="form-control subGame_{{subGameNum}}_end_time autoEndTime"
+                                                                        id="subGame[{{subGameNum}}][end_time]"
+                                                                        value="{{endDate}}" data-date-format="HH:mm"
+                                                                        autocomplete="off"
+                                                                        data-gameNumber='{{subGameNum}}' disabled />
+                                                                    <span class="input-group-addon">
+                                                                        <span
+                                                                            class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="row">
+                                                        <div class="col-lg-6 col-md-6">
+                                                            <div class="form-group">
+                                                                <label>{{translate.custom_game_name}}*:</label>
+                                                                <input type="text" class="form-control" value="{{game.otherData.customGameName}}" 
+                                                                    name="subGame[{{subGameNum}}][custom_game_name]"
+                                                                    id="subGame[{{subGameNum}}][custom_game_name]"
+                                                                    data-validation="required"
+                                                                    data-validation-error-msg-required="{{translate.custom_game_name_is_required}}"
+                                                                >
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="row">
+                                                        <div class="col-lg-6 col-md-6">
+                                                            <div class="form-group ">
+                                                                <label>{{translate.notification_start_time}}*:</label>
+                                                                <select
+                                                                    name="subGame[{{subGameNum}}][notificationStartTime]"
+                                                                    id="subGame[{{subGameNum}}][notificationStartTime]"
+                                                                    class="form-control" required>
+                                                                    <option value="0s" {{ "selected" if
+                                                                    game.notificationStartTime|string()=="0s"
+                                                                    else "" }}>0s</option>
+                                                                    <option value="3s" {{ "selected" if
+                                                                    game.notificationStartTime|string()=="3s"
+                                                                    else "" }}>3s</option>
+                                                                    <option value="5s" {{ "selected" if
+                                                                    game.notificationStartTime|string()=="5s"
+                                                                    else "" }}>5s</option>
+                                                                    <option value="10s" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="10s"
+                                                                        else "" }}>10s</option>
+                                                                    <option value="15s" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="15s"
+                                                                        else "" }}>15s</option>
+                                                                    <!--<option value="20s" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="20s"
+                                                                        else "" }}>20s</option>
+                                                                    <option value="30s" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="30s"
+                                                                        else "" }}>30s</option>
+                                                                    <option value="40s" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="40s"
+                                                                        else "" }}>40s</option>
+                                                                    <option value="50s" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="50s"
+                                                                        else "" }}>50s</option>
+                                                                    <option value="1m" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="1m"
+                                                                        else "" }}>1m</option>
+                                                                    <option value="2m" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="2m"
+                                                                        else "" }}>2m</option>
+                                                                    <option value="3m" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="3m"
+                                                                        else "" }}>3m</option>
+                                                                    <option value="4m" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="4m"
+                                                                        else "" }}>4m</option>
+                                                                    <option value="5m" {{ "selected" if
+                                                                        game.notificationStartTime|string()=="5m"
+                                                                        else "" }}>5m</option> -->
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="row">
+                                                        <div class="col-lg-6 col-md-6">
+                                                            <div class="form-group">
+                                                                <div class="row">
+                                                                    <label class="mb-10 col-sm-12 ">{{translate.minimum_seconds_to_display_single_ball}}*:</label>
+                                                                    <div class="col-sm-12 ">
+                                                                        <input type="number"
+                                                                            class="form-control subGame_{{subGameNum}}_minseconds"
+                                                                            onkeyup="checkforEndDate(this, `{{subGameNum}}`)"
+                                                                            onchange="checkforEndDate(this, `{{subGameNum}}`)"
+                                                                            max="60" min="5"
+                                                                            name="subGame[{{subGameNum}}][minseconds]"
+                                                                            placeholder="{{translate.enter}} {{translate.minseconds}}"
+                                                                            value="{{game.otherData.minseconds}}"
+                                                                            id="subGame[{{subGameNum}}][minseconds]"
+                                                                            data-validation="required number"
+                                                                            data-validation-allowing="range[5;60]"
+                                                                            data-validation-error-msg-number="Minimum seconds should start from 5 seconds."
+                                                                            data-gameNumber='{{subGameNum}}'>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="row">
+                                                        <div class="col-lg-6 col-md-6">
+                                                            <div class="form-group">
+                                                                <div class="row">
+                                                                    <label class="mb-10 col-sm-12 ">{{translate.maximum_seconds_to_display_single_ball}}*:</label>
+                                                                    <div class="col-sm-12 ">
+                                                                        <input type="number"
+                                                                            class="form-control subGame_{{subGameNum}}_maxseconds"
+                                                                            onkeyup="checkforEndDate(this, `{{subGameNum}}`)"
+                                                                            onchange="checkforEndDate(this, `{{subGameNum}}`)"
+                                                                            max="60" min="5"
+                                                                            name="subGame[{{subGameNum}}][maxseconds]"
+                                                                            placeholder="{{translate.enter}} {{translate.maxseconds}}"
+                                                                            value="{{game.otherData.maxseconds}}"
+                                                                            id="subGame[{{subGameNum}}][maxseconds]"
+                                                                            data-validation="required number"
+                                                                            data-validation-allowing="range[5;60]"
+                                                                            data-validation-error-msg-number="Maximum Seconds should be 60 seconds."
+                                                                            data-gameNumber='{{subGameNum}}'>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="row">
+                                                        <div class="col-lg-6 col-md-6">
+                                                            <div class="form-group">
+                                                                <div class="row">
+                                                                    <label class="mb-10 col-sm-12 ">{{translate.total_second_to_display_single_ball}}*:</label>
+                                                                    <div class="col-sm-12 ">
+                                                                        <input type="number"
+                                                                            class="form-control subGame_{{subGameNum}}_seconds"
+                                                                            onkeyup="checkforEndDate(this, `{{subGameNum}}`)"
+                                                                            onchange="checkforEndDate(this, `{{subGameNum}}`)"
+                                                                            max="60"
+                                                                            name="subGame[{{subGameNum}}][seconds]"
+                                                                            placeholder="Enter Seconds "
+                                                                            value="{{game.seconds}}"
+                                                                            id="subGame[{{subGameNum}}][seconds]"
+                                                                            data-validation="required number"
+                                                                            data-validation-allowing="range[3;60]"
+                                                                            data-validation-error-msg-number="Total Seconds to display single ball must be between 3 to 60 seconds."
+                                                                            data-gameNumber='{{subGameNum}}'>
+                                                                        <span class="endDate_{{subGameNum}}">{{translate.end_time}}:
+                                                                            {{startDate | addTime(game.seconds)}}</span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="row subGame[{{subGameNum}}][ticketColor] subGame_{{subGameNum}}_ticketColor">
+                                                        <div class="col-lg-12">
+                                                            <label>{{translate.ticket_color_type_price}}</label>
+                                                        
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div class="row subGame_{{subGameNum}}_ticketColor_inputs">
+                                                        
+                                                        
+                                                        {% for type in ticketTypeArr %}
+                                                    
+                                                            {% set ticketPrice = "" %}
+                                                            {% for ticketType in game.subGames[0].options %}
+                                                                {% if ticketType.ticketName == type|string() %}
+                                                                    {% set ticketPrice = ticketType.ticketPrice %}
+                                                                {% endif %}
+                                                            {% endfor %}
+                                                    
+                                                    
+                                                            {% if (loop.index-1) == 0 %}
+                                                                {% set classNames = "" %}
+                                                                {% set ticketName = "" %}
+                                                                {% if game.gameName == "Traffic Light" %}
+                                                                    {% set classNames = "col-lg-6" %}
+                                                                    {% set ticketName = "Small Red, Small Yellow & Small Green" %}
+                                                                {% elif game.gameName == "Elvis" %}
+                                                                    {% set classNames = "col-lg-6" %}
+                                                                    {% set ticketName = "Elvis1, Elvis2, Elvis3, Elvis4 & Elvis5"%}
+                                                                {% else %}
+                                                                    {% set classNames = "col-lg-3" %}
+                                                                    {% set ticketName = type %}
+                                                                {% endif %}
+                                                                <div class="{{classNames}}">
+                                                                    <div class="input-group">
+                                                                        <span class="input-group-addon">
+                                                                            <input type="checkbox" name="subGame[{{subGameNum}}][ticketColorType][]"  value= "{{type}}"
+                                                                            {{ "checked" if type in game.subGames[0].ticketColorTypes else "" }} 
+                                                                            class = "subGame_{{subGameNum}}_ticketColorType_{{type.split(' ').join('')}}  subGame_ticketColorChk_{{subGameNum}}"
+                                                                            onchange="onChangeTicket(this, `{{subGameNum}}`, `{{game.gameName}}`)"
+                                                                            data-ticketColorType='{{type}}'
+                                                                            data-patterns='{{patterns}}' 
+                                                                            data-type-target="#subGame_{{subGameNum}}ticketColorTypePrice{{type.split(' ').join('')}}"
+                                                                            data-validation="checkbox_group" data-validation-qty="min1"
+                                                                            onclick="return false" 
+                                                                            > {{ ticketName }}  
+                                                                        </span>
+                                                                    
+                                                                        <input type="number" name="subGame[{{subGameNum}}][ticketColorTypePrice][][{{type}}]" class="form-control" 
+                                                                        value="{{ ticketPrice }}"
+                                                                        min="1"
+                                                                        id= "subGame_{{subGameNum}}ticketColorTypePrice{{type.split(' ').join('')}}"
+                                                                        data-gameNumber='{{subGameNum}}'
+                                                                        data-ticketColorType='{{type.split(' ').join('')}}'
+                                                                        readonly>
+                                                                    </div>
+                                                                </div>
+                                                            {% else %}
+                                                                {% set classNames = "" %}
+                                                                {% if (game.gameName == "Traffic Light" or game.gameName == "Elvis") %}
+                                                                    {% set classNames = "col-lg-3 hidden" %}
+                                                                {% else %}
+                                                                    {% set classNames = "col-lg-3" %}
+                                                                {% endif %}
+                                                                <div class="{{classNames}}">
+                                                                    <div class="input-group">
+                                                                        <span class="input-group-addon">
+                                                                            <input type="checkbox" name="subGame[{{subGameNum}}][ticketColorType][]"  value= "{{type}}"
+                                                                            {{ "checked" if type in game.subGames[0].ticketColorTypes else "" }}  
+                                                                            class = "subGame_{{subGameNum}}_ticketColorType_{{type.split(' ').join('')}}  subGame_ticketColorChk_{{subGameNum}}"
+                                                                            onchange="onChangeTicket(this, `{{subGameNum}}`, `{{game.gameName}}`)"
+                                                                            data-ticketColorType='{{type}}'
+                                                                            data-patterns='{{patterns}}' 
+                                                                            data-type-target="#subGame_{{subGameNum}}ticketColorTypePrice{{type.split(' ').join('')}}"
+                                                                            onclick="return false" > {{type}} 
+                                                                        </span>
+                                                                        
+                                                                        <input type="number" name="subGame[{{subGameNum}}][ticketColorTypePrice][][{{type}}]" class="form-control" 
+                                                                        value="{{ ticketPrice }}"
+                                                                        min="1"
+                                                                        id= "subGame_{{subGameNum}}ticketColorTypePrice{{type.split(' ').join('')}}"
+                                                                        data-gameNumber='{{subGameNum}}'
+                                                                        data-ticketColorType='{{type.split(' ').join('')}}'
+                                                                        readonly>
+                                                                    </div>
+                                                                </div>
+                                                            {% endif %}
+                                                        
+                                                        {% endfor %}
+                                                    </div>
+                                                    
+                                                    <br>
+
+                                                    <div class="row subGame[{{subGameNum}}][ticketPrize] subGame_{{subGameNum}}_ticketPrize">
+                                                        <div class="col-lg-12">
+                                                            <label class= "subGame_{{subGameNum}}_ticketPrize_label">{{game.gameName}}: {{translate.row_pattern_prize}}:</label>
+                                                            
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div class="row subGame_{{subGameNum}}_ticketPrize_inputs">
+                                                        {% if game.subGames[0].options.length > 0 %}
+                                                            {% set allSelected = game.subGames[0].ticketColorTypes %}
+                                                            
+                                                            {% set allSelectedUnique = [] %}
+                                                    
+                                                            {% for type in allSelected %}
+                                                                {% set slicesTicket = type.slice(6) %}
+                                                    
+                                                                {% if slicesTicket in allSelectedUnique %}
+                                                                {% else %}
+                                                                    {% set allSelectedUnique =  (allSelectedUnique.push(slicesTicket), allSelectedUnique) %}
+                                                                {% endif %}
+                                                                
+                                                            {% endfor %}
+                                                           
+                                                            {% for type in allSelectedUnique %}
+                                                                {% set selectedTicketTypes = [] %}
+                                                                {% set selectedTicketPrize = [] %}
+                                                                {% set selectedTicketMinimumPrize = [] %}
+                                                                {% for typeTemp in allSelected %}
+                                                                    
+                                                                    {% if type == typeTemp.slice(6)  and (typeTemp.slice(6) in allSelectedUnique) %}
+                                                                       {% set selectedTicketTypes =  (selectedTicketTypes.push(typeTemp), selectedTicketTypes) %}
+                                                    
+                                                                       {% if selectedTicketPrize.length == 0  %} 
+                                                                            {% for cprize in game.subGames[0].options %}
+                                                                                {% if cprize.ticketName.slice(6)|string() == typeTemp.slice(6)|string() %}
+                                                                                    {% set selectedTicketPrize = cprize.winning %}
+                                                                                    {% set selectedTicketMinimumPrize = cprize.minimumWinning %}
+                                                                                {% endif %}
+                                                                            {% endfor %}
+                                                                       {% endif %}
+                                                                    
+                                                                    {% endif %}
+                                                                
+                                                                {% endfor %}
+                                                                
+                                                                {% if (game.gameName != "Super Nils" and game.gameName != "Spillerness Spill" and game.gameName != "Spillerness Spill 2" and game.gameName != "Spillerness Spill 3") %}
+                                                                    <div class="col-lg-12 subGame_{{subGameNum}}_ticketType_{{type}}_div">
+                                                                        <label class="subGame_{{subGameNum}}_ticketType_{{type}}"></label>                
+                                                                    </div>
+                                                        
+                                                                    <div class="col-lg-12 pd-l-5 {{type}}">
+                                                                        <ul class="flx-wrp subGame_{{subGameNum}}_ticketPrize_ul_{{type}}">
+                                                                    
+                                                                            {% for pattern in patterns %}  
+                                                                                {% if (pattern == "Full House" and ( game.gameName  == "Wheel of Fortune" or game.gameName  == "Treasure Chest" or game.gameName == "Mystery" or game.gameName == "Color Draft" ) )%}  
+                                                                                    <div class="col-md-4 hidden">
+                                                                                        <li> 
+                                                                                            <div class="row">
+                                                                                                <div class="col-lg-6 pd-r-5">
+                                                                                                    <label data-toggle="tooltip" title="{{pattern}} Prize">{{pattern}} Prize</label>
+                                                                                                </div>
+                                                                                                <div class="col-lg-6 pd-l-5">
+                                                                                                    <input type="number" name="subGame[{{subGameNum}}][prize][{{type}}][{{pattern}}]" class="form-control" placeholder="10"
+                                                                                                    value="{{ selectedTicketPrize[pattern] }}"
+                                                                                                    />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </li>
+                                                                                    </div>
+                                                                                {% elif pattern == "Full House" and game.gameName == "Innsatsen" %}
+                                                                                    <div class="col-md-4">
+                                                                                        <li> 
+                                                                                            <div class="row">
+                                                                                                <div class="col-lg-6 pd-r-5">
+                                                                                                    <label data-toggle="tooltip" title="{{pattern}} Prize">{{pattern}} Prize</label>
+                                                                                                </div>
+                                                                                                <div class="col-lg-6 pd-l-5">
+                                                                                                    <input type="number" name="subGame[{{subGameNum}}][prize][{{type}}][{{pattern}}]" class="form-control" placeholder="10"
+                                                                                                    value="{{ selectedTicketPrize[pattern] }}"
+                                                                                                    data-validation="required number"
+                                                                                                    data-validation-allowing="range[1;2000]"
+                                                                                                    data-validation-error-msg-number="Value must be from 1 to 2000"
+                                                                                                    min="1"
+                                                                                                    />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </li>
+                                                                                    </div>
+                                                                                {% else %}  
+                                                                                    <div class="col-md-4">
+                                                                                        <li> 
+                                                                                            <div class="row">
+                                                                                                <div class="col-lg-6 pd-r-5">
+                                                                                                    <label data-toggle="tooltip" title="{{pattern}} Prize">{{pattern}} Prize</label>
+                                                                                                </div>
+                                                                                                <div class="col-lg-6 pd-l-5">
+                                                                                                    <input type="number" name="subGame[{{subGameNum}}][prize][{{type}}][{{pattern}}]" class="form-control" placeholder="10"
+                                                                                                    value="{{ selectedTicketPrize[pattern] }}"
+                                                                                                    data-validation="required number"
+                                                                                                    data-validation-allowing="range[1;Infinity]"
+                                                                                                    data-validation-error-msg-number="Value must be greater than or equal to 1"
+                                                                                                    min="1"
+                                                                                                    />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </li>
+                                                                                    </div>
+                                                                                {% endif %}
+                                                                            
+                                                                            {% endfor %}
+                                                                            <div class="clearfix"></div>
+                                                                        </ul> 
+                                                                        
+                                                                    </div>
+                                                                {% elif game.gameName == "Spillerness Spill"  %}
+                                                                    <div class="col-lg-12 subGame_{{subGameNum}}_ticketType_{{type}}_div">
+                                                                        <label class="subGame_{{subGameNum}}_ticketType_{{type}}"></label>                
+                                                                    </div>
+            
+                                                                    <div class="col-lg-12 pd-l-5 {{type}}">
+                                                                        <ul
+                                                                            class="flx-wrp subGame_{{subGameNum}}_ticketPrize_ul_{{type}}">
+            
+                                                                            {% for pattern in patterns %}
+                                                                                
+                                                                                <div class="col-md-4">
+                                                                                    <li>
+                                                                                        <div class="row">
+                                                                                            <div class="col-lg-3 pd-r-5">
+                                                                                                <label data-toggle="tooltip"
+                                                                                                    title="{{pattern}} Prize">{{pattern}}
+                                                                                                    Prize</label>
+                                                                                            </div>
+                                                                                            <div class="col-lg-5 pd-l-5">
+                                                                                                <input type="number"
+                                                                                                    name="subGame[{{subGameNum}}][prize][{{type}}][{{pattern}}]"
+                                                                                                    class="form-control winningPercentage" placeholder="% of Sells"
+                                                                                                    value="{{ selectedTicketPrize[pattern] }}"
+                                                                                                    data-validation="required number"
+                                                                                                    data-validation-allowing="range[1;100]"
+                                                                                                    data-validation-error-msg-number="Value must be between 1 to 100"
+                                                                                                    min="1" />
+                                                                                            </div>
+                                                                                            <div class="col-lg-4 pd-l-5">
+                                                                                                <input type="number" name="subGame[{{subGameNum}}][minimumPrize][{{type}}][{{pattern}}]" class="form-control" placeholder="Minimum Prize"
+                                                                                                value="{{ selectedTicketMinimumPrize[pattern] }}" 
+                                                                                                data-validation="required number"
+                                                                                                data-validation-allowing="range[1;Infinity]"
+                                                                                                min="1"
+                                                                                                data-validation-error-msg-number="Value must be greater than or equal to 1"
+                                                                                                />
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </li>
+                                                                                </div>
+                                                                                
+                                                                            {% endfor %}
+                                                                            
+                                                                            <div class="clearfix"></div>
+                                                                        </ul>
+            
+                                                                    </div>
+                                                                {% elif game.gameName == "Spillerness Spill 2"  %}
+                                                                    <div class="col-lg-12 subGame_{{subGameNum}}_ticketType_{{type}}_div">
+                                                                        <label class="subGame_{{subGameNum}}_ticketType_{{type}}"></label>                
+                                                                    </div>
+            
+                                                                    <div class="col-lg-12 pd-l-5 {{type}}">
+                                                                        <ul
+                                                                            class="flx-wrp subGame_{{subGameNum}}_ticketPrize_ul_{{type}}">
+            
+                                                                            {% for pattern in patterns %}
+                                                                                {% if loop.index < 5 %}
+                                                                                    <div class="col-md-4">
+                                                                                        <li>
+                                                                                            <div class="row">
+                                                                                                <div class="col-lg-3 pd-r-5">
+                                                                                                    <label data-toggle="tooltip"
+                                                                                                        title="{{pattern}} Prize">{{pattern}}
+                                                                                                        Prize</label>
+                                                                                                </div>
+                                                                                                <div class="col-lg-5 pd-l-5">
+                                                                                                    <input type="number"
+                                                                                                        name="subGame[{{subGameNum}}][prize][{{type}}][{{pattern}}]"
+                                                                                                        class="form-control winningPercentage" placeholder="% of Sells"
+                                                                                                        value="{{ selectedTicketPrize[pattern] }}"
+                                                                                                        data-validation="required number"
+                                                                                                        data-validation-allowing="range[1;100]"
+                                                                                                        data-validation-error-msg-number="Value must be between 1 to 100"
+                                                                                                        min="1" />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </li>
+                                                                                    </div>
+                                                                                {% else %}
+                                                                                    <div class="col-md-4">
+                                                                                        <li>
+                                                                                            <div class="row">
+                                                                                                <div class="col-lg-3 pd-r-5">
+                                                                                                    <label data-toggle="tooltip"
+                                                                                                        title="{{pattern}} Prize">{{pattern}}
+                                                                                                        Prize</label>
+                                                                                                </div>
+                                                                                                <div class="col-lg-5 pd-l-5">
+                                                                                                    <input type="number"
+                                                                                                        name="subGame[{{subGameNum}}][prize][{{type}}][{{pattern}}]"
+                                                                                                        class="form-control winningPercentage" placeholder="% of Sells"
+                                                                                                        value="{{ selectedTicketPrize[pattern] }}"
+                                                                                                        data-validation="required number"
+                                                                                                        data-validation-allowing="range[1;100]"
+                                                                                                        data-validation-error-msg-number="Value must be between 1 to 100"
+                                                                                                        min="1" />
+                                                                                                </div>
+                                                                                                <div class="col-lg-4 pd-l-5">
+                                                                                                    <input type="number" name="subGame[{{subGameNum}}][minimumPrize][{{type}}][{{pattern}}]" class="form-control" placeholder="Minimum Prize"
+                                                                                                    value="{{ selectedTicketMinimumPrize[pattern] }}" 
+                                                                                                    data-validation="required number"
+                                                                                                    data-validation-allowing="range[1;Infinity]"
+                                                                                                    min="1"
+                                                                                                    data-validation-error-msg-number="Value must be greater than or equal to 1"
+                                                                                                    />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </li>
+                                                                                    </div>
+                                                                                {% endif %}
+                                                                            {% endfor %}
+                                                                            
+                                                                            <div class="clearfix"></div>
+                                                                        </ul>
+            
+                                                                    </div>
+                                                                {% elif game.gameName == "Spillerness Spill 3"  %}
+                                                                    <div class="col-lg-12 subGame_{{subGameNum}}_ticketType_{{type}}_div">
+                                                                        <label class="subGame_{{subGameNum}}_ticketType_{{type}}"></label>                
+                                                                    </div>
+            
+                                                                    <div class="col-lg-12 pd-l-5 {{type}}">
+                                                                        <ul
+                                                                            class="flx-wrp subGame_{{subGameNum}}_ticketPrize_ul_{{type}}">
+            
+                                                                            {% for pattern in patterns %}
+                                                                                <div class="col-md-4">
+                                                                                    <li>
+                                                                                        <div class="row">
+                                                                                            <div class="col-lg-3 pd-r-5">
+                                                                                                <label data-toggle="tooltip"
+                                                                                                    title="{{pattern}} Prize">{{pattern}}
+                                                                                                    Prize</label>
+                                                                                            </div>
+                                                                                            <div class="col-lg-5 pd-l-5">
+                                                                                                <input type="number"
+                                                                                                    name="subGame[{{subGameNum}}][prize][{{type}}][{{pattern}}]"
+                                                                                                    class="form-control winningPercentage" placeholder="% of Sells"
+                                                                                                    value="{{ selectedTicketPrize[pattern] }}"
+                                                                                                    data-validation="required number"
+                                                                                                    data-validation-allowing="range[1;100]"
+                                                                                                    data-validation-error-msg-number="Value must be between 1 to 100"
+                                                                                                    min="1" />
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </li>
+                                                                                </div>
+                                                                            {% endfor %}
+                                                                            
+                                                                            <div class="clearfix"></div>
+                                                                        </ul>
+            
+                                                                    </div>
+                                                                {% else %}
+                                                                    <div class="col-lg-12 subGame_{{subGameNum}}_ticketType_{{type}}_div">
+                                                                        <label class="subGame_{{subGameNum}}_ticketType_{{type}}"></label> 
+                                                                        <!-- {{selectedTicketTypes | join(" & ")}} :  -->
+                                                                    </div>
+                                                                    {% set winningonColumns = ["B", "I", "N", "G", "O"] %}
+                                                                    {% for wc in winningonColumns %}  
+                                                                        <div class="col-lg-12 subGame_{{subGameNum}}_ticketTypeColumn_{{type}}_div">
+                                                                            <label class="subGame_{{subGameNum}}_ticketTypeColumn_{{type}}">{{wc}} Column  :</label> 
+                                                                            
+                                                                        </div>
+                                                                    
+                                                                        <div class="col-lg-12 pd-l-5 {{type}}">
+                                                                            <ul class="flx-wrp subGame_{{subGameNum}}_ticketPrize_ul_{{type}} subGame_{{subGameNum}}_ticketPrize_ul_{{type}}_{{wc}}">
+                                                                        
+                                                                                {% for pattern in patterns %}   
+                                                                                    <div class="col-md-4">
+                                                                                        <li> 
+                                                                                            <div class="row">
+                                                                                                <div class="col-lg-6 pd-r-5">
+                                                                                                    <label data-toggle="tooltip" title="{{pattern}} Prize">{{pattern}} Prize</label>
+                                                                                                </div>
+                                                                                                <div class="col-lg-6 pd-l-5">
+                                                                                                    <input type="number" name="subGame[{{subGameNum}}][prize][{{type}}][{{wc}}][{{pattern}}]" class="form-control" placeholder="10"
+                                                                                                    value="{{ selectedTicketPrize[wc][pattern] }}"
+                                                                                                    data-validation="required number"
+                                                                                                    data-validation-allowing="range[1;Infinity]"
+                                                                                                    data-validation-error-msg-number="Value must be greater than or equal to 1"
+                                                                                                    min="1"
+                                                                                                    />
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </li>
+                                                                                    </div>
+                                                                                {% endfor %}
+                                                                                <div class="clearfix"></div>
+                                                                            </ul> 
+                                                                            
+                                                                        </div>
+                                                                    {% endfor %}
+                                                                {% endif %}
+                                                                
+                                                                
+                                                            {% endfor %}
+                                                            
+                                                            
+                                                        {% endif %}
+                                                        
+                                                    
+                                                    </div>       
+
+                                                    {% if slug=="Edit" and game.gameName=='Jackpot' %}
+
+                                                    <div class="row subGame_{{subGameNum}}_jackpot">
+                                                        <label class="mb-10 col-sm-12 ">{{translate.jackpot_prize_and_draws}}*:</label>
+                                                        <div class="col-lg-3 col-sm-3">
+                                                            <div class="form-group">
+                                                                <div class='input-group'
+                                                                    id='subGame[{{subGameNum}}][jackpotPrizeYellow]'>
+                                                                    <input type="number"
+                                                                        class="form-control subGame_{{subGameNum}}_jackpot_prize_yellow"
+                                                                        placeholder="Jackpot Prize of Yellow Tickets"
+                                                                        title="Jackpot Prize of Yellow Tickets"
+                                                                        id="subGame[{{subGameNum}}][jackpotPrizeYellow]"
+                                                                        name="subGame[{{subGameNum}}][jackpotPrizeYellow]"
+                                                                        value="{{ game.jackpotPrize.yellow }}"
+                                                                        data-validation=""
+                                                                        data-validation-allowing="range[4000;50000]"
+                                                                        data-validation-error-msg-number="{{translate.jackpot_prize_must_between_5k_50k}}">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-lg-3 col-sm-3">
+                                                            <div class="form-group">
+                                                                <div class='input-group'
+                                                                    id='subGame[{{subGameNum}}][jackpotPrizeWhite]'>
+                                                                    <input type="number"
+                                                                        class="form-control subGame_{{subGameNum}}_jackpot_prize_white"
+                                                                        placeholder="Jackpot Prize of White Tickets"
+                                                                        title="Jackpot Prize of White Tickets"
+                                                                        id="subGame[{{subGameNum}}][jackpotPrizeWhite]"
+                                                                        name="subGame[{{subGameNum}}][jackpotPrizeWhite]"
+                                                                        value="{{ game.jackpotPrize.white }}"
+                                                                        data-validation=""
+                                                                        data-validation-allowing="range[4000;50000]"
+                                                                        data-validation-error-msg-number="{{translate.jackpot_prize_must_between_5k_50k}}">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-lg-3 col-sm-3">
+                                                            <div class="form-group">
+                                                                <div class='input-group'
+                                                                    id='subGame[{{subGameNum}}][jackpotPrizePurple]'>
+                                                                    <input type="number"
+                                                                        class="form-control subGame_{{subGameNum}}_jackpot_prize_purple"
+                                                                        placeholder="Jackpot Prize of Purple Tickets"
+                                                                        title="Jackpot Prize of Purple Tickets"
+                                                                        id="subGame[{{subGameNum}}][jackpotPrizePurple]"
+                                                                        name="subGame[{{subGameNum}}][jackpotPrizePurple]"
+                                                                        value="{{ game.jackpotPrize.purple }}"
+                                                                        data-validation=""
+                                                                        data-validation-allowing="range[4000;50000]"
+                                                                        data-validation-error-msg-number="{{translate.jackpot_prize_must_between_5k_50k}}">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-lg-3 col-sm-3">
+                                                            <div class="form-group">
+                                                                <div class='input-group'
+                                                                    id='subGame[{{subGameNum}}][jackpotDraw]'>
+                                                                    <input type="number"
+                                                                        class="form-control subGame_{{subGameNum}}_jackpot_draw"
+                                                                        placeholder="Jackpot Draw"
+                                                                        title="Jackpot Draw"
+                                                                        id="subGame[{{subGameNum}}][jackpotDraw]"
+                                                                        name="subGame[{{subGameNum}}][jackpotDraw]"
+                                                                        value="{{ game.jackpotDraw }}"
+                                                                        data-validation="required number"
+                                                                        data-validation-allowing="range[50;57]"
+                                                                        data-validation-error-msg-number="{{translate.jackpot_draw_between_50_57}}">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {% endif %}
+
+                                                    {% if slug=="Edit" and game.gameName=='Elvis' %}
+                                                    <div class="row subGame_{{subGameNum}}_elvis">
+                                                        <div class="col-lg-6 col-md-6">
+                                                            <div class="form-group">
+                                                                <div class="row">
+                                                                    <label class="mb-10 col-sm-12 ">{{translate.price_to_replace_elvis_tickets}}*:</label>
+                                                                    <div class="col-sm-12 ">
+                                                                        <input type="number"
+                                                                            class="form-control subGame_{{subGameNum}}_replace_price"
+                                                                            name="subGame[{{subGameNum}}][replace_price]"
+                                                                            placeholder="{{translate.enter}} {{translate.price}} "
+                                                                            value="{{ game.otherData.replaceTicketPrice }}"
+                                                                            id="subGame[{{subGameNum}}][replace_price]"
+                                                                            data-validation="required number"
+                                                                            data-gameNumber='{{subGameNum}}'>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    {% endif %}
+
+                                                    {% if slug=="Edit" and  game.gameName=='Innsatsen' %}
+                                                        <div class="row subGame_{{subGameNum}}_innsatsen">
+                                                            <label class="mb-10 col-sm-12 ">{{translate.jackpot_draw}}*:</label>
+                                                            <div class="col-lg-3 col-sm-3">
+                                                                <div class="form-group">
+                                                                    <div class='input-group' id='subGame[{{subGameNum}}][jackpotInnsatsenDraw]' >
+                                                                        <input type="number" class="form-control subGame_{{subGameNum}}_jackpot_innsatsen_draw"
+                                                                        placeholder="Jackpot Draw"
+                                                                        id="subGame[{{subGameNum}}][jackpotInnsatsenDraw]"
+                                                                        name="subGame[{{subGameNum}}][jackpotInnsatsenDraw]"
+                                                                        value="{{ game.jackpotDraw }}"
+                                                                        data-validation="required number" 
+                                                                        data-validation-allowing="range[56;58]"
+                                                                        data-validation-error-msg-number="{{translate.jackpot_draw_between_55_59}}"
+                                                                        >
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    {% endif %}
+
+                                                </div>
+                                                <div class="clearfix"></div>
+
+                                                {% endif %}
+
+                                            </div>
+
+                                            <br>
+
+                                            <div class="row">
+                                                <div class="col-lg-12">
+                                                    <input type="submit" class="btn btn-success sbBtn btn-flat"
+                                                        value="{{translate.submit}}" disabled>
+                                                    <a href="/viewDailySchduleDetails/{{game.parentGameId}}"
+                                                        class="btn btn-danger btn-flat">{{translate.cancel}}</a>
+                                                </div>
+                                            </div>
+
+                                        </div>
+
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script src="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.jquery.min.js "></script>
+<link href="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.min.css " rel="stylesheet " />
+<script>
+    $(document).ready(function () {
+        $(".chosen-select").chosen();
+    })
+
+    let subGameNum = $("#subGamesContainer").children('.ch').length;
+
+
+    function onChangeTicket(sel, subGameNumber, gameType) {
+        let selectedValue = sel.value;
+
+
+        let allSelected = [];
+        $(`.subGame_${subGameNumber}_ticketColor_inputs input:checked`).each(function () {
+            allSelected.push($(this).attr('data-ticketcolortype'));
+        });
+
+
+        let allSelectedUniqueTemp = allSelected.map((element, index) => {
+            return element.slice(6);
+        });
+
+        let allSelectedUnique = [...new Set(allSelectedUniqueTemp)];
+        console.log("allSelectedUnique---", allSelected, allSelectedUnique)
+
+        // update jackpot validations
+        updateValidation(subGameNumber, allSelectedUnique); 
+
+        let isChecked = $(sel).is(":checked");
+        let ticketType = $(sel).attr("data-ticketcolortype");
+        console.log("ticketType---", ticketType, isChecked, subGameNumber)
+
+        $(`.subGame_${subGameNumber}_ticketPrize`).removeClass("hidden");
+        $(`.subGame_${subGameNumber}_ticketPrize_inputs`).removeClass("hidden");
+
+        if (isChecked == true) {
+
+            console.log($(`.subGame_${subGameNumber}_ticketPrize_inputs`).children(`.${ticketType.slice(6)}`).length)
+            if ($(`.subGame_${subGameNumber}_ticketPrize_inputs`).children(`.${ticketType.slice(6)}`).length > 0) {
+
+                let previousTicketName = $(`.subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}`).text()
+                //$(`.subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}`).text(`${previousTicketName.slice(0, -1)} & ${ticketType} :` )
+                if (previousTicketName != "") {
+                    $(`.subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}`).text(`${previousTicketName.slice(0, -1)} & ${ticketType} :`)
+                } else {
+                    console.log("ticketType name", ticketType)
+                    if (gameType == "Elvis") {
+                        $(`.subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}`).text(`${ticketType.slice(6)} :`)
+                    } else {
+                        $(`.subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}`).text(`${ticketType} :`)
+                    }
+
+                }
+            } else {
+
+                let patterns = $(sel).attr("data-patterns");
+                if (patterns) {
+                    let patternsArray = patterns.split(',');
+                    let ticketTypeHtml = `
+                    <div class="col-lg-12 subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}_div">
+                        <label class="subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}"> ${ticketType} :</label>
+                    
+                    </div>
+                        <div class="col-lg-12 pd-l-5 ${ticketType.slice(6)}">
+                            <ul class="flx-wrp subGame_${subGameNumber}_ticketPrize_ul_${ticketType.slice(6)}">
+                                
+                                
+                            </ul>  
+                        </div>`
+
+                    $(`.subGame_${subGameNumber}_ticketPrize_inputs`).append(ticketTypeHtml);
+
+                    for (let k = 0; k < patternsArray.length; k++) {
+                        let ticketTypeHtmlLi = `
+                            <div class="col-md-4">
+                                <li> 
+                                    <div class="row">
+                                        <div class="col-lg-6 pd-r-5">
+                                            <label data-toggle="tooltip" title="${patternsArray[k]} Prize">${patternsArray[k]} Prize</label>
+                                        </div>
+                                        <div class="col-lg-6 pd-l-5">
+                                            <input type="number" name="subGame[${subGameNumber}][prize][${ticketType.slice(6)}][${patternsArray[k]}]" class="form-control" placeholder="10"
+                                            data-validation="required number"
+                                            data-validation-allowing="range[1;Infinity]"
+                                            min="1"
+                                            data-validation-error-msg-number="Value must be greater than or equal to 1"
+                                            />
+                                        </div>
+                                    </div>
+                                </li>
+                           
+                        </div>`
+
+                        $(`.subGame_${subGameNumber}_ticketPrize_ul_${ticketType.slice(6)}`).append(ticketTypeHtmlLi);
+                    }
+                    $(`.subGame_${subGameNumber}_ticketPrize_ul_${ticketType.slice(6)}`).append(`<div class="clearfix"></div>`);
+
+                    initializeValidator();
+
+                } else {
+                    console.log("No pattern found")
+                }
+
+            }
+
+        } else {
+
+            if (allSelectedUnique.includes(`${ticketType.slice(6)}`)) {
+                console.log("remove element called if")
+                let ticketTypeArray = $(`.subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}`).text().slice(0, -1).split('&');
+                console.log("ticketTypeArray--", ticketTypeArray);
+                let typeArrayAfterDelete = ticketTypeArray.filter(function (e) { return e.trim() !== ticketType });
+                console.log("typeArrayAfterDelete-", typeArrayAfterDelete)
+                $(`.subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}`).text(`${typeArrayAfterDelete} :`)
+            } else {
+                $(`.subGame_${subGameNumber}_ticketPrize_inputs`).find(`.${ticketType.slice(6)}`).remove();
+                $(`.subGame_${subGameNumber}_ticketType_${ticketType.slice(6)}_div`).remove();
+
+                console.log("count", $(`.subGame_${subGameNumber}_ticketPrize_inputs`).children().length);
+                if ($(`.subGame_${subGameNumber}_ticketPrize_inputs`).children().length <= 0) {
+                    $(`.subGame_${subGameNumber}_ticketPrize`).addClass('hidden');
+                }
+
+            }
+            console.log("else--", $(`.subGame_${subGameNumber}_ticketPrize_inputs`).children(`.${ticketType.slice(6)}`).length)
+
+        }
+
+    }
+
+    function checkforEndDate(sel, subGameNumber) {
+        console.log("called end date calculation", sel, subGameNumber, sel.value)
+        let startTime = $(`.subGame_${subGameNumber}_start_time`).val();
+        console.log("startTime", startTime, `.subGame_${subGameNumber}_start_time`)
+        if (startTime && sel.value != undefined && sel.value >= 3) {
+            let addSeconds = 75 * sel.value;
+            let start = moment(startTime, "HH:mm A");
+            let endTime = start.add(addSeconds, 'seconds').add('1', 'minutes').format("HH:mm A");
+            $(`.endDate_${subGameNumber}`).text(`End Time: ${endTime}`);
+        } else {
+            $(`.endDate_${subGameNumber}`).text('');
+        }
+
+    }
+
+    initializeValidator();
+
+    function initializeValidator() {
+        $.validate({
+            validateOnEvent: true,
+            modules: 'logic, date',
+            //validateHiddenInputs: true
+        });
+    }
+    //Time Validation
+    $.formUtils.addValidator({
+        name: 'startTime',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let startTime = value.split(":");
+            startTime = (+startTime[0]) * 60 + (+startTime[1]);
+            let id = $el.attr("data-gameNumber");
+            let endTime = $(`.subGame_${id}_end_time`).val();
+            endTime = endTime.split(":");
+            endTime = (+endTime[0]) * 60 + (+endTime[1]);
+            //console.log("startTime type and val", typeof startTime, startTime, "endTime type and val", typeof endTime, endTime);
+            if (!isNaN(endTime)) {
+                return startTime < endTime;
+            } else {
+                return true;
+            }
+        },
+        errorMessage: 'Start Time Must be less than End Time',
+        errorMessageKey: 'startTimeError'
+    });
+
+    $.formUtils.addValidator({
+        name: 'dependedStartTime',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let startTime = value.split(":");
+            startTime = (+startTime[0]) * 60 + (+startTime[1]);
+            let id = $el.attr("data-gameNumber");
+            console.log("total ids", id);
+            if (id > 0) {
+                for (let i = (id - 1); i >= 0; i--) {
+                    let previousStartTime = $(`.subGame_${i}_start_time`).val();
+                    console.log("previousStartTime", previousStartTime, startTime, i)
+                    if (previousStartTime) {
+                        previousStartTime = previousStartTime.split(":");
+                        previousStartTime = (+previousStartTime[0]) * 60 + (+previousStartTime[1]);
+                        console.log("previousStartTime and starttime", previousStartTime, startTime)
+                        if (!isNaN(previousStartTime) && startTime <= previousStartTime) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            return true;
+        },
+        errorMessage: 'Start Time Must be greater than previous game start time',
+        errorMessageKey: 'dependedStartTimeError'
+    });
+
+    $.formUtils.addValidator({
+        name: 'endTime',
+        validatorFunction: function (value, $el, config, language, $form) {
+            console.log("value of endtime", value)
+            if (value) {
+                //console.log("length--", $el.parent().parent().parent().parent().parent().nextAll('div') , $el.parent().parent().parent().parent().parent().nextAll('div').length)
+                if ($el.parent().parent().parent().parent().parent().nextAll('div').length > 1) {
+                    swal({
+                        title: "Are you sure this is the last game?",
+                        text: "All the listed upcoming games will be removed!",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "Yes!",
+                        cancelButtonText: "No!",
+                        closeOnConfirm: true,
+                        closeOnCancel: true
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $el.parent().parent().parent().parent().parent().nextAll('div').remove();
+                            $el.parent().parent().parent().parent().parent().parent().append(`<div class="clearfix"></div>`);
+                            $(".addsubGameButton").hide();
+                        } else {
+                            $el.val("");
+                            // $el.parent().parent().removeClass("has-error");
+                            // $el.removeClass("error");
+                            return false;
+                        }
+                    });
+                } else {
+                    $(".addsubGameButton").hide();
+                    if ($(`.addsubGameButton`).hasClass('hidden') == false) {
+                        $(`.addsubGameButton`).addClass("hidden");
+                    }
+                }
+            } else {
+                let endDate = $(".autoEndTime").last().val();
+                //console.log("endDate---", endDate)
+                if (!endDate) {
+                    $(".addsubGameButton").show();
+                    if ($(`.addsubGameButton`).hasClass('hidden') == true) {
+                        $(`.addsubGameButton`).removeClass("hidden");
+                    }
+                }
+
+            }
+            let endTime = value.split(":");
+            if (endTime.length > 1) {
+                endTime = (+endTime[0]) * 60 + (+endTime[1]);
+                let id = $el.attr("data-gameNumber");
+                let startTime = $(`.subGame_${id}_start_time`).val();
+                startTime = startTime.split(":");
+                startTime = (+startTime[0]) * 60 + (+startTime[1]);
+                //console.log("startTime type and val", typeof startTime, startTime, "endTime type and val", typeof endTime, endTime);
+                if (!isNaN(startTime)) {
+                    return endTime > startTime;
+                } else {
+                    return true;
+                }
+            }
+            return true;
+
+        },
+        errorMessage: 'End Time Must be Greater than Start Time',
+        errorMessageKey: 'endTimeError'
+    });
+
+    $.formUtils.addValidator({
+        name: 'minimumCount',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let id = $el.attr("data-gameNumber");
+
+            let seconds = $(`.subGame_${id}_seconds`).val();
+            //console.log("mincount", seconds);
+            return parseInt(seconds) >= 4;
+        },
+        errorMessage: 'Minimum Seconds must be greater than 3',
+        errorMessageKey: 'totalNoTickets'
+    });
+
+    $.formUtils.addValidator({
+        name: 'checkboxDependent',
+        validatorFunction: function (value, $el, config, language, $form) {
+
+            let gameNumber = $el.attr("data-gameNumber");
+            let ticketColorType = $el.attr("data-ticketColorType");
+            console.log("class--", `subGame_${gameNumber}_ticketColorType_${ticketColorType}`)
+            let checkboxValue = $(`.subGame_${gameNumber}_ticketColorType_${ticketColorType}`).val();
+            console.log("checkboxValue", checkboxValue, value);
+            if (checkboxValue) {
+                if (value != "") {
+                    return true
+                }
+                return false
+            }
+            return true;
+        },
+        errorMessage: 'Please enter ticket price.',
+        errorMessageKey: 'RequiredInout'
+    });
+
+    $.formUtils.addValidator({
+        name: 'startTimeManual',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let startTime = value.split(":");
+            startTime = (+startTime[0]) * 60 + (+startTime[1]);
+            let endTime = $(`.manualEndTime`).val();
+            endTime = endTime.split(":");
+            endTime = (+endTime[0]) * 60 + (+endTime[1]);
+            //console.log("startTime type and val", typeof startTime, startTime, "endTime type and val", typeof endTime, endTime);
+            if (!isNaN(endTime)) {
+                return startTime < endTime;
+            } else {
+                return true;
+            }
+        },
+        errorMessage: 'Start Time Must be less than End Time',
+        errorMessageKey: 'startTimeError'
+    });
+
+    $.formUtils.addValidator({
+        name: 'endTimeManual',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let endTime = value.split(":");
+            if (endTime.length > 1) {
+                endTime = (+endTime[0]) * 60 + (+endTime[1]);
+                let startTime = $(`.manualStartTime`).val();
+                startTime = startTime.split(":");
+                startTime = (+startTime[0]) * 60 + (+startTime[1]);
+                //console.log("startTime type and val", typeof startTime, startTime, "endTime type and val", typeof endTime, endTime);
+                if (!isNaN(startTime)) {
+                    return endTime > startTime;
+                } else {
+                    return true;
+                }
+            }
+            return true;
+
+        },
+        errorMessage: 'End Time Must be Greater than Start Time',
+        errorMessageKey: 'manualEndTimeError'
+    });
+
+    $('input[type=radio][name=scheduleType]').change(function () {
+
+        console.log("subgame length", $("#subGamesContainer").children('div').length)
+        if ($("#subGamesContainer").children('div').length > 0) {
+            $("#subGamesContainer").children('div').remove();
+        }
+
+        $(".addsubGameButton").show();
+        if ($(`.addsubGameButton`).hasClass('hidden') == true) {
+            $(`.addsubGameButton`).removeClass("hidden");
+        }
+
+        if (this.value == 'Auto') {
+            if ($(`.manualDates`).hasClass('hidden') == false) {
+                $(`.manualDates`).addClass("hidden");
+            }
+        }
+        else if (this.value == 'Manual') {
+            if ($(`.manualDates`).hasClass('hidden') == true) {
+                $(`.manualDates`).removeClass("hidden");
+            }
+            $(`.manualStartTime`).datetimepicker({
+                format: 'HH:mm',
+                pickDate: false
+            });
+            $(`.manualEndTime`).datetimepicker({
+                format: 'HH:mm',
+                pickDate: false
+            });
+        }
+    });
+
+    $("#addGameData").submit(function (event) {
+        event.preventDefault();
+        if ($("#addGameData").isValid() == true) {
+            console.log("is validated", $("#addGameData").isValid())
+
+            // spillerness spill game row/pattrn prize percentage validation
+            let arrValues = document.getElementsByClassName("winningPercentage");
+            let tot = 0;
+            for(let j=0; j< arrValues.length;j++){
+                if(parseInt(arrValues[j].value)) {
+                    tot += parseInt(arrValues[j].value);
+                }
+            } 
+            console.log("total of currnet", tot)
+            if (tot > 100 ) {   
+                alert("Row/Pattern prize percentage must be less or equal to 100.");
+                return false;
+            }  
+            //
+
+            event.currentTarget.submit();
+        } else {
+            if ($(".has-error").length) {
+                let el = $('.has-error').first();
+                if (!$.isEmptyObject(el)) {
+                    $('html, body').animate({
+                        scrollTop: (el.offset().top)
+                    }, 10);
+                }
+            }
+        }
+        //event.preventDefault();
+    });
+
+    // For edit schedule
+    let subGamesCount = 1;
+    //console.log("schedule", subGamesCount)
+    if ("{{slug}}" == "Edit") {
+        for (let i = 0; i < subGamesCount; i++) {
+            $(`.subGame_${i}_start_time`).datetimepicker({
+                format: 'HH:mm',
+                pickDate: false
+            });
+            $(`.subGame_${i}_end_time`).datetimepicker({
+                format: 'HH:mm',
+                pickDate: false
+            });
+
+            $(`input[name="subGame[${subGamesCount}][ticketColorType][]"]:checked`).each(function () {
+                console.log("checked value", this.value);
+            });
+
+            //console.log("logs games", subGamesCount, $(`.subGame_${i}_ticketColor_inputs`), $(`.subGame_0_ticketColor_inputs`), `subGame_ticketColorChk_${i}` )
+            $(`input:checkbox.subGame_ticketColorChk_${i + 1}`).each(function () {
+                var ticketTypevalue = $(this).val(); //(this.checked ? $(this).val() : "");
+                console.log("sThisVal", ticketTypevalue, `.subGame_${i + 1}_ticketColorType_${ticketTypevalue.split(' ').join('')}`)
+
+                $(`.subGame_${i + 1}_ticketColorType_${ticketTypevalue.split(' ').join('')}`).bind('change', function () {
+                    console.log("Called bind")
+                    $dependentPrize = $(this);
+                    $type = $($dependentPrize.data('type-target'));
+                    let adjustment_value = $dependentPrize.is(":checked");
+                    console.log("adjustment_value---", adjustment_value, $dependentPrize, $type)
+                    if (adjustment_value == true) {
+                        $type.prop('required', true);
+                        //$type.prop('min', 1);
+                    } else {
+                        $type.prop('required', false);
+                        //$type.removeAttr('min');
+                    }
+                });
+
+                $(`.subGame_${i + 1}_ticketColorType_${ticketTypevalue.split(' ').join('')}`).trigger("change");
+
+
+            });
+
+        }
+        $(`.manualStartTime`).datetimepicker({
+            format: 'HH:mm',
+            pickDate: false
+        });
+        $(`.manualEndTime`).datetimepicker({
+            format: 'HH:mm',
+            pickDate: false
+        });
+
+    }
+
+
+    const inputs = document.querySelectorAll("input, select");
+    for (const el of inputs) {
+        el.oldValue = el.value + el.checked;
+    }
+
+    // Declares function and call it directly
+    var setEnabled;
+    (setEnabled = function () {
+        var e = true;
+        for (const el of inputs) {
+            if (el.oldValue !== (el.value + el.checked)) {
+                e = false;
+                break;
+            }
+        }
+        document.querySelector(".sbBtn").disabled = e;
+    })();
+
+    document.oninput = setEnabled;
+    document.onchange = setEnabled;
+
+    // Add/Remove validation from jackpot fields
+    function updateValidation(subGameNum, selectedValues) {
+        ["Yellow", "White", "Purple"].forEach(color => {
+            const input = $(`.subGame_${subGameNum}_jackpot_prize_${color.toLowerCase()}`);
+            const parentDiv = input.closest(".col-sm-3"); // Get parent container
+
+            if (selectedValues.includes(color)) {
+                input.attr("data-validation", "required number");
+                parentDiv.show(); // Make sure it’s visible
+            } else {
+                input.removeAttr("data-validation");
+                parentDiv.remove(); // Remove from layout to avoid empty space
+            }
+        });
+    }
+
+</script>
+
+{% endblock %}

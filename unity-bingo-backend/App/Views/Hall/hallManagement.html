@@ -1,0 +1,724 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+
+    .cst {
+        display: flex;
+        justify-content: flex-start;
+        gap: 20px;
+        align-items: stretch;
+    }
+
+    .form-horizontal button {
+        width: 50px;
+    }
+
+    button#search,
+    button#filterReset {
+        min-width: 55px;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{hallData.hall_management}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i>{{hallData.dashboard}}</a></li>
+                <li class="active" href="#">{{hallData.hall}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="container-fluid">
+                    <!-- The modal -->
+                    <div class="modal fade" id="form-Modal" tabindex="-1" role="dialog" aria-labelledby="modalLabel"
+                        aria-hidden="true" data-keyboard="false" data-backdrop="static">
+                        <div class="modal-dialog" role="document">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <!-- <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                        <span aria-hidden="true">&times;</span>
+                                    </button> -->
+                                    <h4 class="modal-title" id="modalLabel">{{hallData.select_new_hall}}</h4>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="table-wrap">
+                                        <div class="table-responsive">
+                                            <form method="POST" name="product" class="form-horizontal" id="newHallForm">
+                                                <!-- action="/addProduct" -->
+                                                <table border="0" class="table display  pb-30">
+                                                    <div class="col-sm-12">
+                                                        <input type="hidden" id="hallId" name="hallId">
+                                                        <div class="form-group">
+                                                            <label class="control-label mb-10 col-sm-4"
+                                                                for="newHall">{{hallData.select_hall_to_move_players}}:</label>
+                                                            <div class="col-sm-8">
+                                                                <select class="form-control" name="newHall" id="newHall"
+                                                                    data-validation="required"
+                                                                    data-validation-error-msg="Please Select Hall">
+                                                                    <option value="">{{hallData.select_hall}}
+                                                                    </option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="form-group">
+                                                            <label class="control-label mb-10 col-sm-4"
+                                                                for="newAgent">{{hallData.select_agent}}:</label>
+                                                            <div class="col-sm-8">
+                                                                <select class="form-control" disabled name="newAgent"
+                                                                    id="newAgent" data-validation="required"
+                                                                    data-validation-error-msg="Please Select Agent">
+                                                                    <option value="">{{hallData.select_agent}}
+                                                                    </option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="form-group">
+                                                            <div id="button_one"
+                                                                style="width: 50%;margin: 0 auto;text-align: center;">
+                                                                <input type="submit" id="submit"
+                                                                    class="btn btn-success btn-flat"
+                                                                    value="{{hallData.submit}}">
+                                                                <input type="button" id="cancel"
+                                                                    class="btn btn-danger btn-flat" data-dismiss="modal"
+                                                                    value="{{hallData.cancel}}">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </table>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-12">
+                    <form>
+                        <div class="box">
+                            <div class="box-header">
+                                <h3 class="box-title">{{hallData.search}}</h3>
+                            </div>
+                            <div class="box-body">
+                                <div class="row">
+                                    <div class="col-lg-9 pull-left">
+                                        <div class="cst">
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <span class="input-group-addon"><i class="fa fa-filter"
+                                                            aria-hidden="true"></i></span>
+                                                    <select name="orderby" class="form-control" id="playerStatus">
+                                                        <option value="" selected="selected">{{hallData.all}}</option>
+                                                        <option value="inactive">{{hallData.inactive}}</option>
+                                                        <option value="active">{{hallData.active}}</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <select name="groupHall" class="form-control" id="groupHall">
+                                                        <option value="" selected="selected">
+                                                            {{hallData.group_of_hall_name}}
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <button type="button" class="pull-right btn btn-sm btn-primary playersearch"
+                                                id="search"><i class="fa fa-search"></i></button>
+                                            <button type="reset" class="btn btn-primary pull-right clickreset"
+                                                id="filterReset">{{hallData.reset}}</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{hallData.hall_management}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                {% if addFlag==true %}
+                                <a href="/addHall"><button type="button" class="btn btn-primary btn-md"><i
+                                            class="fa fa-plus"></i> {{hallData.add_hall}}</button></a> {% else %} {%
+                                endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{hallData.hall_id}}</th>
+                                                    <th>{{hallData.hall_name}}</th>
+                                                    <th>{{hallData.hall_number}}</th>
+                                                    <th>{{hallData.ip_address}}</th>
+                                                    <th>{{hallData.address}}</th>
+                                                    <th>{{hallData.city}}</th>
+                                                    <th>{{hallData.group_of_hall}}</th>
+                                                    <th>{{hallData.status}}</th>
+                                                    <th>{{hallData.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Modal to set total cash balance -->
+
+        <div class="modal fade" id="hallCashBalanceModal" tabindex="-1" role="dialog"
+            aria-labelledby="hallCashBalanceModalLabel">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title" id="hallCashBalanceModalLabel">{{hallData.set_hall_total_cash_balance}}
+                        </h4>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="errorContainer" class="hidden alert alert-danger" role="alert"></div>
+                        <div id="successContainer" class="hidden alert alert-success" role="alert"></div>
+                        <form method="POST" id="hallCashBalanceForm" class="">
+
+                            <div class="table display pb-30">
+
+                                <div class="">
+                                    <input type="hidden" name="hallIdCashBalance" id="hallIdCashBalance" value="">
+                                    <div class="row">
+                                        <div class="col-lg-12 col-md-12">
+                                            <div class="form-group">
+                                                <label>{{hallData.total_cash_balance}}:</label>
+                                                <label id="balanceResult" style="float: right;"></label>
+                                                <input type="number" class="form-control" value=""
+                                                    id="totalHallCashAmount"
+                                                    data-validation="required number minimumAmount">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <br>
+                                    <div class="row">
+                                        <div class="col-lg-12">
+                                            <input type="submit" class="btn btn-success totalHallCashAmountSubmit"
+                                                value="{{hallData.submit}}">
+                                            <button type="button" class="btn btn-danger" data-dismiss="modal"
+                                                aria-label="Close">
+                                                {{hallData.cancel}}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                            </div>
+                        </form>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+
+{% endblock %} {% block Jscript %}
+<script>
+    //:: Modal Related Code ::
+    $('#form-Modal').on('hidden.bs.modal', function () {
+        // Reset values of modal
+        $(this).find('form').trigger('reset');
+        $('#hallId').val(``);
+        $('#newHall').find('option')
+            .remove()
+            .end()
+            .append('<option value="">{{hallData.select_hall}}</option>')
+            .val('');
+        $("#submit").attr("disabled", false);
+        $("#cancel").attr("disabled", false);
+    });
+    var orderTable = "";
+    var host = window.location.origin;
+    $(document).ready(function () {
+
+        let sessionRole = '{{session.role}}';
+        let columns = [];
+        if (sessionRole == 'agent') {
+            columns = [{
+                "data": "hallId"
+            }, {
+                "data": "name"
+            },
+            {
+                "data": "number",
+                render: function (data, row) {
+                    return data ? data : '-'
+                }
+            },
+            {
+                "data": "ip"
+            }, {
+                "data": "address"
+            }, {
+                "data": "city"
+            }, {
+                "data": "groupHall",
+                render: function (data, row) {
+                    let groupHallName = NULL;
+                    if (row.groupHall.name != undefined) {
+                        groupHallName = row.groupHall.name;
+                    }
+                    return groupHallName;
+                }
+            },
+            /*{
+                "data": "agents",
+                render: function(data, row) {
+                    var output = '';
+                    $.each(data, function(index, item) {
+                        output += data[index].name + ',\n';
+                    });
+                    return output;
+                }
+            },*/
+            {
+                "data": "status",
+                render: function (data, type, row) {
+                    /*return '<span id="status-' + row._id + '">' + row.status + '</span>';*/
+                    if (row.status == 'active') {
+                        return '<span style="color:green;font-weight: bold;" id="status-' + row._id + '">' + row.status + '</span>';
+                    } else {
+                        return '<span style="color:red;font-weight: bold;" id="status-' + row._id + '">' + row.status + '</span>';
+                    }
+
+                }
+            }, {
+                "data": "action",
+                render: function (data, type, row) {
+                    return '';
+                }
+            }];
+        } else {
+            columns = [{
+                "data": "hallId"
+            }, {
+                "data": "name"
+            },
+            {
+                "data": "number",
+                render: function (data, row) {
+                    return data ? data : '-'
+                }
+            },
+            {
+                "data": "ip"
+            },
+            /*{
+                "data": "agents",
+                render: function(data, row) {
+                    var output = '';
+                    $.each(data, function(index, item) {
+                        output += data[index].name + ',\n';
+                    });
+                    return output;
+                }
+            },*/
+            {
+                "data": "address"
+            }, {
+                "data": "city"
+            }, {
+                "data": "groupHall.name",
+                render: function (data, type, row) {
+                    let groupHallName = ' ';
+                    if (row.groupHall && row.groupHall.name != undefined) {
+                        groupHallName = row.groupHall.name;
+                    }
+                    return groupHallName;
+                }
+            }, {
+                "data": "status",
+                render: function (data, type, row) {
+                    /*return '<span id="status-' + row._id + '">' + row.status + '</span>';*/
+                    if (row.status == 'active') {
+                        return '<span style="color:green;font-weight: bold;" id="status-' + row._id + '">' + row.status + '</span>';
+                    } else {
+                        return '<span style="color:red;font-weight: bold;" id="status-' + row._id + '">' + row.status + '</span>';
+                    }
+
+                }
+            }, {
+                "data": "action",
+                render: function (data, type, row) {
+
+                    let html = '';
+
+                    if (editFlag == 'true') {
+                        html += `<a href="/hallEdit/` + row._id + `"><button type="button" class="btn btn-warning btn-xs btn-rounded" title="Edit" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a>`;
+                    }
+
+                    if (deleteFlag == 'true') {
+                        html += `  <button type="button" title="Delete" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>`;
+                    }
+
+                    if (editFlag == 'true') {
+                        html += ` <a data-hallid="` + row._id + `" data-hallcashbalance = "` + row.hallCashBalance + `" data-hallcashbalanceBalanceAdded = "` + row.otherData?.hallCashBalanceAdded + `" class="btn btn-primary btn-xs btn-rounded hallCashBalance" title="Set hall Cash Balance"><i class="fa fa-money" aria-hidden="true"></i></a>`
+                    }
+
+                    return html;
+
+                }
+            }];
+        }
+
+        let editFlag = '{{editFlag}}';
+        let deleteFlag = '{{deleteFlag}}';
+
+        let ajaxUrl = host + "/getHall";
+        function loadData() {
+            $('#myTable').DataTable({
+                //"language": { search: '', searchPlaceholder: "search" },
+                "oLanguage": {
+                    "sSearch": "{{hallData.search}}",
+                    "sLengthMenu": "{{hallData.show}} _MENU_ {{hallData.entries}}",
+                    "sInfo" : "{{hallData.show}} _START_ to _END_ of _TOTAL_ {{hallData.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ hallData.previous }}",
+                        sNext: "{{ hallData.next }}"
+                    },
+                    "sInfoEmpty": "{{hallData.showing}} 0 to 0 of 0 {{hallData.entries}}",
+                },
+                "order": [
+                    [0, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": [6],
+                    "orderable": false
+                }],
+                "processing": true,
+                "serverSide": true,
+                "autoWidth": false,
+                "pageLength": 100,
+                /*"ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                },*/
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: function (data) {
+                        data.playerStatus = $('#playerStatus').val();
+                        data.grpHallId = $('#groupHall').val();
+                    }
+                },
+                "pageLength": 25,
+                "buttons": [
+                    // 'csv', 'excel'
+                    {
+                        extend: 'csvHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }, {
+                        extend: 'excelHtml5',
+                        exportOptions: {
+                            columns: [0, 1, 2, 3, 4, 5]
+                        }
+                    }
+                ],
+                "columns": columns
+            });
+        }
+        loadData();
+
+        var table = $('#myTable').DataTable();
+
+        $('body').on('click', '.playersearch', function (e) {
+            $('#myTable').DataTable().clear().destroy();
+            loadData();
+        });
+
+        $('body').on('click', '.clickreset', function (e) {
+            setTimeout(function () {
+                $('#groupHall').trigger("change");
+                $('#myTable').DataTable().clear().destroy();
+                loadData();
+            }, 500);
+        });
+
+        $("#newHallForm").on("submit", function (e) {
+            $("#submit").attr("disabled", true);
+            $("#cancel").attr("disabled", true);
+            if ($("#newHallForm")[0].checkValidity() && $("#newHallForm").isValid()) {
+                e.preventDefault();
+                console.log("swapping halls.....");
+                $.ajax({
+                    method: 'POST',
+                    url: host + '/transferPlayersToHall',
+                    data: {
+                        currentHall: $("#hallId").val(),
+                        newHall: $("#newHall").val(),
+                        newAgent: $("#newAgent").val()
+                    },
+                    success: function (response) {
+                        if (response.status == "success") {
+                            $('#form-Modal').modal('toggle');
+                            $('#myTable').DataTable().clear().destroy();
+                            loadData();
+                            swal("{{Success}}", "{{hallData.hall_data_messge}}.", "success");
+                        } else {
+                            $('#form-Modal').modal('toggle');
+                            swal("{{hallData.cancelled}}", "{{hallData.something_went_wrong}}", "error");
+                        }
+                    }
+                });
+            } else {
+                $("#submit").attr("disabled", false);
+                $("#cancel").attr("disabled", false);
+            }
+        })
+
+        $(function () {
+            "use strict";
+
+            var SweetAlert = function () { };
+
+            SweetAlert.prototype.init = function () {
+
+                //Parameter
+                $('body').on('click', '.delete', function (e) {
+                    var id = $(this).attr('id');
+                    var thisElement = this;
+                    swal({
+                        title: "{{hallData.delete_message}}?",
+                        text: "{{hallData.delete_player_message}} {{hallData.hall}}",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{hallData.delete_button}}",
+                        cancelButtonText: "{{hallData.cancel_button}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/hall/getHallDelete",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData) {
+                                    // alert(resultData)
+                                    console.log(resultData);
+                                    if (resultData.status == 'success') {
+                                        if (resultData.isDelete) {
+                                            // $(thisElement).parent().parent().hide(700);
+                                            // swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                                            if (resultData.halls && resultData.halls.length) {
+                                                let halls = resultData.halls.map((hall) => {
+                                                    return {
+                                                        name: hall.name,
+                                                        value: hall._id.toString(),
+                                                        agents: JSON.stringify(hall.agents)
+                                                    }
+                                                });
+                                                console.log("halls Returned", halls);
+                                                for (let i = 0; i < halls.length; i++) {
+                                                    $("#newHall").append(`<option data-agents='${halls[i].agents}' value="${halls[i].value}">${halls[i].name}</option>`);
+                                                }
+                                                swal.close();
+                                                $('#hallId').val(`${id}`);
+                                                $('#form-Modal').modal('toggle');
+                                            } else {
+                                                $('#myTable').DataTable().clear().destroy();
+                                                loadData();
+                                                swal({
+                                                    type: 'success',
+                                                    title: 'Success',
+                                                    text: resultData.message
+                                                });
+                                            }
+                                        } else {
+                                            swal({
+                                                type: 'warning',
+                                                title: '{{hallData.attention}} !',
+                                                text: resultData.message
+                                            });
+                                        }
+                                    } else {
+                                        alert("{{hallData.something_went_wrong}}")
+                                    }
+                                    // alert("Save Complete")
+                                }
+                            });
+                        } else {
+                            swal("{{hallData.cancelled}}", "{{hallData.hall_not_deleted}}", "error");
+                        }
+                    });
+                    return false;
+                });
+            },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+            $.ajax({
+                type: 'GET',
+                url: host + "/player/getGroupHalls",
+                data: {
+                    // id: id
+                },
+                success: function (resultData) {
+                    console.log("List of GroupHalls", resultData);
+                    if (resultData.status == 'success') {
+                        console.log(resultData);
+                        if (resultData.groups.length) {
+                            for (const val of resultData.groups) {
+                                $('#groupHall').append($(document.createElement('option')).prop({
+                                    /*value: val._id,*/
+                                    value: val._id,
+                                    text: val.name
+                                }));
+                            }
+                        }
+                    } else {
+                        console.log("something went wrong");
+                    }
+                }
+            });
+
+            // function deleteHall(params) {
+
+            // }
+        });
+
+        $("#newHall").on('change', function (e) {
+            let val = $(this).val();
+            //$('#newAgent').attr('disabled').find('option:not(:first)').remove();
+            $('#newAgent').prop('disabled', true).find('option:not(:first)').remove();
+            if (val) {
+                const selectedOption = $(this).find('option:selected');
+                // Access the data attributes using the .data() method
+                const optionInfo = selectedOption.data('agents');
+                console.log(optionInfo);
+                for (let i = 0; i < optionInfo.length; i++) {
+                    $('#newAgent').removeAttr('disabled').append(`<option value="${optionInfo[i].id}">${optionInfo[i].name}</option>`);
+                }
+            }
+        })
+
+        $('body').on('click', '.hallCashBalance', async function (e) {
+            const modal = $(this);
+            const hallId = modal.data('hallid');
+            const hallCashBalance = modal.data('hallcashbalance');
+            const hallcashbalanceBalanceAdded = modal.data('hallcashbalancebalanceadded');
+
+            console.log("hallid and cash balance---", hallId, modal, hallCashBalance, hallcashbalanceBalanceAdded);
+            $("#totalHallCashAmount").val(hallCashBalance);
+            $("#hallIdCashBalance").val(hallId);
+            //if(hallCashBalance > 0){
+
+            // Disabled one time edit as per client request
+            // if(hallCashBalance > 0 || hallcashbalanceBalanceAdded == true){
+            //     $("#totalHallCashAmount").attr("disabled", "disabled");
+            //     $(".totalHallCashAmountSubmit").attr("disabled", "disabled");
+            // }
+
+            $('#hallCashBalanceModal').modal('show');
+        });
+
+        $('#hallCashBalanceModal').on('hidden.bs.modal', function () {
+            $("#totalHallCashAmount").removeAttr("disabled");
+            $(".totalHallCashAmountSubmit").removeAttr("disabled");
+        });
+
+        $.formUtils.addValidator({
+            name: 'minimumAmount',
+            validatorFunction: function (value, $el, config, language, $form) {
+                return value > 0;
+            },
+            errorMessage: 'Amount must be greater than zero',
+            errorMessageKey: 'minimumAmount'
+        });
+
+        $('#hallCashBalanceForm').on('submit', function (event) {
+            event.preventDefault();
+            // Disable the submit button
+            $('.totalHallCashAmountSubmit').prop('disabled', true);
+            const amount = $('#totalHallCashAmount').val();
+            const id = $('#hallIdCashBalance').val();
+            console.log('Amount to add:', amount, hallId);
+
+            // Make AJAX call
+            $.ajax({
+                url: '/hall/set-cash-amount',
+                method: 'POST',
+                data: { amount: amount, id: id },
+                success: function (response) {
+                    if (response.status == "success") {
+                        $('#successContainer').html(response.message);
+                        $('#successContainer').removeClass('hidden');
+                        //$("#totalHallCashAmount").attr("disabled", "disabled");
+                        //$(".totalHallCashAmountSubmit").attr("disabled", "disabled");
+                        $('#myTable').DataTable().clear().destroy();
+                        loadData();
+                        setTimeout(function () {
+                            $('#successContainer').addClass('hidden');
+                        }, 3000);
+                    } else {
+                        console.log("inside error")
+                        $('#errorContainer').html(response.message);
+                        $('#errorContainer').removeClass('hidden');
+                        setTimeout(function () {
+                            $('#errorContainer').addClass('hidden');
+                        }, 5000);
+                    }
+                }, complete: function () {
+                    $('.totalHallCashAmountSubmit').prop('disabled', false);
+                }
+            });
+
+        });
+
+
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

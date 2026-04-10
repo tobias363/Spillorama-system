@@ -1,0 +1,667 @@
+{% extends "partition/layout.html" %}
+
+
+{% block body %}
+
+
+	<!-- Main Content -->
+	<div class="page-wrapper">
+		<div class="container-fluid">
+
+			<!-- Title -->
+			<section class="content-header">
+			    <h1>{{unique.unique_id_table}}</h1>
+			    <ol class="breadcrumb">
+			        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{unique.dashboard}}</a></li>
+			        <!-- <li class="active">User profile</li> -->
+			    </ol>
+			</section>
+			<!-- /Title -->
+			{% include "partition/notification.html" %}
+			<!-- Row -->
+			<section class="content">
+				<div class="row">
+					<div class="col-sm-12">
+						<div class="panel panel-default card-view">
+							<div class="panel-heading">
+								<div class="pull-left">
+									<h6 class="panel-title txt-dark">{{unique.unique_id_table}}</h6>
+								</div>
+								<!-- <div class="pull-right">
+									<a href="/addUser"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add User</button></a>
+								</div> -->
+								<div class="clearfix"></div>
+							</div>
+							<div class="panel-wrapper collapse in">
+								<div class="panel-body">
+									
+									<div class="row">
+										{% if  Agent.role == 'admin'%}
+										<div>
+											<div class="col-sm-2">
+												<div class="form-group">
+													<select name="groupHallFilter" id="groupHallFilter" class="form-control">
+														<option value=""> {{unique.group_hall}} </option>
+														{% for grpHall in grpHalls %}
+															<option value="{{grpHall._id}}"> {{grpHall.name}} </option>
+														{% endfor %}
+													</select>	
+												</div>
+											</div>
+										</div>
+										<div>
+											<div class="col-sm-2">
+												<div class="form-group">
+													<select name="hallFilter" id="hallFilter" class="form-control" disabled>
+														<option value="">{{unique.hall_name}} </option>
+													</select>
+												</div>
+											</div>
+										</div>
+										{% endif %}
+										<div>
+											<div class="col-sm-2">
+												<div class="form-group">
+													<div class='input-group date' id='startDate'>
+														<input type='text' class="form-control" name="start_date" id="start_date" placeholder="{{unique.start_date}}" data-date-format="yyyy-mm-dd" autocomplete="off"/>
+														<span class="input-group-addon">
+																	<span class="glyphicon glyphicon1 glyphicon-calendar"></span>
+														</span>
+													</div>
+												</div>
+											</div>
+										</div>
+										<div>
+											<div class="col-sm-2">
+												<div class="form-group">
+													<div class='input-group date' id='endDate'>
+														<input type='text' class="form-control" name="end_date" id="end_date" placeholder="{{unique.end_date}}" data-date-format="yyyy-mm-dd" autocomplete="off" />
+														<span class="input-group-addon">
+																	<span class="glyphicon glyphicon2 glyphicon-calendar"></span>
+														</span>
+													</div>
+												</div>
+											</div>
+										</div>
+										<div class="col-sm-1">
+											<input type="button" name="search" id="search" value="{{unique.search}}" class="btn btn-info" />
+										</div>
+										<div class="col-sm-1">
+											<input type="button" name="reset" id="reset" value="{{unique.reset}}" class="btn btn-info" />
+										</div>
+										<div>
+											<div class="col-sm-2">
+												<div class="form-group">
+													<select name="paymentType" id="paymentType" class="form-control">
+														<option value="">{{unique.payment_type}}</option>
+														<option value="cash"> {{unique.cash}} </option>
+														<option value="online"> {{unique.online}} </option>
+													</select>
+												</div>
+											</div>
+										</div>
+									</div>
+
+									<div class="table-wrap">
+										<div class="table-responsive">
+											<table id="myTable" class="table table-bordered table-striped" >
+												<thead>
+													<tr>
+														<th>{{unique.unique_ticket_id}}</th>
+														<th>{{unique.group_of_hall}}</th>
+														<th>{{unique.created_by}}</th>
+														<th>{{unique.hall_name}}</th>
+														<th>{{unique.purchase_date_time}}</th>
+														<th>{{unique.expiry_date_time}}</th>
+														<th>{{unique.balance_amount_added}}</th>
+														<th>{{unique.payment_type}}</th>
+														<th>{{unique.status_of_unique_id}}</th>
+														<th>{{unique.withdraw_access}}</th>
+														<th>{{unique.action}}</th>
+													</tr>
+												</thead>
+												<tbody>
+												</tbody>
+											</table>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			 <!-- Modal of Withdraw unique id balance -->
+			<div id="withdrawModal" class="modal fade" tabindex="-1" role="dialog">
+				<div class="modal-dialog" role="document">
+				  <div class="modal-content">
+					<div class="modal-header">
+					  <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
+						  aria-hidden="true">&times;</span></button>
+					  <h4 class="modal-title">{{unique.withdraw}}</h4>
+					</div>
+					<div class="modal-body">
+					  <div id="errorContainer" class="hidden alert alert-danger" role="alert"></div>
+					  <div id="successContainer" class="hidden alert alert-success" role="alert"></div>
+					  <h5 class="text-left">{{unique.unique_id}}: 
+						<span class="uniqueIdName"></span>
+					  </h5> 
+					  <h5 class="text-right">{{unique.balance}}: <span id="openModalSpinner" class="fa fa-spinner fa-spin"></span>
+						<span class="uniqueidBalance"></span>
+					  </h5>
+					  <form id="withdrawUniqueForm">
+						<div class="form-group">
+						  <label for="amount">{{unique.enter_balance}}:</label>
+						  <input type="number" class="form-control" id="amount" name="amount" data-validation="required number"
+							data-validation-allowing="range[1; 999999999999999]"
+							data-validation-error-msg-number="{{unique.amount_should_be_greater_than_zero}}">
+						</div>
+						<button type="submit" class="btn btn-success withdrawunique">{{unique.withdraw}}</button>
+						<button type="button" class="btn btn-default" data-dismiss="modal">{{unique.cancel}}</button>
+					  </form>
+					</div>
+				  </div>
+				</div>
+			</div>
+			
+
+		</div>
+	</div>	
+
+{% endblock %}
+
+{% block Jscript %}
+<script>
+	let viewFlag = `{{viewFlag}}`;
+	let withdrawFlag = `{{withdrawFlag}}`;
+	var host = window.location.origin;
+	var tableObject="";
+	window.dataTableData =()=>{
+		if(tableObject){
+            $('#myTable').dataTable().fnDestroy();
+    }
+
+		let	groupHall =  $('#groupHallFilter').val();
+		let hall = $('#hallFilter').val();
+
+		console.log(" function called +++++++++++++++++++++++++++: ")
+		tableObject = $('#myTable').DataTable({
+														
+						"oLanguage": {
+							"sSearch": "{{unique.search}} {{unique.unique_id}}",
+							"sLengthMenu": "{{unique.show}} _MENU_ {{unique.entries}}",
+							"oPaginate": {
+								sPrevious: "{{ unique.previous }}",
+								sNext: "{{ unique.next }}"
+							}
+						},
+						"processing": true,
+						"serverSide": true,
+						"ordering": false,
+						"autoWidth": false,
+						"searching": true,
+						"pageLength": 10,
+						//"scrollX": true,
+						"ajax":{
+								"url":host + "/unique/getUniqueId",
+								"type":"GET",
+								"data":{
+									fromDate:$('#start_date').val(),
+									toDate:$('#end_date').val(),
+									status:$('#statusType').val(),
+									currentDate:new Date(),
+									groupHall: groupHall ? groupHall : '',
+									hall: hall ? hall : '',
+									paymentType: $('#paymentType').val(),
+								},
+								"dataSrc": function (json){
+
+										//console.log("+++++++++++json json json json DataTable DataTable ++++ :",json)
+					
+										return json.data;
+								}
+						},
+						
+						"columns": [
+							{ 
+								"data": "uniqueId", 
+								render: function(data , type , row){
+									return '<a href="/viewUniqueDetails/'+row._id+'">'+row.uniqueId+'</a>';
+								} 
+							},
+							{
+								"data": "grpHall", 
+								render: function (data, type, row) {
+									return row.groupHall ? row.groupHall.name : "-";
+								}
+							},
+							{ 
+								"data": "createdBy", 
+								render: function(data , type , row , meta){
+									if(row.isCreatedByAdmin){
+										return 'Admin';
+									}else{
+										return (row?.hallApprovedBy?.name) ? row?.hallApprovedBy?.name : "" //row.hall.agent.name;
+									}
+								} 
+							},
+							// { 
+							// 	"data": "agentName", 
+							// 	render: function(data , type , row , meta){
+							// 		if(row.isCreatedByAdmin){
+							// 			return '-';
+							// 		}else{
+							// 			let agentName='-';
+							// 			if(row.agentId){
+							// 				let agentData = meta.settings.json.agentData;
+							// 				for(let a=0;a<agentData.length;a++){
+							// 				if(agentData[a]._id==row.agentId){
+							// 					agentName=agentData[a].name;
+							// 					break;
+							// 				}
+							// 				}
+							// 			}
+							// 			return agentName;
+							// 		}
+									
+							// 	} 
+							// },
+							{ 
+								"data": "hallName", 
+								render: function(data , type , row , meta){
+
+									return row.hall.name;
+
+										// if(row.isCreatedByAdmin){
+										// 	let hallAgent = meta.settings.json.hallAgent;
+										// 	console.log(" hallAgent hallAgent : ",hallAgent)
+										// 	let htm=`<select id=${row._id}>`;
+										// 		for(let a=0;a<hallAgent.length;a++){
+										// 			htm +=`<option value=${hallAgent[a]._id}>${hallAgent[a].name}</option>`;
+										// 		}
+										// 		htm +'</select>';
+										// 	return htm;	
+										// }else{
+										// 	let hallList=[];
+										// 	if(row.agentId){
+										// 		let hallAgent = meta.settings.json.hallAgent;
+										// 		for(let a=0;a<hallAgent.length;a++){
+										// 			for(let h=0;h<(hallAgent[a].agents).length;h++){
+										// 				if(hallAgent[a].agents[h]._id==row.agentId){
+										// 					//hallList +=hallAgent[a].name+" , ";
+										// 					hallList.push({hallName: hallAgent[a].name,hallId:hallAgent[a]._id});
+										// 					break;
+										// 				}
+										// 			}
+										// 		}
+										// 	}
+										// 	let htm=`<select id=${row._id}>`;
+										// 	for(let i=0;i<hallList.length;i++){
+										// 		htm +=`<option value=${hallList[i].hallId}>${hallList[i].hallName}</option>`;
+										// 	}
+										// 	htm +'</select>';
+
+										// 	return htm;
+											
+										// }
+										
+								} 
+							},
+							{ 
+								"data": "uniquePurchaseDate_1", 
+								render: function(data , type , row){
+									var date = moment.utc(row.uniquePurchaseDate).format('YYYY-MM-DD HH:mm:ss');
+									var localTime  = moment.utc(date).toDate();
+									localTime = moment(localTime).format('YYYY-MM-DD hh:mm:ss a');
+									return localTime;	
+				
+								} 
+							},
+							{ 
+								"data": "uniqueExpiryDate_1",
+								render: function(data , type , row){
+								
+								var date = moment.utc(row.uniqueExpiryDate).format('YYYY-MM-DD HH:mm:ss');
+								var localTime  = moment.utc(date).toDate();
+								localTime = moment(localTime).format('YYYY-MM-DD hh:mm:ss a');
+
+								return localTime;	
+								
+							}  
+							},
+							{ 
+								"data": "walletAmount",
+									render: function(data, type, row) {
+										return +row.walletAmount.toFixed(2);
+									} 
+							},
+							{
+								"data": "paymentType",
+								render: function (data, type, row) {
+									return row.uniquePaymentType? row.uniquePaymentType : "cash";
+								}
+							},
+							{
+								"data": "status",
+								render: function (data, type, row) {
+									return  ((row.expireStatus == 'active') ? '<b style="color:green;">Active</b>' : '<b style="color:red;">Inactive</b>');
+								}
+							},
+							{
+								"data": "action",
+								render : function(data, type, row){
+									if (row.expireStatus == 'inactive') {
+										if(withdrawFlag == 'true'){
+											if (row.withdrawEnabledUnique) {
+												return ` <button type="button" name="disable" id="` + row._id + `" class="btn btn-primary btn-xs disable btn-rounded" title="Disable Withdraw">Disable</button>`;
+											} else {
+												return ` <button type="button" name="enable" id="` + row._id + `" class="btn btn-primary btn-xs enable btn-rounded" title="Enable Withdraw">Enable</button>`;
+											}
+										}
+									} else {
+										return '';
+									}
+							}
+							
+							},
+							{
+								"data": "action",
+								render : function(data, type, row){
+									let adminType = `{{Agent.role}}`;
+									let html = '<div style="width : 50px">';
+										if(viewFlag == 'true'){
+											html += `<a href="/unique/transactions/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="{{unique.transaction_history}}">
+												<i class="fa fa-history" aria-hidden="true"></i>
+											</a>`
+										}
+										if(withdrawFlag == 'true'){
+											html += ` <button type="button" name="withdraw" id="` + row._id + `" data-unique-id="`+row.uniqueId+`" class="btn btn-danger btn-xs delete btn-rounded" title="{{unique.withdraw}}" data-toggle="modal" data-target="#withdrawModal"><i class="fa fa-money" aria-hidden="true"></i></button>`;
+										}
+										html += '</div>'
+										return html;
+								}
+							
+							}
+						],
+						"initComplete": function() {
+
+						}
+
+		});
+
+	}
+	
+$(document).ready( function () {
+	let role = `{{Agent.role}}`;
+	$('#startDate input,#endDate input').datepicker();
+
+  $('.glyphicon1').click(function() {
+      $("#startDate input").focus();
+  });
+
+  $('.glyphicon2').click(function() {
+      $("#endDate input").focus();
+  });
+
+
+	dataTableData();
+
+
+	$('#search').click(function() {
+		dataTableData();
+  });
+	$('#reset').click(function () {
+		 if (role == 'admin') {
+			 $("#groupHallFilter").val('');
+			 $("#groupHallFilter > option").each(function () {
+						 if (this.value == '') {
+								 $(this).attr('selected', true);
+						 }
+				 });
+		 $("#hallFilter")
+			 .find('option')
+			 .remove()
+			 .end()
+			 .append('<option value="">Hall Name</option>')
+			 .val('')
+			 .prop("disabled", true);
+		 }
+		$("#paymentType").val('');
+		$("#start_date").val('');
+		$("#end_date").val('');
+		dataTableData();
+	});
+	// $(document).on("change","#statusType", function(){
+	// 	dataTableData();
+	// });
+
+
+
+	$(function() {
+		"use strict";
+
+		var SweetAlert = function() {};
+
+		SweetAlert.prototype.init = function() {
+
+			//Parameter
+			$('body').on('click', '.enable', function(e){
+				let id = $(this).attr('id');
+				let thisElement = this;
+					swal({
+							title: "Are you sure?",
+							text: "Withdraw Access will be Enabled!",
+							type: "warning",
+							showCancelButton: true,
+							confirmButtonColor: "#e69a2a",
+							confirmButtonText: "Yes, change it!",
+							cancelButtonText: "No, cancel Plz!",
+							closeOnConfirm: false,
+							closeOnCancel: false
+					}, function(isConfirm){
+							if (isConfirm) {
+								$.ajax({
+									type: 'POST',
+									url: host + "/unique/withdrawAccess",
+									data: {id: id, enable: true },
+									success: function(resultData) {
+										// alert(resultData)
+										console.log(resultData);
+										if (resultData.status == 'success') {
+											swal("Done!", "Withdraw Access Enabled.", "success");
+										}else {
+											swal("Cancelled", "Withdraw Access not Modified!", "error");
+											alert("Something went wrong")
+										}
+										dataTableData();
+									}
+								});
+									// swal("Done!", "Withdraw Access Enabled.", "success");
+							} else {
+									swal("Cancelled", "Withdraw Access not Modified!", "error");
+							}
+					});
+					return false;
+			});
+
+				$('body').on('click', '.disable', function (e) {
+				var id = $(this).attr('id');
+				var thisElement = this;
+				swal({
+					title: "Are you sure?",
+					text: "Withdraw Access will be Disabled!",
+					type: "warning",
+					showCancelButton: true,
+					confirmButtonColor: "#e69a2a",
+					confirmButtonText: "Yes, change it!",
+					cancelButtonText: "No, cancel Plz!",
+					closeOnConfirm: false,
+					closeOnCancel: false
+				}, function (isConfirm) {
+					if (isConfirm) {
+						$.ajax({
+							type: 'POST',
+							url: host + "/unique/withdrawAccess",
+							data: { id: id, enable : false },
+							success: function (resultData) {
+								// alert(resultData)
+								console.log(resultData);
+								if (resultData.status == 'success') {
+									swal("Done!", "Withdraw Access Disabled.", "success");
+								} else {
+									swal("Cancelled", "Withdraw Access not Modified!", "error");
+									alert("Something went wrong")
+								}
+								dataTableData();
+							}
+						});
+						// swal("Done!", "Withdraw Access Enabled.", "success");
+					} else {
+						swal("Cancelled", "Withdraw Access not Modified!", "error");
+					}
+				});
+				return false;
+			});
+
+		},
+		$.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+		$.SweetAlert.init();
+	});
+
+
+	$("#groupHallFilter").on('change',function () {
+		let val = $(this).val();
+		$("#hallFilter")
+			.find('option')
+			.remove()
+			.end()
+			.append('<option value="">Hall Name</option>')
+			.val('').prop("disabled", true);
+		if (val) {
+			fetchHalls(val);
+		}
+	});
+
+	function fetchHalls(grpId) {
+			$.ajax({
+					type: 'GET',
+					url: host + "/player/getHalls",
+					data: {
+							id: grpId
+					},
+					success: function (resultData) {
+							if (resultData.status == 'success') {
+									if (resultData.halls.length) {
+											for (const val of resultData.halls) {
+													$('#hallFilter').append($(document.createElement('option')).prop({
+															value: val._id,
+															text: val.name
+													}));
+											}
+									}
+									$('#hallFilter').prop('disabled', false);
+							} else {
+									console.log("something went wrong");
+							}
+					}
+				}
+			);
+	}
+
+	// Withdraw unique id
+	$('#withdrawModal').on('shown.bs.modal', function (e) {
+		let id = $(e.relatedTarget).attr('id');
+		let uniqueId = $(e.relatedTarget).attr('data-unique-id');
+    	$('.uniqueIdName').text(uniqueId);
+		$.ajax({
+			url: '/agent/unique-id/balance/get',
+			method: 'GET',
+			data: { uniqueId: uniqueId, action : "withdraw" },
+			success: function (response) {
+			console.log("response---", response)
+			$('#openModalSpinner').addClass('hidden');
+			if (response.status == "success") {
+				console.log('Latest Balance:', response.balance);
+				// Update the current balance in the form
+				$('.uniqueidBalance').text(response.balance);
+			} else {
+				$('.uniqueidBalance').text(response.message);
+			}
+
+			},
+			error: function (xhr, status, error) {
+			console.error('Error:', error);
+			// Show error message in the same modal
+			$('#errorContainer').html('An error occurred while fetching the latest balance. Please try again later.');
+			$('#errorContainer').removeClass('hidden');
+			setTimeout(function () {
+				$('#withdrawUniqueForm')[0].reset();
+				$('#errorContainer').addClass('hidden');
+			}, 3000);
+			}
+		});
+    });
+
+	$('#withdrawModal').on('hidden.bs.modal', function () {
+      $('#openModalSpinner').removeClass('hidden');
+	  $('.uniqueIdName').text('');
+      $('.uniqueidBalance').text('');
+      $("#withdrawUniqueForm")[0].reset();
+    });
+
+	$('#withdrawUniqueForm').on('submit', function (event) {
+      event.preventDefault();
+      // Disable the submit button
+      $('.withdrawunique').prop('disabled', true);
+      const amount = $('#amount').val();
+      console.log('Amount to withdraw:', amount);
+
+      // Make AJAX call
+      $.ajax({
+        url: '/agent/unique-id/balance/update',
+        method: 'POST',
+        data: {
+			uniqueId: $('.uniqueIdName').text(),
+			amount: +amount,
+			paymentType: "Cash",
+			action: "withdraw",
+		}, 
+        success: function (response) {
+          if (response.status == "success") {
+            $('#successContainer').html(response.message);
+            $('#successContainer').removeClass('hidden');
+            $('.uniqueidBalance').text(response.userwallet);
+			$('#myTable').DataTable().columns.adjust().draw();
+            setTimeout(function () {
+              $('#withdrawUniqueForm')[0].reset();
+              $('#successContainer').addClass('hidden');
+              $('#withdrawModal').modal('hide');
+            }, 3000);
+			if (`{{session.role}}` == "agent" && response.dailyBalance && response.paymentType == "Cash") {
+				$("#rootChips").text(parseFloat(response.dailyBalance).toFixed(2));
+			}
+          } else {
+            console.log("inside error")
+            $('#errorContainer').html(response.message);
+            $('#errorContainer').removeClass('hidden');
+            setTimeout(function () {
+              $('#withdrawUniqueForm')[0].reset();
+              $('#errorContainer').addClass('hidden');
+            }, 5000);
+          }
+        }, complete: function () {
+          // Re-enable the submit button after the AJAX call is complete
+          $('.withdrawunique').prop('disabled', false);
+        }
+      });
+
+    });
+	// withdraw unique id
+
+} );
+
+
+</script>
+{% endblock %}

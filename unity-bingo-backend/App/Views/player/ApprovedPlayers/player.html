@@ -1,0 +1,1477 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+
+    .cst {
+        display: flex;
+        justify-content: flex-start;
+        gap: 20px;
+        align-items: stretch;
+    }
+
+    .form-horizontal button {
+        width: 50px;
+    }
+
+    button#search,
+    button#filterReset {
+        min-width: 55px;
+    }
+
+    #message {
+        max-height: 200px;
+        overflow-y: auto;
+        padding: 10px;
+        margin-top: 10px;
+    }
+
+     /* Button spacing styles */
+    #import-button,
+    #reverify-bankid-button {
+        white-space: normal;
+        word-wrap: break-word;
+        padding: 8px 12px;
+        line-height: 1.2;
+        margin-right: 10px;
+        margin-bottom: 10px;
+    }
+
+    /* Style the SweetAlert input type=date */
+    .sweet-alert input[type="date"] {
+        padding: 8px;
+        font-size: 14px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        width: 200px;
+        margin: 0;
+        display: inline-block;
+        background: #fff;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        transition: border-color 0.3s, box-shadow 0.3s;
+    }
+
+    .sweet-alert input[type="date"]:focus {
+        border-color: #e69a2a;
+        box-shadow: 0 0 5px rgba(230, 154, 42, 0.5);
+        outline: none;
+    }
+
+    /* Style for date input container */
+    .sweet-alert .date-input-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin: 15px 0;
+    }
+
+    .sweet-alert .date-input-container label {
+        font-size: 14px;
+        color: #333;
+        margin: 0;
+        white-space: nowrap;
+    }
+
+    /* Style for error message */
+    .sweet-alert .sa-error-container {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 4px;
+        color: #721c24;
+        margin: 10px auto;
+        padding: 10px;
+        width: 80%;
+        text-align: center;
+        display: none;
+    }
+
+    .sweet-alert .sa-error-container.show {
+        display: block;
+    }
+
+    /* Hide the X icon and its container */
+    .sweet-alert .sa-error-container .icon {
+        display: none !important;
+    }
+
+    /* Adjust error message position */
+    .sweet-alert .sa-error-container .sa-error-container-text {
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+    }
+
+    /* Optional: Tweak confirm/cancel buttons spacing if needed */
+    .sweet-alert .sa-button-container button {
+        min-width: 100px;
+    }
+
+    /* prevent action button blink issue and add dropup */
+    /* .table-responsive {
+        overflow: auto !important; 
+    }
+
+    .dropup .dropdown-menu {
+        top: auto !important;
+        bottom: 100% !important;
+        margin-bottom: 5px; 
+    } */
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{player.player}} {{player.table}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{player.dashboard}}</a></li>
+                <li class="active" href="/player">{{player.player}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <!-- <form> -->
+                    <div class="box">
+                        <div class="box-header">
+                            <h3 class="box-title">{{player.search}}</h3>
+                        </div>
+                        <div class="box-body">
+                            <div class="row">
+                                <!-- <div class="col-md-3">
+                                        <div class="input-group">
+                                            <span class="input-group-addon"><i class="fa fa-filter" aria-hidden="true"></i></span>
+                                            <select name="orderby" class="form-control" id="playerStatus">
+                                                <option value="" selected="selected">All</option>
+                                                <option value="Active">Active</option>
+                                                <option value="Blocked">Blocked</option>
+                                            </select>
+                                        </div>
+									</div>
+									<div class="col-md-3">
+                                        <div class="input-group">
+                                            <select name="groupHall" class="form-control" id="groupHall">
+                                                <option value="" selected="selected">Group of Hall Name
+                                                </option>
+                                            </select>
+                                        </div>
+									</div>
+                                    <div class="col-md-3">
+                                        <div class="input-group">
+                                                <select name="hallName" class="form-control" id="hallName"
+                                                                disabled>
+                                                    <option value="" selected="selected">Hall Name</option>
+                                                </select>
+                                        </div>
+                                        
+									</div>
+                                    <div class="col-md-3">
+                                        <div class="col-md-4">
+                                            <button type="button"
+                                            class="pull-right btn btn-primary playersearch"><i
+                                                class="fa fa-search"></i></button>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <button type="reset" class="btn btn-primary pull-right clickreset">Reset</button>
+                                        </div>
+									</div> -->
+                                <div class="col-lg-8 pull-left">
+                                    <form>
+                                        <div class="cst">
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <span class="input-group-addon"><i class="fa fa-filter"
+                                                            aria-hidden="true"></i></span>
+                                                    <select name="orderby" class="form-control" id="playerStatus">
+                                                        <option value="" selected="selected">{{player.all}}</option>
+                                                        <option value="Active">{{player.active}}</option>
+                                                        <option value="Blocked">{{player.blockeds}}</option>
+                                                        <option value="Inactive">{{player.inactive}}</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <!-- <div class="form-horizontal">
+                                                    <div class="input-group">
+                                                        <select name="groupHall" class="form-control" id="groupHall">
+                                                            <option value="" selected="selected">Group of Hall Name
+                                                            </option>
+                                                        </select>
+                                                    </div>
+                                                </div> -->
+                                            {% if Agent.role == 'admin' %}
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <select name="hallName" class="form-control" id="hallName">
+                                                        <option value="" selected="selected">{{player.hall_name}}</option>
+                                                        {% if halls.length %}
+                                                        {% for hall in halls %}
+                                                        <option value="{{hall.id}}">{{hall.name}}</option>
+                                                        {%endfor%}
+                                                        {% endif %}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            {% endif %}
+
+                                            <!-- Search by risk category -->
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <select name="orderby" class="form-control" id="riskCategory">
+                                                        <option value="" selected="selected">{{player.risk_category}}</option>
+                                                        <option value="Low">{{player.low}}</option>
+                                                        <option value="Medium">{{player.medium}}</option>
+                                                        <option value="High">{{player.high}}</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <button type="button" class="pull-right btn btn-sm btn-primary playersearch"
+                                                id="search"><i class="fa fa-search"></i></button>
+                                            <button type="reset" class="btn btn-primary pull-right clickreset"
+                                                id="filterReset">{{player.reset}}</button>
+
+
+
+                                        </div>
+                                    </form>
+                                </div>
+
+                                <div class="col-lg-4">
+                                    {% if Agent.role == 'admin' %}
+                                    <input type="file" id="file" name="file" class="uploadfile" accept=".xls, .xlsx"
+                                        style="display:none;">
+                                        <button id="import-button"> {{player.import_excel}}</button>
+                                        {% if editFlag %}
+                                        <button id="reverify-bankid-button" title="{{player.reverify_bankid_players_title}}"> {{player.reverify_bankid_players}} </button>
+                                        {% endif %}
+                                    <!-- <div id="message"></div> -->
+                                    {% endif %}
+                                </div>
+                                <div class="col-lg-12">
+                                    <div id="message"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- </form> -->
+                </div>
+            </div>
+            <!-- <div class="row">
+                <form id="filterForm">
+                    <div class="box">
+                        <div class="box-header">
+                            <h3 class="box-title">Search By Filter</h3>
+                        </div>
+                        <div class="box-body">
+                            <div class="row">
+                                <div class="col-lg-4">
+                                    <div class="cst">
+                                        <div class="form-horizontal">
+                                            <div class="input-group">
+                                                <label for="fromDate">From Date :</label>
+                                                <input type="date" class="dateFilter form-control" name="fromDate" id="fromDate"
+                                                    onkeydown="return false">
+                                            </div>
+                                        </div>
+                                        <div class="form-horizontal">
+                                            <div class="input-group">
+                                                <label for="fromDate">To Date :</label>
+                                                <input type="date" class="dateFilter form-control" name="toDate" id="fromDate"
+                                                    onkeydown="return false">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-lg-8">
+                                    <div class="cst">
+                                        <div class="form-horizontal">
+                                            <div class="input-group">
+                                                <span class="input-group-addon"><i class="fa fa-filter"
+                                                        aria-hidden="true"></i></span>
+                                                <select name="groupHall" class="form-control" id="groupHall">
+                                                    <option value="" selected="selected">Group of Hall Name
+                                                    </option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="form-horizontal">
+                                            <div class="input-group">
+                                                <select name="hallName" class="form-control" id="hallName" disabled>
+                                                    <option value="" selected="selected">Hall Name</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="pull-right btn btn-sm btn-primary playersearch" id="search"><i
+                                                class="fa fa-search"></i></button>
+                                        <button type="reset" class="btn btn-primary pull-right clickreset"
+                                            id="filterReset">Reset</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div> -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{player.approved}} {{player.player}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                        <table id="myTable" class="table table-bordered table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{player.customer_number}}</th>
+                                                    <th>{{player.username}}</th>
+                                                    <th>{{player.emailId}}</th>
+                                                    <th>{{player.phone_number}}</th>
+                                                    <th>{{player.hall_name}}</th>
+                                                    <th>{{player.approved}} {{player.by}}</th>
+                                                    <!-- <th>Available Balance(In Points)</th> -->
+                                                    <th>{{player.available_balance_in}}</th>
+                                                    <th>{{player.status}}</th>
+                                                    {% if Agent.role == 'admin' or (Agent.role == 'agent' and view_risk_categoryFlag) %}
+                                                        <th>{{player.risk_category}}</th>
+                                                    {% endif %}
+                                                    <th>{{player.isVerifiedByBankId}}</th>
+                                                    <th>{{player.isVerifiedByHall}}</th>
+                                                    <th>{{player.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Modal of Add balance -->
+        <div id="depositModal" class="modal fade" tabindex="-1" role="dialog">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
+                                aria-hidden="true">&times;</span></button>
+                        <h4 class="modal-title">{{player.add_balance}}</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div id="errorContainer" class="hidden alert alert-danger" role="alert"></div>
+                        <div id="successContainer" class="hidden alert alert-success" role="alert"></div>
+                        <h5 class="text-left">{{player.username}}:
+                            <span class="depositUsername"></span>
+                        </h5>
+                        <h5 class="text-right">{{player.balance}}: <span id="openModalSpinner"
+                                class="fa fa-spinner fa-spin"></span>
+                            <span class="depositUserBalance"></span>
+                        </h5>
+                        <form id="depositForm">
+                            <div class="form-group">
+                                <label for="amount">{{player.enter}} {{player.balance}}:</label>
+                                <input type="number" class="form-control" id="amount" name="amount"
+                                    data-validation="required number minimumAmount">
+                            </div>
+                            <input type="hidden" id="depositUserId" value="">
+                            <button type="submit" class="btn btn-success depositUser">{{player.add}}</button>
+                            <button type="button" class="btn btn-default" data-dismiss="modal">{{player.cancel}}</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    var orderTable = "";
+    var host = window.location.origin;
+    $(document).ready(function () {
+        let ajaxUrl = host + "/player/getPlayer";
+        let isAllPlayers = "{{allPlayers}}";
+        let agent = $('#agent').val();
+        let isSuperAdmin = "{{Agent.isSuperAdmin}}"
+        let editFlag = '{{editFlag}}';
+        let deleteFlag = '{{deleteFlag}}';
+        let blockFlag = '{{blockFlag}}';
+        let statusFlag = '{{statusFlag}}';
+        let viewFlag = '{{viewFlag}}';
+        let addFlag = '{{addFlag}}';
+        const view_risk_categoryFlag = '{{ view_risk_categoryFlag }}' === 'true';
+        const showRiskCategory = agent === "admin" || (agent === "agent" && view_risk_categoryFlag);
+        console.log("show risk categoy===", showRiskCategory, typeof showRiskCategory)
+        function loadData() {
+            let columns = [{
+                    "data": "customerNumber"
+                }, {
+                    "data": "username"
+                }, {
+                    "data": "email",
+                    render: function (data, type, row) {
+                        let email = ''
+                        if (row.email) {
+                            email = row.email;
+                        }
+                        return email;
+                    }
+                }, {
+                    "data": "phone",
+                    render: function (data, type, row) {
+                        let phone = ''
+                        if (row.phone) {
+                            phone = row.phone;
+                        }
+                        return phone;
+                    }
+                }, 
+                {
+                    "data": "approvedHalls",
+                    render: function (data, type, row) {
+                        if (!data || data.length === 0) {
+                            return '';
+                        }
+                        let $select = $('<select id="select1-' + row._id + '" class="form-control"></select>', {
+                            "id": row[3],
+                            "value": data.map(item => item.name)
+                        });
+                        $.each(data, function(k, v) {
+                            let $option = $("<option></option>", {
+                                "text": v.name,
+                                "value": v.id
+                            });
+                            $select.append($option);
+                        });
+                        return $select.prop("outerHTML");
+                    }
+                },
+                {
+                    "data": "playerAgent",
+                    render: function (data, type, row) {
+                        let name = '-'
+                        console.log("row.playerAgent---", row.playerAgent)
+                        if (row.playerAgent) {
+                            name = row.playerAgent.name;
+                        }
+                        return name;
+                    }
+                },
+                {
+                    "data": 'walletAmount',
+                    render: function (data, type, row) {
+                        let walletAmount = 0;
+                        if (data > 0) {
+                            walletAmount = parseFloat(parseFloat(data).toFixed(2));
+                        }
+                        return walletAmount;
+                    }
+                },
+                {
+                    "data": "status",
+                    render: function (data, type, row) {
+                        let status = '';
+                        if(row.status == 'Active'){
+                            status = '<span style="color:green;font-weight: bold;" id="status_' + row._id + '">' + '{{player.active}}' + '</span>';
+                        }else if(row.status == 'Blocked'){
+                            status = '<span style="color:red;font-weight: bold;" id="status_' + row._id + '">' + '{{player.blockeds}}' + '</span>';
+                        }else if(row.status == 'Inactive'){
+                            status = '<span style="color:red;font-weight: bold;" id="status_' + row._id + '">' + '{{player.inactive}}' + '</span>';
+                        }
+                        return status;
+                    }
+                }
+            ];
+
+            if(showRiskCategory == true){
+                columns.push({
+                    "data": "riskCategory",
+                    render: function (data, type, row) {
+                        if (row.HR === "yes") {
+                            switch (data) {
+                                case 'Low': return '{{player.low}}';
+                                case 'Medium': return '{{player.medium}}';
+                                case 'High': return '{{player.high}}';
+                                default: return '{{player.low}}';
+                            }
+                            return riskCategory;
+                        }
+                        return '{{player.low}}';
+                        
+                    }
+                });
+            }
+
+            columns.push(
+                {
+                    "data": "bankIdAuth",
+                    render: function (data, type, row) {
+                        return data?.status == "COMPLETED" ? "{{player.yes}}" : "{{player.no}}";
+                    }
+                },
+
+                {
+                    "data": "isVerifiedByHall",
+                    render: function (data, type, row) {
+                        return data ? "{{player.yes}}" : "{{player.no}}";
+                    }
+                },
+
+                {
+                    "data": "action",
+                    render: function (data, type, row) {
+                        let html = ``;
+                        if (isSuperAdmin == "false") {
+                            html += `<div class="btn-group pull-right" style="width:webkit-fill-available;"><button type="button" class="btn btn-primary btn-sm dropdown-toggle" data-toggle="dropdown" style="width:webkit-fill-available;"> Action <span class="caret"> </span></button><ul class="dropdown-menu" role="menu">`;
+                            if (viewFlag == 'true') {
+                                html += `<li><a href="/viewPlayer/` + row._id + `" class="playerid" style="cursor: pointer;">{{player.view_profile}}</a></li>`
+                            }
+                            if (editFlag == 'true') {
+                                html += `<li><a href="/playerEdit/` + row._id + `" class="playerid" style="cursor: pointer;">{{player.edit_profile}}</a></li>`;
+                            }
+                            if (editFlag == 'true' || addFlag == 'true') {
+                                html += `<li><a id="` + row._id + `" class="playerid" style="cursor: pointer;" data-toggle="modal" data-target="#depositModal" data-username="` + row.username + `">{{player.add_balance}}</a></li>`;
+                            }
+                            if (viewFlag == 'true') {
+                                html += `<li><a href="/playerTransactions/` + row._id + `" class="playerloginid" style="cursor: pointer;">{{player.transaction_history}}</a></li>`;
+                                html += `<li><a href="/playerGameHistory/` + row._id + `" class="playerloginid" style="cursor: pointer;">{{player.game_details}}</a></li>`;
+                            }
+                            if (blockFlag == 'true') {
+                                html += `<li><a class="playerActive" id="` + row._id + `" data-st="` + row.status + `" style="cursor: pointer;">{{player.blockeds}}/{{player.unblocked}}</a></li>`;
+                            }
+
+                            if (deleteFlag == 'true') {
+                                html += `<li><a  class="delete" id="` + row._id + `" style="cursor: pointer;">{{player.delete}}</a></li>`;
+                            }
+
+                            if (editFlag == 'true') {
+                                // Only show the Verify button if the player is not already verified
+                                if (row.isVerifiedByHall !== true) {
+                                    html += `<li><a class="playerVerified" id="` + row._id + `" data-isVerified="` + row.isVerifiedByHall + `" data-username="` + row.username + `" style="cursor: pointer;">{{player.verify}}</a></li>`;
+                                }
+                            }
+                            html += `</ul></div>`;
+                        } else {
+                            html += `<div class="btn-group pull-right" style="width:webkit-fill-available;">\
+                                    <button type="button" class="btn btn-primary btn-sm dropdown-toggle" data-toggle="dropdown" style="width:webkit-fill-available;"> Action <span class="caret"> </span>\
+                                    </button>\
+                                    <ul class="dropdown-menu" role="menu">\
+                                        <li><a href="/viewPlayer/` + row._id + `" class="playerid" style="cursor: pointer;">{{player.view_profile}}</a></li>\
+                                        <li><a href="/playerEdit/` + row._id + `" class="playerid" style="cursor: pointer;">{{player.edit_profile}}</a></li>\
+                                        <li><a href="/playerTransactions/` + row._id + `" class="playerloginid" style="cursor: pointer;">{{player.transaction_history}} </a></li>\
+                                        <li><a href="/playerGameHistory/` + row._id + `" class="playerloginid" style="cursor: pointer;">{{player.game_details}}</a></li>\
+                                        <li><a class="playerActive" id="` + row._id + `" data-st="` + row.status + `" style="cursor: pointer;">{{player.blockeds}}/{{player.unblocked}}</a></li>\
+                                        <li><a  class="delete" id="` + row._id + `" style="cursor: pointer;">{{player.delete}}</a></li>\
+                                    `
+                                    // Only show the Verify button if the player is not already verified
+                                    if (row.isVerifiedByHall !== true) {
+                                        html += `<li><a class="playerVerified" id="` + row._id + `" data-isVerified="` + row.isVerifiedByHall + `" data-username="` + row.username + `" style="cursor: pointer;">{{player.verify}}</a></li>`;
+                                    }
+
+                                    html += `</ul>\
+                                </div>`;
+                                   
+                                    
+                        }
+                        return html;
+                    }
+                }
+            );
+                 
+            $('#myTable').DataTable({
+                "language": {
+                    //search: '',
+                    //searchPlaceholder: "{{player.username}} / {{player.customer_number}}",
+                    'paginate': {
+                        'previous': '{{player.previous}}',
+                        'next': '{{player.next}}'
+                    }
+                },
+                "oLanguage": {
+                    "sLengthMenu": "{{player.show}} _MENU_ {{player.entries}}",
+                    "sSearch": "{{player.search}} {{player.username}} / {{player.customer_number}} / {{player.phone_number}}",
+                    "sEmptyTable": "{{player.no_data_available_in_table}}",
+                    "sInfo": "{{player.showing}} _START_ to _END_ of _TOTAL_ {{player.entries}}",
+                    "sInfoEmpty": "{{player.showing}} 0 to 0 of 0 {{player.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ player.previous }}",
+                        sNext: "{{ player.next }}"
+                    },
+                },
+                "processing": true,
+                "serverSide": true,
+                "order": [
+                    [0, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": showRiskCategory ? [4, 9, 10, 11] : [4, 9, 10],
+                    "orderable": false
+                }],
+                "autoWidth": false,
+                "pageLength": 100,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: function (data) {
+                        data.playerStatus = $('#playerStatus').val();
+                        data.hallId = $('#hallName').val() ? $('#hallName').val() : '';
+                        data.riskCategory = $('#riskCategory').val() ? $('#riskCategory').val() : '';
+                    }
+                },
+                "pageLength": 25,
+                "columns": columns
+            });
+        }
+        loadData();
+
+        var table = $('#myTable').DataTable();
+
+        $('body').on('click', '.playersearch', function (e) {
+            $('#myTable').DataTable().clear().destroy();
+            loadData();
+        });
+
+        $('body').on('click', '.clickreset', function (e) {
+            setTimeout(function () {
+                $('#myTable').DataTable().clear().destroy();
+                loadData();
+            }, 500);
+            $("#message").html("")
+        });
+
+        $('#myTable tbody').on("click", 'tr', function () {
+            var data = table.row(this).data();
+            var id;
+            $('#select1-' + data._id + '').change(function () {
+                $("#dataHall-" + data._id).html('');
+
+                id = $(this).val();
+
+                var objData = data.hall;
+
+                var newObj = false;
+                $.each(objData, function () {
+                    var testObject = this;
+                    $.each(testObject, function (k, v) {
+                        //alert(k);
+                        if (id == v) {
+                            newObj = testObject;
+                        }
+                    });
+                });
+                if (newObj.status == "pending") {
+                    let buttonAdd = '<button type="button" title="Approve" class="btn btn-xs btn-rounded btn-success acceptRequestBtn requestStatusBtn" data-btn="accept" id="' + data._id + '" value="' + id + '" ><i class="fa fa-check" aria-hidden="true"></i></button>\
+                    <button type="button" title="Reject"  id="' + data._id + '" value="' + id + '"  data-btn="reject" class="btn btn-danger btn-xs btn-rounded requestStatusBtn rejectRequestBtn reject"><i class="fa fa-times" aria-hidden="true"></i></button>';
+                    $("#dataHall-" + data._id).append(buttonAdd);
+                } else if (newObj.status == "Approved") {
+                    let spanAdd = '<span style="color:green;">' + newObj.status + '</span>'
+                    $("#dataHall-" + data._id).append(spanAdd);
+                } else {
+                    let spanAdd = '<span style="color:red;">' + newObj.status + '</span>'
+                    $("#dataHall-" + data._id).append(spanAdd);
+                }
+            });
+
+
+
+            $(".acceptRequestBtn").click(function () {
+                var playerId = $(this).attr("id");
+                var optionId = $(this).attr("value");
+                var btn = $(this).attr("data-btn");
+                $.ajax({
+                    type: "POST",
+                    url: host + "/player/hallStatus",
+                    data: {
+                        playerId: playerId,
+                        optionId: optionId,
+                        btn: btn
+                    },
+                    success: function (response) {
+                        console.log("response: ", response);
+                        if (response.status == "success") {
+                            if (response.data != null) {
+
+                                var objData = response.data;
+
+                                var newObj = false;
+                                $.each(objData, function () {
+                                    var testObject = this;
+                                    $.each(testObject, function (k, v) {
+                                        if (optionId == v) {
+                                            newObj = testObject;
+                                        }
+                                    });
+                                });
+                                $("#dataHall-" + data._id).html('');
+                                if (newObj.status == "Approved") {
+                                    let spanAdd = '<span style="color:green;">"' + newObj.status + '"</span>'
+                                    $("#dataHall-" + data._id).append(spanAdd);
+                                } else {
+                                    let spanAdd = '<span style="color:red;">"' + newObj.status + '"</span>'
+                                    $("#dataHall-" + data._id).append(spanAdd);
+                                }
+
+                                table.ajax.reload();
+                            }
+                        } else {
+                            alert('Hall Status Not Updated');
+                        }
+                    }
+                })
+
+            });
+
+
+            $(".rejectRequestBtn").click(function () {
+                var playerId = $(this).attr("id");
+                var optionId = $(this).attr("value");
+                var btn = $(this).attr("data-btn");
+                $.ajax({
+                    type: "POST",
+                    url: host + "/player/hallStatus",
+                    data: {
+                        playerId: playerId,
+                        optionId: optionId,
+                        btn: btn
+                    },
+                    success: function (response) {
+                        //console.log("response: ", response);
+                        if (response.status == "success") {
+                            if (response.data != null) {
+
+                                var objData = response.data;
+
+                                var newObj = false;
+                                $.each(objData, function () {
+                                    var testObject = this;
+                                    $.each(testObject, function (k, v) {
+                                        if (optionId == v) {
+                                            newObj = testObject;
+                                        }
+                                    });
+                                });
+                                $("#dataHall-" + data._id).html('');
+                                let spanAdd = '<span>"' + newObj.status + '"</span>'
+                                $("#dataHall-" + data._id).append(spanAdd);
+                                table.ajax.reload();
+                            }
+                        } else {
+                            alert('Hall Status Not Updated');
+                        }
+                    }
+                })
+
+            });
+
+
+
+
+        });
+
+
+        $(function () {
+            "use strict";
+
+            var SweetAlert = function () { };
+
+            SweetAlert.prototype.init = function () {
+
+                //Parameter
+                $('body').on('click', '.delete', function (e) {
+                    var id = $(this).attr('id');
+                    var thisElement = this;
+                    swal({
+                        title: "{{player.delete_message}}?",
+                        text: "{{player.delete_player_message}}!",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{player.delete_button}}",
+                        cancelButtonText: "{{player.cancel_button}}!",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/player/playerSoftDelete",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData) {
+                                    if (resultData == 'success') {
+                                        table.destroy();
+                                        loadData();
+                                        swal("{{player.delete}}!", "Your imaginary file has been deleted.", "success");
+                                    } else {
+                                        alert("{{player.something_went_wrong}}")
+                                    }
+                                }
+                            });
+                            swal("{{player.delete}}!", "{{player.player_delete_successfully}}.", "success");
+                        } else {
+                            swal("{{player.cancelled}}", "{{player.player_not_delete}}", "error");
+                        }
+                    });
+                    return false;
+                });
+
+                // Active & Deactive
+
+                $('body').on('click', '.playerActive', function (e) {
+                    var id = $(this).attr('id');
+                    let $this = $(this);
+                    let st = $(this).attr('data-st');
+                    console.log('st', st);
+                    var thisElement = this;
+                    swal({
+                        title: "{{player.are_you_sure}}?",
+                        text: "{{player.do_you_want_update_status}}?",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{player.delete_button}}",
+                        cancelButtonText: "{{player.cancel_button}}!",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/player/active",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData, data) {
+                                    $('#status_' + id).html('');
+                                    if (resultData == 'success') {
+                                        let cs = (st == 'Active') ? 'Blocked' : 'Active';
+                                        if (st == 'Active') {
+                                            $this.attr('data-st', 'Blocked')
+                                            $this.attr('title', 'Blocked')
+                                            let spanAdd = '<span style="color:red;font-weight: bold;" id="status_' + id + '">' + cs + '</span>'
+                                            $('#status_' + id).append(spanAdd);
+                                        } else {
+                                            $this.attr('data-st', 'Active')
+                                            $this.attr('title', 'Active')
+                                            let spanAdd = '<span style="color:green;font-weight: bold;" id="status_' + id + '">' + cs + '</span>'
+                                            $('#status_' + id).append(spanAdd);
+                                        }
+                                        swal("{{player.success}}!", "{{player.player_status_update_successfully}}.", "success");
+                                    } else {
+                                        alert("{{player.something_went_wrong}}")
+                                    }
+
+                                }
+                            });
+                            swal("{{player.success}}!", "{{player.player_status_update_successfully}}.", "success");
+                        } else {
+                            swal("{{player.cancelled}}", "{{player.player_status_not_update}}", "error");
+                        }
+                    });
+                    return false;
+                });
+
+                // Deposit user
+                $('#depositModal').on('shown.bs.modal', function (e) {
+                    let id = $(e.relatedTarget).attr('id');
+                    let depositUsername = $(e.relatedTarget).attr('data-username');
+                    console.log("user name and id", id, depositUsername)
+                    $('.depositUsername').text(depositUsername);
+                    $.ajax({
+                        url: '/agent/register-user/balance/get',
+                        method: 'GET',
+                        data: { id: id, username: depositUsername },
+                        success: function (response) {
+                            console.log("response---", response)
+                            $('#openModalSpinner').addClass('hidden');
+                            if (response.status == "success") {
+                                console.log('Latest Balance:', response.balance);
+                                // Update the current balance in the form
+                                $('.depositUserBalance').text(response.balance);
+                                $("#depositUserId").val(id);
+                            } else {
+                                $('.depositUserBalance').text(response.message);
+                            }
+
+                        },
+                        error: function (xhr, status, error) {
+                            console.error('Error:', error);
+                            // Show error message in the same modal
+                            $('#errorContainer').html('An error occurred while fetching the latest balance. Please try again later.');
+                            $('#errorContainer').removeClass('hidden');
+                            setTimeout(function () {
+                                $('#depositForm')[0].reset();
+                                $('#errorContainer').addClass('hidden');
+                            }, 3000);
+                        }
+                    });
+                });
+
+                $('#withdrawModal').on('hidden.bs.modal', function () {
+                    $('#openModalSpinner').removeClass('hidden');
+                    $('.depositUsername').text('');
+                    $('.depositUserBalance').text('');
+                    $("#depositForm")[0].reset();
+                });
+
+                $('#depositForm').on('submit', function (event) {
+                    event.preventDefault();
+                    if ($("#depositForm").isValid() == true) {
+                        let action = "{{action}}";
+                        let confirmText = `Do you want to add money to username "${$('.depositUsername').text()}" ?`;
+                        let acceptMessage = "Yes, Add Money!";
+                        let cancelMessage = "The Add Money action has been cancelled.";
+                        swal({
+                            title: "Are you sure?",
+                            text: confirmText,
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: acceptMessage,
+                            cancelButtonText: "No, cancel Plz!",
+                            closeOnConfirm: false,
+                            closeOnCancel: true
+                        }, function (isConfirm) {
+                            if (isConfirm) {
+                                $(".confirm").attr('disabled', 'disabled');
+                                $.ajax({
+                                    url: '/agent/register-user/balance/update',
+                                    method: 'POST',
+                                    data: {
+                                        username: $('.depositUsername').text(),
+                                        id: $("#depositUserId").val(),
+                                        amount: $('#amount').val(),
+                                        paymentType: "Cash",
+                                        action: "add",
+                                    },
+                                    success: function (response) {
+                                        console.log("response of update user balance", response)
+                                        if (response.status == "success") {
+                                            $('.depositUserBalance').text(response.userwallet);
+                                            if (agent == "agent" && response?.paymentType.toLowerCase() == "cash") {
+                                                $("#rootChips").text(parseFloat(response.dailyBalance).toFixed(2));
+                                            }
+                                            $('#myTable').DataTable().clear().destroy();
+                                            loadData();
+                                            swal("Success!", response.message, "success");
+                                        } else {
+                                            swal("Failed", response.message, "error");
+                                        }
+                                    }, complete: function () {
+                                        $("#depositForm")[0].reset();
+                                    }
+                                });
+                            } else {
+                                swal("Cancelled", cancelMessage, "error");
+                            }
+                        });
+                        return false;
+                    } else {
+                        if ($(".has-error").length) {
+                            let el = $('.has-error').first();
+                            if (!$.isEmptyObject(el)) {
+                                $('html, body').animate({
+                                    scrollTop: (el.offset().top)
+                                }, 10);
+                            }
+                        }
+                    }
+                });
+
+                // Import player
+                $('#import-button').on('click', function () {
+                    $("#message").html("");
+                    $('#file').click();
+                });
+
+                $('.uploadfile').on('change', function (e) {
+                    e.preventDefault()
+                    const fileInput = $('#file')[0].files[0];
+                    if (!fileInput) {
+                        $('#message').html('<p>Please select a file.</p>');
+                        return;
+                    }
+
+                    const allowedExtensions = ['.xls', '.xlsx'];
+                    const fileExtension = fileInput.name.substring(fileInput.name.lastIndexOf('.')).toLowerCase();
+                    if (!allowedExtensions.includes(fileExtension)) {
+                        alert("Only .xls and .xlsx files are allowed");
+                        return;
+                    }
+
+                    $("#import-button").attr("disabled", true);
+                    $("#import-button").html('Processing...');
+                    const formData = new FormData();
+                    formData.append('file', fileInput);
+
+                    const fileInput1 = $(this);
+                    fileInput1.val('');
+
+
+                    $.ajax({
+                        url: host + '/player/import',
+                        method: 'POST',
+                        data: formData,
+                        processData: false,
+                        contentType: false,
+                        timeout: 300000,  // Set timeout to 5 minutes (300,000 ms)
+                        success: function (result) {
+                            //$('#message').html(`<p>${result.message}</p>`);
+                            if (result.playersCount > 0) {
+                                let confirmText = `Do you want to import these ${result.playersCount} players in database?`;
+                                if (result.playersCount == 1) {
+                                    confirmText = `Do you want to import this ${result.playersCount} player in database?`;
+                                }
+                                let previousWindowKeyDown = window.onkeydown
+                                swal({
+                                    title: "Are you sure?",
+                                    text: confirmText, //`Do you want to import this ${result.playersCount} players in database.`,
+                                    icon: "warning",
+                                    showCancelButton: true,
+                                    confirmButtonColor: "#e69a2a",
+                                    confirmButtonText: "Yes",
+                                    cancelButtonText: "No, cancel Plz!",
+                                    closeOnConfirm: false,
+                                    closeOnCancel: true
+                                }, function (isConfirm) {
+                                    window.onkeydown = previousWindowKeyDown;
+                                    if (isConfirm) {
+                                        $(".confirm").attr('disabled', 'disabled');
+                                        $.ajax({
+                                            url: '/player/import/confirm',
+                                            method: 'POST',
+                                            data: { isConfirm: "Yes" },
+                                            success: function (response) {
+                                                console.log("res---", response)
+                                                if (response.status == "success") {
+                                                    console.log("response of import", response.message, response.errors)
+                                                    $('#myTable').DataTable().clear().destroy();
+                                                    loadData();
+                                                    if (response.errors && response.errors.length > 0) {
+                                                        let errorMessages = response.errors.map(error => `<li>${error}</li>`).join(''); // Create list items for each error
+                                                        let fullMessage = `<div style="max-height: 200px; overflow-y: auto;"><h3 style="color: green">${response.message} With Following Errors: </h3><ul style="text-align: left; color: red; margin: 5px">${errorMessages}</ul></div>`;
+
+                                                        swal({
+                                                            title: "Success!",
+                                                            icon: "warning",
+                                                            html: true,
+                                                            text: fullMessage,
+
+                                                        });
+                                                    } else {
+                                                        swal("Success!", response.message, "success");
+                                                    }
+
+
+                                                } else {
+                                                    swal("Failed", response.message, "error");
+                                                }
+
+                                            },
+                                            error: function (xhr, status, error) {
+                                                swal("Failed", error, "error");
+                                            }, complete: function () {
+                                                $('#message').html('');
+                                            }
+                                        });
+
+                                    } else {
+                                        $.ajax({
+                                            url: '/player/import/confirm',
+                                            method: 'POST',
+                                            data: { isConfirm: "No" },
+                                            success: function (response) {
+                                                console.log("response of cancel importing", response)
+
+                                            }, complete: function () {
+                                                $('#message').html('');
+                                            }
+                                        });
+                                    }
+                                    window.onkeydown = previousWindowKeyDown;
+                                });
+
+
+
+
+                            } else {
+                                swal("Success!", "No new player available for import.", "success");
+                            }
+                        },
+                        error: function (xhr, status, error) {
+                            console.log("error in importing", error)
+                            console.log("error in importing xhr", xhr, xhr.responseJSON)
+                            if (xhr.responseJSON?.isInternalError == true) {
+
+                                let html = '';
+
+                                const { duplicates, recordsByDuplicate } = xhr.responseJSON.errors;
+                                if (duplicates.customerNumber.length > 0) {
+                                    html += '<div class="error-message"><strong>Duplicate Customer Numbers:</strong></div><ul class="duplicate-list">';
+                                    for (const duplicate of duplicates.customerNumber) {
+                                        const lastIndex = duplicate.lastIndexOf('-');
+                                        const finalName = duplicate.slice(0, lastIndex);
+                                        html += `<li>Customer Number ${finalName}:<ul>`;
+                                        const records = recordsByDuplicate.customerNumber[duplicate] || [];
+                                        console.log("records", records)
+                                        for (const record of records) {
+                                            html += `<li>Customer Number: ${record.customerNumber}, Username: ${record.Username}, Email: ${record.Email}, Phone: ${record.phone}</li>`;
+                                        }
+                                        html += '</ul></li>';
+                                    }
+                                    html += '</ul>';
+                                }
+
+                                if (duplicates.phone.length > 0) {
+                                    html += '<div class="error-message"><strong>Duplicate Mobile Numbers:</strong></div><ul class="duplicate-list">';
+                                        for (const duplicate of duplicates.phone) {
+                                            const lastIndex = duplicate.lastIndexOf('-');
+                                            const finalName = duplicate.slice(0, lastIndex);
+                                            html += `<li>Mobile Number ${finalName}:<ul>`;
+                                            const records = recordsByDuplicate.phone[duplicate] || [];
+                                            for (const record of records) {
+                                                html += `<li>Customer Number: ${record.customerNumber}, Username: ${record.Username}, Email: ${record.Email}, Phone: ${record.phone}</li>`;
+                                            }
+                                        html += '</ul></li>';
+                                    }
+                                    html += '</ul>';
+                                }
+
+                                if (duplicates.Email.length > 0) {
+                                    html += '<div class="error-message"><strong>Duplicate Emails:</strong></div><ul class="duplicate-list">';
+                                    for (const duplicate of duplicates.Email) {
+                                        const lastIndex = duplicate.lastIndexOf('-');
+                                        const finalName = duplicate.slice(0, lastIndex);
+                                        html += `<li>Email ${finalName}:<ul>`;
+                                        const records = recordsByDuplicate.Email[duplicate] || [];
+                                        for (const record of records) {
+                                            html += `<li>Customer Number: ${record.customerNumber}, Username: ${record.Username}, Email: ${record.Email}, Phone: ${record.phone}</li>`;
+                                        }
+                                        html += '</ul></li>';
+                                    }
+                                    html += '</ul>';
+                                }
+
+                                if (duplicates.Username.length > 0) {
+                                    html += '<div class="error-message"><strong>Duplicate Usernames:</strong></div><ul class="duplicate-list">';
+                                    for (const duplicate of duplicates.Username) {
+                                        const lastIndex = duplicate.lastIndexOf('-');
+                                        const finalName = duplicate.slice(0, lastIndex);
+                                        html += `<li>Username ${finalName}:<ul>`;
+                                        const records = recordsByDuplicate.Username[duplicate] || [];
+                                        for (const record of records) {
+                                            html += `<li>Customer Number: ${record.customerNumber}, Username: ${record.Username}, Email: ${record.Email}, Phone: ${record.phone}</li>`;
+                                        }
+                                        html += '</ul></li>';
+                                    }
+                                    html += '</ul>';
+                                }
+
+
+                                $('#message').html(`<p style="font-weight: 700;">Imported Sheet Errors:</p>${html}`);
+
+                            } else {
+                                let errorsHtml = '<ul>';
+                                const errors = xhr.responseJSON.errors;
+                                for (const error of errors) {
+                                    errorsHtml += `<li>${error}</li>`;
+                                }
+                                errorsHtml += '</ul>';
+                                $('#message').html(`<p style="font-weight: 700;">Database Errors:</p>${errorsHtml}`);
+                            }
+
+                        }, complete: function () {
+                            $("#import-button").attr("disabled", false);
+                            $("#import-button").html('Import Excel');
+                        }
+                    });
+                });
+
+                // verify/unverify player
+                $('body').on('click', '.playerVerified', function (e) {
+                    e.preventDefault();
+
+                    const $this = $(this);
+                    const id = $this.attr('id');
+                    const isVerified = $this.attr('data-isVerified') === 'true';
+                    const username = $this.attr('data-username');
+
+                    const text = isVerified
+                        ? `{{player.do_you_want_to_unverify_player}}: ${username}?`
+                        : `{{player.do_you_want_to_verify_player}}: ${username}?<br><br>{{player.please_select_id_card_expiry_date}}`;
+                    const confirmButtonText = isVerified ? "{{player.unverify}}" : "{{player.verify}}";
+
+                    // Get tomorrow's date in YYYY-MM-DD format
+                    const tomorrow = new Date();
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    const minDate = tomorrow.toISOString().split('T')[0];
+
+                    swal({
+                        title: "{{player.are_you_sure}}?",
+                        text: text,
+                        type: "input",
+                        inputType: "date",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: confirmButtonText,
+                        cancelButtonText: "{{player.cancel_button}}!",
+                        closeOnConfirm: false,
+                        closeOnCancel: true,
+                        inputPlaceholder: "Select Date",
+                        html: true
+                    }, function (inputValue) {
+                        if (inputValue === false) return false;
+
+                        if (!inputValue) {
+                            $('.sweet-alert .sa-error-container').html('<div class="sa-error-container-text">{{player.please_select_id_card_expiry_date}}</div>').addClass('show');
+                            return false;
+                        }
+
+                        // Validate if selected date is tomorrow or later
+                        const selectedDate = new Date(inputValue);
+                        const checkDate = new Date();
+                        checkDate.setHours(0, 0, 0, 0);
+                        checkDate.setDate(checkDate.getDate() + 1);
+                        if (selectedDate < checkDate) {
+                            $('.sweet-alert .sa-error-container').html('<div class="sa-error-container-text">{{player.please_select_id_card_expiry_date_from_tomorrow_onward}}</div>').addClass('show');
+                            return false;
+                        }
+
+                        $.ajax({
+                            type: 'POST',
+                            url: `${host}/player/verify/update`,
+                            data: {
+                                playerId: id,
+                                idExpiryDate: inputValue
+                            },
+                            success: function (resultData) {
+                                $('.sweet-alert input').val('').hide();
+                                if (resultData.status === 'success') {
+                                    $('#myTable').DataTable().clear().destroy();
+                                    loadData();
+                                    swal("{{player.success}}!", resultData.message, "success");
+                                } else {
+                                    swal("{{player.failed}}!", resultData.message, "error");
+                                }
+                            },
+                            error: function () {
+                                $('.sweet-alert input').val('').hide();
+                                swal("{{player.failed}}!", "{{player.something_went_wrong}}", "error");
+                            }
+                        });
+                    });
+
+                    // Re-style and restrict the input after the DOM is inserted
+                    setTimeout(function () {
+                        const input = $('.sweet-alert input[type="date"]');
+
+                        input.attr('min', minDate); // restrict to tomorrow onward
+
+                        input.css({
+                            padding: '10px',
+                            fontSize: '15px',
+                            border: '1px solid #ccc',
+                            borderRadius: '6px',
+                            width: '100%',
+                            maxWidth: '280px',
+                            background: '#fff',
+                            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)',
+                            boxSizing: 'border-box',
+                            display: 'block',
+                            margin: '10px auto'
+                        });
+
+                        // Remove error on input change
+                        input.on('change', function () {
+                            if (this.value) {
+                                $('.sweet-alert .sa-error-container').removeClass('show');
+                            }
+                        });
+                    }, 100);
+
+                    return false;
+                });
+
+
+                // Reverify BankID button click handler
+                $('#reverify-bankid-button').on('click', function (e) {
+                    e.preventDefault();
+                    
+                    const $button = $(this);
+                    
+                    // Show confirmation dialog
+                    swal({
+                        title: "{{player.are_you_sure}}?",
+                        text: "{{player.do_you_want_to_reverify_the_bankid_players}}",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{player.yes}}",
+                        cancelButtonText: "{{player.cancel_button}}!",
+                        closeOnConfirm: false,
+                        closeOnCancel: true
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            // Disable button to prevent multiple clicks
+                            $button.attr('disabled', true);
+                            
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/player/reverify-bankid", // Adjust the endpoint as needed
+                                data: {
+                                    // Add any required data here
+                                },
+                                success: function (response) {
+                                    console.log("Reverify BankID response:", response);
+                                    
+                                    if (response.status === 'success') {
+                                        swal("{{player.success}}!", response.message || "BankID reverification notification sent successfully", "success");
+                                    } else {
+                                        swal("{{player.failed}}!", response.message || "BankID reverification failed", "error");
+                                    }
+                                },
+                                error: function (xhr, status, error) {
+                                    console.error('BankID reverification error:', error);
+                                    
+                                    let errorMessage = "{{player.something_went_wrong}}";
+                                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                                        errorMessage = xhr.responseJSON.message;
+                                    }
+                                    
+                                    swal("{{player.failed}}!", errorMessage, "error");
+                                },
+                                complete: function () {
+                                    // Re-enable button and restore original text
+                                    $button.attr('disabled', false);
+                                }
+                            });
+                        }
+                    });
+                });
+
+            
+            },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+
+
+        // FIX FOR DROPDOEN CAUSING SCROLLING IN DATATABLE  START
+        // $('.table-responsive').on('show.bs.dropdown', function () {
+        //     $('.table-responsive').css("overflow", "inherit");
+        // });
+
+        // $('.table-responsive').on('hide.bs.dropdown', function () {
+        //     $('.table-responsive').css("overflow", "auto");
+        // })
+
+        // Add dropup functinality for last rows of datatable
+        // $('.table-responsive').on('show.bs.dropdown', function (e) {
+        //     const $dropdown = $(e.target).find('.dropdown-menu'); // Find the dropdown menu
+        //     const $button = $(e.target).find('.dropdown-toggle'); // Find the dropdown button
+        //     const buttonRect = $button[0].getBoundingClientRect(); // Get button position
+        //     const dropdownHeight = $dropdown.outerHeight(); // Get dropdown height
+        //     const viewportHeight = window.innerHeight; // Get viewport height
+
+        //     // Calculate available space below the button
+        //     const spaceBelow = viewportHeight - buttonRect.bottom;
+
+        //     // If there isn't enough space below, switch to dropup
+        //     if (spaceBelow < dropdownHeight) {
+        //         $(e.target).addClass('dropup'); // Add .dropup class
+        //     } else {
+        //         $(e.target).removeClass('dropup'); // Remove .dropup class
+        //     }
+        // });
+        // FIX FOR DROPDOEN CAUSING SCROLLING IN DATATABLE  END
+
+        // Dropdown cut issue on top and bottom
+        $(document).on('show.bs.dropdown', '.table-responsive', function (e) {
+            const $dropdown = $(e.target);
+            const $menu = $dropdown.find('.dropdown-menu');
+            const $button = $dropdown.find('.dropdown-toggle');
+
+            // Move dropdown menu to body to avoid overflow issues
+            $('body').append($menu.detach());
+
+            const buttonOffset = $button.offset();
+            const buttonHeight = $button.outerHeight();
+            const dropdownHeight = $menu.outerHeight();
+            const dropdownWidth = $menu.outerWidth();
+            const viewportHeight = $(window).height();
+            const viewportWidth = $(window).width();
+
+            let topPosition = buttonOffset.top + buttonHeight;
+            let leftPosition = buttonOffset.left;
+
+            // Adjust if dropdown is out of viewport
+            if (topPosition + dropdownHeight > viewportHeight) {
+                topPosition = buttonOffset.top - dropdownHeight;
+            }
+            if (leftPosition + dropdownWidth > viewportWidth) {
+                leftPosition = viewportWidth - dropdownWidth - 15;
+            }
+
+            // Apply position
+            $menu.css({
+                position: 'absolute',
+                top: `${topPosition}px`,
+                left: `${leftPosition}px`,
+                display: 'block',
+                zIndex: 1050
+            });
+
+            // Hide dropdown when clicking outside
+            $(document).on('click.hideDropdown', (event) => {
+                if (!$menu.is(event.target) && $menu.has(event.target).length === 0) {
+                    $menu.hide();
+                    $(document).off('click.hideDropdown'); // Remove event to avoid duplication
+                }
+            });
+
+            // Move dropdown back to original position on close
+            $dropdown.on('hidden.bs.dropdown', () => {
+                $dropdown.append($menu.detach());
+                $menu.hide();
+            });
+        });
+
+        $.formUtils.addValidator({
+            name: 'minimumAmount',
+            validatorFunction: function (value, $el, config, language, $form) {
+                let amount = $("#amount").val();
+                return parseInt(amount) > 0;
+            },
+            errorMessage: 'Amount should be greater than Zero.',
+            errorMessageKey: 'minimumAmount'
+        });
+
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

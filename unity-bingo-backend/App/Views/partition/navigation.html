@@ -1,0 +1,1549 @@
+<!-- Left side column. contains the logo and sidebar -->
+<aside class="main-sidebar">
+    <!-- sidebar: style can be found in sidebar.less -->
+    <section class="sidebar">
+        <!-- Sidebar user panel -->
+        <div class="user-panel">
+            <div class="pull-left image">
+                {% if session.role == 'admin' %}
+                <img src="/profile/{{session.avatar}}" class="img-circle" alt="User Image" width="50px" height="50px">
+                {% else %}
+                <img src="/profile/{{session.avatar}}" class="img-circle" alt="Agent Image" width="50px" height="50px">
+                {%endif%}
+            </div>
+            <div class="pull-left info">
+                <p>{{session.name}}</p>
+                <a href="#">
+                    <i class="fa fa-circle text-success"></i>{{navigation.online}}</a>
+            </div>
+        </div>
+        <!-- sidebar menu: style can be found in sidebar.less -->
+        <ul class="sidebar-menu" data-widget="tree">
+            <li class="header">{{navigation.main_navigation}}</li>
+
+            <!-- ****************************************************************************************************** -->
+            {# Main Navigation Start Over #}
+            <!-- ****************************************************************************************************** -->
+            {% if session.role == 'admin' and session.isSuperAdmin %}
+
+
+            <li class="{{classActive}}">
+                <a href="/admin">
+                    <i class="fa fa-dashboard"></i>
+                    <span>{{navigation.dashboard}}</span>
+                </a>
+            </li>
+
+            <li class="treeview {{PlayersManagement}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.player_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{playerActive}}">
+                        <a href="/player">
+                            <i class="fa fa-circle-o"></i>{{navigation.approved_players}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{PendingRequests}}">
+                        <a href="/pendingRequests">
+                            <i class="fa fa-circle-o"></i>{{navigation.pending_requests}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{RejectedRequests}}">
+                        <a href="/rejectedRequests">
+                            <i class="fa fa-circle-o"></i>{{navigation.reject_requests}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                </ul>
+            </li>
+
+            <li class="{{trackSpendingActive}}">
+                <a href="/players/track-spending">
+                    <i class="fa fa-gamepad"></i>
+                    <span>{{navigation.tracking_player_spending}}</span>
+                </a>
+            </li>
+
+            <li class="{{gameTypeActive}}">
+                <a href="/gameType">
+                    <i class="fa fa-gamepad"></i>
+                    <span>{{navigation.game_type}}</span>
+                </a>
+            </li>
+
+            <!-- <li class="{{subGameActive}}">
+                <a href="/subGame">
+                    <i class="fa fa-gamepad"></i>
+                    <span>Sub Games For Game 1</span>
+                </a>
+            </li> -->
+
+            {# Old Document wise
+            <li class="treeview {{GameMenu}}" id="gameMenu">
+                <a href="#">
+                    <i class="fa fa-gamepad"></i>
+                    <span>{{navigation.game_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu" id="treeViewGameMenu">
+                    <!--
+                       <li class="{{game1Active}}">
+                        <a href="#">
+                            <i class="fa fa-trophy"></i> Game 1
+                            <span class="pull-right-container">
+                                                <i class="pull-right"></i>
+                                            </span>
+                        </a>
+                    </li>
+                    <li class="{{game2Active}}">
+                        <a href="/gameTwo">
+                            <i class="fa fa-trophy"></i> Game 2
+                            <span class="pull-right-container">
+                                                <i class="pull-right"></i>
+                                            </span>
+                        </a>
+                    </li>
+                    <li class="{{game3Active}}">
+                        <a href="/gameThree">
+                            <i class="fa fa-trophy"></i> Game 3
+                            <span class="pull-right-container">
+                                                <i class="pull-right"></i>
+                                            </span>
+                        </a>
+                    </li>
+                    <li class="{{game4Active}}">
+                        <a href="#">
+                            <i class="fa fa-trophy"></i> Game 4
+                            <span class="pull-right-container">
+                                                <i class="pull-right"></i>
+                                            </span>
+                        </a>
+                    </li> -->
+                </ul>
+            </li> #}
+
+            <li class="{{ScheduleManagement}}" id="scheduleManagement">
+                <a href="/schedules">
+                    <i class="fa fa-calendar"></i>
+                    <span>{{navigation.schedule_management}}</span>
+                </a>
+            </li>
+
+            <li class="{{GameManagement}}" id="gameManagement">
+                <a href="/gameManagement">
+                    <i class="fa fa-gamepad"></i>
+                    <span>{{navigation.game_creation_management}}</span>
+                </a>
+            </li>
+
+            <li class="{{savedGameList}}" id="savedGameList">
+                <a href="/savedGameList">
+                    <i class="fa fa-gears mr-20"></i>
+                    <span>{{navigation.saved_game_list}}</span>
+                </a>
+            </li>
+
+            <li class="treeview {{otherGamesMenu}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.other_games}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{wheelOfFortune}}">
+                        <a href="/wheelOfFortune">
+                            <i class="fa fa-circle-o"></i>{{navigation.wheel_of_fortune}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{treasureChest}}">
+                        <a href="/treasureChest">
+                            <i class="fa fa-circle-o"></i>{{navigation.treasure_chest}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{mysteryGame}}">
+                        <a href="/mystery">
+                            <i class="fa fa-circle-o"></i>{{navigation.mystery_game}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{colorDraftGame}}">
+                        <a href="/colorDraft">
+                            <i class="fa fa-circle-o"></i>{{navigation.color_draft}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                </ul>
+            </li>
+
+            <li class="{{addPhysicalTicketsActive}}" id="addPhysicalTickets">
+                <a href="/addPhysicalTickets">
+                    <i class="fa fa-ticket"></i>
+                    <span>{{navigation.add_physical_tickets}}</span>
+                </a>
+            </li>
+
+            <li class="{{physicalTicketManagement}}" id="physicalTicketManagement">
+                <a href="/physicalTicketManagement">
+                    <i class="fa fa-gears mr-20"></i>
+                    <span>{{navigation.physical_ticket_management}} </span>
+                </a>
+            </li>
+
+            <li class="{{soldTicketManagement}}" id="soldTicketManagement">
+                <a href="/sold-tickets">
+                    <i class="fa fa-ticket mr-20"></i>
+                    <span>{{navigation.sold_tickets}} </span>
+                </a>
+            </li>
+
+            <li class="treeview {{uniqueMenu}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.unique_id_modules}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+
+                    <li class="{{uniqueAdd}}">
+                        <a href="/uniqueId">
+                            <i class="fa fa-circle-o"></i> {{navigation.generate_unique_id}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{uniqueList}}">
+                        <a href="/uniqueIdList">
+                            <i class="fa fa-circle-o"></i>{{navigation.unique_id_list}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                </ul>
+            </li>
+
+
+            <li class="treeview {{otherModules}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.other_modules}} </span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <!-- <li class="{{background}}">
+                        <a href="/background">
+                            <i class="fa fa-circle-o"></i> Background
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li> -->
+
+                    <li class="{{themeCl}}">
+                        <a href="/theme">
+                            <i class="fa fa-circle-o"></i>{{navigation.theme}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <!-- <li class="{{miniGames1}}">
+                        <a href="#">
+                            <i class="fa fa-circle-o"></i> Mini Games (Game 1)
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li> -->
+
+                </ul>
+            </li>
+
+            <li class="treeview {{PatternMenu}}" id="patternMenu">
+                <a href="#">
+                    <i class="fa fa-paint-brush"></i>
+                    <span>{{navigation.pattern_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu" id="treeViewPatternMenu">
+
+                </ul>
+            </li>
+
+            <li class="{{adminActive}}">
+                <a href="/adminUser">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.admin_management}}</span>
+                </a>
+            </li>
+
+            <li class="{{agentActive}}">
+                <a href="/agent">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.agent_management}}</span>
+                </a>
+            </li>
+
+            <li class="{{hallActive}}">
+                <a href="/hall">
+                    <i class="fa fa-bank"></i>
+                    <span>{{navigation.hall_management}}</span>
+                </a>
+            </li>
+
+            <li class="{{groupHallActive}}">
+                <a href="/groupHall">
+                    <i class="fa fa-bank"></i>
+                    <span>{{navigation.group_of_halls_management}}</span>
+                </a>
+            </li>
+
+            <li class="treeview {{productManagement}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.product_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{productList}}">
+                        <a href="/productList">
+                            <i class="fa fa-circle-o"></i>{{navigation.product_list}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{categoryList}}">
+                        <a href="/categoryList">
+                            <i class="fa fa-circle-o"></i>{{navigation.category_list}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{orderHistory}}">
+                        <a href="/orderHistory">
+                            <i class="fa fa-circle-o"></i> {{navigation.order_history}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <!-- <li class="{{hallProductList}}">
+                        <a href="/hallProductList">
+                            <i class="fa fa-circle-o"></i> Hall Product Management
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li> -->
+                </ul>
+            </li>
+
+            <li class="{{roleActive}}">
+                <a href="/role">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.role_management}}</span>
+                </a>
+            </li>
+
+            <li class="treeview {{ReportMenu}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.report_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{reportgame1}}">
+                        <a href="/reportGame1">
+                            <i class="fa fa-circle-o"></i>{{navigation.game1}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportgame2}}">
+                        <a href="/reportGame2">
+                            <i class="fa fa-circle-o"></i> {{navigation.game2}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportgame3}}">
+                        <a href="/reportGame3">
+                            <i class="fa fa-circle-o"></i> {{navigation.game3}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportgame4}}">
+                        <a href="/reportGame4">
+                            <i class="fa fa-circle-o"></i> {{navigation.game4}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportgame5}}">
+                        <a href="/reportGame5">
+                            <i class="fa fa-circle-o"></i> {{navigation.game5}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{hallSpecificReport}}">
+                        <a href="/hallSpecificReport">
+                            <i class="fa fa-circle-o"></i>{{navigation.hall_specific_reports}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportPhysicalTicket}}">
+                        <a href="/physicalTicketReport">
+                            <i class="fa fa-circle-o"></i>{{navigation.physical_ticket}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportUniqueTicket}}">
+                        <a href="/uniqueGameReport">
+                            <i class="fa fa-circle-o"></i>{{navigation.unique_ticket}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{redFlagCategory}}">
+                        <a href="/redFlagCategory">
+                            <i class="fa fa-circle-o"></i>{{navigation.red_flag_category}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportTotalRevenue}}">
+                        <a href="/totalRevenueReport">
+                            <i class="fa fa-circle-o"></i>{{navigation.total_revenue_report}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+
+            <li class="treeview {{PayoutMenu}}">
+                <a href="#">
+                    <i class="fa fa-google-wallet"></i>
+                    <span>{{navigation.payout_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{payoutPlayer}}">
+                        <a href="/payoutPlayer">
+                            <i class="fa fa-circle-o"></i> {{navigation.payout_for_players}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{payoutTicket}}">
+                        <a href="/payoutTickets">
+                            <i class="fa fa-circle-o"></i>{{navigation.payout_for_ticket}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                </ul>
+            </li>
+
+            <li class="{{riskCountryActive}}">
+                <a href="/riskCountry">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.risk_country}}</span>
+                </a>
+            </li>
+
+            <li class="{{hallAccountReportActive}}">
+                <a href="/hallAccountReport">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.hall_account_report}}</span>
+                </a>
+            </li>
+
+            <li class="{{walletActive}}">
+                <a href="/wallet">
+                    <i class="fa fa-credit-card "></i>
+                    <span>{{navigation.wallet_management}}</span>
+                </a>
+            </li>
+
+            <!-- <li class="{{TransactionActive}}">
+                <a href="/transactions">
+                    <i class="fa fa-money"></i>
+                    <span>Transactions Management</span>
+                </a>
+            </li> -->
+            <li class="treeview {{depositActive}}">
+                <a href="#">
+                    <i class="fa fa-money"></i>
+                    <span>{{navigation.transactions_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{depositRequestsActive}}">
+                        <a href="/deposit/requests">
+                            <i class="fa fa-circle-o"></i>{{navigation.deposit_request}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{depositHistoryActive}}">
+                        <a href="/deposit/history">
+                            <i class="fa fa-circle-o"></i>{{navigation.deposit_history}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+
+            <li class="treeview {{mywithdrawActive}}">
+                <a href="#">
+                    <i class="fa fa-user-secret"></i>
+                    <span>{{navigation.withdraw_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <!-- <ul class="treeview-menu">
+                    <li class="{{withdrawActive}}">
+                        <a href="/withdrawAmt">
+                            <i class="fa fa-circle-o"></i> Withdraw Request
+                            <span class="pull-right-container">
+                                            <i class="pull-right"></i>
+                                        </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawAmtHistory}}">
+                        <a href="/withdrawAmtHistory">
+                            <i class="fa fa-circle-o"></i> Withdraw History
+                            <span class="pull-right-container">
+                                            <i class="pull-right"></i>
+                                        </span>
+                        </a>
+                    </li>
+                </ul> -->
+                <ul class="treeview-menu">
+                    <li class="{{withdrawInHallActive}}">
+                        <a href="/withdraw/requests/hall">
+                            <i class="fa fa-circle-o"></i>{{navigation.withdraw_request_in_hall}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawInBankActive}}">
+                        <a href="/withdraw/requests/bank">
+                            <i class="fa fa-circle-o"></i>{{navigation.withdraw_request_in_bank}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawAmtHistoryHall}}">
+                        <a href="/withdraw/history/hall">
+                            <i class="fa fa-circle-o"></i>{{navigation.withdraw_history_hall}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawAmtHistoryBank}}">
+                        <a href="/withdraw/history/bank">
+                            <i class="fa fa-circle-o"></i>{{navigation.withdraw_history_bank}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawAddEmails}}">
+                        <a href="/withdraw/list/emails">
+                            <i class="fa fa-circle-o"></i>{{navigation.add_email_account}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+
+            <li class="{{leaderboardActive}}">
+                <a href="/leaderboard">
+                    <i class="fa fa-credit-card-alt"></i>
+                    <span>{{navigation.leaderboard_management}}</span>
+                </a>
+            </li>
+
+            <li class="{{VoucherActive}}">
+                <a href="/voucher">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.voucher_management}}</span>
+                </a>
+            </li>
+
+            <li class="treeview {{myloyaltyManagementActive}}">
+                <a href="#">
+                    <i class="fa fa-user-secret"></i>
+                    <span>{{navigation.loyalty_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{loyaltyManagementActive}}">
+                        <a href="/loyaltyManagement">
+                            <i class="fa fa-circle-o"></i> {{navigation.players_loyalty_management}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{loyaltyActive}}">
+                        <a href="/loyalty">
+                            <i class="fa fa-circle-o"></i>{{navigation.loyalty_type}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+            
+
+            <li class="{{smsAdvertisementActive}}">
+                <a href="/sms-advertisement">
+                    <i class="fa fa-mobile mr-20"></i>
+                    <span>{{navigation.sms_advertisement}}</span>
+                </a>
+            </li>
+
+            <li class="{{cmsActive}}">
+                <a href="/cms">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.cms_management}}</span>
+                </a>
+            </li>
+
+            <li class="{{settingActive}}">
+                <a href="/settings">
+                    <i class="fa fa-gears mr-20"></i>
+                    <span> {{navigation.settings}}</span>
+                </a>
+            </li>
+            <li class="{{systemInformation}}">
+                <a href="/system/systemInformation">
+                    <i class="fa fa-bar-chart "></i>
+                    <span> {{navigation.system_information}}</span>
+                </a>
+            </li>
+
+
+            {# Agent Navigation #} {% else %}
+
+            {% if session.role != 'admin' or session.isSuperAdmin == false %}
+
+            <li class="{{classActive}}">
+                <a href="/admin">
+                    <i class="fa fa-dashboard"></i>
+                    <span>{{navigation.dashboard}}</span>
+                </a>
+            </li>
+            {% if session.role == 'agent' %}
+            <li class="treeview {{cashinoutManagement}}">
+                <a href="#">
+                    <i class="fa fa-money"></i>
+                    <span>{{navigation.cash_in_out}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{cashinoutActive}}">
+                        <a href="/agent/cashinout">
+                            <i class="fa fa-circle-o"></i> {{navigation.cash_in_out}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{soldTicketManagement}}">
+                        <a href="/sold-tickets">
+                            <i class="fa fa-circle-o"></i>{{navigation.sold_tickets}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                </ul>
+            </li>
+            {% endif %}
+            {% endif %}
+
+            <!-- Players Management -->
+            {% if 'Players Management' in Agent.isPermission %}
+            <li class="treeview {{PlayersManagement}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.player_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{playerActive}}">
+                        <a href="/player">
+                            <i class="fa fa-circle-o"></i> {{navigation.approved_players}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{PendingRequests}}">
+                        <a href="/pendingRequests">
+                            <i class="fa fa-circle-o"></i> {{navigation.pending_requests}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{RejectedRequests}}">
+                        <a href="/rejectedRequests">
+                            <i class="fa fa-circle-o"></i> {{navigation.reject_requests}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                </ul>
+            </li>
+            {%endif%}
+
+            {% if 'Tracking Player Spending' in Agent.isPermission %}
+            <li class="{{trackSpendingActive}}">
+                <a href="/players/track-spending">
+                    <i class="fa fa-gamepad"></i>
+                    <span>{{navigation.tracking_player_spending}}</span>
+                </a>
+            </li>
+            {% endif %}
+
+            {% if 'Game Type' in Agent.isPermission %}
+            <li class="{{gameTypeActive}}">
+                <a href="/gameType">
+                    <i class="fa fa-gamepad"></i>
+                    <span>{{navigation.game_type}}</span>
+                </a>
+            </li>
+            {% endif %}
+
+            {% if 'Schedule Management' in Agent.isPermission %}
+            <li class="{{ScheduleManagement}}" id="scheduleManagement">
+                <a href="/schedules">
+                    <i class="fa fa-calendar"></i>
+                    <span>{{navigation.schedule_management}}</span>
+                </a>
+            </li>
+            {% endif %}
+
+            <!-- Games Management -->
+            {% if 'Games Management' in Agent.isPermission %}
+            <li class="{{GameManagement}}" id="gameManagement">
+                <a href="/gameManagement">
+                    <i class="fa fa-gamepad"></i>
+                    <span>{{navigation.game_creation_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            {% if 'Save Game List' in Agent.isPermission %}
+            <li class="{{savedGameList}}" id="savedGameList">
+                <a href="/savedGameList">
+                    <i class="fa fa-gears mr-20"></i>
+                    <span>{{navigation.saved_game_list}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            {% if 'Other Games' in Agent.isPermission %}
+            <li class="treeview {{otherGamesMenu}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.other_games}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{wheelOfFortune}}">
+                        <a href="/wheelOfFortune">
+                            <i class="fa fa-circle-o"></i>{{navigation.wheel_of_fortune}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{treasureChest}}">
+                        <a href="/treasureChest">
+                            <i class="fa fa-circle-o"></i>{{navigation.treasure_chest}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{mysteryGame}}">
+                        <a href="/mystery">
+                            <i class="fa fa-circle-o"></i>{{navigation.mystery_game}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <li class="{{colorDraftGame}}">
+                        <a href="/colorDraft">
+                            <i class="fa fa-circle-o"></i>{{navigation.color_draft}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                </ul>
+            </li>
+            {% endif %}
+
+            
+            {% if('Physical Ticket Management' in Agent.isPermission and 'add' in Agent.isPermission['Physical Ticket Management']) %}
+            <li class="{{addPhysicalTicketsActive}}" id="addPhysicalTickets">
+                <a href="/addPhysicalTickets">
+                    <i class="fa fa-ticket"></i>
+                    <span>{{navigation.add_physical_tickets}}</span>
+                </a>
+            </li>
+            {% endif %}
+            {% if ('Physical Ticket Management' in Agent.isPermission ) %}
+            <li class="{{physicalTicketManagement}}" id="physicalTicketManagement">
+                <a href="/physicalTicketManagement">
+                    <i class="fa fa-gears mr-20"></i>
+                    <span>{{navigation.physical_ticket_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            {% if ('Physical Ticket Management' in Agent.isPermission and Agent.role == 'admin') %}
+            <li class="{{soldTicketManagement}}" id="soldTicketManagement">
+                <a href="/sold-tickets">
+                    <i class="fa fa-ticket mr-20"></i>
+                    <span>{{navigation.sold_tickets}} </span>
+                </a>
+            </li>
+            {% endif %}
+            {% if ('Physical Ticket Management' in Agent.isPermission and Agent.role == 'agent') %}
+            <li class="{{physicalCashout}}" id="physicalCashout">
+                <a href="/agent/physicalCashOut">
+                    <i class="fa fa-ticket"></i>
+                    <span>{{navigation.physical_cash_out}}</span>
+                </a>
+            </li>
+            {% endif %}
+
+            {% if 'Agent Management' in Agent.isPermission %}
+            <li class="{{agentActive}}">
+                <a href="/agent">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.agent_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            <!-- Hall Management -->
+            {% if 'Hall Management' in Agent.isPermission %}
+            <li class="{{hallActive}}">
+                <a href="/hall">
+                    <i class="fa fa-bank"></i>
+                    <span>{{navigation.hall_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            {% if 'Group Of Halls Management' in Agent.isPermission %}
+            <li class="{{groupHallActive}}">
+                <a href="/groupHall">
+                    <i class="fa fa-bank"></i>
+                    <span>{{navigation.group_of_halls_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            {% if 'Unique ID Modules' in Agent.isPermission %}
+            <li class="treeview {{uniqueMenu}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.unique_id_modules}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+
+                    {% if('add' in Agent.isPermission['Unique ID Modules']) %}
+                    <li class="{{uniqueAdd}}">
+                        <a href="/uniqueId">
+                            <i class="fa fa-circle-o"></i> {{navigation.generate_unique_id}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    {% endif %}
+
+                    {% if('view' in Agent.isPermission['Unique ID Modules']) %}
+                    <li class="{{uniqueList}}">
+                        <a href="/uniqueIdList">
+                            <i class="fa fa-circle-o"></i>{{navigation.unique_id_list}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    {% endif %}
+
+                </ul>
+            </li>
+            {% endif %}
+
+            {% if 'Other Modules' in  Agent.isPermission %}
+            <li class="treeview {{otherModules}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.other_modules}} </span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{themeCl}}">
+                        <a href="/theme">
+                            <i class="fa fa-circle-o"></i>{{navigation.theme}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+            {% endif %}
+            {% if "Pattern Management" in Agent.isPermission %}
+            <li class="treeview {{PatternMenu}}" id="patternMenu">
+                <a href="#">
+                    <i class="fa fa-paint-brush"></i>
+                    <span>{{navigation.pattern_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu" id="treeViewPatternMenu">
+
+                </ul>
+            </li>
+            {% endif %}
+
+            {% if "Product Management" in Agent.isPermission %}
+            <li class="treeview {{productManagement}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.product_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{productList}}">
+                        <a href="/productList">
+                            <i class="fa fa-circle-o"></i> {{navigation.product_list}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    {% if('add' in Agent.isPermission['Product Management']) %}
+                    <li class="{{hallProductList}}">
+                        <a href="/hallProductList">
+                            <i class="fa fa-circle-o"></i>{{navigation.hall_product_management}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="{{orderHistory}}">
+                        <a href="/orderHistory">
+                            <i class="fa fa-circle-o"></i>{{navigation.order_history}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+            {% endif %}
+
+            {% if 'Role Management' in Agent.isPermission %}
+            <li class="{{roleActive}}">
+                <a href="/role">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.role_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            <!-- Report Management -->
+            {% if 'Report Management' in Agent.isPermission %}
+            <li class="treeview {{ReportMenu}}">
+                <a href="#">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.report_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{reportgame1}}">
+                        <a href="/reportGame1">
+                            <i class="fa fa-circle-o"></i> {{navigation.game1}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportgame2}}">
+                        <a href="/reportGame2">
+                            <i class="fa fa-circle-o"></i> {{navigation.game2}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportgame3}}">
+                        <a href="/reportGame3">
+                            <i class="fa fa-circle-o"></i> {{navigation.game3}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportgame4}}">
+                        <a href="/reportGame4">
+                            <i class="fa fa-circle-o"></i> {{navigation.game4}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportgame5}}">
+                        <a href="/reportGame5">
+                            <i class="fa fa-circle-o"></i> {{navigation.game5}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                    <!-- <li class="{{hallSpecificReport}}">
+                        <a href="/hallSpecificReport">
+                            <i class="fa fa-circle-o"></i> Hall Specific Reports
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li> -->
+                    {% if 'Hall Account Specific Report' in Agent.isPermission and Agent.role == 'admin' %}
+                    <li class="{{hallSpecificReport}}">
+                        <a href="/hallSpecificReport">
+                            <i class="fa fa-circle-o"></i>{{navigation.hall_specific_reports}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="{{reportPhysicalTicket}}">
+                        <a href="/physicalTicketReport">
+                            <i class="fa fa-circle-o"></i> {{navigation.physical_ticket}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportUniqueTicket}}">
+                        <a href="/uniqueGameReport">
+                            <i class="fa fa-circle-o"></i>{{navigation.unique_ticket}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{redFlagCategory}}">
+                        <a href="/redFlagCategory">
+                            <i class="fa fa-circle-o"></i>{{navigation.red_flag_category}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{reportTotalRevenue}}">
+                        <a href="/totalRevenueReport">
+                            <i class="fa fa-circle-o"></i>{{navigation.total_revenue_report}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+            {%endif%}
+
+            <!-- Payout Management -->
+            {% if 'Payout Management' in Agent.isPermission %}
+            <li class="treeview {{PayoutMenu}}">
+                <a href="#">
+                    <i class="fa fa-google-wallet"></i>
+                    <span>{{navigation.payout_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{payoutPlayer}}">
+                        <a href="/payoutPlayer">
+                            <i class="fa fa-circle-o"></i>{{navigation.payout_for_players}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{payoutTicket}}">
+                        <a href="/payoutTickets">
+                            <i class="fa fa-circle-o"></i> {{navigation.payout_for_ticket}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+
+                </ul>
+            </li>
+            {%endif%}
+
+            {% if 'Risk Country' in Agent.isPermission %}
+            <li class="{{riskCountryActive}}">
+                <a href="/riskCountry">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.risk_country}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            {% if 'Hall Account Report' in Agent.isPermission and Agent.role == 'agent' %}
+            <li class="{{hallAccountReportActive}}">
+                <a href="/hallAccountReportTable/{{Agent.hall[0].id}}">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.hall_account_report}}</span>
+                </a>
+            </li>
+            <li class="{{settlementReportActive}}">
+                <a href="/report/settlement/{{Agent.hall[0].id}}">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.settlement_report}}</span>
+                </a>
+            </li>
+            {% endif %}
+
+            {% if 'Hall Account Report' in Agent.isPermission and Agent.role == 'admin' %}
+            <li class="{{hallAccountReportActive}}">
+                <a href="/hallAccountReport">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.hall_account_report}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            {% if 'Hall Account Specific Report' in Agent.isPermission and Agent.role == 'agent' %}
+            <li class="{{hallspecificReport}}" id="hallspecificReport">
+                <a href="/hallSpecificReport">
+                    <i class="fa fa-building-o"></i> {{navigation.hall_specific_reports}}
+                    <span class="pull-right-container">
+                        <i class="pull-right"></i>
+                    </span>
+                </a>
+            </li>
+            {% endif %}
+
+            <!-- Wallet Management -->
+            {% if 'Wallet Management' in Agent.isPermission %}
+            <li class="{{walletActive}}">
+                <a href="/wallet">
+                    <i class="fa fa-credit-card "></i>
+                    <span>{{navigation.wallet_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            <!-- Transactions Management -->
+            {% if 'Transactions Management' in Agent.isPermission or 'Accounting' in Agent.isPermission %}
+            <!-- <li class="{{TransactionActive}}">
+                <a href="/transactions">
+                    <i class="fa fa-money"></i>
+                    <span>Transactions Management</span>
+                </a>
+            </li> -->
+
+            <li class="treeview {{depositActive}}">
+                <a href="#">
+                    <i class="fa fa-money"></i>
+                    <span>{{navigation.transactions_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{depositRequestsActive}}">
+                        <a href="/deposit/requests">
+                            <i class="fa fa-circle-o"></i>{{navigation.deposit_request}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{depositHistoryActive}}">
+                        <a href="/deposit/history">
+                            <i class="fa fa-circle-o"></i> {{navigation.deposit_history}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+
+            {%endif%}
+
+            <!-- Withdraw Management -->
+            {% if 'Withdraw Management' in Agent.isPermission or 'Accounting' in Agent.isPermission %}
+            <li class="treeview {{mywithdrawActive}}">
+                <a href="#">
+                    <i class="fa fa-user-secret"></i>
+                    <span>{{navigation.withdraw_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <!-- <ul class="treeview-menu">
+                    <li class="{{withdrawActive}}">
+                        <a href="/withdrawAmt">
+                            <i class="fa fa-circle-o"></i> Withdraw Request
+                            <span class="pull-right-container">
+                                            <i class="pull-right"></i>
+                                        </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawAmtHistory}}">
+                        <a href="/withdrawAmtHistory">
+                            <i class="fa fa-circle-o"></i> Withdraw History
+                            <span class="pull-right-container">
+                                            <i class="pull-right"></i>
+                                        </span>
+                        </a>
+                    </li>
+                </ul> -->
+                <ul class="treeview-menu">
+                    <li class="{{withdrawInHallActive}}">
+                        <a href="/withdraw/requests/hall">
+                            <i class="fa fa-circle-o"></i> {{navigation.withdraw_request_in_hall}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawInBankActive}}">
+                        <a href="/withdraw/requests/bank">
+                            <i class="fa fa-circle-o"></i> {{navigation.withdraw_request_in_bank}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawAmtHistoryHall}}">
+                        <a href="/withdraw/history/hall">
+                            <i class="fa fa-circle-o"></i>{{navigation.withdraw_history_hall}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{withdrawAmtHistoryBank}}">
+                        <a href="/withdraw/history/bank">
+                            <i class="fa fa-circle-o"></i> {{navigation.withdraw_history_bank}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+            {%endif%}
+
+            <!-- Voucher Management -->
+            {% if 'Voucher Management' in Agent.isPermission %}
+            <li class="{{VoucherActive}}">
+                <a href="/voucher">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.voucher_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            <!-- Loyalty Management -->
+            {% if 'Loyalty Management' in Agent.isPermission %}
+            <li class="treeview {{myloyaltyManagementActive}}">
+                <a href="#">
+                    <i class="fa fa-user-secret"></i>
+                    <span>{{navigation.loyalty_management}}</span>
+                    <span class="pull-right-container">
+                        <i class="fa fa-angle-left pull-right"></i>
+                    </span>
+                </a>
+                <ul class="treeview-menu">
+                    <li class="{{loyaltyManagementActive}}">
+                        <a href="/loyaltyManagement">
+                            <i class="fa fa-circle-o"></i> {{navigation.players_loyalty_management}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                    <li class="{{loyaltyActive}}">
+                        <a href="/loyalty">
+                            <i class="fa fa-circle-o"></i> {{navigation.loyalty_type}}
+                            <span class="pull-right-container">
+                                <i class="pull-right"></i>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </li>
+            {%endif%}
+            {% if 'SMS Advertisement' in Agent.isPermission%}
+            <li class="{{smsAdvertisementActive}}">
+                <a href="/sms-advertisement">
+                    <i class="fa fa-mobile mr-20"></i>
+                    <span>{{navigation.sms_advertisement}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            <!-- Leaderboard Management -->
+            {% if 'Leaderboard Management' in Agent.isPermission %}
+            <li class="{{leaderboardActive}}">
+                <a href="/leaderboard">
+                    <i class="fa fa-credit-card-alt"></i>
+                    <span>{{navigation.leaderboard_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            <!-- System Information -->
+            {% if 'System Information' in Agent.isPermission %}
+            <li class="{{systemInformation}}">
+                <a href="/system/systemInformation">
+                    <i class="fa fa-bar-chart "></i>
+                    <span>{{navigation.system_information}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            <!-- CMS Management -->
+            {% if 'CMS Management' in Agent.isPermission %}
+            <li class="{{cmsActive}}">
+                <a href="/cms">
+                    <i class="fa fa-users mr-20"></i>
+                    <span>{{navigation.cms_management}}</span>
+                </a>
+            </li>
+            {%endif%}
+            {% if 'Settings' in Agent.isPermission %}
+            <li class="{{settingActive}}">
+                <a href="/settings">
+                    <i class="fa fa-gears mr-20"></i>
+                    <span> {{navigation.settings}}</span>
+                </a>
+            </li>
+            {%endif%}
+
+            {%endif%}
+            <!-- ****************************************************************************************************** -->
+            {# Main Navigation End Over #}
+            <!-- ****************************************************************************************************** -->
+        </ul>
+    </section>
+    <!-- /.sidebar -->
+</aside>
+<script>
+    // Get Game menu Links
+    var host = window.location.origin;
+    var gameMenuClicked = false;
+    $("#gameMenu").click(function () {
+        console.log("gameMenu Call");
+        $.ajax({
+            type: 'POST',
+            url: host + "/gameMenu/getGameMenu",
+            success: function (resultData) {
+                if (resultData.status == "success") {
+                    if (resultData.data != null) {
+                        console.log("resultData", resultData.data);
+                        if (!gameMenuClicked) {
+                            gameMenuClicked = true;
+                            let html = '';
+                            for (let i = 0; i < resultData.data.length; i++) {
+                                html += '<li>\
+                                            <a href = "/gameDetailList/' + resultData.data[i]._id + '" > \
+                                                <i class = "fa fa-trophy" ></i>' + resultData.data[i].name + '\
+                                                    <span class="pull-right-container">\
+                                                        <i class="pull-right"></i>\
+                                                    </span>\
+                                            </a>\
+                                        </li> '
+                            }
+                            $("#treeViewGameMenu").append(html);
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+
+    var gameManagementClicked = false;
+    $("#gameManagement").click(function () {
+        if (!gameManagementClicked) {
+            gameManagementClicked = true;
+            // if any pervious key store so localStorage do Clear this  key
+            localStorage.removeItem("selectedId");
+            localStorage.clear();
+        }
+    });
+
+
+
+    // Pattern Menu
+    var patternMenuClicked = false;
+    $("#patternMenu").click(function () {
+        console.log("patternMenu Call");
+        $.ajax({
+            type: 'POST',
+            url: host + "/getPatternMenu",
+            success: function (resultData) {
+                if (resultData.status == "success") {
+                    if (resultData.data != null) {
+                        console.log("resultData", resultData.data);
+                        if (!patternMenuClicked) {
+                            patternMenuClicked = true;
+                            let html = '';
+                            for (let i = 0; i < resultData.data.length; i++) {
+                                html += '<li>\
+                                            <a href = "/patternGameDetailList/' + resultData.data[i]._id + '" > \
+                                                <i class = "fa fa-pencil-square" ></i>' + resultData.data[i].name + '\
+                                                    <span class="pull-right-container">\
+                                                        <i class="pull-right"></i>\
+                                                    </span>\
+                                            </a>\
+                                        </li> '
+                            }
+                            $("#treeViewPatternMenu").append(html);
+                        }
+                    }
+                }
+            }
+        });
+    });
+</script>

@@ -1,0 +1,139 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{loyalty.loyalty_management}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{loyalty.dashboard}}</a></li>
+                <li class="active">{{loyalty.loyalty_management}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{loyalty.loyalty_management}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{loyalty.username}}</th>
+                                                    <th>{{loyalty.emailId}}</th>
+                                                    <th>{{loyalty.mobile_number}}</th>
+                                                    <th>{{loyalty.firstname}}</th>
+                                                    <th>{{loyalty.loyalty_points}}</th>
+                                                    <th>{{loyalty.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+
+        // [ Variable Declaration ]
+        let viewFlag = '{{viewFlag}}';
+
+        let reqCount = '{{reqCount}}';
+        console.log('reqC: ', reqCount);
+
+        var host = window.location.origin;
+        $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "{{loyalty.search}} {{loyalty.username}}",
+                "sLengthMenu": "{{loyalty.show}} _MENU_ {{loyalty.entries}}",
+                "oPaginate": {
+                    sPrevious: "{{ loyalty.previous }}",
+                    sNext: "{{ loyalty.next }}"
+                },
+                "sEmptyTable": "{{loyalty.no_data_available_in_table}}",
+                "sInfo": "{{loyalty.showing}} _START_ to _END_ of _TOTAL_ {{loyalty.entries}}",
+                "sInfoEmpty": "{{loyalty.showing}} 0 to 0 of 0 {{loyalty.entries}}"
+            },
+            "scrollX": true,
+            "searching": true,
+            "processing": true,
+            "serverSide": true,
+            "order": [
+                [0, "desc"]
+            ],
+            "columnDefs": [{
+                "targets": [5],
+                "orderable": false
+            }],
+            "autoWidth": false,
+            "pageLength": 25,
+            "ajax": host + "/loyalty/getPlayerLoyalty",
+            "columns": [{
+                "data": "username"
+            }, {
+                "data": "email",
+                render: function(data, type, row) {
+                    if(data){
+                        return data;
+                    }
+                    return "";
+                }
+            }, {
+                "data": "phone",
+                render: function(data, type, row) {
+                    if(data){
+                        return data;
+                    }
+                    return "";
+                }
+            }, {
+                "data": "nickname"
+            }, {
+                "data": "loyaltyPoints"
+            }, {
+                "data": "action",
+                render: function(data, type, row) {
+
+
+                    let html = '';
+
+                    if (viewFlag == 'true') {
+                        html += `<a href="/viewLoyaltyPlayer/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="View Player">
+                                    <i class="fa fa-eye" aria-hidden="true"></i>
+                                </a>`
+                    } else {
+                        html += `  `;
+                    }
+
+                    return html;
+                }
+            }],
+        });
+
+    });
+</script>
+{% endblock %}

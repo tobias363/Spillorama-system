@@ -1,0 +1,693 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+  .modal-content {
+    padding: 20px;
+    border-radius: 8px;
+  }
+
+  .modal-header {
+    text-align: center;
+  }
+
+  .modal-title {
+    font-size: 1.5em;
+  }
+
+  .modal-body {
+    padding: 20px;
+  }
+
+  .modal-footer {
+    text-align: center;
+    background-color: #f1f1f1;
+    padding: 15px;
+  }
+
+  .btn-show-modal {
+    background-color: #007bff;
+    color: white;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+
+  .btn-show-modal:hover {
+    background-color: #0056b3;
+  }
+
+  /* Custom Styles for the Modal Table */
+  .modal-table {
+    margin-top: 20px;
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .modal-table th, .modal-table td {
+    padding: 12px;
+    text-align: left;
+    border: 1px solid #ddd;
+  }
+
+  .modal-table th {
+    text-align: center;
+  }
+
+  .modal-table td {
+    background-color: #f9f9f9;
+  }
+
+  /* Style for Winning Numbers Grid in the Modal */
+  .winning-numbers-table {
+    margin-top: 10px;
+    width: 100%;
+  }
+
+  .winning-numbers-table td {
+    border: none;
+    padding: 10px;
+    text-align: center;
+    font-weight: bold;
+    color: #333;
+  }
+
+  .winning-numbers-table tr {
+    text-align: center;
+  }
+
+  .no-winners-message {
+    text-align: center !important;
+  }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{soldTicket.sold_tickets}} </h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{soldTicket.dashboard}}</a></li>
+                <li class="active" href="/soldTickets">{{soldTicket.sold_ticket}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{soldTicket.sold_ticket}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <div class="row">
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">{{soldTicket.from_date}}:</label>
+                                                <div class="input-group date" id="startDate">
+                                                    <input type="text" class="form-control" name="start_date" id="start_date" placeholder="Start Date"
+                                                        data-date-format="yyyy-mm-dd" autocomplete="off" onkeydown="return false">
+                                                    <span class="input-group-addon">
+                                                        <span class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="end_date" class="control-label">{{soldTicket.to_date}} :</label>
+                                                <div class="input-group date" id="endDate">
+                                                    <input type="text" class="form-control" name="end_date" id="end_date" placeholder="End Date"
+                                                        data-date-format="yyyy-mm-dd" autocomplete="off" onkeydown="return false">
+                                                    <span class="input-group-addon">
+                                                        <span class="glyphicon glyphicon2 glyphicon-calendar"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                
+                                    <div>
+                                        <div class="col-sm-3">
+                                            <div class="form-group">
+                                                <label for="ticketType" class="control-label">{{soldTicket.ticket_type}}</label>
+                                                <div class="input-group">
+                                                    <select name="ticketType" class="form-control" id="ticketType">
+                                                        <option value="" selected="selected">{{soldTicket.ticket_type}}</option>
+                                                        <option value="Web">{{soldTicket.web}}</option>
+                                                        <option value="Terminal">{{soldTicket.terminal}}</option>
+                                                        <option value="Physical">{{soldTicket.physical}}</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                   
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="search" class="control-label"></label>
+                                                <div class="input-group">
+                                                    <input type="button" name="search" id="search" value="{{soldTicket.search}}" class="btn btn-info">
+                                                </div>
+                                                
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                </div>
+
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{soldTicket.date_time}}</th>
+                                                    <th>{{soldTicket.player_name}}</th>
+                                                    <th>{{soldTicket.ticket_type}}</th>
+                                                    <th>{{soldTicket.group_of_hall}}</th>
+                                                    <th>{{soldTicket.hall_name}}</th>
+                                                    <th>{{soldTicket.ticket_color_type}}</th>
+                                                    <th>{{soldTicket.ticket_number}}</th>
+                                                    <th>{{soldTicket.ticket_price}}</th>
+                                                    <th>{{soldTicket.winnig_pattern}}</th>
+                                                    <th>{{soldTicket.total_winning}}</th>
+                                                    <th>{{soldTicket.spin_wheel_winning}}</th>
+                                                    <th>{{soldTicket.treasure_chest_winning}}</th>
+                                                    <th>{{soldTicket.mystery_winning}}</th>
+                                                    <th>{{soldTicket.color_draft_winning}}</th>
+                                                    <th>{{soldTicket.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<div class="modal fade" id="winningInfoModal" tabindex="-1" role="dialog" aria-labelledby="winningInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <h4 class="modal-title" id="winningInfoModalLabel">{{soldTicket.winning_information}} - <span class="ticketNumber"></span> </h4>
+            </div>
+            <div class="modal-body" id="winningInfoContent">
+            </div>
+        </div>
+    </div>
+</div>
+  
+
+{% endblock %} {% block Jscript %}
+<script>
+
+    function formatDate(date) {
+        var d = new Date(date),
+            month = '' + (d.getMonth() + 1),
+            day = '' + d.getDate(),
+            year = d.getFullYear();
+
+        if (month.length < 2) 
+            month = '0' + month;
+        if (day.length < 2) 
+            day = '0' + day;
+
+        return [year, month, day].join('-');
+    }
+    
+
+    $(document).ready(function () {
+
+        //Setting Up Start and End Date
+        $('#startDate input').datepicker({
+            autoclose: true,
+            endDate : new Date()
+        }).on('changeDate', function (ev) {
+            let minDate = new Date(ev.date.valueOf());
+            $('#endDate input').datepicker('setStartDate', minDate);
+        });
+
+
+        $("#endDate input").datepicker({
+            //settings
+            startDate: $('#startDate input').val(),
+            autoclose:true,
+            endDate: new Date()
+        }).on('changeDate', function (selected) {
+            let minDate = new Date(selected.date.valueOf());
+            $('#startDate input').datepicker('setEndDate', minDate);
+        });
+
+        $('.glyphicon1').click(function() {
+            $("#startDate input").focus();
+        });
+
+        $('.glyphicon2').click(function() {
+            $("#endDate input").focus();
+        });
+        
+        $('#startDate input').datepicker('setDate', formatDate(new Date(new Date().setDate(new Date().getDate() - 1))));
+        $('#endDate input').datepicker('setDate', formatDate(new Date()));
+
+        fetch_data('yes', $('#start_date').val(), $('#end_date').val());
+
+        function fetch_data(is_date_search, start_date = '', end_date = '') {
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "{{soldTicket.search}} {{soldTicket.ticket_number}}",
+                    "sInfo" : "{{soldTicket.showing}} _START_ to _END_ of _TOTAL_ {{soldTicket.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ soldTicket.previous }}",
+                        sNext: "{{ soldTicket.next }}"
+                    },
+                    "sEmptyTable": "{{soldTicket.no_data_available_in_table}}",
+                    "sInfoEmpty": "{{soldTicket.showing}} 0 to 0 of 0 {{soldTicket.entries}}"
+                },
+                "bSort": false,
+                "order":[[ 0, "desc" ]],
+                "columnDefs":[{
+                    "targets":[],
+                    "orderable":false,
+                },
+                { className: 'text-center', targets: [9, 10, 11, 12, 13, 14] },
+                ],
+                "scrollX": false,
+                "searching": true,
+                "processing": true,
+                "serverSide": true,
+                "autoWidth": false,
+                "pageLength": 10,
+                "bLengthChange": true,
+                "stateSave": true,
+                "stateSaveCallback": function(settings,data) {
+                    localStorage.setItem( 'onSoldTickethistory_' + settings.sInstance, JSON.stringify(data) )
+                },
+                "stateLoadCallback": function(settings) {
+                    const data = JSON.parse(localStorage.getItem('onSoldTickethistory_' + settings.sInstance));
+    
+                    // Check if the saved page number exceeds the available number of pages
+                    if (data && data.start) {
+                        const totalRecords = settings._iDisplayLength * Math.ceil(settings.fnRecordsTotal() / settings._iDisplayLength); // Calculate total records
+                        const totalPages = Math.ceil(totalRecords / settings._iDisplayLength); // Calculate total pages
+                        const currentPage = Math.floor(data.start / settings._iDisplayLength) + 1;
+
+                        // Adjust the start if the saved page number exceeds the total pages
+                        if (currentPage > totalPages) {
+                            data.start = 0; // Set to the first page
+                        }
+                    }
+                    
+                    return data;
+                },
+                "ajax": {
+                    url:  host + "/sold-tickets/get",
+                    type: "GET",
+                    data: {
+                        is_date_search: is_date_search,
+                        start_date: start_date,
+                        end_date: end_date,
+                        ticketType: $("#ticketType").val()
+                    },
+                },
+                "columns": [
+                {
+                    "data": "startDate",
+                    render: function (data, type, row) {
+                        return dateString(row.createdAt)
+                    }
+                },{
+                    "data": "playerNameOfPurchaser"
+                }, {
+                    "data": "UserType",
+                    render: function (data, type, row) {
+                        if(data){
+                            return data;
+                        }
+                        return "";
+                    }
+                }, {
+                    "data": "groupHallName"
+                }, {
+                    "data": "hallName"
+                }, {
+                    "data": "ticketColorType"
+                }, {
+                    "data": "ticketId"
+                }, {
+                    "data": "ticketPrice",
+                    render: function (data, type, row) {
+                    if (row.ticketColorType == 'large') {
+                        return parseFloat(row.ticketPrice/3).toFixed(2);
+                    } else {
+                        return row.ticketPrice;
+                    }
+                    }
+                }, {
+                    "data": "winnigPattern",
+                    render: function (data, type, row, meta) {
+                        if (data.length) {
+                            // if("{{game.gameName}}" == 'Wheel of Fortune' || "{{game.gameName}}" == 'Treasure Chest' || "{{game.gameName}}" == 'Mystery' || "{{game.gameName}}" == "Color Draft"){
+                            //     data = data.filter(function( obj ) {
+                            //         return obj.lineType !== 'Full House';
+                            //     });
+                            // }
+                            if("{{game.gameName}}" == 'Jackpot' ){
+                                let index = data.findIndex((obj => obj.isJackpotWon == true));
+                                if(index >=0 ){
+                                    data[index].lineType = "Full House/Jackpot"
+                                }
+                            }
+                            if("{{game.gameName}}" == "Innsatsen"){
+                                let index = data.findIndex((obj => obj.isJackpotWon == true));
+                                if(index >=0 ){
+                                    data[index].lineType = "Full House/Jackpot"
+                                }
+                            }
+                            if(data.length > 0){
+                                let $select = $('<select id="select1-' + row._id + '"></select>', {
+                                    "id": row._id,
+                                    "value": data
+                                });
+                                let isDisplay = false;
+                                $.each(data, function (k, v) {
+                                    if(+ v.wonAmount > 0 && v.lineType == "Full House" && ("{{game.gameName}}" == 'Wheel of Fortune' || "{{game.gameName}}" == 'Treasure Chest' || "{{game.gameName}}" == 'Mystery' || "{{game.gameName}}" == "Color Draft") ){
+                                        return true;
+                                    }
+                                    let $option = $("<option></option>", {
+                                        "text": v.lineType + " ( " + v.wonAmount.toFixed(2) + " ) ",
+                                        "value": k
+                                    });
+                                    if (data === v) {
+                                        $option.attr("selected", "selected")
+                                    }
+                                    $select.append($option);
+                                    isDisplay = true;
+                                });
+                                if( isDisplay == true){
+                                    return $select.prop("outerHTML");
+                                }else{
+                                    return "-";
+                                }
+                            }else{
+                                return "-";
+                            }
+                            
+                        } else {
+                            return "-";
+                        }
+
+
+                    }
+                }, {
+                    "data": "totalWinning",
+                    render: function (data, type, row) {
+                        if (row.totalWinning > 0) {
+                            return +row.totalWinning.toFixed(2);
+                        } else {
+                            return row.totalWinning;
+                        }
+
+                    }
+                }, 
+                {
+                    "data": "wofWinners",
+                    render: function (data, type, row) {
+                        if (row.wofWinners > 0) {
+                            return +row.wofWinners.toFixed(2);
+                        } else {
+                            return row.wofWinners;
+                        }
+
+                    }
+                }, 
+                {
+                    "data": "tChestWinners",
+                    render: function (data, type, row) {
+                        if (row.tChestWinners > 0) {
+                            return +row.tChestWinners.toFixed(2);
+                        } else {
+                            return row.tChestWinners;
+                        }
+
+                    }
+                }, {
+                    "data": "mystryWinners",
+                    render: function (data, type, row) {
+                        if (row.mystryWinners > 0) {
+                            return +row.mystryWinners.toFixed(2);
+                        } else {
+                            return row.mystryWinners;
+                        }
+
+                    }
+                }, {
+                    "data": "colorDraftWinners",
+                    render: function (data, type, row) {
+                        if (row.colorDraftWinners > 0) {
+                            return +row.colorDraftWinners.toFixed(2);
+                        } else {
+                            return row.colorDraftWinners;
+                        }
+
+                    }
+                }, {
+                    "data": "action",
+                    render: function (data, type, row) {
+                        return `<a href="/viewTicket/${row._id}/${row.ticketId}" class="btn btn-info btn-xs btn-rounded" title="View Player">\
+                                    <i class="fa fa-eye" aria-hidden="true"></i>\
+                                </a> 
+                                <button id="ticketData_${row._id}" type="button" name="View Winnings" class="btn btn-success btn-xs view btn-rounded" title="View Winnings"> <i class="fa fa-money" aria-hidden="true"></i></button>
+                                `;
+
+                    }
+                }],
+                
+            });
+
+        }
+       
+        var table = $('#myTable').DataTable();
+
+        $('body').on('click', '.playersearch', function (e) {
+            $('#myTable').DataTable().clear().destroy();
+            loadData();
+        });
+
+        $('body').on('click', '.clickreset', function (e) {
+            setTimeout(function () {
+                $('#myTable').DataTable().clear().destroy();
+                loadData();
+            }, 500);
+            $("#message").html("")
+        });
+
+        // FIX FOR DROPDOEN CAUSING SCROLLING IN DATATABLE  START
+        $('.table-responsive').on('show.bs.dropdown', function () {
+            $('.table-responsive').css("overflow", "inherit");
+        });
+
+        $('.table-responsive').on('hide.bs.dropdown', function () {
+            $('.table-responsive').css("overflow", "auto");
+        })
+
+        $('#search').click(function() {
+            let start_date = $('#start_date').val();
+            let end_date = $('#end_date').val();
+            if (start_date != '' && end_date != '') {
+                $('#myTable').DataTable().destroy();
+                fetch_data('yes', start_date, end_date);
+            } else {
+                alert("Both Date is Required");
+            }
+        });
+
+        function dateString(val) {
+            let dt = new Date(val);
+            let date = dt.getDate();
+            let month = parseInt(dt.getMonth() + 1);
+            let year = dt.getFullYear();
+            let hours = dt.getHours();
+            let minutes = dt.getMinutes();
+            let ampm = hours >= 12 ? 'pm' : 'am';
+            hours = hours % 12;
+            hours = hours ? hours : 12;
+            minutes = minutes < 10 ? '0' + minutes : minutes;
+            let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+            return createdAt;
+        }
+
+        $('body').on('click', '[id^="ticketData_"]', function () {
+            const ticketData = $('#myTable').DataTable().row($(this).parent().parent()).data()
+            console.log("ticket data :  ", ticketData);
+
+            if (!ticketData) {
+                alert("Something went wrong")
+            }
+            if (ticketData) {
+                let winnings = [];
+                if (ticketData.winnigPattern && ticketData.winnigPattern.length > 0) {
+                    console.log(" ticketData.winnigPattern---",  ticketData.winnigPattern)
+                    for(let w=0; w < ticketData.winnigPattern.length; w++){
+                        let ballsDrawned = [];
+
+                        if (ticketData.winnigPattern[w] && ticketData.winnigPattern[w].ballDrawned) {
+                            ballsDrawned = ticketData.winnigPattern[w].ballDrawned.slice(0, -1);
+                        }
+                        
+                        let winningNumbers = [];
+                        if(ticketData.winnigPattern[w].lineType == "Frame"){
+                            let frame = ["0:0", "0:1", "0:2", "0:3", "0:4", "1:0", "1:4", "2:0", "2:4", "3:0", "3:4", "4:0", "4:1", "4:2", "4:3", "4:4"];
+                            const frameSet = new Set(frame);
+                            ticketData.ticket.forEach((row, rowIndex) => {
+                                const filteredRow = row.map((item, colIndex) => {
+                                    const coord = `${rowIndex}:${colIndex}`;
+                                    return frameSet.has(coord) ? item.Number : "";
+                                });
+                                winningNumbers.push(filteredRow); 
+                            });
+                        }else if(ticketData.winnigPattern[w].lineType == "Picture"){
+                            let picture = ["1:1", "1:2", "1:3", "2:1", "2:2", "2:3","3:1", "3:2", "3:3"];
+                            const frameSet = new Set(picture);
+                            ticketData.ticket.forEach((row, rowIndex) => {
+                                const filteredRow = row.map((item, colIndex) => {
+                                    const coord = `${rowIndex}:${colIndex}`;
+                                    return frameSet.has(coord) ? item.Number : "";
+                                });
+                                winningNumbers.push(filteredRow); 
+                            });
+                        }else{
+                            const wonElements = ticketData.winnigPattern[w].wonElements || { rows: [], columns: [], wonPatternAt: {} };
+                            const rows = Array.isArray(wonElements.rows) ? wonElements.rows : [];
+                            const wonPatternAt = wonElements.wonPatternAt || {};
+                            const claimedColumns = (wonPatternAt.column && Array.isArray(wonPatternAt.column.claimedAt)) ? wonPatternAt.column.claimedAt : [];
+
+                            let rowsToUse = rows;
+                            let columnsToUse = [];
+
+                            if(ticketData.winnigPattern[w].lineType == "Row 1"){
+                                if(claimedColumns.length > 0){
+                                    columnsToUse = claimedColumns;
+                                    rowsToUse = [];
+                                }else{
+                                    rowsToUse = rows;
+                                    columnsToUse = [];
+                                }
+                            }
+
+                            if(rowsToUse.length > 0){
+                                const sortedRows = rowsToUse.slice().sort((a, b) => a - b);
+                               
+                                for (let r = 0; r < sortedRows.length; r++) {
+                                    winningNumbers.push(ticketData.ticket[sortedRows[r]].map(item => item.Number));
+                                }
+                            }
+
+                            if(columnsToUse.length > 0){
+                                for(let r=0; r < columnsToUse.length; r++){
+                                    winningNumbers.push(ticketData.ticket.map(row => row[[columnsToUse[r]]].Number));
+                                }
+                            }
+                        }
+                        console.log("winningNumbers----", winningNumbers)
+                        winnings.push({
+                            patternName: ticketData.winnigPattern[w].lineType,
+                            ballDrawned: ballsDrawned,
+                            wonOnNumber: ballsDrawned[ballsDrawned.length-1],
+                            winningNumbers: winningNumbers,
+                            amount:  ticketData.winnigPattern[w].wonAmount
+                        })
+                    }
+                }
+
+                $(".ticketNumber").text(ticketData.ticketId);
+                let content = "";
+               
+                if (winnings.length == 0) {
+                    content = `
+                        <table class="modal-table">
+                            <thead>
+                            <tr>
+                                <th>{{soldTicket.pattern_name}}</th>
+                                <th>{{soldTicket.winning_amount}}</th>
+                                <th>{{soldTicket.balls_drawn}}</th>
+                                <th>{{soldTicket.won_on_number}}</th>
+                                <th>{{soldTicket.winning_numbers}}</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <tr>
+                                <td colspan="5" class="no-winners-message">{{soldTicket.no_winners_found}}</td>
+                            </tr>
+                            </tbody>
+                        </table>
+                        `;
+                } else {
+                    content = '<table class="modal-table">';
+                    content += `
+                    <thead>
+                        <tr>
+                        <th>{{soldTicket.pattern_name}}</th>
+                        <th>{{soldTicket.winning_amount}}</th>
+                        <th>{{soldTicket.balls_drawn}}</th>
+                        <th>{{soldTicket.won_on_number}}</th>
+                        <th>{{soldTicket.winning_numbers}}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    `;
+
+                    $.each(winnings, function (index, pattern) {
+                    content += `
+                        <tr>
+                        <td>${pattern.patternName}</td>
+                        <td>${pattern.amount}</td>
+                        <td>${pattern.ballDrawned.join(', ')}</td>
+                        <td>${pattern.wonOnNumber}</td>
+                        <td>
+                            <table class="winning-numbers-table">
+                            ${pattern.winningNumbers.map(function (row) {
+                                return `<tr>${row.map(num => `<td>${num}</td>`).join('')}</tr>`;
+                            }).join('')}
+                            </table>
+                        </td>
+                        </tr>`;
+                    });
+
+                    content += '</tbody></table>';
+                }
+
+                $('#winningInfoContent').html(content);
+                $('#winningInfoModal').modal('show');
+
+            } 
+
+        })
+        
+    });
+</script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+{% endblock %}

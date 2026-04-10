@@ -1,0 +1,250 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+
+    .cst {
+        display: flex;
+        justify-content: flex-end;
+        gap: 20px;
+        align-items: stretch;
+    }
+
+    .form-horizontal button {
+        width: 50px;
+    }
+
+    button#search,
+    button#filterReset {
+        min-width: 55px;
+    }
+</style>
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{adminData.sub_admin}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{adminData.dashboard}}</a></li>
+                <li class="active">{{adminData.admin}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{adminData.admins}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                <a href="/addAdmin"><button type="button" class="btn btn-primary btn-md"><i
+                                            class="fa fa-plus"></i> {{adminData.add_admin}}</button></a>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <!-- <div class="panel-wrapper collapse in">
+                        </div> -->
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{adminData.admin_name}}</th>
+                                                    <th>{{adminData.emailId}}</th>
+                                                    <th>{{adminData.status}}</th>
+                                                    <th>{{adminData.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    var orderTable = "";
+    var table;
+    let data = {
+        status: ''
+    }
+    var host = window.location.origin;
+    $(document).ready(function () {
+        let ajaxUrl = host + "/admin/getAdmin";
+        tableLoad(data);
+        function tableLoad(params) {
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "{{adminData.search}} {{adminData.admin_name_or_email}}",
+                    "sLengthMenu": "{{adminData.show}} _MENU_ {{adminData.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ adminData.previous }}",
+                        sNext: "{{ adminData.next }}"
+                    },
+                    "sEmptyTable": "{{adminData.no_data_available_in_table}}",
+                    "sInfo": "{{adminData.showing}} _START_ to _END_ of _TOTAL_ {{adminData.entries}}",
+                    "sInfoEmpty": "{{adminData.showing}} 0 to 0 of 0 {{adminData.entries}}"
+                },
+                "processing": true,
+                "serverSide": true,
+                // "order": [
+                //     [0, "desc"]
+                // ],
+                // "columnDefs": [{
+                //     "targets": [0],
+                //     "orderable": false
+                // }],
+                "autoWidth": false,
+                "pageLength": 25,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: function (data) {
+                        data.params = params;
+                    }
+                },
+                "columns": [
+                    {
+                        "data": "name",
+                        "orderable": false
+                    }, {
+                        "data": "email",
+                        "orderable": false
+                    },
+                    {
+                        "data": "status",
+                        "orderable": false,
+                        render: function (data, type, row) {
+                            let html = '';
+                            console.log("row", row);
+                            if (row.status === 'active') {
+                                html = '<span style="color:green;text-transform:capitalize;font-weight: bold;">';
+                            } else {
+                                html = '<span style="color:red;text-transform:capitalize;font-weight: bold;">';
+                            }
+                            html += row.status;
+                            html += '</span>'
+                            return html;
+                        }
+                    }, {
+                        "data": "action",
+                        "orderable": false,
+                        render: function (data, type, row) {
+                            let html = '<div style="width : 80px">';
+                            html += `<a href="/adminEdit/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="Edit Admin">
+                                    <i class="fa fa-edit" aria-hidden="true"></i>
+                                </a>`
+                            html += ` <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="Delete Admin" style="margin-right: 3px;"><i class="fa fa-trash" aria-hidden="true"></i></button>`;
+                            html += `<a href="/editRole/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="Edit Role">
+                                    <i class="fa fa-tasks" aria-hidden="true"></i>
+                                </a>`
+
+                            html += '</div>'
+                            return html;
+                        }
+                    }
+                ]
+            });
+            table = $('#myTable').DataTable();
+        }
+        $(function () {
+            "use strict";
+
+            var SweetAlert = function () { };
+
+            SweetAlert.prototype.init = function () {
+                //Parameter
+                $('body').on('click', '.delete', function (e) {
+                    var id = $(this).attr('id');
+                    var thisElement = this;
+                    swal({
+                        title: "{{adminData.delete_title_message}}?",
+                        text: "{{adminData.delete_admin_message}} {{adminData.admin}}!",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{adminData.delete_button}}",
+                        cancelButtonText: "{{adminData.cancel_button}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/admin/getAdminDelete",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData) {
+                                    console.log(resultData);
+                                    if (resultData == 'success') {
+
+                                        swal("{{adminData.deleted}}!", "{{adminData.admin}} {{adminData.delete_successfully}}.", "success");
+                                        console.log('1', $('tbody tr').length);
+                                        // if ($('tbody tr').length <= 1) {
+                                        //      $(thisElement).parent().parent().parent().replaceWith('<tr class="odd"><td valign="top" colspan="7" class="dataTables_empty">No data available in table</td></tr>')
+                                        // } else {
+                                        //     $(thisElement).parent().parent().parent().remove();
+                                        //     console.log('2',$('tbody tr').length);
+                                        // }
+                                        table.rows().invalidate().draw();
+
+                                    }
+                                    if (resultData == 'fail') { 
+                                        swal({
+                                            type: "info",
+                                            title: "",
+                                            text: "{{adminData.admin_not_delete}}",
+                                        });
+                                    }
+                                }
+                            });
+                        } else {
+                            swal("{{adminData.cancelled}}", "{{adminData.delete_cencel}}", "error");
+                        }
+                    });
+                    return false;
+                });
+
+            },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+
+        //Search after click on search button
+        $('#search').on("click", function () {
+            table.destroy();
+            tableLoad(data);
+        });
+    });
+
+</script>
+{% endblock %}
