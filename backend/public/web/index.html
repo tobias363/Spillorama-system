@@ -124,7 +124,7 @@
     function requestDomainData() {
       var serverUrl = window.location.origin;
       if (typeof unityInstanceRef !== 'undefined' && unityInstanceRef) {
-        unityInstanceRef.SendMessage('GameSocketManager', 'DomainDataCall', serverUrl);
+        unityInstanceRef.SendMessage('Socket And Event Manager', 'DomainDataCall', serverUrl);
       }
     }
     var unityInstanceRef = null;

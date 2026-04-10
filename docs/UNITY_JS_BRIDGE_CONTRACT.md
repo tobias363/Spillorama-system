@@ -25,7 +25,7 @@ Kalles av Unity ved oppstart for å få backendens origin.
 function requestDomainData() {
   var serverUrl = window.location.origin;
   if (typeof unityInstanceRef !== 'undefined' && unityInstanceRef) {
-    unityInstanceRef.SendMessage('GameSocketManager', 'DomainDataCall', serverUrl);
+    unityInstanceRef.SendMessage('Socket And Event Manager', 'DomainDataCall', serverUrl);
   }
 }
 ```
@@ -63,7 +63,7 @@ Brukes av hall-displayet for fokus/lukking av TV-vindu.
 
 | SendMessage-kall | Host-side | Når |
 |-----------------|-----------|-----|
-| `SendMessage('GameSocketManager', 'DomainDataCall', serverUrl)` | `/web/` | Etter `requestDomainData()` |
+| `SendMessage('Socket And Event Manager', 'DomainDataCall', serverUrl)` | `/web/` | Etter `requestDomainData()` |
 | `SendMessage('FirebaseManager', 'OnWebTokenReceived', token)` | `/web/` | Etter vellykket FCM-token |
 | `SendMessage('FirebaseManager', 'OnWebMessageReceived', payload)` | `/web/` | Ved foreground push |
 | `SendMessage('Socket And Event Manager', 'DomainDataCall', host)` | `/view-game/` | Etter `requestDomainData()` |
