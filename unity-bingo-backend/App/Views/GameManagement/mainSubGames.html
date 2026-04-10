@@ -1,0 +1,411 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    .wrapperSelected {
+        height: 28px !important;
+        border: 1px solid #ABADB3;
+        margin: 0;
+        padding: 4px 0 0 0;
+        font-size: 14px;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <div class="content-header">
+            <!-- <div class="choose-game">
+               
+            </div> -->
+        </div>
+
+        <!-- Title -->
+        <section class="content-header" id="gameHeader">
+            <h1>Sub Games Table</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> Dashboard</a></li>
+                <li class="active">Sub Games </li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content" id="allGameDetails">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-right">
+                                 <a href="/gameManagement"><button type="button"  class="btn btn-primary btn-md"><i class="fa fa-arrow-left"></i> Back </button></a> 
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30" >
+                                            <thead>
+                                                <tr>
+                                                    <th>Game Id</th>
+                                                    <th>Game Type</th>
+                                                    <th>Start Date & Time</th>
+                                                    <th>Game Name</th>
+                                                    <th>Ticket Color/Type</th>
+                                                    <th>Ticket Price</th>
+                                                    <th>Total No. of Ticket Sold</th>
+                                                    <th>Total Earn From Ticket Sold</th>
+                                                    <th>Total Winning In The Game </th>
+                                                    <th>Seconds</th>
+                                                    <th>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %} {% block Jscript %}
+<script src="/socket.io/socket.io.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/moment.js/2.17.1/moment.min.js"></script>
+<script>
+    $(document).ready(function() {
+
+        let editFlag = '{{editFlag}}';
+        let deleteFlag = '{{deleteFlag}}';
+        let addFlag = '{{addFlag}}';
+        let viewFlag = '{{viewFlag}}';
+        let startFlag = '{{startFlag}}';
+        let pauseFlag = '{{pauseFlag}}';
+        let gameType='game_1';
+        let gameTypeId='{{gameTypeId}}';
+        let gameId = '{{id}}';
+        var socket = io();
+
+
+        var host = window.location.origin;
+        var newTable = $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "Search Game Number"
+            },
+            "scrollX": true,
+            "searching": false,
+            "processing": true,
+            "serverSide": true,
+            "order": [
+                [0, "desc"]
+            ],
+            "columnDefs": [{
+                "targets": [6],
+                "orderable": false
+            }],
+            "autoWidth": false,
+            "pageLength": 25,
+            "ajax":{
+                "url":host + "/viewsubGamesManagementDetails",
+                "type":"GET",
+                "data":{ gameType: gameType,gameTypeId:gameTypeId,gameId:gameId},
+                "dataSrc": function (json){
+
+                    console.log("+++++++++++json json json json DataTable DataTable ++++ :",json)
+					
+                    return json.data;
+                }
+            },
+            "columns":[{
+            "data": "gameNumber",
+                    render: function(data, type, row) {
+                        console.log(" arvind array : ",row)
+                        let html = ``;
+                        if (viewFlag == 'true') {
+                            
+                                html += `<a href="/viewGameManagement/` + gameTypeId + `/` + row._id + `" title="View Game">\
+                            ` + row.gameNumber + `</a>`
+                            
+                        } else {
+                            html += row.gameNumber;
+                        }
+                        //return row.gameNumber;
+                        return html;
+                    }
+
+            }, {
+                "data": "gameMode"
+            }, {
+                "data": "startDate",
+                render: function(data, type, row, meta) {
+                    //return moment.utc(row.startDate).format('DD/MM/YYYY hh:mm a');
+                    return moment(row.startDate).format('DD/MM/YYYY hh:mm a');
+                }
+            }, {
+                "data": "gameName",
+                render: function(data, type, row, meta) {
+                    // var $select = $('<select id="select1-' + row._id + '"></select>', {
+                    //     "id": row._id,
+                    //     "value": data
+                    // });
+
+                    //console.log("data", data);
+
+                    // $.each(data, function(k, v) {
+
+                    //     var $option = $("<option></option>", {
+                    //         "text": v.gameName,
+                    //         "value": k
+                    //     });
+                    //     if (data === v) {
+                    //         $option.attr("selected", "selected")
+                    //     }
+                    //     $select.append($option);
+                    // });
+                    // return $select.prop("outerHTML");
+                    return data[0].gameName;
+                }
+            }, {
+                "data": "ticketColorType",
+                render: function(data, type, row, meta) {
+
+                    //console.log("+++++++++++++++ ticketColorType : ",row)
+
+                    var $select = $('<select id="select2-' + row._id + '"></select> ', {
+                        "id": row._id,
+                        "value": data
+                    });
+
+                    $.each(data[0].ticketColorTypesNo, function(k, v) {
+                       // console.log(" ticketcssssssssssssssssssssss : ",v," kkkkkkkkkkkk : ",k)
+                        var $option = $("<option></option>", {
+                            "text": v.ticketName,
+                            "value": v.ticketPrice
+                        });
+                        if (k==0) {
+                            $option.attr("selected", "selected");
+                        }
+                       $select.append($option);
+                    });
+
+                    return $select.prop("outerHTML");
+
+                }
+            }, 
+            {
+                "data": "ticketPrice", render: function(data, type, row, meta) {
+                    // console.log(" data data data : ",row)
+                    let ticketPrice=0;
+                    $.each(row.gameName[0].ticketColorTypesNo, function(k, v) {
+                        if (k==0) {
+                            ticketPrice = (v.ticketPrice);
+                        }
+                    });
+                    return `<span id='ticketprice_`+row._id+`'>`+ticketPrice+`</span>`;
+                }
+            },
+            {
+                "data": "ticketSold",render: function(data, type, row, meta) {
+
+                    console.log(" row row  row row : ",row)
+                    return ((row.totalNumberOfTicketsSold)?(row.totalNumberOfTicketsSold):'0');
+                }
+            },
+            {
+                "data": "earnedFromTickets",
+                render: function(data, type, row, meta) {
+                    return ((row.totalEarnedFromTicketsSold)?(row.totalEarnedFromTicketsSold):'0');
+                }
+            },
+            {
+                "data": "totalWinning",
+                render: function(data, type, row, meta) {
+                    return ((row.totalWinningInTheGame)?(row.totalWinningInTheGame):'0');
+                }
+            },
+            {
+                "data": "seconds"
+            }, {
+                "data": "action",
+                render: function(data, type, row) {
+                    let html = ``;
+
+                    var now = new Date();
+                    var utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+
+                    if (row.gameMode == "auto") {
+                        console.log("new Date(row.graceDate) > new Date(moment.utc())", new Date(row.graceDate) > utc);
+                        if (new Date(row.graceDate) >= utc) {
+                            if (startFlag == 'true') {
+                                html += `<a href="#" class="btn btn-info btn-xs btn-rounded Start gameSt" id="` + row._id + `"  title="Start"><i class="fa fa-rocket" aria-hidden="true"></i> Start </a>`;
+                            } else {
+                                html += ``;
+                            }
+                        }
+
+                    } else if (row.gameMode == "manual") {
+                        if (new Date(row.startDate) > utc) {
+                            if (startFlag == 'true') {
+                                html += `<a href="#" class="btn btn-info btn-xs btn-rounded Start gameSt" id="` + row._id + `"  title="Start"><i class="fa fa-rocket" aria-hidden="true"></i> Start </a>`;
+                            } else {
+                                html += ``;
+                            }
+                        }
+                    }
+
+                    // if (deleteFlag == 'true') {
+                    //     html += ` <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i>Delete</button>`;
+                    // } else {
+                    //     html += `  `;
+                    // }
+
+                    html += `<a href=" ` + host + `/view-game/index.html?token=` + row._id + ` "  class="btn btn-success btn-xs btn-rounded viewGameDetails" id="` + row._id + `"  title=" Game Details" target="_blank"><i class="fa fa-eye" aria-hidden="true"></i> Game Details </a>`;
+
+                    return html;
+
+                }
+
+            }],
+        });
+
+        if (gameType == "game_1") {
+            var table = $('#myTable').DataTable();
+            //let gameId='';
+            $('#myTable tbody').on("click", 'tr', function() {
+                var data = table.row(this).data();
+                console.log("data", data._id);
+
+                let tval= $("#select2-" + data._id+" option:selected").attr("value");
+
+                console.log("tval tval tval : "+tval)
+                $('#ticketprice_' + data._id + '').html(tval);
+                // $('#select2-' + data._id + '').change(function() {
+                //     var id = $(this).val();
+
+                //     console.log(" id id id id id id id id : "+id)
+                //     $('#ticketprice_' + data._id + '').html(id);
+                // });
+
+
+            });
+
+        } 
+
+
+        $(function() {
+            "use strict";
+
+            var SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    //Parameter
+                    $('body').on('click', '.delete', function(e) {
+                        var id = $(this).attr('id');
+                        var thisElement = this;
+                        swal({
+                            title: "Are you sure?",
+                            text: "You will not be able to recover this Game!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes, delete it!",
+                            cancelButtonText: "No, cancel Plz!",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/getGameManagementDelete",
+                                    data: {
+                                        id: id
+                                    },
+                                    success: function(resultData) {
+                                        //console.log(resultData);
+                                        if (resultData == 'success') {
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                                            newTable.ajax.reload();
+                                        } else {
+                                            swal("Cancelled", "Sorry Game was not Deleted because Few moments are left Start to the game..!!", "error");
+                                        }
+                                        // alert("Save Complete")
+                                    }
+                                });
+                                swal("Deleted!", "Game Deleted Succesfully.", "success");
+
+                            } else {
+                                swal("Cancelled", "Game Not Deleted", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+
+                    //Parameter
+                    $('body').on('click', '.Start', function(e) {
+                        var id = $(this).attr('id');
+
+                        var thisElement = this;
+                        swal({
+                            title: "Are you sure?",
+                            text: "You will Start this Game!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes, Start it!",
+                            cancelButtonText: "No, cancel Plz!",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+
+                                $('.gameSt').prop('disabled', true);
+
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/startGame",
+                                    data: {
+                                        id: id,
+                                        typeId: gameTypeId,
+                                        socketId: socket.id
+                                    },
+                                    success: function(resultData) {
+                                        //console.log(resultData);
+                                        if (resultData == 'success') {
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("Yeah!", "Your imaginary Game has been Started.", "success");
+                                        }
+                                        $('.gameSt').prop('disabled', false);
+                                        // alert("Save Complete")
+                                        if (resultData == 'error') {
+                                            swal("Cancelled", "Because Game Tickets are not solds", "error");
+                                        }
+                                    }
+                                });
+                                //swal("Deleted!", "Game Deleted Succesfully.", "success");
+                            } else {
+                                swal("Cancelled", "Game Not Started", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+            //Delete over
+        });
+        // Document over
+    
+                    
+        // Document over
+    });
+</script>
+<script>
+</script>
+{% endblock %}

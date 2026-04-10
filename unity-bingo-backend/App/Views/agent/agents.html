@@ -1,0 +1,330 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+    .btn-group-new>.btn,
+    .btn-new {
+        padding: 2px 83px;
+        font-size: 12px;
+        line-height: 1.5;
+        border-radius: 3px
+    }
+
+    .cst {
+        display: flex;
+        justify-content: flex-end;
+        gap: 20px;
+        align-items: stretch;
+    }
+
+    .form-horizontal button {
+        width: 50px;
+    }
+
+    button#search,
+    button#filterReset {
+        min-width: 55px;
+    }
+</style>
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{agentData.agent_table}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{agentData.dashboard}}</a></li>
+                <li class="active">{{agentData.agent}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <form id="filterForm">
+                        <div class="box">
+                            <div class="box-header">
+                                <h3 class="box-title">{{agentData.search}}</h3>
+                            </div>
+                            <div class="box-body">
+                                <div class="row cst">
+                                    <div class="col-lg-9 pull-left">
+                                        <div class="cst">
+                                            <div class="form-horizontal">
+                                                <div class="input-group">
+                                                    <span class="input-group-addon"><i class="fa fa-filter"
+                                                            aria-hidden="true"></i></span>
+                                                    <select name="orderby" class="form-control" id="agentStatus">
+                                                        <option value="" selected="selected">{{agentData.all}}</option>
+                                                        <option value="inactive">{{agentData.inactive}}</option>
+                                                        <option value="active">{{agentData.active}}</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <button type="button" class="pull-right btn btn-sm btn-primary playersearch"
+                                                id="search"><i class="fa fa-search"></i></button>
+                                            <button type="reset" class="btn btn-primary pull-right clickreset"
+                                                id="filterReset">{{agentData.reset}}</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{agentData.agents}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                {% if addFlag %}
+                                <a href="/addAgent"><button type="button" class="btn btn-primary btn-md"><i
+                                            class="fa fa-plus"></i> {{agentData.add_agent}}</button></a>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <!-- <div class="panel-wrapper collapse in">
+                        </div> -->
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{agentData.agent_id}}</th>
+                                                    <th>{{agentData.agent_name}}</th>
+                                                    <th>{{agentData.emailId}}</th>
+                                                    <th>{{agentData.mobile_number}}</th>
+                                                    <th>{{agentData.hall_name}}</th>
+                                                    <th>{{agentData.status}}</th>
+                                                    {% if (deleteFlag or editFlag) %}
+                                                    <th>{{agentData.action}}</th>
+                                                    {% endif %}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    var orderTable = "";
+    var table;
+    let data = {
+        status: ''
+    }
+    var host = window.location.origin;
+    $(document).ready(function () {
+        let ajaxUrl = host + "/agent/getAgent";
+        let editFlag = '{{editFlag}}';
+        let deleteFlag = '{{deleteFlag}}';
+        tableLoad(data);
+        function tableLoad(params) {
+            $('#myTable').DataTable({
+                "oLanguage": {
+                    "sSearch": "{{agentData.search}} {{agentData.agent_name_or_id}}",
+                    "sLengthMenu": "{{agentData.show}} _MENU_ {{agentData.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ agentData.previous }}",
+                        sNext: "{{ agentData.next }}"
+                    },
+                    "sEmptyTable": "{{agentData.no_data_available_in_table}}",
+                    "sInfo": "{{agentData.showing}} _START_ to _END_ of _TOTAL_ {{agentData.entries}}",
+                    "sInfoEmpty": "{{agentData.showing}} 0 to 0 of 0 {{agentData.entries}}"
+                },
+                "processing": true,
+                "serverSide": true,
+                "order": [
+                    [0, "desc"]
+                ],
+                "columnDefs": [{
+                    "targets": [4],
+                    "orderable": false
+                }],
+                "autoWidth": false,
+                "pageLength": 25,
+                "ajax": {
+                    url: ajaxUrl,
+                    type: "GET",
+                    data: function (data) {
+                        data.params = params;
+                    }
+                },
+                "columns": [
+                    { "data": "agentId" },
+                    {
+                        "data": "name"
+                    }, {
+                        "data": "email"
+                    }, {
+                        "data": "phone"
+                    }, {
+                        "data": "hall",
+                        render: function (data, type, row) {
+                            if (row.hall.length) {
+                                let $select = $('<select id="select1-' + row._id + '" ></select>', {
+                                    "id": row[3],
+                                    "value": data.map(item => item.name)
+                                });
+                                $.each(data, function (k, v) {
+                                    let $option = $("<option></option>", {
+                                        "text": v.name,
+                                        "value": v.id
+                                    });
+                                    $select.append($option);
+                                });
+                                return $select.prop("outerHTML");
+
+                            } else {
+                                return "{{agentData.no_hall_assigned}}";
+                            }
+                        }
+                    },
+                    {
+                        "data": "status",
+                        render: function (data, type, row) {
+                            let html = '';
+                            console.log("row", row);
+                            if (row.status === 'active') {
+                                html = '<span style="color:green;text-transform:capitalize;font-weight: bold;">';
+                            } else {
+                                html = '<span style="color:red;text-transform:capitalize;font-weight: bold;">';
+                            }
+                            html += row.status;
+                            html += '</span>'
+                            return html;
+                        }
+                    }, {
+                        "data": "action",
+                        render: function (data, type, row) {
+                            let html = '<div style="width : 50px">';
+                                if(editFlag == 'true'){
+                                    html += `<a href="/agentEdit/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="Edit Agent">
+                                            <i class="fa fa-edit" aria-hidden="true"></i>
+                                        </a>`
+                                }
+                                if(deleteFlag == 'true'){
+                                    html += ` <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="Delete Player"><i class="fa fa-trash" aria-hidden="true"></i></button>`;
+                                }
+
+                            html += '</div>'
+                            return html;
+                            // return '<a href="/agentEdit/' + row._id + '"><button type="button" class="btn btn-warning btn-xs btn-rounded" title="Edit" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a> <button type="button" title="Delete" name="delete" id="' + row._id + '" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>'
+                            // return '<a href="/userEdit/'+row._id+'"><button type="button" class="btn btn-warning btn-xs" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a> <button type="button" name="delete" id="'+row._id+'" class="btn btn-danger btn-xs delete"><i class="fa fa-trash" aria-hidden="true"></i></button> '
+                        }
+                    }
+                ]
+            });
+            table = $('#myTable').DataTable();
+        }
+        $(function () {
+            "use strict";
+
+            var SweetAlert = function () { };
+
+            SweetAlert.prototype.init = function () {
+                //Parameter
+                $('body').on('click', '.delete', function (e) {
+                    var id = $(this).attr('id');
+                    var thisElement = this;
+                    swal({
+                        title: "{{agentData.delete_message}} {{agentData.agent}}?",
+                        text: "{{agentData.delete_player_message}} {{agentData.agent}}!",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#e69a2a",
+                        confirmButtonText: "{{agentData.delete_button}}",
+                        cancelButtonText: "{{agentData.cancel_button}}",
+                        closeOnConfirm: false,
+                        closeOnCancel: false
+                    }, function (isConfirm) {
+                        if (isConfirm) {
+                            $.ajax({
+                                type: 'POST',
+                                url: host + "/agent/getAgentDelete",
+                                data: {
+                                    id: id
+                                },
+                                success: function (resultData) {
+                                    console.log(resultData);
+                                    if (resultData == 'success') {
+
+                                        swal("{{agentData.deleted}}!", "{{agentData.agent}} {{agentData.delete_successfully}}.", "success");
+                                        console.log('1', $('tbody tr').length);
+                                        // if ($('tbody tr').length <= 1) {
+                                        //      $(thisElement).parent().parent().parent().replaceWith('<tr class="odd"><td valign="top" colspan="7" class="dataTables_empty">No data available in table</td></tr>')
+                                        // } else {
+                                        //     $(thisElement).parent().parent().parent().remove();
+                                        //     console.log('2',$('tbody tr').length);
+                                        // }
+                                        table.rows().invalidate().draw();
+
+                                    }
+                                    if (resultData == 'fail') { 
+                                        swal({
+                                            type: "info",
+                                            title: "",
+                                            text: "{{agentData.agent_not_delete}}",
+                                        });
+                                    }
+                                }
+                            });
+                        } else {
+                            swal("{{agentData.cancelled}}", "{{agentData.agent_delete_msg}}", "error");
+                        }
+                    });
+                    return false;
+                });
+
+            },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+
+        //Search after click on search button
+        $('#search').on("click", function () {
+            table.destroy();
+            tableLoad(data);
+        });
+
+        //Reset filter after click on reset.
+        $('#filterReset').on("click", function (e) {
+            e.preventDefault();
+            data = {
+                status: ''
+            }
+            $('#filterForm')[0].reset();
+            table.destroy();
+            tableLoad(data);
+            console.log(data, 'after from reset filter');
+        });
+    });
+
+
+    $('#agentStatus').on('change', function () {
+        let value = $(this).val();
+        data.status = value;
+    });
+
+</script>
+{% endblock %}

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deposit Payment - Swedbank Pay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.7;
+            color: #2c3e50;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .header .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+        
+        .company-info {
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .content {
+            padding: 40px 30px;
+        }
+        
+        .section {
+            margin-bottom: 35px;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border-left: 5px solid #667eea;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .section:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .section h2 {
+            color: #2c3e50;
+            font-size: 1.4rem;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .section-number {
+            background: #667eea;
+            color: white;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            font-size: 0.9rem;
+        }
+        
+        .section p {
+            margin-bottom: 15px;
+            text-align: justify;
+            color: #555;
+        }
+        
+        .highlight-box {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border: 1px solid #ffeaa7;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 5px solid #f39c12;
+        }
+        
+        .warning-box {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            border: 1px solid #f5c6cb;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 5px solid #e74c3c;
+        }
+        
+        .contact-info {
+            background: linear-gradient(135deg, #e8f4fd 0%, #bee5eb 100%);
+            border: 1px solid #bee5eb;
+            padding: 25px;
+            border-radius: 15px;
+            margin: 30px 0;
+            border-left: 5px solid #3498db;
+        }
+        
+        .contact-info h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        
+        .contact-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .contact-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .contact-item strong {
+            color: #667eea;
+            margin-right: 10px;
+            min-width: 80px;
+        }
+        
+        .last-updated {
+            text-align: center;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 30px;
+            border-top: 3px solid #667eea;
+        }
+        
+        .last-updated p {
+            color: #666;
+            font-style: italic;
+            margin: 5px 0;
+        }
+        
+        .important-notice {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            border: 1px solid #c3e6cb;
+            padding: 25px;
+            border-radius: 15px;
+            margin: 30px 0;
+            border-left: 5px solid #28a745;
+            text-align: center;
+        }
+        
+        .important-notice h3 {
+            color: #155724;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        
+        .important-notice p {
+            color: #155724;
+            font-weight: 500;
+        }
+        
+        .payment-methods {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .payment-method {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+        }
+        
+        .payment-method:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+        
+        .payment-method h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .payment-method p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                border-radius: 15px;
+            }
+            
+            .header {
+                padding: 30px 20px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .content {
+                padding: 30px 20px;
+            }
+            
+            .section {
+                padding: 20px;
+            }
+            
+            .contact-details {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Vilkår for bruk og betaling</h1>
+            <p class="subtitle">Terms of Service & Betalingsvilkår</p>
+            
+            <div class="company-info">
+                <p>Gjelder for: Bingoro AS  (Org.nr 986 873 031)</p>
+                <p>Adresse: Proffesor Birkelandsvei 26B, 1081 Oslo</p>
+                <p>E-post: post@bingoro.no</p>
+                <p>Sist oppdatert: 25. oktober 2025</p>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="section">
+                <h2><span class="section-number">1</span>Formål og anvendelse</h2>
+                <p>Disse vilkårene regulerer bruk av Bingoro AS’ digitale bingosystem og alle betalinger som gjennomføres
+via integrerte betalingsløsninger levert av Swedbank Pay og Vipps. Ved å delta i bingoarrangementer eller
+foreta betaling i systemet, bekrefter du at du har lest, forstått og akseptert disse vilkåren.</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">2</span>Operatør og lisens</h2>
+                <p>Bingoro AS driver bingovirksomhet godkjent av Lotteritilsynet, og følger gjeldende lover og forskrifter for
+lovlig pengespill i Norge. All betalingsbehandling skjer i samsvar med finansavtaleloven,
+personopplysningsloven (GDPR) og betalingstjenesteloven (PSD2).</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">3</span>Betalingsløsninger</h2>
+                <p>Bingoro AS tilbyr følgende betalingsmetoder: Debetkort (BankAxept, Visa Debit, Mastercard Debit) og
+Vipps. Kredittkort og andre former for betalingsutsettelse eller kredittkjøp tillates ikke. Betalinger håndteres
+av Swedbank Pay som leverer betalingsinfrastrukturen. Når du gjennomfører betaling i vårt system,
+samtykker du til at Swedbank Pay behandler nødvendige person- og transaksjonsdata for å gjennomføre
+betalinge</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">4</span>Gjennomføring av betaling</h2>
+                <p>Betaling registreres umiddelbart ved gjennomført transaksjon. Ved bruk av Vipps eller debetkort trekkes
+beløpet direkte fra kundens konto. Kvittering sendes automatisk til oppgitt e-post eller vises på skjermen
+etter fullført betaling.</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">5</span>Angrerett og refusjon</h2>
+                <p>Bingosystemet tilbyr deltakelse i arrangementer som begynner umiddelbart etter kjøp. I henhold til
+angrerettloven § 22 n) gjelder ingen angrerett etter at spillet eller arrangementet er påbegynt. Dersom et
+arrangement avlyses, vil innbetalt beløp tilbakeføres automatisk til den samme kontoen som ble belastet.
+Ved teknisk feil som fører til dobbeltbetaling eller ugyldig transaksjon, tilbakebetales det feilførte beløpet
+innen 5 arbeidsdager.</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">6</span>Ansvar og begrensninger</h2>
+                <p>Bingoro AS påtar seg ikke ansvar for tap som følge av tekniske feil hos eksterne betalingsleverandører
+(Swedbank Pay, Vipps) eller manglende dekning på kundens konto. Brukeren er selv ansvarlig for å sikre
+at oppgitte betalingsopplysninger er korrekte og at kjøpet ikke bryter med gjeldende lovverk, herunder
+lotteriloven, hvitvaskingsloven og spilleloven. Ved mistanke om misbruk, svindel eller regelbrudd
+forbeholder Bingoro AS seg retten til å sperre brukertilgang eller tilbakeholde betaling inntil forholdet er
+avklart.</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">7</span>Personvern og datasikkerhet</h2>
+                <p>Bingoro AS er behandlingsansvarlig for personopplysninger som samles inn ved bruk av systemet.
+Formålet er å levere sikre betalings- og spilltjenester, oppfylle lovpålagte krav og hindre misbruk.
+Swedbank Pay og Vipps er databehandlere under egne avtaler og følger EUs GDPR-regelverk. Data
+lagres på sikre servere innenfor EØS. Opplysninger deles aldri med tredjeparter utover det som er
+nødvendig for lovpålagte formål eller betalingsbehandling.</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">8</span>Forebygging av misbruk og hvitvasking</h2>
+                <p>Bingoro AS etterlever hvitvaskingsloven og kan iverksette kundekontrolltiltak ved mistanke om
+mistenkelige transaksjoner. Slike transaksjoner kan rapporteres til Økokrim i henhold til lovens krav.</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">9</span>Klager og tvister</h2>
+                <p>Eventuelle klager på betalinger eller bruk av systemet skal rettes til: post@bingoro.no. Klage behandles
+innen rimelig tid, normalt innen 10 arbeidsdager. Dersom partene ikke blir enige, kan saken bringes inn for
+Forbrukertilsynet eller domstolene i Norge. Verneting er Oslo tingrett.</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">10</span>Endringer i vilkår</h2>
+                <p>Bingoro AS kan oppdatere disse vilkårene ved behov. Vesentlige endringer kommuniseres på nettstedet
+eller i systemet før de trer i kraft. Ved fortsatt bruk etter endring anses vilkårene som akseptert.</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">11</span>Kontaktinformasjon</h2>
+                <p>Bingoro AS Org.nr: 986 873 031 Adresse: Proffesor Birkelandsvei 26B, 1081 Oslo E-post:
+post@bingoro.no</p>
+            </div>
+
+            <div class="section">
+                <h2><span class="section-number">12</span>Gyldighet</h2>
+                <p>Disse vilkårene gjelder fra og med 25. oktober 2025 og erstatter alle tidligere versjone</p>
+            </div>
+
+            {# <div class="last-updated">
+                <p><strong>Sist oppdatert:</strong> 25. oktober 2025</p>
+                <p>Disse vilkårene er gyldige fra og med datoen for din aksept og vil forbli i kraft inntil de oppheves i henhold til disse vilkårene.</p>
+            </div> #}
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,553 @@
+        <!-- Login modal start -->
+
+            <div class="modal-dialog modal-dialog-centered modal-md" id="modelgraph" role="document">
+                <div class="modal-content">
+                    <div class="modal-body">
+                        <button type="button" class="close closemodel" data-dismiss="modal" aria-label="Close">
+                            <i class="fa fa-times" aria-hidden="true"></i>
+                        </button>
+                        {% if(error) %}
+                            <div class="modal-tab">
+                                    <ul class="nav nav-pills" id="pills-tab" role="tablist">
+                                        <li class="nav-item">
+                                            <a class="nav-link active" id="help-tab" data-toggle="pill" href="#help" role="tab"
+                                                aria-controls="help" aria-selected="false">Error</a>
+                                        </li>
+                                    </ul>
+
+                                    <div class="tab-content" id="pills-tabContent">
+                                            <div class="tab-pane fade show active" id="help" role="tabpanel"
+                                                aria-labelledby="help-tab">
+                                                <div class="deposits-tab gale-fair">
+                                                    <p class="text-center">{{message}}</p>
+                                                </div>
+                                            </div>
+                                    </div>                
+                            </div>        
+                        {% else %}
+                           {% if modalCondition=='physicalTicket' %}
+                            <div class="modal-header">
+                                <div class="">
+                                    <h5 class="modal-title text-center" id="exampleModalLabel"><b>Add Physical Ticket</b>
+                                    </h5>
+                                </div>
+                            </div>
+                            
+
+                            <div class="table-wrap">
+                            <div class="table-responsive">
+                               
+                                    <form method="POST" id="physicalTicketForm"  name="addPhysicalTicket" class="form-horizontal has-validation-callback" enctype="multipart/form-data">
+                                      
+                                        <table border="0" class="table display  pb-30">
+                                            <div class="col-sm-10">
+                                                <div class="panel-wrapper collapse in">
+                                                    <div class="panel-body">
+
+                                                        <div class="form-group">
+                                                            <label class="radio-inline">
+                                                                <input type="radio" name="phyTicketpurchaseType" id="byPhysicalTicketId"  value="byPhysicalTicketId" checked > Physical Tickets
+                                                            </label>
+                                                            <label class="radio-inline">
+                                                                <input type="radio" name="phyTicketpurchaseType" id="byCoupons"  value="byCoupons"> Coupon
+                                                            </label>
+                                                        </div> 
+                                                        
+                                                        <div id="byPhysicalTicketsDiv">
+                                                            <div class="form-group">
+                                                                <div class="row ">    
+                                                                    <label for="name" class="mb-10 col-sm-12">Game Name:</label>
+                                                                    <div class="col-sm-12">
+                                                                        <input type="hidden" id="game1DataPhysical" value="{{gameJSON}}">
+    
+                                                                        <label for="name" class="form-control">{{subGamesData.subGames[0].gameName}}</label>
+                                                                        <input type="hidden" name="physicalTicketGameId1" value="{{subGamesData._id}}" subId="{{subGamesData.subGames[0].subGameId}}">
+                                                                        
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                    
+                                                            <div class="form-group">
+                                                                <div class="row ">
+                                                                    <label for="name" class="mb-10 col-sm-12">Enter Ticket Id :</label>
+                                                                    <div class="col-sm-12">
+                                                                            
+                                                                            <input type="text" class="form-control" required data-validation="required" name="physicalUniqueTicketId" id="physicalUniqueTicketId" value="" placeholder="Enter Ticket Id" >
+    
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+    
+                                                            <div class="form-group">
+                                                                <div class="row ">
+                                                                    <label for="name" class="mb-10 col-sm-12">Select Ticket Color:</label>
+                                                                    <div class="col-sm-12">
+                                                                        <select class="form-control" id="gamesTicketColors1" name="ticketcolor1" required>
+                                                                            <option value="">Select color</option>
+                                                                            {% for row in (subGamesData.subGames[0].ticketColorTypesNo) %}
+                                                                                <option value ="{{row.ticketType}}" pval="{{row.ticketPrice}}"> {{row.ticketName}} </option>
+                                                                            {% endfor %}
+                                                                        </select>
+                                                                            
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <div class="row ">
+                                                                    <label for="name" class="mb-10 col-sm-12">Ticket Price:</label>
+                                                                    <div class="col-sm-12">
+                                                                            <input type="text" class="form-control" required name="ticketprice1" id="ticketprice" value="" placeholder="Enter Ticket Price" data-validation-length="" data-validation-error-msg="Price is Required" readonly>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div id="byCouponsDiv">
+                                                            <div class="form-group">
+                                                                <div class="row ">    
+                                                                    <label for="name" class="mb-10 col-sm-12">Game Name:</label>
+                                                                    <div class="col-sm-12">
+                                                                        <input type="hidden" id="game1DataPhysical" value="{{gameJSON}}">
+    
+                                                                        <!-- {{gameData.subGames|dump}} -->
+                                                                        
+                                                                        <!-- <select class="form-control" name="physicalTicketGameId" id="physicalTicketGameId" required>
+                                                                            <option>Select Game</option>
+                                                                            {% for row in gameData.subGames %}
+                                                                                {% for sub in  subGamesMaster %}
+                                                                                    
+                                                                                {% if (sub.subGames[0].gameType==row.gameType)%}
+                                                                                    <option value="{{sub._id}}" subId="{{row.subGameId}}">{{row.gameName}}</option>
+                                                                                {% endif %}
+                                                                                
+                                                                                {% endfor%}
+                                                                            {% endfor %}
+                                                                            
+                                                                        </select> -->
+                                                                        <!-- {{subGamesData.subGames[0]|dump}} -->
+                                                                        <label for="name" class="form-control">{{subGamesData.subGames[0].gameName}}</label>
+                                                                        <input type="hidden" name="physicalTicketGameId" value="{{subGamesData._id}}" subId="{{subGamesData.subGames[0].subGameId}}">
+                                                                        
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+            
+                                                            <div class="form-group">
+                                                                <div class="row ">
+                                                                    <label for="name" class="mb-10 col-sm-12">Enter Unique Id :</label>
+                                                                    <div class="col-sm-12">
+                                                                            
+                                                                            <input type="text" class="form-control" required data-validation="required" name="physicalUniqueId" id="physicalUniqueId" value="" placeholder="Enter Unique Id" >
+    
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+    
+                                                            <div class="form-group">
+                                                                <div class="row ">
+                                                                    <label for="name" class="mb-10 col-sm-12">Select Ticket Color:</label>
+                                                                    <div class="col-sm-12">
+                                                                        <select class="form-control" id="gamesTicketColors" name="ticketcolor" required>
+                                                                            <option value="">Select color</option>
+                                                                            {% for row in (subGamesData.subGames[0].ticketColorTypesNo) %}
+                                                                                <option value ="{{row.ticketType}}" pval="{{row.ticketPrice}}"> {{row.ticketName}} </option>
+                                                                            {% endfor %}
+                                                                        </select>
+                                                                            
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <div class="row ">
+                                                                    <label for="name" class="mb-10 col-sm-12">Ticket Price:</label>
+                                                                    <div class="col-sm-12">
+                                                                            <input type="text" class="form-control" required name="ticketprice" id="ticketprice" value="" placeholder="Enter Ticket Price" data-validation-length="" data-validation-error-msg="Price is Required" readonly>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <div class="form-group">
+                                                                <div class="row">
+                                                                    <label class="col-sm-12 mb-10">Unique ID Purchase Date</label>
+                                                                    <div class="col-sm-12">
+                                                                        <div class="input-group">
+                                                                            <input type='text' class="form-control" name="uipd" id="uipd" value="" placeholder="Unique purchase date" data-date-format="YYYY-MM-DD HH:mm" required readonly />
+                                                                            <div class="input-group-addon"><i class="glyphicon glyphicon-calendar"></i></div>
+                                                                        </div>    
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+    
+                                                            <div class="form-group">
+                                                                <div class="row">
+                                                                    <label class="col-sm-12 mb-10">Unique ID Expiry Date</label>
+                                                                    <div class="col-sm-12">
+                                                                        <div class="input-group">
+                                                                            <input type='text' class="form-control" name="uied" id="uied" value="" placeholder="Unique expiry date" data-date-format="YYYY-MM-DD HH:mm"  required  readonly/>
+                                                                            <div class="input-group-addon"><i class="glyphicon glyphicon-calendar"></i></div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <div class="form-group">
+                                                                <div class="row ">
+                                                                    <label for="name" class="mb-10 col-sm-12">Hours Validity:</label>
+                                                                    <div class="col-sm-12">
+                                                                            <input type="text" class="form-control" required name="validity" id="physical_validity" value="" placeholder="Enter Hours Validity" data-validation-length="" data-validation-error-msg="Hours is Required" readonly>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                    
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <tr>
+                                                <td colspan="4">
+                                                    <div class="pull-left ">
+                                                        <input type="button" disabled id="btnGenerateTicket" class="btn btn-default btn-flat " value="Generate">
+                                                        <!-- <input type="button" disabled id="btnPrintPhysicalTicket" class="btn btn-default btn-flat " value="Print"> -->
+                                                        <input type="button" id="btnCancelPhysicalTicket" class="btn btn-default btn-flat " value="Cancel">
+                                                        
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </form>
+                            </div>
+                            </div>
+                            {% elif modalCondition=='generatedTicket' %}
+                                
+                                <div class="panel-body">
+                                    <!-- <div class="row" style="overflow: auto">
+                                        <label class="col-sm-4">Total Numbers displayed already: </label>
+                                        <div class="col-md-8">
+                                            <p style="word-break: break-all;"> 
+                                                {% for ob in generatedTicket %}
+                                                    {% for rr in ob.rows %}
+                                                        {{rr+' , '}}
+                                                    {% endfor %}
+                                                {% endfor %}
+                                            </p>
+                                        </div>
+                                    </div>  -->
+                                    
+                                    <div class="row">
+                                        <div class="col-sm-6 col-sm-offset-3">
+                                            <div id="printPhysicalTicketView">
+                                                <table class="table table-bordered">
+                                                        <tbody>
+                                                        
+                                                            <tr>
+                                                                <th colspan="5">
+                                                                    {{ticketId}}
+                                                                </th>
+                                                            </tr>
+
+                                                            
+                                                                {% for ob in generatedTicket %}
+
+                                                                        <tr>
+                                                                            {% for rr in ob.rows %}
+                                                                                <td>{{'F' if(rr==0) else rr }}</td>
+                                                                            {% endfor %}
+                                                                        </tr>
+                                                                
+
+                                                                {% endfor %}
+                                                        
+                                                        
+                                                        </tbody>
+                                                </table>
+                                            </div>
+                                            <!-- <button pdid="printPhysicalTicketView" id="btnPrintPhyTicket" style="display: block;margin: auto;">Print</button> -->
+                                        </div>
+                                    </div>
+
+                                    
+                                <div>
+                                    
+                                
+
+                            {% elif modalCondition=='printPhysicalTicket' %}
+
+                                <div class="panel-body" id="printdivcontent">
+                                    <!-- <div class="row" style="overflow: auto">
+                                        <label class="col-sm-4">Total Numbers displayed already: </label>
+                                        <div class="col-md-8">
+                                            <p style="word-break: break-all;"> 
+                                                {% for ob in generatedTicket %}
+                                                    {% for rr in ob.rows %}
+                                                        {{rr+' , '}}
+                                                    {% endfor %}
+                                                {% endfor %}
+                                            </p>
+                                        </div>
+                                    </div>  -->
+                                    
+                                    <div class="row">
+                                        <div class="col-sm-6 col-sm-offset-3">
+                                            <table class="table table-bordered">
+                                                    <tbody>
+                                                    
+                                                            <tr>
+                                                                <th colspan="5">{{ticketId}}
+                                                                </th>
+                                                            </tr>
+
+                                                        
+                                                            {% for ob in generatedTicket %}
+
+                                                                    <tr>
+                                                                        {% for rr in ob.rows %}
+                                                                            <td>{{'F' if(rr==0) else rr }}</td>
+                                                                        {% endfor %}
+                                                                    </tr>
+                                                            
+
+                                                            {% endfor %}
+                                                        
+                                                           
+
+                                                    </tbody>
+                                                </table>
+                                                
+                                             
+                                        </div>
+                                    </div>
+
+                                    
+                                <div>
+
+                            {% elif modalCondition=='editPhysicalTicket' %}        
+                                <div class="modal-header">
+                                    <div class="">
+                                        <h4 class="modal-title text-center" id="exampleModalLabel"><b>Edit Physical Ticket</b>
+                                        </h4>
+                                    </div>
+                                </div>
+                                <div class="panel-body">
+                                    <form method="POST" id="physicalTicketEditForm" name="addPhysicalTicket" class="form-horizontal has-validation-callback" enctype="multipart/form-data">
+                                        <div class="col-sm-12">
+                                            <div class="fonrm-inner">
+                                                <!-- {{subGameData|dump}} -->
+                                                <div class="panel-wrapper collapse in">
+                                                    <div class="panel-body">
+                                                        <div class="form-group">
+                                                            <div class="row">
+                                                                <label for="name" class="mb-10 col-sm-12">Game Name:</label>
+                                                                <div class="col-sm-12">
+                                                                    <label for="name" class="form-control">{{subGameData.subGames[0].gameName}}</label>
+                                                                    <input type="hidden" name="physicalTicketGameId" value="{{subGameData._id}}" subid="{{subGameData.subGames[0].subGameId}}" />
+                                                                    <input type="hidden" name="ticketUniqueId" value="{{ticketData._id}}">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                    
+                                                        <input type="hidden" class="form-control" required="" data-validation="required" name="physicalUniqueId"  value="{{ticketData.uniquePlayerId}}" placeholder="Enter Unique Id" />
+                                                        
+                                                        {% if(ticketData.userType == "Physical") %}
+                                                        <div class="form-group">
+                                                            <div class="row ">
+                                                                <label for="name" class="mb-10 col-sm-12">Enter Ticket Id :</label>
+                                                                <div class="col-sm-12">
+                                                                        
+                                                                        <input type="text" class="form-control" required data-validation="required" name="physicalUniqueTicketId" id="physicalUniqueTicketId" value="{{ ticketData.ticketId }}" placeholder="Enter Ticket Id" >
+
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {% endif %}
+
+                                                        <div class="form-group">
+                                                            <div class="row">
+                                                                <label for="name" class="mb-10 col-sm-12">Select Ticket Color:</label>
+                                                                <div class="col-sm-12">
+                                                                    <select class="form-control" id="gamesTicketColors" name="ticketcolor" required="">
+                                                                        <option value="">Select color</option>
+                                                                        {% for rr in subGameData.subGames[0].ticketColorTypesNo %}
+                                                                        {% set abc= "" %}
+                                                                        {% if(ticketData.ticketColorType==rr.ticketType) %}
+                                                                            {% set abc="selected" %}
+                                                                        {% endif %}
+                                                                            <option value="{{rr.ticketType}}" pval="{{rr.ticketPrice}}" {{abc}} oticketType="{{ticketData.ticketColorType}}"> {{rr.ticketName}} </option>
+                                                                        {% endfor%}
+                                    
+                                                                    
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <div class="row">
+                                                                <label for="name" class="mb-10 col-sm-12">Ticket Price:</label>
+                                                                <div class="col-sm-12">
+                                                                    <input type="text" class="form-control" required=""
+                                                                        name="ticketprice" id="ticketprice" value="{{ticketData.ticketPrice}}" placeholder="Enter Ticket Price"
+                                                                        data-validation-length="" data-validation-error-msg="Price is Required" readonly=""
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                        </div>
+
+                                        <table border="0" class="table display pb-30">
+                                            <tbody>
+                                                <tr>
+                                                    <td colspan="4">
+                                                        <div class="pull-left">
+                                                            <input type="button" id="btnReGenerateTicket" class="btn btn-default btn-flat" value="Re-generate" disabled />
+                                                            <!-- <input type="button" id="btnRePrintPhysicalTicket" class="btn btn-default btn-flat" value="Print"  disabled /> -->
+                                                            <input type="button" id="btnCancelPhysicalTicket" class="btn btn-default btn-flat" value="Cancel" />
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </form>    
+                                </div>
+                            {% elif modalCondition=='uniqueTicketWithdraw' %}
+                            <div class="modal-header">
+                                <div class="">
+                                    <h3 class="modal-title text-center" id="exampleModalLabel"><b>Withdraw</b>
+                                    </h3>
+                                </div>
+                            </div>
+                            <div class="panel-body">
+                                <div class="col-sm-8">
+                                    <div class="fonrm-inner">
+                                        <!-- {{player|dump}} -->
+                                        <div class="panel-wrapper collapse in">
+                                            <div class="panel-body">
+                                                <div class="form-group">
+                                                    <div class="row ">
+                                                        <label for="name" class="mb-10 col-sm-6">Unique Id :</label>
+                                                        <label for="name" class="mb-10 col-sm-6">{{player.username}}</label>
+                                                    </div>
+                                                </div>
+                                            <form id="uniqueWithdrawForm" action="unique/depositWithdraw">
+                                                <div class="form-group">
+                                                    <div class="row ">
+                                                        <label for="name" class="mb-10 col-sm-6">Enter Amount:</label>
+                                                        <div class="col-sm-6">
+                                                                <input type="number" class="form-control" required name="unique_amount_dw"  value="" placeholder="Enter Amount" >
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <div class="row">
+                                                        <button type="button" class="btn btn-secondary" id="unique_withdraw_btn" data-id="{{player._id}}">Withdraw</button>
+                                                        <button type="button" class="btn btn-primary" data-dismiss="modal">Cancel</button>
+                                                    </div>
+                                                </div>
+                                            </form>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                                <div class="col-sm-4">
+                                    <div class="fonrm-inner">
+                                        <center>
+                                            <label for="name" class="mb-10 col-sm-12"><h4>Balance :</h4></label>
+                                                    
+                                            <label for="name" class="mb-10 col-sm-12" id="userWalletBalance">{{player.walletAmount}}</label>
+                                        </center>
+                                    </div>    
+                                </div>
+
+                            </div>
+
+                            {% elif modalCondition=='uniqueTicketDeposit' %}     
+                                <div class="modal-header">
+                                    <div class="">
+                                        <h3 class="modal-title text-center" id="exampleModalLabel"><b>Deposit</b>
+                                        </h3>
+                                    </div>
+                                </div>
+                                <div class="panel-body">
+                                    <div class="col-sm-8">
+                                        <div class="fonrm-inner">
+                                            <!-- {{player|dump}} -->
+                                            <div class="panel-wrapper collapse in">
+                                                <div class="panel-body">
+                                                    <div class="form-group">
+                                                        <div class="row ">
+                                                            <label for="name" class="mb-10 col-sm-6">Unique Id :</label>
+                                                            <label for="name" class="mb-10 col-sm-6">{{player.username}}</label>
+                                                        </div>
+                                                    </div>
+                                                    <form id="uniqueWithdrawForm" action="unique/depositWithdraw">
+                                                        <div class="form-group">
+                                                            <div class="row ">
+                                                                <label for="name" class="mb-10 col-sm-6">Enter Amount:</label>
+                                                                <div class="col-sm-6">
+                                                                        <input type="number" class="form-control" required name="unique_amount_dw" value="" placeholder="Enter Amount" >
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="form-group">
+                                                            <div class="row">
+                                                                <button type="button" class="btn btn-secondary" id="unique_deposit_btn" data-id="{{player._id}}">Deposit</button>
+                                                                <button type="button" class="btn btn-primary" data-dismiss="modal">Cancel</button>
+                                                            </div>
+                                                        </div>
+                                                    </form>    
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                    </div>
+
+                                    <div class="col-sm-4">
+                                        <div class="fonrm-inner">
+                                            <center>
+                                                <label for="name" class="mb-10 col-sm-12"><h4>Balance :</h4></label>
+                                                <label for="name" class="mb-10 col-sm-12" id="userWalletBalance">{{player.walletAmount}}</label>
+                                            </center>
+                                        </div>    
+                                    </div>
+
+                                </div>
+                               
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+        <!-- Login modal end -->
+        <script>
+            $(document).ready(function() {
+                let radios = document.getElementsByName("phyTicketpurchaseType");
+                let byPhysicalTickets =  document.getElementById("byPhysicalTicketsDiv");
+                let byCoupons =  document.getElementById("byCouponsDiv");
+                byPhysicalTickets.style.display = 'block';   // show
+                byCoupons.style.display = 'none';// hide
+                for(var i = 0; i < radios.length; i++) {
+                    radios[i].onclick = function() {
+                        var val = this.value;
+                        if(val == 'byPhysicalTicketId' ){
+                            byPhysicalTickets.style.display = 'block';
+                            byCoupons.style.display = 'none';
+                            $('#btnGenerateTicket,#btnPrintPhysicalTicket').attr("disabled","disabled"); 
+                        }
+                        else if(val == 'byCoupons'){
+                            byPhysicalTickets.style.display = 'none';
+                            byCoupons.style.display = 'block';
+                            $('#btnGenerateTicket,#btnPrintPhysicalTicket').attr("disabled","disabled"); 
+                        }            
+                    }
+                }
+            });
+            
+        </script>        

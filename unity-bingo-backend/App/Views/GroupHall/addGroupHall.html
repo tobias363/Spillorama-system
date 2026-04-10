@@ -1,0 +1,576 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<style>
+    .chosen-container-multi {
+        width: 100% !important;
+    }
+
+    .chosen-container-multi .chosen-choices {
+        padding: 5px !important;
+    }
+
+    .chosen-results {
+        max-height: 100px !important;
+        overflow: auto !important;
+    }
+</style>
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            {% if Hall %}
+            <h1>{{grouphallData.create_group_of_halls}}</h1>
+            {% else %}
+            <h1>{{grouphallData.create_group_of_halls}}</h1>
+            {% endif %}
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{grouphallData.dashboard}}</a></li>
+                <li href="/groupHall">{{grouphallData.group_of_hall}}</li>
+                {% if Hall %}
+                <li class="active">{{grouphallData.edit_group_of_halls}}</li>
+                {% else %}
+                <li class="active">{{grouphallData.add_group_of_halls}}</li>
+                {% endif %}
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content">
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                {% if GroupHall %}
+                                <h6 class="panel-title txt-dark">{{grouphallData.edit_group_of_halls}}</h6>
+                                {% else %}
+                                <h6 class="panel-title txt-dark">{{grouphallData.add_group_of_halls}}</h6>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        {% if GroupHall %}
+                                        <form method="POST" action="/groupHallEdit/{{GroupHall._id}}"
+                                            name="addGroupHall" class="form-horizontal">
+                                            {% else %}
+                                            <form method="POST" action="/addGroupHall" name="addGroupHall"
+                                                class="form-horizontal">
+                                                {% endif %}
+                                                <table border="0" class="table display  pb-30">
+                                                    <div class="col-sm-8">
+                                                        <div class="panel-wrapper collapse in">
+                                                            <div class="panel-body">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4"
+                                                                        for="hallname">{{grouphallData.group_of_hall_name}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" class="form-control"
+                                                                            id="name"
+                                                                            placeholder="{{grouphallData.enter}} {{grouphallData.group_of_hall_name}}" required
+                                                                            name="name" value="{{GroupHall.name}}"
+                                                                            data-validation="required"
+                                                                            data-validation-length=""
+                                                                            data-validation-error-msg="">
+                                                                    </div>
+                                                                </div>
+                                                                {% if GroupHall %}
+                                                                <input type="hidden" id="groupId"
+                                                                    value="{{GroupHall._id}}">
+                                                                <!-- {#{% for agent in GroupHall.agents%}
+                                                                        {% if loop.index != 1 %}
+                                                                            <div id="assign">
+                                                                        {% endif %}
+                                                                        <div class="form-group {% if loop.index != 1 %}assigns{% endif %}">
+                                                                            <label class="control-label mb-10 col-sm-4" for="assign">{% if loop.index == 1 %}Assign:{% else %} &nbsp; {% endif%}</label>
+                                                                            <div class="col-sm-3">
+                                                                                <select  id="{{loop.index}}" class="form-control agentname{{loop.index}}" onchange="changeFunc(id);" required name="agentname[{{loop.index}}]">
+                                                                                    {% for item in dataAgent %}
+                                                                                        <option {{ "selected" if agent.name == item.name else "" }} value="{{item.id}}" > {{item.name}}</option>
+                                                                                    {% endfor %}
+                                                                                </select>
+                                                                            </div>
+                                                                            <div class="col-sm-3">
+                                                                                <select data-placeholder="Choose halls ..." multiple class="chosen-select{{loop.index}} form-control" id="{{loop.index}}" required onchange="changeFunc(id);" name="agentHalls[{{loop.index}}]">
+                                                                                        {% for hall in hallData %}
+                                                                                        {% set selected = "false" %}
+                                                                                                {% for halls in agent.halls %}
+                                                                                                    {% if halls == hall.hallId %}
+                                                                                                        {% set selected = "true" %}
+                                                                                                    {% endif %}
+                                                                                                {% endfor %}
+                                                                                            <option {{ "selected" if selected == 'true' else "" }} value="{{hall.hallId}}">{{hall.name}}</option>
+                                                                                        {% endfor %}
+                                                                                </select>
+                                                                            </div>
+                                                                            {% if loop.index == 1 %}
+                                                                                <div class="col-sm-2">
+                                                                                    <button class="add_form_field"><i class="fa fa-plus" aria-hidden="true"></i></button>
+                                                                                    <button class="edit_form_field"><i class="fa fa-pencil-square-o" aria-hidden="true"></i></button>
+                                                                                </div>
+                                                                            {% else %}
+                                                                                <div class="col-sm-2">
+                                                                                    <button type="button" class="btn btn-danger btn-xs delete btn-rounded" value="{{agent.id}}" title="Delete Player"><i class="fa fa-trash" aria-hidden="true"></i></button>
+                                                                                </div>
+                                                                            </div>
+                                                                            {% endif %}
+                                                                        </div>
+                                                                    {% endfor %}#} -->
+                                                                {% endif%}
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4"
+                                                                        for="assign">{{grouphallData.assign}}:</label>
+                                                                    <!-- <div class="col-sm-3">
+                                                                        <select id="1" class="form-control agentname1" onchange="changeFunc(id);" required name="agentname[1]">
+                                                                            <option value="" selected="selected">Select Agent</option>
+                                                                            {% for item in dataAgent %}
+                                                                                <option value="{{item.id}}"> {{item.name}}</option>
+                                                                            {% endfor %}
+                                                                        </select>
+                                                                    </div> -->
+                                                                    <div class="col-sm-8">
+                                                                        <select data-placeholder="{{grouphallData.choose_halls}} ..."
+                                                                            multiple="multiple"
+                                                                            class="chosen-select_halls form-control"
+                                                                            id="halls" name="halls[]">
+                                                                            <option value=""> </option>
+                                                                            {% for singleHall in hallData %}
+                                                                            {% set selected = "false" %}
+                                                                            {% for hall in GroupHall.halls %}
+                                                                            {% if hall.id == singleHall.id %}
+                                                                            {% set selected = "true" %}
+                                                                            {% endif %}
+                                                                            {% endfor %}
+                                                                            <option {{ "selected" if selected=='true'
+                                                                                else "" }} value="{{singleHall._id}}">
+                                                                                {{singleHall.name}}</option>
+                                                                            {% endfor %}
+                                                                        </select>
+                                                                        {% if GroupHall %}
+                                                                        <small style="color: red;">{{grouphallData.group_of_hall_note}}.</small>
+                                                                        {% endif%}
+                                                                    </div>
+                                                                </div>
+                                                                <!-- <div id="assign"></div> -->
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4"
+                                                                        for="product">{{grouphallData.select_product}}s:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <select
+                                                                            data-placeholder="{{grouphallData.begin_typing_a_name_to_filter}}..."
+                                                                            multiple class="chosen-select form-control"
+                                                                            id="products" name="product">
+                                                                            <option value=""> </option>
+                                                                            {% for product in productData %}
+                                                                            {% set selected = "false" %}
+                                                                            {% for products in GroupHall.products %}
+                                                                            {% if products == product.id %}
+                                                                            {% set selected = "true" %}
+                                                                            {% endif %}
+                                                                            {% endfor %}
+                                                                            <option {{ "selected" if selected=='true'
+                                                                                else "" }} value="{{product._id}}">
+                                                                                {{product.name}}</option>
+                                                                            {% endfor %}
+                                                                        </select>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4"
+                                                                        for="status">{{grouphallData.status}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <select class="form-control" name="status"
+                                                                            id="status">
+                                                                            <option value="active" {{ "selected" if
+                                                                                GroupHall.status=='active' else "" }}>
+                                                                                {{grouphallData.active}}</option>
+                                                                            <option value="inactive" {{ "selected" if
+                                                                                GroupHall.status=='inactive' else "" }}>
+                                                                                {{grouphallData.inactive}}</option>
+                                                                        </select>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <tr>
+                                                        <td colspan="2">
+                                                            <div class="pull-left">
+                                                                <input type="submit" class="btn btn-success btn-flat"
+                                                                    value="{{grouphallData.submit}}">
+                                                                <a href="/groupHall"
+                                                                    class="btn btn-danger btn-flat">{{grouphallData.cancel}}</a>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+        <!-- /Row -->
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+
+<!-- <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+ <link href="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/css/bootstrap-multiselect.css" rel="stylesheet" type="text/css" />
+<script src="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/js/bootstrap-multiselect.js" type="text/javascript"></script> -->
+<script src="/dist/js/chosen.jquery.js"></script>
+<link href="/dist/css/chosen.min.css" rel="stylesheet " />
+
+<script>
+
+    // $(document).ready(function() {
+    //     $('form').submit(function(e) {
+    //         $(':disabled').each(function(e) {
+    //             $(this).removeAttr('disabled');
+    //         })
+    //     });
+    //     // let dataAgent = `{{ dataAgent | dump | safe }}`;
+    //     // dataAgent = JSON.parse(dataAgent);
+    //     let hallData = `{{ hallData | dump | safe }}`;
+    //     hallData = JSON.parse(hallData);
+    //     var max_fields = 10;
+    //     var wrapper = $("#assign");
+    //     var add_button = $(".add_form_field");
+    //     let groupId = $('#groupId').val();
+    //     console.log('groupId',groupId);
+    //     var x = 1;
+    //     let grpData = '';
+    //     if(groupId != undefined){
+    //         $(".chosen-select").chosen();
+    //         grpData = `{{ GroupHall | dump | safe }}`;
+    //         grpData = JSON.parse(grpData);
+    //         x = grpData.agents.length;
+    //         console.log('x----',x);
+    //         for(let i = 1; i <= x; i++){
+    //             $(`.chosen-select${i}`).chosen();
+    //             $(`.agentname${i}`).attr({'disabled' : 'true' });
+    //             $(`.chosen-select${i}`).attr({'disabled' : 'true' }).trigger("chosen:updated");
+    //         }
+    //     }else{
+    //         $(".chosen-select").chosen();
+    //         $(".chosen-select1").chosen();
+    //     }
+
+    //     // $(add_button).click(function(e) {
+    //     //     e.preventDefault();
+    //     //     x++;
+
+    //     //     let html = `<div class="form-group assigns">
+    //     //                 <label class="control-label mb-10 col-sm-4" for="assign">&nbsp;</label>
+    //     //                 <div class="col-sm-3">
+    //     //                     <select class="form-control agentname${x}" required id="${x}" onchange="changeFunc(id);" name="agentname[${x}]">
+    //     //                     </select>
+    //     //                 </div>
+    //     //                 <div class="col-sm-3">
+    //     //                     <select data-placeholder="Choose halls ..." multiple="multiple" required class="chosen-select${x} form-control" id="${x}" onchange="changeFunc(id);" name="agentHalls[${x}]">
+    //     //                     </select>
+    //     //                 </div>
+    //     //                 <div class="col-sm-2">
+    //     //                     <button type="button" class="btn btn-danger btn-xs delete btn-rounded assignremove${x}" title="Delete Player"><i class="fa fa-trash" aria-hidden="true"></i></button>
+    //     //                 </div>
+    //     //             </div>
+    //     //             `
+    //     //         $(wrapper).append(html); //add input box
+
+    //     //         $('.add_form_field').css("display", "none");
+    //     //         let a = x - 1;
+    //     //         /*let agentID = $(`.agentname${a} :selected`).val();*/
+    //     //         let agentID = $(`select.agentname${a} option`).filter(":selected").text().trim();
+    //     //             dataAgent = dataAgent.filter( (agent) => {
+    //     //                 return agent.name != agentID} );
+    //     //         let hallD = $(`.chosen-select${a} option:selected`)
+    //     //         .toArray().map(item => item.text);
+    //     //         for(let i=0; i < hallD.length; i++){
+    //     //             hallData = hallData.filter( h => h.name != hallD[i] );
+    //     //         }
+    //     //         let options = [];
+    //     //         $(`.agentname${x}`).html('');  // Set the Dropdown as Blank before new Data
+    //     //         options.push('<option value="">Select Agent</option>');
+    //     //         $.each(dataAgent, function(i, item) {
+    //     //             options.push(
+    //     //                 $('<option/>',{ value: item._id, text: item.name})
+    //     //                 );
+    //     //         });
+    //     //         $(`.agentname${x}`).append(options);  // Set the Values to Dropdown
+
+    //     //         let hallOptions = [];
+    //     //         $(`.chosen-select${x}`).html('');  // Set the Dropdown as Blank before new Data
+    //     //         $.each(hallData, function(i, item) {
+    //     //             hallOptions.push(
+    //     //                 $('<option/>',{ value: item.hallId, text: item.name})
+    //     //                 );
+    //     //         });
+    //     //         $(`.chosen-select${x}`).append(hallOptions);  // Set the Values to Dropdown
+    //     //         $(`.chosen-select${x}`).chosen();
+    //     //         let classNo = x -1;
+    //     //         console.log('classNo',classNo);
+    //     //         $(`.agentname${classNo}`).attr({'disabled' : 'true' });
+    //     //         $(`.chosen-select${classNo}`).attr({'disabled' : 'true' }).trigger("chosen:updated");
+    //     //         $(`.assignremove${classNo}`).css("display", "none");
+    //     //         $('.edit_form_field').css("display", "none");
+    //     // });
+
+    //     // $(wrapper).on("click", ".delete", function(e) {
+    //     //     e.preventDefault();
+    //     //     let groupId = $('#groupId').val();
+    //     //     console.log('groupId',groupId);
+    //     //     if(groupId != undefined){
+    //     //         let agentId = $(this).val();
+    //     //         console.log('agentId',agentId);
+    //     //         if(agentId){
+    //     //             console.log('agentId2',agentId);
+    //     //             $.ajax({
+    //     //                 type: 'GET',
+    //     //                 url: "/removedGroup",
+    //     //                 data: {
+    //     //                     agentId: agentId,
+    //     //                     groupId: groupId
+    //     //                 },
+    //     //                 success: function (resultData) {
+    //     //                     console.log("List of Halls", resultData);
+    //     //                     if (resultData == 'success') {
+    //     //                         console.log("List of Halls----", resultData, x);
+    //     //                         let agentId = $(`select.agentname${x} option`).filter(":selected").val().trim();
+    //     //                         let agentName = $(`select.agentname${x} option`).filter(":selected").text().trim();
+    //     //                         if(agentName != 'Select Agent'){
+    //     //                             let agentArray ={
+    //     //                                     _id:agentId,
+    //     //                                     name:agentName
+    //     //                                 }
+    //     //                                 console.log('agentArray', agentArray);
+    //     //                             let agentIndex = dataAgent.map(function (agent) { return agent.name; }).indexOf(agentArray.name);
+    //     //                             console.log('agentIndex',agentIndex);
+    //     //                             if (agentIndex == -1) {
+    //     //                                     dataAgent.push(agentArray);
+    //     //                             }
+    //     //                         }
+    //     //                             console.log('dataAgent',dataAgent);
+    //     //                         /*let hallName = $(`.chosen-select${x} option:selected`).toArray().map(item => item.text);*/
+    //     //                         let hallArr = $(`.chosen-select${x} option:selected`).map(function(){
+    //     //                             let hallArray ={
+    //     //                                 hallId:this.value,
+    //     //                                 name:this.text
+    //     //                             }
+    //     //                             return hallArray; // If you want text of select boxes.
+    //     //                         }).get();
+    //     //                         console.log('hallArr--',hallArr);
+    //     //                         for(let h=0; h < hallArr.length; h++){
+    //     //                             let index = hallData.map(function (hall) { return hall.hallId; }).indexOf(hallArr[h].hallId);
+    //     //                             if (index == -1) {
+    //     //                                     hallData.push(hallArr[h]);
+    //     //                             }
+    //     //                         }
+    //     //                         console.log('agentName hallName',agentName, x, hallData);
+    //     //                         x--;
+    //     //                         $('.delete').parent().parent('.assigns').remove();
+    //     //                         $(`.agentname${x}`).removeAttr('disabled');
+    //     //                         $(`.chosen-select${x}`).removeAttr('disabled').trigger("chosen:updated");
+    //     //                         $(`.assignremove${x}`).css("display", "block");
+    //     //                         $('.add_form_field').css("display", "block");
+    //     //                     } else {
+    //     //                         console.log("something went wrong");
+    //     //                     }
+    //     //                 }
+    //     //             });
+    //     //         }else{
+    //     //             let agentId = $(`select.agentname${x} option`).filter(":selected").val().trim();
+    //     //             let agentName = $(`select.agentname${x} option`).filter(":selected").text().trim();
+    //     //             if(agentName != 'Select Agent'){
+    //     //                 let agentArray ={
+    //     //                         _id:agentId,
+    //     //                         name:agentName
+    //     //                     }
+    //     //                     console.log('agentArray', agentArray);
+    //     //                 let agentIndex = dataAgent.map(function (agent) { return agent.name; }).indexOf(agentArray.name);
+    //     //                 console.log('agentIndex',agentIndex);
+    //     //                 if (agentIndex == -1) {
+    //     //                         dataAgent.push(agentArray);
+    //     //                 }
+    //     //             }
+    //     //                 console.log('dataAgent',dataAgent);
+    //     //             /*let hallName = $(`.chosen-select${x} option:selected`).toArray().map(item => item.text);*/
+    //     //             let hallArr = $(`.chosen-select${x} option:selected`).map(function(){
+    //     //                 let hallArray ={
+    //     //                     hallId:this.value,
+    //     //                     name:this.text
+    //     //                 }
+    //     //                 return hallArray; // If you want text of select boxes.
+    //     //             }).get();
+    //     //             console.log('hallArr--',hallArr);
+    //     //             for(let h=0; h < hallArr.length; h++){
+    //     //                 let index = hallData.map(function (hall) { return hall.hallId; }).indexOf(hallArr[h].hallId);
+    //     //                 if (index == -1) {
+    //     //                         hallData.push(hallArr[h]);
+    //     //                 }
+    //     //             }
+    //     //             console.log('agentName hallName',agentName, x, hallData);
+    //     //             /*let agentName = $(`select.agentname${x} option`).filter(":selected").text().trim();
+    //     //             let hallName = $(`.chosen-select${x} option:selected`).toArray().map(item => item.text);
+    //     //             console.log('agentName hallName',agentName, hallName, x);*/
+    //     //             $(this).parent().parent('.assigns').remove();
+    //     //             x--;
+    //     //             $(`.agentname${x}`).removeAttr('disabled');
+    //     //             $(`.chosen-select${x}`).removeAttr('disabled').trigger("chosen:updated");
+    //     //             $(`.assignremove${x}`).css("display", "block");
+    //     //             $('.add_form_field').css("display", "block");
+    //     //         }
+    //     //     }else{
+
+    //     //         let agentId = $(`select.agentname${x} option`).filter(":selected").val().trim();
+    //     //         let agentName = $(`select.agentname${x} option`).filter(":selected").text().trim();
+    //     //         if(agentName != 'Select Agent'){
+    //     //             let agentArray ={
+    //     //                     _id:agentId,
+    //     //                     name:agentName
+    //     //                 }
+    //     //                 console.log('agentArray', agentArray);
+    //     //             let agentIndex = dataAgent.map(function (agent) { return agent.name; }).indexOf(agentArray.name);
+    //     //             console.log('agentIndex',agentIndex);
+    //     //             if (agentIndex == -1) {
+    //     //                     dataAgent.push(agentArray);
+    //     //             }
+    //     //         }
+    //     //             console.log('dataAgent',dataAgent);
+    //     //         /*let hallName = $(`.chosen-select${x} option:selected`).toArray().map(item => item.text);*/
+    //     //         let hallArr = $(`.chosen-select${x} option:selected`).map(function(){
+    //     //             let hallArray ={
+    //     //                 hallId:this.value,
+    //     //                 name:this.text
+    //     //             }
+    //     //             return hallArray; // If you want text of select boxes.
+    //     //         }).get();
+    //     //         console.log('hallArr--',hallArr);
+    //     //         for(let h=0; h < hallArr.length; h++){
+    //     //             let index = hallData.map(function (hall) { return hall.hallId; }).indexOf(hallArr[h].hallId);
+    //     //             if (index == -1) {
+    //     //                     hallData.push(hallArr[h]);
+    //     //             }
+    //     //         }
+    //     //         console.log('agentName hallName',agentName, x, hallData);
+    //     //         $(this).parent().parent('.assigns').remove();
+    //     //         x--;
+    //     //         $(`.agentname${x}`).removeAttr('disabled');
+    //     //         $(`.chosen-select${x}`).removeAttr('disabled').trigger("chosen:updated");
+    //     //         $(`.assignremove${x}`).css("display", "block");
+    //     //         $('.add_form_field').css("display", "block");
+    //     //     }
+    //     // })
+    //     $('.edit_form_field').click(function(e) {
+    //         e.preventDefault();
+    //         let agc = grpData.agents.length;
+    //         $(`.agentname${agc}`).removeAttr('disabled');
+    //         $(`.chosen-select${agc}`).removeAttr('disabled').trigger("chosen:updated");
+    //         $('.edit_form_field').css("display", "none");
+    //     });
+    // });
+
+    // function changeFunc(i){
+    //     let agentHall = `agentHalls[${i}]`;
+    //     let agentValue = $(`#${i}`).val();
+    //     let halldata = $(`.chosen-select${i} option:selected`)
+    //             .toArray().map(item => item.text);
+    //         console.log('agentValue',agentValue, halldata.length);
+    //     if(agentValue != ''){
+    //         if(halldata.length > 0){
+    //             let length = $('.chosen-choices > li').length -2;
+    //             if(length > 0){
+    //                 $('.add_form_field').css("display", "block");
+    //             }else{
+    //                 $('.add_form_field').css("display", "none");
+    //             }
+    //         }
+    //     }
+    // }
+    let disabledHalls = [];
+    let grpHall = '{{slug}}';
+    if (grpHall == 'Edit') {
+        disabledHalls = JSON.parse('{{disbledHalls | dump | safe}}');
+    }
+
+    $(document).ready(function () {
+        $('.chosen-select').chosen();
+        let $select = $('.chosen-select_halls').chosen();
+        // Add event listener to chosen container
+        $("#halls_chosen").on("click", ".search-choice-close", function (event) {
+            // Get the selected option being removed
+            const removedOption = $(this).parent().data("option-array-index");
+
+            // Implement your custom logic to determine if the option should be prevented from removal
+            if (shouldPreventRemoval(removedOption)) {
+                // Add the removed option back to the select
+                $(".chosen-select_halls").append($('<option>', {
+                    value: removedOption,
+                    text: $(".chosen-select_halls option[value='" + removedOption + "']").text()
+                }));
+
+                // Trigger the "chosen:updated" event to refresh Chosen
+                $(".chosen-select_halls").trigger("chosen:updated");
+
+                // Prevent the default removal behavior
+                event.preventDefault();
+            }
+        });
+
+        $(".chosen-select_halls").on("chosen:removing_option", function (event, data) {
+            console.log("removing");
+            if (shouldPreventRemoval(data.selected)) {
+                event.preventDefault();
+            }
+        });
+
+
+        // Listen for the "change" event on the select
+        $select.change(function (event, data) {
+            // Get the selected values
+            let selectedValues = $select.val();
+
+            // Implement your custom logic to determine which options should not be removed
+            let optionsToPreserve = disabledHalls;
+
+            // Check if any of the preserved options are being removed
+            let removedOptions = $.grep(optionsToPreserve, function (optionValue) {
+                return $.inArray(optionValue, selectedValues) === -1;
+            });
+
+            // Re-select the removed options to prevent them from being removed
+            if (removedOptions.length > 0) {
+                $select.val(selectedValues.concat(removedOptions));
+                $select.trigger("chosen:updated");
+            }
+        });
+
+        $('form').submit(function (e) {
+            let halls = $("#halls").val();
+            let products = $("#products").val();
+            if (halls.length == 0) {
+                e.preventDefault();
+                alert("{{grouphallData.select_one_goh}}");
+            }
+            if (products.length == 0) {
+                e.preventDefault();
+                alert("{{grouphallData.select_one_product}}");
+            }
+        });
+    });
+</script>
+{% endblock %}

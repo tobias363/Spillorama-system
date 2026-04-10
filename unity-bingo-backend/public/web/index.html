@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en-us">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>SPILLORAMA</title>
+  <link rel="shortcut icon" href="TemplateData/favicon.ico">
+  <link rel="stylesheet" href="TemplateData/style.css">
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: url('TemplateData/bg.png') center / cover no-repeat fixed;
+    }
+  </style>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+
+</head>
+
+<body>
+  <div id="unity-container" class="unity-desktop" style="width:100%; height:100%; overflow:hidden">
+    <canvas id="unity-canvas" width=960 height=600></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
+    </div>
+    <div id="unity-warning"> </div>
+    <div id="unity-footer">
+      <div id="unity-webgl-logo"></div>
+      <div id="unity-fullscreen-button"></div>
+      <div id="unity-build-title">SPILLORAMA</div>
+    </div>
+  </div>
+  <script>
+    var container = document.querySelector("#unity-container");
+    var canvas = document.querySelector("#unity-canvas");
+    var loadingBar = document.querySelector("#unity-loading-bar");
+    var progressBarFull = document.querySelector("#unity-progress-bar-full");
+    var fullscreenButton = document.querySelector("#unity-fullscreen-button");
+    var warningBanner = document.querySelector("#unity-warning");
+
+    // Shows a temporary message banner/ribbon for a few seconds, or
+    // a permanent error message on top of the canvas if type=='error'.
+    // If type=='warning', a yellow highlight color is used.
+    // Modify or remove this function to customize the visually presented
+    // way that non-critical warnings and error messages are presented to the
+    // user.
+    function unityShowBanner(msg, type) {
+      function updateBannerVisibility() {
+        warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+      }
+      var div = document.createElement('div');
+      div.innerHTML = msg;
+      warningBanner.appendChild(div);
+      if (type == 'error') div.style = 'background: red; padding: 10px;';
+      else {
+        if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+        setTimeout(function () {
+          warningBanner.removeChild(div);
+          updateBannerVisibility();
+        }, 5000);
+      }
+      updateBannerVisibility();
+    }
+
+    var buildUrl = "Build";
+    var loaderUrl = buildUrl + "/Spillorama.loader.js";
+    var config = {
+      dataUrl: buildUrl + "/Spillorama.data.unityweb",
+      frameworkUrl: buildUrl + "/Spillorama.framework.js.unityweb",
+        codeUrl: buildUrl + "/Spillorama.wasm.unityweb",
+      streamingAssetsUrl: "StreamingAssets",
+        companyName: "AIS Technolabs",
+        productName: "SPILLORAMA",
+        productVersion: "8.1",
+        showBanner: unityShowBanner,
+      };
+
+    // By default Unity keeps WebGL canvas render target size matched with
+    // the DOM size of the canvas element (scaled by window.devicePixelRatio)
+    // Set this to false if you want to decouple this synchronization from
+    // happening inside the engine, and you would instead like to size up
+    // the canvas DOM size and WebGL render target sizes yourself.
+    // config.matchWebGLToCanvasSize = false;
+
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      // Mobile device style: fill the whole browser client area with the game canvas:
+
+      var meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+      document.getElementsByTagName('head')[0].appendChild(meta);
+      container.className = "unity-mobile";
+      canvas.className = "unity-mobile";
+
+      // To lower canvas resolution on mobile devices to gain some
+      // performance, uncomment the following line:
+      // config.devicePixelRatio = 1;
+
+      //unityShowBanner('WebGL builds are not supported on mobile devices.');
+    } else {
+      // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
+
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+    }
+
+    canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
+    loadingBar.style.display = "block";
+
+    var script = document.createElement("script");
+    script.src = loaderUrl;
+    script.onload = () => {
+      createUnityInstance(canvas, config, (progress) => {
+        progressBarFull.style.width = 100 * progress + "%";
+      }).then((unityInstance) => {
+        loadingBar.style.display = "none";
+        fullscreenButton.onclick = () => {
+          window.vuplex.SetFullscreen(1)/*https://support.vuplex.com/articles/webgl-fullscreen*/;
+        };
+
+        // Initialize Firebase Cloud Messaging
+        const firebaseConfig = {
+          apiKey: "AIzaSyCDX8TKN3YQhX9EmN5A2PGZ99Z-DZTBKM8",
+          authDomain: "spillorama-81245.firebaseapp.com",
+          projectId: "spillorama-81245",
+          storageBucket: "spillorama-81245.firebasestorage.app",
+          messagingSenderId: "839491165887",
+          appId: "1:839491165887:web:8e199d92d3acafbaccb00a",
+          measurementId: "G-BYWTVGSYQG"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const messaging = firebase.messaging();
+
+        // Get the path where index.html is hosted (like /web/, /game/, / or /custom/path/)
+        let swDir = window.location.pathname.replace(/[^\/]+$/, '');
+        let swPath = swDir + 'firebase-messaging-sw.js';
+
+        navigator.serviceWorker.register(swPath, {
+          scope: swDir
+        }).then((registration) => {
+          console.log("✅ Service worker registered");
+          // ✅ Call getToken with service worker reference
+          Notification.requestPermission().then((permission) => {
+            if (permission === 'granted') {
+              messaging.getToken({
+                vapidKey: "BBDxQ88h8BqvyGFI3aWljk-9RXmtrfieb5WzAlk8HuR4jvVpEyG21mBGVuQNxGPOinyeOt-JkwnVAUuMEaOPTCk",
+                serviceWorkerRegistration: registration
+              }).then((token) => {
+                console.log("Web Push Token:", token);
+                unityInstance.SendMessage('FirebaseManager', 'OnWebTokenReceived', token);
+              }).catch((err) => {
+                console.error("FCM getToken error:", err);
+              });
+            } else {
+              console.warn("Notification permission not granted");
+            }
+          });
+        });
+
+        // Foreground push messages
+        messaging.onMessage((payload) => {
+          console.log('Push received in foreground:', payload);
+          unityInstance.SendMessage('FirebaseManager', 'OnWebMessageReceived', JSON.stringify(payload));
+                // Forward to service worker for native notification
+                const title = payload.notification?.title || 'Notification';
+    const body = payload.notification?.body || '';
+    const icon = '/TemplateData/favicon.ico';
+    const staticURL = 'https://spillorama.aistechnolabs.info/web/';
+
+    if (Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        icon,
+        data: { url: staticURL }
+      }).onclick = function (event) {
+        event.preventDefault();
+        window.open(staticURL, '_blank');
+      };
+    }
+        });
+
+      }).catch((message) => {
+        alert(message);
+      });
+    };
+    document.body.appendChild(script);
+    const channel = new BroadcastChannel("focusSpiloramaWeb");
+    channel.onmessage = (event) => {
+      if (event.data === "focus-tab") {
+        window.focus();
+      }
+    };
+
+    let existingTab = null;
+
+    function OpenUrlInSameTab(url) {
+      if (existingTab && !existingTab.closed) {
+        existingTab.focus();
+      } else {
+        existingTab = window.open(url, 'myUniqueTab');
+      }
+    }
+
+    // function ShowBrowserNotification(title, body) {
+    //   if (Notification.permission === "granted") {
+    //     new Notification(title, { body: body });
+    //   } else if (Notification.permission !== "denied") {
+    //     Notification.requestPermission().then(function (permission) {
+    //       if (permission === "granted") {
+    //         new Notification(title, { body: body });
+    //       }
+    //     });
+    //   }
+    // }
+  </script>
+</body>
+
+</html>

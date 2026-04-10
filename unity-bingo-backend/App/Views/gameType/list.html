@@ -1,0 +1,221 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{game.game_table}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{game.dashboard}}</a></li>
+                <li class="active">{{game.game_table}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{game.games}}</h6>
+                            </div>
+                            {% if reqCount == true %}
+                            <div class="pull-right">
+                                <a href="/addGameType"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i> Add Game</button></a>
+                            </div>
+                            {% else %} {% endif %}
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{game.game_name}}</th>
+                                                    <th>{{game.photo}}</th>
+                                                    <th>{{game.row}}</th>
+                                                    <th>{{game.column}}</th>
+                                                    <!-- <th>Total Ticket</th>
+                                                    <th>Max Tickets</th>
+                                                    <th>Ticket Number Min</th>
+                                                    <th>Ticket Number Max</th> -->
+                                                    <th>{{game.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+
+        // [ Variable Declaration ]
+        let isSuperAdmin = "{{Agent.isSuperAdmin}}"
+        let editFlag = '{{editFlag}}';
+        let viewFlag = '{{viewFlag}}';
+        let reqCount = '{{reqCount}}';
+        console.log('reqC isSuperAdmin: ', reqCount, isSuperAdmin);
+
+        var host = window.location.origin;
+        $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "{{game.search}} {{game.game_name}}",
+                "sLengthMenu": "{{game.show}} _MENU_ {{game.entries}}",
+                "sInfo" : "{{game.show}} _START_ to _END_ of _TOTAL_ {{game.entries}}",
+                "oPaginate": {
+                    sPrevious: "{{ game.previous }}",
+                    sNext: "{{ game.next }}"
+                },
+                "sInfoEmpty": "{{game.showing}} 0 to 0 of 0 {{game.entries}}",
+            },
+            "scrollX": true,
+            "searching": false,
+            "processing": true,
+            "serverSide": true,
+            "ordering": false,
+            // "paging": false,
+            "lengthChange": false,
+            "order": [
+                [0, "asc"]
+            ],
+            "columnDefs": [{
+                "targets": [4],
+                "orderable": false
+            }],
+            "autoWidth": false,
+            // "pageLength": 25,
+            "ajax": host + "/gameType/getGameType",
+            "columns": [{
+                    "data": "name"
+                }, {
+                    "data": "photo",
+                    render: function(data, type, row) {
+                        return `<div class="image imagewidthSet fix_list_img">
+                                <img src="/profile/bingo/` + row.photo + `" alt="` + row.name + ` ""/>
+                            </div>`;
+                    }
+                }, {
+                    "data": "row"
+                }, {
+                    "data": "columns"
+                },
+
+                // {
+                //     "data": "totalNoTickets"
+                // }, {
+                //     "data": "userMaxTickets"
+                // }, {
+                //     "data": "rangeMin"
+                // }, {
+                //     "data": "rangeMax"
+                // }, 
+
+                {
+                    "data": "action",
+                    render: function(data, type, row) {
+                        let html = ``;
+                        if (isSuperAdmin == "false") {
+                            if(viewFlag == 'true'){
+                                html += `<a href="/viewGameType/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="Game History">
+                                <i class="fa fa-eye" aria-hidden="true"></i>
+                            </a>`
+                            }
+                            if(editFlag == 'true'){
+                                html +=`<a href="/editGameType/` + row._id + `">
+                                <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit"><i class="fa fa-edit" aria-hidden="true"></i>
+                                </button>
+                                </a>`
+                            }
+                        }else{
+                            html += `<a href="/viewGameType/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="Game History">
+                                <i class="fa fa-eye" aria-hidden="true"></i>
+                            </a> 
+                            <a href="/editGameType/` + row._id + `">
+                                <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit"><i class="fa fa-edit" aria-hidden="true"></i>
+                                </button>
+                            </a>`;
+                        }
+                        // if (Boolean(reqCount)) {
+                        //     html += `<button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded">
+                        //                     <i class="fa fa-trash" aria-hidden="true"></i>
+                        //                 </button>`;
+                        // }
+                        return html;
+                    }
+                }
+            ],
+        });
+
+        $(function() {
+            "use strict";
+
+            var SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    //Parameter
+                    $('body').on('click', '.delete', function(e) {
+                        var id = $(this).attr('id');
+                        var thisElement = this;
+                        swal({
+                            title: "Are you sure?",
+                            text: "You will not be able to recover this Game!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "Yes, delete it!",
+                            cancelButtonText: "No, cancel Plz!",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/gameType/deleteGameType",
+                                    data: {
+                                        id: id
+                                    },
+                                    success: function(resultData) {
+                                        console.log(resultData);
+                                        if (resultData == 'success') {
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("Deleted!", "Your imaginary file has been deleted.", "success");
+                                        }
+                                        // alert("Save Complete")
+                                    }
+                                });
+                                swal("Deleted!", "Game Deleted Succesfully.", "success");
+                            } else {
+                                swal("Cancelled", "Game Not Deleted)", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,737 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    ul {
+        list-style-type: none;
+    }
+    select:invalid {
+        height: 0px !important;
+        opacity: 0 !important;
+        position: absolute !important;
+        display: flex !important;
+    }
+
+    select:invalid[multiple] {
+        margin-top: 15px !important;
+    }
+
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{physical.add_physical_tickets}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{physical.dashboard}}</a></li>
+                <li class="active">{{physical.add_physical_tickets}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <div class="alert alert-success alert-dismissible alertSuccess" style="display: none">
+            <strong class="alert-success-text">{{physical.data_update_successfully}}.</strong>
+        </div>
+        <div class="alert alert-danger alert-dismissible alertError" style="display: none">
+            <strong class="alert-error-text">{{physical.something_went_wrong}}.</strong>
+        </div>
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading mb-10">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{physical.add_physical_tickets}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="mb-10">
+                                    <form method="POST" id="addPhysicalTicketForm" class="form-inline">
+                                        
+                                        {% if session.role == "admin" %}
+                                            <div class="row text-center" style="margin: 25px">
+                                                <div class="col-md-12">
+                                                    <label class="control-label" for="selectHall">{{physical.select_hall}}: </label>
+                                                    <select name="hall" class="form-control js-select-hall" id="hallName">
+                                                        <option value="" selected="selected">{{physical.select_hall_name}}</option>
+                                                        {% for hall in allHalls %}
+                                                            <option value="{{hall.id}}" {{ "selected" if selected=='true' else "" }} >{{hall.name}}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                                
+                                        {% endif %}
+                                            <div class="row">
+                                                <div class="col-md-5 col-md-offset-2">
+                                                    <label class="control-label" for="initialId">{{physical.initail_id_of_the_stack}}:</label>
+                                                    <input type='text' class="form-control initialId"
+                                                    name="initialId" id="initialId"
+                                                    placeholder="{{physical.initail_id_of_the_stack}}"
+                                                    value="{{initialId}}"
+                                                    data-validation="required"
+                                                    data-validation-error-msg = " "
+                                                    autocomplete="off" 
+                                                    {{ "disabled" if session.role == "admin" else "" }}/>
+                                                </div>
+            
+                                                <!-- <div class="col-md-5">
+                                                    <label class="control-label" for="finalId">Final Id of the Stack:</label>
+                                                    <input type='text' class="form-control finalId"
+                                                        name="finalId" id="finalId"
+                                                        placeholder="Final Id of the Stack"
+                                                        value="{{finalId}}"
+                                                        data-validation="required"
+                                                        data-validation-error-msg = " "
+                                                        autocomplete="off" 
+                                                        {{ "disabled" if session.role == "admin" else "" }}/>
+                                                    
+                                                </div> -->
+                                                
+                                                <div class="col-md-2">
+                                                    <input type="button" class="btn btn-secondary scanButton btn-flat"
+                                                    value="{{physical.scan}}" {{ "disabled" if session.role == "admin" else "" }}> 
+                                                    <input type="button" class="btn btn-success submitButton btn-flat"
+                                                    value="{{physical.submit}}" {{ "disabled" if session.role == "admin" else "" }}> 
+                                                </div>
+                                            </div>
+                                        
+                                       
+                                    </form>
+                                </div>
+                               
+
+                                <div>
+                                    <div class="col-sm-12 text-center mb-1">
+                                      <h3><b>{{physical.registered_tickets}}</b></h3>
+                                    </div>
+                                    <div class="col-sm-12">
+                                        <div class="table-wrap">
+                                          <div class="table-responsive">
+                                            <table id="myTable" class="table table-hover display text-center">
+                                              <thead>
+                                                <tr>
+                                                  <th>{{physical.ticket_type}}</th>
+                                                  <th>{{physical.initial_id}}</th>
+                                                  <th>{{physical.final_id}}</th>
+                                                  <th>{{physical.tickets_sold}}</th>
+                                                  <th>{{physical.action}}</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                    </div>
+                                </div>
+                               
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+            
+        </section>
+
+
+        <!-- Modal of Add Daily balance -->
+        <div id="editModal" class="modal fade modal-wide" tabindex="-1" role="dialog">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                        <h4 class="modal-title">{{physical.register_more_tickets_edit}}</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div id="errorContainer" class="hidden alert alert-danger" role="alert"></div>
+                        <div id="successContainer" class="hidden alert alert-success" role="alert"></div>
+                        
+                        <form id="editRegisterTicketForm">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label class="control-label" for="editInitialId">{{physical.initial_id_of_the_stack}}:</label>
+                                    <input type='text' class="form-control editInitialId"
+                                    name="editInitialId" id="editInitialId"
+                                    placeholder="Initial Id of the Stack"
+                                    value=""
+                                    data-validation="required"
+                                    data-validation-error-msg = " "
+                                    autocomplete="off" 
+                                    />
+                                </div>
+
+                                <!-- <div class="col-md-6">
+                                    <label class="control-label" for="editFinalId">Final Id of the Stack:</label>
+                                    <input type='text' class="form-control editFinalId"
+                                        name="editFinalId" id="editFinalId"
+                                        placeholder="Final Id of the Stack"
+                                        value=""
+                                        data-validation="required"
+                                        data-validation-error-msg = " "
+                                        autocomplete="off" 
+                                        />
+                                    
+                                </div> -->
+                                <input type="hidden" name ="editTicketColorId", class="editTicketColorId" value="">
+                                
+                            </div>
+                            <br>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <input type="button" class="btn btn-secondary scanEditButton btn-flat"
+                                    value="{{physical.scan}}"> 
+                                    <input type="button" class="btn btn-success submitEditButton btn-flat"
+                                    value="{{physical.edit}}"> 
+                                </div>
+                            </div>
+                            
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script src="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.jquery.min.js "></script>
+<link href="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.min.css " rel="stylesheet " />
+<script>
+    $(document).ready(function() {
+        $(".js-select-hall").select2({
+            closeOnSelect: true,
+            placeholder: "{{physical.select_hall_name}}",
+        });
+
+        let host = window.location.origin;
+
+        $(".scanButton").on("click", function(){
+            let initialId = $(".initialId").val();
+            //let finalId = $(".finalId").val();
+            if(!initialId){
+                $(".initialId").focus();
+            }else{
+                // if(!finalId){
+                //     $(".finalId").focus()
+                // }
+            }
+        });
+
+        //$("#addPhysicalTicketForm").submit(function( event ){
+        $('.submitButton').click(function(event){
+            event.preventDefault();
+            $(".submitButton").attr("disabled", true);
+            $(".scanButton").attr("disabled", true);
+            if (!$("#addPhysicalTicketForm").isValid()) {
+                if ($(".has-error").length) {
+                    let el = $('.has-error').first();
+                    if (! $.isEmptyObject(el)) {
+                        $('html, body').animate({
+                            scrollTop: (el.offset().top)
+                        },10);
+                    }
+                }
+                $(".submitButton").attr("disabled", false);
+                $(".scanButton").attr("disabled", false);
+            } 
+            
+            let initialId = $(".initialId").val();
+            //let finalId = $(".finalId").val();
+            if(initialId){//if(initialId && finalId){
+                // if(+initialId > +finalId){
+                //     $(".submitButton").attr("disabled", false);
+                //     $(".scanButton").attr("disabled", false);
+                //     alert("Final Id Should be greater than Initial Id.");
+                //     return;
+                // }
+
+                $.ajax({
+                    type: 'GET',
+                    url: host + "/getLastRegisteredId",
+                    data: {'initialId': initialId, hallId: $('#hallName').find(":selected").val()},
+                    success: function (resultData) {
+                        console.log("resultData registered", resultData)
+                        if(resultData.status == "success"){
+                            let isSubmit = true;
+                            if(resultData.lastId != ""){
+                                if(+resultData.lastId + 1 != initialId ){
+                                    isSubmit = false;
+                                }
+                            }
+                            if(isSubmit == false){
+                                let previousWindowKeyDown = window.onkeydown;
+                                swal({
+                                    title: "Are you sure?",
+                                    text: "You are registering non-sequential ticketId.",
+                                    icon: "warning",
+                                    showCancelButton: true,
+                                    confirmButtonColor: "#e69a2a",
+                                    confirmButtonText: "Yes",
+                                    cancelButtonText: "No, cancel Plz!",
+                                    closeOnConfirm: true,
+                                    closeOnCancel: true
+                                }, function (isConfirm) {
+                                    window.onkeydown = previousWindowKeyDown;
+                                    if (isConfirm) {
+                                        addPhysicalTickets();
+                                    } else {
+                                        $(".submitButton").attr("disabled", false);
+                                        $(".scanButton").attr("disabled", false);
+                                        let selectedValue = $('#hallName').find(":selected").val();
+                                        $('#addPhysicalTicketForm')[0].reset();
+                                        if(selectedValue){
+                                            $('#hallName').val(selectedValue);
+                                        }
+                                        $(".initialId").focus();
+                                    }
+                                    window.onkeydown = previousWindowKeyDown;
+                                });
+                                
+                            }else{
+                                addPhysicalTickets();
+                            }
+                        }else{
+                            $(".alert-error-text").html(resultData.message);
+                            $(".alertError").show().delay(2000).fadeOut();
+                            $(".submitButton").attr("disabled", false);
+                            $(".scanButton").attr("disabled", false);
+                        }
+                    },
+                    error: function (d, s, e) {
+                        console.log("error occured", s, e);
+                    }
+                });
+
+                function addPhysicalTickets(){
+                    $.ajax({
+                        type: "POST",
+                        url: `/addPhysicalTickets`,
+                        data: {
+                            initialId: initialId,
+                            //finalId: finalId,
+                            hallId: $('#hallName').find(":selected").val()
+                        },
+                        success: function (response) {
+                            console.log("response", response)
+                            if (response.status == "success") {
+                                $(".alert-success-text").html(response.message);
+                                $(".alertSuccess").show().delay(2000).fadeOut();
+                                
+                            }else{
+                                $(".alert-error-text").html(response.message);
+                                $(".alertError").show().delay(2000).fadeOut();
+                            }
+                            let table = $("#myTable").DataTable();
+                            let selectedValue = $('#hallName').find(":selected").val();
+                            if(selectedValue){
+                                table.ajax.url(host + "/getPhysicalTickets?hallId="+selectedValue).load();
+                            }else{
+                                table.ajax.url(host + "/getPhysicalTickets").load();
+                            }
+                        },
+                        complete: function (data) {
+                            $(".submitButton").attr("disabled", false);
+                            $(".scanButton").attr("disabled", false);
+                            //$('#addPhysicalTicketForm')[0].reset();
+                            //$('form:first *:input[type!=hidden]:first').focus();
+                            let selectedValue = $('#hallName').find(":selected").val();
+                            $('#addPhysicalTicketForm')[0].reset();
+                            if(selectedValue){
+                                $('#hallName').val(selectedValue);
+                            }
+                            $(".initialId").focus();
+                            // $(".initialId").val("");
+                            // $(".finalId").val("");
+                            // $(".initialId").focus();
+                            
+                        },
+                        error: function (d,s,e) {
+                            console.log("error occured",d,s,e);
+                        }
+                    });
+                }
+
+                // $.ajax({
+                //     type: "POST",
+                //     url: `/addPhysicalTickets`,
+                //     data: {
+                //         initialId: initialId,
+                //         finalId: finalId,
+                //         hallId: $('#hallName').find(":selected").val()
+                //     },
+                //     success: function (response) {
+                //         console.log("response", response)
+                //         if (response.status == "success") {
+                //             $(".alert-success-text").html(response.message);
+                //             $(".alertSuccess").show().delay(2000).fadeOut();
+                            
+                //         }else{
+                //             $(".alert-error-text").html(response.message);
+                //             $(".alertError").show().delay(2000).fadeOut();
+                //         }
+                //         let table = $("#myTable").DataTable();
+                //         let selectedValue = $('#hallName').find(":selected").val();
+                //         if(selectedValue){
+                //             table.ajax.url(host + "/getPhysicalTickets?hallId="+selectedValue).load();
+                //         }else{
+                //             table.ajax.url(host + "/getPhysicalTickets").load();
+                //         }
+                //     },
+                //     complete: function (data) {
+                //         $(".submitButton").attr("disabled", false);
+                //         $(".scanButton").attr("disabled", false);
+                //         //$('#addPhysicalTicketForm')[0].reset();
+                //         //$('form:first *:input[type!=hidden]:first').focus();
+                //         let selectedValue = $('#hallName').find(":selected").val();
+                //         $('#addPhysicalTicketForm')[0].reset();
+                //         if(selectedValue){
+                //             $('#hallName').val(selectedValue);
+                //         }
+                //         $(".initialId").focus();
+                //         // $(".initialId").val("");
+                //         // $(".finalId").val("");
+                //         // $(".initialId").focus();
+                         
+                //     }
+                // });
+            }
+        });
+
+  
+        $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "{{physical.search}}",
+                "oPaginate": {
+                    sPrevious: "{{ physical.previous }}",
+                    sNext: "{{ physical.next }}"
+                },
+                "sEmptyTable": "{{physical.no_data_available_in_table}}",
+                "sInfo": "{{physical.showing}} _START_ to _END_ of _TOTAL_ {{physical.entries}}",
+                "sInfoEmpty": "{{physical.showing}} 0 to 0 of 0 {{physical.entries}}"
+            },
+            "bSort": false,
+            "order":[[ 0, "desc" ]],
+            "columnDefs":[{
+                "targets":[],
+                "orderable":false,
+            },
+            { className: 'text-center', targets: [4] },
+            ],
+            "scrollX": false,
+            "searching": true,
+            "processing": true,
+            //"serverSide": true,
+            "autoWidth": false,
+            //"pageLength": 10,
+            "bLengthChange": false,
+            "ajax": {
+                url:  host + "/getPhysicalTickets",
+                type: "GET",
+            },
+            "columns": [
+                { "data": "ticketColor" }, 
+                { "data": "initialId" }, 
+                { "data": "finalId" }, 
+                { "data": "soldTicketCount" },
+                // { "data": "ticketsAvailableFrom",
+                //     render: function (data, type, row) {
+                //         let soldTickets = 0;
+                //         if(row.ticketsAvailableFrom > row.initialId){
+                //             soldTickets = (+row.ticketsAvailableFrom - +row.initialId );
+                //         }
+                //         return soldTickets;
+                //     }
+                // },
+                {
+                    "data": "action",
+                    render: function (data, type, row) {
+                        let html = '<div style="width : 100px !important;margin : 0 auto;text-align: center;">';
+                            html += ` <button type="button" name="edit"  id="` + row.id + `"class="btn btn-warning btn-xs btn-edit edit" title="Edit Registered Tickets" data-toggle="modal" data-target="#editModal"><i class="fa fa-edit" aria-hidden="true"></i></button> `
+                            html += ` <button type="button" name="delete"  id="` + row.id + `"class="btn btn-danger btn-xs btn-delete delete" title="Delete Registered Tickets"><i class="fa fa-trash" aria-hidden="true"></i></button>`;
+
+                        html += '</div>'
+                        return html;
+
+                    }
+                }
+            ],
+        });
+
+        $('body').on('click', '.delete', function (e) {
+            let id = $(this).attr('id');
+            let thisElement = this;
+            let previousWindowKeyDown = window.onkeydown;
+            swal({
+                title: "{{physical.sure_want_to_delete_physical_ticket}}?",
+                text: "{{physical.not_be_able_to_recover_physical_ticket}}!",
+                type: "warning",
+                showCancelButton: true,
+                confirmButtonColor: "#e69a2a",
+                confirmButtonText: "{{physical.delete_button}}",
+                cancelButtonText: "{{physical.cancel_button}}",
+                closeOnConfirm: false,
+                closeOnCancel: false
+            }, function (isConfirm) {
+                window.onkeydown = previousWindowKeyDown;
+                if (isConfirm) {
+                    $.ajax({
+                        type: 'POST',
+                        url: host + "/deletePhysicalTicket",
+                        data: {
+                            id: id,
+                            hallId: $('#hallName').find(":selected").val()
+                        },
+                        success: function (resultData) {
+                            if (resultData == 'success') {
+                                //let table = $("#myTable").DataTable();
+                                //table.ajax.url(host + "/getPhysicalTickets").load();
+                                swal("{{physical.deleted}}!", "{{physical.physical_ticket_deleted_success}}.", "success");
+                            } else {
+                                alert("Something went wrong")
+                            }
+                            let table = $("#myTable").DataTable();
+                            let selectedValue = $('#hallName').find(":selected").val();
+                            if(selectedValue){
+                                table.ajax.url(host + "/getPhysicalTickets?hallId="+selectedValue).load();
+                            }else{
+                                table.ajax.url(host + "/getPhysicalTickets").load();
+                            }
+                            
+                        }
+                    });
+                    swal("{{physical.deleted}}!", "{{physical.physical_ticket_deleted_success}}.", "success");
+                } else {
+                    swal("{{physical.cancelled}}", "{{physical.physical_ticket_not_deleted}}", "error");
+                }
+                window.onkeydown = previousWindowKeyDown;
+            });
+            return false;
+        });
+
+        $('#hallName').on('change', function() {
+            let selectedValue = this.value;
+            if(selectedValue){
+                let table = $("#myTable").DataTable();
+                table.ajax.url(host + "/getPhysicalTickets?hallId="+selectedValue).load();
+                $('.initialId').prop("disabled", false);
+                $('.finalId').prop("disabled", false);
+                $('.scanButton').prop("disabled", false);
+                $('.submitButton').prop("disabled", false);
+            }else{
+                $('.initialId').prop("disabled", true);
+                $('.finalId').prop("disabled", true);
+                $('.scanButton').prop("disabled", true);
+                $('.submitButton').prop("disabled", true);
+                $("#addPhysicalTicketForm").isValid();
+            }
+            //$(".initialId").focus();
+        });
+    
+        on_scanner("initialId") // init function
+        //on_scanner("finalId")
+        function on_scanner(id) {
+            let is_event = false; // for check just one event declaration
+            let input = document.getElementById(id);
+            input.addEventListener("focus", function () {
+                if (!is_event) {
+                    is_event = true;
+                    input.addEventListener("keydown", function (e) {
+                        //console.log("keyCode", e.keyCode, e.key, input.value);
+                        if (e.keyCode == 13) {
+                            e.preventDefault(); // Prevent default behavior
+                            e.stopPropagation(); // Stop propagation to document handler
+                            setTimeout(function () {
+                                // scanner(input.value);
+                                console.log("input value",input.value);
+                                if(input.value != ""){
+                                    if(input.value.toString().length >= 22){
+                                        let scanned_value = input.value.toString();
+                                        if(scanned_value.length > 22){
+                                            scanned_value  = scanned_value.toString().slice(-22);
+                                        }
+                                        input.value = +scanned_value.substr(14, 7);
+                                        if ($('#initialId').val()) {
+                                            if (!$('#finalId').val()) {
+                                                $('#finalId').focus()
+                                            }
+                                        }else{
+                                            $('#initialId').focus()
+                                        }
+                                    }
+                                }
+                                //input.select();
+                            }, 250)
+                        }
+                    })
+                }
+            });
+        }
+        document.addEventListener("keydown", function (e) {
+            console.log("tagName", e.target.tagName);
+            if (e.target.tagName !== "INPUT") {
+                // input.focus();
+                if ($('#initialId').val()) {
+                    // if (!$('#finalId').val()) {
+                    //     $('#finalId').focus()
+                    // }
+                }else{
+                    $('#initialId').focus()
+                }
+            }
+        });
+
+        function scanner(value) {
+            if (value == '') return;
+            console.log(value)
+        }
+
+
+        // Edit functionality
+
+        $(".scanEditButton").on("click", function(){
+            let initialId = $(".editInitialId").val();
+            //let finalId = $(".editFinalId").val();
+            if(!initialId){
+                $(".editInitialId").focus();
+            }else{
+                // if(!finalId){
+                //     $(".editFinalId").focus()
+                // }
+            }
+        });
+        $('#editModal').on('shown.bs.modal', function (event) {
+            let id = $(event.relatedTarget).attr('id');
+            console.log("id---", id)
+        
+            $.ajax({
+                type: 'GET',
+                url: host + "/getEditRegisteredId",
+                data: {
+                    id: id,
+                    hallId: $('#hallName').find(":selected").val()
+                },
+                success: function (resultData) {
+                    console.log("resultData of edit view", resultData)
+                    if(resultData.status == "success"){
+                        console.log("inside")
+                        $(".editInitialId").val(resultData.editInitialId);
+                        $(".editFinalId").val(resultData.editLastId);
+                        $(".editTicketColorId").val(id)
+                    }
+                },
+                error: function (d, s, e) {
+                    console.log("error occured", s, e);
+                    $('#errorContainer').html('{{physical.erro_fetching_balance}}.');
+                    $('#errorContainer').removeClass('hidden');
+                    setTimeout(function() {
+                        $('#editRegisterTicketForm')[0].reset();
+                        $('#errorContainer').addClass('hidden');
+                    }, 3000);
+                }
+            });
+        });
+
+        $('#editModal').on('hidden.bs.modal', function () {
+            $('#openModalSpinner').removeClass('hidden');
+            $('.agentDailyBalance').text('');
+        });
+
+
+        $('.submitEditButton').click(function(event){
+            event.preventDefault();
+            $(".submitEditButton").attr("disabled", true);
+            $(".scanEditButton").attr("disabled", true);
+            if (!$("#editRegisterTicketForm").isValid()) {
+                if ($(".has-error").length) {
+                    let el = $('.has-error').first();
+                    if (! $.isEmptyObject(el)) {
+                        $('html, body').animate({
+                            scrollTop: (el.offset().top)
+                        },10);
+                    }
+                }
+                $(".submitEditButton").attr("disabled", false);
+                $(".scanEditButton").attr("disabled", false);
+            } 
+            let initialId = $(".editInitialId").val();
+            //let finalId = $(".editFinalId").val();
+            if(initialId){//if(initialId && finalId){
+                // if(+initialId > +finalId){
+                //     $(".submitEditButton").attr("disabled", false);
+                //     $(".scanEditButton").attr("disabled", false);
+                //     alert("Final Id Should be greater than Initial Id.");
+                //     return;
+                // }
+                editPhysicalTickets();
+                
+                function editPhysicalTickets(){
+                    $.ajax({
+                        type: "POST",
+                        url: `/editPhysicalTickets`,
+                        data: {
+                            initialId: initialId,
+                            //finalId: finalId,
+                            hallId: $('#hallName').find(":selected").val(),
+                            editColorId: $(".editTicketColorId").val()
+                        },
+                        success: function (response) {
+                            console.log("response", response)
+                            if (response.status == "success") {
+                                $("#successContainer").html(response.message);
+                                $('#successContainer').removeClass('hidden');
+                                $("#successContainer").show().delay(2000).fadeOut();
+                                
+                                $('#editRegisterTicketForm')[0].reset();
+                                setTimeout(function() {
+                                    $('#editModal').modal('toggle');
+                                }, 3000);
+                            }else{
+                                $("#errorContainer").html(response.message);
+                                $('#errorContainer').removeClass('hidden');
+                                $("#errorContainer").show().delay(2000).fadeOut();
+                            }
+                            let table = $("#myTable").DataTable();
+                            let selectedValue = $('#hallName').find(":selected").val();
+                            if(selectedValue){
+                                table.ajax.url(host + "/getPhysicalTickets?hallId="+selectedValue).load();
+                            }else{
+                                table.ajax.url(host + "/getPhysicalTickets").load();
+                            }
+                            
+                        },
+                        complete: function (data) {
+                            $(".submitEditButton").attr("disabled", false);
+                            $(".scanEditButton").attr("disabled", false);
+                            //$('#addPhysicalTicketForm')[0].reset();
+                            //$('form:first *:input[type!=hidden]:first').focus();
+                            let selectedValue = $('#hallName').find(":selected").val();
+                            $('#addPhysicalTicketForm')[0].reset();
+                            if(selectedValue){
+                                $('#hallName').val(selectedValue);
+                            }
+                            $(".initialId").focus();
+                           
+                        },
+                        error: function (d,s,e) {
+                            console.log("error occured",d,s,e);
+                        }
+                    });
+                }
+
+            }else{
+                $(".submitEditButton").attr("disabled", false);
+                $(".scanEditButton").attr("disabled", false);
+            }
+        });
+
+
+    });
+</script>
+{% endblock %}

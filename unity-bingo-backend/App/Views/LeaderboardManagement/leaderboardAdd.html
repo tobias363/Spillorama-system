@@ -1,0 +1,104 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{translate.leaderboard_table}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+                <li><a href="#">{{translate.leaderboard}}</a></li>
+                {% if leaderboard %}
+                <li class="active"><span>{{translate.edit_leaderboard_point}}</span></li>
+                {% else %}
+                <li class="active"><span>{{translate.add_leaderboard}}</span></li>
+                {% endif %}
+            </ol>
+        </section>
+        <!-- /Title -->
+        <!-- Row  -->
+        <section class="content">
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                {% if leaderboard %}
+                                <h6 class="panel-title txt-dark">{{translate.edit_leaderboard_point}}</h6>
+                                {% else %}
+                                <h6 class="panel-title txt-dark">{{translate.add_leaderboard}}</h6>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="row">
+                                    <div class="col-sm-12 col-xs-12">
+                                        <div class="form-wrap">
+                                            {% if leaderboard %}
+                                            <form method="POST" action="/leaderboardEdit/{{leaderboard._id}}" name="addLeaderboard" class="form-horizontal">
+                                                {% else %}
+                                                <form method="POST" action="/addLeaderboard" name="addLeaderboard" class="form-horizontal">
+                                                    {% endif %}
+                                                    <div class="form-group">
+                                                        <label class="control-label mb-10 col-sm-2">{{translate.place}}:- </label>
+                                                        <div class="col-sm-3">
+                                                            <select name="place" class="form-control">
+                                                                {% if leaderboard %}
+                                                                        <option  value={{leaderboard.place}} >{{leaderboard.place}}</option>
+                                                                {% else %}
+                                                                     {% for item in optionField %}
+                                                                     {% set disabled = "false" %}
+                                                                        {% for disabledOption in disabledOptionField %}
+                                                                            {% if item == disabledOption  %}
+                                                                                {% set disabled = "true" %}
+                                                                            {% endif %}
+                                                                        {% endfor %}
+                                                                        <option {{ "disabled" if disabled == 'true' else "" }} value={{item}} >{{item}}</option>
+                                                                      {% endfor %}
+                                                                {% endif %}
+                                                              </select>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="form-group">
+                                                        <label class="control-label mb-10 col-sm-2">{{translate.points}}:-</label>
+                                                        <div class="col-sm-3">
+                                                            <input type="number" onkeypress="return event.charCode >= 48" min="1" class="form-control" required name="points" value="{{leaderboard.points}}">
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="form-group mb-0">
+                                                        <div class="col-sm-offset-2 col-sm-3">
+                                                            <input type="submit" class="btn btn-success btn-flat" value="{{translate.submit}}">
+                                                            <a href="/leaderboard" class="btn btn-danger btn-flat">{{translate.cancel}}</a>
+                                                        </div>
+                                                    </div>
+                                                </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Row -->
+
+                <!-- /Row -->
+            </div>
+        </section>
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+
+    });
+</script>
+{% endblock %}

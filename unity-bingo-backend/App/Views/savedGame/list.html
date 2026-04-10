@@ -1,0 +1,518 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <div class="content-header">
+            <div class="choose-game">
+                <label>{{gameManage.choose_a_game}}-</label>
+                <select id="games" name="gamesList">
+                    <option value="">{{gameManage.choose_game_type}}</option>
+                    {% for item in DataOfGames %}
+                    <option value="{{item._id}}">{{item.name}}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <!-- Title -->
+        <section class="content-header" id="gameHeader">
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content" id="allGameDetails">
+
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading" id="addGameID">
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %} {% block Jscript %}
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    $(document).ready(function () {
+
+        const viewFlag = "{{permissionObj.viewFlag | dump | safe}}";
+        const editFlag = "{{permissionObj.editFlag | dump | safe}}";
+        const deleteFlag = "{{permissionObj.deleteFlag | dump | safe}}";
+        const addFlag = "{{permissionObj.addFlag | dump | safe}}";
+
+        console.table(viewFlag, editFlag, deleteFlag, addFlag);
+        console.log("permissions", JSON.parse(`{{permissionObj | dump | safe}}`));
+        var socket = io();
+
+        $("#gameHeader").hide();
+        $("#allGameDetails").hide();
+
+        // clear for internal content
+        $("#gameHeader").empty();
+        $("#addGameID").empty();
+        $("#myTable").empty();
+        $(".table-responsive").empty();
+        $("#gameHeader").hide();
+        $("#allGameDetails").hide();
+
+        //Dropdown Wise Game Details Changes
+        $("#games").change(function () {
+
+            // clear for internal content
+            $("#gameHeader").empty();
+            $("#addGameID").empty();
+            $("#myTable").empty();
+            $(".table-responsive").empty();
+            $("#gameHeader").hide();
+            $("#allGameDetails").hide();
+
+            // Game ID Select
+            var selectedValue = $("#games option:selected").val();
+            console.log("option", selectedValue);
+
+            // if any pervious key store so localStorage do Clear this  key
+            localStorage.removeItem("selectedId");
+            localStorage.clear();
+
+            //localStorage Set
+            localStorage.setItem("selectedId", selectedValue);
+
+            if (selectedValue == "") { // if selectedValue is Blank
+                // clear for internal content
+                $("#gameHeader").empty();
+                $("#addGameID").empty();
+                $("#myTable").empty();
+                $(".table-responsive").empty();
+                $("#gameHeader").hide();
+                $("#allGameDetails").hide();
+            } else {
+                gameDetailsGet(selectedValue);
+            }
+        }).val(function () {
+            //Previous Value get
+            var id = localStorage.getItem("selectedId");
+            //console.log("id", id);
+            if (id === null) {
+                $("#gameHeader").hide();
+                $("#allGameDetails").hide();
+
+                // clear for internal content
+                $("#gameHeader").empty();
+                $("#addGameID").empty();
+                $("#myTable").empty();
+                $(".table-responsive").empty();
+                $("#gameHeader").hide();
+                $("#allGameDetails").hide();
+
+            } else {
+                gameDetailsGet(id);
+            }
+
+            return localStorage.getItem("selectedId");
+        });
+
+        //localStorage Clear
+        // localStorage.removeItem("selectedId");
+        // localStorage.clear();
+
+        function gameDetailsGet(values) {
+            var gameTypeId = values;
+            //console.log("values", gameTypeId);
+            $.ajax({
+                type: 'GET',
+                url: host + "/savedGameDetailList/" + gameTypeId,
+                success: function (resultData) {
+                    console.log("resultData: ", resultData);
+                    if (resultData) {
+                        var gameData = resultData.gameData;
+
+                        let htmlHeader = '<h1>' + gameData.name + ' {{gameManage.table}}</h1>\
+                            <ol class="breadcrumb">\
+                                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{gameManage.dashboard}}</a></li>\
+                                <li class="active">' + gameData.name + ' </li>\
+                            </ol>';
+
+
+                        let htmlGameID = ' <div class="pull-left">\
+                                              <h6 class="panel-title txt-dark">' + gameData.name + ' </h6>\
+                                           </div>\
+                                           <div class="clearfix"></div>';
+
+
+                        var str = "";
+                        str += '<table id="myTable" class="table table-hover display  pb-30"><thead><tr>';
+                        for (var i = 0; i < resultData.theadField.length; i++) {
+                            str += '<th>' + resultData.theadField[i] + '</th>';
+                        }
+                        str += '</tr></thead><tbody></tbody></table>';
+
+                        $("#gameHeader").append(htmlHeader);
+                        $("#addGameID").append(htmlGameID);
+                        $(".table-responsive").append(str);
+                        $("#gameHeader").show();
+                        $("#allGameDetails").show();
+
+
+
+                        var gameType = gameData.type;
+                        //console.log("gameType::::::", gameType);
+                        var columns;
+                        var typeId = gameData._id;
+                        //console.log("typeId", typeId);
+                        if (gameType == "game_1") {
+                            columns = [{
+                                "data": "srno",
+                                render: function (data, type, row, meta) {
+                                    return meta.row + meta.settings._iDisplayStart + 1;
+                                },
+                            }, {
+                                "data": "dailyScheduleId",
+                                render: function (data, type, row, meta) {
+                                    //let html = row.gameNumber + "-" + row.day;
+                                    let html = row.dailyScheduleId;
+                                    return html
+                                }
+                            }, {
+                                "data": "name",
+                                render: function (data, type, row, meta) {
+                                    //let html = row.gameNumber + "-" + row.day;
+                                    let html = row.name;
+                                    return html
+                                }
+                            }, {
+                                "data": "action",
+                                render: function (data, type, row) {
+                                    let html = "";
+                                    console.log(" viewFlag viewFlag : " + viewFlag + " editFlag editFlag :" + editFlag + " deleteFlag deleteFlag : " + deleteFlag)
+                                    if (viewFlag == 'true') {
+                                        html += `<a href="/viewSavedDailySchedule/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="{{gameManage.view}}">
+                                                                <i class="fa fa-eye" aria-hidden="true"></i>
+                                                            </a>`;
+                                    }
+                                    if (editFlag == 'true') {
+                                        html += `<a href="/editSavedDailySchedule/` + row._id + `">
+                                                                <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                                    <i class="fa fa-edit" aria-hidden="true"></i>
+                                                                </button>
+                                                            </a>`;
+                                    }
+                                    if (deleteFlag == 'true') {
+                                        html += `<button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete-daily-schedule btn-rounded"  ">
+                                                                        <i class="fa fa-trash" aria-hidden="true"></i>
+                                                            </button>`;
+                                    }
+                                    // let html = `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="View">
+                                    //                 <i class="fa fa-eye" aria-hidden="true"></i>
+                                    //             </a>
+                                    //             <a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                    //                 <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                    //                     <i class="fa fa-edit" aria-hidden="true"></i>
+                                    //                 </button>
+                                    //             </a>
+                                    //             <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="Delete Game">
+                                    //                             <i class="fa fa-trash" aria-hidden="true"></i>
+                                    //             </button>`;
+                                    return html;
+                                }
+                            }];
+                        } else if (gameType == "game_2") {
+                            columns = [{
+                                "data": "srno",
+                                render: function (data, type, row, meta) {
+                                    return meta.row + meta.settings._iDisplayStart + 1;
+                                }
+                            }, {
+                                "data": "_id",
+                                render: function (data, type, row, meta) {
+                                    //let html = row.gameNumber + "-" + row.day;
+                                    let html = row._id;
+                                    return html
+                                }
+                            }, {
+                                "data": "gameName",
+                                render: function (data, type, row, meta) {
+                                    //let html = row.gameNumber + "-" + row.day;
+                                    let html = row.gameName;
+                                    return html
+                                }
+                            }, {
+                                "data": "action",
+                                render: function (data, type, row) {
+                                    let html = '';
+                                    if (viewFlag == "true") {
+                                        html += `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="{{gameManage.view}}">
+                                                            <i class="fa fa-eye" aria-hidden="true"></i>
+                                                        </a>`
+                                    }
+
+                                    if (editFlag == "true") {
+                                        html += `<a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                                            <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                                <i class="fa fa-edit" aria-hidden="true"></i>
+                                                            </button>
+                                                        </a>`
+                                    }
+                                    if (deleteFlag == "true") {
+                                        html += `<button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="{{gameManage.delete_game}}">
+                                                                        <i class="fa fa-trash" aria-hidden="true"></i>
+                                                                    </button>`;
+                                    }
+                                    return html;
+                                }
+                            }];
+                        } else if (gameType == "game_3") {
+                            columns = [{
+                                "data": "srno",
+                                render: function (data, type, row, meta) {
+                                    return meta.row + meta.settings._iDisplayStart + 1;
+                                }
+                            }, {
+                                "data": "_id",
+                                render: function (data, type, row, meta) {
+                                    //let html = row.gameNumber + "-" + row.day;
+                                    let html = row._id;
+                                    return html
+                                }
+                            }, {
+                                "data": "gameName",
+                                render: function (data, type, row, meta) {
+                                    //let html = row.gameNumber + "-" + row.day;
+                                    let html = row.gameName;
+                                    return html
+                                }
+                            }, {
+                                "data": "action",
+                                render: function (data, type, row) {
+                                    let html = '';
+
+                                    if (viewFlag == 'true') {
+                                        html += `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="{{gameManage.view}}">
+                                                            <i class="fa fa-eye" aria-hidden="true"></i>
+                                                        </a>`;
+                                    }
+
+                                    if (editFlag == 'true') {
+                                        html += `<a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                                            <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                                <i class="fa fa-edit" aria-hidden="true"></i>
+                                                            </button>
+                                                        </a>`;
+                                    }
+
+                                    if (deleteFlag == 'true') {
+                                        html += `<button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="{{gameManage.delete_game}}">
+                                            <i class="fa fa-trash" aria-hidden="true"></i>
+                                            </button>`;
+                                    }
+                                    return html;
+                                }
+                            }];
+                        } else if (gameType == "game_4" || gameType == "game_5") {
+                            columns = [{
+                                "data": "srno",
+                                render: function (data, type, row, meta) {
+                                    return meta.row + meta.settings._iDisplayStart + 1;
+                                }
+                            }, {
+                                "data": "_id",
+                                render: function (data, type, row, meta) {
+                                    //let html = row.gameNumber + "-" + row.day;
+                                    let html = row._id;
+                                    return html
+                                }
+                            }, {
+                                "data": "gameNumber",
+                                render: function (data, type, row, meta) {
+                                    //let html = row.gameNumber + "-" + row.day;
+                                    let html = row.gameNumber;
+                                    return html
+                                }
+                            }, {
+                                "data": "action",
+                                render: function (data, type, row) {
+
+                                    let html = `<a href="/viewSaveGameManagement/` + row._id + `" class="btn btn-info btn-xs btn-rounded" title="{{gameManage.view}}">
+                                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                                    </a>
+                                                    <a href="/savedGameManagementEdit/` + typeId + `/` + row._id + `">
+                                                        <button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit">
+                                                            <i class="fa fa-edit" aria-hidden="true"></i>
+                                                        </button>
+                                                    </a>
+                                                    <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded" title="{{gameManage.delete_game}}">
+                                                                    <i class="fa fa-trash" aria-hidden="true"></i>
+                                                                </button>`;
+                                    return html;
+                                }
+                            }];
+                        }
+
+                        let targetCol = 2;
+
+                        $(document).ready(function () {
+                            var host = window.location.origin;
+                            let newTable = $('#myTable').DataTable({
+                                // "oLanguage": {
+                                //     "sSearch": "Search Game Number"
+                                // },
+                                "oLanguage": {
+                                    "sSearch": "{{gameManage.search}}",
+                                    "sLengthMenu": "{{gameManage.show}} _MENU_ {{gameManage.entries}}",
+                                    "oPaginate": {
+                                        sPrevious: "{{ gameManage.previous }}",
+                                        sNext: "{{ gameManage.next }}"
+                                    },
+                                    "sInfo": "{{gameManage.showing}} _START_ to _END_ of _TOTAL_ {{gameManage.entries}}",
+                                    "sInfoEmpty": "{{gameManage.showing}} 0 to 0 of 0 {{gameManage.entries}}",
+                                },
+                                "scrollX": true,
+                                "searching": true,
+                                "processing": true,
+                                "serverSide": true,
+                                "order": [
+                                    [0, "desc"]
+                                ],
+                                "columnDefs": [{
+                                    "targets": [targetCol, 3],
+                                    "orderable": false
+                                }],
+                                "autoWidth": false,
+                                "pageLength": 25,
+                                "ajax": {
+                                    url: host + "/getSavedGameDetailList",
+                                    data: {
+                                        gameType: gameType
+                                    }
+                                },
+                                "columns": columns,
+                            });
+
+
+                            $(function () {
+                                "use strict";
+
+                                var SweetAlert = function () { };
+
+                                SweetAlert.prototype.init = function () {
+
+                                    //Parameter
+                                    $('body').on('click', '.delete', function (e) {
+                                        var id = $(this).attr('id');
+                                        var thisElement = this;
+                                        swal({
+                                            title: "{{gameManage.are_you_sure}}?",
+                                            text: "{{gameManage.not_able_to_recover_after_delete}}!",
+                                            type: "warning",
+                                            showCancelButton: true,
+                                            confirmButtonColor: "#e69a2a",
+                                            confirmButtonText: "{{gameManage.yes_delete}}",
+                                            cancelButtonText: "{{gameManage.no_cancle}}",
+                                            closeOnConfirm: false,
+                                            closeOnCancel: false
+                                        }, function (isConfirm) {
+                                            if (isConfirm) {
+                                                $.ajax({
+                                                    type: 'POST',
+                                                    url: host + "/getSaveGameDelete",
+                                                    data: {
+                                                        id: id
+                                                    },
+                                                    success: function (resultData) {
+                                                        //console.log(resultData);
+                                                        if (resultData == 'success') {
+                                                            $(thisElement).parent().parent().hide(700);
+                                                            swal("{{gameManage.deleted}}!", "{{gameManage.game_delete_success}}.", "success");
+                                                            newTable.ajax.reload();
+                                                        } else {
+                                                            swal("{{gameManage.cancelled}}", "{{gameManage.game_not_deleted_as_about_to_start}}..!!", "error");
+                                                        }
+                                                        // alert("Save Complete")
+                                                    }
+                                                });
+                                                swal("{{gameManage.deleted}}!", "{{gameManage.game_delete_success}}.", "success");
+
+                                            } else {
+                                                swal("{{gameManage.cancelled}}", "{{gameManage.game_not_deleted}}", "error");
+                                            }
+                                        });
+                                        return false;
+                                    });
+
+
+                                    $('body').on('click', '.delete-daily-schedule', function (e) {
+                                        var id = $(this).attr('id');
+                                        var thisElement = this;
+                                        swal({
+                                            title: "{{gameManage.are_you_sure}}?",
+                                            text: "{{gameManage.not_able_to_recover_daily_schedule_after_delete}}!",
+                                            type: "warning",
+                                            showCancelButton: true,
+                                            confirmButtonColor: "#e69a2a",
+                                            confirmButtonText: "{{gameManage.yes_delete}}",
+                                            cancelButtonText: "{{gameManage.no_cancle}}",
+                                            closeOnConfirm: false,
+                                            closeOnCancel: false
+                                        }, function (isConfirm) {
+                                            if (isConfirm) {
+                                                $.ajax({
+                                                    type: 'POST',
+                                                    url: host + "/deleteSavedDailySchedule",
+                                                    data: {
+                                                        id: id
+                                                    },
+                                                    success: function (resultData) {
+                                                        //console.log(resultData);
+                                                        if (resultData == 'success') {
+                                                            $(thisElement).parent().parent().hide(700);
+                                                            swal("{{gameManage.deleted}}!", "{{gameManage.daily_schedule_delete_success}}.", "success");
+                                                            newTable.ajax.reload();
+                                                        } else {
+                                                            swal("{{gameManage.cancelled}}", "{{gameManage.daily_schedule_not_deleted_as_game_aboutto_start}}..!!", "error");
+                                                        }
+                                                        // alert("Save Complete")
+                                                    }
+                                                });
+                                                swal("{{gameManage.deleted}}!", "{{gameManage.daily_schedule_delete_success}}.", "success");
+
+                                            } else {
+                                                swal("{{gameManage.cancelled}}", "{{gameManage.daily_schedule_not_deleted}}", "error");
+                                            }
+                                        });
+                                        return false;
+                                    });
+
+                                },
+                                    $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+                                $.SweetAlert.init();
+                                //Delete over
+                            });
+                            // Document over
+                        });
+                        // if end
+                    }
+                    //success end
+                }
+                // ajax end
+            });
+            // function end
+        }
+        // Document over
+    });
+</script>
+<script>
+</script>
+{% endblock %}

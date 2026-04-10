@@ -1,0 +1,2159 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    .m-b-1 {
+        margin-bottom: 1em;
+    }
+
+    .weekDays-selector input {
+        display: none !important;
+    }
+
+    .weekDays-selector input[type=checkbox]+label {
+        display: inline-block;
+        border-radius: 6px;
+        background: #dddddd;
+        height: 40px;
+        width: 50px;
+        margin-right: 3px;
+        line-height: 40px;
+        text-align: center;
+        cursor: pointer;
+    }
+
+    .weekDays-selector input[type=checkbox]:checked+label {
+        background: #0583d7;
+        color: #ffffff;
+    }
+
+    .group-number .group-number-input {
+        flex: auto !important;
+    }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+        <!-- Title -->
+        <section class="content-header">
+            {% if slug=="Add" %}
+            <h1>{{translate.add}} {{gameData.name}}</h1>
+            {% else %}
+            <h1>{{translate.edit_text}} {{Game.gameName}}</h1>
+            {% endif %}
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+                {% if slug=="Add" %}
+                <li href="#">{{gameData.name}}</li>
+                {% else %}
+                <li href="#">{{Game.gameName}}</li>
+                {% endif %} {% if slug=="Add" %}
+                <li class="active">{{translate.add}} {{gameData.name}}</li>
+                {% else %}
+                <li class="active">{{translate.edit_text}} {{Game.gameName}}</li>
+                {% endif %}
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content">
+            <!-- Modal Code Start -->
+            <div class="row">
+                <div class="container-fluid">
+                    <!-- The modal -->
+                    <div class="modal fade" id="saveGameNameModal" tabindex="-1" role="dialog"
+                        aria-labelledby="modalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+                        <div class="modal-dialog" role="document">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                        <span aria-hidden="true">&times;</span>
+                                    </button>
+                                    <h4 class="modal-title" id="modalLabel">{{translate.save_game}}</h4>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="table-wrap">
+                                        <div class="table-responsive">
+                                            <form name="category" action="#" class="form-horizontal"
+                                                id="saveGameNameForm">
+                                                <table border="0" class="table display  pb-30">
+                                                    <div class="col-sm-12">
+                                                        <div class="form-group">
+                                                            <label class="control-label mb-10 col-sm-4"
+                                                                for="saveGameName">{{translate.save_as}}:</label>
+                                                            <div class="col-sm-8">
+                                                                <input type="text" class="form-control"
+                                                                    id="saveGameName" placeholder="{{translate.enter_name_of_game}}"
+                                                                    required name="saveGameName"
+                                                                    data-validation="required"
+                                                                    data-validation-error-msg="{{translate.please}} {{translate.enter_name_of_game}}">
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <div id="button_one"
+                                                                style="width: 50%;margin: 0 auto;text-align: center;">
+                                                                <input type="button" id="nameofSaveGame"
+                                                                    class="btn btn-success btn-flat" value="{{translate.save}}">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </table>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Modal Code End -->
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                {% if slug=="Add" %}
+                                <h6 class="panel-title txt-dark">{{translate.add}} {{gameData.name}}</h6>
+                                {% else %}
+                                <h6 class="panel-title txt-dark">{{translate.edit_text}} {{gameData.name}}</h6>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper">
+                            <div class="panel-body">
+                                {% if slug =="Add" %}
+                                <form method="POST" id="addGameData" class="">
+                                    {% else %}
+                                    <form method="POST" id="addGameData" class="">
+                                        {% endif %}
+                                        <div class="table display pb-30">
+                                            <input type="hidden" name="ctimezone" value="Europe/Oslo">
+                                            <!-- Pattern Add / Buttons add -->
+                                            <div class="">
+                                                <!-- Save Button -->
+                                                {% if addFlagSave %}
+                                                <div class="pull-right">
+                                                    <a href="#"><button type="button" class="btn savedGame btn-primary btn-md"><i class="fa fa-plus"></i> {{translate.save_game}}</button></a>
+                                                </div>
+                                                {% endif %}
+                                                <div class="clearfix"></div>
+                                                <!-- Feild adds-->
+                                                <div class="row">
+                                                    <div class="col-lg-6 col-sm-6">
+                                                        <div class="form-group">
+                                                            <label>{{translate.game_name}} :-</label>
+                                                            <input type="text" class="form-control" name="mainGameName"
+                                                                placeholder="{{translate.enter}} {{translate.game_name}}" value="{{Game.gameName}}"
+                                                                id="mainGameName" data-validation="required">
+                                                        </div>
+                                                    </div>
+                                                    <!--Auto mode selected automatically -->
+                                                    <div class="col-lg-6 col-sm-6" hidden>
+                                                        <div class="form-group">
+                                                            <label>Select Game Mode :-</label>
+                                                            <select id="gameMode" name="gameMode"
+                                                                data-validation="required" data-validation-event="click"
+                                                                class="form-control">
+                                                                <option value="">Choose Game Mode</option>
+                                                                <option value="auto" selected>Auto</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <!-- Start Date and End Date Time /  -->
+                                                <div class="row">
+                                                    <div class="col-lg-6 col-sm-6">
+                                                        <div class="form-group">
+                                                            <label>{{translate.start_date_and_time}}:-</label>
+                                                            <div class='input-group date' id='startDate'>
+                                                                <input type='text' class="form-control"
+                                                                    onkeydown="return false"
+                                                                    name="start_date" id="start_date"
+                                                                    value="{{StartDate}}"
+                                                                    data-validation="required startDate"
+                                                                    placeholder="{{translate.start_date}}"
+                                                                    data-date-format="YYYY-MM-DD" autocomplete="off" />
+                                                                <!-- HH:mm -->
+                                                                <span class="input-group-addon">
+                                                                    <span
+                                                                        class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-lg-6 col-sm-6">
+                                                        <div class="form-group">
+                                                            <label>{{translate.end_date_and_time}}:-</label>
+                                                            <div class='input-group date' id='endDate'>
+                                                                <input type='text' class="form-control" name="end_date"
+                                                                    onkeydown="return false"
+                                                                    id="end_date" value="{{EndTime}}" required
+                                                                    data-validation="required endDate"
+                                                                    placeholder="{{translate.end_date}}" data-date-format="YYYY-MM-DD"
+                                                                    autocomplete="off" /> <!--  HH:mm  -->
+                                                                <span class="input-group-addon">
+                                                                    <span
+                                                                        class="glyphicon glyphicon2 glyphicon-calendar"></span>
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <!--Days Selection Selection-->
+                                                {% set week = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"] %}
+                                                <div class="row">
+                                                    <div class="weekDays-selector col-sm-12">
+                                                        {% if slug == "Add" %}
+                                                        <input type="checkbox" id="weekday-Mon" class="weekday" />
+                                                        <!--days[Mon]-->
+                                                        <label for="weekday-Mon">Mon</label>
+                                                        <input type="checkbox" id="weekday-Tue" class="weekday" />
+                                                        <!--days[Tue]-->
+                                                        <label for="weekday-Tue">Tue</label>
+                                                        <input type="checkbox" id="weekday-Wed" class="weekday" />
+                                                        <!--days[Wed]-->
+                                                        <label for="weekday-Wed">Wed</label>
+                                                        <input type="checkbox" id="weekday-Thu" class="weekday" />
+                                                        <!--days[Wed]-->
+                                                        <label for="weekday-Thu">Thu</label>
+                                                        <input type="checkbox" id="weekday-Fri" class="weekday" />
+                                                        <!--days[Fri]-->
+                                                        <label for="weekday-Fri">Fri</label>
+                                                        <input type="checkbox" id="weekday-Sat" class="weekday" />
+                                                        <!--days[Sat]-->
+                                                        <label for="weekday-Sat">Sat</label>
+                                                        <input type="checkbox" id="weekday-Sun" class="weekday" />
+                                                        <!--days[Sun]-->
+                                                        <label for="weekday-Sun">Sun</label>
+                                                        {% else %}
+                                                        {% for val in week %}
+                                                        {% set add = "false" %}
+                                                        {% for day in days %}
+                                                        {% if val == day %}
+                                                        {% set add = "true"%}
+                                                        {% endif %}
+                                                        {% endfor %}
+                                                        <input type="checkbox" id="weekday-{{val}}" {{ "checked" if
+                                                            add=='true' else "" }} class="weekday" />
+                                                        <label for="weekday-{{val}}">{{val}}</label>
+                                                        {% endfor %}
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                                <hr>
+                                                <h5><b>{{translate.time_period}} :</b></h5>
+                                                <hr>
+                                                <!--Time Selection Selection for Selected Day-->
+                                                <div class="row days">
+                                                    {% for day in days %}
+                                                    <div class="day col-md-12">
+                                                        <div id="day_{{day}}" class="col-sm-2">
+                                                            <input type="text" class="form-control " readonly disabled
+                                                                value="{{day}}">
+                                                        </div>
+                                                        <div id="time_{{day}}" class="col-sm-10">
+                                                            <div class="form-group start_time col-sm-6"
+                                                                style="display:flex;align-items: center;justify-content: space-evenly;">
+                                                                <label class="col-sm-4" style="text-align:end;"
+                                                                    for="days[{{day}}][]">{{translate.start_time}}:</label>
+                                                                <div class="col-sm-7">
+                                                                    <input type='text' class="form-control start_time1"
+                                                                        name="days[{{day}}][]" id="{{day}}_startTime"
+                                                                        data-validation="required startTime"
+                                                                        placeholder="{{translate.select}} {{translate.start_time}}"
+                                                                        data-date-format="HH:mm"
+                                                                        value="{{timings[loop.index-1][0]}}"
+                                                                        autocomplete="off" />
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group  end_time col-sm-6"
+                                                                style="display:flex;align-items: center;justify-content: space-evenly;">
+                                                                <label class="col-sm-3" style="text-align:end;"
+                                                                    for="days[{{day}}][]">{{translate.end_time}} : </label>
+                                                                <div class="col-sm-7">
+                                                                    <input type='text' class="form-control end_time1"
+                                                                        name="days[{{day}}][]" id="{{day}}_endTime"
+                                                                        data-validation="required endTime"
+                                                                        placeholder="{{translate.select}} {{translate.end_time}}"
+                                                                        data-date-format="HH:mm"
+                                                                        value="{{timings[loop.index-1][1]}}"
+                                                                        autocomplete="off" />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
+                                                <hr>
+
+                                                <!-- Specify if it's bot game -->
+                                                <div class="row" id="botDetails">
+                                                    <div class="col-lg-6 col-sm-6">
+                                                        <div class="form-group">
+                                                            <label>{{translate.is_bot_game}}?:</label>
+                                                            <select name="isBotGame" id="isBotGame" class="form-control" required {{ "disabled" if
+                                                                Game.isBotGame== true else "" }}>
+                                                                <option value="No">{{translate.no}}</option>
+                                                                <option value="Yes" {{ "selected" if Game.isBotGame == true else "" }}>{{translate.yes}}</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    {% if slug != 'Add' and Game.isBotGame == true %}
+                                                    <div class="col-lg-6 col-sm-6" id="totalNumberOfGames">
+                                                        <div class="form-group">
+                                                            <label>{{translate.how_many_bot_game_to_run}}:-</label>
+                                                            <input type="number" class="form-control totalNumberOfGames" name="totalNumberOfGames" value="{{Game.totalNumberOfGames}}"
+                                                                required placeholder="{{translate.total_bot_game_to_run}}" data-validation="required">
+                                                        </div>
+                                                    </div>
+                                                    {% endif %}
+                                                </div>
+
+                                                <!--GroupofHalls and Halls Selection-->
+                                                <div class="row">
+                                                    <div class="col-lg-6 col-md-6">
+                                                        <div class="form-group">
+                                                            <label>{{translate.select}} {{translate.group_hall}}</label>
+                                                            <select data-placeholder="{{translate.choose}} {{translate.group_hall}}..." multiple
+                                                                required class="form-control chosen-select"
+                                                                id="groupHallSelected" data-validation="required length"
+                                                                name="groupHalls[]">
+                                                                {% for grpHall in groupHallArray %}
+                                                                {% set selected = "false" %}
+                                                                {% for groupHall in Game.groupHalls %}
+                                                                {% if groupHall.id == grpHall.id %}
+                                                                {% set selected = "true" %}
+                                                                {% endif %}
+                                                                {% endfor %}
+                                                                <!-- <option selected value="{{groupHall.id}}">{{groupHall.name}}</option> -->
+                                                                <option {{ "selected" if selected=='true' else "" }}
+                                                                    value="{{grpHall.id}}">{{grpHall.name}}</option>
+                                                                {% endfor %}
+                                                            </select>
+                                                            <div id="error-contain" class="chzn-container"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="row" id="groupHallOption">
+                                                </div>
+
+                                                <div class="col-12" id="subGamesContainer" style="max-height: 600px;overflow-y:auto;">
+                                                    <!-- SubGames will be added here -->
+                                                    <div class="row">
+                                                       {{ Game.subGames.length}}
+                                                    </div>
+                                                    {% if Game.subGames.length %}
+                                                    {% for subGame in Game.subGames %}
+                                                    {% set subIndex = loop.index0 %}
+                                                    {% set cntt = 0 %}
+                                                    <div class="ch col-lg-12 subNum_{{loop.index0}}" style="border : 1px solid #00000033;margin-top:10px;">
+                                                        <div style="margin-top:10px;">
+                                                            <button type="button" name="delete"
+                                                                class="pull-right btn btn-danger btn-xs deleteSubGame btn-delete"
+                                                                title="Delete Game">
+                                                                <i class="fa fa-trash" aria-hidden="true"></i>
+                                                            </button>
+                                                        </div>
+                                                        <div class="clearfix"></div>
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-sm-6">
+                                                                <input type="hidden" name="sGame[]">
+                                                                <div class="form-group">
+                                                                    <label>{{translate.sub_game_name}} :-</label>
+                                                                    <input type="text" class="form-control"
+                                                                        name="subGame[{{loop.index0}}][name]"
+                                                                        value="{{subGame.name}}" required
+                                                                        placeholder="{{translate.enter}}{{translate.sub_game_name}}"
+                                                                        data-validation="required">
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <div class="form-group">
+                                                                    <label>{{translate.ticket_price}}:-</label>
+                                                                    <input type="number" class="form-control"
+                                                                        name="subGame[{{loop.index0}}][ticketPrice]"
+                                                                        value="{{subGame.ticketPrice}}" required
+                                                                        placeholder="{{translate.enter}} {{translate.ticket_price}}"
+                                                                        data-validation="required">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <div class="form-group">
+                                                                    <label>{{translate.prize_of_lucky_number}} :</label>
+                                                                    <input type="number" class="form-control"
+                                                                        name="subGame[{{loop.index0}}][luckyNumberPrize]"
+                                                                        value="{{subGame.luckyNumberPrize}}" required
+                                                                        placeholder="{{translate.enter}}{{translate.prize_of_lucky_number}}"
+                                                                        data-validation="required">
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <div class="form-group">
+                                                                    <label>{{translate.notification_start_time}}:</label>
+                                                                    <select
+                                                                        name="subGame[{{loop.index0}}][notificationStartTime]"
+                                                                        class="form-control" required>
+                                                                        <option value="10s" {{ "selected" if
+                                                                            subGame.notificationStartTime=='10s' else ""
+                                                                            }}>10s
+                                                                        </option>
+                                                                        <option value="15s" {{ "selected" if
+                                                                            subGame.notificationStartTime=='15s' else ""
+                                                                            }}>15s
+                                                                        </option>
+                                                                        <option value="20s" {{ "selected" if
+                                                                            subGame.notificationStartTime=='20s' else ""
+                                                                            }}>20s
+                                                                        </option>
+                                                                        <option value="30s" {{ "selected" if
+                                                                            subGame.notificationStartTime=='30s' else ""
+                                                                            }}>30s
+                                                                        </option>
+                                                                        <option value="40s" {{ "selected" if
+                                                                            subGame.notificationStartTime=='40s' else ""
+                                                                            }}>40s
+                                                                        </option>
+                                                                        <option value="50s" {{ "selected" if
+                                                                            subGame.notificationStartTime=='50s' else ""
+                                                                            }}>50s
+                                                                        </option>
+                                                                        <option value="1m" {{ "selected" if
+                                                                            subGame.notificationStartTime=='1m' else ""
+                                                                            }}>1m</option>
+                                                                        <option value="2m" {{ "selected" if
+                                                                            subGame.notificationStartTime=='2m' else ""
+                                                                            }}>2m</option>
+                                                                        <option value="3m" {{ "selected" if
+                                                                            subGame.notificationStartTime=='3m' else ""
+                                                                            }}>3m</option>
+                                                                        <option value="4m" {{ "selected" if
+                                                                            subGame.notificationStartTime=='4m' else ""
+                                                                            }}>4m</option>
+                                                                        <option value="5m" {{ "selected" if
+                                                                            subGame.notificationStartTime=='5m' else ""
+                                                                            }}>5m</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="row">
+                                                            <div class="col-lg-6 col-sm-6">
+                                                                <div class="form-group">
+                                                                    <div class="row">
+                                                                        <label class="mb-10 col-sm-12 ">{{translate.total_seconds_to_display_ball}}:</label>
+                                                                        <div class="col-sm-12 ">
+                                                                            <input type="number" class="form-control"
+                                                                                name="subGame[{{loop.index0}}][seconds]"
+                                                                                value="{{subGame.seconds}}" required
+                                                                                placeholder="{{translate.enter}} {{translate.seconds}}"
+                                                                                data-validation="required">
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="col-lg-6 col-md-6">
+                                                                <div class="form-group">
+                                                                    <div class="form-group " id="minTicketCount">
+                                                                        <label>{{translate.minimum_ticket_count}} :-</label>
+                                                                        <input type="number" class="form-control"
+                                                                            name="subGame[{{loop.index0}}][minTicketCount]"
+                                                                            value="{{subGame.minTicketCount}}" required
+                                                                            placeholder="{{translate.enter}} {{translate.minimum_ticket_count}}"
+                                                                            data-validation="required">
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="row ">
+                                                            <div class="col-lg-12">
+                                                                <label>{{translate.jackpot_number_and_prize}} </label>
+                                                                <div class="col-12 m-b-1">
+                                                                    <div class="form-check form-check-inline">
+                                                                        <input class="form-check-input" type="radio" name="subGame[{{subIndex}}][winningType]"
+                                                                            id="inlineRadio1_{{subIndex}}" value="cash" {{ "checked" if subGame.winningType=='cash' else ""}}>
+                                                                        <label class="form-check-label" for="inlineRadio1_{{subIndex}}">{{translate.in_cash}}</label>
+                                                                    </div>
+                                                                    <div class="form-check form-check-inline">
+                                                                        <input class="form-check-input" type="radio" name="subGame[{{subIndex}}][winningType]"
+                                                                            id="inlineRadio2_{{subIndex}}" value="percent" {{ "checked" if subGame.winningType=='percent' else ""}}>
+                                                                        <label class="form-check-label" for="inlineRadio2_{{subIndex}}">{{translate.in_percent}}</label>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="nwCl_{{subIndex}}">
+                                                                    {% for patternArray in subGame.allPatternArray %}
+                                                                    {% set isGroup = "true" %}
+                                                                    {% set ptrn = '' %}
+                                                                    {% set ptrnIndex = loop.index %}
+                                                                    {% for pattern in patternArray %}
+                                                                    {% if pattern.groupName != ptrn%}
+                                                                    <div class="col-12 m-b-1 patternGroup patternGroup_{{ptrnIndex}}_{{subIndex}}" data-percent="100">
+                                                                        <div class="group-number">
+                                                                            <div class="group-type">
+                                                                                <input loopvalue="0" type="text" name="grpp[{{subIndex}}][]" class="form-control ptrnVall_{{ptrnIndex}}_{{subIndex}}" readonly value="{{pattern.groupName}}">
+                                                                            </div>
+                                                                            <div
+                                                                                class="group-number-input patternTotalDivList patternTotalDivList_{{ptrnIndex}}_{{subIndex}}">
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                    {% set ptrn = pattern.groupName %}
+                                                                    {% set cntt = cntt + 1 %}
+                                                                    {%endif%}
+                                                                    {% endfor %}
+                                                                    {% endfor %}
+                                                                    <div class="col-12 m-b-1">
+                                                                        <button type="button" class="btn addGrpList addGrpList_{{subIndex}} btn-primary btn-md" data-cnttsb="{{subIndex}}" data-cntt="{{cntt}}">
+                                                                        <i class="fa fa-plus"></i> {{translate.add_group}}</button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    {% endfor %}
+                                                    {% endif %}
+                                                </div>
+                                                <br>
+                                                <div class="row">
+                                                    <div class="col-lg-12">
+                                                        <input type="button" id="addSBGame"
+                                                            class="btn btn-primary btn-flat" value="{{translate.add_sub_game}}">
+                                                    </div>
+                                                </div>
+                                                <br>
+                                                <div class="row">
+                                                    <div class="col-lg-12">
+                                                        <input type="button" class="btn btn-success sbBtn btn-flat"
+                                                            value="{{translate.submit}}">
+                                                        <a href="/gameManagement"
+                                                            class="btn btn-danger btn-flat">{{translate.cancel}}</a>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- /Row -->
+    </div>
+</div>
+
+<div class="modal fade add-pattern-modal" id="addNewWordModal">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <h4 class="modal-title">{{translate.add_pattern}}</h4>
+            </div>
+            <div class="modal-body">
+                <div class="pattern-name">
+                    <label>{{translate.group_name}}</label>
+                    <input type="text" class="form-control ptrnP" placeholder="Group Test" value="Group Test" required>
+                </div>
+
+                <div class="pattern-group">
+                    <label>{{translate.pattern_group}}</label>
+                    <ul class="pattern-group-ul patternList">
+                        {% for ptrn in pattern %}
+                        <li rel="{{ptrn.patternName}}">
+                            <div class="checkbox">
+                                <label>
+                                    <input type="checkbox" name="checkboxPt" data-patternId="{{ptrn._id}}"
+                                        value="{{ptrn.patternName}}" data-patternType="{{ptrn.patternType}}">
+                                    {{ptrn.patternName}}
+                                </label>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    <button type="submit" class="btn sBtnn btn-primary" data-dismiss="modal">{{translate.add}}</button>
+                </div>
+                <div class="clearfix"></div>
+            </div>
+        </div>
+        <!-- /.modal-content -->
+    </div>
+</div>
+{% endblock %} {% block Jscript %}
+<script src="/dist/js/chosen.jquery.js"></script>
+<link href="/dist/css/chosen.min.css" rel="stylesheet " />
+<link rel="stylesheet "
+    href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css "
+    integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin=" anonymous " />
+<script
+    src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js "
+    integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin=" anonymous "></script>
+
+
+<link href="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/css/bootstrap-multiselect.css"
+    rel="stylesheet" type="text/css" />
+<script src="https://cdn.rawgit.com/davidstutz/bootstrap-multiselect/master/dist/js/bootstrap-multiselect.js"
+    type="text/javascript"></script>
+<script src="/dist/js/gameone.js" type="text/javascript"></script>
+
+<script>
+</script>
+
+<script>
+    let fl = false;
+    let cntt = 0;
+    let prtnAr = [];
+    let allPatternArray = [];
+    let patternListGlobal = [];
+    let prnId = [];
+    let ptTy = [];
+    let subGameNum = $("#subGamesContainer").children('.ch').length;
+    $(document).ready(function () {
+        sessionStorage.clear();
+        $(".chosen-select").chosen();
+        $('#groupHallSelected').trigger("chosen:updated");
+        let grpHallArr = $("#groupHallSelected").val();
+        console.log("#groupHallSelected", grpHallArr);
+        if (grpHallArr.length) {
+            //Put already selected grphall in storage
+            sessionStorage.setItem('groupHallSelected', grpHallArr);
+        }
+        $('input[name="ctimezone"]').val(Intl.DateTimeFormat().resolvedOptions().timeZone);
+        $(function () {
+            $('[data-toggle="tooltip"]').tooltip()
+        })
+        let action = '{{slug}}';
+        if (action !== 'Add') {
+            let subgameData = `{{ Game.subGames | dump | safe }}`;
+            subgameData = JSON.parse(subgameData);
+            cntt = subgameData.length;
+            console.log('subgameData', subgameData);
+            let html = ``;
+            for (let i = 0; i < subgameData.length; i++) {
+                let ptrnData = subgameData[i].allPatternArray;
+                console.log(`ptrnData${i}`, ptrnData);
+                for (let p = 1; p <= ptrnData.length; p++) {
+                    let g = p - 1;
+                    let sGroup = ptrnData[g];
+                    console.log('ptrnData[p].patternName', sGroup);
+                    let percent = $('.patternTotalDivList_' + p + '_' + i).parent().parent().data('percent');
+                    for (let s = 0; s < sGroup.length; s++) {
+                        if(!sGroup[s].patternType.includes(0) && sGroup[s].patternType != ''){
+                            console.log("Percentage in Group",percent);
+                            html += `<div class="group-number-input-inner">
+                            <div class="group-number-checkbox">
+                                <input type="text" class="form-control ptName_${p}_${i}" name="subGame[${i}][ptname]" id="ptName_${p}_${s}_${i}" data-patternId="${sGroup[s].patternId}" data-patternType="${sGroup[s].patternType}" disbled readonly value = "${sGroup[s].patternName}">
+                            </div>
+                            <div class="number-input">
+                                <input type="number" class="form-control ptvalue_${p}_${i}" name="subGame[${i}][ptvalue]" id="ptvalue_${p}_${s}_${i}" value = "${sGroup[s].ballNumber}" min="1" max="75" required data-validation="required number"  data-validation-allowing="range[1;75]" data-validation-error-msg-number="Please select number between 1 and 75">
+                            </div>
+                            <div class="number-input">
+                                <input type="number" class="form-control ptvalue2_${p}_${i}" name="subGame[${i}][ptvalue2]" id="ptvalue2_${p}_${s}_${i}" value = "${sGroup[s].prize}" min="1" required data-validation="required number"  data-validation-allowing="range[1;75000]" data-validation-error-msg-number="Price should be between 1 and 75k Kr">
+                            </div>`
+                            if (subgameData[i].winningType == "percent") {
+                                html += `<div class="number-input">
+                                <input type="number" class="form-control ptvalue3_${p}_${i} percent" name="subGame[${i}][ptvalue3]" id="ptvalue3_${p}_${s}_${i}" value = "${sGroup[s].prize1}" min="1" required data-previous="${sGroup[s].prize1}" data-validation="required number"  data-validation-allowing="range[1;100]" data-validation-error-msg-number="Percent should be between 1 and 100">
+                                </div></div>`;
+
+                                percent = percent - sGroup[s].prize1 
+                            } else {
+                                html += `<div class="number-input">
+                                <input type="number" class="form-control ptvalue3_${p}_${i}" name="subGame[${i}][ptvalue3]" id="ptvalue3_${p}_${s}_${i}" value = "${sGroup[s].prize1}" min="1" required  data-validation="required number"  data-validation-allowing="range[1;75000]" data-validation-error-msg-number="Price should be between 1 and 75k Kr">
+                                </div></div>`;
+                            }
+                            
+                        }else{
+                            html += `<div class="group-number-input-inner">
+                            <div class="group-number-checkbox">
+                                <input type="text" class="form-control ptName_${p}_${i}" name="subGame[${i}][ptname]" id="ptName_${p}_${s}_${i}" data-patternId="` + sGroup[s].patternId + `" data-patternType="` + sGroup[s].patternType + `" disbled readonly value = "${sGroup[s].patternName}">
+                            </div>
+                            <div class="number-input">
+                                <input type="number" class="form-control ptvalue_${p}_${i}" name="subGame[${i}][ptvalue]" id="ptvalue_${p}_${s}_${i}" value = "${sGroup[s].ballNumber}" min="1" max="75" required data-validation="required number"  data-validation-allowing="range[1;75]" data-validation-error-msg-number="Please select number between 1 and 75">
+                            </div>`
+
+                            if (subgameData[i].winningType == "percent") {
+                                 html += `<div class="number-input">
+                                <input type="number" class="form-control ptvalue2_${p}_${i} percent" name="subGame[${i}][ptvalue2]" id="ptvalue2_${p}_${s}_${i}" value = "${sGroup[s].prize}" min="1" required data-previous="${sGroup[s].prize}" data-validation="required number"  data-validation-allowing="range[1;100]" data-validation-error-msg-number="Percent should be between 1 and 100">
+                                </div></div>`; 
+                                percent = percent - sGroup[s].prize;
+                            } else {
+                                 html += `<div class="number-input">
+                                <input type="number" class="form-control ptvalue2_${p}_${i}" name="subGame[${i}][ptvalue2]" id="ptvalue2_${p}_${s}_${i}" value = "${sGroup[s].prize}" min="1" required data-validation="required number"  data-validation-allowing="range[1;75000]" data-validation-error-msg-number="Price should be between 1 and 75k Kr">
+                                </div></div>`; 
+                            }   
+                        }
+                    }
+                    console.log('p i', p, i);
+                    $('.patternTotalDivList_' + p + '_' + i).append(html);
+                    html = `<div class="group-type">
+                            <div class="raw">
+                                <div class="col-12">
+                                    <button type="button" class="btn btn-danger btn-md deleteGroup ptrnDelt_${i}_${p}" data-cnttsb="${i}" data-cntt="${p}" style="width: 108px;margin-bottom: 10px;"> {{translate.remove}}</button>
+                                </div>
+                                <div class="col-12">
+                                    <button type="button" class="btn btnn btn-primary btn-md ptrnAdd_${p}" data-cnttsb="${i}" data-cntt="${p}" data-subId="${i}"><i class="fa fa-plus"></i> {{translate.add_pattern}}</button>
+                                </div>
+                            </div>
+                        </div>`;
+                    $(html).insertAfter('.patternTotalDivList_' + p + '_' + i);
+                    html = ``;
+                    console.log('subgameData pattern length', sGroup.length);
+                    $(`.ptrnVall_${p}_${i}`).attr('loopvalue', sGroup.length);
+                    console.log("running here", $('.addGrpList_' + i));
+                    $('.addGrpList_' + i).hide();
+                    $('.patternTotalDivList_' + p + '_' + i).parent().parent().data('percent',percent);
+                }
+            }
+        }
+
+        // [ Game 3 Add Pattern Open ]
+        $('body').on('click', '.btnn', function () {
+
+            $('input:checkbox[name=checkboxPt]').each(function () {
+                $(this).prop('checked', false);
+            });
+            $('#addNewWordModal').modal({
+                backdrop: 'static',
+                keyboard: false
+            })
+        });
+
+        $('body').on('.numericCls', 'keyup', function () {
+            this.value = this.value.replace(/[^0-9\.]/g, '');
+        });
+
+        $('body').on('.numericCls32', 'keyup', function () {
+            this.value = this.value.replace(/[^1-4\.]/g, '');
+        });
+        
+      
+        let gameTypeId = '{{gameData._id}}';
+
+        // [ Save Game from here] 
+        //:: Modal Related Code ::
+        $('#saveGameNameModal').on('hidden.bs.modal', function () {
+            // Reset values of modal
+            $(this).find('form').trigger('reset');
+        });
+
+        //Open Modal
+        $('body').on('click', '.savedGame', function () {
+            let days = 0;
+            let submit = true;
+            days = $(".weekday:checkbox:checked").length;
+            if (days <= 0) {
+                submit = false;
+                alert("{{translate.selct_atleast_one_day_in_week}}.");
+            }
+            let subGame = 0;
+            subGame = $("#subGamesContainer").children('div.ch').length;
+            if (subGame <= 0) {
+                submit = false;
+                alert("{{translate.add_atleast_one_subgame}}.")
+            }
+            $("#groupHallSelected").removeAttr("disabled");
+            let group = $('#groupHallSelected > option:selected');
+            console.log("length of group", group);
+            if ($("#addGameData").isValid() && submit) {
+                $('#saveGameNameModal').modal('toggle');
+            }
+        });
+
+
+        //Save Game
+        $('body').on('click', '#nameofSaveGame', function () {
+            let myVar = $("#start").find('.myClass').val();
+            let gameMode = 'auto';
+            let  mainGameName =  $("#mainGameName").val();
+            let gameType = '{{gameData.type}}';
+            let start_date = $("#start_date").val();
+            let grace_time = $("#grace_time").val();
+            let end_date = $("#end_date").val();
+            let day = $('#dayDate option:selected').val();
+            let gameId = '{{gameData._id}}';
+            let isBotGame = $('#isBotGame').find(":selected").val() == "Yes" ? true : false;
+            console.log("$('.totalNumberOfGames').val()", $('.totalNumberOfGames').val());
+            let sGame = document.getElementsByName('sGame[]');
+            console.log("+++++++++++++++ :sGame : ", sGame.length);
+            if (sGame.length <= 0) {
+                alert(`{{translate.add_atleast_one_subgame}}`);
+                return false;
+            }
+            let subGameArray = [];
+            for (let i = 0; i < sGame.length; i++) {
+                let inputs = document.getElementsByName(`grpp[${i}][]`);
+                console.log("+++++++++++++++ :patternList : ", inputs.length);
+                let tmpAr = [];
+                prtnAr = [];
+                let allPatternArray = [];
+                if (inputs.length <= 0) {
+                    alert(`{{translate.atleast_one_goh_in_subgames}}`);
+                    return false;
+                }
+                for (let ml = 1; ml <= (inputs.length); ml++) {
+                    tmpAr = [];
+                     let loopvalue = $(".ptrnVall_" + ml + '_' + i).attr("loopvalue");
+                    if (!loopvalue) {
+                        alert(`Please Add Pattern In ${$(".ptrnVall_" + ml + '_' + i).val()}`);
+                        return false;
+                    }
+                    console.log('loopvalue ml', loopvalue, ml);
+                    let gn = ml - 1;
+                    for (let il = 0; il < (loopvalue * 1); il++) {
+                        let isfullHouse = false;
+                        let ptPatternType = $('#ptName_' + ml + '_' + il + '_' + i).attr('data-patternType');
+                        let ptName = $('#ptName_' + ml + '_' + il + '_' + i).val();
+                        let prrtId = $('#ptName_' + ml + '_' + il + '_' + i).attr('data-patternId');
+                        let ptvalue = $('#ptvalue_' + ml + '_' + il + '_' + i).val();
+                        let ptvalue2 = $('#ptvalue2_' + ml + '_' + il + '_' + i).val();
+                        if(!ptPatternType.includes(0)){
+                            if(ptPatternType != ''){
+                                isfullHouse = true;
+                            }
+                        }
+                        if(isfullHouse){
+                            let ptvalue3 = $('#ptvalue3_' + ml + '_' + il + '_' + i).val();
+                            if (![ptName, prrtId, ptvalue, ptvalue2, ptvalue3, ptPatternType].includes(undefined) && ![ptName, prrtId, ptvalue, ptvalue2, ptvalue3].includes('')) {
+                                tmpAr.push({
+                                    'patternName': ptName,
+                                    'groupName': inputs[gn].value,
+                                    'patternId': prrtId,
+                                    'ballNumber': ptvalue,
+                                    'prize': ptvalue2,
+                                    'prize1': ptvalue3,
+                                    'patternType': ptPatternType,
+                                    'isPatternWin': false
+                                });
+                            } else {
+                                alert("Please Fill Fields in Pattern Properly.");
+                                return false;
+                            }
+                        }else{
+                            if (![ptName, prrtId, ptvalue, ptvalue2, ptPatternType].includes(undefined) && ![ptName, prrtId, ptvalue, ptvalue2].includes('')) {
+                                tmpAr.push({
+                                    'patternName': ptName,
+                                    'groupName': inputs[gn].value,
+                                    'patternId': prrtId,
+                                    'ballNumber': ptvalue,
+                                    'prize': ptvalue2,
+                                    'patternType': ptPatternType,
+                                    'isPatternWin': false
+                                });
+                            } else {
+                                alert("Please Fill Fields in Pattern Properly.");
+                                return false;
+                            }
+                        }
+                    }
+
+                    prtnAr.push({
+                        'GroupName': inputs[gn].value,
+                        'PatternData': tmpAr
+                    });
+                    allPatternArray.push(tmpAr);
+                }
+                let subArray = {
+                    name: $(`input[name='subGame[${i}][name]']`).val(),
+                    ticketPrice: $(`input[name='subGame[${i}][ticketPrice]']`).val(),
+                    luckyNumberPrize: $(`input[name='subGame[${i}][luckyNumberPrize]']`).val(),
+                    notificationStartTime: $(`select[name='subGame[${i}][notificationStartTime]']`).val(),
+                    seconds: $(`input[name='subGame[${i}][seconds]']`).val(),
+                    minTicketCount: $(`input[name='subGame[${i}][minTicketCount]']`).val(),
+                    allPatternArray: allPatternArray,
+                    winningType: $(`input[type=radio][name="subGame[${i}][winningType]"]:checked`).val(),
+                };
+                subGameArray.push(subArray);
+            }
+            console.log('subGameArray:-', subGameArray);
+            let days = {};
+            //Collect all the values of time for day-wise slots in days object.
+            $('input[name^="days"]').each(function () {
+                let elemId = $(this).attr('id');
+                elemId = elemId.split('_');
+                let weekDay = elemId[0];
+                if (!Object.hasOwnProperty.call(days, weekDay)) {
+                    days[`${weekDay}`] = [];
+                }
+                if (elemId[1] === 'startTime') {
+                    console.log(days[`${weekDay}`]);
+                    days[`${weekDay}`].unshift($(this).val().toString().trim());
+                } else {
+                    days[`${weekDay}`].push($(this).val().toString().trim());
+                }
+            });
+            console.log("=============>>>>>>>>>>", days);
+            let sdrr = {
+                mainGameName:  $("#saveGameName").val(),
+                gameMode: gameMode,
+                gameId: gameId,
+                gameType: gameType,
+                start_date: start_date,
+                end_date: end_date,
+                days: days,
+                gameTypeId: gameTypeId,
+                isBotGame: isBotGame,
+                totalNumberOfGames: isBotGame ? $('.totalNumberOfGames').val() : null,
+                subGames: subGameArray,
+                ctimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            }
+            console.log('sdrr: ', sdrr);
+            if ($("#saveGameNameForm").isValid()) {
+                $('#saveGameNameModal').modal('toggle');
+                $.ajax({
+                    type: 'POST',
+                    url: host + "/addSavedGameManagement/" + gameTypeId + "/" + gameType,
+                    data: sdrr,
+                    success: function (resultData) {
+                        if (resultData.status == 'success') {
+                            swal("{{translate.created}}!", "{{translate.game_saved_success}}!!", "success");
+                        } else {
+                            console.log('resultData', resultData);
+                            swal("{{translate.error}}!", resultData.message, "error");
+                        }
+                    }
+                });
+            }
+
+        });
+
+
+
+        let now = new Date();
+        let newTime;
+        let utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+        newTime = utc.getTime() + (1000 * 3600 * 24);
+        console.log("start Date", new Date(newTime).setHours(0, 0, 0, 0), now.getTime());
+        $('#start_date').datetimepicker({
+            minDate: moment().startOf('day').utc(), //.add(1, "day"),//newTime,
+            useCurrent: false,
+            format: "l"
+        });
+
+
+        $('#end_date').datetimepicker({
+            minDate: moment().endOf('day').utc(),  //.add(1, "day"),//newTime,
+            useCurrent: false,
+            format: "l"
+        });
+
+        let newTime2 = new Date();
+        newTime2 = utc.getTime() + 4 * 60000;
+
+        $('#grace_time').datetimepicker({
+            minDate: newTime2
+        });
+
+        $('.glyphicon1').click(function () {
+            $("#startDate input").focus();
+        });
+
+        $('.glyphicon2').click(function () {
+            $("#endDate input").focus();
+        });
+
+        $(".weekday").on("click", function (e) {
+            console.log("clicked on weekday");
+            let dayName = $(this).attr("id");
+            dayName = dayName.split("-");
+            dayName = dayName[1];
+            console.log(`weekdate is ${dayName}`);
+            let isChecked = $(this).prop("checked");
+            if (isChecked) {
+                let dayHoursHTML = `<div class="day col-md-12">
+                                        <div id="day_${dayName}" class="col-sm-2">
+                                            <input type="text" class="form-control " readonly disabled value="${dayName}">
+                                        </div>
+                                        <div id="time_${dayName}" class="col-sm-10">
+                                            <div class="form-group start_time col-sm-6" style="display:flex;align-items: center;justify-content: space-evenly;">
+                                                <label class="col-sm-4" style="text-align:end;" for="days[${dayName}][]">{{translate.start_time}} :</label>
+                                                <div class="col-sm-7">
+                                                    <input type='text' class="form-control" name="days[${dayName}][]" id="${dayName}_startTime" value=""
+                                                    data-validation="required startTime" placeholder="{{translate.select}} {{translate.start_time}}" data-date-format="HH:mm" autocomplete="off"/>
+                                                </div>
+                                            </div>
+                                            <div class="form-group  end_time col-sm-6" style="display:flex;align-items: center;justify-content: space-evenly;">
+                                                <label class="col-sm-3" style="text-align:end;" for="days[${dayName}][]">{{translate.end_time}} : </label>
+                                                <div class="col-sm-7">
+                                                    <input type='text' class="form-control" name="days[${dayName}][]" id="${dayName}_endTime" value="" data-validation="required endTime"
+                                                    placeholder="{{translate.select}} {{translate.end_time}}" data-date-format="HH:mm" autocomplete="off" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>`;
+                $(".days").append(dayHoursHTML);
+                $(`#${dayName}_startTime`).datetimepicker({
+                    format: 'LT'
+                });
+                $(`#${dayName}_endTime`).datetimepicker({
+                    format: 'LT'
+                });
+                initializeValidator();
+            } else {
+                $(`#day_${dayName}`).parent(".day").remove();
+            }
+        });
+
+
+        //If Editing Game then intialize all Time Slots for available days
+        $('.start_time1').datetimepicker({                   //
+            format: "LT"                                     //           
+        });                                                  //
+        $('.end_time1').datetimepicker({                     //
+            format: "LT"                                     //
+        });                                                  //   
+
+        //------------------------------------------------------------------------------------------------
+        //-------------------------------New Add SubGame Logic Start--------------------------------------
+        //------------------------------------------------------------------------------------------------
+
+        //Add SubGame Dynamically           
+        $('#addSBGame').on('click', function () {
+            console.log("clicked add subgame button", subGameNum);
+            let isArrayData = true;
+            if (isArrayData) {
+                let html = `<div class="ch col-lg-12 subNum_${subGameNum}" style="border : 1px solid lightgray;margin-top:10px;">
+                                <div style="margin-top:10px;">
+                                    <button type="button" name="delete" class="pull-right btn btn-danger btn-xs deleteSubGame btn-delete" title="Delete Game">
+                                        <i class="fa fa-trash" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                                <div class="clearfix"></div>
+                                
+                                <div class="row">
+                                    <div class="col-lg-6 col-sm-6">
+                                        <input type="hidden" name="sGame[]">
+                                        <div class="form-group">
+                                            <label>{{translate.sub_game_name}} :-</label>
+                                            <input type="text" class="form-control" required name="subGame[${subGameNum}][name]" placeholder="{{translate.enter}}{{translate.sub_game_name}}" value="" data-validation="required">
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-6 col-md-6">
+                                        <div class="form-group">
+                                            <label>{{translate.ticket_price}}:-</label>
+                                            <input type="number" class="form-control" 
+                                            onkeypress="return event.charCode >= 48" min="1" required name="subGame[${subGameNum}][ticketPrice]"
+                                            placeholder="{{translate.enter}} {{translate.ticket_price}}" data-validation="required">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-lg-6 col-sm-6">
+                                        <div class="form-group">
+                                            <label>{{translate.prize_of_lucky_number}} :</label>
+                                            <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" required name="subGame[${subGameNum}][luckyNumberPrize]" placeholder="{{translate.enter}}{{translate.prize_of_lucky_number}}" value="{{Game.luckyNumberPrize}}" id="luckyNumberPrize" data-validation="required ">
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-6 col-md-6">
+                                        <div class="form-group">
+                                            <label>{{translate.notification_start_time}}:</label>
+                                            <select name="subGame[${subGameNum}][notificationStartTime]" id="notificationStartTime" class="form-control" required >
+                                                <option value="10s">10s</option>
+                                                <option value="15s">15s</option>
+                                                <option value="20s">20s</option>
+                                                <option value="30s">30s</option>
+                                                <option value="40s">40s</option>
+                                                <option value="50s">50s</option>
+                                                <option value="1m">1m</option>
+                                                <option value="2m">2m</option>
+                                                <option value="3m">3m</option>
+                                                <option value="4m">4m</option>
+                                                <option value="5m">5m</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-lg-6 col-sm-6">
+                                        <div class="form-group">
+                                            <div class="row">
+                                                <label class="mb-10 col-sm-12 ">{{translate.total_seconds_to_display_ball}}:</label> 
+                                                <div class="col-sm-12 ">
+                                                    <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="1" max="60" required name="subGame[${subGameNum}][seconds]" placeholder="{{translate.enter}} {{translate.seconds}} " value="{{Game.seconds/1000}}" id="seconds" data-validation="required ">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-6 col-md-6">
+                                        <div class="form-group">
+                                            <div class="form-group " id="minTicketCount">
+                                                <label>{{translate.minimum_ticket_count}} :-</label>
+                                                <input type="number" class="form-control" onkeypress="return event.charCode >= 48" min="20" max="1000"
+                                                    name="subGame[${subGameNum}][minTicketCount]" placeholder="{{translate.enter}} {{translate.minimum_ticket_count}}" value="{{Game.minTicketCount}}"
+                                                    id="minTicketCt" data-validation="required minTicketsCount">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-lg-12">
+                                        <label>{{translate.jackpot_number_and_prize}}:-</label>
+                                        <div class="col-12 m-b-1">
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="radio" name="subGame[${subGameNum}][winningType]" id="inlineRadio1_${subGameNum}" value="cash" checked>
+                                                    <label class="form-check-label" for="inlineRadio1_${subGameNum}">{{translate.in_cash}}</label>
+                                            </div>
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="radio" name="subGame[${subGameNum}][winningType]" id="inlineRadio2_${subGameNum}" value="percent">
+                                                    <label class="form-check-label" for="inlineRadio2_${subGameNum}">{{translate.in_percent}}</label>
+                                            </div>
+                                        </div>
+                                        <div class="nwCl_${subGameNum}">
+                                            
+                                            <div class="col-12 m-b-1">
+                                                <button type="button" class="btn addGrpList addGrpList_${subGameNum} btn-primary btn-md" data-cnttsb="${subGameNum}" data-cntt="0"><i class="fa fa-plus"></i> {{translate.add_group}}</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>`;
+                //             <div class="col-12 m-b-1">
+                //     <div class="form-check form-check-inline">
+                //         <input class="form-check-input" type="radio" name="subGame[${subGameNum}][winningType]" id="inlineRadio1_${subGameNum}" value="cash" checked>
+                //             <label class="form-check-label" for="inlineRadio1_${subGameNum}">In Cash</label>
+                //     </div>
+                //     <div class="form-check form-check-inline">
+                //         <input class="form-check-input" type="radio" name="subGame[${subGameNum}][winningType]" id="inlineRadio2_${subGameNum}" value="percent">
+                //             <label class="form-check-label" for="inlineRadio2_${subGameNum}">In Percent</label>
+                //     </div>
+                // </div>
+                $('#subGamesContainer').append(html);
+                subGameNum++;
+                fl = false;
+                patternListGlobal = [];
+                $('input[type=radio][name^="subGame["][name$="][winningType]"]').off('change');
+
+                $('input[type=radio][name^="subGame["][name$="][winningType]"]').on('change', function () {
+                    let subGameCount = $(this).attr("id").split('_')[1];
+                    let countVal = 1;
+                    console.log('countVal subGameCount', countVal, subGameCount);
+                    $('.patternGroup_' + countVal + '_' + subGameCount).remove();
+                    countVal -= 1;
+                    $(`.addGrpList_${subGameCount}`).attr('data-cntt', countVal);
+                    $(`.addGrpList_${subGameCount}`).attr('data-cnttsb', subGameCount);
+                    // fl = false;
+                    $('.addGrpList_' + subGameCount).show();
+                    updateGroupData(subGameCount, subGameCount, true);
+                });
+                initializeValidator();
+
+                // $('input[type=radio][name^="subGame["][name$="][winningType]"]').off('change');
+
+                // $('input[type=radio][name^="subGame["][name$="][winningType]"]').on('change', function () {
+                //     switch ($(this).val()) {
+                //         case 'cash':
+                //             console.log("cash");
+                //             break;
+                //         case 'percent':
+                //             console.log("percent");
+                //             break;
+                //     }
+                // });
+            }
+        });
+
+      
+
+        // [Add Pattern ]
+        $('body').on('click', '.btnn', function () {
+            let cntVl2 = $(this).attr('data-cntt');
+            let cntVsb = $(this).attr('data-cnttsb'); //This is SubGame Numbera
+            $('.sBtnn').attr('data-cntt', cntVl2+1);
+            $('.sBtnn').attr('data-cnttsb', cntVsb);
+            let vall = $('.ptrnVall_' + cntVl2 + '_' + cntVsb).val();
+            let cntVl = $('.ptrnVall_' + cntVl2 + '_' + cntVsb).attr('data-cntt');
+            console.log('cntVl2 cntVsb addPattern', cntVl2, cntVsb, vall);
+            $('.ptrnP').val(vall);
+            $('.sBtnn').attr('data-cntt', cntVl2);
+            $('.sBtnn').attr('data-cnttsb', cntVsb);
+            $('#addNewWordModal').modal('show');
+        });
+
+
+        //[ Pattern Group from here ]  // [ Made By Darshan ]
+        $('body').on('click', '.sBtnn', function () {
+            let nN = $('.ptrnP').val();
+            if (nN == '') {
+                alert("Please Enter Pattern Group Name");
+                return false;
+            }
+            let cntVl2 = $(this).attr('data-cntt');
+            let cntVsb = $(this).attr('data-cnttsb'); //SubGame Number
+            $('.ptrnVall_' + cntVl2 + '_' + cntVsb).val(nN);
+            let pVall = $('.patternList').val();
+            let patternList = [];
+            let prnId = [];
+            let ptTy = [];
+            $('input:checkbox[name=checkboxPt]').each(function () {
+                if ($(this).is(':checked')) {
+                    patternList.push($(this).val());
+                    prnId.push($(this).attr('data-patternId'));
+                    ptTy.push($(this).attr('data-patternType'))
+                }
+            });
+            let html = ``;
+            console.log('patternList: ', patternList);
+            console.log('prnId: ', prnId);
+            if (patternList.length) {
+                fl = false;
+                let existingPatterns = []; 
+                $(`input[name="subGame[${cntVsb}][ptname]"]`).each(function (i,e) {
+                    existingPatterns.push($(e).val())
+                });
+                for (let m = 0; m < patternList.length; m++) {
+                    let isfullHouse = false;
+                    console.log('ptTy[m]------',ptTy[m]);
+                    if(!ptTy[m].includes(0)){
+                    console.log('if ptTy[m]------',ptTy[m]);
+                        if(ptTy[m] != ''){
+                            isfullHouse = true;
+                        }
+                    }
+                    if (existingPatterns.findIndex(p => p == patternList[m]) < 0) {
+                        let isPercent = false;
+                        let value =  $(`input[type=radio][name="subGame[${cntVsb}][winningType]"]:checked`).val(); //Check what type of winning selected
+                        if (value == 'percent') {
+                            isPercent = true;
+                        }
+                        if (isfullHouse) {
+                            html += `<div class="group-number-input-inner">
+                            <div class="group-number-checkbox">
+                                <input type="text" class="form-control ptName_${cntVl2}_${cntVsb}" name="subGame[${cntVsb}][ptname]" id="ptName_${cntVl2}_${m}_${cntVsb}" data-patternId="${prnId[m]}" data-patternType="${ptTy[m]}" readOnly placeholder="${patternList[m]}" value = "${patternList[m]}">
+                            </div>
+                            <div class="number-input">
+                                <input type="number" class="form-control ptvalue_${cntVl2}_${cntVsb}" name="subGame[${cntVsb}][ptvalue]" id="ptvalue_${cntVl2}_${m}_${cntVsb}" placeholder="20" min="1" max="75" required data-validation="required number"  data-validation-allowing="range[1;75]" data-validation-error-msg-number="Please select number between 1 and 75">
+                            </div>
+                            <div class="number-input">
+                                <input type="number" class="form-control ptvalue2_${cntVl2}_${cntVsb}" name="subGame[${cntVsb}][ptvalue2]" id="ptvalue2_${cntVl2}_${m}_${cntVsb}"  placeholder="3500"  min="1" required data-validation="required number"  data-validation-allowing="range[1;75000]" data-validation-error-msg-number="Price should be between 1 and 75k Kr" title="Enter Jackpot winning amount">
+                            </div>`
+                            if (isPercent) {
+                                html +=  `<div class="number-input">
+                                         <input type="number" class="form-control ptvalue3_${cntVl2}_${cntVsb} percent" name="subGame[${cntVsb}][ptvalue3]" id="ptvalue3_${cntVl2}_${m}_${cntVsb}"  placeholder="%"  min="1" required data-validation="required number"  data-validation-allowing="range[1;100]" data-previous="0" data-validation-error-msg-number="Percent should be between 1 and 100" title="Enter regular winning percent">
+                                         </div></div>`;
+                            } else {
+                                 html += `<div class="number-input">
+                                         <input type="number" class="form-control ptvalue3_${cntVl2}_${cntVsb}" name="subGame[${cntVsb}][ptvalue3]" id="ptvalue3_${cntVl2}_${m}_${cntVsb}"  placeholder="3500"  min="1" required data-validation="required number"  data-validation-allowing="range[1;75000]" data-validation-error-msg-number="Price should be between 1 and 75k Kr" title="Enter regular winning price">
+                                         </div></div>`;
+                            }
+                           
+
+                        } else {
+
+                            html += `<div class="group-number-input-inner">
+                            <div class="group-number-checkbox">
+                                <input type="text" class="form-control ptName_${cntVl2}_${cntVsb}" name="subGame[${cntVsb}][ptname]" id="ptName_${cntVl2}_${m}_${cntVsb}" data-patternId="${prnId[m]}" data-patternType="${ptTy[m]}" readOnly placeholder="${patternList[m]}" value = "${patternList[m]}">
+                            </div>
+                            <div class="number-input">
+                                <input type="number" class="form-control ptvalue_${cntVl2}_${cntVsb}" name="subGame[${cntVsb}][ptvalue]" id="ptvalue_${cntVl2}_${m}_${cntVsb}" placeholder="20" min="1" max="75" required data-validation="required number"  data-validation-allowing="range[1;75]" data-validation-error-msg-number="Please select number between 1 and 75">
+                            </div>`;
+                            if (isPercent) {
+                             html +=   `<div class="number-input">\
+                                       <input type="number" class="form-control ptvalue2_${cntVl2}_${cntVsb} percent"\
+                                       name="subGame[${cntVsb}][ptvalue2]" id="ptvalue2_${cntVl2 }_${m}_${cntVsb}"\
+                                       placeholder="%"  min="1" required data-validation="required number"\
+                                       data-previous="0"\
+                                       data-validation-allowing="range[1;100]" data-validation-error-msg-number="Percent should be between 1 and 100">
+                                       </div> </div>`;
+                            } else {
+                             html +=  `<div class="number-input">\
+                                       <input type="number" class="form-control ptvalue2_${cntVl2}_${cntVsb} cash" name="subGame[${cntVsb}][ptvalue2]" id="ptvalue2_${cntVl2}_${m}_${cntVsb}"  placeholder="3500"  min="1" required data-validation="required number"  data-validation-allowing="range[1;75000]" data-validation-error-msg-number="Price should be between 1 and 75k Kr">
+                                       </div></div>`; 
+                            }
+                               
+                        }
+                    }
+                }
+                console.log('cntVl2 cntVsb patternAdded', cntVl2, cntVsb);
+                $('.patternTotalDivList_' + cntVl2 + '_' + cntVsb).append(html);
+
+               //Start Modifying IDs of patterns
+               let index = 0;
+               $(`.ptName_${cntVl2}_${cntVsb}`).each(function () {
+                 $(this).attr(`id`,`ptName_${cntVl2}_${index}_${cntVsb}`);
+                 index++;
+               });
+               index = 0;
+               $(`.ptvalue_${cntVl2}_${cntVsb}`).each(function () {
+                    $(this).attr(`id`, `ptvalue_${cntVl2}_${index}_${cntVsb}`);
+                    index++;
+                });
+               index = 0; 
+               $(`.ptvalue2_${cntVl2}_${cntVsb}`).each(function () {
+                    $(this).attr(`id`, `ptvalue2_${cntVl2}_${index}_${cntVsb}`);
+                    index++;
+                }) 
+               $('.ptrnVall_' + cntVl2 + '_' + cntVsb).attr("loopvalue", index);
+            }
+            initializeValidator();
+        });
+
+        // [ Add Group from here ]  // [ Made By Darshan ]
+
+        $('body').on('click', '.addGrpList', function () {
+            console.log('fl', fl);
+            if (!fl) {
+                cntt = $(this).attr('data-cntt');
+                let sdrVlNc = $(this).attr('data-cnttsb'); //Number Of SubGame
+                console.log('cntt sdrVlNc', cntt, sdrVlNc);
+                let ptNa = $('.ptrnVall_' + cntt + '_' + sdrVlNc).val();
+                let tmpAr = [];
+                let allPatternArray = [];
+                let groups = document.getElementsByName(`grpp[${sdrVlNc}][]`);
+                console.log("GroupList for this sub Game", groups);
+                for (let ml = 1; ml <= (groups.length); ml++) {
+                    tmpAr = [];
+                    // let loopvalue = $(groups[ml]).attr("loopvalue");
+                    let loopvalue = $(".ptrnVall_" + ml + '_' + sdrVlNc).attr("loopvalue");
+                    console.log(loopvalue);
+                    if (loopvalue <= 0) {
+                        alert("Please Add Pattern into Remaining Groups first.");
+                        return;
+                    }
+                    console.log('loopvalue ml', loopvalue, ml);
+                    let gn = ml - 1;
+                    for (let il = 0; il < (loopvalue * 1); il++) {
+                        let isfullHouse = false;
+                        let ptPatternType = $('#ptName_' + ml + '_' + il + '_' + sdrVlNc).attr('data-patternType');
+                        let ptName = $('#ptName_' + ml + '_' + il + '_' + sdrVlNc).val();
+                        let prrtId = $('#ptName_' + ml + '_' + il + '_' + sdrVlNc).attr('data-patternId');
+                        let ptvalue = $('#ptvalue_' + ml + '_' + il + '_' + sdrVlNc).val();
+                        let ptvalue2 = $('#ptvalue2_' + ml + '_' + il + '_' + sdrVlNc).val();
+                        if (!ptPatternType.includes(0)) {
+                            if (ptPatternType != '') {
+                                isfullHouse = true;
+                            }
+                        }
+                        if(isfullHouse){
+                            let ptvalue3 = $('#ptvalue3_' + ml + '_' + il + '_' + sdrVlNc).val();
+                            tmpAr.push({
+                                'patternName': ptName,
+                                'groupName': groups[gn].value,
+                                'patternId': prrtId,
+                                'ballNumber': ptvalue,
+                                'prize': ptvalue2,
+                                'prize1': ptvalue3,
+                                'patternType': ptPatternType ? ptPatternType : ''
+                            });
+                        }else{
+                            tmpAr.push({
+                                'patternName': ptName,
+                                'groupName': groups[gn].value,
+                                'patternId': prrtId,
+                                'ballNumber': ptvalue,
+                                'prize': ptvalue2,
+                                'patternType': ptPatternType ? ptPatternType : ''
+                            });
+                        }
+                    }
+                }
+          
+                prtnAr.push({
+                    'GroupName': ptNa,
+                    'PatternData': tmpAr
+                });
+                if (tmpAr.length > 0) {
+                    allPatternArray.push(tmpAr);
+                }
+                let isGroupCreat = true;
+                let pattern_name = '';
+                console.log('allPatternArray', allPatternArray);
+                for (let i = 0; i < allPatternArray.length; i++) {
+                    let findNullGroup = allPatternArray[i].find((o) => { return o.ballNumber == '' || o.prize == '' || o.prize == undefined })
+                    if (findNullGroup) {
+                        console.log('findNullGroup', findNullGroup);
+                        pattern_name = findNullGroup.patternName;
+                        isGroupCreat = false;
+                        break;
+                    }
+                }
+                if (isGroupCreat) {
+                    let sdrVl = $(this).attr('data-cntt');
+                    let subVal = $(this).attr('data-cnttsb');
+                    $(`.addGrpList_${subVal}`).parent().remove();
+                    let cntt = Number(sdrVl) + 1;
+                    console.log('cntt', cntt);
+                    let html = `<div class="col-12 m-b-1 patternGroup patternGroup_${cntt}_${sdrVlNc}" data-percent="100">
+                                    <div class="group-number">
+                                        <div class="group-type">
+                                            <input loopvalue="0" type="text" name="grpp[${sdrVlNc}][]" class="form-control ptrnVall_${cntt}_${sdrVlNc}" data-cntt="${cntt}" readonly placeholder="Group ${cntt}" value="Group ${cntt}">
+                                        </div>
+                                        <div class="group-number-input patternTotalDivList patternTotalDivList_${cntt}_${sdrVlNc}">
+                                        </div>
+                                        <div class="group-type">
+                                            <div class="raw">
+                                                <div class="col-12">
+                                                    <button type="button" class="btn btn-danger btn-md deleteGroup ptrnDelt_${sdrVlNc}_${cntt}" data-cnttsb="${sdrVlNc}" data-cntt="${cntt}" style="width: 108px;margin-bottom: 10px;"> {{translate.remove}}</button>
+                                                </div>
+                                                <div class="col-12">
+                                                    <button type="button" class="btn btnn btn-primary btn-md ptrnAdd_${cntt}" data-cnttsb="${sdrVlNc}" data-cntt="${cntt}" data-subId="${sdrVlNc}"><i class="fa fa-plus"></i> {{translate.add_pattern}}</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-12 m-b-1">
+                                    <button type="button" class="btn addGrpList addGrpList_${sdrVlNc} btn-primary btn-md" data-cnttsb="${sdrVlNc}" data-cntt="${cntt}">
+                                        <i class="fa fa-plus"></i> Add Group
+                                    </button>
+                                </div>`;
+                    $('.nwCl_' + sdrVlNc).append(html);
+                    $('.addGrpList_' + sdrVlNc).hide();
+                } else {
+                    alert(`Please enter value in ${pattern_name}`);
+                    return;
+                }
+                initializeValidator();
+            } else {
+                alert(`Please add pattern`);
+                return;
+            }
+
+        });
+
+        // [ Game 3 Create from here ] // [ Made By Darshan ]
+        $('body').on('click', '.sbBtn', function () {
+            let gameMode = 'auto';
+            let start_date = $("#start_date").val();
+            let end_date = $("#end_date").val();
+            let gameId = '{{gameData._id}}';
+            let finalGroupHall = $("#groupHallSelected").val();
+            let isBotGame = $('#isBotGame').find(":selected").val() == "Yes" ? true : false;
+            console.log("$('.totalNumberOfGames').val()", $('.totalNumberOfGames').val());
+            if (finalGroupHall.length == 0) {
+                alert("{{translate.select_one_goh}}");
+                return false;
+            }
+
+            let mainGameName = $(`#mainGameName`).val();
+            if (start_date == "") {
+                alert("Please Enter Start date");
+                return false;
+            }
+            if (end_date == "") {
+                alert("Please Enter end date");
+                return false;
+            }
+            if (end_date <= start_date) {
+                alert("End date Must be greater than Start Date");
+                return false;
+            }
+
+            let dayLength = 0;
+            dayLength = $(".weekday:checkbox:checked").length
+            if (dayLength <= 0) {
+                alert("{{translate.selct_atleast_one_day_in_week}}.");
+                return false;
+            }
+
+            let subGame = $("#subGamesContainer").children('div.ch').length;
+            if (subGame <= 0) {
+                alert("{{translate.add_atleast_one_subgame}}.");
+                return false;
+            }
+            let gameType = '{{gameData.type}}';
+
+            let sGame = document.getElementsByName('sGame[]');
+            console.log("+++++++++++++++ :sGame : ", sGame.length);
+             if (sGame.length <= 0) {
+                alert(`{{translate.add_atleast_one_subgame}}`);
+                return false;
+            }
+            let subGameArray = [];
+            for (let i = 0; i < sGame.length; i++) {
+                let inputs = document.getElementsByName(`grpp[${i}][]`);
+                console.log("+++++++++++++++ :patternList : ", inputs.length);
+                if (inputs.length <= 0) {
+                    alert(`{{translate.atleast_one_goh_in_subgames}}`);
+                    return false;
+                }
+                let tmpAr = [];
+                let prtnAr = [];
+                let allPatternArray = [];
+                for (let ml = 1; ml <= (inputs.length); ml++) {
+                    tmpAr = [];
+                    // let loopvalue = $(inputs[ml]).attr("loopvalue");
+                    let loopvalue = $(".ptrnVall_" + ml + '_' + i).attr("loopvalue");
+                    if (!loopvalue) {
+                        alert(`Please Add Pattern In ${$(".ptrnVall_" + ml + '_' + i).val()}`);
+                        return false;
+                    }
+                    console.log('loopvalue ml subGameNumber', loopvalue, ml, i);
+                    let gn = ml - 1;
+                    for (let il = 0; il < (loopvalue * 1); il++) {
+                        let isfullHouse = false;
+                        let ptPatternType = $('#ptName_' + ml + '_' + il + '_' + i).attr('data-patternType');
+                        let ptName = $('#ptName_' + ml + '_' + il + '_' + i).val();
+                        let prrtId = $('#ptName_' + ml + '_' + il + '_' + i).attr('data-patternId');
+                        let ptvalue = $('#ptvalue_' + ml + '_' + il + '_' + i).val();
+                        let ptvalue2 = $('#ptvalue2_' + ml + '_' + il + '_' + i).val();
+                        if(!ptPatternType.includes(0)){
+                            if(ptPatternType != ''){
+                                isfullHouse = true;
+                            }
+                        }
+                        if(isfullHouse){
+                            let ptvalue3 = $('#ptvalue3_' + ml + '_' + il + '_' + i).val();
+                            console.log("Getting full house", [ptName, prrtId, ptvalue, ptvalue2, ptvalue3, ptPatternType]);
+                            if (![ptName, prrtId, ptvalue, ptvalue2, ptvalue3, ptPatternType].includes(undefined) && ![ptName, prrtId, ptvalue, ptvalue2, ptvalue3].includes('')) {
+                                tmpAr.push({
+                                    'patternName': ptName,
+                                    'groupName': inputs[gn].value,
+                                    'patternId': prrtId,
+                                    'ballNumber': ptvalue,
+                                    'prize': ptvalue2,
+                                    'prize1': ptvalue3,
+                                    'patternType': ptPatternType,
+                                    'isPatternWin': false
+                                });
+                            } else {
+                                alert("Please Fill Fields in Pattern Properly.");
+                                return false;
+                            }
+
+                        }else{
+                            if (![ptName, prrtId, ptvalue, ptvalue2, ptPatternType].includes(undefined) && ![ptName, prrtId, ptvalue, ptvalue2].includes('')) {
+                                tmpAr.push({
+                                    'patternName': ptName,
+                                    'groupName': inputs[gn].value,
+                                    'patternId': prrtId,
+                                    'ballNumber': ptvalue,
+                                    'prize': ptvalue2,
+                                    'patternType': ptPatternType,
+                                    'isPatternWin': false
+                                });
+                            } else {
+                                alert("Please Fill Fields in Pattern Properly.");
+                                return false;
+                            }
+                        }
+                    }
+
+                    prtnAr.push({
+                        'GroupName': inputs[gn].value,
+                        'PatternData': tmpAr
+                    });
+                    allPatternArray.push(tmpAr);
+                }
+                let subArray = {
+                    name: $(`input[name='subGame[${i}][name]']`).val(),
+                    ticketPrice: $(`input[name='subGame[${i}][ticketPrice]']`).val(),
+                    luckyNumberPrize: $(`input[name='subGame[${i}][luckyNumberPrize]']`).val(),
+                    notificationStartTime: $(`select[name='subGame[${i}][notificationStartTime]']`).val(),
+                    seconds: $(`input[name='subGame[${i}][seconds]']`).val(),
+                    minTicketCount: $(`input[name='subGame[${i}][minTicketCount]']`).val(),
+                    allPatternArray: allPatternArray,
+                    patternGroupNumberPrize: prtnAr,
+                    winningType : $(`input[type=radio][name="subGame[${i}][winningType]"]:checked`).val(),
+                };
+                subGameArray.push(subArray);
+            }
+            console.log('subGameArray:-', JSON.parse(JSON.stringify(subGameArray)));
+            let days = {};
+            //Collect all the values of time for day-wise slots in days object.
+            $('input[name^="days"]').each(function () {
+                let elemId = $(this).attr('id');
+                elemId = elemId.split('_');
+                let weekDay = elemId[0];
+                if (!Object.hasOwnProperty.call(days, weekDay)) {
+                    days[`${weekDay}`] = [];
+                }
+                if (elemId[1] === 'startTime') {
+                    console.log(days[`${weekDay}`]);
+                    days[`${weekDay}`].unshift($(this).val().toString().trim());
+                } else {
+                    days[`${weekDay}`].push($(this).val().toString().trim());
+                }
+            });
+
+            console.log("=============>>>>>>>>>>", subGameArray);
+            let sdrr = {
+                mainGameName: mainGameName,
+                gameMode: gameMode,
+                gameId: gameId,
+                gameType: gameType,
+                days: days,
+                start_date: start_date,
+                end_date: end_date,
+                groupHalls: finalGroupHall,
+                isBotGame : isBotGame,
+                totalNumberOfGames : isBotGame ? $('.totalNumberOfGames').val() : null,
+                subGames: subGameArray,
+                ctimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            }
+
+            console.log("sdrr", sdrr);
+
+            if ($("#addGameData").isValid() && $('#addGameData')[0].checkValidity()) {
+                console.log('if addGameData');
+                $.ajax({
+                    type: 'POST',
+                    url: host + (action == 'Add' ? "/patternGame" : "/gameManagementEdit/{{gameData._id}}/{{Game._id}}"),
+                    data: sdrr,
+                    success: function (resultData) {
+                        window.location.href = '/gameManagement';
+                    }
+                });
+            }
+        });
+
+        //Remove SubGame Dynamically   
+        $('body').on('click', '.deleteSubGame', function (e) {
+            $(this).parent().parent().remove();
+            fl = false;
+            updateSubGameDetails();
+        });
+
+        $('body').on('click', '.deleteGroup', function (e) {
+            let cntVl2 = $(this).attr('data-cntt');
+            let cntVsb = $(this).attr('data-cnttsb');
+            console.log('cntVl2 cntVsb deletePattern', cntVl2, cntVsb);
+            $('.patternGroup_' + cntVl2 +'_'+ cntVsb).remove();
+            cntVl2 -= 1;
+            $(`.addGrpList_${cntVsb}`).attr('data-cntt', cntVl2);
+            $(`.addGrpList_${cntVsb}`).attr('data-cnttsb', cntVsb);
+            // fl = false;
+            $('.addGrpList_' + cntVsb).show();
+            updateGroupData(cntVsb, cntVsb,true);
+        });
+        
+        //When Value in Grouphall Changes
+        $('#groupHallSelected').on("change", function (e) {
+            console.log("change in groupHallSelected");
+            sessionStorage.clear();
+            let list = $('#groupHallSelected').val();
+            if (list.length) {
+                sessionStorage.setItem('groupHallSelected', list);
+            }
+            console.log(sessionStorage.getItem('groupHallSelected'));
+        })
+        
+        //------------------------------------------------------------------------------------------------
+        //-------------------------------New Add SubGame Logic End----------------------------------------
+        //------------------------------------------------------------------------------------------------
+
+        //Input on Percent box 
+        $('body').on('input', '.percent', function (e) {
+            const pool = $(this).parent().parent().parent().parent().parent().data('percent');
+            console.log("Clicked on Percent box", pool);
+            const valueOfPercent = $(this).val();
+            console.log("Value of Input: " + valueOfPercent);
+            // Now we will validate the percent value
+            const previousValue = $(this).data('previous');
+            console.log("previous percent value", previousValue);
+            const availablePool = parseFloat(pool) + parseFloat(previousValue);
+            console.log("Entered Percent Value", valueOfPercent);
+            console.log("Final Available Pool", availablePool);
+            if (valueOfPercent && !isNaN(valueOfPercent)) {
+                if (parseFloat(valueOfPercent) == 0) {
+                    // $(this).parent().parent().parent().parent().parent().data('pool', parseFloat(availablePool));
+                    // $(this).data("previous", '0');
+                } else {
+                    console.log("Entered Value is a valid input");
+                    const finalPool = parseFloat(availablePool) - parseFloat(valueOfPercent);
+                    console.log("Final Pool", finalPool);
+                    if (finalPool >= 0) {
+                        console.log("valid value");
+                        $(this).parent().parent().parent().parent().parent().data('percent', finalPool);
+                        $(this).data("previous", valueOfPercent);
+                    } else {
+                        $(this).val(previousValue);
+                        setTimeout(() => {
+                            alert('Overall Percent winnings exeeded available 100% pool value.');
+                        }, 200);
+                        return false;
+                    }
+                }
+            } else {
+                console.log("logging here", pool, previousValue);
+                const finalPool = parseFloat(pool) + parseFloat(previousValue);
+                $(this).parent().parent().parent().parent().parent().data('percent', finalPool);
+                $(this).data("previous", 0);
+            }
+        });
+
+
+        //is Bot Game option changes
+        $('#isBotGame').on('change', function (e) {
+            let isBotGame = $(this).find(":selected").val() == "Yes" ? true : false;
+            console.log("isBotGame ?", isBotGame);
+            if (isBotGame) {
+                $('#botDetails').append(`<div class="col-lg-6 col-sm-6" id="totalNumberOfGames"><div class="form-group"><label>Total Number of Games to be played:-</label><input type="number" class="form-control totalNumberOfGames" name="totalNumberOfGames" required placeholder="Enter number of games to be played" data-validation="required"></div></div>`)
+            } else {
+                $('#botDetails').children('#totalNumberOfGames').remove();
+            }
+            //re-initialize the validator
+            initializeValidator();
+
+            //make another api call
+            groupHallOptions();
+        })
+        
+
+
+        //When Type of winning changed [percent,cash] remove all selected patterns with group
+        $('input[type=radio][name^="subGame["][name$="][winningType]"]').on('change', function () {
+            let subGameCount = $(this).attr("id").split('_')[1];
+            let countVal = 1;
+            console.log('countVal subGameCount', countVal, subGameCount);
+            $('.patternGroup_' + countVal + '_' + subGameCount).remove();
+            countVal -= 1;
+            $(`.addGrpList_${subGameCount}`).attr('data-cntt', countVal);
+            $(`.addGrpList_${subGameCount}`).attr('data-cnttsb', subGameCount);
+            // fl = false;
+            $('.addGrpList_' + subGameCount).show();
+            updateGroupData(subGameCount, subGameCount, true);
+        });
+        groupHallOptions();
+        initializeValidator();
+        function updateSubGameDetails() {
+            console.log("updateSubGameDetails called");
+            let counter = 0;
+            $('.ch').each(function () {
+                let classes = $(this).attr('class').split(/\s+/);
+                let subNum = classes[2];
+                subNum = subNum.split('_');
+                subNum = parseInt(subNum[1]);
+                $(`[name="subGame[${subNum}][name]"]`).attr('name',`subGame[${counter}][name]`);
+                $(`[name="subGame[${subNum}][ticketPrice]"]`).attr('name', `subGame[${counter}][ticketPrice]`);
+                $(`[name="subGame[${subNum}][luckyNumberPrize]"]`).attr('name', `subGame[${counter}][luckyNumberPrize]`);
+                $(`[name="subGame[${subNum}][notificationStartTime]"]`).attr('name', `subGame[${counter}][notificationStartTime]`);
+                $(`[name="subGame[${subNum}][seconds]"]`).attr('name', `subGame[${counter}][seconds]`);
+                $(`[name="subGame[${subNum}][minTicketCount]"]`).attr('name', `subGame[${counter}][minTicketCount]`);
+                $(this).removeClass(`subNum_${subNum}`).addClass(`subNum_${counter}`);
+                updateGroupData(subNum,counter);
+                counter++;
+            });
+            console.log("Count of SubGame",counter);
+            subGameNum = counter;
+        }
+
+        function updateGroupData(i,j,k = false) {
+            try {
+                console.log("updateGroupData called",i,j);
+                let count = 1;
+                //Modify patterngroupclasses
+                $(`.patternGroup`).each(function () {
+                    let classes = $(this).attr('class').split(/\s+/);
+                    let newClass = classes[classes.length - 1].split('_');
+                    if (newClass[newClass.length - 1] == i) {
+                        
+                        $(this).removeClass(classes[classes.length -1])
+                        if (k) {
+                            newClass[1] = count;
+                        }
+                        newClass[newClass.length - 1] = j;
+                        newClass = newClass.join('_');
+                        $(this).addClass(newClass);
+                        console.log("patternGroup_", newClass, count);
+                        count++;
+                    }
+                });
+                count = 1;
+                $(`input[name="grpp[${i}][]"]`).each(function () {
+                    $(this).attr(`name`, `grpp[${j}][]`);
+                    let classes = $(this).attr('class').split(/\s+/);
+                    $(this).removeClass(classes[classes.length - 1]);
+                    let newClass = classes[classes.length - 1].split('_');
+                    newClass[newClass.length - 1] = j;
+                    if (k) {
+                        console.log("grpp", newClass);
+                        newClass[1] = count;
+                    }
+                    newClass = newClass.join('_');
+                    $(this).addClass(newClass);
+                    count++;
+                });
+                count = 1;
+                //Modify patternTotalDivList clases
+                $(`.patternTotalDivList`).each(function () {
+                    let classes = $(this).attr('class').split(/\s+/);
+                    let newClass = classes[classes.length - 1].split('_');
+                    if (newClass[newClass.length - 1] == i) {
+
+                        $(this).removeClass(classes[classes.length - 1]);
+                        newClass[classes.length - 1] = j;
+                        if (k) {
+                            console.log("patternTotalDivList_", newClass);
+                            newClass[1] = count;
+                        }
+                        newClass = newClass.join('_');
+                        $(this).addClass(newClass);
+                        count++;
+                    }
+                });
+                
+                //Pattern Fields modifyin
+                let groups = {};
+                count = 1
+                $(`input[name="subGame[${i}][ptname]"]`).each(function () {
+                    $(this).attr(`name`, `subGame[${j}][ptname]`);
+                    let classes = $(this).attr('class').split(/\s+/);
+                    $(this).removeClass(classes[classes.length -1]);
+                    let newClass = classes[classes.length - 1].split('_');
+                    newClass[2] = j;
+                    let idKey
+                    if (k) {
+                        let keys = Object.keys(groups);
+                        if (keys.length && keys.includes(newClass[1])) {
+                            //do nothing
+                        }else{
+                            groups[newClass[1]] = count;
+                            count++;
+                        }
+                        idKey = groups[newClass[1]];
+                        newClass[1] =  groups[newClass[1]];
+                    }
+                    newClass = newClass.join('_');
+                    $(this).addClass(newClass);
+                    let id = $(this).attr('id');
+                    id = id.split('_');
+                    id[id.length - 1] = j;
+                    if (k) {
+                        id[1] = idKey;
+                    }
+                    id = id.join('_');
+                    $(this).attr('id', id);
+                });
+                groups = {};
+                count = 1
+                $(`input[name="subGame[${i}][ptvalue]"]`).each(function () {
+                    $(this).attr(`name`, `subGame[${j}][ptvalue]`);
+                    let classes = $(this).attr('class').split(/\s+/);
+                    let data = classes.filter(cl => cl.includes('ptvalue_'));
+                    data = data[0];
+                    $(this).removeClass(data);
+                    let newClass = data.split('_');
+                    newClass[newClass.length - 1] = j;
+                    let idKey;
+                    if (k) {
+                        let keys = Object.keys(groups);
+                        if (keys.length && keys.includes(newClass[1])) {
+                            //do nothing
+                        } else {
+                            groups[newClass[1]] = count;
+                            count++;
+                        }
+                        idKey = groups[newClass[1]];
+                        newClass[1] = groups[newClass[1]];
+                    }
+                    newClass = newClass.join('_');
+                    $(this).addClass(newClass);
+                    let id = $(this).attr('id');
+                    id = id.split('_');
+                    id[id.length - 1] = j;
+                     if (k) {
+                        id[1] = idKey;
+                    }
+                    id = id.join('_');
+                    $(this).attr('id', id);
+                });
+                groups = {};
+                count = 1;
+                $(`input[name="subGame[${i}][ptvalue2]"]`).each(function () {
+                    $(this).attr(`name`, `subGame[${j}][ptvalue2]`);
+                    let classes = $(this).attr('class').split(/\s+/);
+                    let data = classes.filter(cl => cl.includes('ptvalue2_'))
+                    data = data[0];
+                    $(this).removeClass(data)
+                    let newClass = data.split('_');
+                    newClass[newClass.length - 1] = j;
+                    let idKey
+                    if (k) {
+                        let keys = Object.keys(groups);
+                        if (keys.length && keys.includes(newClass[1])) {
+                            //do nothing
+                        } else {
+                            groups[newClass[1]] = count;
+                            count++;
+                        }
+                        idKey = groups[newClass[1]];
+                        newClass[1] = groups[newClass[1]];
+                    }
+                    newClass = newClass.join('_');
+                    $(this).addClass(newClass);
+                    let id = $(this).attr('id');
+                    id = id.split('_');
+                    id[id.length - 1] = j;
+                     if (k) {
+                        id[1] = idKey;
+                    }
+                    id = id.join('_');
+                    $(this).attr('id', id);
+                });
+                count = 1;
+                let count1 = 1;
+                let count2 = 1;
+                //Buttons class modified
+                $(`button[data-cnttsb="${i}"]`).each(function () {
+                    let classes = $(this).attr('class').split(/\s+/);
+                    if (classes.includes('deleteGroup')) {
+                        $(this).removeClass(classes[classes.length - 1])
+                        let newClass = classes[classes.length - 1].split('_');
+                        newClass[newClass.length - 2] = j;
+                        if (k) {
+                            console.log("data-cnttsb1", newClass);
+                            newClass[newClass.length-1] = count;
+                            $(this).attr('data-cntt', count);
+                            count++;
+                        }
+                        newClass = newClass.join('_');
+                        $(this).addClass(newClass);
+                    } else if (classes.includes('addGrpList')) {
+                        $(this).removeClass(`addGrpList_${i}`).addClass(`addGrpList_${j}`);
+                        let num = $(`input[name="grpp[${j}][]"]`).length;
+                        $(this).attr('data-cntt', num);
+                    } else {
+                        let newClass = classes[classes.length - 1].split('_');
+                        $(this).removeClass(classes[classes.length - 1]);
+                        if (k) {
+                            console.log("data-cnttsb2", newClass);
+                            newClass[newClass.length - 1] = count1;
+                            $(this).attr('data-cntt', count1);
+                            count1++;
+                        }
+                         newClass = newClass.join('_');
+                        $(this).addClass(newClass);
+                        $(this).attr('data-subid', j);
+                    }
+                    $(this).attr('data-cnttsb', j);
+                })
+
+            } catch (error) {
+                console.log("Error Caught",error);
+                alert("There is an Error Plase Check.");
+                return false;
+            }
+        }
+   
+    });
+
+    // function deletePatternGroup (number) {
+    //     console.log('number', number);
+    //     cntt -= 1;
+    //     fl = false;
+    //     $('.patternGroup_' + number).remove();
+    // }
+
+ 
+    //Fetch available groupofHalls
+    function groupHallOptions() {
+        console.log($("#start_date").parent().parent(), $("#end_date").parent().parent());
+        let flagStart = $("#start_date").parent().parent().hasClass("has-error");
+        let flagEnd = $("#end_date").parent().parent().hasClass("has-error");
+        let isBotGame =  $('#isBotGame').find(":selected").val() == "Yes" ? true : false;
+        console.log(flagStart, flagEnd);
+        if ((flagStart === false && flagEnd === false) && ($("#start_date").val() && $("#end_date").val())) {
+             let gameId = `{{Game._id}}`;
+            $.ajax({
+                type: "GET",
+                url: `/getAvailableGroupHalls/{{gameData.type}}`,
+                data: {
+                    startDate: $('#start_date').val(),
+                    endDate: $('#end_date').val(),
+                    id: gameId ? gameId : '',
+                    isBotGame : isBotGame
+                },
+                success: function (response) {
+                    console.log(response);
+                    if (response.status == "success") {
+                        let selectedHalls = sessionStorage.getItem('groupHallSelected');
+                        if (selectedHalls) {
+                            selectedHalls = selectedHalls.split(",");
+                        }
+                        let groupHalls = response.groupHalls;
+                        let options = ``;
+                        if (groupHalls.length) {
+                            for (let i = 0; i < groupHalls.length; i++) {
+                                 if (selectedHalls && selectedHalls.length) {
+                                    if (selectedHalls.findIndex(e => e == groupHalls[i]._id) > -1) {
+                                        options += `<option value="${groupHalls[i]._id}" selected="${true}">${groupHalls[i].name}</option>`;
+                                        continue;
+                                    }
+                                }
+                                options += `<option value="${groupHalls[i]._id}">${groupHalls[i].name}</option>`;
+                            }
+                        }
+                        $('#groupHallSelected').empty()
+                        .append(options)
+                        // .removeAttr('disabled')
+                        .trigger("chosen:updated");
+                        let grpHallArr = $("#groupHallSelected").val();
+                        if (grpHallArr.length) {
+                            sessionStorage.setItem('groupHallSelected', grpHallArr);
+                        }                            
+                    }
+                }
+            });
+        } else {
+            console.log("here2");
+            $('#groupHallSelected').empty().append(``).trigger("chosen:updated");
+            sessionStorage.clear();
+        }
+    }
+
+    $(".js-select2").select2({
+        closeOnSelect: false,
+        placeholder: "Hall 1",
+        allowHtml: true,
+        allowClear: true,
+        tags: true
+    });
+
+    $(".js-select4").select2({
+        closeOnSelect: false,
+        placeholder: "Game 1",
+        allowHtml: true,
+        allowClear: true,
+        tags: true
+    });
+
+    $.formUtils.addValidator({
+        name: 'endDate',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let startDate = document.getElementById("start_date").value;
+            startDate = moment(new Date(startDate)).startOf("day");
+            let endDate = moment(new Date(value)).endOf("day");
+            let diff = endDate.diff(startDate, "days");
+            setTimeout(groupHallOptions, 100);
+            return diff >= 6;
+        },
+        errorMessage: '{{translate.min_day_gap_7_days}}',
+        errorMessageKey: 'endDate'
+    });
+
+    $.formUtils.addValidator({
+        name: 'startDate',
+        validatorFunction: function (value, $el, config, language, $form) {
+            // console.log(document.getElementById("end_date"));
+            let graceDate = document.getElementById("end_date").value;
+            if (graceDate == "") {
+                return true;
+            } else {
+                // let diff = moment(new Date(graceDate)).diff(new Date(value), "days");
+                let startDate = moment(new Date(value)).startOf("day");
+                graceDate = moment(new Date(graceDate)).endOf("day");
+                let diff = graceDate.diff(startDate, "days");
+                console.log("start end", diff);
+                setTimeout(groupHallOptions, 100);
+                return diff >= 6;
+            }
+        },
+        errorMessage: '{{translate.min_day_gap_7_days}}',
+        errorMessageKey: 'startDate'
+    });
+
+
+    //Time Validation
+    $.formUtils.addValidator({
+        name: 'startTime',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let startTime = value.split(":");
+            startTime = (+startTime[0]) * 60 + (+startTime[1]);
+            let day = $el.attr("id").slice(0, 3)
+            console.log("day", day);
+            let endTime = $(`#${day}_endTime`).val();
+            endTime = endTime.split(":");
+            endTime = (+endTime[0]) * 60 + (+endTime[1]);
+            console.log("startTime type and val", typeof startTime, startTime, "endTime type and val", typeof endTime, endTime);
+            if (!isNaN(endTime)) {
+                return startTime < endTime;
+            } else {
+                return true;
+            }
+        },
+        errorMessage: '{{translate.start_time_must_be_less_than_end_time}}',
+        errorMessageKey: 'startTimeError'
+    });
+
+    $.formUtils.addValidator({
+        name: 'endTime',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let endTime = value.split(":");
+            endTime = (+endTime[0]) * 60 + (+endTime[1]);
+            let day = $el.attr("id").slice(0, 3);
+            console.log("day", day);
+            let startTime = $(`#${day}_startTime`).val();
+            startTime = startTime.split(":");
+            startTime = (+startTime[0]) * 60 + (+startTime[1]);
+            console.log("startTime type and val", typeof startTime, startTime, "endTime type and val", typeof endTime, endTime);
+            if (!isNaN(startTime)) {
+                return endTime > startTime;
+            } else {
+                return true;
+            }
+        },
+        errorMessage: '{{translate.end_time_must_be_greater_than_start_time}}',
+        errorMessageKey: 'endTimeError'
+    });
+
+    //No of Ticket Validator
+    $.formUtils.addValidator({
+        name: 'totalNoTickets',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let minTicketCount = $("#minTicketCt").val();
+            console.log("mincount", minTicketCount);
+            if (minTicketCount > 0) {
+                return parseInt(minTicketCount) <= parseInt(value);
+            }
+
+        },
+        errorMessage: 'Total number of Tickets to generate must be greater or equal to Minimum Ticket Count ',
+        errorMessageKey: 'totalNoTickets'
+    });
+
+    //Min Ticket Validator
+    $.formUtils.addValidator({
+        name: 'minTicketsCount',
+        validatorFunction: function (value, $el, config, language, $form) {
+            if(value < 20){
+                return false;
+            }
+        },
+        errorMessage: '{{translate.min_ticket_count_should_be_greater_20}}.',
+        errorMessageKey: 'minTicketsCount'
+    });
+
+    $.formUtils.addValidator({
+        name: 'minimumCount',
+        validatorFunction: function (value, $el, config, language, $form) {
+            let seconds = $("#seconds").val();
+            //console.log("mincount", seconds);
+            return parseInt(seconds) >= 4;
+        },
+        errorMessage: 'Minimum Seconds must be greater than 3',
+        errorMessageKey: 'totalNoTickets'
+    });
+
+    //Group of Halls Validator
+    // $.formUtils.addValidator({
+    //         name: 'groupHalls',
+    //         validatorFunction: function (value, $el, config, language, $form) {
+    //             console.log("validating This too.");
+    //             // let minTicketCount = $("#minTicketCt").val();
+    //             // console.log("mincount", minTicketCount);
+    //             // if (minTicketCount > 0) {
+    //             //     return parseInt(minTicketCount) <= parseInt(value);
+    //             // }
+    //             return false;
+    //         },
+    //         errorMessage: 'Please Select Group Of Hall',
+    //         errorMessageKey: 'groupHalls'
+    //     });
+
+    initializeValidator();
+
+    let subGameColorRow = "{{subGameColorRow}}";
+    //console.log("subGameColorRow", JSON.stringify( subGameColorRow) )
+    function initializeValidator() {
+        console.log('initializeValidator');
+        $.validate({
+            validateOnEvent: true,
+        });
+    }
+
+</script>
+
+{% endblock %}

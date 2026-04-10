@@ -1,0 +1,525 @@
+{% extends "partition/layout.html" %}
+
+
+{% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+	<div class="container-fluid">
+
+		<!-- Title -->
+		<section class="content-header">
+		    <h1>{{unique.unique_id_table}}</h1>
+		    <ol class="breadcrumb">
+		        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{unique.dashboard}}</a></li>
+		        <li><a href="/user">{{unique.generate_unique_id}}</a></li>
+		       
+		    </ol>
+		</section>
+		<!-- /Title -->
+		<!-- Row  -->
+		<section class="content">
+			<div class="row">
+				<div class="col-md-12">
+					<div class="panel panel-default card-view">
+						<div class="panel-heading">
+							<div class="pull-left">
+								<!-- {% if user %}
+								<h6 class="panel-title txt-dark">Edit User</h6>
+								{% else %}
+								<h6 class="panel-title txt-dark">Add User</h6>
+								{% endif %} -->
+							</div>
+							<div class="clearfix"></div>
+						</div>
+						<div class="panel-wrapper collapse in">
+							<div class="panel-body">
+								<div class="row">
+									<div class="col-sm-12 col-xs-12">
+										<div class="form-wrap">
+											
+												<form method="POST" action="/addUniqueId" id="uniqueIdForm" class="form-horizontal has-validation-callback">
+													
+														<div class="form-group">
+																<label class="col-sm-2 mb-10">{{unique.unique_id_purchase_date}}</label>
+																<div class="col-sm-4" id="purchaseDateDivId">
+																	<div class="input-group date" >
+																		<input type='text' class="form-control" name="uipd_unique" id="uipd_unique" value="" placeholder="{{unique.unique_purchase_date}}"  data-date-format="YYYY-MM-DD HH:mm" required data-validation="required startDate" data-validation-error-msg = " " autocomplete="off"/>
+																		<div class="input-group-addon"><i class="glyphicon glyphicon-calendar glyphicon1"></i></div>
+																	</div>    
+																</div>
+																<input type="hidden" name="ctimezone" value="Asia/Calcutta">
+														</div>
+
+														<div class="form-group">
+																<label class="col-sm-2 mb-10">{{unique.generate_expiry_date}}</label>
+																<div class="col-sm-4" >
+																	<div class="input-group date" id="expireDateDivId">
+																		<input type='text' class="form-control" name="uied_unique" id="uied_unique" value="" placeholder="{{unique.unique_expiry_date}}"  data-date-format="YYYY-MM-DD HH:mm"  required data-validation="required endDate" data-validation-error-msg = " " autocomplete="off"/> 
+																		<!-- data-validation="required uied_unique" -->
+																		<div class="input-group-addon"><i class="glyphicon glyphicon-calendar glyphicon2"></i></div>
+																	</div>
+																</div>
+															
+														</div>
+
+												
+														
+
+
+														<div class="form-group">
+															
+															<label for="name" class="mb-10 col-sm-2">{{unique.balance_amount}}</label>
+															<div class="col-sm-4">
+																	<input type="text" class="form-control" required name="balance_amount" id="balance_amount" value="" placeholder="{{unique.balance_amount}}" data-validation="required number" data-validation-error-msg = " "  >
+															</div>
+														
+														</div>
+														{% if Agent.role == "admin" %}
+														<div class="form-group">
+															<label for="hall" class="mb-10 col-sm-2">{{unique.select_hall}}</label>
+															<div class="col-sm-4">
+																	<select id="hall" class="form-control" name="hall" data-validation="required" data-validation-event="change" data-validation-error-msg = " " onchange="onHallNamechange(this)">
+																		<option value="">{{unique.select_halls}}</option>
+																		{% for singleHall in halls %}
+																		<option value="{{singleHall._id}}">{{singleHall.name}}</option>
+																		{% endfor %}
+																	</select>
+															</div>
+														</div>
+														<div class="form-group">
+															<label for="agentId" class="mb-10 col-sm-2">{{unique.select_agent}}</label>
+															<div class="col-sm-4">
+																<select id="agentId" class="form-control" name="agentId" data-validation="required" data-validation-event="change" data-validation-error-msg = " " >
+																	<option value="">{{unique.select_agent}}</option>
+																</select>
+															</div>
+														</div>
+														{% endif %}
+														<div class="form-group">
+														
+															<label for="paymentType" class="mb-10 col-sm-2">{{unique.payment_type}}</label>
+															<div class="col-sm-4">
+																<select id="paymentType" class="form-control" name="paymentType" data-validation="required" data-validation-event="change" data-validation-error-msg = " ">
+																	<option value="">{{unique.select_payment_type}}</option>
+																	<option value="online">{{unique.online}}</option>
+																	<option value="cash">{{unique.cash}}</option>
+																</select>
+															</div>
+														
+														</div>
+													
+														<div class="form-group">
+															
+																<label for="name" class="mb-10 col-sm-2">{{unique.hours_validity}}:</label>
+																<div class="col-sm-4">
+																		<input type="text" class="form-control" required name="unique_validity" id="unique_validity" value="" placeholder="{{unique.hours_validity}}" data-validation="required" data-validation-error-msg = "Minimum 1 hour is required as a Validity"  readonly>
+																</div>
+															
+														</div>
+														<div class="form-group">
+															<div class="col-md-2">
+																
+															</div>
+															<div class="col-md-4">
+																{% if addFlag %}
+																<input type="submit" class="btn btn-default btn-flat "  id="btnUniqueId" value="{{unique.print}}">
+																{%endif%}
+																<a href="/uniqueIdList"><input type="button" class="btn btn-default btn-flat " value="{{unique.cancel}}"></a>
+															</div>
+														</div>	
+													<div id="setPrintContent" hidden>
+													</div>
+												</form>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>	
+					</div>
+					<!-- Row -->
+					
+				<!-- /Row -->
+			</div>
+		</section>
+
+	</div>
+</div>		
+
+		{% endblock %}
+
+		{% block Jscript %}
+		<script>
+
+			initializeValidator();
+
+			function initializeValidator() {
+				$.validate({
+					validateOnEvent: true,
+					modules: 'logic',
+					validateHiddenInputs: true
+				});
+			}
+
+			var host = window.location.origin;
+
+			let nowu = new Date();
+			console.log("+++++++++++++++nowu : ",nowu)
+
+			let newTime_unique;
+			let utc_u = new Date(nowu.getTime() + nowu.getTimezoneOffset() * 60000);
+			console.log("+++++++++++++++ utc_u utc_u : ",utc_u)
+			newTime_unique = utc_u.getTime() + 2 * 60000;
+
+			$('input[name="ctimezone"]').val(Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+			console.log(Intl.DateTimeFormat().resolvedOptions().timeZone)
+
+			$('#uipd_unique').datetimepicker({
+				minDate: newTime_unique,
+				startDate:nowu,
+			}).on('dp.change dp.click',function(e){
+					console.log(" eeeeeeeeeeeeeeeeeeeeeeeeee : "+e)
+			});
+
+
+			$('.glyphicon1').click(function() {
+				$("#purchaseDateDivId input").focus();
+			});
+
+			$('.glyphicon2').click(function () {
+				$("#expireDateDivId input").focus();
+			});
+
+			let newTime1_unique;
+			let utc1_u = new Date(nowu.getTime() + nowu.getTimezoneOffset() * 60000);
+			newTime1_unique = utc1_u.getTime() + 2 * 60000;
+			$('#uied_unique').datetimepicker({
+				minDate: newTime1_unique,
+				startDate:nowu,
+			});
+
+			$(document).on('change','#uied_unique,#uipd_unique', function(){
+				console.log(" uied uied uied uied :")
+				let hours = 0;
+				if($('#uied_unique').val() && $('#uipd_unique').val()){
+					let end = $('#uied_unique').val();
+					let start = $('#uipd_unique').val();
+					console.log("coming here", start, end);
+
+					const dateOneObj = new Date(start);
+					const dateTwoObj = new Date(end);
+					const milliseconds = Math.abs(dateTwoObj - dateOneObj);
+					hours = milliseconds / 36e5;
+
+					console.log(" hours hours : "+hours)
+					
+				}
+				if(parseInt(hours)>0){
+					$('#unique_validity').val(parseInt(hours));
+					}else{
+						$('#unique_validity').val('');
+					}
+			});
+
+
+			$(document).on('click','#uied_unique,#uipd_unique', function(){
+				console.log(" uied uied uied uied :")
+				let hours = 0;
+				if($('#uied_unique').val() && $('#uipd_unique').val()){
+					let end = $('#uied_unique').val();
+					let start = $('#uipd_unique').val();
+
+					const dateOneObj = new Date(start);
+					const dateTwoObj = new Date(end);
+					const milliseconds = Math.abs(dateTwoObj - dateOneObj);
+					hours = milliseconds / 36e5;
+
+					console.log(" hours hours : "+hours)
+					if(parseInt(hours)>0){
+					$('#unique_validity').val(parseInt(hours));
+					}
+				}
+				if (parseInt(hours) > 0) {
+					$('#unique_validity').val(parseInt(hours));
+				} else {
+					$('#unique_validity').val('');
+				}
+			});
+
+			$(document).on('click','#btnUniqueId', function(){
+				
+				let btnVal = $(this).val();
+  				let btnObj=$(this);
+
+				if($('#uniqueIdForm').isValid()){
+					
+					let route = $('#uniqueIdForm').attr("action");
+					var myform = document.getElementById("uniqueIdForm");
+    				var fd = new FormData(myform );
+
+					//console.log("please try again date ",route," hostroute"+host+route)
+
+					$.ajax({
+							type:"POST",
+							dataType: "json",
+							url: host+route,
+							cache: false,
+							processData: false,
+							contentType: false,
+							data: fd,
+							beforeSend: function(){
+								btnObj.val("Wait..");
+								btnObj.attr("disabled","disabled"); 
+							},
+							complete: function(){
+								btnObj.val(btnVal);
+								btnObj.removeAttr("disabled");
+							},
+							success: function(response){
+								console.log("updated value",response)
+								if(response.status=='validate'){
+									let errObj=response.message.details;
+									for(let e=0;e<(errObj).length;e++)
+									{
+										$('#'+errObj[e].context.key+'-error').remove();
+										//let ehtm=`<label id="uied_unique-error" class="error" for="uied_unique">This field is required.</label>`;
+										$('#'+errObj[e].context.key).parent().append(`<label id="${errObj[e].context.key}-error" class="error" for="${errObj[e].context.key}">${errObj[e].message}</label>`)
+										console.log("+++++++++errObj[e].context : ",errObj[e])
+									}
+								}else{
+									if(response.status){
+
+										function dateFormat(ddt){
+											var date = moment.utc(ddt).format('YYYY-MM-DD HH:mm:ss');
+											var localTime  = moment.utc(date).toDate();
+											localTime = moment(localTime).format('YYYY-MM-DD hh:mm:ss a');
+											return localTime;
+										}
+
+										if (`{{session.role}}` == "agent" && response.result.dailyBalance && response.result.paymentType == "cash") {
+											 $("#rootChips").text(parseFloat(response.result.dailyBalance).toFixed(2));
+										}
+
+										let htm=`<div id="printdivcontent">
+													<div class="form-group">
+															<label class="col-sm-2 mb-10">Unique ID :&nbsp;&nbsp;&nbsp;&nbsp; </label>
+															<label class="col-sm-4 mb-10">${response.result.data.username}</label>
+													</div>
+													<div class="form-group">
+															<label class="col-sm-2 mb-10">Purchase Date :&nbsp;&nbsp; </label>
+															<label class="col-sm-4 mb-10">${dateFormat(response.result.data.uniquePurchaseDate)}</label>
+													</div>
+
+													<div class="form-group">
+															<label class="col-sm-2 mb-10">Expiry Date :&nbsp;&nbsp;</label>
+															<label class="col-sm-4 mb-10">${dateFormat(response.result.data.uniqueExpiryDate)}</label>
+													</div>
+
+													<div class="form-group">
+														<label for="name" class="mb-10 col-sm-2">Hall Name :&nbsp;&nbsp;&nbsp;&nbsp; </label>
+														<label for="name" class="mb-10 col-sm-4">${response.result.data.hall.name}</label>
+													</div>
+
+													<div class="form-group">
+														<label for="name" class="mb-10 col-sm-2">Payment Type :&nbsp;&nbsp;&nbsp;&nbsp; </label>
+														<label for="name" class="mb-10 col-sm-4">${response.result.data.uniquePaymentType}</label>
+													</div>
+
+													<div class="form-group">
+														<label for="name" class="mb-10 col-sm-2">Balance Amount :&nbsp;&nbsp;&nbsp;&nbsp; </label>
+														<label for="name" class="mb-10 col-sm-4">${response.result.data.walletAmount} Kr</label>
+													</div>
+
+													<div class="form-group">
+															<label for="name" class="mb-10 col-sm-2">Hours Validity :&nbsp;&nbsp;&nbsp;&nbsp; </label>
+															<label for="name" class="mb-10 col-sm-4">${response.result.data.hoursValidity}</label>
+													</div>
+
+												</div>`;
+
+								
+									let htm2 = `<div id="tablePrint" style="display: none;">
+											    <table style="width:auto;border:1px solid black;padding: 5px;">
+													<tr>
+														<td>&nbsp;&nbsp;</td>
+														<td>&nbsp;&nbsp;</td>
+													</tr>
+													<tr>
+														<td>Unique Id :</td>
+														<td>${response.result.data.username}</td>
+													</tr>
+													<tr>
+														<td>Hall Name :</td>
+														<td>${response.result.data.hall.name}</td>
+													</tr>
+													<tr>
+														<td>Created By :</td>
+														<td>{{ Agent.name }}</td>
+													</tr>
+													<tr>
+														<td>Purchase Date :</td>
+														<td >${dateFormat(response.result.data.uniquePurchaseDate)}</td>
+													</tr>
+													<tr>
+														<td>Expiry Date :</td>
+														<td>${dateFormat(response.result.data.uniqueExpiryDate)}</td>
+													</tr>
+													<tr>
+														<td>Balance Amount :</td>
+														<td>${response.result.data.walletAmount} Kr</td>
+													</tr>
+
+													<tr>
+														<td>Payment Type :</td>
+														<td>${response.result.data.uniquePaymentType}</td>
+													</tr>
+
+													<tr>
+														<td>Hours Validity :</td>
+														<td>${response.result.data.hoursValidity}</td>
+													</tr>
+
+													
+												</table>
+										</div>`
+										$('#setPrintContent').append(htm2);
+
+
+										var divContents = document.getElementById("tablePrint").innerHTML; 
+										
+										console.log(" divContents divContents divContents : ",divContents) 
+
+										var printWindow = window.open('', 'Print-Window', 'height=300,width=400');  // margin: 20% 10%;  
+										printWindow.document.write(`<html><head><title>Print Unique ID</title>
+																		<style type="text/css">
+																			
+																			/* ++++++++++++++++++++++++++ */
+																				@page {
+																					size: 3in 3in;
+																					
+																				}
+
+																				@media print {
+																					html, body {
+																						font-size: 7pt; /* changing to 4pt has no impact */
+																					}
+																					label {
+																						font-size: 7pt; /* changing to 4pt has no impact */
+																						line-height: 12pt;
+																					}
+																				}
+																			/* --------------------------- */	
+																		</style> 
+											`);  
+										printWindow.document.write('</head><body>');  
+										printWindow.document.write(divContents);
+										printWindow.document.write('</body></html>');  
+										printWindow.print();  
+										printWindow.close();
+										document.getElementById("uniqueIdForm").reset();
+										$('#setPrintContent').html('')
+									}else{
+										$.toast({heading: "{{unique.error}}",text: response.message,position: 'top-right',icon: 'error'});
+									}
+								}	
+							}
+					});
+				}
+			});
+				
+			
+
+			// $.formUtils.addValidator({
+			// 	name: 'uied_unique',
+			// 	validatorFunction: function(value, $el, config, language, $form) {
+			// 		let purchaseDate = document.getElementById("uipd_unique").value;
+			// 		console.log(" purchaseDate : "+purchaseDate+" value : "+value)
+			// 		return value > purchaseDate;
+			// 	},
+			// 	errorMessage: 'Expiry Date Must be greater than Pruchase Date',
+			// 	errorMessageKey: 'expireDateDivId'
+			// });
+
+			// $.formUtils.addValidator({
+			// 	name: 'uipd_unique',
+			// 	validatorFunction: function(value, $el, config, language, $form) {
+			// 		let expireDate = document.getElementById("uied_unique").value;
+			// 		if (expireDate == "") {
+			// 			return true;
+			// 		} else {
+			// 			return value < expireDate;
+			// 		}
+			// 	},
+			// 	errorMessage: 'Purchase Date Must be less than Expiry Date',
+			// 	errorMessageKey: 'purchaseDateDivId'
+			// });
+			
+			function onHallNamechange(sel){
+				if(sel.value){
+					// get agents related to hall
+					$.ajax({
+						type: "GET",
+						url: `/hall/getAgent`,
+						data: {
+							id: sel.value,
+						},
+						success: function (response) {
+							console.log(response);
+							if (response.status == "success") {
+								let agents = response.agents;
+								let options = ``;
+								if (agents) {
+									for (let i = 0; i < agents.length; i++) {
+										options += `<option value="${agents[i]._id}" >${agents[i].name}</option>`;
+									}
+								}
+								$('#agentId').empty()
+									.append(options)
+									// .removeAttr('disabled')
+									// .trigger("change");
+							}
+						}
+					});
+				}
+			}
+
+		
+			$.formUtils.addValidator({
+				name: 'endDate',
+				validatorFunction: function (value, $el, config, language, $form) {
+					let startDate = document.getElementById("uipd_unique").value;
+					console.log("startDate", startDate)
+					if(startDate){
+						startDate = moment(new Date(startDate));
+						let endDate = moment(new Date(value));
+						return endDate > startDate;
+					}else{
+						return true;
+					}
+				},
+				errorMessage: 'Expiry Date should be greater than Purchase Date',
+				errorMessageKey: 'endDate'
+			});
+
+			$.formUtils.addValidator({
+				name: 'startDate',
+				validatorFunction: function (value, $el, config, language, $form) {
+					let endDate = document.getElementById("uied_unique").value;
+					if (endDate == "") {
+						return true;
+					} else {
+						let startDate = moment(new Date(value));
+						endDate = moment(new Date(endDate));
+						return endDate > startDate;
+					}
+				},
+				errorMessage: 'Purchase Date Should be less than Expiry Date',
+				errorMessageKey: 'startDate'
+			});
+
+
+		</script>
+		{% endblock %}

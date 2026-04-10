@@ -1,0 +1,38 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Player stats</title>
+</head>
+<body>
+	 <table class="table table-bordered table-striped">
+        <thead>
+        <tr>
+        	<th>GameId</th>
+        	<th>RoomId</th>
+        	<th>Before Balance</th>
+        	<th>After Balance</th>
+        	<th>date</th>	
+        </tr>
+        </thead>
+        <tbody>
+        	<script> console.log( "{{test}}" )</script>
+        	{% if final.length==0 %}
+        		<tr>
+        			<td colspan="4" class="text-center">No Player data Available</td>
+        		</tr>
+        	{% else %}	
+	        	{% for game in final %}
+	        	<tr>
+	        		<td>{{ game.gameNumber }}</td>
+	        		<td>{{ game.roomNumber }}</td>
+	        		<td>{{game.beforeBalance}}</td>
+	        		<td>{{game.afterBalance}}</td>
+	        		<td>{{game.createdAt}}</td>
+	        	</tr>
+	        	{% endfor %}
+	        {% endif %}	
+        </tbody>
+     </table>
+</body>
+</html>

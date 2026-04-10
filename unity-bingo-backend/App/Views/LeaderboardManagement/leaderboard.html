@@ -1,0 +1,166 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{leaderboard.leaderboard_points_table}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{leaderboard.dashboard}}</a></li>
+                <li class="active">{{leaderboard.leaderboard}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{leaderboard.leaderboard}}</h6>
+                            </div>
+                            <div class="pull-right">
+                                {% if addFlag %}
+                                <a href="/addLeaderboard"><button type="button" class="btn btn-primary btn-md"><i class="fa fa-plus"></i>{{leaderboard.add_leaderboard}}</button></a>
+                                {% endif %}
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <table id="myTable" class="table table-hover display  pb-30">
+                                            <thead>
+                                                <tr>
+                                                    <th>{{leaderboard.place}}</th>
+                                                    <th>{{leaderboard.points}}</th>
+                                                    <th>{{leaderboard.action}}</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script>
+    $(document).ready(function() {
+        var host = window.location.origin;
+        let editFlag = '{{editFlag}}';
+        let deleteFlag = '{{deleteFlag}}';
+        $('#myTable').DataTable({
+            "oLanguage": {
+                "sSearch": "{{leaderboard.serach_place}}",
+                "sLengthMenu": "{{leaderboard.show}} _MENU_ {{leaderboard.entries}}",
+                "oPaginate": {
+                    sPrevious: "{{ leaderboard.previous }}",
+                    sNext: "{{ leaderboard.next }}"
+                },
+                "sEmptyTable": "{{leaderboard.no_data_available_in_table}}",
+                "sInfo": "{{leaderboard.showing}} _START_ to _END_ of _TOTAL_ {{leaderboard.entries}}",
+                "sInfoEmpty": "{{leaderboard.showing}} 0 to 0 of 0 {{leaderboard.entries}}"
+            },
+            // "scrollX": true,
+            // "searching": false,
+            "processing": true,
+            "serverSide": true,
+            "order": [
+                [0, "asc"]
+            ],
+            "columnDefs": [{
+                "targets": [2],
+                "orderable": false
+            }],
+            "autoWidth": false,
+            "pageLength": 25,
+            "ajax": host + "/leaderboard/getLeaderboard",
+            "columns": [{
+                "data": "place"
+            }, {
+                "data": "points"
+            }, {
+                "data": "action",
+                render: function(data, type, row) {
+                    let html = '';
+                    if (editFlag == 'true') {
+                        html += `<a class="m-lr-3" href="/leaderboardEdit/` + row._id + `"><button type="button" class="btn btn-warning btn-xs btn-rounded" title="Edit" name="edit"><i class="fa fa-edit" aria-hidden="true"></i></button></a>`;
+                    }
+                    if (deleteFlag == 'true') {
+                        html += `<button type="button" title="Delete" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>`;
+                    }
+                    return html;
+
+                }
+            }]
+        });
+
+        $(function() {
+            "use strict";
+
+            var SweetAlert = function() {};
+
+            SweetAlert.prototype.init = function() {
+
+                    //Parameter
+                    $('body').on('click', '.delete', function(e) {
+                        var id = $(this).attr('id');
+                        var thisElement = this;
+                        swal({
+                            title: "{{leaderboard.are_you_sure}}?",
+                            text: "{{leaderboard.you_will_not_be_able_to_recover_this_leaderboard_place}}!",
+                            type: "warning",
+                            showCancelButton: true,
+                            confirmButtonColor: "#e69a2a",
+                            confirmButtonText: "{{leaderboard.delete_button}}",
+                            cancelButtonText: "{{leaderboard.cancel_button}}",
+                            closeOnConfirm: false,
+                            closeOnCancel: false
+                        }, function(isConfirm) {
+                            if (isConfirm) {
+                                $.ajax({
+                                    type: 'POST',
+                                    url: host + "/leaderboard/getLeaderboardDelete",
+                                    data: {
+                                        id: id
+                                    },
+                                    success: function(resultData) {
+                                        console.log(resultData);
+                                        if (resultData == 'success') {
+                                            $(thisElement).parent().parent().hide(700);
+                                            swal("{{leaderboard.deleted}}!", "{{leaderboard.your_imaginary_file_has_been_deleted}}.", "success");
+                                        }
+                                        // alert("Save Complete")
+                                    }
+                                });
+                                swal("{{leaderboard.deletetd}}!", "{{leaderboard.learderboard_palce_deleted_successfully}}.", "success");
+                            } else {
+                                swal("{{leaderboard.cancelled}}", "{{leaderboard.leaderboard_place_not_deleted}}", "error");
+                            }
+                        });
+                        return false;
+                    });
+
+                },
+                $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+            $.SweetAlert.init();
+        });
+
+    });
+</script>
+{% endblock %}

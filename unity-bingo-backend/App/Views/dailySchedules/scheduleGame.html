@@ -1,0 +1,1222 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+   .dataTables_scrollHeadInner, .table{
+      width:100%!important
+    };
+</style>
+<div class="page-wrapper">
+  <div class="container-fluid">
+    <section class="content-header">
+      <h1>{{translate.ongoing_schedule}}</h1>
+      <ol class="breadcrumb pull-right">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+        <li class="active">{{translate.ongoing_schedule}} </li>
+      </ol>
+    </section>
+    {% include "partition/notification.html" %}
+    <section class="content">
+      <!-- Upcoming Game -->
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                <h6 class="panel-title txt-dark">{{translate.ongoing_schedule}}</h6>
+              </div>
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+
+                {% if todaysGame == null %}
+                    <h1 class='text-center' >{{translate.no_schedule_for_today}}!</h1>
+                {% else %}
+                <div class="row">
+                    <div class="col-lg-6 col-sm-6">
+                        <div class="form-group">
+                            <label>{{translate.schedules_name}} :</label>
+                            <input type="text" class="form-control" value="{{todaysGame.otherData.scheduleName}}" disabled>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-lg-6 col-sm-6">
+                        <div class="form-group">
+                            <label>{{translate.schedules_name}} :</label>
+                            <input type="text" class="form-control" value="{{todaysGame.gameMode}}" disabled>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-lg-6 col-sm-6">
+                        <div class="form-group">
+                            <label>{{translate.date}} :</label>
+                            <div class='input-group date' id='scheduleDate'  >
+                                <input type='text' class="form-control scheduleDate"
+                                    name="scheduleDate" id="scheduleDate"
+                                    value="{{ScheduleDate}}"
+                                    disabled
+                                     />
+                                <span class="input-group-addon">
+                                    <span
+                                        class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="row">
+                  <div class="col-sm-12">
+                    <h3><b>{{translate.sub_game_details}}</b></h3>
+                  </div>
+                  <div class="col-sm-12">
+                    <div class="table-wrap">
+                      <div class="table-responsive">
+                        <table id="myTable" class="table table-hover display  pb-30">
+                          <thead>
+                            <tr>
+                              <th>{{translate.sub_game_id}}</th>
+                              <th>{{translate.sub_game_name}}</th>
+                              <th>{{translate.start_time}}</th>
+                              <th>{{translate.ticket_color_type}}</th>
+                              <th>{{translate.ticket_price}}</th>
+                              <th>{{translate.total_no_ticket_sold}}</th>
+                              <th>{{translate.total_earned_from}} <br>{{translate.tickets_sold}} </th>
+                              <th>{{translate.total_earned_from}} <br>{{translate.replace_ticket}} </th>
+                              <th>{{translate.total_winning_game}} </th>
+                              <th>{{translate.profit}}</th>
+                              <th>{{translate.profit_percentage}}</th>
+                              <th>{{translate.status}}</th>
+                              <th>{{translate.action}}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="row">
+                  <div class="col-sm-12">
+                    <h3><b>{{translate.scheduled_game}}</b></h3>
+                  </div>
+                  <div class="col-sm-12">
+                    <div class="table-wrap">
+                      <div class="table-responsive">
+                        <table id="schedule" class="table table-bordered table-striped">
+                          <thead>
+                            <tr>
+                              <th>{{translate.game_id}}</th>
+                              <th>{{translate.start_date}}</th>
+                              <th>{{translate.day}}</th>
+                              <th>{{translate.start_time_end_time}}</th>
+                              <th>{{translate.schedules_name}}</th>
+                              <th>{{translate.schedules_type}}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <!-- The modal -->
+      <div class="modal fade" id="agentInfoModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+          <div class="modal-dialog" role="document">
+              <div class="modal-content">
+                  <div class="modal-header">
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                          <span aria-hidden="true">&times;</span>
+                      </button>
+                      <h4 class="modal-title" id="modalLabel">{{translate.agent_info}}</h4>
+                  </div>
+                  <div class="modal-body">
+                      <div class="ready-agents">
+                          <label>{{translate.ready_to_go}}</label>
+                          <div>
+                            <ul class="list-inline readyAgents"></ul>
+                          </div>
+                      </div>
+                      <br>
+                      <div class="not-ready-agents">
+                        <label>{{translate.not_ready_yet}}</label>
+                        <div class="not-ready-agents">
+                          <ul class="list-inline notReadyAgents"></ul>
+                        </div>
+                      </div>
+                      <div class="clearfix"></div>
+                  </div>
+              </div>
+          </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <!-- The modal -->
+      <div class="modal fade" id="startManualGameModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+          <div class="modal-dialog" role="document">
+              <div class="modal-content">
+                  <div class="modal-header">
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                          <span aria-hidden="true">&times;</span>
+                      </button>
+                      <h4 class="modal-title text-center" id="modalLabel">{{translate.attention}}!</h4>
+                  </div>
+                  <div class="modal-body">
+                    <div class="row">
+                      <h4 class="text-center">{{translate.some_agent_not_ready_are_you_sure}}?</h4>
+                    </div>
+                      
+                    <div class="row">
+                      <div class="text-center">
+                        <a class="btn btn-success btn-flat startGame">{{translate.start}}</a>
+                        <a class="btn btn-danger btn-flat cancelStartGame">{{translate.cancel}}</a>
+                      </div>
+                  </div>
+                    <div class="clearfix"></div>
+                  </div>
+              </div>
+          </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <!-- The modal -->
+      <div class="modal fade" id="confirmJackpotModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+          <div class="modal-dialog" role="document">
+              <div class="modal-content">
+                  <div class="modal-body">
+                    <div class="modal-header">
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                          <span aria-hidden="true">&times;</span>
+                      </button>
+                      <h4 class="modal-title" id="modalLabel">{{translate.confirm_jackpot_draw}}</h4>
+                    </div>
+
+                    <div class="modal-body">
+                      <div class="table-wrap">
+                        <div class="table-responsive">
+                            <form name="saveJackpot" class="form-horizontal"
+                                id="saveJackpotForm">
+                                <table border="0" class="table">
+                                    <div class="col-sm-12">
+                                        <div class="form-group">
+                                            <label class="control-label mb-10 col-sm-4"
+                                                for="saveGameName">{{translate.jackpot_prize_and_draws}}</label>
+                                            <div class="col-sm-3">
+                                                <input type="number" class="form-control jackpotPrizeYellowModal"
+                                                  id="jackpotPrizeYellowModal" placeholder="{{translate.jackpot_yellow_prize}}"
+                                                  title="{{translate.jackpot_yellow_prize}}"
+                                                  name="jackpotPrizeYellow"
+                                                 
+                                                  >
+                                            </div>
+                                            <div class="col-sm-3">
+                                              <input type="number" class="form-control jackpotPrizeWhiteModal"
+                                                id="jackpotPrizeWhiteModal"  placeholder="{{translate.jackpot_white_prize}}"
+                                                title="{{translate.jackpot_white_prize}}"
+                                                name="jackpotPrizeWhite"
+                                               
+                                                >
+                                          </div>
+                                          <div class="col-sm-3">
+                                            <input type="number" class="form-control jackpotPrizePurpleModal"
+                                              id="jackpotPrizePurpleModal" placeholder="{{translate.jackpot_purple_prize}}"
+                                              title="J{{translate.jackpot_purple_prize}}"
+                                              name="jackpotPrizePurple"
+                                              
+                                              >
+                                        </div>
+                                            <div class="col-sm-3">
+                                              <input type="number" class="form-control jackpotDrawModal"
+                                                id="jackpotDraw" placeholder="{{translate.draw}}"
+                                                name="jackpotDraw"
+                                                required
+                                                min="50" max="57"
+                                                >
+                                            </div>
+                                        </div>
+                                        <div class="form-group text-center">
+                                          <input type="submit" class="btn btn-success sbBtn btn-flat"
+                                          value="{{translate.confirm}}"> 
+                                          <a class="btn btn-danger btn-flat cancelJackpot">{{translate.cancel}}</a>
+                                        </div>
+                                    </div>
+                                </table>
+                            </form>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div class="clearfix"></div>
+                  </div>
+              </div>
+          </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <!-- The modal -->
+      <div class="modal fade" id="manualGameNotification" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+          <div class="modal-dialog" role="document">
+              <div class="modal-content">
+                  <div class="modal-header">
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                          <span aria-hidden="true">&times;</span>
+                      </button>
+                      <h4 class="modal-title text-center remaningTime" id="modalLabel"></h4>
+                  </div>
+                  <div class="modal-body">
+                    <div class="row">
+                      <h4 class="text-center timeh4">{{translate.remaining_time}}: <span id="remaningTimeLive">00:00</span> {{translate.minutes}}!</h4>
+                    </div>
+                      
+                    <div class="row">
+                      <div class="text-center">
+                        <a class="btn btn-danger btn-flat cancelNotification">{{translate.ok}}</a>
+                      </div>
+                  </div>
+                    <div class="clearfix"></div>
+                  </div>
+              </div>
+          </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <!-- The modal -->
+      <div class="modal fade" id="errorModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+          <div class="modal-dialog" role="document">
+              <div class="modal-content">
+                  <div class="modal-header">
+                      <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                          <span aria-hidden="true">&times;</span>
+                      </button>
+                      <h4 class="modal-title text-center" id="modalLabel">{{translate.something_went_wrong}}</h4>
+                  </div>
+                  <div class="modal-body">
+                    <div class="row">
+                      <h4 class="text-center errorMessage"></h4>
+                    </div>
+                      
+                    <div class="row">
+                      <div class="text-center">
+                        <a class="btn btn-danger btn-flat cancelErrorModal">{{translate.ok}}</a>
+                      </div>
+                  </div>
+                    <div class="clearfix"></div>
+                  </div>
+              </div>
+          </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <!-- The modal -->
+      <div class="modal fade" id="confirmInnsatsenJackpotModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel" aria-hidden="true" data-keyboard="false" data-backdrop="static">
+        <div class="modal-dialog" role="document">
+          <div class="modal-content">
+              <div class="modal-body">
+                <div class="modal-header">
+                  <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                      <span aria-hidden="true">&times;</span>
+                  </button>
+                  <h4 class="modal-title" id="modalLabel">{{translate.confirm_jackpot_draw_to_start_game}}.</h4>
+                </div>
+
+                <div class="modal-body">
+                  <div class="table-wrap">
+                    <div class="table-responsive">
+                        <form name="saveJackpot" class="form-horizontal"
+                            id="saveJackpotFormInnsatsen">
+                            <table border="0" class="table">
+                                <div class="col-sm-12">
+                                  <div class="form-group">
+                                      <label class="control-label mb-10 col-sm-4"
+                                          for="saveGameName">{{translate.jackpot_draw}}</label>
+                                      <div class="col-sm-4">
+                                        <input type="number" class="form-control jackpotDrawModal"
+                                          id="jackpotDrawInn" placeholder="{{translate.draw}}"
+                                          name="jackpotDraw"
+                                          required
+                                          min="56" max="58"
+                                          >
+                                      </div>
+                                  </div>
+                                  <div class="form-group text-center">
+                                    <input type="submit" class="btn btn-success sbBtn btn-flat"
+                                    value="{{translate.confirm}}"> 
+                                    <a class="btn btn-danger btn-flat cancelJackpot">{{translate.cancel}}</a>
+                                  </div>
+                                </div>
+                            </table>
+                        </form>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="clearfix"></div>
+              </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+{% endblock %} {% block Jscript %}
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  function onTypeChnage(sel){
+        let ajax_source = host + "/getCurrentSubgames/{{schedule._id}}?gameStatus="+ $("#searchByType option:selected").val();
+        let table = $("#myTable").DataTable();
+        table.ajax.url(ajax_source).load();
+        // let search = $("#searchByType").val();
+        // if(search == "active"){
+        //   search = "Ongoing";
+        // }
+        // table.search(search).draw();
+    }
+  $(document).ready(function () {
+    let isMaster = "{{isMaster}}";
+    let viewFlag = "{{viewFlag}}";
+    let editFlag = "{{editFlag}}";
+    let deleteFlag = "{{deleteFlag}}";
+    let startFlag = "{{startFlag}}";
+    let isSuperAdmin = "{{Agent.isSuperAdmin}}";
+    let role = "{{Agent.role}}";
+    let adminSocket = io("/admin");
+    adminSocket.on('updateSubgameTable', (data) => {
+        console.log("updateSubgameTable called")
+        let table = $("#myTable").DataTable();
+        let ajax_source = host + "/getCurrentSubgames/{{schedule._id}}?gameStatus="+ $("#searchByType option:selected").val();
+        table.ajax.url(ajax_source).load();
+    });
+    adminSocket.on('refreshSchedule', (data) => {
+      console.log("refreshSchedule called", data);
+      if(data.scheduleId ==  `{{schedule._id}}`){
+        console.log("same id of schedule found");
+        //location.reload();
+        let table = $("#myTable").DataTable();
+        let ajax_source = host + "/getCurrentSubgames/{{schedule._id}}?gameStatus="+ $("#searchByType option:selected").val();
+        table.ajax.url(ajax_source).load();
+      }
+    })
+    //Sub Game Details
+    $('#myTable').DataTable({
+      "oLanguage": {
+            "sSearch": "{{translate.search}}",
+            "sLengthMenu": "{{translate.show}} _MENU_ {{translate.entries}}",
+            "sInfo" : "{{translate.showing}} _START_ to _END_ of _TOTAL_ {{translate.entries}}",
+            "oPaginate": {
+                sPrevious: "{{ translate.previous }}",
+                sNext: "{{ translate.next }}"
+            },
+            "sInfoEmpty": "{{translate.showing}} 0 to 0 of 0 {{translate.entries}}",
+        },
+        "bSort": false,
+        "order":[[ 0, "desc" ]],
+        "columnDefs":[{
+            "targets":[],
+            "orderable":false,
+        },
+        // { className: 'text-center', targets: [3], "width": "20%" },
+        { className: 'text-center', targets: [11] },
+        ],
+        "scrollX": false,
+        "searching": true,
+        "processing": true,
+        //"serverSide": true,
+        "autoWidth": false,
+        "pageLength": 10,
+        "bLengthChange": false,
+        "ajax": {
+            url:  host + "/getCurrentSubgames/{{schedule._id}}",
+            type: "GET",
+            data: function (data) {
+                data.type = $("#searchByType option:selected").val();
+            }
+        },
+        "columns": [
+            { "data": "gameNumber" }, 
+            { "data": "gameName" }, 
+            { "data": "startTime" }, 
+
+            {
+                "data": "ticketColorPrice",
+                "render": function(data, type, row) {
+                    var $select = $('<select class="selectColor" id="select1-' + row._id + '" ></select>', {
+                        "id": row._id,
+                        "value": data
+                    });
+                    $.each(data, function(k, v) {
+                        var $option = $("<option></option>", {
+                            "text": v.color,
+                            "value": k
+                        });
+                        if (data === v) {
+                            $option.attr("selected", "selected")
+                        }
+                        $select.append($option);
+                    });
+                    return $select.prop("outerHTML");
+                }
+            }, {
+                "data": "ticketColorPrice",
+                "render": function(data, type, row) {
+                    var $select = $('<select class="selectPrice" id="select2-' + row._id + '" ></select>', {
+                        "id": row._id,
+                        "value": data
+                    });
+                    $.each(data, function(k, v) {
+                        var $option = $("<option></option>", {
+                            "text": v.price,
+                            "value": k
+                        });
+                        if (data == v) {
+                            $option.attr("selected", "selected")
+                        }
+                        $select.append($option);
+                    });
+                    return $select.prop("outerHTML");
+                }
+            },
+
+            { "data": "totalTicketsSold", }, 
+            { "data": "earnedFromTickets" }, 
+            { "data": "elvisReplaceAmount" }, 
+            { "data": "totalWinning" }, 
+            { "data": "profit", }, 
+            { "data": "profitPercentage",
+              render: function (data, type, row) {
+                if(row.profit > 0){
+                  return parseFloat( (row.profit*100)/ (row.earnedFromTickets + row.elvisReplaceAmount ) ).toFixed(2)
+                }else if(row.profit < 0){
+                  return + parseFloat( (row.profit*100)/ (row.earnedFromTickets + row.elvisReplaceAmount ) ).toFixed(2)
+                }else{
+                  return 0;
+                }
+              }
+            }, 
+            { "data": "gameSecondaryStatus",
+                render: function (data, type, row) {
+                    if(data == "running"){
+                        return "Ongoing";
+                    }else if(data == "active"){
+                        return "Upcoming";
+                    }else if(data == "completed" || data == "finish"){
+                        return "Completed";
+                    }else if(data == "stopped"){
+                        return "Stopped";
+                    }
+                }
+            }, 
+            {
+                "data": "action",
+                render: function (data, type, row) {
+                    if(row.status == "active"){
+                        let html = '<div style="width : 100px !important;margin : 0 auto;text-align: center;">';
+                        if(isSuperAdmin == 'true' || viewFlag == 'true'){
+                          html += ` <a href="/view-subgame/` + row._id + `" name="view" class="btn btn-info btn-xs view btn-rounded" title="{{translate.view_game}}"><i class="fa fa-eye" aria-hidden="true"></i></a>`
+                        }
+                        
+                        if(row.timerStart == false && isMaster == 'true' && (isSuperAdmin == 'true' || editFlag == 'true')){
+                          html += ` <a href="/edit-subgame/` + row._id + `"><button type="button" class="btn btn-warning btn-xs btn-rounded" name="edit" title="{{translate.edit_game}}"><i class="fa fa-edit" aria-hidden="true"></i></button></a>`;
+                        }
+
+                        if(row.gameMode == "Manual" && row.showStartButton == true && row.timerStart == false){
+                          if(row.timerStart == false && isMaster == 'true' && (isSuperAdmin == 'true' || startFlag == 'true')){
+                            html += ` <a class="btn btn-info btn-xs btn-rounded startManualGame gameSt" data-isJackpotPrizeRequired = "` + row.isJackpotPrizeRequired + `"  id="` + row._id + `"  title="{{translate.start}}"  data-jackpotDraw = "` + row.jackpotDraw + `" data-jackpotPrize = '` + JSON.stringify(row.jackpotPrize) + `' data-jackpotColors='${JSON.stringify(row.jackpotSelectedColors)}' > {{translate.start}} </a>`
+                          }else{
+                            html += ` <a class="btn btn-info btn-xs btn-rounded startManualGame gameSt disabled" data-isJackpotPrizeRequired = "` + row.isJackpotPrizeRequired + `" id="` + row._id + `"  title="{{translate.start}}"  data-jackpotDraw = "` + row.jackpotDraw + `" data-jackpotPrize = '` + JSON.stringify(row.jackpotPrize) + `' data-jackpotColors='${JSON.stringify(row.jackpotSelectedColors)}'> {{translate.start}} </a>`
+                          }
+                          
+                          //html += ` <a href="${host}/view-game/index.html?token={{schedule._id}}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="Live"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                          
+                          if(isSuperAdmin == 'true' || (role == "admin" && viewFlag == 'true')){
+                            html += ` <a href="/tv/{{schedule._id}}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                          }else if(role != "admin" && viewFlag == 'true'){
+                            html += ` <a href="/tv/${row.tvId}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                          }
+                          
+                        }else if(row.gameMode == "Manual" && row.timerStart == false){
+                          //html += ` <a href=" ` + host + `/view-game/index.html?token=` + `{{schedule._id}}` + ` " target="_blank"   ><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="Live"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                          
+                          if(isSuperAdmin == 'true' || (role == "admin" && viewFlag == 'true')){
+                            html += ` <a href="/tv/{{schedule._id}}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                          }else if(role != "admin" && viewFlag == 'true'){
+                            html += ` <a href="/tv/${row.tvId}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                          }
+                          
+                        }else{
+                          console.log("row data", row, data, type)
+                          if(row.gameMode == "Auto" && row.showStartButton == true){
+                            //html += ` <a href=" ` + host + `/view-game/index.html?token=` + `{{schedule._id}}` + ` " target="_blank"   ><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="Live"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                            if(isSuperAdmin == 'true' || (role == "admin" && viewFlag == 'true')){
+                              html += ` <a href="/tv/{{schedule._id}}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                            }else if(role != "admin" && viewFlag == 'true'){
+                              html += ` <a href="/tv/${row.tvId}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                            }
+                          }else{
+                            if(row.timerStart == true){
+                              //html += ` <a href=" ` + host + `/view-game/index.html?token=` + `{{schedule._id}}` + ` " target="_blank"   ><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="Live"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                              if(isSuperAdmin == 'true' || (role == "admin" && viewFlag == 'true')){
+                                html += ` <a href="/tv/{{schedule._id}}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                              }else{
+                                html += ` <a href="/tv/${row.tvId}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                              }
+                            }
+                          }
+                          
+                        }
+
+                        if(row.gameMode == "Manual" && row.timerStart == false){
+                          html += ` <a data-gameId="` + row._id + `" name="agent-info" class="btn btn-info btn-xs agent-info btn-rounded" title="{{translate.info}}"><i class="fa fa-info" aria-hidden="true"></i></a>`
+                          if ('{{Agent.role}}' == 'agent') {
+                             let classname = 'btn-warning';
+                            if (row.isReady) {
+                               classname = 'btn-success'
+                            }
+                            html += ` <a data-gameId="` + row._id +`"data-agentId="`+`{{Agent.id}}`+`" name="agent-ready" class="btn ${classname} btn-xs agent-ready btn-rounded" title="Ready To Go">Ready</a>`
+                          }
+                        }
+                        
+                        html += '</div>'
+                        return html;
+                    }else if(row.gameSecondaryStatus == "running"){
+                        let html = '<div style="width : 100px !important;margin : 0 auto;text-align: center;">';
+
+                        html += ` <a href="/view-subgame/` + row._id + `" name="view" class="btn btn-info btn-xs view btn-rounded" title="{{translate.view_game}}"><i class="fa fa-eye" aria-hidden="true"></i></a>`
+
+                        //html += ` <a href=" ` + host + `/view-game/index.html?token=` + `{{schedule._id}}` + ` " target="_blank"   ><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="Live"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                        
+                        if(isSuperAdmin == 'true' || (role == "admin" && viewFlag == 'true')){
+                          html += ` <a href="/tv/{{schedule._id}}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                        }else if(role != "admin" && viewFlag == 'true'){
+                          html += ` <a href="/tv/${row.tvId}" target="_blank"><button type="button" class="btn btn-danger btn-xs btn-rounded" name="edit" title="{{translate.live}}"><i class="fa fa-video-camera" aria-hidden="true"></i></button></a>`;
+                        }
+                        html += '</div>'
+                        return html;
+
+                    }else if(row.gameSecondaryStatus == "completed" || row.gameSecondaryStatus == "finish"){
+                        let html = '<div style="width : 100px !important;margin : 0 auto;text-align: center;">';
+                        if(isSuperAdmin == 'true' || viewFlag == 'true'){
+                          html += ` <a href="/view-subgame/` + row._id + `" name="view" class="btn btn-info btn-xs view btn-rounded" title="{{translate.view_game}}"><i class="fa fa-eye" aria-hidden="true"></i></a>`
+                        }
+
+                        html += '</div>'
+                        return html;
+                    }else{
+                        return "";
+                    }
+
+                }
+            }
+        ],
+        "rowCallback": function( row, data ) {
+        
+            let color = $(row).find('#select1-' + data._id + '');
+            color.on("change", function () {
+                let id = $(this).val();
+                $('#select2-' + data._id + '').val(id);
+            });
+
+            let price = $(row).find('#select2-' + data._id + '');
+            price.on("change", function () {
+                let id = $(this).val();
+                $('#select1-' + data._id + '').val(id);
+            });
+           
+        },
+        initComplete: function(){
+            
+            let filterHtml = `
+        
+                <div class="input-group">
+                    <span class="input-group-addon"><i class="fa fa-filter"
+                            aria-hidden="true"></i></span>
+                    <select name="searchByType" class="form-control searchByType" id="searchByType"
+                    onchange="onTypeChnage(this);">
+                        <option value="All"> {{translate.all}} </option>
+                        <option value="active"> {{translate.active}} </option>
+                        <option value="upcoming"> {{translate.upcoming}} </option>
+                        <option value="stopped"> {{translate.stopped}} </option>
+                    </select>
+                </div>
+                                    
+            `;
+            $("#myTable_filter").prepend(filterHtml)
+           
+        },
+        createdRow: function (row, data, dataIndex) {
+          // mark testing games
+          if (data.isTestGame) {
+            $(row).css('background-color', '#e3f2fd'); // inline style wins
+          }
+        }
+
+    });
+
+
+    // Schedule Game
+    let start_date = "{{schedule.startDate}}";
+    let end_date = "{{schedule.endDate}}";
+    let finalResult = []; 
+    if( moment(new Date(end_date)) >= moment(new Date()) ){
+      let game = `{{ schedule | dump | safe }}`;
+      game = JSON.parse(game);
+      let subgames = `{{subGames | dump | safe}}`;
+      subgames = JSON.parse(subgames);
+      console.log("days selected in this game", game.days);
+      //Scheduled Game Code Starts Here
+      let week = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      let start = moment(new Date()).startOf('day'),end = moment(new Date(end_date)).add(1, "day").startOf('day');
+    
+      days = [];
+      //Extract name of days
+      let daysForGame = Object.keys(game.days);console.log("daysForGame--", daysForGame)
+      //Assign Numbers for days
+      for (let i = 0; i < week.length; i++) {
+        const element = week[i];
+        let index = daysForGame.findIndex(val => val == element);
+        if (index >= 0) {
+          days.push(i);
+        }
+      }
+      console.log("days selected in this game as numbers", days);
+      let result = [];
+      //Loop for each day in days array
+      for (let i = 0; i < days.length; i++) {
+        const day = days[i];
+        let tmp = start.clone().day(day);
+        if (tmp.isAfter(start, 'd')) {
+          result.push(moment(tmp));
+        }
+        //Add All Upcoming Days 
+        while (tmp.isBefore(end)) {
+          let data = tmp.add(7, 'days');
+          // (tmp + 7) day should be before end date
+          if (data.isBefore(end)) {
+            result.push(moment(data));
+          }
+        }
+      }
+      //sort dates
+      result = result.sort((a, b) => a - b);
+      console.log("sorted result", result.map(m => m.format('LLLL')));
+      
+      //let finalResult = [];
+      if(result.length > 0){
+          for(i=0; i < result.length; i++){
+              let subgame = `${game.days[result[i].format('dddd').substring(0, 3)][0]}`;
+              let index = subgames.findIndex(x => x.id == subgame );
+            
+              let subgameData = {};
+              if(index >= 0){
+                  subgameData = subgames[index];
+                  if(subgameData.startDate.length > 0){
+                      for(t=0; t < subgameData.startDate.length; t++){
+                        
+                          finalResult.push([
+                              subgame,
+                              result[i].format('DD-MM-YYYY'),
+                              result[i].format('dddd').substring(0, 3),
+                              `${subgameData.startDate[t]} - ${subgameData.endDate}`,
+                              subgameData.name,
+                              subgameData.type
+
+                          ])
+                      }
+                  }
+              }
+          }
+      }
+    }
+
+    $('#schedule').DataTable({
+      language: {
+        "emptyTable": "{{translate.no_data_available_in_table}}"
+      },
+      "oLanguage": {
+            "sSearch": "{{translate.search}}",
+            "sLengthMenu": "{{translate.show}} _MENU_ {{translate.entries}}",
+            "sInfo" : "{{translate.showing}} _START_ to _END_ of _TOTAL_ {{translate.entries}}",
+            "oPaginate": {
+                sPrevious: "{{ translate.previous }}",
+                sNext: "{{ translate.next }}"
+            },
+            "sInfoEmpty": "{{translate.showing}} 0 to 0 of 0 {{translate.entries}}",
+        },
+      data: finalResult,
+      autowidth: false,
+      ordering: false
+    });
+
+   
+    $("#myTable").on("click", ".agent-info",async function(){
+      try {
+        let gameId = $(this).attr("data-gameId")
+        if (gameId) {
+          $(".readyAgents").html("");
+          $(".notReadyAgents").html("");
+          const response = await fetch(`${host}/getGameAgents?gameId=${gameId}`);
+          const resultData = await response.json();
+          console.log("result data of agent details", resultData);
+          if (resultData.status == "success") {
+            let readyAgentHtml = "";
+            if (resultData.readyAgents.length > 0) {
+              for (let a = 0; a < resultData.readyAgents.length; a++) {
+                readyAgentHtml += ` <li class="list-group-item">${resultData.readyAgents[a].name}</li>`
+              }
+              $(".readyAgents").append(readyAgentHtml);
+            }
+            let notreadyAgentHtml = "";
+            if (resultData.notReadyagents.length > 0) {
+              for (let a = 0; a < resultData.notReadyagents.length; a++) {
+                notreadyAgentHtml += ` <li class="list-group-item">${resultData.notReadyagents[a].name}</li>`
+              }
+              $(".notReadyAgents").append(notreadyAgentHtml);
+            }
+            $('#agentInfoModal').modal('toggle');
+          }
+        }
+      } catch (error) {
+        console.log("Error while fetching agent status info",error);
+      }
+      
+    });
+
+    let isJackpotPrizeRequired = false;
+    let isInnsatsenGame = false; 
+
+    $("#myTable").on("click", ".agent-ready", function (e) {
+      e.preventDefault();
+      let element = this;
+      let gameId = $(this).attr("data-gameId")
+      let agentId = $(this).attr("data-agentId")
+      console.log(gameId,agentId);
+      if (gameId) {
+        swal({
+          title: "{{translate.are_you_sure}}?",
+          type: "warning",
+          showCancelButton: true,
+          confirmButtonColor: "#e69a2a",
+          confirmButtonText: "{{translate.yes}}",
+          cancelButtonText: "{{translate.no}}",
+          closeOnConfirm: false,
+          closeOnCancel: false
+        }, function (isConfirm) {
+          if (isConfirm) {
+           $.ajax({
+              type: 'POST',
+              url: host + "/agentReady",
+              data: {
+                'gameId': gameId,
+                'agentId': agentId
+              },
+              success: function (resultData) {
+                if (resultData.status == "success") {
+                  $(element).removeClass("btn-warning");
+                   $(element).addClass("btn-success");
+                  swal({
+                    title : "{{translate.done}}.",
+                    text : "{{translate.status_updated}}",
+                    type:"success"
+                  })
+                }else{
+                  swal({
+                    title: "{{translate.fail}}.",
+                    text: "{{translate.status_not_updated}}",
+                    type: "error"
+                  })
+                }
+              }
+            })
+          }else{
+            swal({
+              title: "{{translate.canel}}.",
+              text: "{{translate.status_update_cancel}}",
+              type: "error"
+            })
+          }
+        })
+      }
+    });
+
+    //OLD one
+    // $("#myTable").on("click", ".startManualGame", function(e){
+    //   console.log("gameID---",e.target.id, e.target.getAttribute("data-isJackpotPrizeRequired"))
+    //   if(e.target.getAttribute("data-isJackpotPrizeRequired") == "true"){
+    //     isJackpotPrizeRequired = true;
+    //     let jackpotDraw = e.target.getAttribute("data-jackpotDraw");
+    //     let jackpotPrize = e.target.getAttribute("data-jackpotPrize");
+    //     let jackpotPrizeValues = JSON.parse(jackpotPrize)
+    //     console.log("jackpotPrize", JSON.parse(jackpotPrize))
+    //     $('.jackpotDrawModal').attr('value', jackpotDraw);
+    //     $('.jackpotPrizeYellowModal').attr('value', +jackpotPrizeValues.yellow);
+    //     $('.jackpotPrizeWhiteModal').attr('value', +jackpotPrizeValues.white);
+    //     $('.jackpotPrizePurpleModal').attr('value', +jackpotPrizeValues.purple);
+    //     if(jackpotPrize == 0){
+    //       isInnsatsenGame = true;
+    //     }
+    //   }else{
+    //     isJackpotPrizeRequired = false;
+    //   }
+    //   $('#startManualGameModal').modal('toggle'); 
+    // });
+
+
+    $('.cancelStartGame').click(function(){
+      console.log("cancel game called")
+      $("#startManualGameModal").modal('toggle');
+    });
+
+    $('.startGame').click(function(){
+      console.log("start game agent popup confirmed")
+      $("#startManualGameModal").modal('toggle');
+
+      // check if jackpot prize is required
+      if(isJackpotPrizeRequired == true){
+        if(isInnsatsenGame == true){
+          $("#confirmInnsatsenJackpotModal").modal('toggle');
+        }else{
+          $("#confirmJackpotModal").modal('toggle');
+        }
+      }else{
+        // ajax call to start the game and show time remaining popup
+        console.log("call ajax call to start manual game");
+        let gameId = $(".startManualGame").attr('id');
+        startManualGame({gameId: gameId})
+      }
+
+      
+    });
+
+    $('.cancelJackpot').click(function(){
+      if(isInnsatsenGame == true){
+        $("#saveJackpotFormInnsatsen").trigger('reset');
+        $("#confirmInnsatsenJackpotModal").modal('toggle');
+      }else{
+        $("#saveJackpotForm").trigger('reset');
+        $("#confirmJackpotModal").modal('toggle');
+      }
+    });
+
+    var remainingTimeout = "";
+    $( "#saveJackpotForm" ).submit(function( event ) {
+      clearTimeout(remainingTimeout);
+      if($('#saveJackpotForm')[0].checkValidity() == false ){
+        $('#saveJackpotForm')[0].reportValidity();
+        return; 
+      }else{
+        event.preventDefault();
+        let gameId = $(".startManualGame").attr('id');
+        //let jackpotPrize = $("#jackpotPrize").val();
+        let jackpotPrizeYellow = $(".jackpotPrizeYellowModal").val();
+        let jackpotPrizeWhite = $(".jackpotPrizeWhiteModal").val();
+        let jackpotPrizePurple = $(".jackpotPrizePurpleModal").val();
+        let jackpotDraw = $("#jackpotDraw").val();
+        
+        console.log("ajax call to start game", gameId, jackpotDraw);
+        startManualGame({gameId: gameId, jackpotPrizeYellow: jackpotPrizeYellow, jackpotPrizeWhite: jackpotPrizeWhite, jackpotPrizePurple: jackpotPrizePurple,  jackpotDraw: jackpotDraw})
+        // $.ajax({
+        //   type: 'POST',
+        //   url: host + "/startManualGame",
+        //   data: {
+        //     id: gameId,
+        //     jackpotPrize: jackpotPrize,
+        //     jackpotDraw: jackpotDraw
+        //   },
+        //   success: function (resultData) {
+        //       console.log(resultData);
+        //       $("#saveJackpotForm").trigger('reset');
+        //       $("#confirmJackpotModal").modal('toggle');
+        //       if (resultData.status == 'success') {
+        //         $(".startManualGame").addClass( "disabled" );
+        //         $(".remaningTime").text(resultData.message);
+        //         function countdown(duration, display) {
+        //             let timer = duration, minutes, seconds;
+        //             remainingTimeout =  setInterval(function () {
+        //                 minutes = parseInt(timer / 60, 10);
+        //                 seconds = parseInt(timer % 60, 10);
+
+        //                 minutes = minutes < 10 ? "0" + minutes : minutes;
+        //                 seconds = seconds < 10 ? "0" + seconds : seconds;
+
+        //                 display.textContent = minutes + ":" + seconds;
+        //                 //console.log("minutes: seconds;", minutes + ":" + seconds)
+        //                 if (--timer < 0) {
+        //                   clearTimeout(remainingTimeout);
+        //                 }
+        //             }, 1000);
+        //         }
+                
+        //         countdown(resultData.reminingTime, document.querySelector('#remaningTimeLive'));
+        //         $(".timeh4").hide();
+        //         $("#manualGameNotification").modal('toggle');
+        //         setTimeout(function() {
+        //           $(".timeh4").show();
+        //         }, 250);
+                
+        //       } else {
+        //         $(".errorMessage").text(resultData.message);
+        //         $("#errorModal").modal('toggle');
+        //       }
+        //   }
+        // });
+      }
+    });
+
+    function startManualGame(data){
+      clearTimeout(remainingTimeout);
+      let gameId = data.gameId;
+      if(data.isInnsatsen == true){
+        let jackpotDraw = (data.jackpotDraw) ? data.jackpotDraw : "";
+        $.ajax({
+            type: 'POST',
+            url: host + "/startManualGame",
+            data: {
+              id: gameId,
+              jackpotDraw: jackpotDraw
+            },
+            success: function (resultData) {
+                console.log(resultData);
+                if(jackpotDraw){
+                  $("#saveJackpotFormInnsatsen").trigger('reset');
+                  $("#confirmInnsatsenJackpotModal").modal('toggle');
+                }
+                if (resultData.status == 'success') {
+                  $(".startManualGame").addClass( "disabled" );
+                  $(".remaningTime").text(resultData.message);
+                  function countdown(duration, display) {
+                      let timer = duration, minutes, seconds;
+                      remainingTimeout =  setInterval(function () {
+                          minutes = parseInt(timer / 60, 10);
+                          seconds = parseInt(timer % 60, 10);
+
+                          minutes = minutes < 10 ? "0" + minutes : minutes;
+                          seconds = seconds < 10 ? "0" + seconds : seconds;
+
+                          display.textContent = minutes + ":" + seconds;
+                          //console.log("minutes: seconds;", minutes + ":" + seconds)
+                          if (--timer < 0) {
+                            clearTimeout(remainingTimeout);
+                          }
+                      }, 1000);
+                  }
+                  
+                  countdown(resultData.reminingTime, document.querySelector('#remaningTimeLive'));
+                  $(".timeh4").hide();
+                  $("#manualGameNotification").modal('toggle');
+                  setTimeout(function() {
+                    $(".timeh4").show();
+                  }, 250);
+                  
+                } else {
+                  $(".errorMessage").text(resultData.message);
+                  $("#errorModal").modal('toggle');
+                }
+            }
+        });
+      }else{
+        //let jackpotPrize = (data.jackpotPrize) ? data.jackpotPrize : "";
+        let jackpotDraw = (data.jackpotDraw) ? data.jackpotDraw : "";
+        let jackpotPrizeYellow = (data.jackpotPrizeYellow) ? data.jackpotPrizeYellow : "";
+        let jackpotPrizeWhite = (data.jackpotPrizeWhite) ? data.jackpotPrizeWhite : "";
+        let jackpotPrizePurple = (data.jackpotPrizePurple) ? data.jackpotPrizePurple : "";
+        $.ajax({
+            type: 'POST',
+            url: host + "/startManualGame",
+            data: {
+              id: gameId,
+              jackpotPrizeYellow: jackpotPrizeYellow,
+              jackpotPrizeWhite: jackpotPrizeWhite,
+              jackpotPrizePurple: jackpotPrizePurple,
+              jackpotDraw: jackpotDraw
+            },
+            success: function (resultData) {
+                console.log(resultData);
+                if(jackpotPrizeYellow && jackpotPrizeWhite && jackpotPrizePurple && jackpotDraw){
+                  $("#saveJackpotForm").trigger('reset');
+                  $("#confirmJackpotModal").modal('toggle');
+                }
+                if (resultData.status == 'success') {
+                  $(".startManualGame").addClass( "disabled" );
+                  $(".remaningTime").text(resultData.message);
+                  function countdown(duration, display) {
+                      let timer = duration, minutes, seconds;
+                      remainingTimeout =  setInterval(function () {
+                          minutes = parseInt(timer / 60, 10);
+                          seconds = parseInt(timer % 60, 10);
+
+                          minutes = minutes < 10 ? "0" + minutes : minutes;
+                          seconds = seconds < 10 ? "0" + seconds : seconds;
+
+                          display.textContent = minutes + ":" + seconds;
+                          //console.log("minutes: seconds;", minutes + ":" + seconds)
+                          if (--timer < 0) {
+                            clearTimeout(remainingTimeout);
+                          }
+                      }, 1000);
+                  }
+                  
+                  countdown(resultData.reminingTime, document.querySelector('#remaningTimeLive'));
+                  $(".timeh4").hide();
+                  $("#manualGameNotification").modal('toggle');
+                  setTimeout(function() {
+                    $(".timeh4").show();
+                  }, 250);
+                  
+                } else {
+                  $(".errorMessage").text(resultData.message);
+                  $("#errorModal").modal('toggle');
+                }
+            }
+        });
+      }
+      
+    }
+
+    $('.cancelNotification').click(function(){
+      clearTimeout(remainingTimeout);
+      $("#manualGameNotification").modal('toggle');
+    });
+
+    $('.cancelErrorModal').click(function(){
+      $("#errorModal").modal('toggle');
+    });
+
+    $( "#saveJackpotFormInnsatsen" ).submit(function( event ) {
+      clearTimeout(remainingTimeout);
+      if($('#saveJackpotFormInnsatsen')[0].checkValidity() ==false ){
+        $('#saveJackpotFormInnsatsen')[0].reportValidity();
+        return; 
+      }else{
+        event.preventDefault();
+        let gameId = $(".startManualGame").attr('id');
+        let jackpotDraw = $("#jackpotDrawInn").val();
+        console.log("ajax call to start game", gameId, jackpotDraw);
+        startManualGame({gameId: gameId, jackpotDraw: jackpotDraw, isInnsatsen: true})
+      }
+    });
+    
+
+    $(function () {
+      "use strict";
+
+      var SweetAlert = function () { };
+
+      SweetAlert.prototype.init = function () {
+
+        $('body').on('click', '.startManualGame',async function (e) {
+          console.log("gameID---", e.target.id, e.target.getAttribute("data-isJackpotPrizeRequired"))
+          const gameId = e.target.id;
+          if (e.target.getAttribute("data-isJackpotPrizeRequired") == "true") {
+            isJackpotPrizeRequired = true;
+            let jackpotDraw = e.target.getAttribute("data-jackpotDraw");
+            let jackpotPrize = e.target.getAttribute("data-jackpotPrize");
+            let jackpotPrizeValues = JSON.parse(jackpotPrize)
+            let jackpotColors = JSON.parse(e.target.getAttribute("data-jackpotColors") || "[]");
+            // Ensure missing colors default to 0
+            ["Yellow", "White", "Purple"].forEach(color => {
+                if (!jackpotColors.includes(color)) {
+                    jackpotPrizeValues[color.toLowerCase()] = 0;
+                }
+            });
+            console.log("jackpotPrize", JSON.parse(jackpotPrize))
+            $('.jackpotDrawModal').attr('value', jackpotDraw);
+            $('.jackpotPrizeYellowModal').attr('value', +jackpotPrizeValues.yellow);
+            $('.jackpotPrizeWhiteModal').attr('value', +jackpotPrizeValues.white);
+            $('.jackpotPrizePurpleModal').attr('value', +jackpotPrizeValues.purple);
+            if (jackpotPrize == 0) {
+              isInnsatsenGame = true;
+            }else{
+              // call jackpot validation
+              updateJackpotValidation(jackpotPrizeValues);
+            }
+          } else {
+            isJackpotPrizeRequired = false;
+          }
+
+          let alertText = "{{translate.are_you_sure_you_want_to_start_game}}?";
+
+          //Fetch Status of Agents
+          const response = await fetch(`${host}/getGameAgents?gameId=${gameId}`);
+          const result = await response.json();
+          if (result.status == "success") {
+            if (result?.notReadyagents.length) {
+              alertText = `<div><p>"<b>{{translate.attention}}!</b> {{translate.some_agent_not_yet_ready}}.<br {{translate.are_you_sure_you_want_to_start_game}}>?"</p><br>`;
+              alertText += `<p>Agents Not Ready Yet :</p><p>`;
+              for (let i = 0; i < result.notReadyagents.length; i++) {
+                alertText += `${result.notReadyagents[i].name} : ${result.notReadyagents[i].hallName};<br>`;
+              }
+              alertText += `</p></div>`;
+            }
+          }
+          swal({
+            title: "{{translate.alert}}!",
+            text: alertText,
+            type: "warning",
+            showCancelButton: true,
+            confirmButtonColor: "#e69a2a",
+            confirmButtonText: "{{translate.start}}",
+            cancelButtonText: "{{translate.cancel}}",
+            // closeOnConfirm: false,
+            // closeOnCancel: false,
+            html: true
+          }, async function (isConfirm) {
+            if (isConfirm) {
+                console.log("start game agent popup confirmed")
+                // check if jackpot prize is required
+                if (isJackpotPrizeRequired == true) {
+                  if (isInnsatsenGame == true) {
+                    $("#confirmInnsatsenJackpotModal").modal('toggle');
+                  } else {
+                    $("#confirmJackpotModal").modal('toggle');
+                  }
+                } else {
+                  let gameId = $(".startManualGame").attr('id');
+                  startManualGame({ gameId: gameId })
+                }
+            }
+          });
+          return false;
+        });
+
+      },
+        $.SweetAlert = new SweetAlert, $.SweetAlert.Constructor = SweetAlert;
+
+      $.SweetAlert.init();
+    });
+
+    // Validation for jackpot game
+    function updateJackpotValidation(jackpotPrizeValues) {
+      ["yellow", "white", "purple"].forEach(color => {
+          const field = $(`#jackpotPrize${color.charAt(0).toUpperCase() + color.slice(1)}Modal`);
+          
+          if (!jackpotPrizeValues[color] || jackpotPrizeValues[color] <= 0) {
+              field.closest(".col-sm-3").remove(); // Remove the parent div to avoid empty spaces
+          } else {
+              field.attr({ required: true, min: 4000, max: 50000 });
+          }
+      });
+    }
+
+
+  })
+</script>
+{% endblock %}

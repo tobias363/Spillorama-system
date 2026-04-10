@@ -1,0 +1,254 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+<style>
+  button#search,
+  button#filterReset {
+    min-width: 55px;
+  }
+</style>
+<!-- Main Content -->
+<div class="page-wrapper">
+  <div class="container-fluid">
+
+    <!-- Title -->
+    <section class="content-header">
+      <h1>{{translate.physical_cashout_details}}</h1>
+      <ol class="breadcrumb">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{translate.dashboard}}</a></li>
+        <li class="active">{{translate.physical_cashout_details}}</li>
+      </ol>
+    </section>
+    <!-- /Title -->
+    {% include "partition/notification.html" %}
+    <!-- Row -->
+    <section class="content">
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                <h6 class="panel-title txt-dark">{{translate.physical_cashout_details}}</h6>
+              </div>
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+                <!-- Search Filter Code Start -->
+                <div class="row">
+                  <div class="col-sm-12">
+                    <form id="filterForm" class="form-inline">
+                      <div class="form-group">
+                        <label for="fromDate">{{translate.from_date}} :</label>
+                        <input type="date" class="dateFilter form-control" name="fromDate" id="fromDate" onkeydown="return false">
+                      </div>
+                      <div class="form-group">
+                        <label for="toDate">{{translate.to_date}} :</label>
+                        <input type="date" class="dateFilter form-control" name="toDate" id="toDate" onkeydown="return false">
+                      </div>
+                      <button type="button" class="btn btn-primary playersearch" id="search" title="Search for dates"><i class="fa fa-search"></i></button>
+                    </form>
+                  </div>
+                </div>
+                <br>
+                <!-- Search Filter Code End -->
+                <div class="table-wrap">
+                  <div class="table-responsive">
+                    <table id="myTable" class="table table-bordered table-hover display  pb-30 text-center">
+                      <thead>
+                        <tr>
+                          <th>{{translate.date}}</th>
+                          <th>{{translate.game_name}}</th>
+                          <th>{{translate.sub_game_name_id}}</th>
+                          <th>{{translate.total_winnings}}</th>
+                          <th>{{translate.pending_cashout}}</th>
+                          <th>{{translate.action}}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<link rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css"
+  integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin="anonymous" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js"
+  integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin="anonymous"></script>
+<script>
+
+  let agent = `{{ Agent | dump | safe }}`;
+  $('#startDate input,#endDate input').datepicker();
+
+  $('#startDate input,#endDate input').val(formatDate(new Date()));
+
+  $('.glyphicon1').click(function () {
+    $("#startDate input").focus();
+  });
+
+  $('.glyphicon2').click(function () {
+    $("#endDate input").focus();
+  });
+
+  let date = new Date();
+
+  date.setHours(23, 59, 59);
+  $("#toDate").val(formatDate(date));
+  date.setDate(date.getDate() - 7);
+  $("#fromDate").val(formatDate(date));
+
+  let data = {
+    start_date: $("#fromDate").val(),
+    end_date: $("#toDate").val(),
+  }
+
+  agent = JSON.parse(agent);
+  $(document).ready(function () {
+    let host = window.location.origin;
+    let start_date = $('#fromDate').val();
+    let end_date = $('#toDate').val();
+
+    $('#search').click(function () {
+      let start_date = $('#fromDate').val();
+      let end_date = $('#toDate').val();
+      if (start_date != '' && end_date != '') {
+        $('#myTable').DataTable().destroy();
+        fetch_data(data);
+      } else {
+        alert("Both dates are required.");
+      }
+    });
+
+    fetch_data(data);
+
+    function fetch_data(value) {
+      $('#myTable').DataTable({
+        "oLanguage": {
+          // "sSearch": "Search Order ID",
+          "sProcessing": "<img style='width:50px; height:50px;' src='/admin/loading.gif'/>",
+          "sEmptyTable": "{{translate.no_data_available_in_table}}",
+          "oPaginate": {
+              sPrevious: "{{ translate.previous }}",
+              sNext: "{{ translate.next }}"
+          },
+          "sLengthMenu": "{{translate.show}} _MENU_ {{translate.entries}}",
+        },
+        "autoWidth": false,
+        "paging": true,
+        "searching": false,
+        "processing": true,
+        "serverSide": true,
+        "order": [
+          //[0, "desc"]
+        ],
+        "ajax": {
+          url: host + "/agent/getGamesInHall",
+          type: "GET",
+          data: value,
+          dataSrc: function (json) {
+            console.log("API response", json);
+            return json.data;
+          },
+        },
+        "columns": [
+          {
+            "data": "startTime",
+             "orderable": false,
+            "render": function (data, type, row) {
+              return moment(row.startDate).format('DD/MM/YYYY hh:mm a');
+            }
+          }, {
+            "data": "gameType",
+            "orderable": false,
+            "render": function (data, type, row) {
+              return row.gameType;
+            }
+          }, {
+            "data": "gameName",
+             "orderable": false,
+            "render": function (data, type, row) {
+              return `${row.gameName} - ${row.gameNumber}`;
+            }
+          }, {
+            "data": "totalWinning",
+            "orderable": false,
+            "render": function (data, type, row) {
+              return row.totalWinning;
+            }
+          }, {
+            "data": "totalPhysicalWinnings",
+            "orderable": false,
+            "render": function (data, type, row) {
+              let pendingAmount = 0;
+              for (let index = 0; index < row.totalPhysicalWinnings.length; index++) {
+                const ticketdetails = row.totalPhysicalWinnings[index];
+                for (let i = 0; i < ticketdetails.winnings.length; i++) {
+                 if (!ticketdetails.winnings[i].isWinningDistributed) {
+                   pendingAmount += ticketdetails.winnings[i].wonAmount
+                 }
+                }
+              }
+              return parseFloat(pendingAmount).toFixed(2);
+            }
+          }, {
+            "data": null,
+            "orderable": false,
+            "render": function (data, type, row) {
+              return `<a href="/agent/viewWonTickets/${row._id}" name="view" class="btn btn-info btn-xs view btn-rounded" title="View Tickets"> <i class="fa fa-eye" aria-hidden="true"></i></a>`;
+            }
+          }
+        ]
+      });
+    }
+
+  });
+
+  //From Date
+  $('#fromDate').change(function () {
+    let date = $(this).val();
+    let compDate = $('#toDate').val();
+    if (compDate !== '' && date !== '' && date > compDate) {
+      alert("From Date cannot be greater than To Date :(");
+      $('#fromDate').val('');
+    } else {
+      data.start_date = date;
+    }
+  });
+
+  //To Date
+  $('#toDate').change(function () {
+    let compDate = $('#fromDate').val();
+    let date = $(this).val();
+    if (compDate !== '' && date !== '' && date < compDate) {
+      alert("To Date cannot be less than From Date :(");
+      $('#toDate').val('');
+    } else {
+      data.end_date = date;
+    }
+  });
+
+
+  function formatDate(date) {
+    let d = new Date(date),
+      month = '' + (d.getMonth() + 1),
+      day = '' + d.getDate(),
+      year = d.getFullYear();
+
+    if (month.length < 2)
+      month = '0' + month;
+    if (day.length < 2)
+      day = '0' + day;
+
+    return [year, month, day].join('-');
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,998 @@
+{% extends "partition/layout.html" %} {% block body %}
+
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{gameReport.hall_specific_reports}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{gameReport.dashboard}}</a></li>
+                <li class="active">{{gameReport.hall_specific_reports}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <!-- Row -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{gameReport.hall_specific_reports}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <div class="row">
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">{{gameReport.from_date}} :</label>
+                                                <div class="input-group date" id="startDate">
+                                                    <input type="text" class="form-control" name="start_date"
+                                                        id="start_date" placeholder="{{gameReport.start_date}}"
+                                                        data-date-format="yyyy-mm-dd" autocomplete="off"
+                                                        onkeydown="return false">
+                                                    <span class="input-group-addon">
+                                                        <span class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="end_date" class="control-label">{{gameReport.to_date}} :</label>
+                                                <div class="input-group date" id="endDate">
+                                                    <input type="text" class="form-control" name="end_date"
+                                                        id="end_date" placeholder="{{gameReport.end_date}}"
+                                                        data-date-format="yyyy-mm-dd" autocomplete="off"
+                                                        onkeydown="return false">
+                                                    <span class="input-group-addon">
+                                                        <span class="glyphicon glyphicon2 glyphicon-calendar"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="gameType" class="control-label">{{gameReport.game_type}} :</label>
+                                                <select name="gameType" class="form-control"
+                                                    id="gameType">
+                                                    <option value="real">{{gameReport.real}}</option>
+                                                    <option value="bot">{{gameReport.bot}}</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {% if Agent.role == "admin" %}
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">{{gameReport.group_of_hall_name}}</label>
+                                                <div class="input-group">
+                                                    <span class="input-group-addon"><i class="fa fa-filter"
+                                                            aria-hidden="true"></i></span>
+                                                    <select name="groupHall" class="form-control groupHall" id="groupHall">
+                                                        <option value="" selected="selected">{{gameReport.group_of_hall_name}}
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-1">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">{{gameReport.hall_name}}</label>
+                                                <div class="input-group">
+                                                    <select name="hall" class="form-control hallName" id="hallName" disabled>
+                                                        <option value="" selected="selected">{{gameReport.hall_name}}
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    <div>
+                                        <div class="col-sm-1">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">&nbsp;</label>
+                                                <div class="input-group">
+                                                    <input type="button" name="search" id="search" value="{{gameReport.search}}"
+                                                class="btn btn-info">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-1">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">&nbsp;</label>
+                                                <div class="input-group">
+                                                    <input type="button" name="reset" id="reset" value="{{gameReport.reset}}"
+                                                class="btn btn-info">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="table-wrap">
+                                        <div class="table-responsive">
+                                            <table id="myTable" class="table  table-bordered table-striped table-hover display  pb-30">
+                                                <thead>
+                                                    <tr>
+                                                        <th colspan="3" scope="colgroup"></th>
+                                                        <th colspan="5" scope="colgroup" style="text-align: center;">
+                                                            {{gameReport.game1}}</th>
+                                                        <th colspan="4" scope="colgroup" style="text-align: center;">
+                                                            {{gameReport.game2}}</th>
+                                                        <th colspan="4" scope="colgroup" style="text-align: center;">
+                                                            {{gameReport.game3}}</th>
+                                                        <th colspan="4" scope="colgroup" style="text-align: center;">
+                                                            {{gameReport.game4}}</th>
+                                                        <th colspan="4" scope="colgroup" style="text-align: center;">
+                                                            {{gameReport.game5}}</th>
+                                                    </tr>
+                                                    <tr>
+                                                        <th scope="col">{{gameReport.group_of_hall_name}}</th>
+                                                        <th scope="col">{{gameReport.hall_name}}</th>
+                                                        <th scope="col">{{gameReport.agent}}</th>
+                                                        <th scope="col">OMS</th>
+                                                        <th scope="col">{{gameReport.elvis_replace_amount}}</th>
+                                                        <th scope="col">UTD</th>
+                                                        <th scope="col">{{gameReport.payout}}(%)</th>
+                                                        <th scope="col">RES</th>
+                                                        <th scope="col">OMS</th>
+                                                        <th scope="col">UTD</th>
+                                                        <th scope="col">{{gameReport.payout}}(%)</th>
+                                                        <th scope="col">RES</th>
+                                                        <th scope="col">OMS</th>
+                                                        <th scope="col">UTD</th>
+                                                        <th scope="col">{{gameReport.payout}}(%)</th>
+                                                        <th scope="col">RES</th>
+                                                        <th scope="col">OMS</th>
+                                                        <th scope="col">UTD</th>
+                                                        <th scope="col">{{gameReport.payout}}(%)</th>
+                                                        <th scope="col">RES</th>
+                                                        
+                                                        <th scope="col">OMS</th>
+                                                        <th scope="col">UTD</th>
+                                                        <th scope="col">{{gameReport.payout}}(%)</th>
+                                                        <th scope="col">RES</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                </tbody>
+                                                <tfoot>
+                                                    <th colspan="3" scope="colgroup" style="text-align: end;">{{gameReport.total}}:</th>
+                                                    <th class="oms1"></th>
+                                                    <th class="elvisreplace1"></th>
+                                                    <th class="utd1"></th>
+                                                    <th class="payout1"></th>
+                                                    <th class="res1"></th>
+                                                    <th class="oms2"></th>
+                                                    <th class="utd2"></th>
+                                                    <th class="payout2"></th>
+                                                    <th class="res2"></th>
+                                                    <th class="oms3"></th>
+                                                    <th class="utd3"></th>
+                                                    <th class="payout3"></th>
+                                                    <th class="res3"></th>
+                                                    <th class="oms4"></th>
+                                                    <th class="utd4"></th>
+                                                    <th class="payout4"></th>
+                                                    <th class="res4"></th>
+
+                                                    <th class="oms5"></th>
+                                                    <th class="utd5"></th>
+                                                    <th class="payout5"></th>
+                                                    <th class="res5"></th>
+                                                </tfoot>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+        </section>
+
+        <!-- Order Report -->
+        <section class="content">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{gameReport.sell_product_reports}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+
+                                <div class="row">
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="start_date_order" class="control-label">{{gameReport.from_date}} :</label>
+                                                <div class="input-group date" id="startDate">
+                                                    <input type="text" class="form-control" name="start_date_order"
+                                                        id="start_date_order" placeholder="{{gameReport.start_date}}"
+                                                        data-date-format="yyyy-mm-dd" autocomplete="off"
+                                                        onkeydown="return false">
+                                                    <span class="input-group-addon">
+                                                        <span class="glyphicon glyphicon1 glyphicon-calendar"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="end_date_order" class="control-label">{{gameReport.to_date}} :</label>
+                                                <div class="input-group date" id="endDate">
+                                                    <input type="text" class="form-control" name="end_date_order"
+                                                        id="end_date_order" placeholder="{{gameReport.end_date}}"
+                                                        data-date-format="yyyy-mm-dd" autocomplete="off"
+                                                        onkeydown="return false">
+                                                    <span class="input-group-addon">
+                                                        <span class="glyphicon glyphicon2 glyphicon-calendar"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {% if Agent.role == "admin" %}
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">{{gameReport.group_of_hall_name}}</label>
+                                                <div class="input-group">
+                                                    <span class="input-group-addon"><i class="fa fa-filter"
+                                                            aria-hidden="true"></i></span>
+                                                    <select name="groupHall" class="form-control groupHall" id="groupHallOrder">
+                                                        <option value="" selected="selected">{{gameReport.group_of_hall_name}}
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-2">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">{{gameReport.hall_name}}</label>
+                                                <div class="input-group">
+                                                    <select name="hall" class="form-control hallName" id="hallNameOrder" disabled>
+                                                        <option value="" selected="selected">{{gameReport.hall_name}}
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    <div>
+                                        <div class="col-sm-1">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">&nbsp;</label>
+                                                <div class="input-group">
+                                                    <input type="button" name="searchOrder" id="searchOrder" value="{{gameReport.search}}"
+                                                class="btn btn-info">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="col-sm-1">
+                                            <div class="form-group">
+                                                <label for="start_date" class="control-label">&nbsp;</label>
+                                                <div class="input-group">
+                                                    <input type="button" name="reset" id="resetOrder" value="{{gameReport.reset}}"
+                                                class="btn btn-info">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="table-wrap">
+                                        <div class="table-responsive">
+                                            <table id="orderTable" class="table  table-bordered table-striped table-hover display  pb-30">
+                                                <thead> 
+                                                    <tr>
+                                                        <th>{{gameReport.date}}</th>
+                                                        <th scope="col">{{gameReport.group_of_hall}}</th>
+                                                        <th scope="col">{{gameReport.hall_name}}</th>
+                                                        <th scope="col">{{gameReport.agent}}</th>
+                                                        <th scope="col">{{gameReport.cash}}</th>
+                                                        <th scope="col">{{gameReport.card}}</th>
+                                                        <th scope="col">{{gameReport.customer_number}}</th>
+                                                        <th scope="col">{{gameReport.total}}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                </tbody>
+                                                <!-- <tfoot>
+                                                    <th colspan="4" scope="colgroup" style="text-align: start;">Total:</th>
+                                                    <th class="cashValue"></th>
+                                                    <th class="cardValue"></th>
+                                                    <th class="customerNumberValue"></th>
+                                                    <th class="totalOrderValue"></th>
+                                                </tfoot> -->
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+        </section>
+
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<link rel="stylesheet "
+    href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/css/bootstrap-datetimepicker.min.css "
+    integrity="sha256-yMjaV542P+q1RnH6XByCPDfUFhmOafWbeLPmqKh11zo=" crossorigin=" anonymous " />
+<script
+    src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.47/js/bootstrap-datetimepicker.min.js "
+    integrity="sha256-5YmaxAwMjIpMrVlK84Y/+NjCpKnFYa8bWWBbUHSBGfU=" crossorigin=" anonymous "></script>
+<script src="https://cdn.datatables.net/buttons/2.2.3/js/dataTables.buttons.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/vfs_fonts.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.2.3/js/buttons.html5.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.3.2/js/buttons.print.min.js"></script>
+<script>
+    function formatDate(date) {
+        var d = new Date(date),
+            month = '' + (d.getMonth() + 1),
+            day = '' + d.getDate(),
+            year = d.getFullYear();
+
+        if (month.length < 2)
+            month = '0' + month;
+        if (day.length < 2)
+            day = '0' + day;
+
+        return [year, month, day].join('-');
+    }
+
+    $(document).ready(function () {
+        let searchTimeOut;
+        var host = window.location.origin;
+        let role = `{{Agent.role}}`;
+
+        //Setting Up Start and End Date
+        $('#startDate input').datepicker({
+            autoclose: true,
+            endDate: new Date()
+        }).on('changeDate', function (ev) {
+            let minDate = new Date(ev.date.valueOf());
+            $('#endDate input').datepicker('setStartDate', minDate);
+        });
+
+
+        $("#endDate input").datepicker({
+            //settings
+            startDate: $('#startDate input').val(),
+            autoclose: true,
+            endDate: new Date()
+        }).on('changeDate', function (selected) {
+            let minDate = new Date(selected.date.valueOf());
+            $('#startDate input').datepicker('setEndDate', minDate);
+        });
+
+        $('.glyphicon1').click(function () {
+            $("#startDate input").focus();
+        });
+
+        $('.glyphicon2').click(function () {
+            $("#endDate input").focus();
+        });
+        ////Setting Up Start and End Date Done
+
+        //Setting initial Value in Start Date and End Date
+        $('#startDate input').datepicker('setDate', formatDate(new Date()) ); // formatDate(new Date(new Date().setDate(new Date().getDate() - 1)))
+        $('#endDate input').datepicker('setDate', formatDate(new Date()));
+        if (role == "admin") {
+            //Load Group Halls
+            loadGroupHalls();
+        }
+
+        //Load Table
+        fetch_data('yes', $('#start_date').val(), $('#end_date').val());
+
+        //When Click on Search
+        $('#search').click(function () {
+            let start_date = $('#start_date').val();
+            let end_date = $('#end_date').val();
+            if (start_date != '' && end_date != '') {
+                $('#myTable').DataTable().destroy();
+                fetch_data('yes', start_date, end_date);
+            } else {
+                alert("{{gameReport.both_date_required}}");
+            }
+        });
+
+
+
+        //Group Hall Name Change Listener
+        $('.groupHall').on('change', function () {
+            let value = $(this).val();
+            console.log("groupHall selection", value);
+            $(".hallName > option").each(function () {
+                if (this.value !== '') {
+                    $(this).remove();
+                } else {
+                    $(this).attr('selected', true);
+                }
+            });
+            if (value == "") {
+                $('hallName').prop('disabled', true);
+            } else {
+                //Load Hall DropDown Options
+                loadHalls(value);
+            }
+        });
+
+        //When Filter Is Reset
+        $('#reset').on("click", function (e) {
+            if (role == "admin") {
+                $('#groupHall option[value=""]').prop('selected', true);
+                $('#groupHall').trigger("change");
+                $('#gameType option:first').prop('selected',true);
+            }else{
+                $('#gameType option:first').prop('selected',true);
+            }
+            searchTimeOut = setTimeout(() => {
+                clearTimeout();
+                $('#myTable').DataTable().destroy();
+                let start_date = $('#start_date').val();
+                let end_date = $('#end_date').val();
+                fetch_data('yes', start_date, end_date);
+            }, 500);
+        });
+
+        
+
+        //Load Group Halls
+        function loadGroupHalls() {
+            console.log("loading group halls");
+            $.ajax({
+                type: 'GET',
+                url: host + "/getAllGroupHalls",
+                success: function (resultData) {
+                    console.log("List of GroupHalls", resultData);
+                    if (resultData.status == 'success') {
+                        console.log(resultData);
+                        if (resultData.groups.length) {
+                            for (const val of resultData.groups) {
+                                $('.groupHall').append($(document.createElement('option')).prop({
+                                    value: val._id,
+                                    text: val.name
+                                }));
+                            }
+                        }
+                    } else {
+                        console.log("something went wrong");
+                    }
+                }
+            });
+
+        }
+
+        // $(win.document.body).find('thead').prepend('<div class="header-print">' + $('#dt-header').val() + '</div>');
+
+
+
+        //Load Halls
+        function loadHalls(value) {
+            console.log("loading halls", value);
+            $.ajax({
+                type: 'GET',
+                url: host + "/getHalls",
+                data: {
+                    id: value
+                },
+                success: function (resultData) {
+                    console.log("List of Halls", resultData);
+                    if (resultData.status == 'success') {
+                        console.log(resultData);
+                        if (resultData.halls.length) {
+                            for (const val of resultData.halls) {
+                                $('.hallName').append($(document.createElement('option')).prop({
+                                    value: val._id,
+                                    text: val.name
+                                }));
+                            }
+                        }
+                        $('.hallName').prop('disabled', false);
+                    } else {
+                        console.log("something went wrong");
+                    }
+                }
+            });
+
+        }
+
+
+        //Table Handler
+        function fetch_data(is_date_search, start_date = '', end_date = '') {
+         
+            $('#myTable').DataTable({
+                "searching": false,
+                "oLanguage": {
+                    "sProcessing": "<img style='width:50px; height:50px;' src='admin/loading.gif' />",
+                    "sLengthMenu": "{{gameReport.show}} _MENU_ {{gameReport.entries}}",
+                    "oPaginate": {
+                        sPrevious: "{{ gameReport.previous }}",
+                        sNext: "{{ gameReport.next }}"
+                    },
+                    "sEmptyTable": "{{gameReport.no_data_available_in_table}}",
+                    "sInfo": "{{gameReport.showing}} _START_ to _END_ of _TOTAL_ {{gameReport.entries}}",
+                    "sInfoEmpty": "{{gameReport.showing}} 0 to 0 of 0 {{gameReport.entries}}"
+                },
+                // "scrollX": true,
+                // "scrollY": '800px',
+                // "scrollCollapse": true,
+                "paging": false,
+                "processing": true,
+                "serverSide": true,
+                "ordering": false,
+                "autoWidth": true,
+                "dom": 'Bfrti',
+                "buttons": [
+                    {
+                        extend: 'print',
+                        footer: true,
+                        customize: win => exportFormationPDF(win)
+                    },
+                    { extend: 'excelHtml5',
+                      footer: true,
+                      header: true,
+                      customize : function (xlsx) {
+                            const sheet = xlsx.xl.worksheets['sheet1.xml'];
+
+                            let complexHeaders =  [{ value: '-', colspan: 3 }, { value: 'Game 1', colspan: 5 }, { value: 'Game 2', colspan: 4   }, { value: 'Game 3', colspan: 4 }, { value: 'Game 4', colspan: 4 }, { value: 'Game 5', colspan: 4 }]
+
+                            // Helper function to get the cell reference based on column index and header row height
+                            function getCellRef(columnIndex, headerRowHeight) {
+                                let letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                                let col = columnIndex;
+                                let ref = '';
+
+                                while (col >= 0) {
+                                    ref = letters[col % 26] + ref;
+                                    col = Math.floor(col / 26) - 1;
+                                }
+
+                                return ref + headerRowHeight;
+                            }
+
+                          // Create complex header using XML
+                          let skipVal = 0
+                          const xmlHeaderRow = '<row r="2">' +
+                              complexHeaders.map(function (cellObj, index) {
+                                  if (cellObj.value) {
+                                    let cellRef = getCellRef(index+skipVal, 2);
+                                    let cellRange = getCellRef(cellObj.colspan, 2);
+                                    skipVal += cellObj.colspan
+                                    return '<c r="' + cellRef + '" t="inlineStr" ><is><t>' + cellObj.value + '</t></is></c>';
+                                  } else {
+                                      return '';
+                                  }
+                              }).join('') +
+                              '</row>';
+
+                          // Insert complex header below the title row (row index 1)
+                          let titleRow = sheet.getElementsByTagName('row')[0];
+                          titleRow.insertAdjacentHTML('afterend', xmlHeaderRow);
+                          // Apply merge cells for complex headers
+                          complexHeaders.forEach(function (cellObj, index) {
+                              if (cellObj.value) {
+                                  var cellRef = getCellRef(index, 2);
+                                  var cellRange = getCellRef(index + cellObj.colspan - 1, 2);
+                                  sheet.getElementsByTagName('mergeCells')[0].insertAdjacentHTML('beforeend', '<mergeCell ref="' + cellRef + ':' + cellRange + '"/>');
+                              }
+                          });
+                          // Get all data rows
+                          let dataRows = sheet.getElementsByTagName('row');
+                          let rowIndex = 2; // Start with the custom header row
+                          let headerRowCount = complexHeaders.length;
+
+                          // Update the "r" attribute for existing data rows and cells
+                          for (let i = 1; i < dataRows.length; i++) {
+                              dataRows[i].setAttribute('r', (1 + i).toString());
+                              let cells = dataRows[i].getElementsByTagName('c');
+                              for (let j = 0; j < cells.length; j++) {
+                                  let cell = cells[j];
+                                  let address = cell.getAttribute('r');
+                                  let rowNumber = parseInt(address.match(/\d+/)[0]);
+                                  cell.setAttribute('r', getCellRef(j, 1 + i));
+                              }
+                          }
+                          dataRows[1].innerHTML = '<c r="A2" t="inlineStr"><is><t>-</t></is></c><c r="D2" t="inlineStr"><is><t>Game 1</t></is></c><c r="I2" t="inlineStr"><is><t>Game 2</t></is></c><c r="M2" t="inlineStr"><is><t>Game 3</t></is></c><c r="Q2" t="inlineStr"><is><t>Game 4</t></is></c><c r="U2" t="inlineStr"><is><t>Game 5</t></is></c>';
+                            let mergeString = '<mergeCell xmlns="" ref="A1:X1"/><mergeCell ref="A2:C2"/><mergeCell ref="D2:H2"/><mergeCell ref="I2:L2"/><mergeCell ref="M2:P2"/><mergeCell ref="Q2:T2"/><mergeCell ref="U2:X2"/><mergeCell ref="A8:C8"/>'
+                            let merger = sheet.getElementsByTagName('mergeCells')[0];
+                            merger.innerHTML = mergeString;
+                            console.log(dataRows, merger);
+                        }
+                    }
+                ],
+                "ajax": {
+                    url: host + "/getHallReports",
+                    type: "GET",
+                    data: {
+                        start_date: start_date,
+                        end_date: end_date,
+                        groupHall: $('.groupHall').val() ? $('.groupHall').val() : '',
+                        hall: $('.hallName').val() ? $('.hallName').val() : '',
+                        playerType: $("#gameType").val()
+                    },
+                    "dataSrc": function (json) {
+                        let [totalOMS1, totalOMS2, totalOMS3, totalOMS4, totalOMS5, totalElvisReplaceAmount1, totalUTD1, totalUTD2, totalUTD3, totalUTD4, totalUTD5, totalPayout1, totalPayout2, totalPayout3, totalPayout4, totalPayout5, totalRES1, totalRES2, totalRES3, totalRES4, totalRES5] = new Array(21).fill(0);
+                        for (let i = 0; i < json.data.length; i++) {
+                           totalOMS1 += json.data[i].game1.OMS;
+                           totalOMS2 += json.data[i].game2.OMS;
+                           totalOMS3 += json.data[i].game3.OMS;
+                           totalOMS4 += json.data[i].game4.OMS;
+                           totalUTD1 += json.data[i].game1.UTD;
+                           totalUTD2 += json.data[i].game2.UTD;
+                           totalUTD3 += json.data[i].game3.UTD;
+                           totalUTD4 += json.data[i].game4.UTD;
+
+                           totalOMS5 += json.data[i].game5.OMS;
+                           totalUTD5 += json.data[i].game5.UTD;
+                           
+                           
+                           //totalElvisReplaceAmount1 += json.data[i].game1.elvis_replace_amount;
+                           totalElvisReplaceAmount1 = (totalElvisReplaceAmount1 ?? 0) + (json.data[i]?.game1?.elvis_replace_amount ?? 0);
+                        }
+
+                        totalRES1 = (totalOMS1 + totalElvisReplaceAmount1)  - totalUTD1;
+                        totalRES2 = totalOMS2 - totalUTD2;
+                        totalRES3 = totalOMS3 - totalUTD3;
+                        totalRES4 = totalOMS4 - totalUTD4;
+                        totalRES5 = totalOMS5 - totalUTD5;
+
+                        totalPayout1 = (totalUTD1 * 100) / (totalOMS1 + totalElvisReplaceAmount1);
+                        totalPayout2 = (totalUTD2 * 100) / totalOMS2;
+                        totalPayout3 = (totalUTD3 * 100) / totalOMS3;
+                        totalPayout4 = (totalUTD4 * 100) / totalOMS4;
+                        totalPayout5 = (totalUTD5 * 100) / totalOMS5;
+
+                        if (isNaN(totalPayout1)) {
+                            totalPayout1 = 0;
+                        }
+                        if (isNaN(totalPayout2)) {
+                            totalPayout2 = 0;
+                        }
+                        if (isNaN(totalPayout3)) {
+                            totalPayout3 = 0;
+                        }
+                        if (isNaN(totalPayout4)) {
+                            totalPayout4 = 0;
+                        }
+                        if (isNaN(totalPayout5)) {
+                            totalPayout5 = 0;
+                        }
+                        // console.log("Footer Data", totalOMS, totalUTD, resPageTotal, parseFloat(resPageTotal).toFixed(2));
+                        // // // Update footer
+                        $('.oms1').text(parseFloat(totalOMS1).toFixed(2));
+                        $('.elvisreplace1').text(parseFloat(totalElvisReplaceAmount1).toFixed(2));
+                        $('.utd1').text(parseFloat(totalUTD1).toFixed(2));
+                        $('.payout1').text(parseFloat(totalPayout1).toFixed(2));
+                        $('.res1').text(parseFloat(totalRES1).toFixed(2));
+                        $('.oms2').text(parseFloat(totalOMS2).toFixed(2));
+                        $('.utd2').text(parseFloat(totalUTD2).toFixed(2));
+                        $('.payout2').text(parseFloat(totalPayout2).toFixed(2));
+                        $('.res2').text(parseFloat(totalRES2).toFixed(2));
+                        $('.oms3').text(parseFloat(totalOMS3).toFixed(2));
+                        $('.utd3').text(parseFloat(totalUTD3).toFixed(2));
+                        $('.payout3').text(parseFloat(totalPayout3).toFixed(2));
+                        $('.res3').text(parseFloat(totalRES3).toFixed(2));
+                        $('.oms4').text(parseFloat(totalOMS4).toFixed(2));
+                        $('.utd4').text(parseFloat(totalUTD4).toFixed(2));
+                        $('.payout4').text(parseFloat(totalPayout4).toFixed(2));
+                        $('.res4').text(parseFloat(totalRES4).toFixed(2));
+
+                        $('.oms5').text(parseFloat(totalOMS5).toFixed(2));
+                        $('.utd5').text(parseFloat(totalUTD5).toFixed(2));
+                        $('.payout5').text(parseFloat(totalPayout5).toFixed(2));
+                        $('.res5').text(parseFloat(totalRES5).toFixed(2));
+
+                        return json.data;
+                    }
+                },
+                "columns": [{
+                    "data": "groupName"
+                }, {
+                    "data": "hallName"
+                }, {
+                    "data": "agents",
+                    render : function (data, type, row, meta) {
+                        let $p = $('<p></p>');
+                        for (let index = 0; index < data.length; index++) {
+                           if (index > 0) {
+                            $p.append(`,<span>${data[index].name}</span>`)
+                           }else{
+                            $p.append(`<span>${data[index].name}</span>`)
+                           }
+                        }
+                        return $p.prop("outerHTML");
+                    }
+                }, {
+                    "data": null,
+                    render: function (data, type, row, meta) {
+                        return row.game1.OMS;
+                    }
+                }, {
+                    "data": null,
+                    render: function (data, type, row, meta) {
+                        return row.game1?.elvis_replace_amount ?? 0;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return row.game1.UTD;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        let oms = row.game1.OMS + (row.game1?.elvis_replace_amount ?? 0);
+                        let utd = row.game1.UTD;
+                        let result = 0;
+                        if (oms > 0 && utd > 0) {
+                            result = (utd * 100) / oms;
+                        }
+                        console.log("oms utd result", result);
+                        return parseFloat(result).toFixed(2);
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return parseFloat( (row.game1.OMS + (row.game1?.elvis_replace_amount ?? 0) ) - row.game1.UTD).toFixed(2);
+                    }
+                }, {
+                    "data": null,
+                    render: function (data, type, row, meta) {
+                        return row.game2.OMS;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return row.game2.UTD;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        let oms = row.game2.OMS;
+                        let utd = row.game2.UTD;
+                        let result = 0;
+                        if (oms > 0 && utd > 0) {
+                            result = (utd * 100) / oms;
+                        }
+                        console.log("oms utd result", result);
+                        return parseFloat(result).toFixed(2);
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return parseFloat(row.game2.OMS - row.game2.UTD).toFixed(2);
+                    }
+                }, {
+                    "data": null,
+                    render: function (data, type, row, meta) {
+                        return row.game3.OMS;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return row.game3.UTD;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        let oms = row.game3.OMS;
+                        let utd = row.game3.UTD;
+                        let result = 0;
+                        if (oms > 0 && utd > 0) {
+                            result = (utd * 100) / oms;
+                        }
+                        console.log("oms utd result", result);
+                        return parseFloat(result).toFixed(2);
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return parseFloat(row.game3.OMS - row.game3.UTD).toFixed(2);
+                    }
+                }, {
+                    "data": null,
+                    render: function (data, type, row, meta) {
+                        return row.game4.OMS;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return row.game4.UTD;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        let oms = row.game4.OMS;
+                        let utd = row.game4.UTD;
+                        let result = 0;
+                        if (oms > 0 && utd > 0) {
+                            result = (utd * 100) / oms;
+                        }
+                        console.log("oms utd result", result);
+                        return parseFloat(result).toFixed(2);
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return parseFloat(row.game4.OMS - row.game4.UTD).toFixed(2);
+                    }
+                },
+
+                {
+                    "data": null,
+                    render: function (data, type, row, meta) {
+                        return row.game5.OMS;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return row.game5.UTD;
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        let oms = row.game5.OMS;
+                        let utd = row.game5.UTD;
+                        let result = 0;
+                        if (oms > 0 && utd > 0) {
+                            result = (utd * 100) / oms;
+                        }
+                        console.log("oms utd result", result);
+                        return parseFloat(result).toFixed(2);
+                    }
+                }, {
+                    "data": null,
+                    "render": function (data, type, row) {
+                        return parseFloat(row.game5.OMS - row.game5.UTD).toFixed(2);
+                    }
+                }
+
+                ]
+            });
+        }
+        function exportFormationPDF(data) {
+            // console.log(data);
+            $(data.document.body).find('thead').prepend(' <tr>\
+                <th colspan="3" scope="colgroup"></th>\
+                <th colspan="5" scope="colgroup"style="text-align: center;">Game1</th>\
+                <th colspan="4" scope="colgroup"style="text-align: center;">Game2</th>\
+                <th colspan="4" scope="colgroup"style="text-align: center;">Game3</th>\
+                <th colspan="4" scope="colgroup"style="text-align: center;">Game4</th>\
+                <th colspan="4" scope="colgroup"style="text-align: center;">Game5</th>\
+            </tr>');
+        }
+    
+
+        // Order Data Table
+        fetch_order_data('yes', $('#start_date_order').val(), $('#end_date_order').val());
+        function fetch_order_data(is_date_search, start_date = '', end_date = '') {
+         
+         $('#orderTable').DataTable({
+            "searching": false,
+            "oLanguage": {
+                "sProcessing": "<img style='width:50px; height:50px;' src='admin/loading.gif' />",
+                "sLengthMenu": "{{gameReport.show}} _MENU_ {{gameReport.entries}}",
+                "oPaginate": {
+                    sPrevious: "{{ gameReport.previous }}",
+                    sNext: "{{ gameReport.next }}"
+                },
+                "sEmptyTable": "{{gameReport.no_data_available_in_table}}",
+                "sInfo": "{{gameReport.showing}} _START_ to _END_ of _TOTAL_ {{gameReport.entries}}",
+                "sInfoEmpty": "{{gameReport.showing}} 0 to 0 of 0 {{gameReport.entries}}"
+            },
+             // "scrollX": true,
+             // "scrollY": '800px',
+             // "scrollCollapse": true,
+             //"paging": true,
+             "processing": true,
+             "serverSide": true,
+             "ordering": false,
+             "autoWidth": true,
+             "pageLength": 10,
+             "ajax": {
+                 url: host + "/getHallOrderReports",
+                 type: "GET",
+                 data: {
+                     start_date: start_date,
+                     end_date: end_date,
+                     groupHall: $('#groupHallOrder').val() ? $('#groupHallOrder').val() : '',
+                     hall: $('#hallNameOrder').val() ? $('#hallNameOrder').val() : '',
+                 },
+                //  "dataSrc": function (json) {console.log("json data", json)
+                //     let [cashValue, cardValue, customerNumberValue, totalOrderValue] = new Array(4).fill(0);
+                    
+                //     for (let i = 0; i < json.data.length; i++) {
+                //         cashValue += json.data[i].cash;
+                //         cardValue += json.data[i].card;
+                //         customerNumberValue += json.data[i].customerNumber;
+                //         totalOrderValue += json.data[i].total;
+                //     }
+
+                //     $('.cashValue').text(cashValue);
+                //     $('.cardValue').text(cardValue);
+                //     $('.customerNumberValue').text(customerNumberValue);
+                //     $('.totalOrderValue').text(totalOrderValue);
+                
+                //     return json.data;
+                //  }
+             },
+             
+             "columns": [ { data: 'date' }, 
+                    { data: 'groupHallName' },
+                    { data: 'hallName' },
+                    { data: 'agentName' },
+                    { data: 'cash' },
+                    { data: 'card' },
+                    { data: 'customerNumber' },
+                    { data: 'total' }]
+            });
+        }
+
+        $('#searchOrder').click(function () {
+            let start_date = $('#start_date_order').val();
+            let end_date = $('#end_date_order').val();
+            if (start_date != '' && end_date != '') {
+                $('#orderTable').DataTable().destroy();
+                fetch_order_data('yes', start_date, end_date);
+            } else {
+                alert("Both Date is Required");
+            }
+        });
+
+        $('#resetOrder').on("click", function (e) {
+            if (role == "admin") {
+                $('#groupHallOrder option[value=""]').prop('selected', true);
+                $('#groupHallOrder').trigger("change");
+            }
+            searchTimeOut = setTimeout(() => {
+                clearTimeout();
+                $('#orderTable').DataTable().destroy();
+                let start_date = $('#start_date_order').val();
+                let end_date = $('#end_date_order').val();
+                fetch_order_data('yes', start_date, end_date);
+            }, 500);
+        });
+
+    });
+</script>
+{% endblock %}

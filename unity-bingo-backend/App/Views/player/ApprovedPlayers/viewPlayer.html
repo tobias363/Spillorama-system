@@ -1,0 +1,1227 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style>
+    input[type=radio] {
+        margin: 10px 0 0 !important;
+    }
+
+    /* Style the SweetAlert input type=date */
+    .sweet-alert input[type="date"] {
+        padding: 8px;
+        font-size: 14px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        width: 200px;
+        margin: 0;
+        display: inline-block;
+        background: #fff;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        transition: border-color 0.3s, box-shadow 0.3s;
+    }
+
+    .sweet-alert input[type="date"]:focus {
+        border-color: #e69a2a;
+        box-shadow: 0 0 5px rgba(230, 154, 42, 0.5);
+        outline: none;
+    }
+
+    /* Style for date input container */
+    .sweet-alert .date-input-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin: 15px 0;
+    }
+
+    .sweet-alert .date-input-container label {
+        font-size: 14px;
+        color: #333;
+        margin: 0;
+        white-space: nowrap;
+    }
+
+    /* Style for error message */
+    .sweet-alert .sa-error-container {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 4px;
+        color: #721c24;
+        margin: 10px auto;
+        padding: 10px;
+        width: 80%;
+        text-align: center;
+        display: none;
+    }
+
+    .sweet-alert .sa-error-container.show {
+        display: block;
+    }
+
+    /* Hide the X icon and its container */
+    .sweet-alert .sa-error-container .icon {
+        display: none !important;
+    }
+
+    /* Adjust error message position */
+    .sweet-alert .sa-error-container .sa-error-container-text {
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+    }
+
+    /* Optional: Tweak confirm/cancel buttons spacing if needed */
+    .sweet-alert .sa-button-container button {
+        min-width: 100px;
+    }
+</style>
+
+<!-- Main Content -->
+<div class="page-wrapper">
+    <div class="container-fluid">
+
+        <!-- Title -->
+        <section class="content-header">
+            <h1>{{player.view_player_details}}</h1>
+            <ol class="breadcrumb">
+                <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{player.dashboard}}</a></li>
+                <li class="active">{{player.view_player_details}}</li>
+            </ol>
+        </section>
+        <!-- /Title -->
+        {% include "partition/notification.html" %}
+        <section class="content">
+            <!-- Row -->
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading">
+                            <div class="pull-left">
+                                <h6 class="panel-title txt-dark">{{player.view_player_details}}</h6>
+                            </div>
+                            <div class="clearfix"></div>
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive">
+                                        <form method="POST" action="#" class="form-horizontal">
+                                            <table border="0" class="table display  pb-30">
+                                                <div class="col-sm-8">
+                                                    <div class="panel-wrapper collapse in">
+                                                        <div class="panel-body">
+                                                            <input type="text" class="playerId" value="{{Player._id}}" hidden>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="username">{{player.photo_id}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    {% for photos in Player.profilePic%}
+                                                                        <img src="{{photos}}" style="width: 100px;height: 100px;margin-right: 10px;">
+                                                                    {%endfor%}
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="customerNumber">{{player.customer_number}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.customerNumber}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="username">{{player.username}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.username}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="email">{{player.emailId}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.email}}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="mobile">{{player.phone_number}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.phone}}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{player.firstname}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.nickname}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4">{{player.date_of_birth}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{DOB}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{player.bank_ac_no}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.bankId}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">Group Hall:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.groupHall.name}}">
+                                                                </div>
+                                                            </div> -->
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{player.hall}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <!-- <input type="text" class="form-control" readonly disabled required value="{{Player.hall.name}}"> -->
+                                                                    <select name="hallId" class="form-control" id="hallId" multiple readonly disabled>
+                                                                        {% for approvedHall in Player.approvedHalls %}
+                                                                            {% if approvedHall.status == "Approved" %}
+                                                                            <option {{ "selected" }} value={{approvedHall.id}}  class="select-{{approvedHall.id}}">{{ approvedHall.name }}</option>
+                                                                            {% endif %}
+                                                                        {% endfor %}
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{player.approved}} {{player.by}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.playerAgent.name}}">  
+                                                                    <!-- {{Player.hall.agent.name}} -->
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">Available Balance (In Points):</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{(Player.points|float).toFixed(2)}}">
+                                                                </div>
+                                                            </div> -->
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{player.available_balance_in}}:</label>
+                                                                <div class="col-sm-8">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{(Player.walletAmount|float).toFixed(2)}}">
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- PLayer Address Details -->
+                                                            <!-- Residential Address in Norway Question -->
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-4">{{player.do_you_have_address_in_norway}}:</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" name="isResidentialAddressInNorway" value="yes"
+                                                                        {% if Player.addressDetails.residentialAddressInNorway == true %} checked {% endif %}
+                                                                        disabled
+                                                                    >
+                                                                    <label for="html">{{player.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" name="isResidentialAddressInNorway" value="no"
+                                                                        {% if Player.addressDetails.residentialAddressInNorway == false %} checked {% endif %}
+                                                                        disabled
+                                                                    >
+                                                                    <label for="html">{{player.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- Norwegian Address Fields (shown when Yes is selected) -->
+                                                            <div class="norwegian-address-fields" style="display: none;">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="city">{{player.city}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" class="form-control" id="city" name="city" placeholder="Enter City" value="{{Player.addressDetails.city}}" data-validation="required" disabled>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="zipCode">{{player.zip_code}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" class="form-control" id="zipCode" name="zipCode" placeholder="Enter ZIP Code" value="{{Player.addressDetails.zipCode}}" data-validation="required" disabled>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="address">{{player.address}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <textarea class="form-control" id="address" name="address" placeholder="Enter Address" data-validation="required" disabled rows="3">{{Player.addressDetails.address}}</textarea>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- International Address Fields (shown when No is selected) -->
+                                                            <div class="international-address-fields" style="display: none;">
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-10 col-sm-4" for="country">{{player.country}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <select class="form-control" id="country" name="country" data-validation="required" disabled>
+                                                                            <option>{{Player.addressDetails.country}}</option>
+                                                                        </select>
+                                                                    </div>
+                                                                </div>
+
+                                                                 <!-- Income Sources -->
+                                                                 <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{player.type_of_income_used_to_play}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="salary" 
+                                                                                    {% if Player.addressDetails.incomeSources.salary %} checked {% endif %}
+                                                                                    data-validation="checkbox_group"
+                                                                                    data-validation-qty="min1"
+                                                                                    disabled
+                                                                                >
+                                                                                {{player.salary}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="propertySaleOrLease" 
+                                                                                    {% if Player.addressDetails.incomeSources.propertySaleOrLease %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{player.sale_lease_property}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="stocks" 
+                                                                                    {% if Player.addressDetails.incomeSources.stocks %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{player.stocks}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="socialSupport" 
+                                                                                    {% if Player.addressDetails.incomeSources.socialSupport %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{player.social_security_pension_support_scheme}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="giftsOrInheritance" 
+                                                                                    {% if Player.addressDetails.incomeSources.giftsOrInheritance %} checked {% endif %}
+                                                                                    disabled
+                                                                                >  
+                                                                                {{player.gift_inheritance}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="other" 
+                                                                                    {% if Player.addressDetails.incomeSources.other %} checked {% endif %}
+                                                                                    disabled
+                                                                                >
+                                                                                {{player.other}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <!-- Validation message -->
+                                                                        <div id="income-error" class="text-danger" style="display: none;">
+                                                                            Please select at least one income source.
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <!-- PLayer Address Details -->
+
+                                                            <!-- check for high risk player -->
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{player.is_the_player_high_risk}}?</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="yes" name="HR" value="yes" {{ "checked" if Player.HR == 'yes' else "" }} disabled>
+                                                                    <label for="html">{{player.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="no" name="HR" value="no" {{ "checked" if Player.HR == 'no' else "" }} disabled>
+                                                                    <label for="html">{{player.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                            <!-- Player Risk Category and Comment -->
+                                                            {% if Player.HR == 'yes' %} 
+                                                                <div id="riskCategorySection">   
+                                                                    {% if Agent.role == 'admin' or (Agent.role == 'agent' and permissions.view_risk_categoryFlag) %}
+                                                                        <div class="form-group">
+                                                                            <label class="control-label mb-8 col-sm-4" for="riskCategory">{{player.risk_category}}:</label>
+                                                                            <div class="col-sm-8">
+                                                                                <select class="form-control" id="riskCategory" name="riskCategory" readonly disabled>
+                                                                                    <option value="Low" {% if Player.riskCategory == 'Low' %}selected{% endif %}>{{player.low}}</option>
+                                                                                    <option value="Medium" {% if Player.riskCategory == 'Medium' %}selected{% endif %}>{{player.medium}}</option>
+                                                                                    <option value="High" {% if Player.riskCategory == 'High' %}selected{% endif %}>{{player.high}}</option>
+                                                                                </select>
+                                                                            </div>
+                                                                        </div>
+                                                                    {% endif %}
+                                                                    {% if Agent.role == 'admin' or (Agent.role == 'agent' and permissions.view_risk_commentFlag) %}
+                                                                        <div class="form-group" id="riskCommentGroup">
+                                                                            <label class="control-label mb-8 col-sm-4" for="riskComment">{{player.risk_comment}}:</label>
+                                                                            <div class="col-sm-8">
+                                                                                <textarea class="form-control" id="riskComment" name="riskComment" rows="3" readonly disabled>{{ Player.riskComment }}</textarea>
+                                                                            </div>
+                                                                        </div>
+                                                                    {% endif %}
+                                                                </div>    
+                                                            {% endif %}
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-8 col-sm-4" for="nickname">{{player.is_the_player_pep}}</label>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="yes" name="PEP" value="yes" {{ "checked" if Player.PEP == 'yes' else "" }} disabled>
+                                                                    <label for="html">{{player.yes}}</label>
+                                                                </div>
+                                                                <div class="col-sm-2">
+                                                                    <input type="radio" id="no" name="PEP" value="no" {{ "checked" if Player.PEP == 'no' else "" }} disabled>
+                                                                    <label for="html">{{player.no}}</label>
+                                                                </div>
+                                                            </div>
+
+                                                             <!-- PEP Details Section -->
+                                                             <div id="pep-details" class="{% if Player.PEP == 'no' %}hidden{% endif %}">
+                                                
+                                                                <!-- Residential Address in Norway -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{player.do_you_have_address_in_norway}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <label>
+                                                                            <input type="radio" name="hasNorwegianAddress" value="yes"
+                                                                                {% if Player.pepDetails.residentialAddressInNorway == true %} checked {% endif %}
+                                                                                {% if not Player.pepDetails.residentialAddressInNorway %} checked {% endif %} disabled>
+                                                                            {{player.yes}}
+                                                                        </label>
+                                                                        <label>
+                                                                            <input type="radio" name="hasNorwegianAddress" value="no"
+                                                                                {% if Player.pepDetails.residentialAddressInNorway == false %} checked {% endif %} disabled>
+                                                                            {{player.no}}
+                                                                        </label>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Name of PEP -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{player.name_of_pep}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="text" name="nameOfPEP" class="form-control"
+                                                                            value="{{ Player.pepDetails.name or '' }}"
+                                                                            data-validation="required"
+                                                                            disabled>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Relationship to PEP -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{player.relation_with_pep}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <textarea name="relationshipToPEP" class="form-control" rows="3"
+                                                                            data-validation="required"
+                                                                            disabled>{{ Player.pepDetails.relationship or '' }}</textarea>
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Date of Birth -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{player.date_of_birth}}:</label>
+                                                                    <div class="col-sm-8">
+                                                                        <input type="date" name="dateOfBirth" class="form-control"
+                                                                            value="{{ pepdateofBirth  }}"
+                                                                            data-validation="date required"
+                                                                            disabled
+                                                                            max="{{ today }}">
+                                                                    </div>
+                                                                </div>
+                                                
+                                                                <!-- Income Sources -->
+                                                                <div class="form-group">
+                                                                    <label class="control-label col-sm-4">{{player.type_of_income_used_to_play}}</label>
+                                                                    <div class="col-sm-8">
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="salary" 
+                                                                                    {% if Player.pepDetails.incomeSources.salary %} checked {% endif %}
+                                                                                    data-validation="checkbox_group"
+                                                                                    data-validation-qty="min1" disabled>
+                                                                                    {{player.salary}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="propertySaleOrLease" 
+                                                                                    {% if Player.pepDetails.incomeSources.propertySaleOrLease %} checked {% endif %} disabled>
+                                                                                    {{player.sale_lease_property}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="stocks" 
+                                                                                    {% if Player.pepDetails.incomeSources.stocks %} checked {% endif %} disabled>
+                                                                                    {{player.stocks}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="socialSupport" 
+                                                                                    {% if Player.pepDetails.incomeSources.socialSupport %} checked {% endif %} disabled>
+                                                                                    {{player.social_security_pension_support_scheme}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="giftsOrInheritance" 
+                                                                                    {% if Player.pepDetails.incomeSources.giftsOrInheritance %} checked {% endif %} disabled>
+                                                                                    {{player.gift_inheritance}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <div class="checkbox">
+                                                                            <label>
+                                                                                <input type="checkbox" name="income[]" value="other" 
+                                                                                    {% if Player.pepDetails.incomeSources.other %} checked {% endif %} disabled>
+                                                                                    {{player.other}}
+                                                                            </label>
+                                                                        </div>
+                                                                        <!-- Validation message -->
+                                                                        <div id="income-error" class="text-danger" style="display: none;">
+                                                                            Please select at least one income source.
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                
+                                                            </div>
+
+                                                            <!--<div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2" for="nickname">Group Hall:</label>
+                                                                <div class="col-sm-10">
+                                                                    {% for row in Player.hall %}
+                                                                    <p class="col-md-3">{{row.name}}</p>
+                                                                    {% endfor %}
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2" for="nickname">Hall:</label>
+                                                                <div class="col-sm-10">
+                                                                    {% for row in Player.hall %}
+                                                                    <p class="col-md-3">{{row.name}}</p>
+                                                                    {% endfor %}
+                                                                </div>
+                                                            </div>
+
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2" for="nickname">Assign Access:</label>
+                                                                <div class="col-sm-10">
+                                                                    <p class="col-md-1">{{assginAccess}}</p>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="form-group">
+                                                                <label class="control-label mb-10 col-sm-2">Status:</label>
+                                                                <div class="col-sm-10">
+                                                                    <input type="text" class="form-control" readonly disabled required value="{{Player.status}}">
+                                                                </div>
+                                                            </div> -->
+
+                                                            {# Player block rules only visible to super admin #}
+                                                            {% if Agent.role == 'admin' and Agent.isSuperAdmin %}
+                                                                <div class="form-group">
+                                                                    <label class="control-label mb-8 col-sm-4"
+                                                                        for="nickname">{{player.block_rules}}:</label>
+                                                                    <div class="col-sm-8">
+
+                                                                        <!-- Always render this alert and hide if there are rules -->
+                                                                        <div class="alert alert-info"
+                                                                            style="{% if existingBlockRules.length > 0 %}display: none;{% endif %}">
+                                                                            {{player.block_rule_not_found}}
+                                                                        </div>
+
+                                                                        {% if existingBlockRules.length > 0 %}
+                                                                            {% for rule in existingBlockRules %}
+                                                                            <div class="panel panel-default block-rule-panel" style="box-shadow: 0 1px 5px rgba(0,0,0,0.1);">
+                                                                                <div class="panel-heading" style="font-size: 18px; font-weight: bold;">
+                                                                                    {{ rule.hallName }}
+                                                                                    <span class="pull-right text-muted" style="font-size: 18px;">
+                                                                                        <span class="label label-warning">{{player.expiry_date}}: {{ rule.endDate | date('YYYY-MM-DD') }}</span>
+                                                                                    </span>
+                                                                                </div>
+                                                                                <div class="panel-body">
+                                                                                    <div style="font-size: 14px; margin-bottom: 8px;"><strong>{{player.games_blocked}}:</strong></div>
+                                                                                    <ul class="list-unstyled" style="margin-left: 15px; font-size: 16px;">
+                                                                                        {% for gt in rule.gameTypes %}
+                                                                                        <li style="margin-bottom: 5px;">
+                                                                                            <span class="label label-primary" style="font-size: 14px;">{{ gt.name }}</span>
+                                                                                            {% if gt.subTypes.length > 0 %}
+                                                                                                <small style="color: #555;">→ {{ gt.subTypes | join(', ') }}</small>
+                                                                                            {% endif %}
+                                                                                        </li>
+                                                                                        {% endfor %}
+                                                                                    </ul>
+                                                                                </div>
+                                                                            </div>
+                                                                            {% endfor %}
+                                                                        {% endif %}
+                                                                    </div>
+
+                                                                    </div>
+                                                                </div>
+                                                            {% endif %}
+
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <tr>
+                                                    <td colspan="2" style="padding-left: 25%;">
+                                                        <div class="pull-left">
+                                                            <a href="/player" class="btn btn-danger btn-flat">{{player.cancel}}</a>
+                                                            {% if not Player.isVerifiedByHall and editFlag %}
+                                                                <a class="btn btn-success btn-flat playerVerified" id="{{ Player._id }}" data-isVerified="{{Player.isVerifiedByHall}}" data-username="{{Player.username}}" style="cursor: pointer;">{{player.verify}}</a>
+                                                            {% endif %}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+
+        <!--<label class="control-label mb-8 col-sm-2">Choose a Game:-</label>
+        <select id="games" name="gamesList">
+                <option value="">Choose Game Type</option>
+                {% for item in DataOfGames %}
+                <option value="{{item._id}}">{{item.name}}</option>
+                {% endfor %}
+        </select>
+        <section id="gameHeader">
+        </section> -->
+        <!-- <section id="allGameDetails">
+            <div class="row">
+                <div class="col-sm-12">
+                    <div class="panel panel-default card-view">
+                        <div class="panel-heading" id="addGameID">
+                        </div>
+                        <div class="panel-wrapper collapse in">
+                            <div class="panel-body">
+                                <div class="table-wrap">
+                                    <div class="table-responsive" id="Game">
+
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section> -->
+
+        <!-- /Row -->
+    </div>
+</div>
+
+{% endblock %} {% block Jscript %}
+<script src="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.jquery.min.js"></script>
+<link href="https://cdn.rawgit.com/harvesthq/chosen/gh-pages/chosen.min.css" rel="stylesheet" />
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+<script>
+    $('#hallId').select2({
+        placeholder: "Select Hall Name",
+        allowClear: true
+    });
+
+    // Show or hide the PEP details section based on the selected value
+    $('input[name="PEP"]').on('change', function () {
+        const pepDetails = $('#pep-details');
+        if ($(this).val() === 'yes') {
+            pepDetails.removeClass('hidden');
+        } else {
+            pepDetails.addClass('hidden');
+        }
+    });
+
+    $('body').on('click', '.playerVerified', function (e) {
+        e.preventDefault();
+
+        const $this = $(this);
+        const id = $this.attr('id');
+        const isVerified = $this.attr('data-isVerified') === 'true';
+        const username = $this.attr('data-username');
+
+        const text = `{{player.do_you_want_to_verify_player}}: ${username}?<br><br>{{player.please_select_id_card_expiry_date}}`;
+        const confirmButtonText = isVerified ? "{{player.unverify}}" : "{{player.verify}}";
+
+        // Get tomorrow's date in YYYY-MM-DD format
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const minDate = tomorrow.toISOString().split('T')[0];
+
+        swal({
+            title: "{{player.are_you_sure}}?",
+            text: text,
+            type: "input",
+            inputType: "date",
+            showCancelButton: true,
+            confirmButtonColor: "#e69a2a",
+            confirmButtonText: confirmButtonText,
+            cancelButtonText: "{{player.cancel_button}}!",
+            closeOnConfirm: false,
+            closeOnCancel: true,
+            inputPlaceholder: "Select Date",
+            html: true
+        }, function (inputValue) {
+            if (inputValue === false) return false;
+
+            if (!inputValue) {
+                $('.sweet-alert .sa-error-container').html('<div class="sa-error-container-text">{{player.please_select_id_card_expiry_date}}</div>').addClass('show');
+                return false;
+            }
+
+            // Validate if selected date is tomorrow or later
+            const selectedDate = new Date(inputValue);
+            const checkDate = new Date();
+            checkDate.setHours(0, 0, 0, 0);
+            checkDate.setDate(checkDate.getDate() + 1);
+            if (selectedDate < checkDate) {
+                $('.sweet-alert .sa-error-container').html('<div class="sa-error-container-text">{{player.please_select_id_card_expiry_date_from_tomorrow_onward}}</div>').addClass('show');
+                return false;
+            }
+
+            $.ajax({
+                type: 'POST',
+                url: `${host}/player/verify/update`,
+                data: {
+                    playerId: id,
+                    idExpiryDate: inputValue
+                },
+                success: function (resultData) {
+                    $('.sweet-alert input').val('').hide();
+                    if (resultData.status === 'success') {
+                        $this.remove();
+                        swal("{{player.success}}!", resultData.message, "success");
+                    } else {
+                        swal("{{player.failed}}!", resultData.message, "error");
+                    }
+                },
+                error: function () {
+                    $('.sweet-alert input').val('').hide();
+                    swal("{{player.failed}}!", "{{player.something_went_wrong}}", "error");
+                }
+            });
+        });
+
+        // Re-style and restrict the input after the DOM is inserted
+        setTimeout(function () {
+            const input = $('.sweet-alert input[type="date"]');
+
+            input.attr('min', minDate); // restrict to tomorrow onward
+
+            input.css({
+                padding: '10px',
+                fontSize: '15px',
+                border: '1px solid #ccc',
+                borderRadius: '6px',
+                width: '100%',
+                maxWidth: '280px',
+                background: '#fff',
+                boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)',
+                boxSizing: 'border-box',
+                display: 'block',
+                margin: '10px auto'
+            });
+
+            // Remove error on input change
+            input.on('change', function () {
+                if (this.value) {
+                    $('.sweet-alert .sa-error-container').removeClass('show');
+                }
+            });
+        }, 100);
+
+        return false;
+    });
+
+    // check for player has residential address and manage fields accordingly
+    function handleAddressFieldsVisibility(value) {
+        if (value === 'yes') {
+            $('.norwegian-address-fields').show();
+            $('.international-address-fields').hide();
+        } else if (value === 'no') {
+            $('.norwegian-address-fields').hide();
+            $('.international-address-fields').show();
+        }
+    }
+
+    // Check on page load which radio is selected
+    const selectedValue = $('input[name="isResidentialAddressInNorway"]:checked').val();
+    if (selectedValue) {
+        handleAddressFieldsVisibility(selectedValue);
+    }
+
+    // $('#select1').change(function() {
+    //     var id = $("#select1 option:selected").val();
+    //     console.log("option", id);
+    //     $('#select2').val(id);
+    // });
+
+    // $('#select2').change(function() {
+    //     var id = $("#select2 option:selected").val();
+    //     console.log("option", id);
+    //     $('#select1').val(id);
+    // });
+
+
+    // $(document).ready(function() {
+
+    //     $("#gameHeader").hide();
+    //     $("#allGameDetails").hide();
+    //     $("#gamesInfo").hide();
+    //     // clear for internal content
+    //     $("#gameHeader").empty();
+    //     $("#addGameID").empty();
+    //     $("#myTable").empty();
+    //     $("#Game").empty();
+    //     $("#gameHeader").hide();
+    //     $("#allGameDetails").hide();
+
+    //     //Dropdown Wise Game Details Changes
+    //     $("#games").change(function() {
+
+    //         // clear for internal content
+    //         $("#gameHeader").empty();
+    //         $("#addGameID").empty();
+    //         $("#myTable").empty();
+    //         $("#Game").empty();
+    //         $("#gameHeader").hide();
+    //         $("#allGameDetails").hide();
+    //         $("#gamesInfo").hide();
+    //         // Game ID Select
+    //         var selectedValue = $("#games option:selected").val();
+    //         // console.log("option", selectedValue);
+
+    //         // if any pervious key store so localStorage do Clear this  key
+    //         localStorage.removeItem("selectedId");
+    //         localStorage.clear();
+
+    //         //localStorage Set
+    //         localStorage.setItem("selectedId", selectedValue);
+
+    //         if (selectedValue == "") { // if selectedValue is Blank
+    //             // clear for internal content
+    //             $("#gameHeader").empty();
+    //             $("#addGameID").empty();
+    //             $("#myTable").empty();
+    //             $("#Game").empty();
+    //             $("#gameHeader").hide();
+    //             $("#allGameDetails").hide();
+    //             $("#gamesInfo").hide();
+    //         } else {
+    //             gameDetailsGet(selectedValue);
+    //         }
+    //     }).val(function() {
+    //         //Previous Value get
+    //         var id = localStorage.getItem("selectedId");
+    //         //console.log("id", id);
+    //         if (id === null) {
+    //             $("#gameHeader").hide();
+    //             $("#allGameDetails").hide();
+
+    //             // clear for internal content
+    //             $("#gameHeader").empty();
+    //             $("#addGameID").empty();
+    //             $("#myTable").empty();
+    //             $("#Game").empty();
+    //             $("#gameHeader").hide();
+    //             $("#allGameDetails").hide();
+    //             $("#gamesInfo").hide();
+    //         } else {
+    //             gameDetailsGet(id);
+    //         }
+
+    //         return localStorage.getItem("selectedId");
+    //     });
+
+
+    //     function gameDetailsGet(values) {
+    //         var gameTypeId = values;
+    //         //console.log("values", gameTypeId);
+    //         $.ajax({
+    //             type: 'GET',
+    //             url: host + "/playerGameManagementDetailList/" + gameTypeId,
+    //             success: function(resultData) {
+    //                     console.log("resultData", resultData);
+    //                     if (resultData) {
+    //                         var gameData = resultData.gameData;
+
+    //                         //let htmlHeader = '<h1>' + gameData.name + ' Table</h1>';
+
+
+    //                         let htmlGameID = ' <div class="pull-left">\
+    //                                           <h2 class="panel-title txt-dark">' + gameData.name + ' </h2>\
+    //                                        </div>\
+    //                                        <div class="clearfix"></div>';
+
+
+    //                         var str = "";
+    //                         str += '<table id="myTable" class="table table-hover display  pb-30"><thead><tr>';
+    //                         for (var i = 0; i < resultData.theadField.length; i++) {
+    //                             str += '<th>' + resultData.theadField[i] + '</th>';
+    //                         }
+    //                         str += '</tr></thead><tbody></tbody></table>';
+
+    //                         //$("#gameHeader").append(htmlHeader);
+    //                         $("#addGameID").append(htmlGameID);
+    //                         $("#Game").append(str);
+    //                         $("#gameHeader").show();
+    //                         $("#allGameDetails").show();
+    //                         $("#gamesInfo").show();
+    //                         var gameType = gameData.type;
+    //                         //console.log("gameType::::::", gameType);
+    //                         var columns;
+    //                         var typeId = gameData._id;
+    //                         //console.log("typeId", typeId);
+    //                         if (gameType == "game_1") {
+    //                             columns = [{
+    //                                 "data": "gameNumber"
+    //                             }, {
+    //                                 "data": "gameType"
+    //                             }, {
+    //                                 "data": "gameStartDate",
+    //                                 render: function(data, type, row) {
+    //                                     let dt = new Date(row.gameStartDate);
+    //                                     let date = dt.getDate();
+    //                                     let month = parseInt(dt.getMonth() + 1);
+    //                                     let year = dt.getFullYear();
+    //                                     let hours = dt.getHours();
+    //                                     let minutes = dt.getMinutes();
+    //                                     let ampm = hours >= 12 ? 'pm' : 'am';
+    //                                     hours = hours % 12;
+    //                                     hours = hours ? hours : 12;
+    //                                     minutes = minutes < 10 ? '0' + minutes : minutes;
+    //                                     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    //                                     return createdAt;
+    //                                 }
+    //                             }, {
+    //                                 "data": "variantGame"
+    //                             }, {
+    //                                 "data": "ticketColorType"
+    //                             }, {
+    //                                 "data": "ticketNumber"
+    //                             }, {
+    //                                 "data": "amtCategory"
+    //                             }, {
+    //                                 "data": "previousBalance",
+    //                                 render: function(data, type, row) {
+    //                                     return Math.round(row.previousBalance);
+    //                                 }
+    //                             }, {
+    //                                 "data": "ticketPrice"
+    //                             }, {
+    //                                 "data": "winningPrice",
+    //                                 render: function(data, type, row) {
+    //                                     let html;
+    //                                     if (row.winningPrice == null) {
+    //                                         html = '--';
+    //                                     } else if (row.winningPrice == 0) {
+    //                                         html = '--';
+    //                                     } else {
+    //                                         html = row.winningPrice;
+    //                                     }
+    //                                     return html;
+    //                                 }
+    //                             }, {
+    //                                 "data": "afterBalance",
+    //                                 render: function(data, type, row) {
+    //                                     return Math.round(row.afterBalance);
+    //                                 }
+    //                             }, {
+    //                                 "data": "remark"
+    //                             }, {
+    //                                 "data": "createdAt",
+    //                                 render: function(data, type, row) {
+    //                                     let dt = new Date(row.createdAt);
+    //                                     let date = dt.getDate();
+    //                                     let month = parseInt(dt.getMonth() + 1);
+    //                                     let year = dt.getFullYear();
+    //                                     let hours = dt.getHours();
+    //                                     let minutes = dt.getMinutes();
+    //                                     let ampm = hours >= 12 ? 'pm' : 'am';
+    //                                     hours = hours % 12;
+    //                                     hours = hours ? hours : 12;
+    //                                     minutes = minutes < 10 ? '0' + minutes : minutes;
+    //                                     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    //                                     return createdAt;
+    //                                 }
+    //                             }, ];
+    //                         } else if (gameType == "game_2") {
+    //                             columns = [{
+    //                                 "data": "gameNumber"
+    //                             }, {
+    //                                 "data": "gameType"
+    //                             }, {
+    //                                 "data": "gameStartDate",
+    //                                 render: function(data, type, row) {
+    //                                     console.log("row", row);
+    //                                     let dt = new Date(row.gameStartDate);
+    //                                     let date = dt.getDate();
+    //                                     let month = parseInt(dt.getMonth() + 1);
+    //                                     let year = dt.getFullYear();
+    //                                     let hours = dt.getHours();
+    //                                     let minutes = dt.getMinutes();
+    //                                     let ampm = hours >= 12 ? 'pm' : 'am';
+    //                                     hours = hours % 12;
+    //                                     hours = hours ? hours : 12;
+    //                                     minutes = minutes < 10 ? '0' + minutes : minutes;
+    //                                     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    //                                     return createdAt;
+    //                                 }
+    //                             }, {
+    //                                 "data": "ticketNumber"
+    //                             }, {
+    //                                 "data": "amtCategory"
+    //                             }, {
+    //                                 "data": "previousBalance",
+    //                                 render: function(data, type, row) {
+    //                                     return Math.round(row.previousBalance);
+    //                                 }
+    //                             }, {
+    //                                 "data": "ticketPrice"
+    //                             }, {
+    //                                 "data": "winningPrice",
+    //                                 render: function(data, type, row) {
+    //                                     let html;
+    //                                     if (row.winningPrice == null) {
+    //                                         html = '--';
+    //                                     } else {
+    //                                         html = row.winningPrice;
+    //                                     }
+    //                                     return html;
+    //                                 }
+    //                             }, {
+    //                                 "data": "afterBalance",
+    //                                 render: function(data, type, row) {
+    //                                     return Math.round(row.afterBalance);
+    //                                 }
+    //                             }, {
+    //                                 "data": "remark"
+    //                             }, {
+    //                                 "data": "createdAt",
+    //                                 render: function(data, type, row) {
+    //                                     let dt = new Date(row.createdAt);
+    //                                     let date = dt.getDate();
+    //                                     let month = parseInt(dt.getMonth() + 1);
+    //                                     let year = dt.getFullYear();
+    //                                     let hours = dt.getHours();
+    //                                     let minutes = dt.getMinutes();
+    //                                     let ampm = hours >= 12 ? 'pm' : 'am';
+    //                                     hours = hours % 12;
+    //                                     hours = hours ? hours : 12;
+    //                                     minutes = minutes < 10 ? '0' + minutes : minutes;
+    //                                     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    //                                     return createdAt;
+    //                                 }
+    //                             }, ];
+    //                         } else if (gameType == "game_3") {
+    //                             columns = [{
+    //                                 "data": "gameNumber"
+    //                             }, {
+    //                                 "data": "gameType"
+    //                             }, {
+    //                                 "data": "gameStartDate",
+    //                                 render: function(data, type, row) {
+    //                                     let dt = new Date(row.gameStartDate);
+    //                                     let date = dt.getDate();
+    //                                     let month = parseInt(dt.getMonth() + 1);
+    //                                     let year = dt.getFullYear();
+    //                                     let hours = dt.getHours();
+    //                                     let minutes = dt.getMinutes();
+    //                                     let ampm = hours >= 12 ? 'pm' : 'am';
+    //                                     hours = hours % 12;
+    //                                     hours = hours ? hours : 12;
+    //                                     minutes = minutes < 10 ? '0' + minutes : minutes;
+    //                                     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    //                                     return createdAt;
+    //                                 }
+    //                             }, {
+    //                                 "data": "ticketNumber"
+    //                             }, {
+    //                                 "data": "amtCategory"
+    //                             }, {
+    //                                 "data": "previousBalance",
+    //                                 render: function(data, type, row) {
+    //                                     return Math.round(row.previousBalance);
+    //                                 }
+    //                             }, {
+    //                                 "data": "ticketPrice"
+    //                             }, {
+    //                                 "data": "winningPrice",
+    //                                 render: function(data, type, row) {
+    //                                     let html;
+    //                                     if (row.winningPrice == null) {
+    //                                         html = '--';
+    //                                     } else {
+    //                                         html = row.winningPrice;
+    //                                     }
+    //                                     return html;
+    //                                 }
+    //                             }, {
+    //                                 "data": "afterBalance",
+    //                                 render: function(data, type, row) {
+    //                                     return Math.round(row.afterBalance);
+    //                                 }
+    //                             }, {
+    //                                 "data": "remark"
+    //                             }, {
+    //                                 "data": "createdAt",
+    //                                 render: function(data, type, row) {
+    //                                     let dt = new Date(row.createdAt);
+    //                                     let date = dt.getDate();
+    //                                     let month = parseInt(dt.getMonth() + 1);
+    //                                     let year = dt.getFullYear();
+    //                                     let hours = dt.getHours();
+    //                                     let minutes = dt.getMinutes();
+    //                                     let ampm = hours >= 12 ? 'pm' : 'am';
+    //                                     hours = hours % 12;
+    //                                     hours = hours ? hours : 12;
+    //                                     minutes = minutes < 10 ? '0' + minutes : minutes;
+    //                                     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    //                                     return createdAt;
+    //                                 }
+    //                             }, ];
+    //                         } else if (gameType == "game_4") {
+    //                             columns = [{
+    //                                 "data": "gameNumber"
+    //                             }, {
+    //                                 "data": "gameType"
+    //                             }, {
+    //                                 "data": "gameStartDate",
+    //                                 render: function(data, type, row) {
+    //                                     let dt = new Date(row.gameStartDate);
+    //                                     let date = dt.getDate();
+    //                                     let month = parseInt(dt.getMonth() + 1);
+    //                                     let year = dt.getFullYear();
+    //                                     let hours = dt.getHours();
+    //                                     let minutes = dt.getMinutes();
+    //                                     let ampm = hours >= 12 ? 'pm' : 'am';
+    //                                     hours = hours % 12;
+    //                                     hours = hours ? hours : 12;
+    //                                     minutes = minutes < 10 ? '0' + minutes : minutes;
+    //                                     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    //                                     return createdAt;
+    //                                 }
+    //                             }, {
+    //                                 "data": "ticketNumber"
+    //                             }, {
+    //                                 "data": "amtCategory"
+    //                             }, {
+    //                                 "data": "previousBalance",
+    //                                 render: function(data, type, row) {
+    //                                     return Math.round(row.previousBalance);
+    //                                 }
+    //                             }, {
+    //                                 "data": "ticketPrice"
+    //                             }, {
+    //                                 "data": "winningPrice",
+    //                                 render: function(data, type, row) {
+    //                                     let html;
+    //                                     if (row.winningPrice == null) {
+    //                                         html = '--';
+    //                                     } else {
+    //                                         html = row.winningPrice;
+    //                                     }
+    //                                     return html;
+    //                                 }
+    //                             }, {
+    //                                 "data": "afterBalance",
+    //                                 render: function(data, type, row) {
+    //                                     return Math.round(row.afterBalance);
+    //                                 }
+    //                             }, {
+    //                                 "data": "remark"
+    //                             }, {
+    //                                 "data": "createdAt",
+    //                                 render: function(data, type, row) {
+    //                                     let dt = new Date(row.createdAt);
+    //                                     let date = dt.getDate();
+    //                                     let month = parseInt(dt.getMonth() + 1);
+    //                                     let year = dt.getFullYear();
+    //                                     let hours = dt.getHours();
+    //                                     let minutes = dt.getMinutes();
+    //                                     let ampm = hours >= 12 ? 'pm' : 'am';
+    //                                     hours = hours % 12;
+    //                                     hours = hours ? hours : 12;
+    //                                     minutes = minutes < 10 ? '0' + minutes : minutes;
+    //                                     let createdAt = date + '/' + month + '/' + year + ' ' + hours + ':' + minutes + ' ' + ampm;
+    //                                     return createdAt;
+    //                                 }
+    //                             }, ];
+    //                         }
+
+    //                         $(document).ready(function() {
+    //                             let orderCount =10;
+    //                             if(gameType == "game_1"){
+    //                                 orderCount =12;
+    //                             }
+    //                             var host = window.location.origin;
+    //                             var playerId = $('.playerId').attr('value');
+    //                             $('#myTable').DataTable({
+    //                                 "oLanguage": {
+    //                                     "sSearch": "Search GameID"
+    //                                 },
+    //                                 "scrollX": true,
+    //                                 "searching": true,
+    //                                 "processing": true,
+    //                                 "serverSide": true,
+    //                                 "order": [
+    //                                     [orderCount, "desc"]
+    //                                 ],
+    //                                 "columnDefs": [{
+    //                                     "targets": [10],
+    //                                     "visible": false
+    //                                 }, ],
+    //                                 "autoWidth": false,
+    //                                 "pageLength": 10,
+    //                                 "ajax": {
+    //                                     type: 'GET',
+    //                                     url: host + "/playerGetGameManagementDetailList",
+    //                                     data: {
+    //                                         gameType: gameType,
+    //                                         playerId: playerId
+    //                                     }
+    //                                 },
+    //                                 "columns": columns,
+    //                             });
+
+
+
+
+    //                             // Document over
+    //                         });
+    //                         // if end
+    //                     }
+    //                     //success end
+    //                 }
+    //                 // ajax end
+    //         });
+    //         // function end
+    //     }
+    //     //Document over
+
+
+
+
+    // });
+</script>
+{% endblock %}

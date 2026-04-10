@@ -1,0 +1,604 @@
+{% extends "partition/layout.html" %} {% block body %}
+<style type="text/css">
+  .btn-group-new>.btn,
+  .btn-new {
+    padding: 2px 83px;
+    font-size: 12px;
+    line-height: 1.5;
+    border-radius: 3px
+  }
+
+  .cst {
+    display: flex;
+    justify-content: flex-end;
+    gap: 20px;
+    align-items: flex-end;
+  }
+
+  .form-horizontal button {
+    width: 50px;
+  }
+
+  button#search,
+  button#filterReset {
+    min-width: 55px;
+  }
+.profile-edit {
+    width: 50% !important;
+    }
+</style>
+<!-- Main Content -->
+{% set action = "add" %}
+<div class="page-wrapper">
+  <div class="container-fluid">
+    <!-- Title -->
+    <section class="content-header">
+      <h1>{{products.product_management}} </h1>
+      <ol class="breadcrumb">
+        <li><a href="/dashboard"><i class="fa fa-dashboard"></i> {{products.dashboard}}</a></li>
+        <li class="active" href="/productList">{{products.product_management}}</li>
+      </ol>
+    </section>
+    <!-- /Title -->
+    {% include "partition/notification.html" %}
+    <!-- Row -->
+    <section class="content">
+
+      <!-- Search Filter Code Start -->
+
+      <div class="row">
+        <!-- <form id="filterForm">
+          <div class="box">
+            <div class="box-header">
+              <h3 class="box-title">Search By Filter</h3>
+            </div>
+            <div class="box-body">
+              <div class="row cst">
+                <div class="col-lg-4">
+                  <div class="cst">
+                    <div class="form-horizontal">
+                      <div class="input-group">
+                        <label for="fromDate">From Date :</label>
+                        <input type="date" class="dateFilter form-control" name="fromDate" id="fromDate"
+                          onkeydown="return false">
+                      </div>
+                    </div>
+                    <div class="form-horizontal">
+                      <div class="input-group">
+                        <label for="fromDate">To Date :</label>
+                        <input type="date" class="dateFilter form-control" name="toDate" id="fromDate"
+                          onkeydown="return false">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-lg-8">
+                  <div class="cst">
+                    <div class="form-horizontal">
+                      <div class="input-group">
+                        <span class="input-group-addon"><i class="fa fa-filter" aria-hidden="true"></i></span>
+                        <select name="groupHall" class="form-control" id="groupHall">
+                          <option value="" selected="selected">Group of Hall Name
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="form-horizontal">
+                      <div class="input-group">
+                        <select name="hallName" class="form-control" id="hallName" disabled>
+                          <option value="" selected="selected">Hall Name</option>
+                        </select>
+                      </div>
+                    </div>
+                    <button type="button" class="pull-right btn btn-primary playersearch" id="search"><i
+                        class="fa fa-search"></i></button>
+                    <button type="reset" class="btn btn-primary pull-right clickreset" id="filterReset">Reset</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>-->
+        <div class="container-fluid">
+          <!-- The modal -->
+          <div class="modal fade" id="form-Modal" tabindex="-1" role="dialog" aria-labelledby="modalLabel"
+            aria-hidden="true" data-keyboard="false" data-backdrop="static">
+            <div class="modal-dialog" role="document">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                  </button>
+                  <h4 class="modal-title" id="modalLabel">{{products.add_product}}</h4>
+                </div>
+                <div class="modal-body">
+                  <div class="table-wrap">
+                    <div class="table-responsive">
+                      <form method="POST" name="product" class="form-horizontal addProduct" id="productForm" enctype="multipart/form-data">
+                        <!-- action="/addProduct" -->
+                        <table border="0" class="table display  pb-30">
+                          <div class="col-sm-12">
+                            <input type="hidden" id="productId" name="productId">
+                            <div class="form-group">
+                              <label class="control-label mb-10 col-sm-4" for="name">{{products.product_name}}:</label>
+                              <div class="col-sm-8">
+                                <input type="text" class="form-control" id="name" placeholder="Enter Name" required
+                                  name="name" value="{{product.name}}" data-validation="required" data-validation-error-msg = "Please Enter Name">
+                              </div>
+                            </div>
+                            <div class="form-group">
+                              <label class="control-label mb-10 col-sm-4" for="price">{{products.price}}:</label>
+                              <div class="col-sm-8">
+                                <input type="number" class="form-control" id="price" step="any" min="0" required
+                                  placeholder="Enter Price" name="price" value="{{product.price}}"
+                                  data-validation="required" data-validation-error-msg = "Please Enter Price">
+                              </div>
+                            </div>
+                            <div class="form-group">
+                              <label class="control-label mb-10 col-sm-4" for="category">{{products.select_category}}:</label>
+                              <div class="col-sm-8">
+                                <select class="form-control" name="category" id="category" required
+                                  data-validation="required" data-validation-error-msg = "Please Select a Category">
+                                  <option value="">Select Category
+                                  </option>
+                                </select>
+                              </div>
+                            </div>
+                            <div class="form-group">
+                              <label class="control-label mb-10 col-sm-4" for="productImage">{{products.image}}:</label>
+                              {# <div class="col-sm-8 productImage"> #}
+                                <div id="addImage"></div>
+                                <div id="editImage"></div>
+                               <!-- <div class="col-sm-8">
+                                  <div class="profile-edit">
+                                      <div class="profile-upload">
+                                          <img class="profile-pic" src="${value}">
+                                          <div class="p-image ">
+                                              <i class="fa fa-pencil upload-button"></i>
+                                              <input class="file-upload" type="file" name="productImage" accept="image/*">
+                                          </div>
+                                      </div>
+                                  </div>
+                                </div>
+                                <div class="col-sm-8">
+                                  <input type="file" name="productImage" id="productImage" required
+                                  data-validation="required" data-validation-error-msg = "Please Select a productImage">
+                                </div> -->
+                            </div>
+                            <div class="form-group">
+                              <label class="control-label mb-10 col-sm-4" for="status">{{products.status}}:</label>
+                              <div class="col-sm-8">
+                                <select class="form-control" name="status" id="status">
+                                  <option value="active">{{products.active}}
+                                  </option>
+                                  <option value="inactive">
+                                    {{products.inactive}}
+                                  </option>
+                                </select>
+                              </div>
+                            </div>
+                            <div class="form-group">
+                              <div id="button_one" style="width: 50%;margin: 0 auto;text-align: center;">
+                                <input type="submit" id="submit" class="btn btn-success btn-flat" value="{{products.submit}}">
+                                <input type="button" class="btn btn-danger btn-flat" data-dismiss="modal"
+                                  value="{{products.cancel}}">
+                              </div>
+                            </div>
+                          </div>
+                        </table>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+                <!-- <div class="modal-footer">
+                  <div style="width: 50%;margin: 0 auto;text-align: center;">
+                    <input type="submit" id="submit" class="btn btn-success btn-flat" value="Submit">
+                    <input type="button" class="btn btn-danger btn-flat" data-dismiss="modal" value="Cancel">
+                  </div>
+                </div> -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Search Filter Code End -->
+
+      <div class="row">
+        <div class="col-sm-12">
+          <div class="panel panel-default card-view">
+            <div class="panel-heading">
+              <div class="pull-left">
+                <h6 class="panel-title txt-dark">{{products.product_management}}</h6>
+              </div>
+              {% if addFlag %}
+              <div class="pull-right">
+                <button type="button" class="btn btn-primary btn-md" data-toggle="modal" data-target="#form-Modal" onclick="categoryList()">
+                  <i class="fa fa-plus"></i>&nbsp {{products.add_product}}
+                </button>
+              </div>
+              {% endif %}
+              <div class="clearfix"></div>
+            </div>
+            <div class="panel-wrapper collapse in">
+              <div class="panel-body">
+                <!-- DataTable Code Start -->
+                <div class="row">
+                  <div class="col-sm-12">
+                    <div class="table-wrap">
+                      <div class="table-responsive">
+                        <input type="text" name="agent" id="agent" value="{{Agent.role}}" hidden>
+                        <table id="myTable" class="table table-bordered table-striped">
+                          <thead>
+                            <tr>
+                              <th>{{products.product_id}}</th>
+                              <th>{{products.product_name}}</th>
+                              <th>{{products.category}}</th>
+                              <th>{{products.status}}</th>
+                              <th>{{products.action}}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <!-- DataTable Code End -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %} {% block Jscript %}
+<script>
+  var orderTable = "";
+  var table;
+  var host = window.location.origin;
+  // let data = {
+  //   fromDate: '',
+  //   toDate: '',
+  //   groupHall: '',
+  //   hallName: ''
+  // }
+  $(document).ready(function () {
+    // console.log("document Loaded", data);
+    let ajaxUrl = host + "/products/getProducts";
+    let deleteFlag = '{{deleteFlag}}';
+    let viewFlag = '{{viewFlag}}';
+    let editFlag = '{{editFlag}}';
+    let role = `{{Agent.role}}`; 
+    dataLoad();
+    function dataLoad() {
+      //Drawing Datatable
+      $('#myTable').DataTable({
+        "oLanguage": {
+            "sSearch": "{{products.search_product_name}}",
+            "sLengthMenu": "{{products.show}} _MENU_ {{products.entries}}",
+            "oPaginate": {
+              sPrevious: "{{ products.previous }}",
+              sNext: "{{ products.next }}"
+            },
+            "sEmptyTable": "{{products.no_data_available_in_table}}",
+            "sInfo": "{{products.showing}} _START_ to _END_ of _TOTAL_ {{products.entries}}",
+            "sInfoEmpty": "{{products.showing}} 0 to 0 of 0 {{products.entries}}"
+        },
+        "processing": true,
+        "serverSide": true,
+        "order": [
+          [0, "desc"]
+        ],
+        "columnDefs": [{
+          "targets": [1,2,3,4],
+          "orderable": false
+        }],
+        "autoWidth": false,
+        "pageLength": 100,
+        "ajax": {
+          url: ajaxUrl,
+          type: "GET"
+        },
+        "pageLength": 25,
+        "buttons": [
+          // 'csv', 'excel'
+          {
+            extend: 'csvHtml5',
+            exportOptions: {
+              columns: [0, 1, 2, 3]
+            }
+          }, {
+            extend: 'excelHtml5',
+            exportOptions: {
+              columns: [0, 1, 2, 3]
+            }
+          }
+        ],
+        "columns": [{
+          "data": "productId"
+        }, {
+          "data": "name"
+        }, {
+          "data": "category",
+          render: function (data, type, row) {
+            return row.category !== null?row.category.name:"NULL";
+          }
+        }, {
+          "data": "status",
+          render: function (data,type,row) {
+            return row.status === "active"?'<span style="color:green;font-weight:bold;">Active</span>': '<span style="color:red;font-weight:bold;">Inactive</span>';
+          }
+        }, {
+          "data": "action",
+          render: function (data, type, row) {
+            let html = '<div style="width : 50%;margin : 0 auto;text-align: center;">';
+            if (viewFlag == 'true') {
+              html += ` <button type="button" name="view" id="view_` + row._id + `" class="btn btn-info btn-xs view btn-rounded" ><i class="fa fa-eye" aria-hidden="true"></i></button>`
+            }
+            if (role == "agent" && row.adminProduct) {
+              console.log("agent getting admin products");
+            }else{
+              if (editFlag == 'true') {
+                html += ` <button type="button" name="edit" id="edit_` + row._id + `" class="btn btn-warning btn-xs edit btn-rounded" ><i class="fa fa-edit" aria-hidden="true"></i></button>`
+              }
+              if (deleteFlag == 'true') {
+                html += ` <button type="button" name="delete" id="` + row._id + `" class="btn btn-danger btn-xs delete btn-rounded"><i class="fa fa-trash" aria-hidden="true"></i></button>`;
+              }
+            }
+            html += '</div>'
+            return html;
+          }
+        }]
+      });
+      table = $('#myTable').DataTable();
+    }
+
+    //:: Modal Related Code ::
+    $('#form-Modal').on('hidden.bs.modal', function () {
+      // Reset values of modal
+      $(this).find('form').trigger('reset');
+      $("#productForm").removeClass("editProduct").addClass("addProduct");
+      $('#modalLabel').text('{{products.add_product}}');
+      $("#productId").attr("disabled", false);
+      $("#name").attr("disabled", false);
+      $("#price").attr("disabled", false);
+      $("#category").attr("disabled", false);
+      $('#category').find('option').remove().end()
+        .append('<option value="">Select Category</option>').val('');
+      $("#status").attr("disabled", false);
+      $("#button_one").css("display", "block");
+      $('#addImage').html('');
+      $('#editImage').html('');
+      $("#submit").attr("disabled", false);
+    });
+
+    $('body').on('click', '.view', function () {
+      let product = $(this).attr('id');
+      product = product.split("_");
+      return getProduct("view", product[1]);
+    });
+
+    $('body').on('click', '.edit', function () {
+      let product = $(this).attr('id');
+      product = product.split("_");
+      console.log("debug edit");
+      return getProduct("edit", product[1]);
+    });
+
+    // Submit Handler for Add and Edit Form.
+    $('#submit').on('click', function (e) {
+      $("#submit").attr("disabled", true);
+      console.log("Form Valid?", $("#productForm")[0].checkValidity());
+      if ($("#productForm")[0].checkValidity() && $("#productForm").isValid()) {
+        e.preventDefault();
+        var data = new FormData(this.form);
+        if ($("#productForm").hasClass("addProduct")) {
+          console.log("adding product.....");
+          $.ajax({
+            method: 'POST',
+            url: host + '/addProduct',
+            data: data,
+            processData: false,
+            contentType: false,
+            success: function (response) {
+              window.location.reload();
+            }
+          });
+        } else if ($("#productForm").hasClass("editProduct")) {
+          console.log("editing product.....");
+          $.ajax({
+            method: 'POST',
+            url: host + '/editProduct',
+            data: data,
+            processData: false,
+            contentType: false,
+            success: function (response) {
+              window.location.reload();
+            }
+          });
+        }
+      }else{
+        $("#submit").attr("disabled", false);
+      }
+    });
+
+    //Delete Product
+    $('body').on('click', '.delete', function (e) {
+      let id = $(this).attr('id');
+      swal({
+        title: "{{products.delete_message}}?",
+        type: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#e69a2a",
+        confirmButtonText: "{{products.delete_button}}",
+        cancelButtonText: "{{products.cancel_button}}",
+        closeOnConfirm: false,
+        closeOnCancel: false
+      }, function (isConfirm) {
+        if (isConfirm) {
+          $.ajax({
+            type: 'POST',
+            url: host + "/deleteProduct",
+            data: {
+              id: id
+            },
+            success: function (resultData) {
+              console.log("Rejected Player Delete Response", resultData);
+              if (resultData == 'success') {
+                table.destroy();
+                dataLoad();
+                swal("{{products.deleted}}", "{{products.product_has_been_deleted}}", "success");
+              } else {
+                swal("{{products.failed}}!", "{{products.something_went_wrong}}", "error");
+              }
+            }
+          });
+          // swal("Deleted!", "Product has been deleted.", "success");
+        } else {
+          swal("{{products.cancelled}}!", "{{products.cancelled_delete_product}}", "error");
+        }
+      });
+      return false;
+    });
+
+    //Get Product
+    function getProduct(action, product) {
+      $.ajax({
+        method: 'GET',
+        url: host + '/getProduct/' + product,
+        success: function (response) {
+          console.log("product found", response);
+          return openModal(action, response.data);
+        }
+      });
+    }
+      
+  });
+
+  function openModal(action, data) {
+    console.log("openModal", action, data);
+    // Set values given in data
+    if (data) {
+      $("#productId").val(data.id);
+      $("#name").val(data.name);
+      $("#price").val(data.price);
+      $("#status").val(data.status);
+      categoryList(data.category);
+      getImage(action, data.productImage);
+      if (action == 'edit') {
+        $('#modalLabel').text('{{products.edit_product}}');
+        $("#productForm").removeClass("addProduct").addClass("editProduct");
+      } else if (action == 'view') {
+        $("#productId").attr("disabled", true);
+        $("#name").attr("disabled", true);
+        $("#price").attr("disabled", true);
+        $("#category").attr("disabled", true);
+        $("#status").attr("disabled", true);
+        $("#button_one").css("display", "none");
+        $('#modalLabel').text('{{products.view_product}}');
+      }
+      $('#form-Modal').modal('toggle');
+    }
+    return;
+  }
+
+  function categoryList(value = null) {
+    console.log("value", value);
+    $.ajax({
+      method: 'GET',
+      url: host + '/getCategories',
+      success: function (response) {
+        console.log("categories found", response);
+        if (response.data.length) {
+          let categories = response.data;
+          $.each(categories, function (key, data) {
+            console.log("key data in select",key,data);
+            $('#category').append($("<option></option>").attr("value", data._id).text(data.name));
+            if (value !== null && value._id == data._id) {
+              $("#category").val(data._id);
+            }
+          });
+          if(value == null){
+            $('#addImage').append(`<div class="col-sm-8"><input type="file" name="productImage" id="productImage" required
+                                  data-validation="required" data-validation-error-msg = "Please Select a productImage"></div>`);
+          }
+        }else{
+          console.log("category not available", response.message);
+        }
+        return;
+      }
+    });
+  }
+
+  function getImage(action, value = null){
+    console.log('image path', value);
+    if(value != null){
+      if (action == 'edit') {
+        $('#editImage').append(`<div class="col-sm-8"><div class="profile-edit">
+                                      <div class="profile-upload">
+                                          <img class="profile-pic" src="${value}">
+                                          <div class="p-image ">
+                                              <i class="fa fa-pencil upload-button"></i>
+                                              <input class="file-upload" type="file" name="productImage" accept="image/*">
+                                          </div>
+                                      </div>
+                                  </div></div>`);
+      }else{
+          $('#editImage').append(`<div class="col-sm-8"><div class="profile-edit">
+                                      <div class="profile-upload">
+                                          <img class="profile-pic" src="${value}">
+                                      </div>
+                                  </div></div>`)
+      }
+    }else{
+      if (action == 'edit') {
+        $('#editImage').append(`<div class="col-sm-8"><div class="profile-edit">
+                                      <div class="profile-upload">
+                                          <img class="profile-pic" src="/assets/product/gameUser.jpg">
+                                          <div class="p-image ">
+                                              <i class="fa fa-pencil upload-button"></i>
+                                              <input class="file-upload" type="file" name="productImage" accept="image/*">
+                                          </div>
+                                      </div>
+                                  </div></div>`);
+      }else{
+          $('#editImage').append(`<div class="col-sm-8"><div class="profile-edit">
+                                      <div class="profile-upload">
+                                          <img class="profile-pic" src="/assets/product/gameUser.jpg">
+                                      </div>
+                                  </div></div>`)
+      }
+    }
+  }
+  //Update values in of query object for change.
+  $(document).ready(function() {
+        var readURL = function(input) {
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+
+                reader.onload = function(e) {
+                    $('.profile-pic').attr('src', e.target.result);
+                }
+
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+
+        $(".file-upload").on('change', function() {
+            readURL(this);
+        });
+        $('body').on('click', '.upload-button', function () {
+            $(".file-upload").click();
+        });
+    });
+</script>
+
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/dataTables.buttons.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.flash.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+<script type="text/javascript" src="https://cdn.datatables.net/buttons/1.5.2/js/buttons.html5.min.js"></script>
+
+{% endblock %}
