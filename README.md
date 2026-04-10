@@ -27,7 +27,8 @@ Det eier ikke Candy demo-login, Candy demo-admin eller Candy demo-settings.
 
 | Domene | Path | System | Betydning |
 |---|---|---|---|
-| `spillorama-system.onrender.com` | `/` | Live bingo | portal |
+| `spillorama-system.onrender.com` | `/` | Live bingo | redirect til `/web/` |
+| `spillorama-system.onrender.com` | `/portal/` | Live bingo | portal |
 | `spillorama-system.onrender.com` | `/admin/` | Live bingo | live admin |
 | `spillorama-system.onrender.com` | `/web/` | Live bingo | Unity-lobby / WebGL-host |
 | `candy-backend-ldvg.onrender.com` | `/` | demo-backend | Candy demo-login og testflate |

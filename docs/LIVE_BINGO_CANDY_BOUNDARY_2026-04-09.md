@@ -42,6 +42,7 @@ Det betyr også:
 | Domene | Path | Eier |
 |---|---|---|
 | `https://spillorama-system.onrender.com/` | `/` | `Spillorama-system` |
+| `https://spillorama-system.onrender.com/portal/` | `/portal/` | `Spillorama-system` |
 | `https://spillorama-system.onrender.com/admin/` | `/admin/` | `Spillorama-system` |
 | `https://spillorama-system.onrender.com/web/` | `/web/` | `Spillorama-system` |
 | `https://candy-backend-ldvg.onrender.com/` | `/` | `demo-backend` |
@@ -49,7 +50,7 @@ Det betyr også:
 
 Samme navn på route betyr ikke samme system. Domene avgjør eierskap.
 
-Merk: offentlig live-adresse er nå `https://spillorama-system.onrender.com/`.
+Merk: offentlig live-adresse er nå `https://spillorama-system.onrender.com/`, og rooten `/` redirecter til `/web/`.
 
 ## 4. Integrasjonsmodellen vi er enige om
 
