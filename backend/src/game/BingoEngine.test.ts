@@ -247,7 +247,7 @@ function prioritizeDrawNumbers(
 test("startGame rejects ticketsPerPlayer below 1", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await assert.rejects(
-    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 0 }),
+    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 0, payoutPercent: 80 }),
     (error: unknown) => error instanceof DomainError && error.code === "INVALID_TICKETS_PER_PLAYER"
   );
 });
@@ -255,21 +255,21 @@ test("startGame rejects ticketsPerPlayer below 1", async () => {
 test("startGame rejects ticketsPerPlayer above 5", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await assert.rejects(
-    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 6 }),
+    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 6, payoutPercent: 80 }),
     (error: unknown) => error instanceof DomainError && error.code === "INVALID_TICKETS_PER_PLAYER"
   );
 });
 
 test("startGame accepts ticketsPerPlayer equal to 1", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
   const snapshot = engine.getRoomSnapshot(roomCode);
   assert.equal(snapshot.currentGame?.ticketsPerPlayer, 1);
 });
 
 test("startGame accepts ticketsPerPlayer equal to 5", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 5 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 5, payoutPercent: 80 });
   const snapshot = engine.getRoomSnapshot(roomCode);
   assert.equal(snapshot.currentGame?.ticketsPerPlayer, 5);
 });
@@ -415,7 +415,8 @@ test("line claim includes deterministic backend bonus contract fields in claim a
     roomCode,
     actorPlayerId: hostPlayerId,
     entryFee: 100,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   const secondRow = new Set([13, 14, 15, 16, 17]);
@@ -479,7 +480,8 @@ test("round ends automatically when max draws is reached", async () => {
   await limitedEngine.startGame({
     roomCode: limitedRoomCode,
     actorPlayerId: limitedHostPlayerId,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   await limitedEngine.drawNextNumber({ roomCode: limitedRoomCode, actorPlayerId: limitedHostPlayerId });
@@ -527,7 +529,7 @@ test("joinRoom rejects duplicate wallet in same room", async () => {
 
 test("createRoom rejects wallet already in running game", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
 
   await assert.rejects(
     async () =>
@@ -542,7 +544,7 @@ test("createRoom rejects wallet already in running game", async () => {
 
 test("joinRoom rejects wallet already in running game in another room", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
 
   const { roomCode: secondRoomCode } = await engine.createRoom({
     hallId: "hall-2",
@@ -580,7 +582,8 @@ test("daily hard limit is enforced per hall scope", async () => {
     roomCode: firstRoom.roomCode,
     actorPlayerId: firstRoom.hostPlayerId,
     entryFee: 90,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
   await engine.endGame({
     roomCode: firstRoom.roomCode,
@@ -602,7 +605,8 @@ test("daily hard limit is enforced per hall scope", async () => {
       roomCode: secondRoom.roomCode,
       actorPlayerId: secondRoom.hostPlayerId,
       entryFee: 90,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     })
   );
 });
@@ -633,7 +637,8 @@ test("personal loss limits are hall-specific", async () => {
     roomCode: hallOneRoom.roomCode,
     actorPlayerId: hallOneRoom.hostPlayerId,
     entryFee: 60,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
   const snapshot = engine.getRoomSnapshot(hallOneRoom.roomCode);
   const ticketKeys = Object.keys(snapshot?.currentGame?.tickets ?? {});
@@ -671,7 +676,8 @@ test("mandatory pause is enforced after play session limit and includes break su
       roomCode: firstRoom.roomCode,
       actorPlayerId: firstRoom.hostPlayerId,
       entryFee: 100,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     });
   });
 
@@ -699,7 +705,8 @@ test("mandatory pause is enforced after play session limit and includes break su
       roomCode: secondRoom.roomCode,
       actorPlayerId: secondRoom.hostPlayerId,
       entryFee: 0,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     });
     const snapshot = engine.getRoomSnapshot(secondRoom.roomCode);
     // Host (wallet-host) is on pause. Game should still run for other players.
@@ -833,7 +840,8 @@ test("prize policy caps single databingo payouts and stores policy reference", a
     roomCode,
     actorPlayerId: hostPlayerId,
     entryFee: 3000,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   const needed = new Set([1, 2, 3, 4, 5]);
@@ -962,7 +970,8 @@ test("payout audit trail includes immutable hash chain and payout metadata", asy
     roomCode,
     actorPlayerId: hostPlayerId,
     entryFee: 100,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   const needed = new Set([1, 2, 3, 4, 5]);

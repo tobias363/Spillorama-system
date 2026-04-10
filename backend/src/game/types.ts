@@ -52,6 +52,8 @@ export interface GameState {
   claims: ClaimRecord[];
   lineWinnerId?: string;
   bingoWinnerId?: string;
+  /** KRITISK-8: Player IDs that participated (were armed + paid buy-in) when the game started. */
+  participatingPlayerIds?: string[];
   startedAt: string;
   endedAt?: string;
   endedReason?: string;
@@ -84,9 +86,18 @@ export interface GameSnapshot {
   claims: ClaimRecord[];
   tickets: Record<string, Ticket[]>;
   marks: Record<string, number[]>;
+  participatingPlayerIds?: string[];
   startedAt: string;
   endedAt?: string;
   endedReason?: string;
+}
+
+/** Extended snapshot with full engine state for crash recovery (KRITISK-5/6). */
+export interface RecoverableGameSnapshot extends GameSnapshot {
+  /** Ordered remaining draw sequence (consumed by drawNextNumber). */
+  drawBag: number[];
+  /** Per-ticket marks preserving ticket association (replaces flat marks for recovery). */
+  structuredMarks: Record<string, number[][]>;
 }
 
 export interface RoomSnapshot {

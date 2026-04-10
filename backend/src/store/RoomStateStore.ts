@@ -8,7 +8,7 @@
  * The store manages serialization of Map/Set fields in RoomState/GameState.
  */
 
-import type { RoomState, GameState, Player, Ticket, ClaimRecord, GameSnapshot, RoomSummary } from "../game/types.js";
+import type { RoomState, GameState, Player, Ticket, ClaimRecord, GameSnapshot, RecoverableGameSnapshot, RoomSummary } from "../game/types.js";
 
 // ── Serializable versions (no Map/Set) ────────────────────────────────
 
@@ -123,6 +123,38 @@ function deserializeGame(data: SerializedGameState): GameState {
     startedAt: data.startedAt,
     endedAt: data.endedAt,
     endedReason: data.endedReason
+  };
+}
+
+// ── Recovery deserialization ─────────────────────────────────────────
+
+/** KRITISK-5/6: Reconstruct a full GameState from a RecoverableGameSnapshot (checkpoint recovery). */
+export function deserializeRecoverableSnapshot(snap: RecoverableGameSnapshot): GameState {
+  const marks = new Map<string, Set<number>[]>();
+  for (const [playerId, arrays] of Object.entries(snap.structuredMarks)) {
+    marks.set(playerId, arrays.map(arr => new Set(arr)));
+  }
+  return {
+    id: snap.id,
+    status: snap.status,
+    entryFee: snap.entryFee,
+    ticketsPerPlayer: snap.ticketsPerPlayer,
+    prizePool: snap.prizePool,
+    remainingPrizePool: snap.remainingPrizePool,
+    payoutPercent: snap.payoutPercent,
+    maxPayoutBudget: snap.maxPayoutBudget,
+    remainingPayoutBudget: snap.remainingPayoutBudget,
+    drawBag: [...snap.drawBag],
+    drawnNumbers: [...snap.drawnNumbers],
+    tickets: new Map(Object.entries(snap.tickets)),
+    marks,
+    claims: [...snap.claims],
+    lineWinnerId: snap.lineWinnerId,
+    bingoWinnerId: snap.bingoWinnerId,
+    participatingPlayerIds: snap.participatingPlayerIds,
+    startedAt: snap.startedAt,
+    endedAt: snap.endedAt,
+    endedReason: snap.endedReason,
   };
 }
 

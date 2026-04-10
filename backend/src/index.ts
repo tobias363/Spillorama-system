@@ -152,6 +152,12 @@ const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
   : "*";
 app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json());
+app.get(["/", "/index.html"], (_req, res) => {
+  res.redirect(302, "/web/");
+});
+app.get(["/portal", "/portal/"], (_req, res) => {
+  res.sendFile(path.join(frontendDir, "index.html"));
+});
 app.use(express.static(frontendDir));
 app.use(express.static(publicDir));
 
@@ -161,7 +167,8 @@ const io = new Server(server, {
   cors: {
     origin: corsOrigins,
     credentials: true
-  }
+  },
+  maxHttpBufferSize: 100 * 1024 // LAV-3: 100 KB — prevents oversized payloads
 });
 
 const walletRuntime = createWalletAdapter(projectDir);
@@ -303,7 +310,7 @@ if (isProductionRuntime && !autoplayAllowed && (requestedAutoRoundStartEnabled |
 
 // BIN-159: Use PostgreSQL adapter for game checkpointing when a DB connection is available
 const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
-const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, false) && checkpointConnectionString.length > 0;
+const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, true) && checkpointConnectionString.length > 0;
 
 const localBingoAdapter = usePostgresBingoAdapter
   ? new PostgresBingoSystemAdapter({
@@ -315,6 +322,14 @@ const localBingoAdapter = usePostgresBingoAdapter
 
 if (usePostgresBingoAdapter) {
   console.log("[BIN-159] Game state checkpointing enabled (PostgreSQL)");
+} else {
+  const reason = !checkpointConnectionString
+    ? "No database connection string configured (APP_PG_CONNECTION_STRING / WALLET_PG_CONNECTION_STRING)"
+    : "BINGO_CHECKPOINT_ENABLED is explicitly set to false";
+  console.warn(`[CHECKPOINT] WARNING: Game checkpointing is DISABLED. Reason: ${reason}. Game state will NOT survive server restarts.`);
+  if (process.env.NODE_ENV === "production") {
+    console.error("[CHECKPOINT] CRITICAL: Running production WITHOUT checkpointing. Set BINGO_CHECKPOINT_ENABLED=true and provide a database connection string.");
+  }
 }
 
 // BIN-170/171: Room state store and scheduler lock provider
@@ -2045,8 +2060,11 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
       actorPlayerId: beforeStartSnapshot.hostPlayerId,
       entryFee,
       ticketsPerPlayer,
-      payoutPercent: runtimeBingoSettings.payoutPercent
+      payoutPercent: runtimeBingoSettings.payoutPercent,
+      armedPlayerIds: getArmedPlayerIds(roomCode),
     });
+    disarmAllPlayers(roomCode);
+    clearDisplayTicketCache(roomCode);
     const snapshot = await emitRoomUpdate(roomCode);
     apiSuccess(res, {
       roomCode,
@@ -2836,6 +2854,22 @@ app.post("/api/wallets/transfer", async (req, res) => {
 const socketRateLimiter = new SocketRateLimiter();
 socketRateLimiter.start();
 
+// KRITISK-7: Reject unauthenticated WebSocket connections at handshake level.
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.accessToken;
+    if (typeof token !== "string" || !token.trim()) {
+      return next(new Error("UNAUTHORIZED: Mangler accessToken i handshake auth."));
+    }
+    const user = await platformService.getUserFromAccessToken(token.trim());
+    socket.data.user = user;
+    next();
+  } catch (err) {
+    const message = err instanceof DomainError ? err.message : "Autentisering feilet";
+    next(new Error(`UNAUTHORIZED: ${message}`));
+  }
+});
+
 io.on("connection", (socket: Socket) => {
   /** BIN-164: Wrap a socket handler with rate limiting. */
   function rateLimited<P, R>(
@@ -3035,8 +3069,11 @@ io.on("connection", (socket: Socket) => {
         actorPlayerId: playerId,
         entryFee: payload?.entryFee ?? getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer,
-        payoutPercent: runtimeBingoSettings.payoutPercent
+        payoutPercent: runtimeBingoSettings.payoutPercent,
+        armedPlayerIds: getArmedPlayerIds(roomCode),
       });
+      disarmAllPlayers(roomCode);
+      clearDisplayTicketCache(roomCode);
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { snapshot });
     } catch (error) {
@@ -3160,6 +3197,10 @@ io.on("connection", (socket: Socket) => {
 app.get("*", (_req, res) => {
   if (_req.path === "/admin" || _req.path === "/admin/") {
     res.sendFile(adminFrontendFile);
+    return;
+  }
+  if (_req.path === "/portal" || _req.path === "/portal/") {
+    res.sendFile(path.join(frontendDir, "index.html"));
     return;
   }
   if (_req.path.startsWith("/web")) {
