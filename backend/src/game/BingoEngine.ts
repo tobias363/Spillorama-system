@@ -521,6 +521,9 @@ export class BingoEngine {
     if (!Number.isFinite(entryFee) || entryFee < 0) {
       throw new DomainError("INVALID_ENTRY_FEE", "entryFee må være >= 0.");
     }
+    if (entryFee > 10000) {
+      throw new DomainError("INVALID_ENTRY_FEE", "entryFee kan ikke overstige 10 000 kr.");
+    }
     const ticketsPerPlayer = input.ticketsPerPlayer ?? 1;
     if (!Number.isInteger(ticketsPerPlayer) || ticketsPerPlayer < 1 || ticketsPerPlayer > 5) {
       throw new DomainError("INVALID_TICKETS_PER_PLAYER", "ticketsPerPlayer må være et heltall mellom 1 og 5.");

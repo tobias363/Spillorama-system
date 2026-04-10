@@ -151,7 +151,7 @@ const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
   ? corsAllowedOriginsRaw.split(",").map((o) => o.trim()).filter(Boolean)
   : "*";
 app.use(cors({ origin: corsOrigins, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
 app.get(["/", "/index.html"], (_req, res) => {
   res.redirect(302, "/web/");
 });
@@ -3311,3 +3311,13 @@ function handleShutdown(signal: string) {
 
 process.on("SIGTERM", () => handleShutdown("SIGTERM"));
 process.on("SIGINT", () => handleShutdown("SIGINT"));
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[FATAL] Unhandled promise rejection:", reason);
+  handleShutdown("unhandledRejection");
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[FATAL] Uncaught exception:", error);
+  handleShutdown("uncaughtException");
+});
