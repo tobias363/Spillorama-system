@@ -148,7 +148,9 @@ const processPurchase = async (player, gameData, ticketCount, purchaseType, vouc
             dataSet.patterns = gameData.allPatternArray.flat();
             dataSet.winningType = updatedGameData.winningType;
             dataSet.currentPool = updatedGameData.totalNoPurchasedTickets * gameData.ticketPrice;
-            dataSet.count = updatedGameData.withdrawNumberList.length;
+            dataSet.count = Array.isArray(updatedGameData.withdrawNumberList)
+                ? updatedGameData.withdrawNumberList.length
+                : 0;
             patternPriceUpdateBroadcast(dataSet);
             Sys.App.Controllers.redFlagCategoryController.dailyTransctionUpdate({
                 type: "purchase",
@@ -634,7 +636,9 @@ async function cancelTickets({
             patterns: updatedGame.allPatternArray.flat(),
             winningType: updatedGame.winningType,
             currentPool: Math.round(updatedGame.totalNoPurchasedTickets * updatedGame.ticketPrice),
-            count: updatedGame.withdrawNumberList.length
+            count: Array.isArray(updatedGame.withdrawNumberList)
+                ? updatedGame.withdrawNumberList.length
+                : 0
         };
         patternPriceUpdateBroadcast(dataSet);
 

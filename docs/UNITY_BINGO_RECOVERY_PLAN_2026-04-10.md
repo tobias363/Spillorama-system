@@ -70,6 +70,8 @@ På lokal recovery-runtime `http://127.0.0.1:4010` er dette verifisert:
 - `AvailableGames` svarer med `Start at` for `game_2` og `game_3`
 - `Game2PlanList` svarer med en faktisk `upcomingGames`-liste
 - `Game3PlanList` svarer med en faktisk `upcomingGames`-liste nar smoke-klienten tvinger `forceNew`/`multiplex:false` per namespace
+- `scripts/e2e_recovery_purchase_flow.js` passerer lokalt for `Game2` med kjøp, `SubscribeRoom` og kansellering
+- `scripts/e2e_recovery_purchase_flow.js` passerer lokalt for `Game3` med kjøp, `SubscribeRoom` og kansellering
 
 Det betyr at vi er forbi:
 
@@ -79,7 +81,7 @@ Det betyr at vi er forbi:
 - grunnleggende login/hall-bootstrap
 - minimumsdataene som trengs for a fa `game_2` og `game_3` synlige i lobbyen lokalt
 
-Det som ikke er forbi er full parity med historisk bingo-produkt.
+Det som ikke er forbi er full parity med historisk bingo-produkt eller faktisk trekk/start/finish gjennom Unity-klienten.
 
 ## Det som fortsatt mangler
 
@@ -243,14 +245,16 @@ Følgende smoke-tester skal passere lokalt før Render:
 6. `AvailableGames` gir forventede statusverdier
 7. `Game2PlanList` gir planliste når relevante spill finnes
 8. `Game3PlanList` gir planliste når relevante spill finnes
+9. `scripts/e2e_recovery_purchase_flow.js` passerer for `LoginPlayer`, `Game2`, `Game3`, kjøp, `SubscribeRoom` og kansellering
 
 Deretter skal Unity WebGL faktisk testes i nettleser mot denne lokale runtimeen.
 
 Status:
 
 - smoke-test er na kodifisert i `unity-bingo-backend/scripts/smoke_recovery_runtime.js`
-- steg 1 til 6 er teknisk bekreftet
-- steg 7 og 8 stopper fortsatt pa manglende masterdata, ikke pa runtime-feil
+- lokal E2E er na kodifisert i `unity-bingo-backend/scripts/e2e_recovery_purchase_flow.js`
+- steg 1 til 9 er teknisk bekreftet for `game_2` og `game_3`
+- neste faktiske verifisering er trekk/start/finish i Unity WebGL, ikke bare socket-API
 
 ### Fase 5. Opprett dedikert Render-service for legacy Unity bingo
 
@@ -293,8 +297,8 @@ Dette er neste riktige arbeidsrekkefølge:
 2. Dokumenter alle seedede staging-endringer gjort 10. april 2026
 3. Finn historisk dump eller annen kilde for `game`, `schedule`, `gameType` og hall-masterdata
 4. Gjenopprett disse i staging
-5. Kjør lokal smoke-test for `GameTypeList`, `AvailableGames`, `Game2PlanList`, `Game3PlanList`
-6. Test faktisk Unity WebGL mot `http://127.0.0.1:4010/web/`
+5. Test faktisk Unity WebGL mot `http://127.0.0.1:4010/web/`
+6. Verifiser trekk/start/finish og minst ett komplett spill-løp
 7. Forbered egen Render-service for `unity-bingo-backend`
 
 ## Beslutning

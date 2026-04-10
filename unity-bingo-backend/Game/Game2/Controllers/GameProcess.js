@@ -766,7 +766,7 @@ module.exports = {
             const createJackpotEvent = (tickets) => ({
                 gameId: game.parentGameId.toString(),
                 subGameId: game._id.toString(),
-                jackpotData: game.jackPotNumber[0],
+                jackpotData: game.jackPotNumber,
                 tickets: tickets ?? game.totalNoPurchasedTickets, // use provided value or fallback
                 ticketPrice: game.ticketPrice
             });

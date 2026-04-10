@@ -24,6 +24,16 @@ const {
     isDateInRange 
 } = require('../../../gamehelper/all');
 const { countryNames } = require('../../../gamehelper/game1-process');
+
+const createGame2JackpotDefinition = (subGame) => ([{
+    9: { price: +subGame.priceNine, isCash: true },
+    10: { price: +subGame.priceTen, isCash: true },
+    11: { price: +subGame.priceEleven, isCash: true },
+    12: { price: +subGame.priceTwelve, isCash: true },
+    13: { price: +subGame.priceThirteen, isCash: true },
+    1421: { price: +subGame.priceFourteenToTwentyone, isCash: true }
+}]);
+
 module.exports = {
     // [ Cron Function ]
     startGameCron: async function () {
@@ -409,11 +419,12 @@ module.exports = {
                     Object.assign(childGameData, {
                         minTicketCount: parentGame.minTicketCount,
                         totalNoTickets: parentGame.totalNoTickets,
-                        totalNoPurchasedTickets: parentGame.totalNoTickets,
+                        totalNoPurchasedTickets: 0,
                         notificationStartTime: parentGame.notificationStartTime,
                         luckyNumberPrize: parentGame.luckyNumberPrize,
                         seconds: parentGame.seconds,
                         rocketLaunch: false,
+                        purchasedTickets: [],
                         otherData: {
                             ...childGameData.otherData,
                             botTicketCount: 0,
@@ -421,14 +432,7 @@ module.exports = {
                             alreadyPurchasedBotPot: 0,
                             ticketPurchasedByBotCount: 0,
                         },
-                        jackPotNumber: {
-                            9: subGame.priceNine,
-                            10: subGame.priceTen,
-                            11: subGame.priceEleven,
-                            12: subGame.priceTwelve,
-                            13: subGame.priceThirteen,
-                            1421: subGame.priceFourteenToTwentyone,
-                        }
+                        jackPotNumber: createGame2JackpotDefinition(subGame)
                     });
                 } else if (parentGame.gameType === 'game_3') {
                     const pattern = subGame.patternGroupNumberPrize;
@@ -450,7 +454,10 @@ module.exports = {
                         seconds: subGame.seconds * 1000,
                         patternGroupNumberPrize: pattern,
                         allPatternArray: sortedPatterns,
-                        winningType: subGame.winningType
+                        winningType: subGame.winningType,
+                        withdrawNumberList: [],
+                        history: [],
+                        patternWinnerHistory: []
                     });
                 }
     
@@ -2087,8 +2094,6 @@ module.exports = {
     // },
 
 }
-
-
 
 
 

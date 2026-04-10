@@ -318,12 +318,15 @@ module.exports = {
             const playerLuckynumberWithAutoplay = selectedRoom.players.find(item => JSON.stringify(item.id) == JSON.stringify(player._id));
             
             // Prepare pattern data
+            const withdrawNumberList = Array.isArray(selectedRoom.withdrawNumberList)
+                ? selectedRoom.withdrawNumberList
+                : [];
             const pricePool = Math.round(selectedRoom.totalNoPurchasedTickets * selectedRoom.ticketPrice);
             const { patternData, jackPotData } = preparePatternData(
                 selectedRoom.allPatternArray,
                 pricePool,
                 selectedRoom.winningType,
-                selectedRoom.withdrawNumberList
+                withdrawNumberList
             );
             
             // Cancel button logic
@@ -344,9 +347,9 @@ module.exports = {
                 luckyNumber: playerLuckynumberWithAutoplay ? playerLuckynumberWithAutoplay.luckyNumber : '',
                 maxWithdrawCount: 75,
                 patternList: patternData,
-                totalWithdrawCount: selectedRoom.withdrawNumberList.length,
+                totalWithdrawCount: withdrawNumberList.length,
                 jackpotList: selectedRoom.patternGroupNumberPrize,
-                withdrawNumberList: selectedRoom.withdrawNumberList,
+                withdrawNumberList,
                 ticketList: ticketsArr,
                 totalBetAmount: Math.round(ticketsArr.length * selectedRoom.ticketPrice),
                 totalWon: totalWon,

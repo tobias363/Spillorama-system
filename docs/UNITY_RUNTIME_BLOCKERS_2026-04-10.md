@@ -28,10 +28,12 @@ Etter videre arbeid 10. april 2026 er følgende na bevist:
 - `Game2PlanList` svarer med `upcomingGames`
 - `Game3PlanList` svarer med `upcomingGames` nar smoke-klienten tvinger ny Socket.IO-transport per namespace
 - `dailySchedule`, `schedules`, `assignedHalls`, `parentGame` og recovery `game` er seedet i staging
+- lokal E2E passerer for `Game2` gjennom kjøp, `SubscribeRoom` og kansellering
+- lokal E2E passerer for `Game3` gjennom kjøp, `SubscribeRoom` og kansellering
 
 Det betyr at recovery-sporet er riktig.
 
-Det som fortsatt mangler er ikke grunnmur, men full parity-data for faktisk historisk lobby og spill:
+Det som fortsatt mangler er ikke grunnmur, men full parity-data for faktisk historisk lobby og spill, pluss verifisering av trekk/start/finish i Unity-klienten:
 
 - `subGame*`
 - komplett `gameType`

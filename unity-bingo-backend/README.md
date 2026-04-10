@@ -56,8 +56,10 @@ Videre recovery-arbeid har na bekreftet:
 11. `AvailableGames` svarer na med `Start at` for `game_2` og `game_3`.
 12. `Game2PlanList` svarer na med en faktisk `upcomingGames`-liste.
 13. `Game3PlanList` svarer na med en faktisk `upcomingGames`-liste nar smoke-klienten tvinger egen Socket.IO-transport per namespace.
+14. `scripts/e2e_recovery_purchase_flow.js` passerer na lokalt for `Game2` med kjøp, `SubscribeRoom` og kansellering.
+15. `scripts/e2e_recovery_purchase_flow.js` passerer na lokalt for `Game3` med kjøp, `SubscribeRoom` og kansellering.
 
-Det neste hovedgapet er ikke lenger login eller host, men full parity-data utover recovery-bootstrapen:
+Det neste hovedgapet er ikke lenger login eller host, men full parity-data utover recovery-bootstrapen og faktisk trekk/start/finish i Unity:
 
 - `subGame`
 - `subGame1`
@@ -82,6 +84,7 @@ Denne recovery-runden har na konkrete scripts og backup-spor:
 - audit-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/audit_masterdata.js`
 - start-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/start_local_recovery.sh`
 - smoke-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/smoke_recovery_runtime.js`
+- e2e-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/e2e_recovery_purchase_flow.js`
 
 Siste eksplisitte backup ligger i:
 
@@ -157,6 +160,7 @@ node scripts/seed_staging_lobby_bootstrap.js .env.recovery --apply
 node scripts/audit_masterdata.js .env.recovery
 ./scripts/start_local_recovery.sh .env.recovery
 node scripts/smoke_recovery_runtime.js http://127.0.0.1:4010 .env.recovery martin martin 1
+node scripts/e2e_recovery_purchase_flow.js http://127.0.0.1:4010 .env.recovery martin martin
 ```
 
 ## Hva som mangler for faktisk recovery

@@ -57,6 +57,17 @@ function ensureArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function createGame2JackpotDefinition(prices) {
+  return [{
+    9: { price: prices.priceNine, isCash: true },
+    10: { price: prices.priceTen, isCash: true },
+    11: { price: prices.priceEleven, isCash: true },
+    12: { price: prices.priceTwelve, isCash: true },
+    13: { price: prices.priceThirteen, isCash: true },
+    1421: { price: prices.priceFourteenToTwentyone, isCash: true },
+  }];
+}
+
 async function main() {
   const envPath = process.argv[2] || path.join(__dirname, '..', '.env.recovery');
   const apply = process.argv.includes('--apply');
@@ -339,14 +350,14 @@ async function main() {
         [currentDay]: [localTime(start), localTime(end)],
       },
       isParent: true,
-      jackPotNumber: {
-        9: 50,
-        10: 100,
-        11: 250,
-        12: 500,
-        13: 1000,
-        1421: 2500,
-      },
+      jackPotNumber: createGame2JackpotDefinition({
+        priceNine: 50,
+        priceTen: 100,
+        priceEleven: 250,
+        priceTwelve: 500,
+        priceThirteen: 1000,
+        priceFourteenToTwentyone: 2500,
+      }),
       subGames: [
         {
           name: 'Recovery Game 2 Heat 1',
@@ -408,6 +419,10 @@ async function main() {
       minTicketCount: 1,
       totalNoTickets: 30,
       totalNoPurchasedTickets: 0,
+      purchasedTickets: [],
+      withdrawNumberList: [],
+      history: [],
+      ticketIdArray: [],
       notificationStartTime: '30s',
       luckyNumberPrize: 5000,
       seconds: 3000,
@@ -500,6 +515,8 @@ async function main() {
       allPatternArray: patternGroupNumberPrize[0].PatternData,
       winningType: 'pattern',
       players: [],
+      withdrawNumberList: [],
+      history: [],
       patternWinnerHistory: [],
       updatedAt: new Date(),
       createdAt: new Date(),

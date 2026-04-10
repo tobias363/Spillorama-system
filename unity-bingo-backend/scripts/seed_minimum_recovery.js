@@ -39,6 +39,10 @@ async function main() {
     await db.collection('setting').updateOne(
       {},
       {
+        $set: {
+          daily_spending: 5000,
+          monthly_spending: 50000,
+        },
         $setOnInsert: {
           defaultChips: 0,
           rakePercenage: 0,
@@ -64,8 +68,6 @@ async function main() {
           imageTime: [],
           systemInformationData: '',
           gameTicketCounts: {},
-          daily_spending: 0,
-          monthly_spending: 0,
         },
       },
       { upsert: true }

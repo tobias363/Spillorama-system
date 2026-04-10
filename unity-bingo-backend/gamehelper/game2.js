@@ -1419,7 +1419,9 @@ const updateGameStateAndNotify = async (processedData, gameData, player, subGame
             playerRegisteredCount: onlinePlayers
         }),
         Sys.Io.of(Sys.Config.Namespace.Game2).to(subGameId).emit('game2PurchasedTicketsCount', {
-            purchasedTicketsCount: gameDataUpdated.purchasedTickets.length
+            purchasedTicketsCount: Array.isArray(gameDataUpdated.purchasedTickets)
+                ? gameDataUpdated.purchasedTickets.length
+                : (gameDataUpdated.totalNoPurchasedTickets || 0)
         })
     ]);
 
@@ -1427,8 +1429,10 @@ const updateGameStateAndNotify = async (processedData, gameData, player, subGame
     Sys.Game.Game2.Controllers.GameController.game2JackpotUpdate({
         gameId: gameDataUpdated.parentGameId.toString(),
         subGameId: subGameId,
-        jackpotData: gameDataUpdated.jackPotNumber[0],
-        tickets: gameDataUpdated.purchasedTickets.length,
+        jackpotData: gameDataUpdated.jackPotNumber,
+        tickets: Array.isArray(gameDataUpdated.purchasedTickets)
+            ? gameDataUpdated.purchasedTickets.length
+            : (gameDataUpdated.totalNoPurchasedTickets || 0),
         ticketPrice: gameDataUpdated.ticketPrice
     });
 }
@@ -1459,8 +1463,33 @@ const updateGameStateAndNotify = async (processedData, gameData, player, subGame
 //     });
 // }
 
+const normalizeGame2JackpotData = (jackPotNumber) => {
+    if (!jackPotNumber) return {};
+
+    const rawData = Array.isArray(jackPotNumber) ? (jackPotNumber[0] || {}) : jackPotNumber;
+    if (!rawData || typeof rawData !== 'object') return {};
+
+    return Object.fromEntries(
+        Object.entries(rawData).map(([number, value]) => {
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                return [number, {
+                    price: parseFloat(value.price ?? 0),
+                    isCash: value.isCash !== false
+                }];
+            }
+
+            return [number, {
+                price: parseFloat(value ?? 0),
+                isCash: true
+            }];
+        })
+    );
+}
+
 const processJackpotNumbers = (jackPotNumber, purchasedTickets, ticketPrice) => {
-    return Object.entries(jackPotNumber).map(([number, value]) => {
+    const normalizedJackpotData = normalizeGame2JackpotData(jackPotNumber);
+
+    return Object.entries(normalizedJackpotData).map(([number, value]) => {
         const rawPrize = value.isCash
             ? parseFloat(value.price)
             : (parseFloat(value.price) * purchasedTickets * parseFloat(ticketPrice)) / 100;
@@ -1491,7 +1520,7 @@ const checkJackPot = async (data, isWinningDistributed= false) => {
         } = data;
 
         const winnerCount = winnerArr.length;
-        const [jackPotObj] = jackPotNumber;
+        const jackPotObj = normalizeGame2JackpotData(jackPotNumber);
         const numberList = Object.keys(jackPotObj);
         const valueList = Object.values(jackPotObj);
         
@@ -2176,6 +2205,7 @@ module.exports = {
     createGameNotification,
     processCancelTickets,
     getOnlinePlayers,
+    normalizeGame2JackpotData,
     processJackpotNumbers,
     //compareTimeSlots,
     checkJackPot,

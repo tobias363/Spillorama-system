@@ -25,6 +25,7 @@ const {
     createGameNotification,
     processCancelTickets,
     getOnlinePlayers,
+    normalizeGame2JackpotData,
     processJackpotNumbers,
     processRefundAndFinishGameCron
 } = require('../../../gamehelper/game2');
@@ -258,7 +259,7 @@ module.exports = {
             });
             
             const jackPotNumberList = processJackpotNumbers(
-                activeRoom.jackPotNumber[0],
+                activeRoom.jackPotNumber,
                 activeRoom.totalNoPurchasedTickets,
                 activeRoom.ticketPrice
             );
@@ -276,10 +277,12 @@ module.exports = {
             const playerData = activeRoom.players.find(
                 item => item.id.toString() === playerId.toString()
             );
-            let withdrawNumberList = activeRoom.withdrawNumberList;
+            let withdrawNumberList = Array.isArray(activeRoom.withdrawNumberList)
+                ? activeRoom.withdrawNumberList
+                : [];
             if(Sys.Running.indexOf(activeRoom.gameNumber) > -1 || activeRoom.status == 'running'){
                 const history = await getGameDataFromRedisHmset('game2', activeRoom._id.toString(), 'history');
-                if (history) withdrawNumberList = history;
+                if (Array.isArray(history)) withdrawNumberList = history;
             }
             // Prepare response
             const result = {
@@ -509,7 +512,7 @@ module.exports = {
             this.game2JackpotUpdate({
                 gameId: gameData.parentGameId.toString(),
                 subGameId: subGameId,
-                jackpotData: gameData.jackPotNumber[0],
+                jackpotData: gameData.jackPotNumber,
                 tickets: purchasedCount,
                 ticketPrice: Math.round(parseFloat(gameData.ticketPrice)),
             });
@@ -820,8 +823,11 @@ module.exports = {
 
             // Update player count for frontend
             let onlinePlayers = await getOnlinePlayers('/Game2', gameData.parentGameId.toString());
+            const purchasedTicketsCount = Array.isArray(gameData.purchasedTickets)
+                ? gameData.purchasedTickets.length
+                : (gameData.totalNoPurchasedTickets || 0);
             Sys.Io.of(Sys.Config.Namespace.Game2).to(data.subGameId).emit('UpdatePlayerRegisteredCount', { playerRegisteredCount: onlinePlayers });
-            Sys.Io.of(Sys.Config.Namespace.Game2).to(data.subGameId).emit('game2PurchasedTicketsCount', { purchasedTicketsCount: gameData.purchasedTickets.length });
+            Sys.Io.of(Sys.Config.Namespace.Game2).to(data.subGameId).emit('game2PurchasedTicketsCount', { purchasedTicketsCount });
             !isBlindTicketPurchase && Sys.Io.to(player.socketId).emit('PlayerHallLimit', { }); // Required as it is not re subscribing
             // Handle auto-play if enabled
             if (autoPlay) {
@@ -835,8 +841,8 @@ module.exports = {
                 const jacpotEvent = {
                     gameId: gameData.parentGameId.toString(),
                     subGameId: data.subGameId,
-                    jackpotData: gameData.jackPotNumber[0],
-                    tickets: gameData.purchasedTickets.length,
+                    jackpotData: normalizeGame2JackpotData(gameData.jackPotNumber),
+                    tickets: purchasedTicketsCount,
                     ticketPrice: gameData.ticketPrice
                 }
 
@@ -1311,4 +1317,3 @@ module.exports = {
     //     });
     // },
 }
-
