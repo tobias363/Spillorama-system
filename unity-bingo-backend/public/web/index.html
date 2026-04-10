@@ -45,6 +45,98 @@
     var progressBarFull = document.querySelector("#unity-progress-bar-full");
     var fullscreenButton = document.querySelector("#unity-fullscreen-button");
     var warningBanner = document.querySelector("#unity-warning");
+    var recoveryOrigin = window.location.origin;
+    var recoverySocketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var legacyHosts = new Set([
+      'spillorama.aistechnolabs.info',
+      'bingoadmin.aistechnolabs.pro',
+      'bingoadmin.aistechnolabs.in'
+    ]);
+
+    function normalizeUrlInput(rawUrl) {
+      if (!rawUrl) {
+        return null;
+      }
+
+      if (typeof rawUrl === 'string') {
+        return rawUrl;
+      }
+
+      if (typeof URL !== 'undefined' && rawUrl instanceof URL) {
+        return rawUrl.toString();
+      }
+
+      if (typeof rawUrl.href === 'string') {
+        return rawUrl.href;
+      }
+
+      try {
+        return String(rawUrl);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function rewriteLegacyUrl(rawUrl, socketProtocol) {
+      var normalizedUrl = normalizeUrlInput(rawUrl);
+      if (!normalizedUrl) {
+        return rawUrl;
+      }
+
+      try {
+        var parsed = new URL(normalizedUrl, recoveryOrigin);
+        if (!legacyHosts.has(parsed.host)) {
+          return rawUrl;
+        }
+
+        if (socketProtocol) {
+          parsed.protocol = socketProtocol;
+        } else {
+          parsed.protocol = window.location.protocol;
+        }
+        parsed.host = window.location.host;
+
+        var rewritten = parsed.toString();
+        if (rewritten !== normalizedUrl) {
+          console.log('Rewriting legacy URL', normalizedUrl, '->', rewritten);
+        }
+        return rewritten;
+      } catch (error) {
+        return rawUrl;
+      }
+    }
+
+    // Recovery host patch: the shipped WebGL build is still wired to legacy AISTech hosts.
+    // Rewrite those URLs to the current origin so the same build can be smoke-tested locally.
+    var NativeWebSocket = window.WebSocket;
+    window.WebSocket = function(url, protocols) {
+      var rewrittenUrl = rewriteLegacyUrl(url, recoverySocketProtocol);
+      console.log('Recovery WebSocket open', normalizeUrlInput(url), '->', rewrittenUrl);
+      return protocols === undefined
+        ? new NativeWebSocket(rewrittenUrl)
+        : new NativeWebSocket(rewrittenUrl, protocols);
+    };
+    window.WebSocket.prototype = NativeWebSocket.prototype;
+    Object.setPrototypeOf(window.WebSocket, NativeWebSocket);
+
+    var nativeFetch = window.fetch.bind(window);
+    window.fetch = function(resource, init) {
+      if (typeof resource === 'string') {
+        resource = rewriteLegacyUrl(resource);
+      } else if (resource instanceof Request) {
+        var rewrittenRequestUrl = rewriteLegacyUrl(resource.url);
+        if (rewrittenRequestUrl !== resource.url) {
+          resource = new Request(rewrittenRequestUrl, resource);
+        }
+      }
+      return nativeFetch(resource, init);
+    };
+
+    var nativeXhrOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      var rewrittenUrl = rewriteLegacyUrl(url);
+      return nativeXhrOpen.apply(this, [method, rewrittenUrl].concat(Array.prototype.slice.call(arguments, 2)));
+    };
 
     // Shows a temporary message banner/ribbon for a few seconds, or
     // a permanent error message on top of the canvas if type=='error'.
@@ -115,12 +207,40 @@
     canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
     loadingBar.style.display = "block";
 
+    function flushPendingDomainData() {
+      if (!unityInstanceRef || !pendingDomainData) {
+        return false;
+      }
+
+      var serverUrl = window.location.origin;
+      console.log("Flushing pending DomainDataCall", serverUrl);
+      unityInstanceRef.SendMessage('Socket And Event Manager', 'DomainDataCall', serverUrl);
+      pendingDomainData = false;
+      return true;
+    }
+
+    // DynamicWebgl: Unity kaller denne for å hente backend-origin ved oppstart.
+    function requestDomainData() {
+      var serverUrl = window.location.origin;
+      console.log("requestDomainData called", serverUrl);
+      if (unityInstanceRef) {
+        unityInstanceRef.SendMessage('Socket And Event Manager', 'DomainDataCall', serverUrl);
+      } else {
+        pendingDomainData = true;
+        console.log("Deferring DomainDataCall until Unity instance is ready");
+      }
+    }
+    var unityInstanceRef = null;
+    var pendingDomainData = false;
+
     var script = document.createElement("script");
     script.src = loaderUrl;
     script.onload = () => {
       createUnityInstance(canvas, config, (progress) => {
         progressBarFull.style.width = 100 * progress + "%";
       }).then((unityInstance) => {
+        unityInstanceRef = unityInstance;
+        flushPendingDomainData();
         loadingBar.style.display = "none";
         fullscreenButton.onclick = () => {
           window.vuplex.SetFullscreen(1)/*https://support.vuplex.com/articles/webgl-fullscreen*/;
@@ -174,7 +294,7 @@
                 const title = payload.notification?.title || 'Notification';
     const body = payload.notification?.body || '';
     const icon = '/TemplateData/favicon.ico';
-    const staticURL = 'https://spillorama.aistechnolabs.info/web/';
+    const staticURL = new URL('./', window.location.href).toString();
 
     if (Notification.permission === 'granted') {
       new Notification(title, {

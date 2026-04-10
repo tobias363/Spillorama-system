@@ -58,6 +58,9 @@ Videre recovery-arbeid har na bekreftet:
 13. `Game3PlanList` svarer na med en faktisk `upcomingGames`-liste nar smoke-klienten tvinger egen Socket.IO-transport per namespace.
 14. `scripts/e2e_recovery_purchase_flow.js` passerer na lokalt for `Game2` med kjøp, `SubscribeRoom` og kansellering.
 15. `scripts/e2e_recovery_purchase_flow.js` passerer na lokalt for `Game3` med kjøp, `SubscribeRoom` og kansellering.
+16. En ny lokal Unity WebGL-build er promotert inn i `public/web`, og `StreamingAssets/build_info` viser `Build from Tobias sin MacBook Pro at 4/9/2026 12:34:42 PM`.
+17. Selve Unity WebGL-klienten er verifisert i nettleser gjennom splash, login, lobby og faktisk billettkjop i `Recovery Game 2`.
+18. En konkret post-login-crash i lobbyen ble sporet til manglende `public/profile/bingo/candy-mania-thumb.png`, og recovery-hosten er na oppdatert med denne filen.
 
 Det neste hovedgapet er ikke lenger login eller host, men full parity-data utover recovery-bootstrapen og faktisk trekk/start/finish i Unity:
 
@@ -85,6 +88,7 @@ Denne recovery-runden har na konkrete scripts og backup-spor:
 - start-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/start_local_recovery.sh`
 - smoke-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/smoke_recovery_runtime.js`
 - e2e-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/e2e_recovery_purchase_flow.js`
+- lokal Candy-thumbnail: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/public/profile/bingo/candy-mania-thumb.png`
 
 Siste eksplisitte backup ligger i:
 

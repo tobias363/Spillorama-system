@@ -30,6 +30,10 @@ Etter videre arbeid 10. april 2026 er følgende na bevist:
 - `dailySchedule`, `schedules`, `assignedHalls`, `parentGame` og recovery `game` er seedet i staging
 - lokal E2E passerer for `Game2` gjennom kjøp, `SubscribeRoom` og kansellering
 - lokal E2E passerer for `Game3` gjennom kjøp, `SubscribeRoom` og kansellering
+- recovery-hosten serverer en ny lokal Unity WebGL-build med `build_info` fra `Tobias sin MacBook Pro at 4/9/2026 12:34:42 PM`
+- faktisk Unity WebGL-login virker i nettleser mot recovery-runtimeen
+- lobbyen renderer etter login uten runtime-crash
+- `Recovery Game 2` kan apnes fra lobbyen og billettkjop fungerer i selve Unity WebGL-klienten
 
 Det betyr at recovery-sporet er riktig.
 
@@ -41,6 +45,12 @@ Det som fortsatt mangler er ikke grunnmur, men full parity-data for faktisk hist
 - `theme`
 - `slotmachines`
 - øvrige bingo-data som gjør at lobby og planlister ser ut som før
+
+Den siste konkrete post-login-feilen som faktisk blokkerte lobbyen var en manglende PNG:
+
+- `unity-bingo-backend/public/profile/bingo/candy-mania-thumb.png`
+
+Da den manglet, fikk Unity HTML tilbake i stedet for bildeinnhold for Candy-thumbnailen, og WebGL-klienten krasjet videre i lobbyflyten. Etter at filen ble lagt tilbake, ble lobbyen stabil igjen.
 
 Se styrende plan:
 

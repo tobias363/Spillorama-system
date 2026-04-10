@@ -83,6 +83,46 @@ Det betyr at vi er forbi:
 
 Det som ikke er forbi er full parity med historisk bingo-produkt eller faktisk trekk/start/finish gjennom Unity-klienten.
 
+### 5. Ny lokal Unity WebGL-build er i bruk
+
+Recovery-hosten serverer na en ny lokal Unity WebGL-build i:
+
+- `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/public/web`
+
+`StreamingAssets/build_info` pa recovery-hosten viser:
+
+- `Build from Tobias sin MacBook Pro at 4/9/2026 12:34:42 PM`
+
+Det betyr at videre recovery-verifisering na skjer mot en kjent lokal build og ikke mot en eldre, ukjent WebGL-pakke.
+
+### 6. Faktisk Unity WebGL-flyt er verifisert i nettleser
+
+Følgende er na bekreftet i selve Unity WebGL-klienten mot lokal runtime:
+
+- splash -> login virker
+- login -> lobby virker
+- lobbyen renderer `Candy Mania`, `Recovery Game 2` og `Recovery Game 3`
+- `Recovery Game 2` kan apnes fra lobbyen
+- billettkjop i `Recovery Game 2` fungerer i selve Unity-klienten
+
+Dette er sterkere enn ren socket-smoke, fordi det bekrefter at recovery-runtimeen og den lokale WebGL-builden faktisk spiller sammen gjennom UI-laget.
+
+### 7. Siste post-login-crash var en manglende statisk thumbnail
+
+Den siste konkrete crashen etter vellykket login var ikke en socket-feil eller en Unity-kodefeil.
+
+Arsaken var at lobbyen lastet:
+
+- `profile/bingo/candy-mania-thumb.png`
+
+og recovery-hosten svarte med HTML i stedet for PNG fordi filen manglet.
+
+Denne filen finnes na i:
+
+- `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/public/profile/bingo/candy-mania-thumb.png`
+
+Etter at den ble lagt tilbake, sluttet lobbyen a krasje etter login.
+
 ## Det som fortsatt mangler
 
 Dette er na hovedgapene:
@@ -91,8 +131,6 @@ Dette er na hovedgapene:
 
 I dagens staging-database er disse kritiske collectionene fortsatt tomme:
 
-- `parentGame = 0`
-- `game = 0`
 - `subGame = 0`
 - `subGame1 = 0`
 - `subGame5 = 0`
@@ -109,9 +147,11 @@ Konsekvens:
 
 ### 2. `gameType` er ikke komplett
 
-`gameType` inneholder na bare:
+`gameType` inneholder na bare recovery-settet:
 
 - `Candy Mania`
+- `Recovery Game 2`
+- `Recovery Game 3`
 
 Konsekvens:
 
@@ -254,7 +294,8 @@ Status:
 - smoke-test er na kodifisert i `unity-bingo-backend/scripts/smoke_recovery_runtime.js`
 - lokal E2E er na kodifisert i `unity-bingo-backend/scripts/e2e_recovery_purchase_flow.js`
 - steg 1 til 9 er teknisk bekreftet for `game_2` og `game_3`
-- neste faktiske verifisering er trekk/start/finish i Unity WebGL, ikke bare socket-API
+- faktisk Unity WebGL-login, lobby og `Recovery Game 2`-kjop er na bekreftet i nettleser
+- neste faktiske verifisering er trekk/start/finish i Unity WebGL, og tilsvarende manuell UI-verifisering av `Recovery Game 3`
 
 ### Fase 5. Opprett dedikert Render-service for legacy Unity bingo
 
@@ -297,9 +338,11 @@ Dette er neste riktige arbeidsrekkefølge:
 2. Dokumenter alle seedede staging-endringer gjort 10. april 2026
 3. Finn historisk dump eller annen kilde for `game`, `schedule`, `gameType` og hall-masterdata
 4. Gjenopprett disse i staging
-5. Test faktisk Unity WebGL mot `http://127.0.0.1:4010/web/`
-6. Verifiser trekk/start/finish og minst ett komplett spill-løp
-7. Forbered egen Render-service for `unity-bingo-backend`
+5. Behold den lokale WebGL-builden og recovery-hosten i sync
+6. Test faktisk Unity WebGL mot `http://127.0.0.1:4010/web/`
+7. Verifiser trekk/start/finish og minst ett komplett spill-løp
+8. Kjor manuell UI-verifisering av `Recovery Game 3`
+9. Forbered egen Render-service for `unity-bingo-backend`
 
 ## Beslutning
 
