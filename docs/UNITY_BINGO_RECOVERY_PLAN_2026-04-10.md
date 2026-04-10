@@ -41,7 +41,7 @@ starter lokalt under Node 18 nar den far:
 
 peker na til `ais_bingo_stg`, og Mongo-tilkoblingen fungerer.
 
-### 3. Minimumsdata for login og hall-list er seedet i staging
+### 3. Minimumsdata for login, hall og lobby-bootstrap er seedet i staging
 
 Følgende finnes na i `ais_bingo_stg`:
 
@@ -49,9 +49,14 @@ Følgende finnes na i `ais_bingo_stg`:
 - `hall = 1`
 - `player = 1`
 - `pattern = 21`
-- `gameType = 1`
+- `gameType = 3`
+- `dailySchedule = 1`
+- `schedules = 1`
+- `assignedHalls = 1`
+- `parentGame = 2`
+- `game = 2` for recovery-lobby, i tillegg til genererte `game_1` schedule-games
 
-I tillegg er testspilleren knyttet til seedet hall og godkjent for spill i hallen.
+I tillegg er testspilleren knyttet til seedet hall, godkjent for spill i hallen, og recovery-bootstrapen oppretter lokale `game_2`/`game_3` parent- og child-games med fremtidige tider i `Europe/Oslo`.
 
 ### 4. Følgende runtime-kall er bevist lokalt
 
@@ -60,11 +65,11 @@ På lokal recovery-runtime `http://127.0.0.1:4010` er dette verifisert:
 - `/web/` svarer `200`
 - `HallList` svarer `success`
 - `LoginPlayer` svarer `success`
-- `GetApprovedHallList` svarer korrekt hall-liste etter normalisering av `groupHall`
+- `GetApprovedHallList` svarer korrekt hall-liste
 - `GameTypeList` svarer uten dobbelt bilde-prefix
-- `AvailableGames` svarer teknisk korrekt, men alle spill står `Closed`
-- `Game2PlanList` og `Game3PlanList` er bekreftet blokkert av manglende `parentGame`- og `game`-data
-- direkte Atlas-verifisering viser også at `dailySchedule`, `schedules` og `assignedHalls` er tomme
+- `AvailableGames` svarer med `Start at` for `game_2` og `game_3`
+- `Game2PlanList` svarer med en faktisk `upcomingGames`-liste
+- `Game3PlanList` svarer med en faktisk `upcomingGames`-liste nar smoke-klienten tvinger `forceNew`/`multiplex:false` per namespace
 
 Det betyr at vi er forbi:
 
@@ -72,28 +77,15 @@ Det betyr at vi er forbi:
 - websocket-handshake
 - Mongo-autentisering
 - grunnleggende login/hall-bootstrap
+- minimumsdataene som trengs for a fa `game_2` og `game_3` synlige i lobbyen lokalt
 
-Det som ikke er forbi er masterdata-laget for faktisk bingo-lobby.
+Det som ikke er forbi er full parity med historisk bingo-produkt.
 
 ## Det som fortsatt mangler
 
 Dette er na hovedgapene:
 
-### 1. Schedule-laget mangler
-
-I dagens staging-database er disse kritiske collectionene fortsatt tomme:
-
-- `dailySchedule = 0`
-- `schedules = 0`
-- `assignedHalls = 0`
-
-Konsekvens:
-
-- Game 1 child games kan ikke genereres fra schedules
-- deler av lobbyen mangler sin autoritative kilde
-- `parentGame` og `game` kan ikke forventes å dukke opp av seg selv
-
-### 2. Spill-masterdata mangler
+### 1. Spill-masterdata mangler fortsatt utover recovery-bootstrap
 
 I dagens staging-database er disse kritiske collectionene fortsatt tomme:
 
@@ -109,11 +101,11 @@ I dagens staging-database er disse kritiske collectionene fortsatt tomme:
 
 Konsekvens:
 
-- `AvailableGames` vil ikke representere ekte bingo-oppsett
-- `Game2PlanList` og `Game3PlanList` har ikke reelle spill a liste
-- Unity-lobbyen kan ikke bli "som for" uten flere data
+- recovery-bootstrapen kan vise `game_2` og `game_3`, men det er fortsatt ikke historisk komplett bingo-oppsett
+- Game 1, bakgrunner, theme-data, slotmachines og admin-drevet schedule-oppsett er fortsatt ikke tilbakefort
+- Unity-lobbyen er derfor ikke "som for" ennå, selv om de grunnleggende namespace-listene na virker lokalt
 
-### 3. `gameType` er ikke komplett
+### 2. `gameType` er ikke komplett
 
 `gameType` inneholder na bare:
 
@@ -124,7 +116,7 @@ Konsekvens:
 - `GameTypeList` kan ikke gjenskape opprinnelig Spillorama-lobby
 - vi mangler minst de historiske bingo-spilltypene Unity forventer a vise
 
-### 4. Production-env er ikke gjenreist
+### 3. Production-env er ikke gjenreist
 
 For full parity trengs ikke bare Mongo og Redis. Legacy runtime refererer ogsa til:
 

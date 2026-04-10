@@ -23,6 +23,8 @@ function connectSocket(url, options = {}) {
       transports: ['websocket', 'polling'],
       reconnection: false,
       timeout: 10000,
+      forceNew: true,
+      multiplex: false,
       ...options,
     });
 

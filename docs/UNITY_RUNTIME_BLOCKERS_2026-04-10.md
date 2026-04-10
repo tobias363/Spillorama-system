@@ -17,24 +17,27 @@ Det betyr:
 Etter videre arbeid 10. april 2026 er følgende na bevist:
 
 - Atlas-tilkobling til `ais_bingo_stg` fungerer
-- minimumsdata for `setting`, `hall` og spiller-hall-godkjenning er seedet i staging
+- minimumsdata for `setting`, `hall`, spiller-hall-godkjenning og lobby-bootstrap er seedet i staging
 - legacy runtime i `unity-bingo-backend/` booter lokalt under Node 18
 - `/web/` svarer `200` lokalt nar runtime startes fra riktig working directory
 - `HallList` svarer `success`
 - `LoginPlayer` svarer `success`
-- `GetApprovedHallList` svarer `success` etter at `player.groupHall` ble normalisert i seed-data
+- `GetApprovedHallList` svarer `success`
 - `GameTypeList` svarer `success` uten dobbel bildebane
-- `AvailableGames` svarer, men alle spill står fortsatt `Closed`
-- `Game2PlanList` og `Game3PlanList` stopper fortsatt fordi databasen mangler `parentGame` og `game`
+- `AvailableGames` svarer med `Start at` for `game_2` og `game_3`
+- `Game2PlanList` svarer med `upcomingGames`
+- `Game3PlanList` svarer med `upcomingGames` nar smoke-klienten tvinger ny Socket.IO-transport per namespace
+- `dailySchedule`, `schedules`, `assignedHalls`, `parentGame` og recovery `game` er seedet i staging
 
 Det betyr at recovery-sporet er riktig.
 
-Det som fortsatt mangler er ikke grunnmur, men masterdata for faktisk lobby og spill:
+Det som fortsatt mangler er ikke grunnmur, men full parity-data for faktisk historisk lobby og spill:
 
-- `game`
 - `subGame*`
-- `schedules`
 - komplett `gameType`
+- `background`
+- `theme`
+- `slotmachines`
 - øvrige bingo-data som gjør at lobby og planlister ser ut som før
 
 Se styrende plan:
@@ -157,7 +160,7 @@ Det som ikke finnes der er legacy bingo-databaseoppsett som:
 
 Den gamle bingo-serveren er eksplisitt Mongo-basert og starter ikke uten dette.
 
-### 6. Isolert recovery-runtime er hentet ut og smoke-testet
+### 6. Isolert recovery-runtime er hentet ut, bootet og lobby-smoke-testet
 
 Det er hentet ut en ren legacy bingo-runtime til:
 
@@ -179,7 +182,13 @@ Konkrete observasjoner fra smoke-test:
 - oppstart uten legacy env bygger ugyldig Mongo-URI og feiler umiddelbart
 - oppstart i eksplisitt `DB_CONNECTION_TYPE=local` og `DB_MODE=local` kommer lenger, men stopper med `connect ECONNREFUSED 127.0.0.1:27017`
 
-Dette bekrefter at recovery-sporet er teknisk riktig, men databasen mangler fortsatt.
+Dette bekrefter at recovery-sporet er teknisk riktig, og at vi na er forbi ren login-recovery.
+
+Videre arbeid 10. april 2026 la ogsa til:
+
+- `seed_staging_lobby_bootstrap.js` som bygger en deterministisk staging-lobby for `game_2` og `game_3`
+- fremtidige lokale tidsluker i `Europe/Oslo`, slik at legacy cron ikke umiddelbart refunderer og avslutter recovery-rundene
+- `forceNew` og `multiplex: false` i smoke-klienten, fordi sekvensielle namespace-tilkoblinger ellers kan henge i `socket.io-client` uten at runtimeen faktisk er blokkert
 
 Videre recovery-scripts finnes na direkte i runtime-mappen:
 
@@ -207,7 +216,7 @@ Det trengs enten:
 - den opprinnelige legacy bingo-databasen, eller
 - et eksplisitt prosjekt for å bootstrappe minimumsdata for settings, haller, spill og spillere
 
-### 8. Ingen lokal dump eller ekte legacy env-fil er funnet
+### 8. Ingen autoritativ historisk dump er funnet
 
 Det er søkt etter:
 

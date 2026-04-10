@@ -45,23 +45,26 @@ Videre recovery-arbeid har na bekreftet:
 
 1. Atlas-tilkobling mot `ais_bingo_stg` fungerer.
 2. Minimumsdata for `setting`, `hall` og spiller-hall-godkjenning er seedet i staging.
-3. Seed-scriptet normaliserer na `player.groupHall`, `player.approvedHalls` og `hall.groupHall` slik legacy runtime faktisk forventer.
+3. Seed-scriptet bygger na opp minimumsdata for hall, spiller og recovery-lobby i staging.
 4. Runtimeen booter lokalt pa `http://127.0.0.1:4010` nar den startes fra denne mappen.
 5. `/web/` svarer `200`.
 6. `HallList` svarer `success`.
 7. `LoginPlayer` svarer `success`.
 8. `GetApprovedHallList` svarer korrekt hall-liste.
 9. `GameTypeList` svarer uten dobbelt `profile/bingo/`-prefix i bildebanen.
-10. `AvailableGames` svarer, men alle spill er fortsatt `Closed` fordi `parentGame` og `game` er tomme.
-11. `Game2PlanList` og `Game3PlanList` er na eksplisitt verifisert som blokkert av manglende masterdata, ikke av auth eller socket.
+10. `seed_staging_lobby_bootstrap.js` bygger na opp en lokal staging-lobby med `dailySchedule`, `schedules`, `assignedHalls`, `parentGame` og recovery-`game` for `game_2` og `game_3`.
+11. `AvailableGames` svarer na med `Start at` for `game_2` og `game_3`.
+12. `Game2PlanList` svarer na med en faktisk `upcomingGames`-liste.
+13. `Game3PlanList` svarer na med en faktisk `upcomingGames`-liste nar smoke-klienten tvinger egen Socket.IO-transport per namespace.
 
-Det neste hovedgapet er ikke lenger login eller host, men manglende spill-masterdata:
+Det neste hovedgapet er ikke lenger login eller host, men full parity-data utover recovery-bootstrapen:
 
-- `game`
 - `subGame`
 - `subGame1`
 - `subGame5`
-- `schedules`
+- `background`
+- `theme`
+- `slotmachines`
 - komplett `gameType`
 
 Se full plan i:
@@ -75,6 +78,7 @@ Denne recovery-runden har na konkrete scripts og backup-spor:
 
 - backup-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/backup_mongo_db.js`
 - seed-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/seed_minimum_recovery.js`
+- lobby-bootstrap: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/seed_staging_lobby_bootstrap.js`
 - audit-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/audit_masterdata.js`
 - start-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/start_local_recovery.sh`
 - smoke-script: `/Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend/scripts/smoke_recovery_runtime.js`
@@ -149,6 +153,7 @@ Faktisk recovery-kjoring mot Atlas staging:
 cd /Users/tobiashaugen/Projects/Spillorama-system/unity-bingo-backend
 node scripts/backup_mongo_db.js .env.recovery recovery-backups
 node scripts/seed_minimum_recovery.js .env.recovery
+node scripts/seed_staging_lobby_bootstrap.js .env.recovery --apply
 node scripts/audit_masterdata.js .env.recovery
 ./scripts/start_local_recovery.sh .env.recovery
 node scripts/smoke_recovery_runtime.js http://127.0.0.1:4010 .env.recovery martin martin 1
