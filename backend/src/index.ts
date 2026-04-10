@@ -156,6 +156,7 @@ app.use(express.static(publicDir));
 
 const server = http.createServer(app);
 const io = new Server(server, {
+  allowEIO3: true,
   cors: {
     origin: corsOrigins,
     credentials: true

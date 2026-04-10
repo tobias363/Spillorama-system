@@ -95,6 +95,8 @@ Hvis disse trengs for Candy, hører de hjemme i `demo-backend` eller Candy-repoe
 
 Unity WebGL-build og host HTML er ett deploybart sett.
 
+Live `/web/` bruker i tillegg en eldre Socket.IO/Engine.IO-klient fra Unity-builden. Backend må derfor beholde kompatibilitet for Engine.IO v3 (`allowEIO3`) så lenge denne Unity-builden er i bruk.
+
 Det betyr at følgende må deployes sammen:
 
 - `backend/public/web/index.html`
