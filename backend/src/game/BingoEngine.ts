@@ -19,11 +19,13 @@ import type {
   GameSnapshot,
   GameState,
   Player,
+  RecoverableGameSnapshot,
   RoomSnapshot,
   RoomState,
   RoomSummary,
   Ticket
 } from "./types.js";
+import { InMemoryRoomStateStore, type RoomStateStore } from "../store/RoomStateStore.js";
 
 export class DomainError extends Error {
   public readonly code: string;
@@ -52,7 +54,7 @@ interface StartGameInput {
   actorPlayerId: string;
   entryFee?: number;
   ticketsPerPlayer?: number;
-  payoutPercent?: number;
+  payoutPercent: number;
   /** If provided, only these players get tickets. Others watch without playing. */
   armedPlayerIds?: string[];
 }
@@ -82,6 +84,8 @@ interface EndGameInput {
 
 interface ComplianceOptions {
   minRoundIntervalMs?: number;
+  /** MEDIUM-1: Minimum interval between manual draws (ms). Default 1500. */
+  minDrawIntervalMs?: number;
   minPlayersToStart?: number;
   dailyLossLimit?: number;
   monthlyLossLimit?: number;
@@ -324,7 +328,8 @@ const MAX_BINGO_BALLS = 60;
 const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
 
 export class BingoEngine {
-  private readonly rooms = new Map<string, RoomState>();
+  /** HOEY-7: Pluggable room state store (in-memory or Redis-backed). */
+  private readonly rooms: RoomStateStore;
   private readonly roomLastRoundStartMs = new Map<string, number>();
   private readonly lossEntriesByScope = new Map<string, LossLedgerEntry[]>();
   private readonly personalLossLimitsByScope = new Map<string, LossLimits>();
@@ -340,6 +345,8 @@ export class BingoEngine {
   private lastPayoutAuditHash = "GENESIS";
 
   private readonly minRoundIntervalMs: number;
+  private readonly minDrawIntervalMs: number;
+  private readonly lastDrawAtByRoom = new Map<string, number>();
   private readonly minPlayersToStart: number;
   private readonly regulatoryLossLimits: LossLimits;
   private readonly playSessionLimitMs: number;
@@ -350,9 +357,13 @@ export class BingoEngine {
   constructor(
     private readonly bingoAdapter: BingoSystemAdapter,
     private readonly walletAdapter: WalletAdapter,
-    options: ComplianceOptions = {}
+    options: ComplianceOptions = {},
+    /** HOEY-7: Pluggable room state store. Defaults to in-memory. */
+    rooms?: RoomStateStore
   ) {
+    this.rooms = rooms ?? new InMemoryRoomStateStore();
     this.minRoundIntervalMs = Math.max(30000, Math.floor(options.minRoundIntervalMs ?? 30000));
+    this.minDrawIntervalMs = Math.max(0, Math.floor(options.minDrawIntervalMs ?? 1500));
     const minPlayersToStart = options.minPlayersToStart ?? 2;
     if (!Number.isFinite(minPlayersToStart) || !Number.isInteger(minPlayersToStart) || minPlayersToStart < 1) {
       throw new DomainError("INVALID_CONFIG", "minPlayersToStart må være et heltall >= 1.");
@@ -510,11 +521,14 @@ export class BingoEngine {
     if (!Number.isFinite(entryFee) || entryFee < 0) {
       throw new DomainError("INVALID_ENTRY_FEE", "entryFee må være >= 0.");
     }
+    if (entryFee > 10000) {
+      throw new DomainError("INVALID_ENTRY_FEE", "entryFee kan ikke overstige 10 000 kr.");
+    }
     const ticketsPerPlayer = input.ticketsPerPlayer ?? 1;
     if (!Number.isInteger(ticketsPerPlayer) || ticketsPerPlayer < 1 || ticketsPerPlayer > 5) {
       throw new DomainError("INVALID_TICKETS_PER_PLAYER", "ticketsPerPlayer må være et heltall mellom 1 og 5.");
     }
-    const payoutPercent = input.payoutPercent ?? 100;
+    const payoutPercent = input.payoutPercent;
     if (!Number.isFinite(payoutPercent) || payoutPercent < 0 || payoutPercent > 100) {
       throw new DomainError("INVALID_PAYOUT_PERCENT", "payoutPercent må være mellom 0 og 100.");
     }
@@ -543,59 +557,77 @@ export class BingoEngine {
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.makeHouseAccountId(room.hallId, gameType, channel);
     await this.walletAdapter.ensureAccount(houseAccountId);
+    // HOEY-4: Track debited players for compensation if startup fails partway through.
+    const debitedPlayers: Array<{ player: Player; fromAccountId: string; toAccountId: string }> = [];
     if (entryFee > 0) {
-      for (const player of eligiblePlayers) {
-        const transfer = await this.walletAdapter.transfer(
-          player.walletId,
-          houseAccountId,
-          entryFee,
-          `Bingo buy-in ${room.code}`
-        );
-        player.balance -= entryFee;
-        this.recordLossEntry(player.walletId, room.hallId, {
-          type: "BUYIN",
-          amount: entryFee,
-          createdAtMs: nowMs
-        });
-        this.recordComplianceLedgerEvent({
-          hallId: room.hallId,
-          gameType,
-          channel,
-          eventType: "STAKE",
-          amount: entryFee,
-          roomCode: room.code,
-          gameId,
-          playerId: player.id,
-          walletId: player.walletId,
-          sourceAccountId: transfer.fromTx.accountId,
-          targetAccountId: transfer.toTx.accountId,
-          metadata: {
-            reason: "BINGO_BUYIN"
-          }
-        });
+      try {
+        for (const player of eligiblePlayers) {
+          const transfer = await this.walletAdapter.transfer(
+            player.walletId,
+            houseAccountId,
+            entryFee,
+            `Bingo buy-in ${room.code}`,
+            { idempotencyKey: `buyin-${gameId}-${player.id}` }
+          );
+          debitedPlayers.push({ player, fromAccountId: transfer.fromTx.accountId, toAccountId: transfer.toTx.accountId });
+          player.balance -= entryFee;
+          this.recordLossEntry(player.walletId, room.hallId, {
+            type: "BUYIN",
+            amount: entryFee,
+            createdAtMs: nowMs
+          });
+          this.recordComplianceLedgerEvent({
+            hallId: room.hallId,
+            gameType,
+            channel,
+            eventType: "STAKE",
+            amount: entryFee,
+            roomCode: room.code,
+            gameId,
+            playerId: player.id,
+            walletId: player.walletId,
+            sourceAccountId: transfer.fromTx.accountId,
+            targetAccountId: transfer.toTx.accountId,
+            metadata: {
+              reason: "BINGO_BUYIN"
+            }
+          });
+        }
+      } catch (err) {
+        // Compensate: refund all already-debited players
+        await this.refundDebitedPlayers(debitedPlayers, houseAccountId, entryFee, room.code, gameId);
+        throw err;
       }
     }
     const tickets = new Map<string, Ticket[]>();
     const marks = new Map<string, Set<number>[]>();
 
-    for (const player of eligiblePlayers) {
-      const playerTickets: Ticket[] = [];
-      const playerMarks: Set<number>[] = [];
+    try {
+      for (const player of eligiblePlayers) {
+        const playerTickets: Ticket[] = [];
+        const playerMarks: Set<number>[] = [];
 
-      for (let ticketIndex = 0; ticketIndex < ticketsPerPlayer; ticketIndex += 1) {
-        const ticket = await this.bingoAdapter.createTicket({
-          roomCode: room.code,
-          gameId,
-          player,
-          ticketIndex,
-          ticketsPerPlayer
-        });
-        playerTickets.push(ticket);
-        playerMarks.push(new Set<number>());
+        for (let ticketIndex = 0; ticketIndex < ticketsPerPlayer; ticketIndex += 1) {
+          const ticket = await this.bingoAdapter.createTicket({
+            roomCode: room.code,
+            gameId,
+            player,
+            ticketIndex,
+            ticketsPerPlayer
+          });
+          playerTickets.push(ticket);
+          playerMarks.push(new Set<number>());
+        }
+
+        tickets.set(player.id, playerTickets);
+        marks.set(player.id, playerMarks);
       }
-
-      tickets.set(player.id, playerTickets);
-      marks.set(player.id, playerMarks);
+    } catch (err) {
+      // Compensate: refund all debited players if ticket generation fails
+      if (entryFee > 0) {
+        await this.refundDebitedPlayers(debitedPlayers, houseAccountId, entryFee, room.code, gameId);
+      }
+      throw err;
     }
 
     const prizePool = roundCurrency(entryFee * eligiblePlayers.length);
@@ -615,6 +647,7 @@ export class BingoEngine {
       tickets,
       marks,
       claims: [],
+      participatingPlayerIds: eligiblePlayers.map(p => p.id),
       startedAt: new Date().toISOString()
     };
 
@@ -622,15 +655,17 @@ export class BingoEngine {
     this.roomLastRoundStartMs.set(room.code, Date.parse(game.startedAt));
 
     // BIN-161: Structured RNG audit log — enables regulatory replay of draw sequence
+    // KRITISK-3: Log cryptographic hash of draw sequence instead of cleartext.
+    // The full drawBag is persisted securely via RecoverableGameSnapshot checkpoint.
     logger.info({
       event: "RNG_DRAW_BAG",
       gameId,
       roomCode: room.code,
       hallId: room.hallId,
-      drawBag: game.drawBag,
+      drawBagHash: createHash("sha256").update(JSON.stringify(game.drawBag)).digest("hex"),
       ballCount: game.drawBag.length,
       timestamp: game.startedAt
-    }, "RNG draw bag generated");
+    }, "RNG draw bag generated — hash committed");
 
     for (const player of eligiblePlayers) {
       this.startPlaySession(player.walletId, nowMs);
@@ -642,7 +677,7 @@ export class BingoEngine {
           roomCode: room.code,
           gameId,
           reason: "BUY_IN",
-          snapshot: this.serializeGame(game),
+          snapshot: this.serializeGameForRecovery(game),
           players: [...room.players.values()],
           hallId: room.hallId
         });
@@ -650,6 +685,8 @@ export class BingoEngine {
         logger.error({ err, gameId }, "CRITICAL: Checkpoint failed after game start");
       }
     }
+    // HOEY-7: Persist room state after buy-in
+    await this.rooms.persist(room.code);
     if (this.bingoAdapter.onGameStarted) {
       await this.bingoAdapter.onGameStarted({
         roomCode: room.code,
@@ -664,7 +701,21 @@ export class BingoEngine {
     const room = this.requireRoom(input.roomCode);
     this.assertHost(room, input.actorPlayerId);
     const host = this.requirePlayer(room, input.actorPlayerId);
-    this.assertWalletAllowedForGameplay(host.walletId, Date.now());
+    const nowMs = Date.now();
+    this.assertWalletAllowedForGameplay(host.walletId, nowMs);
+
+    // MEDIUM-1: Enforce minimum interval between manual draws
+    if (this.minDrawIntervalMs > 0) {
+      const lastDraw = this.lastDrawAtByRoom.get(room.code);
+      if (lastDraw !== undefined) {
+        const elapsed = nowMs - lastDraw;
+        if (elapsed < this.minDrawIntervalMs) {
+          const waitSec = ((this.minDrawIntervalMs - elapsed) / 1000).toFixed(1);
+          throw new DomainError("DRAW_TOO_FAST", `Vent ${waitSec}s mellom trekninger.`);
+        }
+      }
+    }
+
     const game = this.requireRunningGame(room);
     if (game.drawnNumbers.length >= this.maxDrawsPerRound) {
       const endedAt = new Date();
@@ -672,6 +723,8 @@ export class BingoEngine {
       game.endedAt = endedAt.toISOString();
       game.endedReason = "MAX_DRAWS_REACHED";
       this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      // HOEY-6: Write GAME_END checkpoint for MAX_DRAWS_REACHED
+      await this.writeGameEndCheckpoint(room, game);
       throw new DomainError("NO_MORE_NUMBERS", `Maks antall trekk (${this.maxDrawsPerRound}) er nådd.`);
     }
 
@@ -682,6 +735,8 @@ export class BingoEngine {
       game.endedAt = endedAt.toISOString();
       game.endedReason = "DRAW_BAG_EMPTY";
       this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      // HOEY-6: Write GAME_END checkpoint for DRAW_BAG_EMPTY
+      await this.writeGameEndCheckpoint(room, game);
       throw new DomainError("NO_MORE_NUMBERS", "Ingen tall igjen i trekken.");
     }
 
@@ -694,13 +749,19 @@ export class BingoEngine {
         drawIndex: game.drawnNumbers.length
       });
     }
+    // HOEY-3: Checkpoint after each draw — persists draw sequence state
+    await this.writeDrawCheckpoint(room, game);
     if (game.drawnNumbers.length >= this.maxDrawsPerRound) {
       const endedAt = new Date();
       game.status = "ENDED";
       game.endedAt = endedAt.toISOString();
       game.endedReason = "MAX_DRAWS_REACHED";
       this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      // HOEY-6: Write GAME_END checkpoint for MAX_DRAWS_REACHED (post-draw)
+      await this.writeGameEndCheckpoint(room, game);
     }
+    // MEDIUM-1: Record draw timestamp for interval enforcement
+    this.lastDrawAtByRoom.set(room.code, Date.now());
     return { number: nextNumber, drawIndex: game.drawnNumbers.length, gameId: game.id };
   }
 
@@ -738,6 +799,14 @@ export class BingoEngine {
     const game = this.requireRunningGame(room);
     const player = this.requirePlayer(room, input.playerId);
     this.assertWalletAllowedForGameplay(player.walletId, Date.now());
+
+    // KRITISK-8: Only players who participated (were armed + paid buy-in) can claim prizes.
+    if (game.participatingPlayerIds && !game.participatingPlayerIds.includes(player.id)) {
+      throw new DomainError(
+        "PLAYER_NOT_PARTICIPATING",
+        "Spilleren deltok ikke i denne runden og kan ikke kreve premie."
+      );
+    }
 
     // BIN-45: Idempotency — if this player already has a paid-out claim of the
     // same type in this game, return the existing claim instead of processing again.
@@ -791,9 +860,15 @@ export class BingoEngine {
         }
       }
     } else if (input.type === "BINGO") {
-      valid = playerTickets.some((ticket, index) => hasFullBingo(ticket, playerMarks[index]));
-      if (!valid) {
-        reason = "NO_VALID_BINGO";
+      // KRITISK-4: Guard against duplicate BINGO claims (mirrors LINE guard)
+      if (game.bingoWinnerId) {
+        valid = false;
+        reason = "BINGO_ALREADY_CLAIMED";
+      } else {
+        valid = playerTickets.some((ticket, index) => hasFullBingo(ticket, playerMarks[index]));
+        if (!valid) {
+          reason = "NO_VALID_BINGO";
+        }
       }
     } else {
       reason = "UNKNOWN_CLAIM_TYPE";
@@ -835,7 +910,8 @@ export class BingoEngine {
           houseAccountId,
           player.walletId,
           payout,
-          `Line prize ${room.code}`
+          `Line prize ${room.code}`,
+          { idempotencyKey: `line-prize-${game.id}-${claim.id}` }
         );
         player.balance += payout;
         game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
@@ -885,7 +961,7 @@ export class BingoEngine {
               claimId: claim.id,
               payoutAmount: payout,
               transactionIds: [transfer.fromTx.id, transfer.toTx.id],
-              snapshot: this.serializeGame(game),
+              snapshot: this.serializeGameForRecovery(game),
               players: [...room.players.values()],
               hallId: room.hallId
             });
@@ -893,6 +969,8 @@ export class BingoEngine {
             logger.error({ err, claimId: claim.id, gameId: game.id }, "CRITICAL: Checkpoint failed after LINE payout");
           }
         }
+        // HOEY-7: Persist after LINE payout
+        await this.rooms.persist(room.code);
       }
       const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       claim.payoutAmount = payout;
@@ -908,6 +986,12 @@ export class BingoEngine {
     }
 
     if (valid && input.type === "BINGO") {
+      // KRITISK-4: Double-check guard against race between validation and payout
+      if (game.bingoWinnerId) {
+        claim.valid = false;
+        claim.reason = "BINGO_ALREADY_CLAIMED";
+        return claim;
+      }
       const endedAt = new Date();
       game.bingoWinnerId = player.id;
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
@@ -927,7 +1011,8 @@ export class BingoEngine {
           houseAccountId,
           player.walletId,
           payout,
-          `Bingo prize ${room.code}`
+          `Bingo prize ${room.code}`,
+          { idempotencyKey: `bingo-prize-${game.id}-${claim.id}` }
         );
         player.balance += payout;
         this.recordLossEntry(player.walletId, room.hallId, {
@@ -975,7 +1060,7 @@ export class BingoEngine {
               claimId: claim.id,
               payoutAmount: payout,
               transactionIds: [transfer.fromTx.id, transfer.toTx.id],
-              snapshot: this.serializeGame(game),
+              snapshot: this.serializeGameForRecovery(game),
               players: [...room.players.values()],
               hallId: room.hallId
             });
@@ -983,6 +1068,8 @@ export class BingoEngine {
             logger.error({ err, claimId: claim.id, gameId: game.id }, "CRITICAL: Checkpoint failed after BINGO payout");
           }
         }
+        // HOEY-7: Persist after BINGO payout
+        await this.rooms.persist(room.code);
       }
       game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
       game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
@@ -1010,6 +1097,11 @@ export class BingoEngine {
       });
     }
 
+    // HOEY-6: Write GAME_END checkpoint if the game ended via BINGO_CLAIMED
+    if (game.status === "ENDED" && game.endedReason === "BINGO_CLAIMED") {
+      await this.writeGameEndCheckpoint(room, game);
+    }
+
     return claim;
   }
 
@@ -1033,7 +1125,7 @@ export class BingoEngine {
           roomCode: room.code,
           gameId: game.id,
           reason: "GAME_END",
-          snapshot: this.serializeGame(game),
+          snapshot: this.serializeGameForRecovery(game),
           players: [...room.players.values()],
           hallId: room.hallId
         });
@@ -1080,6 +1172,8 @@ export class BingoEngine {
       throw new DomainError("GAME_IN_PROGRESS", `Kan ikke slette rom ${code} mens en runde pågår.`);
     }
     this.rooms.delete(code);
+    this.roomLastRoundStartMs.delete(code);
+    this.lastDrawAtByRoom.delete(code);
   }
 
   getPlayerCompliance(walletId: string, hallId?: string): PlayerComplianceSnapshot {
@@ -1449,11 +1543,13 @@ export class BingoEngine {
     const gameType: LedgerGameType = "DATABINGO";
     const channel: LedgerChannel = "INTERNET";
     const sourceAccountId = this.makeHouseAccountId(hallId, gameType, channel);
+    const extraPrizeId = randomUUID();
     const transfer = await this.walletAdapter.transfer(
       sourceAccountId,
       walletId,
       amount,
-      input.reason?.trim() || `Extra prize ${hallId}/${linkId}`
+      input.reason?.trim() || `Extra prize ${hallId}/${linkId}`,
+      { idempotencyKey: `extra-prize-${extraPrizeId}` }
     );
     this.recordLossEntry(walletId, hallId, {
       type: "PAYOUT",
@@ -1869,7 +1965,8 @@ export class BingoEngine {
           sourceAccountId,
           allocation.organizationAccountId,
           amount,
-          `Overskudd ${batchId} ${date}`
+          `Overskudd ${batchId} ${date}`,
+          { idempotencyKey: `surplus-${batchId}-${allocation.organizationAccountId}-${row.hallId}` }
         );
         const record: OverskuddDistributionTransfer = {
           id: randomUUID(),
@@ -2169,8 +2266,8 @@ export class BingoEngine {
   }
 
   private isPlayerInAnotherRunningGame(roomCode: string, player: Player): boolean {
-    for (const [code, room] of this.rooms) {
-      if (code === roomCode) continue;
+    for (const room of this.rooms.values()) {
+      if (room.code === roomCode) continue;
       if (room.currentGame?.status === "RUNNING" && room.players.has(player.id)) {
         return true;
       }
@@ -2841,6 +2938,71 @@ export class BingoEngine {
     };
   }
 
+  /** HOEY-4: Refund buy-ins when game startup fails partway through. */
+  private async refundDebitedPlayers(
+    debitedPlayers: Array<{ player: Player; fromAccountId: string; toAccountId: string }>,
+    houseAccountId: string,
+    entryFee: number,
+    roomCode: string,
+    gameId: string
+  ): Promise<void> {
+    for (const { player } of debitedPlayers) {
+      try {
+        await this.walletAdapter.transfer(
+          houseAccountId,
+          player.walletId,
+          entryFee,
+          `Refund: game start failed ${roomCode}`,
+          { idempotencyKey: `refund-${gameId}-${player.id}` }
+        );
+        player.balance += entryFee;
+      } catch (refundErr) {
+        logger.error(
+          { err: refundErr, playerId: player.id, walletId: player.walletId, gameId, roomCode },
+          "CRITICAL: Failed to refund buy-in after game start failure"
+        );
+      }
+    }
+  }
+
+  /** HOEY-3: Write a DRAW checkpoint after each ball draw. */
+  private async writeDrawCheckpoint(room: RoomState, game: GameState): Promise<void> {
+    if (!this.bingoAdapter.onCheckpoint) return;
+    try {
+      await this.bingoAdapter.onCheckpoint({
+        roomCode: room.code,
+        gameId: game.id,
+        reason: "DRAW",
+        snapshot: this.serializeGameForRecovery(game),
+        players: [...room.players.values()],
+        hallId: room.hallId
+      });
+    } catch (err) {
+      logger.error({ err, gameId: game.id, drawCount: game.drawnNumbers.length }, "CRITICAL: Checkpoint failed after draw");
+    }
+    // HOEY-7: Persist room state to backing store after draw
+    await this.rooms.persist(room.code);
+  }
+
+  /** HOEY-6: Write a GAME_END checkpoint for any termination path. */
+  private async writeGameEndCheckpoint(room: RoomState, game: GameState): Promise<void> {
+    if (!this.bingoAdapter.onCheckpoint) return;
+    try {
+      await this.bingoAdapter.onCheckpoint({
+        roomCode: room.code,
+        gameId: game.id,
+        reason: "GAME_END",
+        snapshot: this.serializeGameForRecovery(game),
+        players: [...room.players.values()],
+        hallId: room.hallId
+      });
+    } catch (err) {
+      logger.error({ err, gameId: game.id, endedReason: game.endedReason }, "CRITICAL: Checkpoint failed at game end");
+    }
+    // HOEY-7: Persist room state to backing store after game end
+    await this.rooms.persist(room.code);
+  }
+
   private serializeGame(game: GameState): GameSnapshot {
     const ticketByPlayerId = Object.fromEntries(
       [...game.tickets.entries()].map(([playerId, tickets]) => [playerId, tickets.map((ticket) => ({ ...ticket }))])
@@ -2874,9 +3036,24 @@ export class BingoEngine {
       claims: [...game.claims],
       tickets: ticketByPlayerId,
       marks: marksByPlayerId,
+      participatingPlayerIds: game.participatingPlayerIds,
       startedAt: game.startedAt,
       endedAt: game.endedAt,
       endedReason: game.endedReason
+    };
+  }
+
+  /** KRITISK-5/6: Full engine state for checkpoint recovery (preserves drawBag + per-ticket marks). */
+  private serializeGameForRecovery(game: GameState): RecoverableGameSnapshot {
+    const base = this.serializeGame(game);
+    const structuredMarks: Record<string, number[][]> = {};
+    for (const [playerId, sets] of game.marks) {
+      structuredMarks[playerId] = sets.map(s => [...s]);
+    }
+    return {
+      ...base,
+      drawBag: [...game.drawBag],
+      structuredMarks,
     };
   }
 }

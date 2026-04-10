@@ -227,7 +227,8 @@ test("compliance: enforces 30s interval between databingo rounds", async () => {
       roomCode: room.roomCode,
       actorPlayerId: room.hostPlayerId,
       entryFee: 0,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     });
   });
 
@@ -246,7 +247,8 @@ test("compliance: enforces 30s interval between databingo rounds", async () => {
           roomCode: room.roomCode,
           actorPlayerId: room.hostPlayerId,
           entryFee: 0,
-          ticketsPerPlayer: 1
+          ticketsPerPlayer: 1,
+          payoutPercent: 80
         }),
       (error: unknown) => error instanceof DomainError && error.code === "ROUND_START_TOO_SOON"
     );
@@ -270,7 +272,8 @@ test("compliance: enforces ticket max and hall ticket cap", async () => {
         roomCode: room.roomCode,
         actorPlayerId: room.hostPlayerId,
         entryFee: 0,
-        ticketsPerPlayer: 6
+        ticketsPerPlayer: 6,
+        payoutPercent: 80
       }),
     (error: unknown) => error instanceof DomainError && error.code === "INVALID_TICKETS_PER_PLAYER"
   );
@@ -308,7 +311,8 @@ test("compliance: enforces regulatory and personal loss limits", async () => {
     roomCode: hallOneRoom.roomCode,
     actorPlayerId: hallOneRoom.hostPlayerId,
     entryFee: 70,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   const hallOneSnap = engine.getRoomSnapshot(hallOneRoom.roomCode);
@@ -342,7 +346,8 @@ test("compliance: enforces regulatory and personal loss limits", async () => {
       roomCode: hallTwoRoom.roomCode,
       actorPlayerId: hallTwoRoom.hostPlayerId,
       entryFee: 70,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     })
   );
 });
@@ -367,7 +372,8 @@ test("compliance: enforces mandatory break and timed pause", async () => {
       roomCode: firstRoom.roomCode,
       actorPlayerId: firstRoom.hostPlayerId,
       entryFee: 10,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     });
   });
 
@@ -395,7 +401,8 @@ test("compliance: enforces mandatory break and timed pause", async () => {
       roomCode: secondRoom.roomCode,
       actorPlayerId: secondRoom.hostPlayerId,
       entryFee: 0,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     });
 
     const snap = engine.getRoomSnapshot(secondRoom.roomCode);
@@ -453,7 +460,8 @@ test("compliance: enforces databingo prize caps and keeps payout audit", async (
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 20_000,
     monthlyLossLimit: 20_000,
-    maxDrawsPerRound: 60
+    maxDrawsPerRound: 60,
+    minDrawIntervalMs: 0
   });
 
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
@@ -482,7 +490,8 @@ test("compliance: enforces databingo prize caps and keeps payout audit", async (
     roomCode,
     actorPlayerId: hostPlayerId,
     entryFee: 3000,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   // Make draw order deterministic for this test to avoid flakiness where a required

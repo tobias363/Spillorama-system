@@ -11,7 +11,7 @@ import { PostgresBingoSystemAdapter } from "./adapters/PostgresBingoSystemAdapte
 import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { assertTicketsPerPlayerWithinHallLimit } from "./game/compliance.js";
 import { BingoEngine, DomainError, toPublicError } from "./game/BingoEngine.js";
-import { generateTraditional75Ticket } from "./game/ticket.js";
+import { generateDatabingo60Ticket } from "./game/ticket.js";
 import type { ClaimType, RoomSnapshot, RoomSummary, Ticket } from "./game/types.js";
 import {
   ADMIN_ACCESS_POLICY,
@@ -38,6 +38,7 @@ import {
 import { DrawScheduler, type SchedulerSettings } from "./draw-engine/DrawScheduler.js";
 import { SocketRateLimiter } from "./middleware/socketRateLimit.js";
 import { register as promRegister, metrics as promMetrics } from "./util/metrics.js";
+import { createExternalGameWalletRouter } from "./integration/externalGameWallet.js";
 
 interface AckResponse<T> {
   ok: boolean;
@@ -150,7 +151,13 @@ const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
   ? corsAllowedOriginsRaw.split(",").map((o) => o.trim()).filter(Boolean)
   : "*";
 app.use(cors({ origin: corsOrigins, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
+app.get(["/", "/index.html"], (_req, res) => {
+  res.redirect(302, "/web/");
+});
+app.get(["/portal", "/portal/"], (_req, res) => {
+  res.sendFile(path.join(frontendDir, "index.html"));
+});
 app.use(express.static(frontendDir));
 app.use(express.static(publicDir));
 
@@ -160,11 +167,22 @@ const io = new Server(server, {
   cors: {
     origin: corsOrigins,
     credentials: true
-  }
+  },
+  maxHttpBufferSize: 100 * 1024 // LAV-3: 100 KB — prevents oversized payloads
 });
 
 const walletRuntime = createWalletAdapter(projectDir);
 const walletAdapter = walletRuntime.adapter;
+
+// External game wallet bridge (Candy/demo-backend calls these)
+const extGameWalletApiKey = (process.env.EXT_GAME_WALLET_API_KEY ?? "").trim();
+if (extGameWalletApiKey) {
+  app.use("/api/ext-wallet", createExternalGameWalletRouter({
+    walletAdapter,
+    apiKey: extGameWalletApiKey
+  }));
+}
+
 const platformConnectionString =
   process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim();
 if (!platformConnectionString) {
@@ -292,7 +310,7 @@ if (isProductionRuntime && !autoplayAllowed && (requestedAutoRoundStartEnabled |
 
 // BIN-159: Use PostgreSQL adapter for game checkpointing when a DB connection is available
 const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
-const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, false) && checkpointConnectionString.length > 0;
+const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, true) && checkpointConnectionString.length > 0;
 
 const localBingoAdapter = usePostgresBingoAdapter
   ? new PostgresBingoSystemAdapter({
@@ -304,6 +322,14 @@ const localBingoAdapter = usePostgresBingoAdapter
 
 if (usePostgresBingoAdapter) {
   console.log("[BIN-159] Game state checkpointing enabled (PostgreSQL)");
+} else {
+  const reason = !checkpointConnectionString
+    ? "No database connection string configured (APP_PG_CONNECTION_STRING / WALLET_PG_CONNECTION_STRING)"
+    : "BINGO_CHECKPOINT_ENABLED is explicitly set to false";
+  console.warn(`[CHECKPOINT] WARNING: Game checkpointing is DISABLED. Reason: ${reason}. Game state will NOT survive server restarts.`);
+  if (process.env.NODE_ENV === "production") {
+    console.error("[CHECKPOINT] CRITICAL: Running production WITHOUT checkpointing. Set BINGO_CHECKPOINT_ENABLED=true and provide a database connection string.");
+  }
 }
 
 // BIN-170/171: Room state store and scheduler lock provider
@@ -336,7 +362,7 @@ const engine = new BingoEngine(localBingoAdapter, walletAdapter, {
   pauseDurationMs: bingoPauseDurationMs,
   selfExclusionMinMs: bingoSelfExclusionMinMs,
   maxDrawsPerRound: bingoMaxDrawsPerRound
-});
+}, roomStateStore);
 
 const platformService = new PlatformService(walletAdapter, {
   connectionString: platformConnectionString,
@@ -1078,7 +1104,7 @@ function getOrCreateDisplayTickets(roomCode: string, playerId: string, count: nu
   if (cached && cached.length === count) return cached;
   const tickets: Ticket[] = [];
   for (let i = 0; i < count; i++) {
-    tickets.push(generateTraditional75Ticket());
+    tickets.push(generateDatabingo60Ticket());
   }
   displayTicketCache.set(key, tickets);
   return tickets;
@@ -1633,6 +1659,65 @@ app.get("/api/games", async (req, res) => {
   }
 });
 
+// Launch external game (e.g. Candy) — calls demo-backend's integration API
+app.post("/api/games/:slug/launch", async (req, res) => {
+  try {
+    const user = await getAuthenticatedUser(req);
+    const slug = req.params.slug?.trim();
+    if (!slug) throw new DomainError("INVALID_INPUT", "Mangler game slug.");
+
+    const game = await platformService.getGame(slug);
+    if (!game || !game.isEnabled) {
+      throw new DomainError("GAME_NOT_FOUND", `Spillet '${slug}' finnes ikke eller er deaktivert.`);
+    }
+
+    const candyBackendUrl = (process.env.CANDY_BACKEND_URL ?? "").trim();
+    const candyApiKey = (process.env.CANDY_INTEGRATION_API_KEY ?? "").trim();
+    if (!candyBackendUrl || !candyApiKey) {
+      throw new DomainError("INTEGRATION_NOT_CONFIGURED", "Candy-integrasjon er ikke konfigurert.");
+    }
+
+    const hallId = typeof req.body?.hallId === "string" ? req.body.hallId.trim() : "hall-default";
+    const returnUrl = typeof req.body?.returnUrl === "string"
+      ? req.body.returnUrl.trim()
+      : `${req.protocol}://${req.get("host") ?? "localhost"}/`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(`${candyBackendUrl}/api/integration/launch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": candyApiKey
+        },
+        body: JSON.stringify({
+          sessionToken: getAccessTokenFromRequest(req),
+          playerId: user.walletId,
+          currency: "NOK",
+          language: "nb-NO",
+          returnUrl
+        }),
+        signal: controller.signal
+      });
+
+      const body = await response.json() as { ok?: boolean; data?: { embedUrl?: string; expiresAt?: string }; error?: unknown };
+      if (!response.ok || !body.ok || !body.data?.embedUrl) {
+        throw new DomainError("LAUNCH_FAILED", "Kunne ikke starte spillet.");
+      }
+
+      apiSuccess(res, {
+        embedUrl: body.data.embedUrl,
+        expiresAt: body.data.expiresAt
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    apiFailure(res, error);
+  }
+});
+
 app.get("/api/admin/games", async (req, res) => {
   try {
     await requireAdminPermissionUser(req, "GAME_CATALOG_READ");
@@ -1975,8 +2060,11 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
       actorPlayerId: beforeStartSnapshot.hostPlayerId,
       entryFee,
       ticketsPerPlayer,
-      payoutPercent: runtimeBingoSettings.payoutPercent
+      payoutPercent: runtimeBingoSettings.payoutPercent,
+      armedPlayerIds: getArmedPlayerIds(roomCode),
     });
+    disarmAllPlayers(roomCode);
+    clearDisplayTicketCache(roomCode);
     const snapshot = await emitRoomUpdate(roomCode);
     apiSuccess(res, {
       roomCode,
@@ -1989,12 +2077,20 @@ app.post("/api/admin/rooms/:roomCode/start", async (req, res) => {
 
 app.post("/api/admin/rooms/:roomCode/draw-next", async (req, res) => {
   try {
-    await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
+    const adminUser = await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
     const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
     const snapshot = engine.getRoomSnapshot(roomCode);
     const drawResult = await engine.drawNextNumber({
       roomCode,
       actorPlayerId: snapshot.hostPlayerId
+    });
+    console.info("[MEDIUM-4] Admin draw", {
+      adminUserId: adminUser.id,
+      adminEmail: adminUser.email,
+      roomCode,
+      gameId: drawResult.gameId,
+      number: drawResult.number,
+      drawIndex: drawResult.drawIndex
     });
     io.to(roomCode).emit("draw:new", { number: drawResult.number, source: "admin", drawIndex: drawResult.drawIndex, gameId: drawResult.gameId });
     const updatedSnapshot = await emitRoomUpdate(roomCode);
@@ -2012,13 +2108,20 @@ app.post("/api/admin/rooms/:roomCode/draw-next", async (req, res) => {
 
 app.post("/api/admin/rooms/:roomCode/end", async (req, res) => {
   try {
-    await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
+    const adminUser = await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
     const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
+    const reason = typeof req.body?.reason === "string" ? req.body.reason : "Manual end from admin";
     const beforeEndSnapshot = engine.getRoomSnapshot(roomCode);
     await engine.endGame({
       roomCode,
       actorPlayerId: beforeEndSnapshot.hostPlayerId,
-      reason: typeof req.body?.reason === "string" ? req.body.reason : "Manual end from admin"
+      reason
+    });
+    console.info("[MEDIUM-4] Admin end game", {
+      adminUserId: adminUser.id,
+      adminEmail: adminUser.email,
+      roomCode,
+      reason
     });
     const snapshot = await emitRoomUpdate(roomCode);
     apiSuccess(res, {
@@ -2766,7 +2869,29 @@ app.post("/api/wallets/transfer", async (req, res) => {
 const socketRateLimiter = new SocketRateLimiter();
 socketRateLimiter.start();
 
+// KRITISK-7: Reject unauthenticated WebSocket connections at handshake level.
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.accessToken;
+    if (typeof token !== "string" || !token.trim()) {
+      return next(new Error("UNAUTHORIZED: Mangler accessToken i handshake auth."));
+    }
+    const user = await platformService.getUserFromAccessToken(token.trim());
+    socket.data.user = user;
+    next();
+  } catch (err) {
+    const message = err instanceof DomainError ? err.message : "Autentisering feilet";
+    next(new Error(`UNAUTHORIZED: ${message}`));
+  }
+});
+
 io.on("connection", (socket: Socket) => {
+  // HOEY-9: Register player identity for player-based rate limiting.
+  // socket.data.user is set by the auth middleware above.
+  if (socket.data.user?.walletId) {
+    socketRateLimiter.registerPlayer(socket.id, socket.data.user.walletId);
+  }
+
   /** BIN-164: Wrap a socket handler with rate limiting. */
   function rateLimited<P, R>(
     eventName: string,
@@ -2965,8 +3090,11 @@ io.on("connection", (socket: Socket) => {
         actorPlayerId: playerId,
         entryFee: payload?.entryFee ?? getRoomConfiguredEntryFee(roomCode),
         ticketsPerPlayer,
-        payoutPercent: runtimeBingoSettings.payoutPercent
+        payoutPercent: runtimeBingoSettings.payoutPercent,
+        armedPlayerIds: getArmedPlayerIds(roomCode),
       });
+      disarmAllPlayers(roomCode);
+      clearDisplayTicketCache(roomCode);
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { snapshot });
     } catch (error) {
@@ -3092,6 +3220,10 @@ app.get("*", (_req, res) => {
     res.sendFile(adminFrontendFile);
     return;
   }
+  if (_req.path === "/portal" || _req.path === "/portal/") {
+    res.sendFile(path.join(frontendDir, "index.html"));
+    return;
+  }
   if (_req.path.startsWith("/web")) {
     res.sendFile(path.join(publicDir, "web/index.html"));
     return;
@@ -3179,3 +3311,13 @@ function handleShutdown(signal: string) {
 
 process.on("SIGTERM", () => handleShutdown("SIGTERM"));
 process.on("SIGINT", () => handleShutdown("SIGINT"));
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[FATAL] Unhandled promise rejection:", reason);
+  handleShutdown("unhandledRejection");
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[FATAL] Uncaught exception:", error);
+  handleShutdown("uncaughtException");
+});

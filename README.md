@@ -19,7 +19,7 @@ Det eier ikke Candy demo-login, Candy demo-admin eller Candy demo-settings.
 
 | System | Lokal mappe | Repo | Produksjon | Eier |
 |---|---|---|---|---|
-| Live bingo | `/Users/tobiashaugen/Projects/Spillorama-system/` | `tobias363/Spillorama-system` | `https://bingo-system-jsso.onrender.com/` | portal, wallet, auth, compliance, admin, Unity-lobby |
+| Live bingo | `/Users/tobiashaugen/Projects/Spillorama-system/` | `tobias363/Spillorama-system` | `https://spillorama-system.onrender.com/` | portal, wallet, auth, compliance, admin, Unity-lobby |
 | Candy | `/Users/tobiashaugen/Projects/Candy/` | `tobias363/candy-web` | Candy-klient og spillkode | selve spillet, UI, assets, gameplay |
 | demo-backend | `/Users/tobiashaugen/Projects/demo-backend/` | `tobias363/demo-backend` | `https://candy-backend-ldvg.onrender.com/` | demo-login, demo-admin, demo-settings, demo-drift |
 
@@ -27,9 +27,10 @@ Det eier ikke Candy demo-login, Candy demo-admin eller Candy demo-settings.
 
 | Domene | Path | System | Betydning |
 |---|---|---|---|
-| `bingo-system-jsso.onrender.com` | `/` | Live bingo | portal |
-| `bingo-system-jsso.onrender.com` | `/admin/` | Live bingo | live admin |
-| `bingo-system-jsso.onrender.com` | `/web/` | Live bingo | Unity-lobby / WebGL-host |
+| `spillorama-system.onrender.com` | `/` | Live bingo | redirect til `/web/` |
+| `spillorama-system.onrender.com` | `/portal/` | Live bingo | portal |
+| `spillorama-system.onrender.com` | `/admin/` | Live bingo | live admin |
+| `spillorama-system.onrender.com` | `/web/` | Live bingo | Unity-lobby / WebGL-host |
 | `candy-backend-ldvg.onrender.com` | `/` | demo-backend | Candy demo-login og testflate |
 | `candy-backend-ldvg.onrender.com` | `/admin/` | demo-backend | Candy demo-admin |
 
@@ -77,7 +78,7 @@ Live bingo kan fortsatt kjenne til Candy som et eksternt spill på generisk niv�
 
 Repo og Blueprint bruker nå navnet `Spillorama-system` / `spillorama-system`.
 
-Live host er fortsatt `https://bingo-system-jsso.onrender.com/`, som er et historisk Render-hostname. Bytte av offentlig hostname gjøres i Render-plattformen, ikke via repoet alene.
+Live host er `https://spillorama-system.onrender.com/`.
 
 ## Kort regel
 

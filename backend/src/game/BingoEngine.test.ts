@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import type { BingoSystemAdapter, CreateTicketInput } from "../adapters/BingoSystemAdapter.js";
+import type { BingoSystemAdapter, CheckpointInput, CreateTicketInput } from "../adapters/BingoSystemAdapter.js";
 import {
   type CreateWalletAccountInput,
   type WalletAccount,
@@ -10,7 +10,7 @@ import {
   WalletError,
   type WalletTransferResult
 } from "../adapters/WalletAdapter.js";
-import type { Ticket } from "./types.js";
+import type { ClaimRecord, Ticket } from "./types.js";
 import { BingoEngine, DomainError } from "./BingoEngine.js";
 
 class InMemoryWalletAdapter implements WalletAdapter {
@@ -247,7 +247,7 @@ function prioritizeDrawNumbers(
 test("startGame rejects ticketsPerPlayer below 1", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await assert.rejects(
-    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 0 }),
+    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 0, payoutPercent: 80 }),
     (error: unknown) => error instanceof DomainError && error.code === "INVALID_TICKETS_PER_PLAYER"
   );
 });
@@ -255,21 +255,21 @@ test("startGame rejects ticketsPerPlayer below 1", async () => {
 test("startGame rejects ticketsPerPlayer above 5", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await assert.rejects(
-    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 6 }),
+    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 6, payoutPercent: 80 }),
     (error: unknown) => error instanceof DomainError && error.code === "INVALID_TICKETS_PER_PLAYER"
   );
 });
 
 test("startGame accepts ticketsPerPlayer equal to 1", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
   const snapshot = engine.getRoomSnapshot(roomCode);
   assert.equal(snapshot.currentGame?.ticketsPerPlayer, 1);
 });
 
 test("startGame accepts ticketsPerPlayer equal to 5", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 5 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 5, payoutPercent: 80 });
   const snapshot = engine.getRoomSnapshot(roomCode);
   assert.equal(snapshot.currentGame?.ticketsPerPlayer, 5);
 });
@@ -291,7 +291,8 @@ test("rtp payout budget caps total payouts across line and bingo claims", async 
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 10000,
     monthlyLossLimit: 10000,
-    maxDrawsPerRound: 60
+    maxDrawsPerRound: 60,
+    minDrawIntervalMs: 0
   });
 
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
@@ -397,7 +398,8 @@ test("rtp payout budget caps total payouts across line and bingo claims", async 
 
 test("line claim includes deterministic backend bonus contract fields in claim and snapshot", async () => {
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
-    maxDrawsPerRound: 60
+    maxDrawsPerRound: 60,
+    minDrawIntervalMs: 0
   });
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
     hallId: "hall-1",
@@ -415,7 +417,8 @@ test("line claim includes deterministic backend bonus contract fields in claim a
     roomCode,
     actorPlayerId: hostPlayerId,
     entryFee: 100,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   const secondRow = new Set([13, 14, 15, 16, 17]);
@@ -462,7 +465,8 @@ test("line claim includes deterministic backend bonus contract fields in claim a
 
 test("round ends automatically when max draws is reached", async () => {
   const limitedEngine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
-    maxDrawsPerRound: 3
+    maxDrawsPerRound: 3,
+    minDrawIntervalMs: 0
   });
   const { roomCode: limitedRoomCode, playerId: limitedHostPlayerId } = await limitedEngine.createRoom({
     hallId: "hall-1",
@@ -479,7 +483,8 @@ test("round ends automatically when max draws is reached", async () => {
   await limitedEngine.startGame({
     roomCode: limitedRoomCode,
     actorPlayerId: limitedHostPlayerId,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   await limitedEngine.drawNextNumber({ roomCode: limitedRoomCode, actorPlayerId: limitedHostPlayerId });
@@ -527,7 +532,7 @@ test("joinRoom rejects duplicate wallet in same room", async () => {
 
 test("createRoom rejects wallet already in running game", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
 
   await assert.rejects(
     async () =>
@@ -542,7 +547,7 @@ test("createRoom rejects wallet already in running game", async () => {
 
 test("joinRoom rejects wallet already in running game in another room", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
 
   const { roomCode: secondRoomCode } = await engine.createRoom({
     hallId: "hall-2",
@@ -580,7 +585,8 @@ test("daily hard limit is enforced per hall scope", async () => {
     roomCode: firstRoom.roomCode,
     actorPlayerId: firstRoom.hostPlayerId,
     entryFee: 90,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
   await engine.endGame({
     roomCode: firstRoom.roomCode,
@@ -602,7 +608,8 @@ test("daily hard limit is enforced per hall scope", async () => {
       roomCode: secondRoom.roomCode,
       actorPlayerId: secondRoom.hostPlayerId,
       entryFee: 90,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     })
   );
 });
@@ -633,7 +640,8 @@ test("personal loss limits are hall-specific", async () => {
     roomCode: hallOneRoom.roomCode,
     actorPlayerId: hallOneRoom.hostPlayerId,
     entryFee: 60,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
   const snapshot = engine.getRoomSnapshot(hallOneRoom.roomCode);
   const ticketKeys = Object.keys(snapshot?.currentGame?.tickets ?? {});
@@ -671,7 +679,8 @@ test("mandatory pause is enforced after play session limit and includes break su
       roomCode: firstRoom.roomCode,
       actorPlayerId: firstRoom.hostPlayerId,
       entryFee: 100,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     });
   });
 
@@ -699,7 +708,8 @@ test("mandatory pause is enforced after play session limit and includes break su
       roomCode: secondRoom.roomCode,
       actorPlayerId: secondRoom.hostPlayerId,
       entryFee: 0,
-      ticketsPerPlayer: 1
+      ticketsPerPlayer: 1,
+      payoutPercent: 80
     });
     const snapshot = engine.getRoomSnapshot(secondRoom.roomCode);
     // Host (wallet-host) is on pause. Game should still run for other players.
@@ -805,7 +815,8 @@ test("prize policy caps single databingo payouts and stores policy reference", a
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 20000,
     monthlyLossLimit: 20000,
-    maxDrawsPerRound: 60
+    maxDrawsPerRound: 60,
+    minDrawIntervalMs: 0
   });
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
     hallId: "hall-1",
@@ -833,7 +844,8 @@ test("prize policy caps single databingo payouts and stores policy reference", a
     roomCode,
     actorPlayerId: hostPlayerId,
     entryFee: 3000,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   const needed = new Set([1, 2, 3, 4, 5]);
@@ -940,7 +952,8 @@ test("payout audit trail includes immutable hash chain and payout metadata", asy
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
     dailyLossLimit: 10000,
     monthlyLossLimit: 10000,
-    maxDrawsPerRound: 60
+    maxDrawsPerRound: 60,
+    minDrawIntervalMs: 0
   });
 
   const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
@@ -962,7 +975,8 @@ test("payout audit trail includes immutable hash chain and payout metadata", asy
     roomCode,
     actorPlayerId: hostPlayerId,
     entryFee: 100,
-    ticketsPerPlayer: 1
+    ticketsPerPlayer: 1,
+    payoutPercent: 80
   });
 
   const needed = new Set([1, 2, 3, 4, 5]);
@@ -1173,4 +1187,322 @@ test("overskudd distribution enforces minimum percentages and links transfers to
   const fetchedBatch = engine.getOverskuddDistributionBatch(batch.id);
   assert.equal(fetchedBatch.id, batch.id);
   assert.equal(fetchedBatch.date, date);
+});
+
+// ── Fase 4: Security verification tests ─────────────────────────────
+
+test("KRITISK-4: second BINGO claim after game ends is rejected", async () => {
+  const wallet = new InMemoryWalletAdapter();
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), wallet, {
+    dailyLossLimit: 10000,
+    monthlyLossLimit: 10000,
+    maxDrawsPerRound: 60,
+    minDrawIntervalMs: 0
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host"
+  });
+  const { playerId: guestId } = await engine.joinRoom({
+    roomCode,
+    hallId: "hall-1",
+    playerName: "Guest",
+    walletId: "wallet-guest"
+  });
+  await engine.startGame({ roomCode, actorPlayerId: hostId, payoutPercent: 80, armedPlayerIds: [hostId, guestId] });
+
+  // Draw all numbers needed for bingo on the fixed ticket
+  const bingoNumbers = [1,2,3,4,5,13,14,15,16,17,25,26,27,28,37,38,39,40,41,49,50,51,52,53];
+  prioritizeDrawNumbers(engine, roomCode, bingoNumbers);
+
+  for (let i = 0; i < bingoNumbers.length; i++) {
+    const { number: drawn } = await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+    await engine.markNumber({ roomCode, playerId: hostId, number: drawn });
+    await engine.markNumber({ roomCode, playerId: guestId, number: drawn });
+  }
+
+  // First BINGO claim should succeed and end the game
+  const claim1 = await engine.submitClaim({ roomCode, playerId: hostId, type: "BINGO" });
+  assert.equal(claim1.valid, true);
+  assert.equal(claim1.type, "BINGO");
+
+  // Game should now be ENDED
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  assert.equal(snapshot.currentGame?.status, "ENDED");
+  assert.equal(snapshot.currentGame?.endedReason, "BINGO_CLAIMED");
+
+  // Second BINGO claim is rejected because game already ended
+  await assert.rejects(
+    async () => engine.submitClaim({ roomCode, playerId: guestId, type: "BINGO" }),
+    (err: unknown) => err instanceof DomainError && err.code === "GAME_NOT_RUNNING"
+  );
+});
+
+test("KRITISK-4: BINGO_ALREADY_CLAIMED guard prevents double payout during race", async () => {
+  // Use a delayed wallet that yields control between validation and payout
+  let transferCount = 0;
+  const realWallet = new InMemoryWalletAdapter();
+  const delayedWallet: WalletAdapter = {
+    createAccount: (input) => realWallet.createAccount(input),
+    ensureAccount: (id) => realWallet.ensureAccount(id),
+    getAccount: (id) => realWallet.getAccount(id),
+    listAccounts: () => realWallet.listAccounts(),
+    getBalance: (id) => realWallet.getBalance(id),
+    debit: (id, amount, reason) => realWallet.debit(id, amount, reason),
+    credit: (id, amount, reason) => realWallet.credit(id, amount, reason),
+    topUp: (id, amount, reason) => realWallet.topUp(id, amount, reason),
+    withdraw: (id, amount, reason) => realWallet.withdraw(id, amount, reason),
+    transfer: async (from, to, amount, reason) => {
+      transferCount++;
+      // On prize payout transfers (after buy-ins), yield to event loop
+      // to allow the second claim to interleave
+      if (transferCount > 2) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+      return realWallet.transfer(from, to, amount, reason);
+    },
+    listTransactions: (id, limit) => realWallet.listTransactions(id, limit)
+  };
+
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), delayedWallet, {
+    dailyLossLimit: 10000,
+    monthlyLossLimit: 10000,
+    maxDrawsPerRound: 60,
+    minDrawIntervalMs: 0
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host"
+  });
+  const { playerId: guestId } = await engine.joinRoom({
+    roomCode,
+    hallId: "hall-1",
+    playerName: "Guest",
+    walletId: "wallet-guest"
+  });
+  await engine.startGame({ roomCode, actorPlayerId: hostId, payoutPercent: 80, armedPlayerIds: [hostId, guestId] });
+
+  const bingoNumbers = [1,2,3,4,5,13,14,15,16,17,25,26,27,28,37,38,39,40,41,49,50,51,52,53];
+  prioritizeDrawNumbers(engine, roomCode, bingoNumbers);
+
+  for (let i = 0; i < bingoNumbers.length; i++) {
+    const { number: drawn } = await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+    await engine.markNumber({ roomCode, playerId: hostId, number: drawn });
+    await engine.markNumber({ roomCode, playerId: guestId, number: drawn });
+  }
+
+  // Fire both claims concurrently — the delayed wallet yields control between them
+  const results = await Promise.allSettled([
+    engine.submitClaim({ roomCode, playerId: hostId, type: "BINGO" }),
+    engine.submitClaim({ roomCode, playerId: guestId, type: "BINGO" })
+  ]);
+
+  // Collect results: one should succeed, the other should fail or return invalid
+  const claims = results
+    .filter((r): r is PromiseFulfilledResult<ClaimRecord> => r.status === "fulfilled")
+    .map(r => r.value);
+  const errors = results
+    .filter((r): r is PromiseRejectedResult => r.status === "rejected");
+
+  const validClaims = claims.filter(c => c.valid);
+  const invalidClaims = claims.filter(c => !c.valid);
+
+  // At most one valid BINGO claim
+  assert.ok(validClaims.length <= 1, `Expected at most 1 valid BINGO, got ${validClaims.length}`);
+  // Total: exactly one winner (valid claim) and one loser (invalid claim or error)
+  assert.equal(validClaims.length + invalidClaims.length + errors.length, 2);
+});
+
+test("KRITISK-8: unarmed player cannot submit claim", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host"
+  });
+  const { playerId: guestId } = await engine.joinRoom({
+    roomCode,
+    hallId: "hall-1",
+    playerName: "Guest",
+    walletId: "wallet-guest"
+  });
+
+  // Only arm the host — guest is a spectator
+  await engine.startGame({
+    roomCode,
+    actorPlayerId: hostId,
+    payoutPercent: 80,
+    armedPlayerIds: [hostId]
+  });
+
+  // Draw a line for host
+  prioritizeDrawNumbers(engine, roomCode, [1, 2, 3, 4, 5]);
+  for (let i = 0; i < 5; i++) {
+    const { number: drawn } = await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+    await engine.markNumber({ roomCode, playerId: hostId, number: drawn });
+  }
+
+  // Guest tries to claim — must be rejected as non-participating
+  await assert.rejects(
+    async () => engine.submitClaim({ roomCode, playerId: guestId, type: "LINE" }),
+    (err: unknown) => err instanceof DomainError && err.code === "PLAYER_NOT_PARTICIPATING"
+  );
+
+  // Host can claim successfully
+  const hostClaim = await engine.submitClaim({ roomCode, playerId: hostId, type: "LINE" });
+  assert.equal(hostClaim.valid, true);
+});
+
+test("MEDIUM-1: drawNextNumber enforces minimum draw interval", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 5000  // 5 seconds — enough to always trigger in test
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host"
+  });
+  await engine.joinRoom({ roomCode, hallId: "hall-1", playerName: "Guest", walletId: "wallet-guest" });
+  await engine.startGame({ roomCode, actorPlayerId: hostId, payoutPercent: 80 });
+
+  // First draw should succeed
+  await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+
+  // Immediate second draw should fail
+  await assert.rejects(
+    async () => engine.drawNextNumber({ roomCode, actorPlayerId: hostId }),
+    (err: unknown) => err instanceof DomainError && err.code === "DRAW_TOO_FAST"
+  );
+});
+
+test("HOEY-4: wallet failure during buy-in refunds already-debited players", async () => {
+  // Create a wallet that fails on the second player's buy-in transfer
+  let transferCount = 0;
+  const realWallet = new InMemoryWalletAdapter();
+  const failingWallet: WalletAdapter = {
+    createAccount: (input) => realWallet.createAccount(input),
+    ensureAccount: (id) => realWallet.ensureAccount(id),
+    getAccount: (id) => realWallet.getAccount(id),
+    listAccounts: () => realWallet.listAccounts(),
+    getBalance: (id) => realWallet.getBalance(id),
+    debit: (id, amount, reason) => realWallet.debit(id, amount, reason),
+    credit: (id, amount, reason) => realWallet.credit(id, amount, reason),
+    topUp: (id, amount, reason) => realWallet.topUp(id, amount, reason),
+    withdraw: (id, amount, reason) => realWallet.withdraw(id, amount, reason),
+    transfer: async (from, to, amount, reason) => {
+      transferCount++;
+      // Fail on the 2nd buy-in transfer (second player)
+      if (transferCount === 2) {
+        throw new WalletError("NETWORK_ERROR", "Simulated wallet failure");
+      }
+      return realWallet.transfer(from, to, amount, reason);
+    },
+    listTransactions: (id, limit) => realWallet.listTransactions(id, limit)
+  };
+
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), failingWallet, {
+    minDrawIntervalMs: 0
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host"
+  });
+  await engine.joinRoom({
+    roomCode,
+    hallId: "hall-1",
+    playerName: "Guest",
+    walletId: "wallet-guest"
+  });
+
+  const hostBalanceBefore = await realWallet.getBalance("wallet-host");
+
+  // startGame with all players armed (default) → 2 buy-in transfers.
+  // Transfer #1 (host buy-in) succeeds, transfer #2 (guest buy-in) fails.
+  // Host should be refunded via compensation flow.
+  await assert.rejects(
+    async () => engine.startGame({
+      roomCode,
+      actorPlayerId: hostId,
+      entryFee: 50,
+      payoutPercent: 80
+    }),
+    (err: unknown) => err instanceof WalletError && err.code === "NETWORK_ERROR"
+  );
+
+  // Host's balance should be restored (refunded after guest's buy-in failed)
+  const hostBalanceAfter = await realWallet.getBalance("wallet-host");
+  assert.equal(hostBalanceAfter, hostBalanceBefore, "Host should be refunded after failed game start");
+
+  // Room should still exist but without a running game
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  assert.equal(snapshot.currentGame, undefined);
+});
+
+test("KRITISK-5/6: checkpoint captures RecoverableGameSnapshot with drawBag and structured marks", async () => {
+  const checkpoints: Array<{ reason: string; snapshot?: unknown; players?: unknown[] }> = [];
+  const capturingAdapter: BingoSystemAdapter = {
+    async createTicket() {
+      return {
+        grid: [
+          [1, 2, 3, 4, 5],
+          [13, 14, 15, 16, 17],
+          [25, 26, 0, 27, 28],
+          [37, 38, 39, 40, 41],
+          [49, 50, 51, 52, 53]
+        ]
+      };
+    },
+    async onCheckpoint(input) {
+      checkpoints.push({
+        reason: input.reason,
+        snapshot: input.snapshot,
+        players: input.players
+      });
+    }
+  };
+
+  const engine = new BingoEngine(capturingAdapter, new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0,
+    maxDrawsPerRound: 60
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host"
+  });
+  await engine.joinRoom({ roomCode, hallId: "hall-1", playerName: "Guest", walletId: "wallet-guest" });
+  await engine.startGame({ roomCode, actorPlayerId: hostId, payoutPercent: 80 });
+
+  // BUY_IN checkpoint should have been captured
+  const buyInCheckpoint = checkpoints.find(c => c.reason === "BUY_IN");
+  assert.ok(buyInCheckpoint, "BUY_IN checkpoint should exist");
+  const buyInSnap = buyInCheckpoint!.snapshot as Record<string, unknown>;
+  assert.ok(Array.isArray(buyInSnap.drawBag), "BUY_IN snapshot should contain drawBag array");
+  assert.ok(typeof buyInSnap.structuredMarks === "object", "BUY_IN snapshot should contain structuredMarks");
+  assert.equal((buyInSnap.drawBag as number[]).length, 60, "drawBag should have 60 balls at start");
+
+  // Draw a number and mark it
+  const { number: drawn } = await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  const somePlayerId = snapshot.players[0].id;
+  try {
+    await engine.markNumber({ roomCode, playerId: somePlayerId, number: drawn });
+  } catch {
+    // Number might not be on this player's ticket — that's fine
+  }
+
+  // DRAW checkpoint should capture current drawBag state
+  const drawCheckpoint = checkpoints.find(c => c.reason === "DRAW");
+  assert.ok(drawCheckpoint, "DRAW checkpoint should exist after draw");
+  const drawSnap = drawCheckpoint!.snapshot as Record<string, unknown>;
+  assert.ok(Array.isArray(drawSnap.drawBag), "DRAW snapshot should contain drawBag");
+  assert.equal((drawSnap.drawBag as number[]).length, 59, "drawBag should have 59 balls after 1 draw");
+  assert.ok(Array.isArray(drawSnap.drawnNumbers), "DRAW snapshot should contain drawnNumbers");
+  assert.equal((drawSnap.drawnNumbers as number[]).length, 1);
+  assert.ok(drawCheckpoint!.players, "DRAW checkpoint should include players");
 });

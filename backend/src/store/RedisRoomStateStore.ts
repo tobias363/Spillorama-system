@@ -75,20 +75,28 @@ export class RedisRoomStateStore implements RoomStateStore {
 
   // ── Async persistence ────────────────────────────────────────────────
 
-  /** Explicitly persist a room to Redis. Called after critical mutations. */
+  /**
+   * HOEY-11: Explicitly persist a room to Redis (synchronous with error propagation).
+   * Called after critical mutations (payout, game end, buy-in).
+   * Throws on failure so callers can handle or log at CRITICAL level.
+   */
   async persist(code: string): Promise<void> {
-    await this.persistAsync(code);
-  }
-
-  private async persistAsync(code: string): Promise<void> {
     const room = this.rooms.get(code);
     if (!room) return;
+    const serialized = serializeRoom(room);
+    const json = JSON.stringify(serialized);
+    await this.redis.setex(this.redisKey(code), this.ttlSeconds, json);
+  }
+
+  /**
+   * Fire-and-forget persistence for non-critical write-through cache updates.
+   * Errors are logged but not thrown — in-memory state is authoritative.
+   */
+  private async persistAsync(code: string): Promise<void> {
     try {
-      const serialized = serializeRoom(room);
-      const json = JSON.stringify(serialized);
-      await this.redis.setex(this.redisKey(code), this.ttlSeconds, json);
+      await this.persist(code);
     } catch (err) {
-      logger.error({ err, roomCode: code }, "Failed to persist room to Redis");
+      logger.error({ err, roomCode: code }, "Failed to persist room to Redis (non-critical)");
     }
   }
 

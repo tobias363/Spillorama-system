@@ -17,7 +17,7 @@ import type {
   GameEndedInput
 } from "./BingoSystemAdapter.js";
 import type { Ticket } from "../game/types.js";
-import { generateTraditional75Ticket } from "../game/ticket.js";
+import { generateDatabingo60Ticket } from "../game/ticket.js";
 
 interface PostgresBingoSystemAdapterOptions {
   connectionString: string;
@@ -40,7 +40,7 @@ export class PostgresBingoSystemAdapter implements BingoSystemAdapter {
   }
 
   async createTicket(_input: CreateTicketInput): Promise<Ticket> {
-    return generateTraditional75Ticket();
+    return generateDatabingo60Ticket();
   }
 
   async onGameStarted(_input: GameStartedInput): Promise<void> {

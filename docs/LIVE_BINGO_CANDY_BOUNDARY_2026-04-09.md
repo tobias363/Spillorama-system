@@ -41,15 +41,16 @@ Det betyr også:
 
 | Domene | Path | Eier |
 |---|---|---|
-| `https://bingo-system-jsso.onrender.com/` | `/` | `Spillorama-system` |
-| `https://bingo-system-jsso.onrender.com/admin/` | `/admin/` | `Spillorama-system` |
-| `https://bingo-system-jsso.onrender.com/web/` | `/web/` | `Spillorama-system` |
+| `https://spillorama-system.onrender.com/` | `/` | `Spillorama-system` |
+| `https://spillorama-system.onrender.com/portal/` | `/portal/` | `Spillorama-system` |
+| `https://spillorama-system.onrender.com/admin/` | `/admin/` | `Spillorama-system` |
+| `https://spillorama-system.onrender.com/web/` | `/web/` | `Spillorama-system` |
 | `https://candy-backend-ldvg.onrender.com/` | `/` | `demo-backend` |
 | `https://candy-backend-ldvg.onrender.com/admin/` | `/admin/` | `demo-backend` |
 
 Samme navn på route betyr ikke samme system. Domene avgjør eierskap.
 
-Merk: `render.yaml` i dette repoet bruker tjenestenavnet `spillorama-system`, men den offentlige live-adressen er fortsatt det historiske Render-hostnavnet `https://bingo-system-jsso.onrender.com/`. Offentlig hostname styres i Render-plattformen, ikke bare i repoet.
+Merk: offentlig live-adresse er nå `https://spillorama-system.onrender.com/`, og rooten `/` redirecter til `/web/`.
 
 ## 4. Integrasjonsmodellen vi er enige om
 

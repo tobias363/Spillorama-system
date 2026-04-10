@@ -38,6 +38,14 @@ export class SocketRateLimiter {
   private gcTimer: ReturnType<typeof setInterval> | null = null;
   private readonly activeSockets = new Set<string>();
 
+  /**
+   * HOEY-9: Player-based rate limiting.
+   * Maps socketId → playerId so player-level limits survive reconnections.
+   * Also tracks limits by `player:${playerId}:${event}` buckets.
+   */
+  private readonly socketToPlayer = new Map<string, string>();
+  private readonly activePlayers = new Set<string>();
+
   constructor(limits?: Record<string, RateLimitConfig>, fallback?: RateLimitConfig) {
     this.limits = limits ?? DEFAULT_RATE_LIMITS;
     this.fallback = fallback ?? DEFAULT_FALLBACK;
@@ -59,21 +67,46 @@ export class SocketRateLimiter {
   }
 
   /**
+   * HOEY-9: Associate a socket with a player ID.
+   * Call this after authentication so player-level limits apply.
+   */
+  registerPlayer(socketId: string, playerId: string): void {
+    this.socketToPlayer.set(socketId, playerId);
+    this.activePlayers.add(playerId);
+  }
+
+  /**
    * Check whether an event from a socket is allowed.
    * Returns true if allowed, false if rate-limited.
+   * Enforces both per-socket AND per-player limits (HOEY-9).
    */
   check(socketId: string, eventName: string, nowMs: number = Date.now()): boolean {
     this.activeSockets.add(socketId);
-    const key = `${socketId}:${eventName}`;
     const config = this.limits[eventName] ?? this.fallback;
 
+    // Per-socket check
+    if (!this.checkBucket(`${socketId}:${eventName}`, config, nowMs)) {
+      return false;
+    }
+
+    // HOEY-9: Per-player check (survives reconnections)
+    const playerId = this.socketToPlayer.get(socketId);
+    if (playerId) {
+      if (!this.checkBucket(`player:${playerId}:${eventName}`, config, nowMs)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private checkBucket(key: string, config: RateLimitConfig, nowMs: number): boolean {
     let timestamps = this.buckets.get(key);
     if (!timestamps) {
       timestamps = [];
       this.buckets.set(key, timestamps);
     }
 
-    // Prune timestamps outside window
     const cutoff = nowMs - config.windowMs;
     while (timestamps.length > 0 && timestamps[0] <= cutoff) {
       timestamps.shift();
@@ -96,14 +129,31 @@ export class SocketRateLimiter {
         this.buckets.delete(key);
       }
     }
+    // HOEY-9: Keep player-level buckets alive (they survive reconnections).
+    // Only remove the socket→player mapping; player buckets expire via GC.
+    this.socketToPlayer.delete(socketId);
   }
 
-  /** Periodic GC: remove entries for sockets that are no longer active */
+  /** Periodic GC: remove entries for sockets/players that are no longer active */
   private gc(): void {
+    // Rebuild active player set from current socket→player mappings
+    this.activePlayers.clear();
+    for (const playerId of this.socketToPlayer.values()) {
+      this.activePlayers.add(playerId);
+    }
+
     for (const key of this.buckets.keys()) {
-      const socketId = key.split(":")[0];
-      if (!this.activeSockets.has(socketId)) {
-        this.buckets.delete(key);
+      if (key.startsWith("player:")) {
+        // HOEY-9: Player bucket — GC if player has no active sockets
+        const playerId = key.split(":")[1];
+        if (!this.activePlayers.has(playerId)) {
+          this.buckets.delete(key);
+        }
+      } else {
+        const socketId = key.split(":")[0];
+        if (!this.activeSockets.has(socketId)) {
+          this.buckets.delete(key);
+        }
       }
     }
   }

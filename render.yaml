@@ -4,7 +4,7 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: npm install && npm --prefix backend install && npm run build
+    buildCommand: npm install && npm --prefix backend install --include=dev && npm run build
     startCommand: npm --prefix backend run start
     envVars:
       - key: NODE_ENV
@@ -17,12 +17,10 @@ services:
         sync: false
       - key: JWT_REFRESH_SECRET
         sync: false
-      - key: MONGO_URI
+      - key: APP_PG_CONNECTION_STRING
         sync: false
-      - key: DB_CONNECTION_TYPE
-        value: production
-      - key: DB_MODE
-        value: production
+      - key: APP_PG_SCHEMA
+        value: public
       - key: REDIS_HOST
         sync: false
       - key: REDIS_PORT
@@ -98,4 +96,11 @@ services:
       - key: CLOUDINARY_API_KEY
         sync: false
       - key: CLOUDINARY_API_SECRET
+        sync: false
+      # Candy integration
+      - key: EXT_GAME_WALLET_API_KEY
+        sync: false
+      - key: CANDY_BACKEND_URL
+        value: https://candy-backend-ldvg.onrender.com
+      - key: CANDY_INTEGRATION_API_KEY
         sync: false

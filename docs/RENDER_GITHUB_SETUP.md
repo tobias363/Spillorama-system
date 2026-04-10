@@ -13,8 +13,8 @@ Per 9. april 2026 er production i `Spillorama-system` satt opp slik:
 
 Anbefalt:
 
-- `bingosystem-staging` (staging)
-- `bingosystem-production` (production)
+- `spillorama-staging` (staging)
+- `spillorama-system` (production)
 
 Hver service skal ha egen deploy hook URL og health endpoint.
 
@@ -28,6 +28,16 @@ Påkrevde secrets:
 - `RENDER_STAGING_HEALTHCHECK_URL`
 - `RENDER_PRODUCTION_DEPLOY_HOOK_URL`
 - `RENDER_PRODUCTION_HEALTHCHECK_URL`
+
+Påkrevde Render environment variables for production:
+
+- `APP_PG_CONNECTION_STRING`
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `REDIS_PASSWORD`
+- `SESSION_SECRET`
+- `JWT_SECRET`
+- `JWT_REFRESH_SECRET`
 
 Anbefalt health-endpoint:
 

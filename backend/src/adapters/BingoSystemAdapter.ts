@@ -1,4 +1,4 @@
-import type { Player, Ticket, ClaimType, ClaimRecord, GameSnapshot } from "../game/types.js";
+import type { Player, Ticket, ClaimType, ClaimRecord, GameSnapshot, RecoverableGameSnapshot } from "../game/types.js";
 
 export interface CreateTicketInput {
   roomCode: string;
@@ -46,12 +46,12 @@ export interface GameEndedInput {
 export interface CheckpointInput {
   roomCode: string;
   gameId: string;
-  reason: "PAYOUT" | "GAME_END" | "BUY_IN";
+  reason: "PAYOUT" | "GAME_END" | "BUY_IN" | "DRAW";
   claimId?: string;
   payoutAmount?: number;
   transactionIds?: string[];
   /** BIN-159: Full serialized game snapshot at checkpoint time. */
-  snapshot?: GameSnapshot;
+  snapshot?: GameSnapshot | RecoverableGameSnapshot;
   /** BIN-159: Players in the room at checkpoint time. */
   players?: Player[];
   /** BIN-159: Hall ID for the room. */

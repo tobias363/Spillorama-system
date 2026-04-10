@@ -203,7 +203,7 @@ På kode- og repo-nivå er Render-navnet ryddet opp:
 
 Det som fortsatt er historisk er selve live Render-hostnavnet:
 
-- `https://bingo-system-jsso.onrender.com/`
+- `https://spillorama-system.onrender.com/`
 
 Det hostnavnet styres ikke av repoet alene. Render sine Blueprint-filer styrer tjenestekonfigurasjon og navn, mens domener og subdomene-innstillinger håndteres i Render-plattformen. Se:
 

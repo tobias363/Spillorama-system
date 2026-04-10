@@ -32,7 +32,7 @@ export function makeShuffledBallBag(maxNumber = 60): number[] {
   return shuffle(Array.from({ length: maxNumber }, (_, i) => i + 1));
 }
 
-export function generateTraditional75Ticket(): Ticket {
+export function generateDatabingo60Ticket(): Ticket {
   // Denne varianten bruker 60 baller fordelt på 5 kolonner med 12 tall hver.
   // Frontend expects a 3×5 grid (15 cells) — all cells must contain a number.
   const columns = [

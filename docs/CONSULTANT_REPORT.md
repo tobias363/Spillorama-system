@@ -32,7 +32,7 @@ Frontend-koden har pr. nå verken Playwright- eller Cypress-tester. `style.css` 
 
 ## Addendum etter produksjonsfeil 9. april 2026
 
-Etter denne rapporten ble det avdekket en konkret produksjonsfeil i selve Unity-hostingen på `https://bingo-system-jsso.onrender.com/web/`. Den feilen lå **ikke** i portalens embed-autostart alene, men i kontrakten mellom host-siden og Unity WebGL-builden. Rapporten bør derfor utvides med følgende punkter:
+Etter denne rapporten ble det avdekket en konkret produksjonsfeil i selve Unity-hostingen på den daværende prod-adressen `/web/`. Den feilen lå **ikke** i portalens embed-autostart alene, men i kontrakten mellom host-siden og Unity WebGL-builden. Rapporten bør derfor utvides med følgende punkter:
 
 ## 5. Scope må skilles tydeligere: Portal vs Unity Host Page
 Denne rapporten beskriver i hovedsak frontend-portalen og embed-flyten i `frontend/index.html`.
