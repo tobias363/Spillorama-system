@@ -1,7 +1,7 @@
 ## Unity Dead-Code Audit
 
 Dato: 11. april 2026
-Status: sekstende sikre pass gjennomfort
+Status: syttende sikre pass gjennomfort
 
 ### Fjernet i denne runden
 
@@ -28,8 +28,10 @@ Disse filene var beviselig ubrukte eller kun backup/testartefakter:
   - `Game4GamePlayPanel` splittet så transport/minigame/room-flyt ligger i `Game4GamePlayPanel.SocketFlow.cs`
   - `Game4GamePlayPanel` splittet videre så interaksjoner/layout, pattern/highlight-logikk og ticket/reset-state ligger i egne partial-filer
   - `Game5GamePlayPanel` splittet så socket/minigame/room-flyt ligger i `Game5GamePlayPanel.SocketFlow.cs`
+  - `Game5GamePlayPanel` splittet videre så interaksjoner, pattern/highlight-logikk og roulette/ticket/reset-state ligger i egne partial-filer
   - fjernet død `if (false)`-gren med gammel minigame-reconnectlogikk i `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 1/Game1GamePlayPanel.cs`
   - fjernet død `GenerateDummyTicket()`-helper og ubrukt `ArrayContainsValue(...)` i `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 4/Game4GamePlayPanel.cs`
+  - fjernet ubrukt `SampleInput`-felt, død `GenerateRoulateData()` og kommentert gammel message-popup-branch i `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 5/Game5GamePlayPanel.cs`
 
 - `unity-bingo-backend` controller:
   - `unity-bingo-backend/App/Controllers/GameController-old.js`

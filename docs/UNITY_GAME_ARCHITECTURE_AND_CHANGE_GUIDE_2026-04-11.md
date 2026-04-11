@@ -214,6 +214,9 @@ Primære filer:
 - [`Game5Panel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5Panel.cs)
 - [`Game5GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.cs)
 - [`Game5GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.SocketFlow.cs)
+- [`Game5GamePlayPanel.Interactions.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.Interactions.cs)
+- [`Game5GamePlayPanel.Patterns.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.Patterns.cs)
+- [`Game5GamePlayPanel.RouletteAndTickets.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.RouletteAndTickets.cs)
 - [`Game5BetCoin.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5BetCoin.cs)
 
 Hvordan det åpnes:
@@ -227,6 +230,12 @@ Hva styrer opplevelsen:
 - jackpot wheel / roulette: `Game5WheelOfFortuneData`, `Game5RouletteWheelData`, `SelectRouletteAuto`
 
 Game 5 er tettere koblet til minigame- og rouletteflyt enn de andre spillene.
+Game 5 følger nå samme hovedmønster som Game 1 og Game 4:
+- `Game5GamePlayPanel.cs` holder panel-livssyklus og hoveddata-init
+- `Game5GamePlayPanel.SocketFlow.cs` holder room/broadcast/minigame-transport
+- `Game5GamePlayPanel.Interactions.cs` holder play-/loader-flyt og små UI-handlinger
+- `Game5GamePlayPanel.Patterns.cs` holder one-to-go-, highlight- og winning-pattern-logikk
+- `Game5GamePlayPanel.RouletteAndTickets.cs` holder roulette-visualisering, ticketgenerering og reset/state-opprydding
 
 ## Candy i Unity-lobbyen
 
