@@ -30,3 +30,6 @@ Spillorama/**/.DS_Store
 
 # Claude
 .claude/
+
+# Local Unity vendor SDK bundles
+unity-vendor-bundles/
