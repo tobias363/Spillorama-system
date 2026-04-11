@@ -44,9 +44,17 @@ Dette repoet skal nå kun inneholde:
 - `Spillorama/` for live Unity-lobby og live Unity-spill
 - `backend/public/web/` for live Unity WebGL-host
 - `backend/public/view-game/` for hall-display / TV-host
+- leverandorsiden av Candy launch og shared wallet
 - dokumentasjon som forklarer grensen mot Candy og demo-backend
 
-Det er med andre ord lov at Candy nevnes i `.md`-dokumenter når formålet er å forklare grensen mellom systemene. Det er ikke lov at Candy-demo eller Candy-backend kommer tilbake som kjørbar kode, config eller deploy-logikk i dette repoet.
+Det er med andre ord lov at Candy finnes i dette repoet som integrasjonsflate, for eksempel:
+
+- `POST /api/games/candy/launch`
+- `/api/ext-wallet/*`
+- Unity-lobby entry for Candy
+- iframe/overlay-hosting fra live `/web/`
+
+Det er ikke lov at Candy-demo eller Candy-backend kommer tilbake som gameplay-kode, room-engine, scheduler, config eller deploy-logikk i dette repoet.
 
 ## 4. Verifisering av at repoet er rent
 
@@ -59,12 +67,12 @@ Denne oppryddingen ble verifisert med følgende kontroller:
 3. `npm run build`
    Bygget passerte etter oppryddingen.
 4. Tekstsøk i ikke-markdown-filer:
-   `rg -n --hidden --glob '!node_modules' --glob '!.git' --glob '!backend/dist/**' --glob '!*.md' 'Candy|candy|CANDY|demo-backend|Bingo-system|bingosystem' .`
-   Denne ga null treff i kjørbar kode og config.
+   dette skal ikke lenger tolkes som "null Candy-referanser". Etter at launch og shared wallet ble tatt inn, er det forventet og riktig at `Spillorama-system` har Candy-relaterte integrasjonsreferanser i kjørbar kode.
 
 Konklusjon:
 
-- det finnes ikke lenger Candy/demo-kode i `Spillorama-system`
+- det finnes ikke lenger Candy gameplay-kode eller Candy-backend-kode i `Spillorama-system`
+- det finnes Candy-integrasjonskode i `Spillorama-system`
 - det finnes fortsatt bevisste `.md`-referanser som forklarer hva som ble gjort og hvordan grensene fungerer
 
 ## 5. Integrasjonsmodellen etter oppryddingen
@@ -86,7 +94,13 @@ Det viktige skillet er dette:
 - `Spillorama-system` eier ikke Candy runtime-parametre
 - `Spillorama-system` eier ikke Candy gameplay-kode
 
-`Spillorama-system` kan fortsatt eie en generisk launch-flyt eller katalogoppføring for et eksternt spill, men det skal ikke eie Candy-spesifikke backendbeslutninger.
+`Spillorama-system` kan eie:
+
+- launch-flyt for Candy
+- shared wallet API for Candy
+- Unity-host glue som rammer inn Candy i live `/web/`
+
+`Spillorama-system` skal ikke eie Candy-spesifikke backendbeslutninger som room-engine, scheduler eller gameplaylogikk.
 
 ## 6. Hva som eies hvor fremover
 
@@ -180,6 +194,7 @@ Eksempler:
 
 - hvordan en pålogget spiller åpner Candy fra live bingo
 - hvordan delt wallet brukes i integrasjonen
+- hvordan Candy vises som sjette tile i Unity-lobbyen
 - hvordan et generisk spill launch-es fra portal eller lobby
 
 Riktig sted:
@@ -233,7 +248,8 @@ Dette er en plattformhandling, ikke en kodeendring i repoet.
 
 Ja, selve kodebase-splittet følger nå planen:
 
-- `Spillorama-system` inneholder ikke lenger Candy/demo-kode
+- `Spillorama-system` inneholder ikke lenger Candy gameplay-kode eller Candy-backend-kode
+- `Spillorama-system` inneholder bare leverandorsiden av Candy-integrasjonen
 - Candy-klienten lever i `Candy`
 - Candy-backenden lever i `demo-backend`
 - dokumentasjon om grensen er bevart i `.md`-filer
