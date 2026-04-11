@@ -83,6 +83,7 @@ Det betyr ikke at `Spillorama-system` skal eie Candy gameplay eller Candy-backen
 - `docs/CANDY_SEPARATION_AND_FUTURE_OPERATING_MODEL_2026-04-09.md`
 - `docs/UNITY_JS_BRIDGE_CONTRACT.md`
 - `docs/CANDY_UNITY_SHARED_WALLET_STATUS_2026-04-11.md`
+- `docs/UNITY_VENDOR_SDK_BOOTSTRAP_2026-04-11.md`
 
 Providervendt Candy-integrasjonsdokumentasjon eies ikke av dette repoet. Bruk:
 

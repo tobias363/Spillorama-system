@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT_PATH="$REPO_ROOT/Spillorama"
-LOG_FILE="/tmp/unity_game_runtime_state_smoke.log"
-
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_PATH="${UNITY_PROJECT_PATH:-"$ROOT_DIR/Spillorama"}"
 UNITY_BIN="${UNITY_BIN:-}"
+LOG_FILE="${UNITY_GAME_RUNTIME_STATE_LOG:-/tmp/unity_game_runtime_state_smoke.log}"
+
 if [[ -z "$UNITY_BIN" ]]; then
   PROJECT_VERSION_FILE="$PROJECT_PATH/ProjectSettings/ProjectVersion.txt"
   if [[ -f "$PROJECT_VERSION_FILE" ]]; then
@@ -29,6 +29,13 @@ if [[ ! -x "$UNITY_BIN" ]]; then
   exit 1
 fi
 
+if [[ ! -d "$PROJECT_PATH" ]]; then
+  echo "Unity project path not found: $PROJECT_PATH" >&2
+  exit 1
+fi
+
+"$ROOT_DIR/scripts/unity-vendor-sdk-audit.sh"
+
 echo "Running game runtime state smoke test..."
 "$UNITY_BIN" \
   -batchmode \
@@ -38,5 +45,10 @@ echo "Running game runtime state smoke test..."
   -executeMethod GameRuntimeStateSmokeTests.RunGameRuntimeStateSmokeTest \
   -logFile "$LOG_FILE"
 
-grep -q "\[GameRuntimeStateSmoke\] PASS" "$LOG_FILE"
+if ! rg -n "\[GameRuntimeStateSmoke\] PASS" "$LOG_FILE" >/dev/null; then
+  echo "Game runtime state smoke test did not report PASS. Check log: $LOG_FILE" >&2
+  tail -n 80 "$LOG_FILE" >&2 || true
+  exit 1
+fi
+
 echo "Game runtime state smoke test passed."
