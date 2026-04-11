@@ -185,6 +185,9 @@ Primære filer:
 - [`Game4ThemeSelectionPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4ThemeSelectionPanel.cs)
 - [`Game4GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.cs)
 - [`Game4GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.SocketFlow.cs)
+- [`Game4GamePlayPanel.Interactions.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.Interactions.cs)
+- [`Game4GamePlayPanel.Patterns.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.Patterns.cs)
+- [`Game4GamePlayPanel.Tickets.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.Tickets.cs)
 
 Hvordan det åpnes:
 - lobby -> [`LobbyGameSelection.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Lobby/LobbyGameSelection.cs) -> `Game4()`
@@ -198,6 +201,12 @@ Hva styrer opplevelsen:
 - minigames i Game4: wheel, treasure chest, mystery
 
 Game 4 er mer UI-tung enn Game1–Game3. Endringer i layout og theme må nesten alltid verifiseres visuelt i Unity-editor eller WebGL.
+Game 4 følger nå samme struktur som Game 1:
+- `Game4GamePlayPanel.cs` holder panel-livssyklus og kjernedata-init
+- `Game4GamePlayPanel.SocketFlow.cs` holder room/broadcast/minigame-socketflyt
+- `Game4GamePlayPanel.Interactions.cs` holder knappetrykk, layout og loader/utility-flyt
+- `Game4GamePlayPanel.Patterns.cs` holder one-to-go-, pattern- og highlightlogikk
+- `Game4GamePlayPanel.Tickets.cs` holder ticketgenerering, reset og bet-/ticket-state
 
 ### Game 5
 
