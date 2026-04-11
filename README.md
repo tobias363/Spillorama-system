@@ -101,6 +101,14 @@ For å publisere oppdatert vendor-bundle til standard lokal team-plassering, bru
 bash scripts/unity-vendor-sdk-publish-local.sh
 ```
 
+For å verifisere en bundle manuelt før restore:
+
+```bash
+bash scripts/unity-vendor-sdk-verify.sh /absolute/path/to/unity-vendor-sdk.tar.gz
+```
+
+Bundle-verifiseringen bruker deterministisk innholds-hash, ikke tar-metadata.
+
 Providervendt Candy-integrasjonsdokumentasjon eies ikke av dette repoet. Bruk:
 
 - `/Users/tobiashaugen/Projects/demo-backend/docs/CANDY_PROVIDER_INTEGRATION_IMPLEMENTATION_GUIDE_2026-04-11.md`

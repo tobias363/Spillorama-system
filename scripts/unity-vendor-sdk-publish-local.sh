@@ -23,6 +23,10 @@ manifest_name="$(basename "$manifest_path")"
 cp "$archive_path" "$PUBLISH_DIR/$archive_name"
 cp "$manifest_path" "$PUBLISH_DIR/$manifest_name"
 
+bash "$ROOT_DIR/scripts/unity-vendor-sdk-verify.sh" \
+  "$PUBLISH_DIR/$archive_name" \
+  "$PUBLISH_DIR/$manifest_name"
+
 ln -sfn "$PUBLISH_DIR/$archive_name" "$PUBLISH_DIR/latest.tar.gz"
 ln -sfn "$PUBLISH_DIR/$manifest_name" "$PUBLISH_DIR/latest.manifest.tsv"
 

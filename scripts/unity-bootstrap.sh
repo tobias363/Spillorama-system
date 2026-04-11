@@ -55,9 +55,9 @@ done
 find_latest_bundle() {
   local dir
   for dir in \
-    "$ROOT_DIR/unity-vendor-bundles" \
     "$HOME/.spillorama/unity-vendor-bundles" \
-    "$HOME/Library/Application Support/Spillorama/unity-vendor-bundles"
+    "$HOME/Library/Application Support/Spillorama/unity-vendor-bundles" \
+    "$ROOT_DIR/unity-vendor-bundles"
   do
     if [[ -d "$dir" ]]; then
       latest="$(ls -t "$dir"/*.tar.gz 2>/dev/null | head -n1 || true)"

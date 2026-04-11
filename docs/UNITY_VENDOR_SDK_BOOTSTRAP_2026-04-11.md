@@ -66,6 +66,7 @@ Repoet har nå også to praktiske bootstrap-script:
 - [`unity-vendor-sdk-publish-local.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-publish-local.sh)
 - [`unity-vendor-sdk-package.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-package.sh)
 - [`unity-vendor-sdk-restore.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-restore.sh)
+- [`unity-vendor-sdk-verify.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-verify.sh)
 
 Disse brukes slik:
 
@@ -106,9 +107,9 @@ Dette er kommandoen som skal brukes når målet er "bekreft at Unity-prosjektet 
 Bootstrap-scriptet leter etter vendor-bundles i denne rekkefølgen:
 
 1. `UNITY_VENDOR_BUNDLE_PATH`
-2. `./unity-vendor-bundles/` i repoet
-3. `~/.spillorama/unity-vendor-bundles/`
-4. `~/Library/Application Support/Spillorama/unity-vendor-bundles/`
+2. `~/.spillorama/unity-vendor-bundles/`
+3. `~/Library/Application Support/Spillorama/unity-vendor-bundles/`
+4. `./unity-vendor-bundles/` i repoet
 
 Den anbefalte team-standarden er:
 
@@ -131,7 +132,8 @@ Dette:
 
 1. pakker en ny vendor-bundle fra lokal Unity-installasjon
 2. kopierer archive + manifest til `~/.spillorama/unity-vendor-bundles/`
-3. oppdaterer `latest.tar.gz` og `latest.manifest.tsv`
+3. verifiserer archive mot manifest
+4. oppdaterer `latest.tar.gz` og `latest.manifest.tsv`
 
 Det er dermed denne kommandoen som skal brukes når teamet vil oppdatere den delte lokale bootstrap-kilden på en maskin.
 
@@ -200,6 +202,9 @@ bash scripts/unity-vendor-sdk-restore.sh \
 /absolute/path/to/unity-vendor-sdk-<timestamp>.tar.gz
 ```
 
+Restore-scriptet verifiserer nå også archive mot bundle-manifest før utpakking.
+Verifiseringen bruker en deterministisk tre-hash av relative filbaner, filinnhold og symlink-targets, slik at sjekken ikke påvirkes av tar-metadata eller utpakkingstidspunkt.
+
 Hvis målmappene allerede finnes og skal overskrives:
 
 ```bash
@@ -237,6 +242,12 @@ For å kjøre standardpakken med eksplisitt bundle:
 
 ```bash
 bash scripts/unity-test-suite.sh --bundle /absolute/path/to/unity-vendor-sdk.tar.gz
+```
+
+For å verifisere en bundle manuelt:
+
+```bash
+bash scripts/unity-vendor-sdk-verify.sh /absolute/path/to/unity-vendor-sdk.tar.gz
 ```
 
 ## Source-of-truth-gap som fortsatt gjenstår

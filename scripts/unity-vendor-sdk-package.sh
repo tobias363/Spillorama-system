@@ -31,7 +31,7 @@ relative_paths=()
     [[ -z "${relative_path:-}" ]] && continue
     full_path="$PROJECT_PATH/$relative_path"
     size="$(du -sh "$full_path" | awk '{print $1}')"
-    sha="$(tar -cf - -C "$PROJECT_PATH" "$relative_path" | shasum -a 256 | awk '{print $1}')"
+    sha="$(bash "$ROOT_DIR/scripts/unity-vendor-sdk-tree-sha.sh" "$PROJECT_PATH" "$relative_path")"
     printf "%s\t%s\t%s\t%s\n" "$relative_path" "${purpose:-unknown}" "$size" "$sha"
     relative_paths+=("$relative_path")
   done < "$MANIFEST_FILE"
