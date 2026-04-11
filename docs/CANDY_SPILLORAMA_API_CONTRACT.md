@@ -14,7 +14,7 @@ Se `CANDY_SEPARATION_AND_FUTURE_OPERATING_MODEL_2026-04-09.md` for eiermodell og
 ```
 Spiller (nettleser)
   |
-  |-- HTTPS --> Spillorama portal (spillorama-system.onrender.com)
+  |-- HTTPS --> Spillorama live host (spillorama-system.onrender.com)
   |               |
   |               |-- POST /api/games/candy/launch --> Spillorama backend
   |               |     |

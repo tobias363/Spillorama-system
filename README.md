@@ -31,7 +31,7 @@ Det eier ikke Candy demo-login, Candy demo-admin eller Candy demo-settings.
 | `spillorama-system.onrender.com` | `/portal/` | Live bingo | portal |
 | `spillorama-system.onrender.com` | `/admin/` | Live bingo | live admin |
 | `spillorama-system.onrender.com` | `/web/` | Live bingo | Unity-lobby / WebGL-host |
-| `candy-backend-ldvg.onrender.com` | `/` | demo-backend | Candy demo-login og testflate |
+| `candy-backend-ldvg.onrender.com` | `/` | demo-backend | Candy integrasjonsflate / testflate |
 | `candy-backend-ldvg.onrender.com` | `/admin/` | demo-backend | Candy demo-admin |
 
 Samme route-navn på to forskjellige domener betyr ikke samme system.
@@ -41,6 +41,7 @@ Samme route-navn på to forskjellige domener betyr ikke samme system.
 - `frontend/` for live portal og live admin
 - `backend/` for live bingo API, auth, wallet, compliance, admin og generisk spillkatalog
 - `Spillorama/` for live Unity-lobby og live Unity-spill
+- leverandorsiden av Candy launch og shared wallet
 - dokumentasjon som handler om live bingo eller om den formelle grensen mot Candy/demo-backend
 
 ## Hva som ikke skal bygges her
@@ -68,11 +69,26 @@ Samme route-navn på to forskjellige domener betyr ikke samme system.
 
 Live bingo kan fortsatt kjenne til Candy som et eksternt spill på generisk nivå, for eksempel via spillkatalog, launch-URL eller en generisk embed-mekanisme. Live bingo skal ikke eie demo-driften rundt Candy.
 
+Det betyr i praksis at `Spillorama-system` kan inneholde:
+
+- Candy tile i Unity-lobbyen
+- `POST /api/games/candy/launch`
+- `/api/ext-wallet/*`
+- iframe/overlay-hosting fra live `/web/`
+
+Det betyr ikke at `Spillorama-system` skal eie Candy gameplay eller Candy-backend.
+
 ## Les disse dokumentene for full detalj
 
 - `docs/LIVE_BINGO_CANDY_BOUNDARY_2026-04-09.md`
 - `docs/CANDY_SEPARATION_AND_FUTURE_OPERATING_MODEL_2026-04-09.md`
 - `docs/UNITY_JS_BRIDGE_CONTRACT.md`
+- `docs/CANDY_UNITY_SHARED_WALLET_STATUS_2026-04-11.md`
+
+Providervendt Candy-integrasjonsdokumentasjon eies ikke av dette repoet. Bruk:
+
+- `/Users/tobiashaugen/Projects/demo-backend/docs/CANDY_PROVIDER_INTEGRATION_IMPLEMENTATION_GUIDE_2026-04-11.md`
+- `/Users/tobiashaugen/Projects/demo-backend/docs/INTEGRATION_CONTRACT.md`
 
 ## Render-navnstatus
 

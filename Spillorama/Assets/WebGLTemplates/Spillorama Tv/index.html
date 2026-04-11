@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en-us">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>Spillorama</title>
+  <link rel="shortcut icon" href="TemplateData/favicon.png">
+  <link rel="stylesheet" href="TemplateData/style.css">
+  <script type="text/javascript" src="/dist/js/jquery-1.9.1.min.js"></script>
+</head>
+
+<body>
+  <div id="unity-container" class="unity-desktop">
+    <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}}></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
+    </div>
+    <div id="unity-warning"> </div>
+  </div>
+  <script>
+    var container = document.querySelector("#unity-container");
+    var canvas = document.querySelector("#unity-canvas");
+    var loadingBar = document.querySelector("#unity-loading-bar");
+    var progressBarFull = document.querySelector("#unity-progress-bar-full");
+    var warningBanner = document.querySelector("#unity-warning");
+    var unityInstance;
+
+    // Shows a temporary message banner/ribbon for a few seconds, or
+    // a permanent error message on top of the canvas if type=='error'.
+    // If type=='warning', a yellow highlight color is used.
+    // Modify or remove this function to customize the visually presented
+    // way that non-critical warnings and error messages are presented to the
+    // user.
+    function unityShowBanner(msg, type) {
+      function updateBannerVisibility() {
+        warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+      }
+      var div = document.createElement('div');
+      div.innerHTML = msg;
+      warningBanner.appendChild(div);
+      if (type == 'error') div.style = 'background: red; padding: 10px;';
+      else {
+        if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+        setTimeout(function () {
+          warningBanner.removeChild(div);
+          updateBannerVisibility();
+        }, 5000);
+      }
+      updateBannerVisibility();
+    }
+
+    var buildUrl = "Build";
+    var loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+    var config = {
+      dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+      frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+      #if USE_WASM
+        codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+      #endif
+#if MEMORY_FILENAME
+        memoryUrl: buildUrl + "/{{{ MEMORY_FILENAME }}}",
+      #endif
+#if SYMBOLS_FILENAME
+        symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+      #endif
+        streamingAssetsUrl: "StreamingAssets",
+      companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+    productName: "SPILLORAMA",
+      productVersion: "7.1",
+        showBanner: unityShowBanner,
+      };
+
+    // By default Unity keeps WebGL canvas render target size matched with
+    // the DOM size of the canvas element (scaled by window.devicePixelRatio)
+    // Set this to false if you want to decouple this synchronization from
+    // happening inside the engine, and you would instead like to size up
+    // the canvas DOM size and WebGL render target sizes yourself.
+    // config.matchWebGLToCanvasSize = false;
+
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      // Mobile device style: fill the whole browser client area with the game canvas:
+      if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        //if ios device found
+        document.getElementsByTagName('body')[0].classList.add("ios");
+      }
+      var meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+      document.getElementsByTagName('head')[0].appendChild(meta);
+      container.className = "unity-mobile";
+      canvas.className = "unity-mobile";
+      // canvas.style.height = "calc(100% + 50px)";
+      // To lower canvas resolution on mobile devices to gain some
+      // performance, uncomment the following line:
+      // config.devicePixelRatio = 1;
+
+      //unityShowBanner('WebGL builds are not supported on mobile devices.');
+    } else {
+      // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
+
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+    }
+
+    #if BACKGROUND_FILENAME
+    canvas.style.background = "url('" + buildUrl + "/{{{ BACKGROUND_FILENAME.replace(/'/g, '%27') }}}') center / cover";
+    #endif
+    loadingBar.style.display = "block";
+
+    var script = document.createElement("script");
+    script.src = loaderUrl;
+    script.onload = () => {
+      createUnityInstance(canvas, config, (progress) => {
+        progressBarFull.style.width = 100 * progress + "%";
+      }).then((Instance) => {
+        loadingBar.style.display = "none";
+        unityInstance = Instance;
+      }).catch((message) => {
+        alert(message);
+      });
+    };
+    document.body.appendChild(script);
+  </script>
+</body>
+
+</html>
+
+<script>
+  function requestGameData() {
+    console.log("requestGameData called");
+    let searchParams = new URLSearchParams(window.location.search);
+    let token = searchParams.get('token');
+    const deviceType = searchParams.get('deviceType');
+    const redirectUrl = deviceType ? `/view-game?token=${token}&deviceType=${deviceType}` : `/view-game?token=${token}`;
+    let dataForWebGL = {};
+    console.log("get token : ", token);
+
+    if ((token == null || token == "")) {
+      dataForWebGL = {
+        message: "fail",
+        token: null,
+        playerId: null
+      };
+    } else {
+      let host = window.location.origin;
+      //console.log("host--", host)
+      $.ajax({
+        type: 'post',
+        url: host + "/validateGameView",
+        data: { id: token },
+        success: function (r) {
+          if (r.message == 'success') {
+            console.log("success data of validateGame", token, r.message, r.gameId, r.identifier, r.language, r?.hallId)
+            dataForWebGL = {
+              message: "success",
+              token: r.gameId,
+              identifier: r.identifier,
+              isDisplay: true,
+              deviceType: deviceType,
+              language: r.language,
+              hallId: r?.hallId ?? ""
+            };
+            dataForWebGL = JSON.stringify(dataForWebGL);
+            unityInstance.SendMessage("Panel - Bingo Hall Display", "AdminHallDisplayRoomIdCall", dataForWebGL);
+            window.history.replaceState(null, null, redirectUrl);
+          } else {
+            console.log("Something went wrong of validateGame", token, r)
+            dataForWebGL = {
+              message: "fail",
+              token: null,
+              identifier: null,
+              isDisplay: true,
+              displayMessage: r?.displayMessage,
+              deviceType: deviceType,
+              language: r.language,
+              hallId: r?.hallId ?? ""
+            };
+            dataForWebGL = JSON.stringify(dataForWebGL);
+            unityInstance.SendMessage("Panel - Bingo Hall Display", "AdminHallDisplayRoomIdCall", dataForWebGL);
+            window.history.replaceState(null, null, redirectUrl);
+          }
+        },
+        error: function (jqXHR, exeption) {
+          console.log("Something went wrong of validateGame", token)
+          dataForWebGL = {
+            message: "fail",
+            token: null,
+            identifier: null,
+            isDisplay: false,
+            deviceType: deviceType,
+            language: r.language,
+            hallId: r?.hallId ?? ""
+          };
+          dataForWebGL = JSON.stringify(dataForWebGL);
+          unityInstance.SendMessage("Panel - Bingo Hall Display", "AdminHallDisplayRoomIdCall", dataForWebGL);
+          window.history.replaceState(null, null, redirectUrl);
+        }
+      });
+
+    }
+  }
+
+  function requestDomainData() {
+    console.log("requestDomainData called");
+    let host = window.location.origin;
+    unityInstance.SendMessage("Socket And Event Manager", "DomainDataCall", host);
+  }
+
+  function getDeviceTypeFromURL() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('deviceType');  // Get deviceType value
+  }
+
+  // Function to open or focus the Spillorama tab
+  function openSpilloramaTab() {
+    const channel = new BroadcastChannel("focusSpiloramaWeb");
+    channel.postMessage("focus-tab");
+    setTimeout(() => {
+      window.close();
+    }, 200);
+  }
+
+  function CloseSpilloramaTvScreenTab() {
+    console.log("CloseSpilloramaTvScreenTab called");
+    window.close();
+  }
+
+  // Send deviceType to Unity
+  function sendDeviceTypeToUnity() {
+    const deviceType = getDeviceTypeFromURL();
+    if (deviceType) {
+      if (unityInstance != null) {
+        unityInstance.SendMessage('Panel - Bingo Hall Display', 'ReceiveDeviceType', deviceType);
+      }
+    }
+  }
+
+  // Trigger on page load
+  window.onload = function () {
+    sendDeviceTypeToUnity();
+  };
+
+  // window.onfocus = function () {
+  //       if(unityInstance != null)
+  //       {
+  //           unityInstance.SendMessage('Panel - Bingo Hall Display', 'Refresh');
+  //       }
+  //   };
+
+</script>

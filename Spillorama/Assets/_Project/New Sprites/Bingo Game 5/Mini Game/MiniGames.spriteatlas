@@ -1,0 +1,117 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!687078895 &4343727234628468602
+SpriteAtlas:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: MiniGames
+  m_EditorData:
+    serializedVersion: 2
+    textureSettings:
+      serializedVersion: 2
+      anisoLevel: 1
+      compressionQuality: 50
+      maxTextureSize: 2048
+      textureCompression: 0
+      filterMode: 1
+      generateMipMaps: 0
+      readable: 0
+      crunchedCompression: 0
+      sRGB: 1
+    platformSettings:
+    - serializedVersion: 4
+      m_BuildTarget: DefaultTexturePlatform
+      m_MaxTextureSize: 2048
+      m_ResizeAlgorithm: 0
+      m_TextureFormat: -1
+      m_TextureCompression: 1
+      m_CompressionQuality: 50
+      m_CrunchedCompression: 1
+      m_AllowsAlphaSplitting: 0
+      m_Overridden: 0
+      m_IgnorePlatformSupport: 0
+      m_AndroidETC2FallbackOverride: 0
+      m_ForceMaximumCompressionQuality_BC6H_BC7: 0
+    packingSettings:
+      serializedVersion: 2
+      padding: 4
+      blockOffset: 1
+      allowAlphaSplitting: 0
+      enableRotation: 1
+      enableTightPacking: 0
+      enableAlphaDilation: 0
+    secondaryTextureSettings: {}
+    variantMultiplier: 1
+    packables:
+    - {fileID: 2800000, guid: f2f6f7e735637df4eb124e6afd99c4c2, type: 3}
+    - {fileID: 2800000, guid: b447f70051da60f4fae1bad01ab3a00f, type: 3}
+    - {fileID: 2800000, guid: 93962ec06df8285458926ca3ae4e8635, type: 3}
+    - {fileID: 2800000, guid: 0c64aad3d6300904baa1cdca5e30f510, type: 3}
+    - {fileID: 2800000, guid: 3c0a839fe05f83c47b7c3b92c689b09f, type: 3}
+    - {fileID: 2800000, guid: 08133490dbc834148b83601157548429, type: 3}
+    - {fileID: 2800000, guid: 2fa8ce5e27a243145987a001319f4165, type: 3}
+    - {fileID: 2800000, guid: 3099b82fc48d52943ab7cc752318abe9, type: 3}
+    - {fileID: 2800000, guid: 5f4fbc90aca729841968be71ab387f79, type: 3}
+    - {fileID: 2800000, guid: d11914e26411473418020d8a48c7bb34, type: 3}
+    - {fileID: 2800000, guid: c5b83a7547c621947b562b60a0ea1f0f, type: 3}
+    - {fileID: 2800000, guid: 3857d7dba631b614791f7d902b0ffac0, type: 3}
+    - {fileID: 2800000, guid: 98224556a34992b439e9ec8410b9383e, type: 3}
+    - {fileID: 2800000, guid: 5912cedd5b8ad3345aaa3e32d20c5766, type: 3}
+    - {fileID: 2800000, guid: 1e523ef2eba26fa41a47a875a812202e, type: 3}
+    bindAsDefault: 1
+    isAtlasV2: 0
+    cachedData: {fileID: 0}
+    packedSpriteRenderDataKeys:
+    - b447f70051da60f4fae1bad01ab3a00f: 21300000
+    - 08133490dbc834148b83601157548429: 21300000
+    - 5f4fbc90aca729841968be71ab387f79: 21300000
+    - 93962ec06df8285458926ca3ae4e8635: 21300000
+    - d11914e26411473418020d8a48c7bb34: 21300000
+    - 1e523ef2eba26fa41a47a875a812202e: 21300000
+    - 0c64aad3d6300904baa1cdca5e30f510: 21300000
+    - c5b83a7547c621947b562b60a0ea1f0f: 21300000
+    - 98224556a34992b439e9ec8410b9383e: 21300000
+    - f2f6f7e735637df4eb124e6afd99c4c2: 21300000
+    - 3857d7dba631b614791f7d902b0ffac0: 21300000
+    - 5912cedd5b8ad3345aaa3e32d20c5766: 21300000
+    - 2fa8ce5e27a243145987a001319f4165: 21300000
+    - 3099b82fc48d52943ab7cc752318abe9: 21300000
+    - 3c0a839fe05f83c47b7c3b92c689b09f: 21300000
+  m_MasterAtlas: {fileID: 0}
+  m_PackedSprites:
+  - {fileID: 21300000, guid: b447f70051da60f4fae1bad01ab3a00f, type: 3}
+  - {fileID: 21300000, guid: 08133490dbc834148b83601157548429, type: 3}
+  - {fileID: 21300000, guid: 5f4fbc90aca729841968be71ab387f79, type: 3}
+  - {fileID: 21300000, guid: 93962ec06df8285458926ca3ae4e8635, type: 3}
+  - {fileID: 21300000, guid: d11914e26411473418020d8a48c7bb34, type: 3}
+  - {fileID: 21300000, guid: 1e523ef2eba26fa41a47a875a812202e, type: 3}
+  - {fileID: 21300000, guid: 0c64aad3d6300904baa1cdca5e30f510, type: 3}
+  - {fileID: 21300000, guid: c5b83a7547c621947b562b60a0ea1f0f, type: 3}
+  - {fileID: 21300000, guid: 98224556a34992b439e9ec8410b9383e, type: 3}
+  - {fileID: 21300000, guid: f2f6f7e735637df4eb124e6afd99c4c2, type: 3}
+  - {fileID: 21300000, guid: 3857d7dba631b614791f7d902b0ffac0, type: 3}
+  - {fileID: 21300000, guid: 5912cedd5b8ad3345aaa3e32d20c5766, type: 3}
+  - {fileID: 21300000, guid: 2fa8ce5e27a243145987a001319f4165, type: 3}
+  - {fileID: 21300000, guid: 3099b82fc48d52943ab7cc752318abe9, type: 3}
+  - {fileID: 21300000, guid: 3c0a839fe05f83c47b7c3b92c689b09f, type: 3}
+  m_PackedSpriteNamesToIndex:
+  - btn_Jackpot
+  - Jackpot Stand Game 5
+  - Rectangle 786
+  - Game 5 Jackpot UI
+  - roulette wheel
+  - White Ball 280x280
+  - imgSpinRetry
+  - roulette wheel Mini Game
+  - Roulette-final - 2
+  - '[Downloader.la]-659510d84500a'
+  - roulette wheel Mini Game Ball
+  - Vinn opptil 1
+  - Jackpot Wheel Game 5
+  - Rectangle 782
+  - Jackpot Arrow Game 5
+  m_RenderDataMap: {}
+  m_Tag: MiniGames
+  m_IsVariant: 0

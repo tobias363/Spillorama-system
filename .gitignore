@@ -4,8 +4,21 @@ backend/.env
 .DS_Store
 *.log
 
-# Unity (Spillorama er for stor for git — bruk git-lfs eller separat repo)
-Spillorama/
+# Unity
+# Track authored Unity source, but keep generated/editor/build folders out of git.
+Spillorama/*
+!Spillorama/Assets/
+Spillorama/Assets/*
+!Spillorama/Assets/_Project/
+!Spillorama/Assets/_Project/**
+!Spillorama/Assets/WebGLTemplates/
+!Spillorama/Assets/WebGLTemplates/**
+!Spillorama/Packages/
+!Spillorama/Packages/**
+!Spillorama/ProjectSettings/
+!Spillorama/ProjectSettings/**
+Spillorama/.DS_Store
+Spillorama/**/.DS_Store
 *.csproj
 *.sln
 *.suo

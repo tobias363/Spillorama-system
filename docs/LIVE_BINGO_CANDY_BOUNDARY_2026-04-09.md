@@ -27,7 +27,12 @@ Det betyr også:
 - ingen demo-login for Candy i dette repoet
 - ingen demo-admin for Candy i dette repoet
 - ingen Candy-spesifikke backendsettings i dette repoet
-- ingen Candy-spesifikk wallet-bridge i dette repoet
+- ingen Candy room-engine eller Candy scheduler i dette repoet
+
+Merk:
+
+- leverandorsiden av Candy-integrasjonen er fortsatt lov i dette repoet
+- dette inkluderer launch-endepunkt, shared wallet API og `/web/`-host glue
 
 ## 2. De tre kodebasene
 
@@ -81,9 +86,18 @@ Disse områdene ble tatt ut fordi de tilhører Candy/demo-backend og ikke live b
 Dette betyr at `Spillorama-system` ikke lenger eier:
 
 - `/api/integration/*`
-- Candy wallet bridge
-- Candy iframe-overlay i Unity-host
+- Candy gameplay-kode
+- Candy room-engine
+- Candy backendsettings
 - legacy demo-backend-strukturen som blandet live bingo og Candy
+
+Dette er derimot fortsatt riktig å eie i `Spillorama-system`:
+
+- `POST /api/games/candy/launch`
+- `/api/ext-wallet/*`
+- Candy tile i Unity-lobbyen
+- `/web/`-hostens iframe-overlay for Candy
+- token handoff mellom Unity-host og launch-flyten
 
 ## 6. Hva som fortsatt er riktig å ha i `Spillorama-system`
 
@@ -99,6 +113,7 @@ Spesielt:
 
 - `backend/public/web/` er live Unity WebGL-host for bingo-lobbyen.
 - `backend/public/view-game/` er hall-display / TV-host for live bingo.
+- leverandorsiden av Candy launch og shared wallet hører også hjemme her
 
 ## 7. Praktisk tommelfingerregel
 
@@ -111,6 +126,8 @@ Endringen hører hjemme i `Spillorama-system` hvis den er nødvendig for:
 - live compliance
 - live `/web/`
 - live `/view-game/`
+- leverandorsiden av Candy launch
+- leverandorsiden av shared wallet
 
 Endringen hører ikke hjemme i `Spillorama-system` hvis den er nødvendig for:
 
@@ -142,7 +159,7 @@ så er dokumentet historisk og ikke kildesannhet.
 
 ## 10. Kortversjonen
 
-`Spillorama-system` = live bingo.
+`Spillorama-system` = live bingo + leverandorsiden av Candy-integrasjonen.
 
 `Candy` = Candy-spillet.
 
