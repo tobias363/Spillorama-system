@@ -46,6 +46,7 @@ Disse brukes faktisk av authored kode under `_Project`, blant annet:
 Repoet har nå et eksplisitt audit-script:
 
 - [`unity-vendor-sdk-audit.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-audit.sh)
+- [`unity-vendor-sdk-manifest.tsv`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-manifest.tsv)
 
 Dette scriptet:
 
@@ -55,6 +56,30 @@ Dette scriptet:
 4. feiler tidlig med forklaring hvis de mangler
 
 Det betyr at en ny maskin nå får en presis bootstrap-feil i stedet for en uleselig Unity-compileeksplosjon.
+
+## Intern bootstrap-pakke
+
+Repoet har nå også to praktiske bootstrap-script:
+
+- [`unity-vendor-sdk-package.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-package.sh)
+- [`unity-vendor-sdk-restore.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-restore.sh)
+
+Disse brukes slik:
+
+1. Pakk vendor-SDK-ene fra en kjent god Unity-installasjon til en intern bundle
+2. Del bundle-filen internt
+3. Restore bundle-filen inn i en ren Unity-prosjektmappe
+4. Kjør vendor-audit og Unity-smoke-testene
+
+Dette er valgt fordi full tracking av vendor-mappene i git er for tungt og delvis upraktisk:
+
+- `Vuplex` alene er rundt `932 MB`
+- `Firebase` og `Plugins` er også store
+
+Den praktiske modellen er derfor:
+
+- authored gameplay-kode i git
+- vendor-SDK-er som intern, eksplisitt bootstrap-bundle
 
 ## Batch-testkontrakt
 
@@ -94,6 +119,34 @@ Hvis Unity-prosjektet ligger et annet sted enn repoets standardmappe:
 ```bash
 UNITY_PROJECT_PATH=/absolute/path/to/Spillorama bash scripts/unity-vendor-sdk-audit.sh
 UNITY_PROJECT_PATH=/absolute/path/to/Spillorama bash scripts/unity-compile-check.sh
+```
+
+For å bygge en intern vendor-bundle fra en fungerende maskin:
+
+```bash
+bash scripts/unity-vendor-sdk-package.sh
+```
+
+Dette lager som standard:
+
+- `unity-vendor-bundles/unity-vendor-sdk-<timestamp>.tar.gz`
+- `unity-vendor-bundles/unity-vendor-sdk-<timestamp>.manifest.tsv`
+
+For å restore bundle-filen inn i en ren prosjektmappe:
+
+```bash
+UNITY_PROJECT_PATH=/absolute/path/to/Spillorama \
+bash scripts/unity-vendor-sdk-restore.sh \
+/absolute/path/to/unity-vendor-sdk-<timestamp>.tar.gz
+```
+
+Hvis målmappene allerede finnes og skal overskrives:
+
+```bash
+UNITY_VENDOR_RESTORE_FORCE=1 \
+UNITY_PROJECT_PATH=/absolute/path/to/Spillorama \
+bash scripts/unity-vendor-sdk-restore.sh \
+/absolute/path/to/unity-vendor-sdk-<timestamp>.tar.gz
 ```
 
 ## Source-of-truth-gap som fortsatt gjenstår

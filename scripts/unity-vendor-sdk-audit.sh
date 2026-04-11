@@ -3,21 +3,17 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_PATH="${UNITY_PROJECT_PATH:-"$ROOT_DIR/Spillorama"}"
+MANIFEST_FILE="${UNITY_VENDOR_MANIFEST_PATH:-"$ROOT_DIR/scripts/unity-vendor-sdk-manifest.tsv"}"
 
 if [[ ! -d "$PROJECT_PATH" ]]; then
   echo "Unity project path not found: $PROJECT_PATH" >&2
   exit 1
 fi
 
-declare -a REQUIRED_DIRS=(
-  "Assets/Best HTTP"
-  "Assets/ExternalDependencyManager"
-  "Assets/Firebase"
-  "Assets/GPM"
-  "Assets/I2"
-  "Assets/Plugins"
-  "Assets/Vuplex"
-)
+if [[ ! -f "$MANIFEST_FILE" ]]; then
+  echo "Unity vendor manifest not found: $MANIFEST_FILE" >&2
+  exit 1
+fi
 
 purpose_for_path() {
   case "$1" in
@@ -33,14 +29,15 @@ purpose_for_path() {
 }
 
 missing=0
-for relative_path in "${REQUIRED_DIRS[@]}"; do
+while IFS=$'\t' read -r relative_path purpose || [[ -n "${relative_path:-}" ]]; do
+  [[ -z "${relative_path:-}" ]] && continue
   full_path="$PROJECT_PATH/$relative_path"
   if [[ ! -e "$full_path" ]]; then
     echo "Missing required Unity vendor SDK path: $full_path" >&2
-    echo "  Purpose: $(purpose_for_path "$relative_path")" >&2
+    echo "  Purpose: ${purpose:-$(purpose_for_path "$relative_path")}" >&2
     missing=1
   fi
-done
+done < "$MANIFEST_FILE"
 
 if [[ "$missing" -ne 0 ]]; then
   cat >&2 <<EOF
