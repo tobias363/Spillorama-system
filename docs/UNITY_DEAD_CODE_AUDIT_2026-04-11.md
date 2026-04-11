@@ -1,7 +1,7 @@
 ## Unity Dead-Code Audit
 
 Dato: 11. april 2026
-Status: syttende sikre pass gjennomfort
+Status: attende sikre pass gjennomfort
 
 ### Fjernet i denne runden
 
@@ -124,6 +124,7 @@ Følgende automatiske sjekker er grønne etter splitten av manager-laget og Game
 - `bash scripts/unity-game-flow-contract-smoke.sh`
 - `bash scripts/unity-game-panel-lifecycle-smoke.sh`
 - `bash scripts/unity-game-interaction-contract-smoke.sh`
+- `bash scripts/unity-game-runtime-state-smoke.sh`
 
 Den siste testen kjøres via:
 
@@ -144,6 +145,11 @@ Den nye interaksjonskontraktsmoken kjøres via:
 
 - `Spillorama/Assets/_Project/_Scripts/Other/Editor/GameInteractionContractSmokeTests.cs`
 - `scripts/unity-game-interaction-contract-smoke.sh`
+
+Den nye runtime-state-smoken kjøres via:
+
+- `Spillorama/Assets/_Project/_Scripts/Other/Editor/GameRuntimeStateSmokeTests.cs`
+- `scripts/unity-game-runtime-state-smoke.sh`
 
 og verifiserer at `Game.unity` fortsatt har intakt referanse-wiring for:
 
@@ -170,3 +176,8 @@ Interaksjonskontraktsmoken verifiserer i tillegg at de mest endringsutsatte spil
 - Game4 minigame-entrypoints for wheel, treasure og mystery
 - Game5 jackpot/free-spin-entrypoints og reconnect-surface
 - `EventManager`-kontrakter for cancel, reconnect, lucky number og minigame-API
+
+Runtime-state-smoken verifiserer i tillegg faktiske state-overganger etter refaktor i Game4 og Game5:
+
+- Game4 `TicketCount`, `BetValue`, `OnTicketButtonTap()` og `IsGamePlayInProcess`
+- Game5 `IsGamePlayInProcess` og oppdatering av `LastWithdrawNumber`

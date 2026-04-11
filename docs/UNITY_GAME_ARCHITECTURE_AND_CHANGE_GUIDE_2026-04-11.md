@@ -95,6 +95,11 @@ Det finnes nå seks grunnleggende Unity-sjekker som bør kjøres etter hver clea
    - [`GameInteractionContractSmokeTests.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Other/Editor/GameInteractionContractSmokeTests.cs)
    - formål: bekrefte at kjøpsflater, lucky number, reconnect og minigame-entrypoints fortsatt finnes og er koblet opp per spill
 
+7. Game runtime state smoke
+   - [`unity-game-runtime-state-smoke.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-game-runtime-state-smoke.sh)
+   - [`GameRuntimeStateSmokeTests.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Other/Editor/GameRuntimeStateSmokeTests.cs)
+   - formål: bekrefte faktiske state-overganger i de mest refaktorerte spillpanelene uten live socket, blant annet Game4 ticket-option/bet-state og Game5 play-/roulette-state
+
 Disse seks testene er ikke full gameplay-verifisering, men de er nok til å fange:
 
 - brutt scene-wiring etter prefab-/sceneendringer
@@ -103,6 +108,7 @@ Disse seks testene er ikke full gameplay-verifisering, men de er nok til å fang
 - regressjoner der sentrale per-spill entrypoints forsvinner under refaktor
 - regressjoner der panelenes open/close-lifecycle fortsatt kompilere, men ikke lenger kan kjøres trygt i batch/edit-mode
 - regressjoner i de mest endringsutsatte interaksjonsflatene: kjøp, lucky number, reconnect og minigame-entrypoints
+- regressjoner i faktiske UI-/state-overganger etter refaktor, som at Game4 mister riktig play/ticket-option-state eller Game5 mister play-/roulette-state
 
 ## Spilloversikt
 
