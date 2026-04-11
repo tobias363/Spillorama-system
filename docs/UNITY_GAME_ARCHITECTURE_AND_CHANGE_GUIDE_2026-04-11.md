@@ -14,12 +14,18 @@ Unity-klienten er delt i fire hovedlag:
 
 1. Global app- og panelstyring
    - [`UIManager.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Manager/UIManager.cs)
-   - ansvar: aktivere paneler, topbar, login, lobby, Game1–Game5, split-screen, globale sprites og statusflagg
+   - [`UIManager.GamePresentation.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Manager/UIManager.GamePresentation.cs)
+   - [`UIManager.Notifications.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Manager/UIManager.Notifications.cs)
+   - [`UIManager.WebHostBridge.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Manager/UIManager.WebHostBridge.cs)
+   - ansvar: aktivere paneler, topbar, login, lobby, Game1–Game5, split-screen, globale sprites, notifikasjoner og WebGL-host-bridge
 
 2. Socket- og eventlag
    - [`GameSocketManager.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Socket%20Manager/GameSocketManager.cs)
    - [`EventManager.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Socket%20Manager/EventManager.cs)
-   - ansvar: socket-oppkobling, namespace-håndtering, auth refresh, event payloads mot backend
+   - [`EventManager.AuthProfile.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Socket%20Manager/EventManager.AuthProfile.cs)
+   - [`EventManager.Platform.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Socket%20Manager/EventManager.Platform.cs)
+   - [`EventManager.Gameplay.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Socket%20Manager/EventManager.Gameplay.cs)
+   - ansvar: socket-oppkobling, namespace-håndtering, auth refresh, lobby/plattformevents og gameplay payloads mot backend
 
 3. Lobby- og spillrouting
    - [`LobbyGameSelection.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Lobby/LobbyGameSelection.cs)
@@ -27,11 +33,17 @@ Unity-klienten er delt i fire hovedlag:
    - ansvar: status i spillgrid, åpne riktige spill, hente romdata og sende spilleren inn i korrekt panel
 
 4. Spillspesifikke paneler
-   - `Panels/Game/Game 1/*`
-   - `Panels/Game/Game 2/*`
-   - `Panels/Game/Game 3/*`
-   - `Panels/Game/Game 4/*`
-   - `Panels/Game/Game 5/*`
+  - `Panels/Game/Game 1/*`
+  - `Panels/Game/Game 2/*`
+  - `Panels/Game/Game 3/*`
+  - `Panels/Game/Game 4/*`
+  - `Panels/Game/Game 5/*`
+
+Game 2 og Game 3 er nå delvis splittet:
+- [`Game2GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%202/Game2GamePlayPanel.cs)
+- [`Game2GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%202/Game2GamePlayPanel.SocketFlow.cs)
+- [`Game3GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%203/Game3GamePlayPanel.cs)
+- [`Game3GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%203/Game3GamePlayPanel.SocketFlow.cs)
 
 ## Runtime-flyt
 
@@ -219,7 +231,7 @@ Denne runden ryddet bare lavrisiko dødkode i Unity-klienten:
   - [`Game4Panel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4Panel.cs)
   - [`Game5Panel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5Panel.cs)
 
-Dette er en opprydding av kode som ikke hadde runtime-effekt. Det er ikke en full funksjonell refaktor av Game1–Game5.
+Dette er en opprydding av kode som ikke hadde runtime-effekt, pluss en strukturrefaktor der manager-laget og Game2/Game3 room/socket-flyt ble flyttet til partial-klasser. Det er fortsatt ikke en full funksjonell refaktor av Game1–Game5.
 
 ## Hva som fortsatt bør ryddes senere
 
@@ -232,16 +244,16 @@ Disse områdene ser fortsatt tunge eller historisk lastet ut:
 - Game1/Game2/Game3 gameplay-panelene
   - store monolitter med både rendering, state, socket callbacks og UI-håndtering i samme klasse
 
-Den riktige neste oppryddingen er ikke mer “slett kommentarkode”, men modulær splitting:
-- socket adapters
-- view state
+Den riktige neste oppryddingen er ikke mer “slett kommentarkode”, men videre modulær splitting:
+- Game1 socket/gameflow
+- Game4/Game5 gameplay-state
 - ticket rendering
 - minigame integrations
 
 ## Anbefalt videre arbeid
 
-1. Del [`EventManager.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Socket%20Manager/EventManager.cs) i per-game adapters.
-2. Del [`UIManager.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Manager/UIManager.cs) i mindre ansvarlige managers.
+1. Splitt [`Game1GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%201/Game1GamePlayPanel.cs) i minst socket/gameflow og render/view-state.
+2. Gjør tilsvarende splitting for [`Game4GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.cs) og [`Game5GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.cs).
 3. Gjør en parity-sammenligning mot leverandørens Unity-kode for layout-sensitive spill.
 4. Etabler en fast regel:
    - Unity scene/prefab-endringer verifiseres visuelt
