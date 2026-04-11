@@ -64,7 +64,7 @@ Den faktiske flyten i klienten er:
 
 ## Test- og verifikasjonslag
 
-Det finnes nå fem grunnleggende Unity-sjekker som bør kjøres etter hver cleanup- eller strukturendring:
+Det finnes nå seks grunnleggende Unity-sjekker som bør kjøres etter hver cleanup- eller strukturendring:
 
 1. Compile-check
    - [`unity-compile-check.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-compile-check.sh)
@@ -90,13 +90,19 @@ Det finnes nå fem grunnleggende Unity-sjekker som bør kjøres etter hver clean
    - [`GamePanelLifecycleSmokeTests.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Other/Editor/GamePanelLifecycleSmokeTests.cs)
    - formål: bekrefte at Game1-Game5 kan åpnes og lukkes i edit-mode uten play-mode, live socket eller `Awake()`-avhengige singletoner
 
-Disse fem testene er ikke full gameplay-verifisering, men de er nok til å fange:
+6. Game interaction contract smoke
+   - [`unity-game-interaction-contract-smoke.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-game-interaction-contract-smoke.sh)
+   - [`GameInteractionContractSmokeTests.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Other/Editor/GameInteractionContractSmokeTests.cs)
+   - formål: bekrefte at kjøpsflater, lucky number, reconnect og minigame-entrypoints fortsatt finnes og er koblet opp per spill
+
+Disse seks testene er ikke full gameplay-verifisering, men de er nok til å fange:
 
 - brutt scene-wiring etter prefab-/sceneendringer
 - feil etter partial-splitting av gameplay-paneler
 - manglende serialiserte referanser som ellers først ville vist seg ved runtime-klikk i lobbyen
 - regressjoner der sentrale per-spill entrypoints forsvinner under refaktor
 - regressjoner der panelenes open/close-lifecycle fortsatt kompilere, men ikke lenger kan kjøres trygt i batch/edit-mode
+- regressjoner i de mest endringsutsatte interaksjonsflatene: kjøp, lucky number, reconnect og minigame-entrypoints
 
 ## Spilloversikt
 

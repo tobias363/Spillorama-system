@@ -1,7 +1,7 @@
 ## Unity Dead-Code Audit
 
 Dato: 11. april 2026
-Status: trettende sikre pass gjennomfort
+Status: fjortende sikre pass gjennomfort
 
 ### Fjernet i denne runden
 
@@ -118,6 +118,7 @@ Følgende automatiske sjekker er grønne etter splitten av manager-laget og Game
 - `bash scripts/unity-game-panel-smoke.sh`
 - `bash scripts/unity-game-flow-contract-smoke.sh`
 - `bash scripts/unity-game-panel-lifecycle-smoke.sh`
+- `bash scripts/unity-game-interaction-contract-smoke.sh`
 
 Den siste testen kjøres via:
 
@@ -133,6 +134,11 @@ Den nye lifecycle-smoken kjøres via:
 
 - `Spillorama/Assets/_Project/_Scripts/Other/Editor/GamePanelLifecycleSmokeTests.cs`
 - `scripts/unity-game-panel-lifecycle-smoke.sh`
+
+Den nye interaksjonskontraktsmoken kjøres via:
+
+- `Spillorama/Assets/_Project/_Scripts/Other/Editor/GameInteractionContractSmokeTests.cs`
+- `scripts/unity-game-interaction-contract-smoke.sh`
 
 og verifiserer at `Game.unity` fortsatt har intakt referanse-wiring for:
 
@@ -151,3 +157,11 @@ Lifecycle-smoken verifiserer i tillegg at Game1-Game5 kan åpnes og lukkes i edi
 - `Game1GamePlayPanel.OpenPanel(...)` setter panelstate uten å kreve full runtime-UI
 - `Game2GamePlayPanel.OpenPanel(...)` og `Game3GamePlayPanel.OpenPanel(...)` setter `Current_Game_Number` og `isGame*`
 - `Game4Panel.OpenPanel()` og `Game5Panel.OpenPanel()` kan aktiveres uten `BackgroundManager`/socket-crash i batch
+
+Interaksjonskontraktsmoken verifiserer i tillegg at de mest endringsutsatte spillflatene fortsatt finnes og er koblet opp:
+
+- Game1 purchase- og view-purchase-flyt via `HallGameListPanel`, `Game1TicketPurchasePanel` og lucky number-entrypoints
+- Game2/Game3 purchase-paneler, buy/cancel-lignende entrypoints, buy-more-boards og lucky number-flyt
+- Game4 minigame-entrypoints for wheel, treasure og mystery
+- Game5 jackpot/free-spin-entrypoints og reconnect-surface
+- `EventManager`-kontrakter for cancel, reconnect, lucky number og minigame-API
