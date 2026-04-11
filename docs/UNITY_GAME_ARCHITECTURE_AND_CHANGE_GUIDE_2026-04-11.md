@@ -62,6 +62,30 @@ Den faktiske flyten i klienten er:
 5. [`GamePlanPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Lobby/GamePlanPanel.cs) henter romdata for Game1–Game3 og åpner riktig gameplay-panel.
 6. Game4 og Game5 åpnes mer direkte fra lobbyen og henter sine data etter at panelet er aktivt.
 
+## Test- og verifikasjonslag
+
+Det finnes nå tre grunnleggende Unity-sjekker som bør kjøres etter hver cleanup- eller strukturendring:
+
+1. Compile-check
+   - [`unity-compile-check.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-compile-check.sh)
+   - formål: oppdage rene compile-feil i Unity-skript
+
+2. Theme2 smoke
+   - [`unity-theme2-smoke.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-theme2-smoke.sh)
+   - [`Theme2SmokeTests.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Other/Editor/Theme2SmokeTests.cs)
+   - formål: bekrefte at scenehierarki og Theme2-flyt fortsatt er lastbar i edit-mode
+
+3. Game panel wiring smoke
+   - [`unity-game-panel-smoke.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-game-panel-smoke.sh)
+   - [`GamePanelWiringSmokeTests.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Other/Editor/GamePanelWiringSmokeTests.cs)
+   - formål: bekrefte at `Game.unity` fortsatt har intakt wiring mellom `UIManager`, Game1-Game5-panelene og de viktigste gameplay-/minigame-referansene
+
+Disse tre testene er ikke full gameplay-verifisering, men de er nok til å fange:
+
+- brutt scene-wiring etter prefab-/sceneendringer
+- feil etter partial-splitting av gameplay-paneler
+- manglende serialiserte referanser som ellers først ville vist seg ved runtime-klikk i lobbyen
+
 ## Spilloversikt
 
 ### Game 1

@@ -1,7 +1,7 @@
 ## Unity Dead-Code Audit
 
 Dato: 11. april 2026
-Status: tiende sikre pass gjennomfort
+Status: ellevte sikre pass gjennomfort
 
 ### Fjernet i denne runden
 
@@ -107,3 +107,22 @@ Neste oppryddingsrunde bor deles i to:
 
 Dette betyr ikke at "all dodkode er borte".
 Det betyr at den forste, lave risiko-pass er gjort, og at source-of-truth na er i git slik at videre cleanup kan gjores kontrollert.
+
+### Verifisering etter denne runden
+
+Følgende automatiske sjekker er grønne etter splitten av manager-laget og Game1-Game5-panelene:
+
+- `bash scripts/unity-compile-check.sh`
+- `bash scripts/unity-theme2-smoke.sh`
+- `bash scripts/unity-game-panel-smoke.sh`
+
+Den siste testen kjøres via:
+
+- `Spillorama/Assets/_Project/_Scripts/Other/Editor/GamePanelWiringSmokeTests.cs`
+- `scripts/unity-game-panel-smoke.sh`
+
+og verifiserer at `Game.unity` fortsatt har intakt referanse-wiring for:
+
+- `UIManager.game1Panel` til `UIManager.game5Panel`
+- Game1-Game5 sine panelreferanser
+- sentrale gameplay-/minigame-referanser som fortsatt må være satt i scenen
