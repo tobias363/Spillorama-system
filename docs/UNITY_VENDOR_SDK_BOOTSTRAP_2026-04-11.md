@@ -64,9 +64,11 @@ Repoet har nå også to praktiske bootstrap-script:
 - [`unity-bootstrap.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-bootstrap.sh)
 - [`unity-test-suite.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-test-suite.sh)
 - [`unity-vendor-sdk-publish-local.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-publish-local.sh)
+- [`unity-vendor-sdk-fetch.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-fetch.sh)
 - [`unity-vendor-sdk-package.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-package.sh)
 - [`unity-vendor-sdk-restore.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-restore.sh)
 - [`unity-vendor-sdk-verify.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-vendor-sdk-verify.sh)
+- [`unity-test-suite-ci.sh`](/Users/tobiashaugen/Projects/Spillorama-system/scripts/unity-test-suite-ci.sh)
 
 Disse brukes slik:
 
@@ -136,6 +138,22 @@ Dette:
 4. oppdaterer `latest.tar.gz` og `latest.manifest.tsv`
 
 Det er dermed denne kommandoen som skal brukes når teamet vil oppdatere den delte lokale bootstrap-kilden på en maskin.
+
+Hvis teamet bruker en delt artifact-URL eller intern nedlastingslenke, vil bootstrap nå prioritere denne kilden når `UNITY_VENDOR_BUNDLE_URL` er satt:
+
+```bash
+UNITY_VENDOR_BUNDLE_URL=https://internal.example.com/unity-vendor-sdk.tar.gz \
+UNITY_VENDOR_BUNDLE_MANIFEST_URL=https://internal.example.com/unity-vendor-sdk.manifest.tsv \
+bash scripts/unity-bootstrap.sh
+```
+
+Eller eksplisitt fetch først:
+
+```bash
+UNITY_VENDOR_BUNDLE_URL=https://internal.example.com/unity-vendor-sdk.tar.gz \
+UNITY_VENDOR_BUNDLE_MANIFEST_URL=https://internal.example.com/unity-vendor-sdk.manifest.tsv \
+bash scripts/unity-vendor-sdk-fetch.sh
+```
 
 ## Batch-testkontrakt
 
@@ -232,6 +250,14 @@ For standard daglig verifisering:
 bash scripts/unity-test-suite.sh
 ```
 
+For CI eller ren maskin uten lokal bundle-cache:
+
+```bash
+UNITY_VENDOR_BUNDLE_URL=https://internal.example.com/unity-vendor-sdk.tar.gz \
+UNITY_VENDOR_BUNDLE_MANIFEST_URL=https://internal.example.com/unity-vendor-sdk.manifest.tsv \
+bash scripts/unity-test-suite-ci.sh
+```
+
 For å bruke en eksplisitt bundle-fil:
 
 ```bash
@@ -252,15 +278,15 @@ bash scripts/unity-vendor-sdk-verify.sh /absolute/path/to/unity-vendor-sdk.tar.g
 
 ## Source-of-truth-gap som fortsatt gjenstår
 
-Dette dokumentet løser ikke selve vendor-distribusjonen. Det løser synlighet og bootstrap-kontrakt.
+Dette dokumentet støtter nå begge operative modellene:
 
-Det som fortsatt gjenstår for full reproduserbarhet er ett av disse valgene:
+1. lokal team-cache i `~/.spillorama/unity-vendor-bundles/`
+2. delt artifact-URL via `UNITY_VENDOR_BUNDLE_URL` og `UNITY_VENDOR_BUNDLE_MANIFEST_URL`
 
-1. tracke vendor-SDK-ene i git
-2. lagre dem som en eksplisitt intern bootstrap-pakke
-3. beskrive eksakt installasjonsflyt per SDK og gjøre den reproducerbar
+Det gjenværende organisatoriske valget er derfor ikke kode, men hvilken av disse to modellene teamet faktisk vil standardisere på.
 
-Inntil et av disse valgene tas, er riktig formulering:
+Riktig formulering nå er:
 
 - authored Unity-kode er source of truth i git
-- vendor-SDK-ene er fortsatt et kontrollert, men ikke fullt versjonert miljøkrav
+- vendor-SDK-ene er håndtert gjennom en eksplisitt bootstrap-kontrakt
+- teamet kan bruke enten lokal cache eller delt artifact-URL som standard distribusjonsmodell

@@ -21,6 +21,8 @@ Behavior:
 Environment overrides:
   UNITY_PROJECT_PATH
   UNITY_VENDOR_BUNDLE_PATH
+  UNITY_VENDOR_BUNDLE_URL
+  UNITY_VENDOR_BUNDLE_MANIFEST_URL
   UNITY_BOOTSTRAP_RUN_TESTS=1
   UNITY_VENDOR_RESTORE_FORCE=1
 EOF
@@ -84,6 +86,15 @@ fi
 
 if [[ "$needs_restore" == "1" ]]; then
   bundle_path="$EXPLICIT_BUNDLE_PATH"
+  if [[ -z "$bundle_path" && -n "${UNITY_VENDOR_BUNDLE_URL:-}" ]]; then
+    fetch_dir="${UNITY_VENDOR_FETCH_DIR:-$HOME/.spillorama/unity-vendor-bundles}"
+    echo "Fetching Unity vendor bundle from configured bundle URL."
+    bash "$ROOT_DIR/scripts/unity-vendor-sdk-fetch.sh" "${UNITY_VENDOR_BUNDLE_URL}" "${UNITY_VENDOR_BUNDLE_MANIFEST_URL:-}"
+    if [[ -L "$fetch_dir/latest.tar.gz" || -f "$fetch_dir/latest.tar.gz" ]]; then
+      bundle_path="$fetch_dir/latest.tar.gz"
+    fi
+  fi
+
   if [[ -z "$bundle_path" ]]; then
     bundle_path="$(find_latest_bundle || true)"
   fi
@@ -92,6 +103,7 @@ if [[ "$needs_restore" == "1" ]]; then
     echo "No Unity vendor bundle found." >&2
     echo "Checked:" >&2
     echo "  - UNITY_VENDOR_BUNDLE_PATH" >&2
+    echo "  - UNITY_VENDOR_BUNDLE_URL" >&2
     echo "  - $ROOT_DIR/unity-vendor-bundles" >&2
     echo "  - $HOME/.spillorama/unity-vendor-bundles" >&2
     echo "  - $HOME/Library/Application Support/Spillorama/unity-vendor-bundles" >&2

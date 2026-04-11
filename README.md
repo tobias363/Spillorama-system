@@ -109,6 +109,14 @@ bash scripts/unity-vendor-sdk-verify.sh /absolute/path/to/unity-vendor-sdk.tar.g
 
 Bundle-verifiseringen bruker deterministisk innholds-hash, ikke tar-metadata.
 
+For CI eller ren maskin med delt artifact-URL:
+
+```bash
+UNITY_VENDOR_BUNDLE_URL=https://internal.example.com/unity-vendor-sdk.tar.gz \
+UNITY_VENDOR_BUNDLE_MANIFEST_URL=https://internal.example.com/unity-vendor-sdk.manifest.tsv \
+bash scripts/unity-test-suite-ci.sh
+```
+
 Providervendt Candy-integrasjonsdokumentasjon eies ikke av dette repoet. Bruk:
 
 - `/Users/tobiashaugen/Projects/demo-backend/docs/CANDY_PROVIDER_INTEGRATION_IMPLEMENTATION_GUIDE_2026-04-11.md`
