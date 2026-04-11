@@ -1,0 +1,85 @@
+## Unity Dead-Code Audit
+
+Dato: 11. april 2026
+Status: første sikre pass gjennomfort
+
+### Fjernet i denne runden
+
+Disse filene var beviselig ubrukte eller kun backup/testartefakter:
+
+- Unity-klient:
+  - `Spillorama/Assets/_Project/_Scripts/Other/TestScript.cs`
+  - `Spillorama/Assets/_Project/_Scripts/Other/Editor/TestEditor.cs`
+
+- `unity-bingo-backend` controller:
+  - `unity-bingo-backend/App/Controllers/GameController-old.js`
+
+- `unity-bingo-backend` backup/test-views:
+  - `unity-bingo-backend/App/Views/GameFolder/editTicket_bkp.html`
+  - `unity-bingo-backend/App/Views/GameFolder/gameAdd-old.html`
+  - `unity-bingo-backend/App/Views/GameFolder/gameAddOld16.html`
+  - `unity-bingo-backend/App/Views/GameFolder/gameAdd_bkpMay18.html`
+  - `unity-bingo-backend/App/Views/GameFolder/gameViewBkp_10_11_2022.html`
+  - `unity-bingo-backend/App/Views/GameFolder/gameView_bkp.html`
+  - `unity-bingo-backend/App/Views/GameFolder/gameView_bkp_15_10_2022.html`
+  - `unity-bingo-backend/App/Views/GroupHall/addGroupHallTest.html`
+  - `unity-bingo-backend/App/Views/PayoutforPlayers/payoutPlayers-backup.html`
+  - `unity-bingo-backend/App/Views/cash-inout/product_cart_old.html`
+  - `unity-bingo-backend/App/Views/hallAccountReport/hallAccount-old.html`
+  - `unity-bingo-backend/App/Views/player/gameHistory-old.html`
+  - `unity-bingo-backend/App/Views/player/playerStatsTest.html`
+  - `unity-bingo-backend/App/Views/savedGame/gameAdd_bkp.html`
+  - `unity-bingo-backend/App/Views/savedGame/gameView_bkp.html`
+
+- `unity-bingo-backend` lokale test-/ops-artefakter:
+  - `unity-bingo-backend/bingo-push-to-git.php`
+  - `unity-bingo-backend/bingo_ci-cd.php`
+  - `unity-bingo-backend/developement_requirement`
+  - `unity-bingo-backend/spiloDev`
+  - `unity-bingo-backend/test-dev.html`
+  - `unity-bingo-backend/test.js`
+  - `unity-bingo-backend/test.txt`
+
+### Hvorfor disse var trygge a fjerne
+
+- `TestScript.cs` og `TestEditor.cs` refererte bare til hverandre.
+- Backup-viewene i `unity-bingo-backend` hadde ingen runtime-referanser i controllere eller `res.render(...)`.
+- `addGroupHallTest.html` var bare nevnt i kommentert kode.
+- `GameController-old.js` hadde ingen referanser i runtime.
+- root-testfilene i `unity-bingo-backend` var ikke del av appstart, routes eller build.
+
+### Ikke fjernet i denne runden
+
+Disse kandidatene er fortsatt ikke bevist dode nok til automatisk sletting:
+
+- Unity-scener som ikke er i build:
+  - `Spillorama/Assets/_Project/_Scenes/Custom Socket URL.unity`
+  - `Spillorama/Assets/_Project/_Scenes/SamplePhysics.unity`
+  - `Spillorama/Assets/_Project/_Scenes/Test.unity`
+
+- debug-/prototype-assets:
+  - `Spillorama/Assets/_Project/_Scripts/Proto and Test/`
+
+- store authored runtimefiler som trolig trenger refaktor, ikke sletting:
+  - `Spillorama/Assets/_Project/_Scripts/Socket Manager/EventManager.cs`
+  - `Spillorama/Assets/_Project/_Scripts/Manager/UIManager.cs`
+  - `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 1/Game1GamePlayPanel.cs`
+  - `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 2/Game2GamePlayPanel.cs`
+  - `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 3/Game3GamePlayPanel.cs`
+
+### Neste sikre pass
+
+Neste oppryddingsrunde bor deles i to:
+
+1. Unity-klient:
+   - verifisere om de tre disabled scenene fortsatt trengs for manuell drift/debug
+   - rydde prototype-assets som ikke refereres fra scener/prefabs
+
+2. `unity-bingo-backend`:
+   - fjerne kommenterte testbaner i controllere
+   - identifisere gamle admin-views som bare er historiske kopier
+
+### Viktig presisering
+
+Dette betyr ikke at "all dodkode er borte".
+Det betyr at den forste, lave risiko-pass er gjort, og at source-of-truth na er i git slik at videre cleanup kan gjores kontrollert.
