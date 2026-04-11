@@ -39,7 +39,7 @@ Unity-klienten er delt i fire hovedlag:
   - `Panels/Game/Game 4/*`
   - `Panels/Game/Game 5/*`
 
-Game 1 til Game 4 er nå delvis splittet:
+Game 1 til Game 5 er nå delvis splittet:
 - [`Game1GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%201/Game1GamePlayPanel.cs)
 - [`Game1GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%201/Game1GamePlayPanel.SocketFlow.cs)
 - [`Game2GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%202/Game2GamePlayPanel.cs)
@@ -48,6 +48,8 @@ Game 1 til Game 4 er nå delvis splittet:
 - [`Game3GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%203/Game3GamePlayPanel.SocketFlow.cs)
 - [`Game4GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.cs)
 - [`Game4GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.SocketFlow.cs)
+- [`Game5GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.cs)
+- [`Game5GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.SocketFlow.cs)
 
 ## Runtime-flyt
 
@@ -148,6 +150,7 @@ Game 4 er mer UI-tung enn Game1–Game3. Endringer i layout og theme må nesten 
 Primære filer:
 - [`Game5Panel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5Panel.cs)
 - [`Game5GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.cs)
+- [`Game5GamePlayPanel.SocketFlow.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.SocketFlow.cs)
 - [`Game5BetCoin.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5BetCoin.cs)
 
 Hvordan det åpnes:
@@ -237,7 +240,7 @@ Denne runden ryddet bare lavrisiko dødkode i Unity-klienten:
   - [`Game4Panel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4Panel.cs)
   - [`Game5Panel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5Panel.cs)
 
-Dette er en opprydding av kode som ikke hadde runtime-effekt, pluss en strukturrefaktor der manager-laget og Game1-Game4 room/socket-flyt ble flyttet til partial-klasser. Det er fortsatt ikke en full funksjonell refaktor av Game1-Game5.
+Dette er en opprydding av kode som ikke hadde runtime-effekt, pluss en strukturrefaktor der manager-laget og Game1-Game5 room/socket-flyt ble flyttet til partial-klasser. Det er fortsatt ikke en full funksjonell refaktor av Game1-Game5.
 
 ## Hva som fortsatt bør ryddes senere
 
@@ -251,17 +254,15 @@ Disse områdene ser fortsatt tunge eller historisk lastet ut:
   - store monolitter med både rendering, state, socket callbacks og UI-håndtering i samme klasse
 
 Den riktige neste oppryddingen er ikke mer “slett kommentarkode”, men videre modulær splitting:
-- Game5 gameplay-state og socketflow
-- videre intern splitting av Game1 og Game4 hvis de fortsatt blir for brede
+- videre intern splitting av Game1, Game4 og Game5 hvis de fortsatt blir for brede
 - ticket rendering
 - minigame integrations
 
 ## Anbefalt videre arbeid
 
-1. Splitt [`Game5GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.cs) i minst socket/gameflow og render/view-state.
-2. Gjør en ny bredde-revisjon av [`Game1GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%201/Game1GamePlayPanel.cs) og [`Game4GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.cs) for å se om de bør deles enda finere.
-3. Gjør en parity-sammenligning mot leverandørens Unity-kode for layout-sensitive spill.
-4. Etabler en fast regel:
+1. Gjør en ny bredde-revisjon av [`Game1GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%201/Game1GamePlayPanel.cs), [`Game4GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%204/Game4GamePlayPanel.cs) og [`Game5GamePlayPanel.cs`](/Users/tobiashaugen/Projects/Spillorama-system/Spillorama/Assets/_Project/_Scripts/Panels/Game/Game%205/Game5GamePlayPanel.cs) for å se om de bør deles enda finere.
+2. Gjør en parity-sammenligning mot leverandørens Unity-kode for layout-sensitive spill.
+3. Etabler en fast regel:
    - Unity scene/prefab-endringer verifiseres visuelt
    - socket-endringer verifiseres mot backend payloads
    - lobby-endringer verifiseres fra login til faktisk åpning av spill

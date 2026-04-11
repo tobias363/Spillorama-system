@@ -1,7 +1,7 @@
 ## Unity Dead-Code Audit
 
 Dato: 11. april 2026
-Status: niende sikre pass gjennomfort
+Status: tiende sikre pass gjennomfort
 
 ### Fjernet i denne runden
 
@@ -25,6 +25,7 @@ Disse filene var beviselig ubrukte eller kun backup/testartefakter:
   - `Game2GamePlayPanel` splittet så room/socket-flyt ligger i `Game2GamePlayPanel.SocketFlow.cs`
   - `Game3GamePlayPanel` splittet så room/socket-flyt ligger i `Game3GamePlayPanel.SocketFlow.cs`
   - `Game4GamePlayPanel` splittet så transport/minigame/room-flyt ligger i `Game4GamePlayPanel.SocketFlow.cs`
+  - `Game5GamePlayPanel` splittet så socket/minigame/room-flyt ligger i `Game5GamePlayPanel.SocketFlow.cs`
   - fjernet død `if (false)`-gren med gammel minigame-reconnectlogikk i `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 1/Game1GamePlayPanel.cs`
 
 - `unity-bingo-backend` controller:
@@ -67,7 +68,7 @@ Disse filene var beviselig ubrukte eller kun backup/testartefakter:
 - `OpenMultiSelectionPanel(...)` hadde ingen kode-, scene-, prefab- eller host-referanser.
 - `DisplayLoader(bool, string)` hadde ingen kode-, scene-, prefab- eller host-referanser.
 - Cleanupen i `EventManager.cs` endret ikke runtime-signaturer; den fjernet bare dokumentert foreldet kommentarkode og imports som ikke lenger brukes.
-- Partial-splittingen av `UIManager`, `EventManager`, `Game1GamePlayPanel`, `Game2GamePlayPanel`, `Game3GamePlayPanel` og `Game4GamePlayPanel` beholdt eksisterende public API og passerte Unity compile-check og Theme2 smoke-test.
+- Partial-splittingen av `UIManager`, `EventManager`, `Game1GamePlayPanel`, `Game2GamePlayPanel`, `Game3GamePlayPanel`, `Game4GamePlayPanel` og `Game5GamePlayPanel` beholdt eksisterende public API og passerte Unity compile-check og Theme2 smoke-test.
 - Backup-viewene i `unity-bingo-backend` hadde ingen runtime-referanser i controllere eller `res.render(...)`.
 - `addGroupHallTest.html` var bare nevnt i kommentert kode.
 - `GameController-old.js` hadde ingen referanser i runtime.
@@ -84,7 +85,9 @@ Disse kandidatene er fortsatt ikke bevist dode nok til automatisk sletting:
 - debug-/prototype-assets:
   - `Spillorama/Assets/_Project/_Scripts/Proto and Test/download.png`
 
-- store authored runtimefiler som trolig trenger refaktor, ikke sletting:
+- store authored runtimefiler som trolig trenger videre intern refaktor, ikke sletting:
+  - `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 1/Game1GamePlayPanel.cs`
+  - `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 4/Game4GamePlayPanel.cs`
   - `Spillorama/Assets/_Project/_Scripts/Panels/Game/Game 5/Game5GamePlayPanel.cs`
 
 ### Neste sikre pass
@@ -94,7 +97,7 @@ Neste oppryddingsrunde bor deles i to:
 1. Unity-klient:
    - verifisere om `Custom Socket URL.unity` og `Admin Bingo Hall Display.unity` fortsatt trengs for manuell drift/debug
    - rydde prototype-assets som fortsatt ligger igjen hvis de mister siste material-/scene-referanse
-   - splitte `Game5GamePlayPanel` og deretter ta ny vurdering av om Game1/Game4 trenger enda finere ansvarsdeling internt
+   - ta ny vurdering av om Game1/Game4/Game5 trenger enda finere ansvarsdeling internt
 
 2. `unity-bingo-backend`:
    - fjerne kommenterte testbaner i controllere
