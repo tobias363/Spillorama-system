@@ -329,6 +329,7 @@ public partial class Game1GamePlayPanel : MonoBehaviour
     #region PRIVATE_METHODS
     private void HandleLanguageChange()
     {
+        if (BingoGame1HistoryData == null) return;
         GenerateRowDetails(BingoGame1HistoryData.patternList);
         GeneratePatternList(BingoGame1HistoryData.patternList);
         GenerateTicketList(BingoGame1HistoryData.ticketList);
@@ -646,6 +647,12 @@ public partial class Game1GamePlayPanel : MonoBehaviour
      /// </summary>
     private void Reset()
     {
+        // Clear game history to prevent stale data bleeding into next game
+        BingoGame1HistoryData = null;
+        isTimerReceived = false;
+        onGameStart = false;
+        isGameRefreshed = false;
+
         LastWithdrawNumber = 0;
         LuckyNumber = 0;
         TotalRegisteredPlayerCount = 0;
@@ -653,6 +660,9 @@ public partial class Game1GamePlayPanel : MonoBehaviour
         Game_1_Timer.SetActive(false);
         Game_1_Timer_LBL.SetActive(false);
         bingoBallPanelManager.Reset();
+
+        foreach (Transform transform in transformTicketContainer)
+            Destroy(transform.gameObject);
         ticketList.Clear();
         ticketLargeList.Clear();
 
@@ -661,9 +671,9 @@ public partial class Game1GamePlayPanel : MonoBehaviour
 
         foreach (Transform transform in transformPatternContainer)
             Destroy(transform.gameObject);
+        Patterns.Clear();
 
-        foreach (Transform transform in transformTicketContainer)
-            Destroy(transform.gameObject);
+        StopAllCoroutines();
 
         UIManager.Instance.withdrawNumberHistoryPanel.Close();
         UIManager.Instance.withdrawNumberHistoryPanel.Reset();

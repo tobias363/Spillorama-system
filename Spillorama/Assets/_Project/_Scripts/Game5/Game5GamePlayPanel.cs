@@ -105,6 +105,7 @@ public partial class Game5GamePlayPanel : MonoBehaviour
         UIManager.Instance.isGame5 = false;
 
         DisableBroadcasts();
+        StopAllCoroutines();
     }
 
     #endregion

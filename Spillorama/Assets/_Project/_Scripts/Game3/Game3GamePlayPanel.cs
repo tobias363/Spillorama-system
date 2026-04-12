@@ -125,6 +125,7 @@ public partial class Game3GamePlayPanel : MonoBehaviour
 
     private void HandleLanguageChange()
     {
+        if (BingoGame3History == null) return;
         GenerateRowDetails(BingoGame3History.patternList);
         GeneratePatternList(BingoGame3History.patternList);
         GenerateWithdrawNumberList(BingoGame3History.withdrawNumberList);
@@ -168,11 +169,7 @@ public partial class Game3GamePlayPanel : MonoBehaviour
 
                     LeanTween.cancel(Panel_Game_Header);
                     LeanTween.move(Panel_Game_Header.GetComponent<RectTransform>(), new Vector2(Panel_Game_Header.GetComponent<RectTransform>().anchoredPosition.x - 80f, Panel_Game_Header.GetComponent<RectTransform>().anchoredPosition.y), 0.25f)
-                        .setOnComplete(() =>
-                        {
-                            // Your code to be executed when the move is complete
-                            Debug.Log("Closed chat panel!");
-                        });
+;
 
                     break;
                 case 1: // Opened chat panel
@@ -631,19 +628,25 @@ public partial class Game3GamePlayPanel : MonoBehaviour
     /// </summary>
     private void Reset()
     {
+        // Clear game history to prevent stale data bleeding into next game
+        BingoGame3History = null;
+        isTimerReceived = false;
+
         LastWithdrawNumber = 0;
         LuckyNumber = 0;
         TotalRegisteredPlayerCount = 0;
 
         bingoBallPanelManager.Reset();
+
+        foreach (Transform transform in transformTicketContainer)
+            Destroy(transform.gameObject);
         ticketList.Clear();
 
         foreach (Transform transform in transformPatternContainer)
             Destroy(transform.gameObject);
         Patterns.Clear();
 
-        foreach (Transform transform in transformTicketContainer)
-            Destroy(transform.gameObject);
+        StopAllCoroutines();
 
         UIManager.Instance.withdrawNumberHistoryPanel.Close();
         UIManager.Instance.withdrawNumberHistoryPanel.Reset();

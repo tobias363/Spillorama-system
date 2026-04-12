@@ -149,8 +149,8 @@
     return data;
   }
 
-  async function registerRequest(displayName, email, password, phone) {
-    const payload = { displayName, email, password };
+  async function registerRequest(displayName, surname, email, password, phone, birthDate) {
+    const payload = { displayName, surname, email, password, birthDate };
     if (phone) payload.phone = phone;
     const data = await apiFetch('/api/auth/register', {
       method: 'POST',
@@ -295,11 +295,27 @@
       // Step navigation
       if (next1) next1.addEventListener('click', function () {
         const fn = document.getElementById('register-firstname')?.value?.trim();
+        const ln = document.getElementById('register-lastname')?.value?.trim();
+        const dob = document.getElementById('register-dob')?.value;
         const em = document.getElementById('register-email')?.value?.trim();
         const pw = document.getElementById('register-password')?.value;
-        if (!fn) { alert('Fornavn er påkrevd'); return; }
-        if (!em) { alert('E-post er påkrevd'); return; }
-        if (!pw || pw.length < 6) { alert('Passord må være minst 6 tegn'); return; }
+        const errorEl = document.getElementById('register-error');
+        function showErr(msg) {
+          if (errorEl) { errorEl.textContent = msg; errorEl.hidden = false; }
+          else alert(msg);
+        }
+        if (errorEl) errorEl.hidden = true;
+        if (!fn) { showErr('Fornavn er påkrevd'); return; }
+        if (!ln) { showErr('Etternavn er påkrevd'); return; }
+        if (!dob) { showErr('Fødselsdato er påkrevd'); return; }
+        const today = new Date();
+        const birth = new Date(dob);
+        let age = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+        if (age < 18) { showErr('Du må være minst 18 år for å registrere deg.'); return; }
+        if (!em) { showErr('E-post er påkrevd'); return; }
+        if (!pw || pw.length < 8) { showErr('Passord må være minst 8 tegn'); return; }
         showStep(2);
       });
       if (next2) next2.addEventListener('click', function () { showStep(3); loadHallsForRegister(); });
@@ -376,7 +392,7 @@
         e.preventDefault();
         const firstName = document.getElementById('register-firstname')?.value?.trim() || '';
         const lastName = document.getElementById('register-lastname')?.value?.trim() || '';
-        const displayName = [firstName, lastName].filter(Boolean).join(' ');
+        const birthDate = document.getElementById('register-dob')?.value || '';
         const email = document.getElementById('register-email')?.value?.trim() || '';
         const phone = document.getElementById('register-phone')?.value?.trim() || '';
         const password = document.getElementById('register-password')?.value || '';
@@ -384,7 +400,7 @@
         const submitBtn = document.getElementById('register-submit');
         const errorEl = document.getElementById('register-error');
 
-        if (!displayName) {
+        if (!firstName) {
           if (errorEl) { errorEl.textContent = 'Fornavn er påkrevd'; errorEl.hidden = false; }
           return;
         }
@@ -396,7 +412,7 @@
         if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Oppretter konto...'; }
 
         try {
-          const data = await registerRequest(displayName, email, password, phone);
+          const data = await registerRequest(firstName, lastName, email, password, phone, birthDate);
           sessionStorage.setItem('spillvett.token', data.accessToken);
           notifySpillvett(data.accessToken);
           showStep(1); // Reset form

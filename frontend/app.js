@@ -98,6 +98,9 @@ const els = {
   loginStatus: document.getElementById("loginStatus"),
 
   registerDisplayName: document.getElementById("registerDisplayName"),
+  registerSurname: document.getElementById("registerSurname"),
+  registerDob: document.getElementById("registerDob"),
+  registerPhone: document.getElementById("registerPhone"),
   registerEmail: document.getElementById("registerEmail"),
   registerPassword: document.getElementById("registerPassword"),
   registerBtn: document.getElementById("registerBtn"),
@@ -2659,11 +2662,26 @@ async function bootFromToken() {
 
 async function onRegister() {
   const displayName = (els.registerDisplayName.value || "").trim();
+  const surname = (els.registerSurname.value || "").trim();
+  const dob = (els.registerDob.value || "").trim();
+  const phone = (els.registerPhone.value || "").trim();
   const email = (els.registerEmail.value || "").trim();
   const password = els.registerPassword.value || "";
 
-  if (!displayName || !email || !password) {
-    setStatusBox(els.registerStatus, "Fyll ut navn, e-post og passord.", "error");
+  if (!displayName || !surname || !dob || !email || !password) {
+    setStatusBox(els.registerStatus, "Fyll ut fornavn, etternavn, fødselsdato, e-post og passord.", "error");
+    return;
+  }
+
+  const today = new Date();
+  const birthDate = new Date(dob);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  if (age < 18) {
+    setStatusBox(els.registerStatus, "Du må være minst 18 år for å registrere deg.", "error");
     return;
   }
 
@@ -2671,7 +2689,7 @@ async function onRegister() {
     const session = await api("/api/auth/register", {
       method: "POST",
       auth: false,
-      body: { displayName, email, password }
+      body: { displayName, surname, birthDate: dob, phone: phone || undefined, email, password }
     });
 
     state.accessToken = session.accessToken;

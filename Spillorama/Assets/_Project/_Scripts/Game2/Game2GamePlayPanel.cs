@@ -129,6 +129,7 @@ public partial class Game2GamePlayPanel : MonoBehaviour
 
     private void HandleLanguageChange()
     {
+        if (bingoGame2History == null) return;
         GenerateTicketList(bingoGame2History.ticketList);
     }
 
@@ -543,19 +544,26 @@ public partial class Game2GamePlayPanel : MonoBehaviour
     /// </summary>
     private void Reset()
     {
+        // Clear game history to prevent stale data bleeding into next game
+        bingoGame2History = null;
+        isTimerReceived = false;
+        _isGameRunning = false;
+
         toggleAutoPlay.isOn = false;
         LuckyNumber = 0;
         New_Lucky_Number = 0;
         TotalRegisteredPlayerCount = 0;
         bingoBallPanelManager.Reset();
-        ticketList.Clear();
-        jackpotPanelList.Clear();
-
-        foreach (Transform transform in transformJackpotContainer)
-            Destroy(transform.gameObject);
 
         foreach (Transform transform in transformTicketContainer)
             Destroy(transform.gameObject);
+        ticketList.Clear();
+
+        jackpotPanelList.Clear();
+        foreach (Transform transform in transformJackpotContainer)
+            Destroy(transform.gameObject);
+
+        StopAllCoroutines();
 
         UIManager.Instance.withdrawNumberHistoryPanel.Close();
         UIManager.Instance.withdrawNumberHistoryPanel.Reset();

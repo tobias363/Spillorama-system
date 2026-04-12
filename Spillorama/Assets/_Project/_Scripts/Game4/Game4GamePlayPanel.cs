@@ -139,6 +139,15 @@ public partial class Game4GamePlayPanel : MonoBehaviour
     private void OnDisable()
     {
         SoundManager.Instance.StopNumberAnnouncement();
+
+        // Stop all running coroutines (especially GameTimer/WithdrawBingoBallAction)
+        if (GameTimer != null)
+        {
+            StopCoroutine(GameTimer);
+            GameTimer = null;
+        }
+        StopAllCoroutines();
+
         UIManager.Instance.isGame4 = false;
         UIManager.Instance.isGame4Theme1 = false;
         UIManager.Instance.isGame4Theme2 = false;
@@ -149,8 +158,13 @@ public partial class Game4GamePlayPanel : MonoBehaviour
         imgTryOtherGamesPanel.Close();
         UIManager.Instance.selectPurchaseTypePanel.Close();
 
-        // Clear the drawn ball list
+        // Clear game state to prevent stale data
         drewBallList.Clear();
+        game4PlayResponseActual = null;
+        _isGamePlayInProcess = false;
+        isGameRunningStatus = false;
+        isDrewBallSetProgress = false;
+
         Reset();
         btnDecreaseBet.Close();
         btnIncreaseBet.Close();

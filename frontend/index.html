@@ -59,16 +59,28 @@
         <article class="card auth-card">
           <h2>Opprett Bruker</h2>
           <label>
-            Navn
-            <input id="registerDisplayName" placeholder="Ditt navn" />
+            Fornavn
+            <input id="registerDisplayName" placeholder="Fornavn" autocomplete="given-name" />
+          </label>
+          <label>
+            Etternavn
+            <input id="registerSurname" placeholder="Etternavn" autocomplete="family-name" />
+          </label>
+          <label>
+            Fødselsdato
+            <input id="registerDob" type="date" autocomplete="bday" />
+          </label>
+          <label>
+            Telefon
+            <input id="registerPhone" type="tel" placeholder="+47 000 00 000" autocomplete="tel" />
           </label>
           <label>
             E-post
-            <input id="registerEmail" type="email" placeholder="navn@firma.no" />
+            <input id="registerEmail" type="email" placeholder="navn@eksempel.no" autocomplete="email" />
           </label>
           <label>
             Passord
-            <input id="registerPassword" type="password" placeholder="Minst 8 tegn" />
+            <input id="registerPassword" type="password" placeholder="Minst 8 tegn" autocomplete="new-password" />
           </label>
           <button id="registerBtn" class="btn-primary">Opprett bruker</button>
           <pre id="registerStatus" class="status-box">Ikke opprettet bruker ennå.</pre>

@@ -95,6 +95,10 @@ public partial class Game5GamePlayPanel
 
     private void Reset()
     {
+        // Clear game data to prevent stale state between games
+        _isGamePlayInProcess = false;
+        isMiniGameActivated = false;
+
         TotalWithdrawCount = 0;
         txtLastWithdrawNumber.text = "--";
         rouletteSpinnerElements.SetActive(UIManager.Instance.Game5ActiveElementAction());
