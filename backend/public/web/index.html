@@ -1,8 +1,3 @@
-<!--
-  LIVE BINGO UNITY HOST
-  Unity er fullskjerm-lobbyen kundene ser.
-  Spillvett, grenser og innstillinger ligger i profilpanelet (slide-in fra høyre).
--->
 <!DOCTYPE html>
 <html lang="en-us">
 
@@ -15,66 +10,473 @@
   <link rel="stylesheet" href="spillvett.css">
 
   <style>
-    /* ── Spillvett floating button ─────────────────────────────────── */
+    /* ── Base ──────────────────────────────────────────────────────────── */
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      background: #1a0a0a;
+      color: #f4f6fb;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    /* ── Login Overlay ─────────────────────────────────────────────────── */
+    .login-overlay {
+      position: fixed; inset: 0; z-index: 10000;
+      display: none;
+      align-items: center; justify-content: center;
+      background: linear-gradient(145deg, #1a0a0a 0%, #5c1010 45%, #2d0808 100%);
+      overflow-y: auto;
+    }
+    .login-overlay.is-visible { display: flex; }
+
+    .login-brand {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .login-brand-title {
+      font-size: 42px; font-weight: 900;
+      letter-spacing: 0.06em;
+      color: #fff;
+      text-shadow: 0 2px 20px rgba(220,40,40,0.5);
+      margin: 0;
+    }
+    .login-brand-sub {
+      font-size: 14px; font-weight: 500;
+      color: rgba(255,255,255,0.6);
+      margin: 6px 0 0;
+    }
+    .login-brand-balls {
+      display: flex; gap: 8px;
+      justify-content: center;
+      margin-top: 16px;
+    }
+    .login-brand-ball {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 900; color: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .login-card {
+      width: min(420px, 92vw);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      padding: 0;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 24px 48px rgba(0,0,0,0.4);
+    }
+
+    .login-tabs {
+      display: flex;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .login-tab {
+      flex: 1;
+      padding: 16px;
+      text-align: center;
+      font-size: 14px; font-weight: 700;
+      color: rgba(255,255,255,0.5);
+      cursor: pointer;
+      border: none; background: none;
+      transition: color 0.2s, border-color 0.2s;
+      border-bottom: 2px solid transparent;
+    }
+    .login-tab.is-active {
+      color: #fff;
+      border-bottom-color: #e53935;
+    }
+    .login-tab:hover { color: rgba(255,255,255,0.8); }
+
+    .login-card-body { padding: 28px; }
+
+    .login-field {
+      margin-bottom: 16px;
+    }
+    .login-field label {
+      display: block;
+      font-size: 12px; font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.55);
+      margin-bottom: 6px;
+    }
+    .login-field input,
+    .login-field select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 500;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .login-field input:focus,
+    .login-field select:focus {
+      border-color: rgba(229,57,53,0.6);
+    }
+    .login-field input::placeholder {
+      color: rgba(255,255,255,0.3);
+    }
+
+    .login-btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #c62828, #e53935);
+      color: #fff;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      margin-top: 8px;
+    }
+    .login-btn:hover { opacity: 0.9; }
+    .login-btn:active { transform: scale(0.98); }
+    .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .login-btn-secondary {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: background 0.2s;
+    }
+    .login-btn-secondary:hover { background: rgba(255,255,255,0.1); }
+    .login-btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .login-error, .register-error {
+      background: rgba(220,60,60,0.15);
+      border: 1px solid rgba(220,60,60,0.3);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #ff9191;
+      margin-bottom: 14px;
+    }
+
+    .register-step-nav {
+      display: flex; gap: 8px;
+      margin-top: 16px;
+    }
+    .register-step-nav button { flex: 1; }
+
+    .register-verify-status {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .register-verify-status.is-pending {
+      background: rgba(255,193,7,0.12);
+      border: 1px solid rgba(255,193,7,0.3);
+      color: #ffd54f;
+    }
+
+    .register-pep-group {
+      display: flex; gap: 16px;
+      margin-bottom: 12px;
+    }
+    .register-pep-group label {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 14px; font-weight: 600;
+      cursor: pointer; color: rgba(255,255,255,0.8);
+      text-transform: none; letter-spacing: 0;
+    }
+
+    .register-step-title {
+      font-size: 16px; font-weight: 800;
+      margin-bottom: 16px;
+      color: #fff;
+    }
+
+    .register-checkbox {
+      display: flex; align-items: flex-start; gap: 8px;
+      margin: 16px 0 8px;
+      font-size: 13px; color: rgba(255,255,255,0.7);
+    }
+    .register-checkbox input { margin-top: 2px; }
+    .register-checkbox a { color: #ef9a9a; }
+
+    /* ── Lobby Screen ──────────────────────────────────────────────────── */
+    .lobby-screen {
+      display: none;
+      flex-direction: column;
+      min-height: 100vh;
+      background: linear-gradient(160deg, #1a0a0a 0%, #3d0d0d 40%, #5c1010 70%, #2d0808 100%);
+    }
+    .lobby-screen.is-visible { display: flex; }
+
+    .lobby-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      background: rgba(0,0,0,0.35);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      flex-shrink: 0;
+    }
+    .lobby-topbar-left {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .lobby-topbar-logo {
+      font-size: 20px; font-weight: 900;
+      letter-spacing: 0.06em;
+      color: #fff;
+      text-shadow: 0 1px 8px rgba(220,40,40,0.4);
+    }
+    .lobby-topbar-hall {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px; font-weight: 600;
+    }
+
+    .lobby-topbar-right {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .lobby-balance-chip {
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.08);
+      font-size: 14px; font-weight: 800;
+      color: #fff;
+    }
+    .lobby-deposit-btn {
+      padding: 8px 14px;
+      border: none; border-radius: 10px;
+      background: linear-gradient(135deg, #2e7d32, #43a047);
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+    }
+    .lobby-deposit-btn:hover { opacity: 0.9; }
+
+    .lobby-user-chip {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 12px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      cursor: pointer;
+      font-size: 13px; font-weight: 600;
+      color: rgba(255,255,255,0.85);
+    }
+    .lobby-user-chip:hover { background: rgba(255,255,255,0.1); }
+    .lobby-user-avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #c62828, #e53935);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 900; color: #fff;
+    }
+
+    .lobby-main {
+      flex: 1;
+      padding: 24px 20px 0;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .lobby-heading {
+      font-size: 26px; font-weight: 900;
+      margin: 0 0 20px;
+      color: #fff;
+    }
+
+    .lobby-compliance-warning {
+      background: rgba(220,60,60,0.15);
+      border: 1px solid rgba(220,60,60,0.3);
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 14px; font-weight: 600;
+      color: #ff9191;
+      margin-bottom: 16px;
+    }
+
+    .lobby-game-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 14px;
+    }
+
+    .lobby-tile {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 18px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.05);
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, transform 0.1s;
+      font-family: inherit;
+      color: #fff;
+      text-align: left;
+      width: 100%;
+    }
+    .lobby-tile:hover:not(:disabled) {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(229,57,53,0.4);
+      transform: translateY(-1px);
+    }
+    .lobby-tile:disabled {
+      opacity: 0.4; cursor: not-allowed;
+    }
+    .lobby-tile-icon { flex-shrink: 0; }
+    .lobby-tile-info { flex: 1; min-width: 0; }
+    .lobby-tile-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 3px; }
+    .lobby-tile-title {
+      display: block;
+      font-size: 16px; font-weight: 800;
+    }
+    .lobby-tile-status {
+      display: inline-block;
+      font-size: 11px; font-weight: 700;
+      padding: 2px 7px; border-radius: 20px;
+      letter-spacing: 0.03em;
+    }
+    .lobby-tile-status--open    { background: rgba(76,175,80,0.25); color: #81c784; }
+    .lobby-tile-status--starting{ background: rgba(255,193,7,0.2);  color: #ffd54f; }
+    .lobby-tile-status--closed  { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.35); }
+    .lobby-tile-desc {
+      display: block;
+      font-size: 12px; font-weight: 500;
+      color: rgba(255,255,255,0.55);
+    }
+    .lobby-tile-arrow {
+      font-size: 24px; font-weight: 300;
+      color: rgba(255,255,255,0.3);
+    }
+
+    .lobby-loading, .lobby-error, .lobby-empty {
+      text-align: center;
+      padding: 40px 20px;
+      font-size: 15px; font-weight: 600;
+      color: rgba(255,255,255,0.6);
+    }
+    .lobby-error { color: #ff9191; }
+
+    .lobby-footer {
+      margin-top: auto;
+      padding: 20px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px 20px;
+      font-size: 12px;
+    }
+    .lobby-footer-link {
+      color: rgba(255,255,255,0.4);
+      text-decoration: none;
+      cursor: pointer;
+      border: none; background: none;
+      font-family: inherit; font-size: 12px;
+      padding: 4px 0;
+    }
+    .lobby-footer-link:hover { color: rgba(255,255,255,0.7); }
+
+    /* ── Unity Container override ──────────────────────────────────────── */
+    #unity-container { display: none; }
+    #unity-footer { display: none; }
+
+    /* ── Back-to-Lobby Bar ─────────────────────────────────────────────── */
+    .lobby-back-bar {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 200;
+      display: none;
+      align-items: center;
+      padding: 0 16px;
+      height: 44px;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .lobby-back-bar.is-visible { display: flex; }
+
+    .lobby-back-btn {
+      border: none;
+      border-radius: 8px;
+      padding: 6px 14px;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+    }
+    .lobby-back-btn:hover { background: rgba(255,255,255,0.18); }
+
+    /* ── Spillvett FAB ─────────────────────────────────────────────────── */
     .spillvett-fab {
       position: fixed;
-      bottom: 18px;
-      left: 18px;
+      bottom: 18px; left: 18px;
       z-index: 4000;
       appearance: none;
-      border: 1px solid rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255,255,255,0.18);
       border-radius: 999px;
       padding: 10px 18px;
-      background: rgba(9, 14, 34, 0.88);
+      background: rgba(9,14,34,0.88);
       backdrop-filter: blur(12px);
       color: #f4f6fb;
       font-family: Inter, system-ui, -apple-system, sans-serif;
-      font-size: 13px;
-      font-weight: 700;
+      font-size: 13px; font-weight: 700;
       cursor: pointer;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
       transition: background 120ms ease, transform 120ms ease;
     }
-
     .spillvett-fab:hover {
-      background: rgba(9, 14, 34, 0.96);
+      background: rgba(9,14,34,0.96);
       transform: translateY(-1px);
     }
+    .spillvett-fab[hidden] { display: none; }
 
-    .spillvett-fab[hidden] {
-      display: none;
-    }
-
-    /* ── Profile / Spillvett panel overlay ──────────────────────────── */
+    /* ── Profile / Spillvett Panel Overlay ──────────────────────────────── */
     .profile-overlay {
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       z-index: 5000;
       display: none;
     }
-
-    .profile-overlay.is-open {
-      display: flex;
-    }
+    .profile-overlay.is-open { display: flex; }
 
     .profile-backdrop {
       flex: 1;
-      background: rgba(0, 0, 0, 0.45);
+      background: rgba(0,0,0,0.45);
     }
-
     .profile-panel {
-      width: min(420px, 92vw);
+      width: min(440px, 94vw);
       height: 100%;
       overflow-y: auto;
       padding: 20px;
       box-sizing: border-box;
-      background: rgba(9, 14, 34, 0.97);
-      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(9,14,34,0.97);
+      border-left: 1px solid rgba(255,255,255,0.1);
       backdrop-filter: blur(20px);
       color: #f4f6fb;
       font-family: Inter, system-ui, -apple-system, sans-serif;
     }
-
     .profile-panel-header {
       display: flex;
       justify-content: space-between;
@@ -82,59 +484,165 @@
       gap: 12px;
       margin-bottom: 20px;
     }
-
     .profile-panel-title {
       margin: 4px 0 0;
-      font-size: 20px;
-      font-weight: 800;
+      font-size: 20px; font-weight: 800;
       letter-spacing: -0.02em;
     }
-
     .profile-panel-close {
       appearance: none;
-      border: 1px solid rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255,255,255,0.18);
       border-radius: 999px;
       padding: 8px 16px;
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(255,255,255,0.08);
       color: #f4f6fb;
-      font: inherit;
-      font-size: 13px;
-      font-weight: 700;
+      font: inherit; font-size: 13px; font-weight: 700;
       cursor: pointer;
       flex-shrink: 0;
     }
-
-    .profile-panel-close:hover {
-      background: rgba(255, 255, 255, 0.14);
-    }
+    .profile-panel-close:hover { background: rgba(255,255,255,0.14); }
 
     .profile-section {
       padding: 14px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
     }
-
     .profile-section-label {
       display: block;
       margin-bottom: 6px;
-      font-size: 11px;
-      font-weight: 700;
+      font-size: 11px; font-weight: 700;
       letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: rgba(195, 208, 255, 0.62);
+      color: rgba(195,208,255,0.62);
     }
-
     .profile-section-value {
       display: block;
-      font-size: 18px;
-      font-weight: 800;
+      font-size: 18px; font-weight: 800;
       color: #f8fbff;
     }
-
     .profile-section-note {
       margin-top: 6px;
+      font-size: 13px; line-height: 1.45;
+      color: rgba(228,234,255,0.7);
+    }
+
+    .profile-field {
+      margin-bottom: 12px;
+    }
+    .profile-field label {
+      display: block;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(195,208,255,0.5);
+      margin-bottom: 4px;
+    }
+    .profile-field input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px; font-weight: 500;
+      outline: none;
+    }
+    .profile-field input:focus { border-color: rgba(229,57,53,0.5); }
+
+    .profile-btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #c62828, #e53935);
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .profile-btn:hover { opacity: 0.9; }
+    .profile-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .profile-btn-outline {
+      padding: 10px 16px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .profile-btn-outline:hover { background: rgba(255,255,255,0.1); }
+
+    .profile-btn-danger {
+      padding: 10px 16px;
+      border: 1px solid rgba(220,60,60,0.3);
+      border-radius: 10px;
+      background: rgba(220,60,60,0.1);
+      color: #ff9191;
+      font-family: inherit;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .profile-btn-danger:hover { background: rgba(220,60,60,0.2); }
+
+    .profile-error {
+      background: rgba(220,60,60,0.15);
+      border: 1px solid rgba(220,60,60,0.3);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px; font-weight: 600;
+      color: #ff9191;
+      margin-top: 8px;
+    }
+    .profile-success {
+      background: rgba(46,125,50,0.15);
+      border: 1px solid rgba(46,125,50,0.3);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px; font-weight: 600;
+      color: #81c784;
+      margin-top: 8px;
+    }
+
+    .profile-tx-table {
+      width: 100%;
+      border-collapse: collapse;
       font-size: 13px;
-      line-height: 1.45;
-      color: rgba(228, 234, 255, 0.7);
+      margin-top: 10px;
+    }
+    .profile-tx-table th {
+      text-align: left;
+      padding: 6px 8px;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(195,208,255,0.5);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .profile-tx-table td {
+      padding: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.8);
+    }
+    .profile-tx-positive { color: #81c784 !important; }
+    .profile-tx-negative { color: #ef9a9a !important; }
+
+    .profile-deposit-form-wrap,
+    .profile-pause-form-wrap {
+      margin-top: 10px;
+      padding: 14px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .profile-actions {
+      display: flex; flex-direction: column; gap: 8px;
+      padding-top: 14px;
     }
 
     .host-hall-select {
@@ -142,17 +650,234 @@
       margin-top: 10px;
       padding: 12px 14px;
       border-radius: 14px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
       color: #f7faff;
       font-family: inherit;
-      font-size: 14px;
-      font-weight: 700;
+      font-size: 14px; font-weight: 700;
     }
-
     .host-hall-select:disabled {
       opacity: 0.55;
       cursor: not-allowed;
+    }
+
+    /* ── Info Panel Overlay ─────────────────────────────────────────────── */
+    .info-overlay {
+      position: fixed; inset: 0;
+      z-index: 6000;
+      display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+    }
+    .info-overlay.is-visible { display: flex; }
+
+    .info-panel {
+      width: min(600px, 94vw);
+      max-height: 85vh;
+      overflow-y: auto;
+      background: rgba(9,14,34,0.97);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 28px;
+      color: #f4f6fb;
+      font-family: Inter, system-ui, -apple-system, sans-serif;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.5);
+    }
+    .info-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .info-panel-title {
+      font-size: 20px; font-weight: 800;
+      margin: 0;
+    }
+    .info-panel-close {
+      appearance: none;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 999px;
+      padding: 6px 14px;
+      background: rgba(255,255,255,0.08);
+      color: #f4f6fb;
+      font: inherit; font-size: 13px; font-weight: 700;
+      cursor: pointer;
+    }
+    .info-panel-close:hover { background: rgba(255,255,255,0.14); }
+
+    .info-panel-body {
+      font-size: 14px; line-height: 1.65;
+      color: rgba(228,234,255,0.85);
+    }
+    .info-panel-body h3 {
+      font-size: 16px; font-weight: 800;
+      margin: 20px 0 8px;
+      color: #fff;
+    }
+    .info-panel-body h3:first-child { margin-top: 0; }
+    .info-panel-body p { margin: 0 0 12px; }
+    .info-panel-body ul {
+      margin: 0 0 12px 20px;
+      padding: 0;
+    }
+    .info-panel-body li { margin-bottom: 6px; }
+    .info-panel-body a { color: #ef9a9a; }
+
+    /* ── Candy Overlay ──────────────────────────────────────────────────── */
+    .candy-overlay {
+      position: fixed; inset: 0;
+      z-index: 8000;
+      display: none;
+      flex-direction: column;
+      background: #000;
+    }
+    .candy-overlay.is-open { display: flex; }
+
+    .candy-overlay-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: rgba(0,0,0,0.9);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .candy-overlay-title {
+      font-size: 16px; font-weight: 800;
+      color: #fff;
+    }
+    .candy-overlay-close {
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      padding: 6px 14px;
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+    }
+    .candy-overlay-close:hover { background: rgba(255,255,255,0.15); }
+
+    .candy-overlay-loading {
+      display: flex;
+      align-items: center; justify-content: center;
+      flex: 1;
+      font-size: 16px; font-weight: 600;
+      color: rgba(255,255,255,0.6);
+    }
+    .candy-overlay-error {
+      padding: 20px;
+      text-align: center;
+      color: #ff9191;
+      font-size: 14px; font-weight: 600;
+    }
+    .candy-iframe {
+      flex: 1;
+      border: none;
+      width: 100%; height: 100%;
+    }
+
+    /* ── Notification bell ──────────────────────────────────────────────── */
+    .lobby-topbar-icon-btn {
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.8);
+      cursor: pointer;
+      padding: 0;
+    }
+    .lobby-topbar-icon-btn:hover { background: rgba(255,255,255,0.12); }
+    .notification-badge {
+      position: absolute; top: -4px; right: -4px;
+      min-width: 16px; height: 16px;
+      border-radius: 999px;
+      background: #e53935;
+      color: #fff;
+      font-size: 10px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 4px;
+    }
+
+    /* ── Schedule list ─────────────────────────────────────────────────── */
+    .schedule-list { display: flex; flex-direction: column; gap: 8px; }
+    .schedule-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .schedule-item-left { display: flex; align-items: center; gap: 10px; }
+    .schedule-item-right { text-align: right; font-size: 12px; color: rgba(255,255,255,0.5); }
+    .schedule-status {
+      font-size: 11px; font-weight: 700;
+      padding: 3px 8px; border-radius: 6px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .schedule-status.is-live { background: rgba(46,125,50,0.2); color: #81c784; }
+    .schedule-status.is-open { background: rgba(25,118,210,0.2); color: #90caf9; }
+    .schedule-status.is-ended { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.4); }
+    .schedule-game-name { font-size: 14px; font-weight: 700; }
+    .schedule-room { display: block; font-weight: 600; color: rgba(255,255,255,0.7); }
+
+    /* ── Notification list ──────────────────────────────────────────────── */
+    .notification-list { display: flex; flex-direction: column; gap: 6px; }
+    .notification-item {
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .notification-item.is-unread {
+      background: rgba(229,57,53,0.06);
+      border-color: rgba(229,57,53,0.15);
+    }
+    .notification-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .notification-message { font-size: 13px; color: rgba(255,255,255,0.65); }
+    .notification-time { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 6px; }
+
+    /* ── Leaderboard table ─────────────────────────────────────────────── */
+    .leaderboard-table {
+      width: 100%; border-collapse: collapse; font-size: 14px;
+    }
+    .leaderboard-table th {
+      text-align: left; padding: 8px 10px;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: rgba(195,208,255,0.5);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .leaderboard-table td {
+      padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.8);
+    }
+    .leaderboard-table tr.is-top td { color: #ffd54f; font-weight: 700; }
+    .leaderboard-rank { font-weight: 800; width: 40px; }
+    .leaderboard-points { text-align: right; font-weight: 700; }
+
+    /* ── Panel utilities ───────────────────────────────────────────────── */
+    .panel-loading, .panel-empty, .panel-error {
+      text-align: center; padding: 30px 20px;
+      font-size: 14px; font-weight: 600;
+      color: rgba(255,255,255,0.5);
+    }
+    .panel-error { color: #ff9191; }
+
+    /* ── Responsive ────────────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .lobby-topbar {
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .lobby-topbar-left,
+      .lobby-topbar-right { width: 100%; }
+      .lobby-game-grid {
+        grid-template-columns: 1fr;
+      }
+      .login-brand-title { font-size: 32px; }
     }
   </style>
 
@@ -161,9 +886,193 @@
 </head>
 
 <body>
-  <!-- Unity fullscreen — nøyaktig som original template -->
-  <div id="unity-container" class="unity-desktop">
-    <canvas id="unity-canvas" width=960 height=600></canvas>
+  <!-- ═══ 1. LOGIN OVERLAY ═══════════════════════════════════════════════ -->
+  <div id="login-overlay" class="login-overlay">
+    <div>
+      <div class="login-brand">
+        <h1 class="login-brand-title">SPILLORAMA</h1>
+        <p class="login-brand-sub">Norsk databingo</p>
+        <div class="login-brand-balls">
+          <span class="login-brand-ball" style="background:#c62828">B</span>
+          <span class="login-brand-ball" style="background:#1565c0">I</span>
+          <span class="login-brand-ball" style="background:#2e7d32">N</span>
+          <span class="login-brand-ball" style="background:#6a1b9a">G</span>
+          <span class="login-brand-ball" style="background:#e65100">O</span>
+        </div>
+      </div>
+
+      <div class="login-card">
+        <div class="login-tabs">
+          <button class="login-tab is-active" id="tab-login" type="button">Logg inn</button>
+          <button class="login-tab" id="tab-register" type="button">Registrer</button>
+        </div>
+
+        <div class="login-card-body">
+          <!-- Login form -->
+          <form id="login-form">
+            <div id="login-error" class="login-error" hidden></div>
+            <div class="login-field">
+              <label for="login-email">E-post</label>
+              <input type="email" id="login-email" placeholder="din@epost.no" required autocomplete="email">
+            </div>
+            <div class="login-field">
+              <label for="login-password">Passord</label>
+              <input type="password" id="login-password" placeholder="Ditt passord" required autocomplete="current-password">
+            </div>
+            <button type="submit" id="login-submit" class="login-btn">Logg inn</button>
+            <div style="text-align:center;margin-top:12px">
+              <a href="#" id="forgot-password-link" style="color:rgba(255,255,255,0.5);font-size:13px;text-decoration:none">Glemt passord?</a>
+            </div>
+          </form>
+
+          <!-- Forgot password form -->
+          <form id="forgot-password-form" hidden>
+            <div class="register-step-title">Tilbakestill passord</div>
+            <div id="forgot-error" class="login-error" hidden></div>
+            <div id="forgot-success" class="profile-success" hidden></div>
+            <div class="login-field">
+              <label for="forgot-email">E-post</label>
+              <input type="email" id="forgot-email" placeholder="din@epost.no" required>
+            </div>
+            <button type="submit" id="forgot-submit" class="login-btn">Send tilbakestillingslenke</button>
+            <div style="text-align:center;margin-top:12px">
+              <a href="#" id="forgot-password-back" style="color:rgba(255,255,255,0.5);font-size:13px;text-decoration:none">Tilbake til innlogging</a>
+            </div>
+          </form>
+
+          <!-- Register multi-step form -->
+          <form id="register-form" hidden>
+            <div id="register-error" class="register-error" hidden></div>
+
+            <!-- Step 1: Personal info -->
+            <div id="register-step-1">
+              <div class="register-step-title">Steg 1 av 3 &mdash; Personopplysninger</div>
+              <div class="login-field">
+                <label for="register-firstname">Fornavn *</label>
+                <input type="text" id="register-firstname" placeholder="Ola" required>
+              </div>
+              <div class="login-field">
+                <label for="register-lastname">Etternavn</label>
+                <input type="text" id="register-lastname" placeholder="Nordmann">
+              </div>
+              <div class="login-field">
+                <label for="register-dob">Fodselsdato</label>
+                <input type="date" id="register-dob">
+              </div>
+              <div class="login-field">
+                <label for="register-email">E-post *</label>
+                <input type="email" id="register-email" placeholder="din@epost.no" required>
+              </div>
+              <div class="login-field">
+                <label for="register-phone">Telefon</label>
+                <input type="tel" id="register-phone" placeholder="+47 000 00 000">
+              </div>
+              <div class="login-field">
+                <label for="register-password">Passord *</label>
+                <input type="password" id="register-password" placeholder="Minst 6 tegn" required minlength="6">
+              </div>
+              <button type="button" id="register-next-1" class="login-btn">Neste</button>
+            </div>
+
+            <!-- Step 2: Verification -->
+            <div id="register-step-2" hidden>
+              <div class="register-step-title">Steg 2 av 3 &mdash; Verifisering</div>
+              <p class="profile-section-note" style="margin-bottom:14px">Norsk lov krever identitetsverifisering for pengespill.</p>
+              <button type="button" id="register-bankid-btn" class="login-btn-secondary">Verifiser med BankID</button>
+              <div id="register-bankid-status" class="register-verify-status" hidden></div>
+
+              <div style="margin-top:20px">
+                <div class="login-field">
+                  <label>Er du en politisk eksponert person (PEP)?</label>
+                  <div class="register-pep-group">
+                    <label><input type="radio" name="register-pep" value="no" checked> Nei</label>
+                    <label><input type="radio" name="register-pep" value="yes"> Ja</label>
+                  </div>
+                </div>
+                <div id="register-pep-details" hidden>
+                  <div class="login-field">
+                    <label for="register-pep-role">PEP-rolle / beskrivelse</label>
+                    <input type="text" id="register-pep-role" placeholder="Beskriv din rolle">
+                  </div>
+                </div>
+              </div>
+
+              <div class="register-step-nav">
+                <button type="button" id="register-back-2" class="login-btn-secondary">Tilbake</button>
+                <button type="button" id="register-next-2" class="login-btn">Neste</button>
+              </div>
+            </div>
+
+            <!-- Step 3: Hall & terms -->
+            <div id="register-step-3" hidden>
+              <div class="register-step-title">Steg 3 av 3 &mdash; Velg hall</div>
+              <div class="login-field">
+                <label for="register-hall">Bingohall</label>
+                <select id="register-hall" class="login-field select">
+                  <option>Laster haller...</option>
+                </select>
+              </div>
+              <div class="register-checkbox">
+                <input type="checkbox" id="register-terms">
+                <label for="register-terms">Jeg godtar <a href="#" onclick="showInfoPanel('terms');return false">vilkarene</a> og bekrefter at jeg er over 18 ar.</label>
+              </div>
+              <div class="register-step-nav">
+                <button type="button" id="register-back-3" class="login-btn-secondary">Tilbake</button>
+                <button type="submit" id="register-submit" class="login-btn">Opprett konto</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 2. LOBBY SCREEN ════════════════════════════════════════════════ -->
+  <div id="lobby-screen" class="lobby-screen">
+    <div class="lobby-topbar">
+      <div class="lobby-topbar-left">
+        <span class="lobby-topbar-logo">SPILLORAMA</span>
+        <select id="lobby-hall-select" class="lobby-topbar-hall">
+          <option>Laster haller...</option>
+        </select>
+      </div>
+      <div class="lobby-topbar-right">
+        <span class="lobby-balance-chip" id="lobby-balance">0 kr</span>
+        <button class="lobby-deposit-btn" id="lobby-deposit-btn" type="button">Sett inn</button>
+        <button class="lobby-topbar-icon-btn" id="lobby-notification-btn" type="button" title="Varsler">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notification-badge" id="notification-badge" hidden></span>
+        </button>
+        <button class="lobby-user-chip" id="lobby-profile-btn" type="button">
+          <span class="lobby-user-avatar" id="lobby-user-avatar">?</span>
+          <span id="lobby-user-name">Bruker</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="lobby-main">
+      <h2 class="lobby-heading">Velg spill</h2>
+      <div id="lobby-compliance-warning" class="lobby-compliance-warning" hidden></div>
+      <div id="lobby-game-grid" class="lobby-game-grid">
+        <div class="lobby-loading">Laster spill...</div>
+      </div>
+    </div>
+
+    <footer class="lobby-footer">
+      <button class="lobby-footer-link" type="button" onclick="SpilloramaPanels.openSchedule()">Spillplan</button>
+      <button class="lobby-footer-link" type="button" onclick="SpilloramaPanels.openLeaderboard()">Toppliste</button>
+      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('faq')">FAQ</button>
+      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('terms')">Vilkar</button>
+      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('responsible')">Ansvarlig spill</button>
+      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('support')">Kundeservice</button>
+      <button class="lobby-footer-link" type="button" onclick="showInfoPanel('about')">Om Spillorama</button>
+      <button class="lobby-footer-link" id="shell-logout-btn" type="button">Logg ut</button>
+    </footer>
+  </div>
+
+  <!-- ═══ 3. UNITY CONTAINER (hidden, loads on demand) ═══════════════════ -->
+  <div id="unity-container" class="unity-desktop" style="display:none">
+    <canvas id="unity-canvas" width=960 height=600 tabindex="-1"></canvas>
     <div id="unity-loading-bar">
       <div id="unity-logo"></div>
       <div id="unity-progress-bar-empty">
@@ -178,41 +1087,134 @@
     </div>
   </div>
 
-  <!-- Spillvett-knapp (vises etter innlogging) -->
+  <!-- ═══ 4. BACK-TO-LOBBY BAR ══════════════════════════════════════════ -->
+  <div id="lobby-back-bar" class="lobby-back-bar">
+    <button class="lobby-back-btn" type="button" onclick="window.returnToShellLobby()">&#8592; Tilbake til lobby</button>
+  </div>
+
+  <!-- ═══ 5. SPILLVETT FAB ══════════════════════════════════════════════ -->
   <button id="spillvett-fab" class="spillvett-fab" type="button" hidden>Spillvett</button>
 
-  <!-- Profil / Spillvett panel (slide-in fra høyre) -->
+  <!-- ═══ 6. PROFILE / SPILLVETT PANEL ══════════════════════════════════ -->
   <div id="profile-overlay" class="profile-overlay">
     <div class="profile-backdrop" id="profile-backdrop"></div>
     <aside class="profile-panel">
       <div class="profile-panel-header">
         <div>
           <p class="spillvett-kicker">Min profil</p>
-          <h2 class="profile-panel-title">Spillvett og innstillinger</h2>
+          <h2 class="profile-panel-title">Profil og Spillvett</h2>
         </div>
         <button class="profile-panel-close" id="profile-close" type="button">Lukk</button>
       </div>
 
+      <!-- Profile info -->
+      <div class="profile-section" id="profile-info-display">
+        <span class="profile-section-label">Profil</span>
+        <div style="margin-bottom:6px">
+          <strong id="profile-display-name">--</strong>
+        </div>
+        <div class="profile-section-note" id="profile-display-email">--</div>
+        <div class="profile-section-note" id="profile-display-phone">--</div>
+        <button class="profile-btn-outline" id="profile-edit-btn" type="button" style="margin-top:10px">Rediger profil</button>
+      </div>
+
+      <!-- Profile edit form -->
+      <form class="profile-section" id="profile-edit-form" hidden>
+        <span class="profile-section-label">Rediger profil</span>
+        <div class="profile-field">
+          <label for="profile-edit-name">Navn</label>
+          <input type="text" id="profile-edit-name">
+        </div>
+        <div class="profile-field">
+          <label for="profile-edit-email">E-post</label>
+          <input type="email" id="profile-edit-email">
+        </div>
+        <div class="profile-field">
+          <label for="profile-edit-phone">Telefon</label>
+          <input type="tel" id="profile-edit-phone">
+        </div>
+        <div id="profile-edit-error" class="profile-error" hidden></div>
+        <div style="display:flex;gap:8px">
+          <button type="submit" id="profile-save-btn" class="profile-btn">Lagre</button>
+          <button type="button" id="profile-cancel-btn" class="profile-btn-outline">Avbryt</button>
+        </div>
+      </form>
+
+      <!-- Active hall -->
       <div class="profile-section">
         <span class="profile-section-label">Aktiv hall</span>
-        <strong class="profile-section-value" id="host-active-hall">Venter på hall</strong>
+        <strong class="profile-section-value" id="host-active-hall">Venter pa hall</strong>
         <div class="profile-section-note" id="host-session-state"></div>
         <select id="host-hall-select" class="host-hall-select" disabled>
-          <option>Venter på haller</option>
+          <option>Venter pa haller</option>
         </select>
         <div class="profile-section-note" id="host-hall-note"></div>
       </div>
 
+      <!-- Wallet -->
+      <div class="profile-section">
+        <span class="profile-section-label">Lommebok</span>
+        <strong class="profile-section-value" id="profile-wallet-balance">0 kr</strong>
+        <button class="profile-btn-outline" id="profile-deposit-btn" type="button">Sett inn penger</button>
+        <div id="profile-deposit-form-wrap" class="profile-deposit-form-wrap" hidden>
+          <form id="profile-deposit-form">
+            <div class="profile-field">
+              <label for="profile-deposit-amount">Belop (NOK)</label>
+              <input type="number" id="profile-deposit-amount" min="10" step="10" placeholder="100">
+            </div>
+            <div id="profile-deposit-error" class="profile-error" hidden></div>
+            <button type="submit" class="profile-btn">Sett inn</button>
+          </form>
+        </div>
+        <div id="profile-transactions" style="margin-top:10px"></div>
+
+        <!-- Withdraw -->
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">
+          <button class="profile-btn-outline" id="profile-withdraw-btn" type="button">Ta ut penger</button>
+          <div id="profile-withdraw-success" class="profile-success" hidden></div>
+          <div id="profile-withdraw-form-wrap" class="profile-deposit-form-wrap" hidden>
+            <form id="profile-withdraw-form">
+              <div class="profile-field">
+                <label for="profile-withdraw-amount">Belop (NOK)</label>
+                <input type="number" id="profile-withdraw-amount" min="10" step="10" placeholder="100">
+              </div>
+              <div id="profile-withdraw-error" class="profile-error" hidden></div>
+              <button type="submit" class="profile-btn">Ta ut</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loss Limits -->
+      <div class="profile-section">
+        <span class="profile-section-label">Tapsgrenser</span>
+        <p class="profile-section-note" style="margin-bottom:10px">Sett personlige grenser for maks tap per dag og maned.</p>
+        <form id="loss-limits-form">
+          <div class="profile-field">
+            <label for="loss-limit-daily">Dagsgrense (NOK)</label>
+            <input type="number" id="loss-limit-daily" min="0" step="50" placeholder="F.eks. 500">
+          </div>
+          <div class="profile-field">
+            <label for="loss-limit-monthly">Manedsgrense (NOK)</label>
+            <input type="number" id="loss-limit-monthly" min="0" step="100" placeholder="F.eks. 5000">
+          </div>
+          <div id="loss-limits-error" class="profile-error" hidden></div>
+          <div id="loss-limits-success" class="profile-success" hidden></div>
+          <button type="submit" class="profile-btn-outline">Oppdater grenser</button>
+        </form>
+      </div>
+
+      <!-- Spillvett -->
       <section id="spillvett-shell" class="spillvett-shell">
         <div class="spillvett-card">
           <div class="spillvett-header">
             <div>
               <p class="spillvett-kicker">Spillvett</p>
               <h2 class="spillvett-title">Grenser og spillregnskap</h2>
-              <p class="spillvett-subtitle" id="spillvett-hall-name">Venter på valgt hall</p>
+              <p class="spillvett-subtitle" id="spillvett-hall-name">Venter pa valgt hall</p>
             </div>
             <div class="spillvett-actions">
-              <button class="spillvett-button is-secondary" type="button" id="spillvett-toggle">Åpne spillregnskap</button>
+              <button class="spillvett-button is-secondary" type="button" id="spillvett-toggle">Apne spillregnskap</button>
             </div>
           </div>
 
@@ -231,12 +1233,12 @@
                 <span id="spillvett-daily-used">Brukt: 0 kr</span>
                 <span id="spillvett-daily-remaining">Grense: 0 kr</span>
               </div>
-              <div class="spillvett-note" id="spillvett-daily-reset">Venter på data</div>
+              <div class="spillvett-note" id="spillvett-daily-reset">Venter pa data</div>
             </article>
 
             <article class="spillvett-limit">
               <div class="spillvett-limit-head">
-                <span class="spillvett-limit-label" id="spillvett-monthly-label">Månedsgrense</span>
+                <span class="spillvett-limit-label" id="spillvett-monthly-label">Manedsgrense</span>
                 <span class="spillvett-limit-value" id="spillvett-monthly-value">0 kr igjen</span>
               </div>
               <div class="spillvett-meter">
@@ -246,12 +1248,12 @@
                 <span id="spillvett-monthly-used">Brukt: 0 kr</span>
                 <span id="spillvett-monthly-remaining">Grense: 0 kr</span>
               </div>
-              <div class="spillvett-note" id="spillvett-monthly-reset">Venter på data</div>
+              <div class="spillvett-note" id="spillvett-monthly-reset">Venter pa data</div>
             </article>
           </div>
 
           <p class="spillvett-note" id="spillvett-note">
-            Logg inn og velg hall for å se spillegrenser.
+            Logg inn og velg hall for a se spillegrenser.
           </p>
           <div class="spillvett-error" id="spillvett-inline-error" hidden></div>
         </div>
@@ -265,12 +1267,143 @@
             <button class="spillvett-period" type="button" data-period="last365">365 dager</button>
           </div>
           <div id="spillvett-report-content"></div>
+          <div class="spillvett-export" style="display:flex;gap:10px;margin-top:16px">
+            <button id="spillvett-download-report" class="profile-btn-outline" type="button">Last ned PDF</button>
+            <button id="spillvett-email-report" class="profile-btn-outline" type="button">Send på e-post</button>
+          </div>
         </div>
       </section>
+
+      <!-- Settings -->
+      <div class="profile-section">
+        <span class="profile-section-label">Innstillinger</span>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
+          <label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;color:rgba(255,255,255,0.8);cursor:pointer">
+            <input type="checkbox" id="settings-sound" checked> Spilllyd
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;color:rgba(255,255,255,0.8);cursor:pointer">
+            <input type="checkbox" id="settings-voice" checked> Taleopplesing
+          </label>
+          <div class="profile-field" style="margin-bottom:0">
+            <label for="settings-language">Sprak</label>
+            <select id="settings-language" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-family:inherit;font-size:14px">
+              <option value="nor">Norsk</option>
+              <option value="eng">English</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Password change -->
+      <div class="profile-section">
+        <span class="profile-section-label">Bytt passord</span>
+        <form id="profile-password-form">
+          <div class="profile-field">
+            <label for="profile-current-pw">Navaerende passord</label>
+            <input type="password" id="profile-current-pw" autocomplete="current-password">
+          </div>
+          <div class="profile-field">
+            <label for="profile-new-pw">Nytt passord</label>
+            <input type="password" id="profile-new-pw" autocomplete="new-password">
+          </div>
+          <div id="profile-pw-error" class="profile-error" hidden></div>
+          <div id="profile-pw-success" class="profile-success" hidden></div>
+          <button type="submit" id="profile-pw-submit" class="profile-btn-outline">Bytt passord</button>
+        </form>
+      </div>
+
+      <!-- KYC -->
+      <div class="profile-section" id="profile-kyc-section">
+        <span class="profile-section-label">Identitetsverifisering</span>
+        <p class="profile-section-note" style="margin-bottom:10px">Norsk lov krever verifisering for pengespill.</p>
+        <strong class="profile-section-value" id="profile-kyc-status">Laster...</strong>
+        <div id="profile-kyc-form-wrap" hidden>
+          <form id="profile-kyc-form" style="margin-top:12px">
+            <div class="profile-field">
+              <label for="profile-kyc-dob">Fødselsdato</label>
+              <input type="date" id="profile-kyc-dob" required>
+            </div>
+            <div class="profile-field">
+              <label for="profile-kyc-national-id">Personnummer (valgfritt)</label>
+              <input type="text" id="profile-kyc-national-id" placeholder="DDMMYYXXXXX">
+            </div>
+            <div id="profile-kyc-error" class="profile-error" hidden></div>
+            <div id="profile-kyc-success" class="profile-success" hidden></div>
+            <button type="submit" class="profile-btn">Verifiser</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Account actions -->
+      <div class="profile-section">
+        <span class="profile-section-label">Kontohandlinger</span>
+        <div class="profile-actions">
+          <button class="profile-btn-outline" id="profile-pause-btn" type="button">Frivillig spillepause</button>
+          <div id="profile-pause-form-wrap" class="profile-pause-form-wrap" hidden>
+            <form id="profile-pause-form">
+              <div class="profile-field">
+                <label for="profile-pause-duration">Pausevarighet (minutter)</label>
+                <input type="number" id="profile-pause-duration" min="1" value="30">
+              </div>
+              <div id="profile-pause-error" class="profile-error" hidden></div>
+              <div style="display:flex;gap:8px">
+                <button type="submit" class="profile-btn">Aktiver pause</button>
+                <button type="button" id="profile-pause-cancel" class="profile-btn-outline">Avbryt</button>
+              </div>
+            </form>
+          </div>
+          <button class="profile-btn-danger" id="profile-self-exclude-btn" type="button">Selvutestengelse (12 mnd)</button>
+          <button class="profile-btn-danger" id="profile-delete-btn" type="button">Slett konto</button>
+        </div>
+      </div>
     </aside>
   </div>
 
-  <!-- Candy iframe-overlay -->
+  <!-- ═══ 7. INFO PANEL OVERLAY ═════════════════════════════════════════ -->
+  <div id="info-overlay" class="info-overlay">
+    <div class="info-panel">
+      <div class="info-panel-header">
+        <h2 class="info-panel-title" id="info-panel-title">Informasjon</h2>
+        <button class="info-panel-close" id="info-panel-close" type="button">Lukk</button>
+      </div>
+      <div class="info-panel-body" id="info-panel-body"></div>
+    </div>
+  </div>
+
+  <!-- ═══ 8. GAME SCHEDULE OVERLAY ═══════════════════════════════════════ -->
+  <div id="schedule-overlay" class="info-overlay">
+    <div class="info-panel">
+      <div class="info-panel-header">
+        <h2 class="info-panel-title">Spillplan</h2>
+        <button class="info-panel-close" id="schedule-panel-close" type="button">Lukk</button>
+      </div>
+      <div id="schedule-content" class="info-panel-body"></div>
+    </div>
+  </div>
+
+  <!-- ═══ 9. NOTIFICATIONS OVERLAY ═══════════════════════════════════════ -->
+  <div id="notifications-overlay" class="info-overlay">
+    <div class="info-panel" style="width:min(420px,94vw)">
+      <div class="info-panel-header">
+        <h2 class="info-panel-title">Varsler</h2>
+        <button class="info-panel-close" id="notifications-panel-close" type="button">Lukk</button>
+      </div>
+      <div id="notifications-content" class="info-panel-body"></div>
+    </div>
+  </div>
+
+  <!-- ═══ 10. LEADERBOARD OVERLAY ════════════════════════════════════════ -->
+  <div id="leaderboard-overlay" class="info-overlay">
+    <div class="info-panel">
+      <div class="info-panel-header">
+        <h2 class="info-panel-title">Toppliste</h2>
+        <button class="info-panel-close" id="leaderboard-panel-close" type="button">Lukk</button>
+      </div>
+      <div id="leaderboard-content" class="info-panel-body"></div>
+    </div>
+  </div>
+
+  <!-- ═══ 11. CANDY OVERLAY ═════════════════════════════════════════════ -->
   <div id="candy-overlay" class="candy-overlay">
     <div class="candy-overlay-bar">
       <span class="candy-overlay-title">Candy</span>
@@ -289,8 +1422,18 @@
     ></iframe>
   </div>
 
+  <!-- ═══ SCRIPTS ═══════════════════════════════════════════════════════ -->
   <script src="spillvett.js"></script>
+
   <script>
+    /* ── Unity on-demand loader & bridge ─────────────────────────────── */
+    var unityInstanceRef = null;
+    var _spilloramaUnityLoaded = false;
+    window._spilloramaUnityLoaded = false;
+    var _unityReady = false;
+    var _pendingNavigate = null;
+    var _firebaseWebToken = null;
+
     var container = document.querySelector("#unity-container");
     var canvas = document.querySelector("#unity-canvas");
     var loadingBar = document.querySelector("#unity-loading-bar");
@@ -317,11 +1460,10 @@
     }
 
     var buildUrl = "Build";
-    var loaderUrl = buildUrl + "/Spillorama.loader.js";
-    var config = {
-      dataUrl: buildUrl + "/Spillorama.data.unityweb",
-      frameworkUrl: buildUrl + "/Spillorama.framework.js.unityweb",
-      codeUrl: buildUrl + "/Spillorama.wasm.unityweb",
+    var unityConfig = {
+      dataUrl: buildUrl + "/web.data.unityweb",
+      frameworkUrl: buildUrl + "/web.framework.js.unityweb",
+      codeUrl: buildUrl + "/web.wasm.unityweb",
       streamingAssetsUrl: "StreamingAssets",
       companyName: "AIS Technolabs",
       productName: "SPILLORAMA",
@@ -329,131 +1471,117 @@
       showBanner: unityShowBanner,
     };
 
-    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-      var meta = document.createElement('meta');
-      meta.name = 'viewport';
-      meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-      document.getElementsByTagName('head')[0].appendChild(meta);
-      container.className = "unity-mobile";
-      canvas.className = "unity-mobile";
-    } else {
-      canvas.style.width = "100%";
-      canvas.style.height = "100%";
-    }
+    /* Called by lobby.js when a game tile is clicked */
+    window._initUnity = function _initUnity() {
+      if (_spilloramaUnityLoaded || document.getElementById('unity-loader-script')) return;
 
-    canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
-    loadingBar.style.display = "block";
-
-    function requestDomainData() {
-      var serverUrl = window.location.origin;
-      if (typeof unityInstanceRef !== 'undefined' && unityInstanceRef) {
-        unityInstanceRef.SendMessage('GameSocketManager', 'DomainDataCall', serverUrl);
+      // Mobile viewport
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        var meta = document.createElement('meta');
+        meta.name = 'viewport';
+        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+        document.getElementsByTagName('head')[0].appendChild(meta);
+        container.className = "unity-mobile";
+        canvas.className = "unity-mobile";
+      } else {
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
       }
-    }
-    var unityInstanceRef = null;
 
-    function returnToUnityLobby() {
-      if (unityInstanceRef) {
-        unityInstanceRef.SendMessage('UIManager', 'ReturnToLobby');
+      canvas.style.background = "url('" + buildUrl + "/web.jpg') center / cover";
+      loadingBar.style.display = "block";
+
+      // Store pending game from lobby.js
+      if (window._pendingGame) {
+        _pendingNavigate = window._pendingGame.gameNumber;
       }
-    }
 
+      var script = document.createElement("script");
+      script.id = 'unity-loader-script';
+      script.src = buildUrl + "/web.loader.js";
+      script.onload = function () {
+        createUnityInstance(canvas, unityConfig, function (progress) {
+          progressBarFull.style.width = 100 * progress + "%";
+        }).then(function (unityInstance) {
+          unityInstanceRef = unityInstance;
+          _spilloramaUnityLoaded = true;
+          window._spilloramaUnityLoaded = true;
+          loadingBar.style.display = "none";
+
+          // Send stored Firebase token if available
+          if (_firebaseWebToken) {
+            unityInstance.SendMessage('FirebaseManager', 'OnWebTokenReceived', _firebaseWebToken);
+          }
+
+          fullscreenButton.onclick = function () {
+            if (window.vuplex) window.vuplex.SetFullscreen(1);
+          };
+        }).catch(function (message) {
+          console.error('Unity load error:', message);
+        });
+      };
+      document.body.appendChild(script);
+    };
+
+    /* ── Unity → JS bridge callbacks ────────────────────────────────── */
+
+    /* Called by Unity (SplashScreenPanel) when socket is connected (or timed out) and ready */
+    window.OnUnityReady = function OnUnityReady() {
+      _unityReady = true;
+
+      // BIN-270: Send Spillorama JWT — Unity uses SpilloramaSocketManager, no AIS socket needed
+      var jwt = sessionStorage.getItem('spillorama.accessToken') || '';
+      if (jwt && unityInstanceRef) {
+        unityInstanceRef.SendMessage('UIManager', 'ReceiveShellToken', jwt);
+      }
+
+      if (_pendingNavigate && unityInstanceRef) {
+        unityInstanceRef.SendMessage('UIManager', 'NavigateToGame', String(_pendingNavigate));
+        _pendingNavigate = null;
+      }
+    };
+
+    /* Called by Unity (SplashScreenPanel) as fallback to re-send credentials */
+    window.ProvideShellCredentials = function ProvideShellCredentials() {
+      // BIN-270: Send JWT only — AIS credentials no longer used
+      var jwt = sessionStorage.getItem('spillorama.accessToken') || '';
+      if (jwt && unityInstanceRef) {
+        unityInstanceRef.SendMessage('UIManager', 'ReceiveShellToken', jwt);
+      }
+    };
+
+    /* Phase 1: Called by auth.js after login/token refresh to push new JWT to a running Unity instance */
+    window.ProvideShellToken = function ProvideShellToken() {
+      var jwt = sessionStorage.getItem('spillorama.accessToken') || '';
+      if (jwt && unityInstanceRef) {
+        unityInstanceRef.SendMessage('UIManager', 'ReceiveShellToken', jwt);
+      }
+    };
+
+    /* Called by lobby.js or shell to navigate Unity to a game */
     window.NavigateSpilloramaGame = function NavigateSpilloramaGame(gameNumber) {
       if (unityInstanceRef) {
         unityInstanceRef.SendMessage('UIManager', 'NavigateToGame', String(gameNumber));
       }
     };
 
+    /* Called by shell to switch Unity's active hall */
     window.SwitchActiveHallFromHost = function SwitchActiveHallFromHost(hallId) {
       if (unityInstanceRef && hallId) {
         unityInstanceRef.SendMessage('UIManager', 'SwitchActiveHallFromHost', hallId);
       }
     };
 
-    var script = document.createElement("script");
-    script.src = loaderUrl;
-    script.onload = () => {
-      createUnityInstance(canvas, config, (progress) => {
-        progressBarFull.style.width = 100 * progress + "%";
-      }).then((unityInstance) => {
-        unityInstanceRef = unityInstance;
-        loadingBar.style.display = "none";
-        fullscreenButton.onclick = () => {
-          window.vuplex.SetFullscreen(1);
-        };
-
-        const firebaseConfig = {
-          apiKey: "AIzaSyCn63hcAqgw-iWLRFCxKmJk6Wa6UrK8Ucc",
-          authDomain: "spillorama-bingo-ca229.firebaseapp.com",
-          databaseURL: "https://spillorama-bingo-ca229-default-rtdb.europe-west1.firebasedatabase.app",
-          projectId: "spillorama-bingo-ca229",
-          storageBucket: "spillorama-bingo-ca229.firebasestorage.app",
-          messagingSenderId: "360754039754",
-          appId: "1:360754039754:web:78c18c50fed1b2ad509d33",
-          measurementId: "G-8WZJB8ECSW"
-        };
-
-        firebase.initializeApp(firebaseConfig);
-        const messaging = firebase.messaging();
-
-        let swDir = window.location.pathname.replace(/[^\/]+$/, '');
-        let swPath = swDir + 'firebase-messaging-sw.js';
-
-        navigator.serviceWorker.register(swPath, {
-          scope: swDir
-        }).then((registration) => {
-          console.log("Service worker registered");
-          Notification.requestPermission().then((permission) => {
-            if (permission === 'granted') {
-              messaging.getToken({
-                vapidKey: "BO8GlGnlSoBYtA0oZx6SzY-dlLNdh__TeFS6WNIY5X_SWsXfejE-B5I9gsn6O6a0rCYt8eOXTCO7-lcVAOgsPMc",
-                serviceWorkerRegistration: registration
-              }).then((token) => {
-                console.log("Web Push Token:", token);
-                unityInstance.SendMessage('FirebaseManager', 'OnWebTokenReceived', token);
-              }).catch((err) => {
-                console.error("FCM getToken error:", err);
-              });
-            } else {
-              console.warn("Notification permission not granted");
-            }
-          });
-        });
-
-        messaging.onMessage((payload) => {
-          console.log('Push received in foreground:', payload);
-          unityInstance.SendMessage('FirebaseManager', 'OnWebMessageReceived', JSON.stringify(payload));
-          const title = payload.notification?.title || 'Notification';
-          const body = payload.notification?.body || '';
-          const icon = 'TemplateData/favicon.ico';
-          const staticURL = new URL('./', window.location.href).toString();
-
-          if (Notification.permission === 'granted') {
-            new Notification(title, {
-              body,
-              icon,
-              data: { url: staticURL }
-            }).onclick = function (event) {
-              event.preventDefault();
-              window.open(staticURL, '_blank');
-            };
-          }
-        });
-
-      }).catch((message) => {
-        alert(message);
-      });
-    };
-    document.body.appendChild(script);
-    const channel = new BroadcastChannel("focusSpiloramaWeb");
-    channel.onmessage = (event) => {
-      if (event.data === "focus-tab") {
-        window.focus();
+    /* Called by Unity to send domain data */
+    function requestDomainData() {
+      var serverUrl = window.location.origin;
+      if (unityInstanceRef) {
+        unityInstanceRef.SendMessage('GameSocketManager', 'DomainDataCall', serverUrl);
       }
-    };
+    }
 
-    let existingTab = null;
-
+    /* Called by Unity to open a URL */
+    var existingTab = null;
     function OpenUrlInSameTab(url) {
       if (url && url.startsWith('/candy') && typeof window.launchCandyOverlay === 'function') {
         window.launchCandyOverlay();
@@ -465,7 +1593,156 @@
         existingTab = window.open(url, 'myUniqueTab');
       }
     }
-  </script>
-</body>
 
+    /* ── Profile panel toggle ───────────────────────────────────────── */
+
+    window.ShowSpillvettPanel = function ShowSpillvettPanel() {
+      var overlay = document.getElementById('profile-overlay');
+      if (overlay) overlay.classList.add('is-open');
+    };
+
+    document.getElementById('profile-close').addEventListener('click', function () {
+      document.getElementById('profile-overlay').classList.remove('is-open');
+    });
+    document.getElementById('profile-backdrop').addEventListener('click', function () {
+      document.getElementById('profile-overlay').classList.remove('is-open');
+    });
+    document.getElementById('spillvett-fab').addEventListener('click', function () {
+      window.ShowSpillvettPanel();
+    });
+
+    /* ── Info panel system ───────────────────────────────────────────── */
+
+    var INFO_CONTENT = {
+      faq: {
+        title: 'Ofte stilte sporsmal',
+        body: '<h3>Hvordan spiller jeg bingo?</h3><p>Velg et spill fra lobbyen, kjop lodd og vent pa trekningen. Gevinster utbetales automatisk til lommeboken din.</p>' +
+              '<h3>Hva er Spillvett?</h3><p>Spillvett er var ansvarlig spill-funksjon. Her kan du sette daglige og manedlige grenser, ta spillepause eller stenge deg ute.</p>' +
+              '<h3>Hvordan setter jeg inn penger?</h3><p>Apne profilen din og klikk "Sett inn penger" i lommebok-seksjonen.</p>' +
+              '<h3>Hva er en bingohall?</h3><p>En bingohall er en lokal avdeling med egne spillegrenser og regler ifolge norsk forskrift.</p>'
+      },
+      terms: {
+        title: 'Vilkar og betingelser',
+        body: '<h3>Generelle vilkar</h3><p>Ved a opprette konto og bruke Spillorama aksepterer du disse vilkarene. Spillorama drives i henhold til norsk pengespillovgivning.</p>' +
+              '<h3>Aldersgrense</h3><p>Du ma vaere fylt 18 ar for a spille. Identitetsverifisering kreves ved registrering.</p>' +
+              '<h3>Ansvarlig spill</h3><p>Du plikter a sette personlige spillegrenser. Lotteritilsynet kan pallegge ytterligere begrensninger.</p>' +
+              '<h3>Personvern</h3><p>Vi behandler personopplysningene dine i samsvar med GDPR og norsk personopplysningslov. Data deles ikke med tredjeparter uten samtykke.</p>'
+      },
+      responsible: {
+        title: 'Ansvarlig spill',
+        body: '<h3>Spillvett-verktoy</h3>' +
+              '<ul><li><strong>Dagsgrense</strong> &mdash; Maks belop du kan spille for per dag</li>' +
+              '<li><strong>Manedsgrense</strong> &mdash; Maks belop du kan spille for per maned</li>' +
+              '<li><strong>Frivillig pause</strong> &mdash; Ta en midlertidig pause fra spilling</li>' +
+              '<li><strong>Selvutestengelse</strong> &mdash; Steng deg ute i minimum 12 maneder</li></ul>' +
+              '<h3>Trenger du hjelp?</h3><p>Kontakt Hjelpelinjen for spilleavhengige pa telefon 800 800 40 (gratis).</p>'
+      },
+      support: {
+        title: 'Kundeservice',
+        body: '<h3>Kontakt oss</h3><p>Har du sporsmal eller trenger hjelp? Ta kontakt med kundeservice.</p>' +
+              '<h3>Apningstider</h3><p>Mandag-fredag: 09:00-17:00<br>Lordag-sondag: Stengt</p>' +
+              '<h3>Selvhjelp</h3><p>Sjekk var FAQ-side for svar pa vanlige sporsmal.</p>'
+      },
+      about: {
+        title: 'Om Spillorama',
+        body: '<h3>Spillorama Databingo</h3><p>Spillorama er en norsk plattform for databingo, utviklet i henhold til pengespillforskriften.</p>' +
+              '<h3>Regulering</h3><p>Spillorama opererer under norsk lovgivning og er underlagt tilsyn fra Lotteritilsynet.</p>'
+      }
+    };
+
+    function showInfoPanel(key) {
+      var info = INFO_CONTENT[key];
+      if (!info) return;
+      document.getElementById('info-panel-title').textContent = info.title;
+      document.getElementById('info-panel-body').innerHTML = info.body;
+      document.getElementById('info-overlay').classList.add('is-visible');
+    }
+
+    document.getElementById('info-panel-close').addEventListener('click', function () {
+      document.getElementById('info-overlay').classList.remove('is-visible');
+    });
+    document.getElementById('info-overlay').addEventListener('click', function (e) {
+      if (e.target === this) this.classList.remove('is-visible');
+    });
+
+    /* ── Candy overlay ──────────────────────────────────────────────── */
+    // BIN-272: launchCandyOverlay + closeCandyOverlay defined in spillvett.js
+    // with API-based launch, origin validation, and postMessage protocol.
+
+    /* ── Firebase init (independent of Unity) ───────────────────────── */
+
+    (function initFirebase() {
+      var firebaseConfig = {
+        apiKey: "AIzaSyCn63hcAqgw-iWLRFCxKmJk6Wa6UrK8Ucc",
+        authDomain: "spillorama-bingo-ca229.firebaseapp.com",
+        databaseURL: "https://spillorama-bingo-ca229-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "spillorama-bingo-ca229",
+        storageBucket: "spillorama-bingo-ca229.firebasestorage.app",
+        messagingSenderId: "360754039754",
+        appId: "1:360754039754:web:78c18c50fed1b2ad509d33",
+        measurementId: "G-8WZJB8ECSW"
+      };
+
+      try {
+        firebase.initializeApp(firebaseConfig);
+        var messaging = firebase.messaging();
+
+        var swDir = window.location.pathname.replace(/[^\/]+$/, '');
+        var swPath = swDir + 'firebase-messaging-sw.js';
+
+        navigator.serviceWorker.register(swPath, { scope: swDir }).then(function (registration) {
+          console.log("Service worker registered");
+          Notification.requestPermission().then(function (permission) {
+            if (permission === 'granted') {
+              messaging.getToken({
+                vapidKey: "BO8GlGnlSoBYtA0oZx6SzY-dlLNdh__TeFS6WNIY5X_SWsXfejE-B5I9gsn6O6a0rCYt8eOXTCO7-lcVAOgsPMc",
+                serviceWorkerRegistration: registration
+              }).then(function (token) {
+                console.log("Web Push Token:", token);
+                _firebaseWebToken = token;
+                // If Unity already loaded, send now
+                if (unityInstanceRef) {
+                  unityInstanceRef.SendMessage('FirebaseManager', 'OnWebTokenReceived', token);
+                }
+              }).catch(function (err) {
+                console.error("FCM getToken error:", err);
+              });
+            }
+          });
+        });
+
+        messaging.onMessage(function (payload) {
+          console.log('Push received:', payload);
+          if (unityInstanceRef) {
+            unityInstanceRef.SendMessage('FirebaseManager', 'OnWebMessageReceived', JSON.stringify(payload));
+          }
+          var title = (payload.notification && payload.notification.title) || 'Notification';
+          var body = (payload.notification && payload.notification.body) || '';
+          var icon = 'TemplateData/favicon.ico';
+          var staticURL = new URL('./', window.location.href).toString();
+
+          if (Notification.permission === 'granted') {
+            new Notification(title, { body: body, icon: icon, data: { url: staticURL } }).onclick = function (event) {
+              event.preventDefault();
+              window.open(staticURL, '_blank');
+            };
+          }
+        });
+      } catch (e) {
+        console.warn('Firebase init skipped:', e.message);
+      }
+    })();
+
+    /* ── BroadcastChannel focus ──────────────────────────────────────── */
+    var channel = new BroadcastChannel("focusSpiloramaWeb");
+    channel.onmessage = function (event) {
+      if (event.data === "focus-tab") window.focus();
+    };
+  </script>
+
+  <script src="lobby.js"></script>
+  <script src="profile.js"></script>
+  <script src="panels.js"></script>
+  <script src="auth.js"></script>
+</body>
 </html>

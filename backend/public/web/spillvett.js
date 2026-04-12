@@ -928,7 +928,24 @@
     }
   };
 
+  // SetShellToken — kalles av auth.js etter web-login (BIN-262).
+  // Setter token direkte uten å bli overstyrt av Unity.
+  window.SetShellToken = function SetShellToken(token) {
+    state.token = token || "";
+    safeStorageSet(storageKeys.token, state.token);
+    scheduleSync();
+    render();
+  };
+
+  // SetPlayerToken — kalles av Unity etter socket-login.
+  // Ignoreres hvis web-shell allerede har et gyldig Spillorama-token,
+  // siden Unity-tokenet ikke er gyldig mot Spillorama REST-APIet.
   window.SetPlayerToken = function SetPlayerToken(token) {
+    if (state.token) {
+      // Web-session er aktiv — ignorer Unity-tokenet for API-kall,
+      // men lagre det separat for eventuelle Fase 3-behov.
+      return;
+    }
     state.token = token || "";
     safeStorageSet(storageKeys.token, state.token);
     scheduleSync();

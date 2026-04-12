@@ -14,6 +14,7 @@
     halls: [],
     wallet: null,
     compliance: null,
+    gameStatus: {}, // BIN-266: slug → { status, nextRoundAt }
     activeHallId: '',
     loading: true,
     error: '',
@@ -80,10 +81,11 @@
     renderLobby();
 
     try {
-      var [halls, wallet, apiGames] = await Promise.all([
+      var [halls, wallet, apiGames, gameStatus] = await Promise.all([
         apiFetch('/api/halls'),
         apiFetch('/api/wallet/me'),
-        apiFetch('/api/games').catch(function () { return null; })
+        apiFetch('/api/games').catch(function () { return null; }),
+        apiFetch('/api/games/status').catch(function () { return {}; }) // BIN-266
       ]);
 
       if (Array.isArray(apiGames) && apiGames.length > 0) {
@@ -101,6 +103,7 @@
       }
       lobbyState.halls = Array.isArray(halls) ? halls : [];
       lobbyState.wallet = wallet;
+      lobbyState.gameStatus = (gameStatus && typeof gameStatus === 'object') ? gameStatus : {};
       lobbyState.user = getUser();
 
       // Restore or pick first hall
@@ -120,6 +123,7 @@
     } finally {
       lobbyState.loading = false;
       renderLobby();
+      scheduleStatusRefresh(); // BIN-266: poll status every 30s
     }
   }
 
@@ -318,11 +322,15 @@
 
       const icon = getGameIcon(game.slug);
       const desc = game.description || '';
+      const badge = buildStatusBadge(game.slug);
 
       tile.innerHTML =
         '<div class="lobby-tile-icon">' + icon + '</div>' +
         '<div class="lobby-tile-info">' +
-          '<span class="lobby-tile-title">' + escapeHtml(game.title) + '</span>' +
+          '<div class="lobby-tile-title-row">' +
+            '<span class="lobby-tile-title">' + escapeHtml(game.title) + '</span>' +
+            badge +
+          '</div>' +
           (desc ? '<span class="lobby-tile-desc">' + escapeHtml(desc) + '</span>' : '') +
         '</div>' +
         '<div class="lobby-tile-arrow">&#8250;</div>';
@@ -352,6 +360,41 @@
         warningEl.hidden = true;
       }
     }
+  }
+
+  // BIN-265: Status badge — reflects live state from GET /api/games/status
+  function buildStatusBadge(slug) {
+    var s = lobbyState.gameStatus[slug];
+    if (!s) return '<span class="lobby-tile-status lobby-tile-status--closed">Stengt</span>';
+    if (s.status === 'OPEN') {
+      return '<span class="lobby-tile-status lobby-tile-status--open">&#9679; Åpen</span>';
+    }
+    if (s.status === 'STARTING') {
+      var label = 'Starter snart';
+      if (s.nextRoundAt) {
+        try {
+          var d = new Date(s.nextRoundAt);
+          label = 'Starter ' + d.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
+        } catch { /* ignore */ }
+      }
+      return '<span class="lobby-tile-status lobby-tile-status--starting">&#9679; ' + escapeHtml(label) + '</span>';
+    }
+    return '<span class="lobby-tile-status lobby-tile-status--closed">Stengt</span>';
+  }
+
+  // Refresh game status every 30 seconds without reloading everything
+  var _statusRefreshTimer = null;
+  function scheduleStatusRefresh() {
+    if (_statusRefreshTimer) clearInterval(_statusRefreshTimer);
+    _statusRefreshTimer = setInterval(async function () {
+      try {
+        var s = await apiFetch('/api/games/status');
+        if (s && typeof s === 'object') {
+          lobbyState.gameStatus = s;
+          renderLobby();
+        }
+      } catch { /* ignore */ }
+    }, 30000);
   }
 
   function getGameIcon(slug) {

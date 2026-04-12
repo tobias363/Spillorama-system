@@ -33,6 +33,8 @@
     return body.data;
   }
 
+  var _walletId = null;
+
   function formatKr(value) {
     return new Intl.NumberFormat('nb-NO', {
       style: 'currency', currency: 'NOK',
@@ -191,6 +193,9 @@
         apiFetch('/api/wallet/me/transactions?limit=10')
       ]);
 
+      if (wallet?.account) {
+        _walletId = wallet.account.id || null;
+      }
       if (balanceEl && wallet?.account) {
         balanceEl.textContent = formatKr(wallet.account.balance);
       }
@@ -257,6 +262,108 @@
           loadWallet();
         } catch (err) {
           if (errEl) { errEl.textContent = err.message || 'Innskudd feilet'; errEl.hidden = false; }
+        }
+      });
+    }
+  }
+
+  // ── Withdrawal ───────────────────────────────────────────────────────
+
+  function initWithdrawal() {
+    var withdrawBtn = document.getElementById('profile-withdraw-btn');
+    var withdrawWrap = document.getElementById('profile-withdraw-form-wrap');
+    var withdrawForm = document.getElementById('profile-withdraw-form');
+    var successEl = document.getElementById('profile-withdraw-success');
+
+    if (withdrawBtn && withdrawWrap) {
+      withdrawBtn.addEventListener('click', function () {
+        withdrawWrap.hidden = !withdrawWrap.hidden;
+        if (successEl) successEl.hidden = true;
+      });
+    }
+
+    if (withdrawForm) {
+      withdrawForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var errEl = document.getElementById('profile-withdraw-error');
+        if (errEl) errEl.hidden = true;
+        if (successEl) successEl.hidden = true;
+
+        if (!_walletId) {
+          if (errEl) { errEl.textContent = 'Wallet ikke lastet — prøv igjen'; errEl.hidden = false; }
+          return;
+        }
+        var amount = Number(document.getElementById('profile-withdraw-amount').value);
+        if (!amount || amount < 10) {
+          if (errEl) { errEl.textContent = 'Minimumsbeløp er 10 kr'; errEl.hidden = false; }
+          return;
+        }
+        var submitBtn = withdrawForm.querySelector('[type="submit"]');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Tar ut...'; }
+        try {
+          await apiFetch('/api/wallets/' + _walletId + '/withdraw', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: amount, reason: 'Uttak til bank' })
+          });
+          withdrawWrap.hidden = true;
+          withdrawForm.reset();
+          if (successEl) { successEl.textContent = formatKr(amount) + ' er tatt ut.'; successEl.hidden = false; }
+          loadWallet();
+        } catch (err) {
+          if (errEl) { errEl.textContent = err.message || 'Uttak feilet'; errEl.hidden = false; }
+        } finally {
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Ta ut'; }
+        }
+      });
+    }
+  }
+
+  // ── KYC ──────────────────────────────────────────────────────────────
+
+  function initKyc() {
+    var statusEl = document.getElementById('profile-kyc-status');
+    var formWrap = document.getElementById('profile-kyc-form-wrap');
+    var kycForm = document.getElementById('profile-kyc-form');
+    if (!statusEl) return;
+
+    apiFetch('/api/kyc/me').then(function (kyc) {
+      if (kyc && kyc.verified) {
+        statusEl.textContent = 'Verifisert ✓';
+        if (formWrap) formWrap.hidden = true;
+      } else {
+        statusEl.textContent = 'Ikke verifisert';
+        if (formWrap) formWrap.hidden = false;
+      }
+    }).catch(function () {
+      statusEl.textContent = 'Ukjent status';
+      if (formWrap) formWrap.hidden = false;
+    });
+
+    if (kycForm) {
+      kycForm.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var errEl = document.getElementById('profile-kyc-error');
+        var successEl = document.getElementById('profile-kyc-success');
+        if (errEl) errEl.hidden = true;
+        if (successEl) successEl.hidden = true;
+        var submitBtn = kycForm.querySelector('[type="submit"]');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Verifiserer...'; }
+        var birthDate = document.getElementById('profile-kyc-dob').value;
+        var nationalId = document.getElementById('profile-kyc-national-id').value.trim();
+        try {
+          await apiFetch('/api/kyc/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ birthDate: birthDate, nationalId: nationalId || undefined })
+          });
+          if (statusEl) statusEl.textContent = 'Verifisert ✓';
+          if (formWrap) formWrap.hidden = true;
+          if (successEl) { successEl.textContent = 'Identitet verifisert!'; successEl.hidden = false; }
+        } catch (err) {
+          if (errEl) { errEl.textContent = err.message || 'Verifisering feilet'; errEl.hidden = false; }
+        } finally {
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Verifiser'; }
         }
       });
     }
@@ -353,6 +460,8 @@
     initProfileEdit();
     initPasswordChange();
     initWallet();
+    initWithdrawal();
+    initKyc();
     initAccountActions();
   }
 
