@@ -5,7 +5,6 @@ public partial class Game5GamePlayPanel
 {
     public void Reconnect()
     {
-        Debug.Log("On Reconnected Game 5");
         CallSubscribeRoom();
     }
 
@@ -14,7 +13,6 @@ public partial class Game5GamePlayPanel
         if (!Application.isPlaying)
         {
             DisplayLoader(false);
-            Debug.Log("[EditModeSmoke] Skipping Game5 SubscribeRoom.");
             return;
         }
 
@@ -41,7 +39,6 @@ public partial class Game5GamePlayPanel
         if (!Application.isPlaying)
             return;
 
-        Debug.Log("EnableBroadcasts Game 5 Play Panel");
         SoundManager.Instance.ResetPlayedAnnouncements();
     }
 
@@ -50,7 +47,6 @@ public partial class Game5GamePlayPanel
         if (!Application.isPlaying)
             return;
 
-        Debug.Log("DisableBroadcasts Game 5 Play Panel");
     }
 
     private PrefabBingoGame5Ticket3x3 GetTicketById(string ticketId)

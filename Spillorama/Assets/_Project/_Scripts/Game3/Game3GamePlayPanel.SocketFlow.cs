@@ -11,7 +11,6 @@ public partial class Game3GamePlayPanel
         if (!Application.isPlaying)
             return;
 
-        Debug.Log("Game 3 broadcast on (Spillorama path)");
         SpilloramaGameBridge.OnBallDrawn           += OnBallDrawn_Spillorama;
         SpilloramaGameBridge.OnGameStarted         += OnGameStart_Spillorama;
         SpilloramaGameBridge.OnGameFinished        += OnGameFinish_Spillorama;
@@ -40,7 +39,6 @@ public partial class Game3GamePlayPanel
         if (!Application.isPlaying)
         {
             DisplayLoader(false);
-            Debug.Log("[EditModeSmoke] Skipping Game3 SubscribeRoom.");
             return;
         }
 
@@ -150,7 +148,6 @@ public partial class Game3GamePlayPanel
     private void CallPlayerHallLimitEvent()
     {
         // Spillorama backend handles hall limits via REST — AIS socket call removed.
-        Debug.Log("[Game3] CallPlayerHallLimitEvent: skipped (Spillorama backend handles hall limits via REST)");
     }
 
     private void jackpotUpdateDataUpdate(JackPotData jackPotData)

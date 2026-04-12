@@ -131,7 +131,6 @@ public partial class Game4GamePlayPanel : MonoBehaviour
 
     private void OnEnable()
     {
-        Debug.Log("OnEnable Game4GamePlayPanel");
         UIManager.Instance.isGame4 = true;
         CloseMiniGames();
     }
@@ -173,17 +172,12 @@ public partial class Game4GamePlayPanel : MonoBehaviour
 
     #endregion
 
-    #region DELEGATE_CALLBACKS
-    // (reserved for future delegate callbacks)
-    #endregion
-
     #region PUBLIC_METHODS
 
     public void SetData(Game4Theme theme, Game4Data game4data = null, bool isGameRunning = false)
     {
         try
         {
-            Debug.Log("SetData");
             this.theme = theme;
             this.Open();
             isGameRunningStatus = isGameRunning;
@@ -221,16 +215,12 @@ public partial class Game4GamePlayPanel : MonoBehaviour
 
             btnPlay.GetComponent<Image>().sprite = theme.spritePlayButton;
             imgBackground.sprite = theme.spriteBackground;
-            Debug.Log("IsGamePlayInProcess = > " + IsGamePlayInProcess);
-            Debug.Log("isGameRunning = > " + isGameRunning);
-            //if (game4data != null && !IsGamePlayInProcess)
             SaveGameDataResponse(game4data);
             if (UIManager.Instance.isBreak)
             {
                 UIManager.Instance.breakTimePopup.OpenPanel("null");
             }
 
-            Debug.Log("isGameRunning = " + isGameRunning);
             if (isGameRunning)
             {
                 IsGamePlayInProcess = true;

@@ -10,7 +10,6 @@ public partial class Game4GamePlayPanel
 
     public void OnPlayButtonTap()
     {
-        Debug.Log("OnPlayButtonTap");
         SoundManager.Instance.ResetPlayedAnnouncements();
         btnPlay.interactable = false;
         CallGame4PlayEvent();

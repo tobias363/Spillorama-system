@@ -48,8 +48,6 @@ public partial class Game4GamePlayPanel
     void CallPlayerHallLimitEvent()
     {
         // TODO: Replace with Spillorama REST call when Game 4 backend is ready.
-        // Other games use SpilloramaApiClient for this.
-        Debug.Log("[Game4] CallPlayerHallLimitEvent: skipped (no Spillorama endpoint yet)");
     }
 
     // TODO: Wire up mini-game buttons to Spillorama endpoints when available.

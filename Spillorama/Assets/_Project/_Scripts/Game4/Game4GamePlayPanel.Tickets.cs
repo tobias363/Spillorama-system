@@ -38,7 +38,6 @@ public partial class Game4GamePlayPanel
 
     private void ChangeTickets(List<GameTicketData> list)
     {
-        Debug.Log("ChangeTickets");
 
         foreach (PrefabBingoGame4Pattern patternData in patternList)
             patternData.HighlightPattern(false);
@@ -96,11 +95,7 @@ public partial class Game4GamePlayPanel
 
     private void UpdatedBetValue(int value)
     {
-        Debug.Log("TicketCount => " + TicketCount);
-        Debug.Log("game4Data.ticketPrice => " + betMultiplierValue);
-        Debug.Log("betMultiplierIndex => " + value);
         int indexvalue = value / (game4Data.ticketPrice * TicketCount);
-        Debug.Log("indexvalue => " + indexvalue);
 
         if (TicketCount == 1)
             betMultiplierIndex = game4Data.betData.ticket1Multiplier.IndexOf(indexvalue);
@@ -110,9 +105,6 @@ public partial class Game4GamePlayPanel
             betMultiplierIndex = game4Data.betData.ticket3Multiplier.IndexOf(indexvalue);
         else
             betMultiplierIndex = game4Data.betData.ticket4Multiplier.IndexOf(indexvalue);
-
-        Debug.Log("TicketCount after => " + TicketCount);
-        Debug.Log("betMultiplierIndex after  => " + betMultiplierIndex);
     }
 
     public Game4PatternSpriteData GetPatternSpriteData(string patternId)

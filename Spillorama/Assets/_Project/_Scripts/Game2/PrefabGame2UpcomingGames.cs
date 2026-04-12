@@ -117,8 +117,6 @@ public class PrefabGame2UpcomingGames : MonoBehaviour
 
     public void Open_Choose_Tickets_Btn()
     {
-        print($"Open Choose Tickets : {Sub_Game_Data.id}");
-
         // Spillorama: namespace handled by SpilloramaSocketManager
         UIManager.Instance.lobbyPanel.Close();
         UIManager.Instance.CloseAllSubPanels();
