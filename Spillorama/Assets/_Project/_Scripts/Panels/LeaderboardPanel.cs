@@ -1,8 +1,31 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using BestHTTP.SocketIO;
 using TMPro;
 using UnityEngine;
+
+// ── Spillorama leaderboard response wrappers ─────────────────────────────────
+
+[Serializable]
+internal class SpilloramaLeaderboardAck
+{
+    public bool ok;
+    public SpilloramaLeaderboardAckData data;
+}
+
+[Serializable]
+internal class SpilloramaLeaderboardAckData
+{
+    public List<SpilloramaLeaderboardEntryRaw> leaderboard;
+}
+
+[Serializable]
+internal class SpilloramaLeaderboardEntryRaw
+{
+    public string nickname = "";
+    public double points = 0;
+}
 
 public class LeaderboardPanel : MonoBehaviour
 {
@@ -30,7 +53,11 @@ public class LeaderboardPanel : MonoBehaviour
 
     private void OnEnable()
     {
-        // UIManager.Instance.DisplayLoader(true);
+        if (UIManager.Instance != null && UIManager.Instance.isGameWebGL)
+        {
+            FetchLeaderboard_Spillorama();
+            return;
+        }
         EventManager.Instance.Leaderboard(LeaderboardResponse);
     }
     #endregion
@@ -70,6 +97,45 @@ public class LeaderboardPanel : MonoBehaviour
         {
             UIManager.Instance.messagePopup.DisplayMessagePopup(response.message);
         }
+    }
+
+    private void FetchLeaderboard_Spillorama()
+    {
+        SpilloramaSocketManager.Instance?.FetchLeaderboard(
+            onSuccess: (string raw) =>
+            {
+                Reset();
+                try
+                {
+                    var ack = JsonUtility.FromJson<SpilloramaLeaderboardAck>(raw);
+                    if (ack == null || !ack.ok || ack.data?.leaderboard == null)
+                    {
+                        txtRecordNotFound.gameObject.SetActive(true);
+                        return;
+                    }
+
+                    txtRecordNotFound.gameObject.SetActive(ack.data.leaderboard.Count == 0);
+                    foreach (var entry in ack.data.leaderboard)
+                    {
+                        var data = new LeaderboardData { nickname = entry.nickname, points = entry.points };
+                        PrefabLeaderboardPlayerData leaderboardPlayer = Instantiate(prefabLeaderboardPlayerData, transformLeaderboardContainer);
+                        leaderboardPlayer.SetData(data);
+                        leaderboardPlayerList.Add(leaderboardPlayer);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[Leaderboard] Parse error: " + ex.Message);
+                    txtRecordNotFound.gameObject.SetActive(true);
+                }
+            },
+            onError: (string err) =>
+            {
+                Debug.LogWarning("[Leaderboard] Fetch error: " + err);
+                Reset();
+                txtRecordNotFound.gameObject.SetActive(true);
+            }
+        );
     }
 
     private void Reset()

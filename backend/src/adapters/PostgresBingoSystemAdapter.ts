@@ -157,6 +157,19 @@ export class PostgresBingoSystemAdapter implements BingoSystemAdapter {
     return rows[0]?.snapshot ?? null;
   }
 
+  /** BIN-245: Get the latest snapshot and players for crash recovery. */
+  async getLatestCheckpointData(gameId: string): Promise<{ snapshot: unknown; players: unknown } | null> {
+    await this.ensureInitialized();
+    const { rows } = await this.pool.query<{ snapshot: unknown; players: unknown }>(
+      `SELECT snapshot, players FROM ${this.checkpointsTable()}
+       WHERE game_id = $1 AND snapshot IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1`,
+      [gameId]
+    );
+    if (!rows[0]) return null;
+    return { snapshot: rows[0].snapshot, players: rows[0].players };
+  }
+
   /** BIN-173: Get full checkpoint timeline for a game (for replay/audit). */
   async getGameTimeline(gameId: string): Promise<Array<{
     id: string;

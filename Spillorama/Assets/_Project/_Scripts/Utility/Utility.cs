@@ -761,7 +761,7 @@ public static class MyExtension
     /// <param name="component">Component.</param>
     public static void Open(this MonoBehaviour component)
     {
-        if (component.gameObject != null)
+        if (component != null && component.gameObject != null)
             component.gameObject.SetActive(true);
     }
 
@@ -781,7 +781,7 @@ public static class MyExtension
     /// <param name="component">Component.</param>
     public static void Close(this MonoBehaviour component)
     {
-        if (component.gameObject != null)
+        if (component != null && component.gameObject != null)
             component.gameObject.SetActive(false);
     }
 

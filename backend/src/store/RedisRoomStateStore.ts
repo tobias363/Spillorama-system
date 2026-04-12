@@ -57,8 +57,11 @@ export class RedisRoomStateStore implements RoomStateStore {
 
   set(code: string, room: RoomState): void {
     this.rooms.set(code, room);
-    // Fire-and-forget persist — errors logged, not thrown
-    this.persistAsync(code).catch(() => {});
+    // BIN-249: Fire-and-forget persist — errors logged (not swallowed).
+    // For write-confirmation on critical paths, call persist(code) explicitly and await it.
+    this.persistAsync(code).catch((err: unknown) => {
+      logger.error({ err, roomCode: code }, "Unhandled error in Redis room persist — state may be stale in Redis");
+    });
   }
 
   delete(code: string): void {

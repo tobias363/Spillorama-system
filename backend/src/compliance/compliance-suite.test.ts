@@ -289,7 +289,7 @@ test("compliance: enforces regulatory and personal loss limits", async () => {
     dailyLossLimit: 100,
     monthlyLossLimit: 4400
   });
-  engine.setPlayerLossLimits({
+  await engine.setPlayerLossLimits({
     walletId: "wallet-host",
     hallId: "hall-1",
     daily: 60,
@@ -352,7 +352,7 @@ test("compliance: enforces regulatory and personal loss limits", async () => {
   );
 });
 
-test("compliance: enforces mandatory break and timed pause", async () => {
+test("compliance: activates mandatory pause after one hour-equivalent play and keeps timed pause separate", async () => {
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
     playSessionLimitMs: 1000,
     pauseDurationMs: 5 * 60 * 1000
@@ -413,8 +413,25 @@ test("compliance: enforces mandatory break and timed pause", async () => {
     );
   });
 
+  await withFakeNow(2501, async () => {
+    const compliance = engine.getPlayerCompliance("wallet-host", "hall-pause");
+    assert.equal(compliance.pause.isOnPause, true);
+    assert.equal(compliance.pause.lastMandatoryBreak?.hallId, "hall-pause");
+    assert.equal(compliance.pause.lastMandatoryBreak?.netLoss.daily, 10);
+    assert.equal(compliance.restrictions.blockedBy, "MANDATORY_PAUSE");
+    await assert.rejects(
+      async () =>
+        engine.createRoom({
+          hallId: "hall-pause",
+          playerName: "Paused by rule",
+          walletId: "wallet-host"
+        }),
+      (error: unknown) => error instanceof DomainError && error.code === "PLAYER_REQUIRED_PAUSE"
+    );
+  });
+
   await withFakeNow(10_000, async () => {
-    engine.setTimedPause({
+    await engine.setTimedPause({
       walletId: "wallet-timed-pause",
       durationMinutes: 30
     });
@@ -434,7 +451,7 @@ test("compliance: enforces self exclusion minimum period", async () => {
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter());
 
   await withFakeNow(1_000, async () => {
-    engine.setSelfExclusion("wallet-self-excluded");
+    await engine.setSelfExclusion("wallet-self-excluded");
   });
 
   await withFakeNow(2_000, async () => {
@@ -448,8 +465,8 @@ test("compliance: enforces self exclusion minimum period", async () => {
       (error: unknown) => error instanceof DomainError && error.code === "PLAYER_SELF_EXCLUDED"
     );
 
-    assert.throws(
-      () => engine.clearSelfExclusion("wallet-self-excluded"),
+    await assert.rejects(
+      async () => engine.clearSelfExclusion("wallet-self-excluded"),
       (error: unknown) => error instanceof DomainError && error.code === "SELF_EXCLUSION_LOCKED"
     );
   });

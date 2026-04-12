@@ -1,6 +1,7 @@
 node_modules/
 backend/dist/
 backend/.env
+backend/.env.production
 .DS_Store
 *.log
 
@@ -30,3 +31,29 @@ Spillorama/**/.DS_Store
 
 # Claude
 .claude/
+
+# Local Unity vendor SDK bundles
+unity-vendor-bundles/
+
+# Unity build output
+SpilloramaBuilds/
+Spillorama/WebBuild/
+Spillorama/WebGLBuild/
+backend/public/web/Build/
+backend/public/web/TemplateData/
+
+# Raw source assets (already imported into Assets/)
+assets spingo/
+
+# Runtime / generated data
+backend/data/
+
+# Temp files
+tmp-*.png
+spinngo-anim-test.html
+
+# Runtime session data
+sessions/
+
+# Legacy AIS backend recovery dumps
+unity-bingo-backend/recovery-backups/

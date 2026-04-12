@@ -17,6 +17,7 @@ export interface AppUser {
   id: string;
   email: string;
   displayName: string;
+  phone?: string;
   walletId: string;
   role: UserRole;
   kycStatus: KycStatus;
@@ -164,6 +165,7 @@ interface UserRow {
   id: string;
   email: string;
   display_name: string;
+  phone: string | null;
   wallet_id: string;
   role: UserRole;
   kyc_status: KycStatus;
@@ -316,6 +318,7 @@ export class PlatformService {
     email: string;
     password: string;
     displayName: string;
+    phone?: string;
   }): Promise<SessionInfo> {
     await this.ensureInitialized();
     const email = normalizeEmail(input.email);
@@ -343,12 +346,13 @@ export class PlatformService {
 
       const userId = randomUUID();
       const walletId = `wallet-user-${userId}`;
+      const phone = input.phone?.trim() || null;
       const { rows: createdRows } = await client.query<UserRow>(
         `INSERT INTO ${this.usersTable()}
-          (id, email, display_name, password_hash, wallet_id, role)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
-        [userId, email, displayName, passwordHash, walletId, role]
+          (id, email, display_name, password_hash, wallet_id, role, phone)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at, phone`,
+        [userId, email, displayName, passwordHash, walletId, role, phone]
       );
       await client.query("COMMIT");
 
@@ -379,7 +383,7 @@ export class PlatformService {
         password_hash: string;
       }
     >(
-      `SELECT id, email, display_name, password_hash, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
+      `SELECT id, email, display_name, phone, password_hash, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
        FROM ${this.usersTable()}
        WHERE email = $1`,
       [email]
@@ -949,7 +953,7 @@ export class PlatformService {
     await this.ensureInitialized();
     const userId = this.assertEntityReference(userIdInput, "userId");
     const { rows } = await this.pool.query<UserRow>(
-      `SELECT id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
+      `SELECT id, email, display_name, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
        FROM ${this.usersTable()}
        WHERE id = $1`,
       [userId]
@@ -961,6 +965,118 @@ export class PlatformService {
     return this.mapUser(row);
   }
 
+  async updateProfile(
+    userId: string,
+    input: { displayName?: string; email?: string; phone?: string }
+  ): Promise<PublicAppUser> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userId, "userId");
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    let idx = 1;
+
+    if (input.displayName !== undefined) {
+      const name = input.displayName.trim();
+      this.assertDisplayName(name);
+      sets.push(`display_name = $${idx++}`);
+      values.push(name);
+    }
+    if (input.email !== undefined) {
+      const email = normalizeEmail(input.email);
+      this.assertEmail(email);
+      const { rows: existing } = await this.pool.query<{ id: string }>(
+        `SELECT id FROM ${this.usersTable()} WHERE email = $1 AND id != $2`,
+        [email, id]
+      );
+      if (existing[0]) {
+        throw new DomainError("EMAIL_EXISTS", "E-post er allerede i bruk.");
+      }
+      sets.push(`email = $${idx++}`);
+      values.push(email);
+    }
+    if (input.phone !== undefined) {
+      sets.push(`phone = $${idx++}`);
+      values.push(input.phone.trim());
+    }
+
+    if (sets.length === 0) {
+      throw new DomainError("INVALID_INPUT", "Ingen endringer oppgitt.");
+    }
+
+    sets.push(`updated_at = now()`);
+    values.push(id);
+
+    const { rows } = await this.pool.query<UserRow>(
+      `UPDATE ${this.usersTable()}
+       SET ${sets.join(", ")}
+       WHERE id = $${idx}
+       RETURNING id, email, display_name, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
+      values
+    );
+    if (!rows[0]) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
+    return this.withBalance(this.mapUser(rows[0]));
+  }
+
+  async changePassword(
+    userId: string,
+    input: { currentPassword: string; newPassword: string }
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userId, "userId");
+    this.assertPassword(input.newPassword);
+
+    const { rows } = await this.pool.query<{ password_hash: string }>(
+      `SELECT password_hash FROM ${this.usersTable()} WHERE id = $1`,
+      [id]
+    );
+    if (!rows[0]) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
+    const ok = await this.verifyPassword(input.currentPassword, rows[0].password_hash);
+    if (!ok) {
+      throw new DomainError("INVALID_CREDENTIALS", "Nåværende passord er feil.");
+    }
+
+    const newHash = await this.hashPassword(input.newPassword);
+    await this.pool.query(
+      `UPDATE ${this.usersTable()} SET password_hash = $2, updated_at = now() WHERE id = $1`,
+      [id, newHash]
+    );
+  }
+
+  async deleteAccount(userId: string): Promise<void> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userId, "userId");
+
+    const user = await this.getUserById(id);
+    if (user.role === "ADMIN") {
+      const { rows } = await this.pool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM ${this.usersTable()} WHERE role = 'ADMIN'`
+      );
+      if (Number(rows[0]?.count ?? "0") <= 1) {
+        throw new DomainError("LAST_ADMIN_REQUIRED", "Kan ikke slette siste admin.");
+      }
+    }
+
+    // Revoke all sessions
+    await this.pool.query(
+      `UPDATE ${this.sessionsTable()} SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+      [id]
+    );
+    // Soft-delete by anonymising
+    await this.pool.query(
+      `UPDATE ${this.usersTable()}
+       SET email = 'deleted-' || id || '@deleted',
+           display_name = 'Slettet bruker',
+           password_hash = 'DELETED',
+           updated_at = now()
+       WHERE id = $1`,
+      [id]
+    );
+  }
+
   async updateUserRole(userIdInput: string, roleInput: UserRole): Promise<PublicAppUser> {
     await this.ensureInitialized();
     const userId = this.assertEntityReference(userIdInput, "userId");
@@ -970,7 +1086,7 @@ export class PlatformService {
     try {
       await client.query("BEGIN");
       const { rows: existingRows } = await client.query<UserRow>(
-        `SELECT id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
+        `SELECT id, email, display_name, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at
          FROM ${this.usersTable()}
          WHERE id = $1
          FOR UPDATE`,
@@ -998,7 +1114,7 @@ export class PlatformService {
          SET role = $2,
              updated_at = now()
          WHERE id = $1
-         RETURNING id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
+         RETURNING id, email, display_name, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
         [userId, nextRole]
       );
       await client.query("COMMIT");
@@ -1109,6 +1225,7 @@ export class PlatformService {
       id: row.id,
       email: row.email,
       displayName: row.display_name,
+      phone: row.phone ?? undefined,
       walletId: row.wallet_id,
       role: row.role,
       kycStatus: row.kyc_status,
@@ -1348,7 +1465,7 @@ export class PlatformService {
            kyc_verified_at = $5,
            updated_at = now()
        WHERE id = $1
-       RETURNING id, email, display_name, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
+       RETURNING id, email, display_name, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, created_at, updated_at`,
       [input.userId, input.status, input.birthDate, providerRef, verifiedAt]
     );
     const row = rows[0];
@@ -1403,6 +1520,10 @@ export class PlatformService {
       await client.query(
         `ALTER TABLE ${this.usersTable()}
          ADD COLUMN IF NOT EXISTS kyc_provider_ref TEXT NULL`
+      );
+      await client.query(
+        `ALTER TABLE ${this.usersTable()}
+         ADD COLUMN IF NOT EXISTS phone TEXT NULL`
       );
       await this.ensureUserRoleConstraint(client);
 
@@ -1507,11 +1628,28 @@ export class PlatformService {
          ON ${this.gameSettingsChangeLogTable()} (game_slug, created_at DESC)`
       );
 
-      await client.query(
-        `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
-         VALUES ('bingo', 'Bingo', 'Multiplayer bingo i web-klienten.', '/bingo', true, 1, '{}'::jsonb)
-         ON CONFLICT (slug) DO NOTHING`
-      );
+      const gameSeeds: Array<[string, string, string, string, boolean, number, object]> = [
+        ["bingo",        "Bingo",        "75-kulsbingo med flere spillvarianter",    "/bingo",        true, 1, { gameNumber: 1 }],
+        ["rocket",       "Rocket",       "Tallspill med 3x3 brett og Lucky Number",  "/rocket",       true, 2, { gameNumber: 2 }],
+        ["monsterbingo", "Mønsterbingo", "Bingo med mønstergevinster",               "/monsterbingo", true, 3, { gameNumber: 3 }],
+        ["temabingo",    "Temabingo",    "Bingo med temaer og multiplikator",         "/temabingo",    true, 4, { gameNumber: 4 }],
+        ["spillorama",   "Spillorama",   "Spillorama-bingo med bonusspill",           "/spillorama",   true, 5, { gameNumber: 5 }],
+        ["candy",        "Candy Mania",  "Candy-spillet",                             "/candy",        true, 6, { gameNumber: 6 }],
+      ];
+      for (const [slug, title, description, route, isEnabled, sortOrder, settings] of gameSeeds) {
+        await client.query(
+          `INSERT INTO ${this.gamesTable()} (slug, title, description, route, is_enabled, sort_order, settings_json)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+           ON CONFLICT (slug) DO UPDATE SET
+             title = EXCLUDED.title,
+             description = EXCLUDED.description,
+             route = EXCLUDED.route,
+             sort_order = EXCLUDED.sort_order,
+             settings_json = ${this.gamesTable()}.settings_json || EXCLUDED.settings_json,
+             updated_at = now()`,
+          [slug, title, description, route, isEnabled, sortOrder, JSON.stringify(settings)]
+        );
+      }
       await client.query(
         `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, is_active)
          VALUES ($1, $2, 'Default hall', 'NO', '', true)

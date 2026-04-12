@@ -263,14 +263,14 @@ Backend håndhever:
 
 **Funksjonalitet:**
 - Innlogging/registrering
-- Spillkatalog med tre spill: Bingo Game, Roma, Bingo
+- Spillkatalog med spill: Bingo Game, Bingo
 - Wallet-håndtering med Swedbank Pay
 - KYC-verifisering
 - Compliance-kontroller (tapsgrenser, pauser, selvutelukking)
 - Profilhåndtering
 
 **Spillstart:**
-- **Bingo Game/Roma** ("Instant Launch"): Henter launch-token → åpner Game Web i ny side/iframe
+- **Bingo Game** ("Instant Launch"): Henter launch-token → åpner Game Web i ny side/iframe
 - **Bingo**: Direkte Socket.IO-tilkobling for live-spill i portalen
 
 ### Admin-panel

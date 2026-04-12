@@ -84,6 +84,39 @@ Det betyr ikke at `Spillorama-system` skal eie Candy gameplay eller Candy-backen
 - `docs/CANDY_SEPARATION_AND_FUTURE_OPERATING_MODEL_2026-04-09.md`
 - `docs/UNITY_JS_BRIDGE_CONTRACT.md`
 - `docs/CANDY_UNITY_SHARED_WALLET_STATUS_2026-04-11.md`
+- `docs/UNITY_VENDOR_SDK_BOOTSTRAP_2026-04-11.md`
+
+## Standard Unity-verifisering
+
+For daglig verifisering av tracket Unity-kilde og vendor-SDK-oppsett, bruk:
+
+```bash
+bash scripts/unity-test-suite.sh
+```
+
+Det bootstrapper vendor-SDK-er ved behov og kjører hele Unity-suiten i riktig rekkefølge.
+
+For å publisere oppdatert vendor-bundle til standard lokal team-plassering, bruk:
+
+```bash
+bash scripts/unity-vendor-sdk-publish-local.sh
+```
+
+For å verifisere en bundle manuelt før restore:
+
+```bash
+bash scripts/unity-vendor-sdk-verify.sh /absolute/path/to/unity-vendor-sdk.tar.gz
+```
+
+Bundle-verifiseringen bruker deterministisk innholds-hash, ikke tar-metadata.
+
+For CI eller ren maskin med delt artifact-URL:
+
+```bash
+UNITY_VENDOR_BUNDLE_URL=https://internal.example.com/unity-vendor-sdk.tar.gz \
+UNITY_VENDOR_BUNDLE_MANIFEST_URL=https://internal.example.com/unity-vendor-sdk.manifest.tsv \
+bash scripts/unity-test-suite-ci.sh
+```
 
 Providervendt Candy-integrasjonsdokumentasjon eies ikke av dette repoet. Bruk:
 

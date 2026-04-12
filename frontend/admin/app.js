@@ -1804,6 +1804,8 @@ function formatComplianceSnapshot(snapshot) {
   const monthlyReg = snapshot?.regulatoryLossLimits?.monthly;
   const dailyPersonal = snapshot?.personalLossLimits?.daily;
   const monthlyPersonal = snapshot?.personalLossLimits?.monthly;
+  const pendingDaily = snapshot?.pendingLossLimits?.daily;
+  const pendingMonthly = snapshot?.pendingLossLimits?.monthly;
   const netDaily = snapshot?.netLoss?.daily;
   const netMonthly = snapshot?.netLoss?.monthly;
 
@@ -1818,13 +1820,15 @@ function formatComplianceSnapshot(snapshot) {
     `selfExclusionUntil: ${snapshot?.restrictions?.selfExclusion?.minimumUntil || "-"}`,
     `reg.daily=${dailyReg ?? "-"} | reg.monthly=${monthlyReg ?? "-"}`,
     `personal.daily=${dailyPersonal ?? "-"} | personal.monthly=${monthlyPersonal ?? "-"}`,
+    `pending.daily=${pendingDaily ? `${pendingDaily.value} @ ${pendingDaily.effectiveFrom}` : "-"}`,
+    `pending.monthly=${pendingMonthly ? `${pendingMonthly.value} @ ${pendingMonthly.effectiveFrom}` : "-"}`,
     `net.daily=${netDaily ?? "-"} | net.monthly=${netMonthly ?? "-"}`
   ].join("\n");
 }
 
 function syncComplianceLimitInputs(snapshot) {
-  const daily = snapshot?.personalLossLimits?.daily;
-  const monthly = snapshot?.personalLossLimits?.monthly;
+  const daily = snapshot?.pendingLossLimits?.daily?.value ?? snapshot?.personalLossLimits?.daily;
+  const monthly = snapshot?.pendingLossLimits?.monthly?.value ?? snapshot?.personalLossLimits?.monthly;
   elements.complianceDailyLossLimit.value = Number.isFinite(daily) ? String(daily) : "";
   elements.complianceMonthlyLossLimit.value = Number.isFinite(monthly) ? String(monthly) : "";
 }

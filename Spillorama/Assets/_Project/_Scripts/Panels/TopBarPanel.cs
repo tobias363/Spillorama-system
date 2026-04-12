@@ -68,6 +68,15 @@ public class TopBarPanel : MonoBehaviour
     #region PUBLIC_METHODS
     public void SetSwitchHallDropdown(List<ApprovedHalls> approvedHalls)
     {
+        if (approvedHalls == null || approvedHalls.Count == 0)
+        {
+            ApprovedHalls.Clear();
+            dropdownSwitchHall.ClearOptions();
+            currentHall = null;
+            UIManager.Instance.SyncApprovedHallsToWebHost();
+            return;
+        }
+
         ApprovedHalls.Clear();
         ApprovedHalls = approvedHalls;
         dropdownSwitchHall.ClearOptions();
@@ -78,103 +87,203 @@ public class TopBarPanel : MonoBehaviour
         }
         dropdownSwitchHall.AddOptions(options);
         currentHall = ApprovedHalls.Find(hall => hall.hallId == UIManager.Instance.Player_Hall_ID);
+        int currentIndex = 0;
         for (int i = 0; i < ApprovedHalls.Count; i++)
         {
             if (ApprovedHalls[i].isSelected)
             {
-                dropdownSwitchHall.value = i;
                 currentHall = ApprovedHalls[i];
-                //Debug.Log("check check " + currentHall.hallName + " \n " + currentHall.totalLimitAvailable + "kr");
-                dropdownSwitchHall.captionText.text = currentHall.hallName + " \n " + currentHall.totalLimitAvailable + "kr";
-                txtcurrentHallName.text = currentHall.hallName + " \n (" + currentHall.totalLimitAvailable + "kr)";
+                currentIndex = i;
                 break;
             }
         }
+
         if (currentHall == null)
         {
             currentHall = ApprovedHalls[0];
-            dropdownSwitchHall.value = 0;
         }
+        else
+        {
+            int foundIndex = ApprovedHalls.FindIndex(hall => hall.hallId == currentHall.hallId);
+            if (foundIndex >= 0)
+                currentIndex = foundIndex;
+        }
+
+        dropdownSwitchHall.value = currentIndex;
+        ApplyCurrentHallVisuals(currentHall);
+        UIManager.Instance.Player_Hall_ID = currentHall.hallId;
+        UIManager.Instance.Player_Hall_Name = currentHall.hallName;
+        SyncHallContextToHost();
     }
 
     public void OnSwitchHallDropdownValueChanged(int index)
     {
         Debug.Log($"OnSwitchHallDropdownValueChanged: {index}");
-        currentHall = ApprovedHalls[index];
-        if (currentHall.isSelected)
+        if (index < 0 || index >= ApprovedHalls.Count)
         {
-
-            dropdownSwitchHall.captionText.text = currentHall.hallName + " \n " + currentHall.totalLimitAvailable + "kr";
-            txtcurrentHallName.text = currentHall.hallName + " \n (" + currentHall.totalLimitAvailable + "kr)";
+            Debug.LogError("Selected Hall index not found");
             return;
         }
-        if (currentHall != null)
-        {
-            Debug.Log($"Selected Hall: {currentHall.hallName}");
-            dropdownSwitchHall.captionText.text = $"{currentHall.hallName} \n ({currentHall.totalLimitAvailable} kr)";
-            txtcurrentHallName.text = currentHall.hallName + " \n (" + currentHall.totalLimitAvailable + "kr)";
-            EventManager.Instance.SwitchHall(currentHall.hallId, (socket, packet, args) =>
-            {
-                Debug.Log($"SwitchHall Response: {packet}");
-                EventResponse<SwitchHallResponse> response = JsonUtility.FromJson<EventResponse<SwitchHallResponse>>(Utility.Instance.GetPacketString(packet));
-                if (response.status == Constants.EventStatus.SUCCESS)
-                {
-                    CallPlayerHallLimitEvent();
-                    UIManager.Instance.gameAssetData.PlayerId = response.result.playerId;
-                    UIManager.Instance.Player_Hall_ID = response.result.hall;
-                    UIManager.Instance.Player_Hall_Name = response.result.hallName;
-                    UIManager.Instance.gameAssetData.RealMoney = response.result.realMoney.ToString();
-                    // UIManager.Instance.loginPanel.selectedHall = hallData;
-                    OnGamesButtonTap();
-                }
-                else
-                {
-                    UIManager.Instance.messagePopup.DisplayMessagePopup(response.message);
-                }
-            });
-        }
-        else
+
+        currentHall = ApprovedHalls[index];
+        if (currentHall == null)
         {
             Debug.LogError("Selected Hall not found");
+            return;
         }
+
+        if (currentHall.isSelected)
+        {
+            ApplyCurrentHallVisuals(currentHall);
+            UIManager.Instance.Player_Hall_ID = currentHall.hallId;
+            UIManager.Instance.Player_Hall_Name = currentHall.hallName;
+            SyncHallContextToHost();
+            return;
+        }
+
+        RequestHallSwitch(currentHall);
+    }
+
+    public void SwitchHallFromHost(string hallId)
+    {
+        if (string.IsNullOrEmpty(hallId))
+        {
+            Debug.LogWarning("SwitchHallFromHost skipped: empty hallId.");
+            return;
+        }
+
+        ApprovedHalls hall = ApprovedHalls.Find(item => item.hallId == hallId);
+        if (hall == null)
+        {
+            Debug.LogWarning("SwitchHallFromHost skipped: hall not found in approved list: " + hallId);
+            return;
+        }
+
+        if (hall.isSelected)
+        {
+            currentHall = hall;
+            ApplyCurrentHallVisuals(currentHall);
+            UIManager.Instance.Player_Hall_ID = currentHall.hallId;
+            UIManager.Instance.Player_Hall_Name = currentHall.hallName;
+            SyncHallContextToHost();
+            return;
+        }
+
+        RequestHallSwitch(hall);
     }
 
     void CallPlayerHallLimitEvent()
     {
-        EventManager.Instance.PlayerHallLimit((socket, packet, args) =>
+        CallPlayerHallLimit_Spillorama();
+    }
+
+    private void CallPlayerHallLimit_Spillorama()
+    {
+        if (SpilloramaApiClient.Instance == null) return;
+
+        SpilloramaApiClient.Instance.GetHalls(
+            (SpilloramaHall[] halls) =>
+            {
+                if (halls == null || halls.Length == 0) return;
+
+                var approvedHalls = new System.Collections.Generic.List<ApprovedHalls>();
+                foreach (var hall in halls)
+                {
+                    if (!hall.isActive) continue;
+                    approvedHalls.Add(new ApprovedHalls
+                    {
+                        hallId = hall.id,
+                        hallName = hall.name,
+                        totalLimitAvailable = 0,
+                        isSelected = hall.id == UIManager.Instance.Player_Hall_ID
+                    });
+                }
+
+                // Fetch compliance for current hall to get remaining limit
+                string currentHallId = UIManager.Instance.Player_Hall_ID ?? "";
+                if (!string.IsNullOrEmpty(currentHallId))
+                {
+                    SpilloramaApiClient.Instance.GetCompliance(currentHallId,
+                        (SpilloramaComplianceData compliance) =>
+                        {
+                            // Update the current hall's limit display
+                            foreach (var h in approvedHalls)
+                            {
+                                if (h.hallId == currentHallId)
+                                    h.totalLimitAvailable = (double)compliance.limits.monthlyLossRemaining;
+                            }
+                            UIManager.Instance.topBarPanel.SetSwitchHallDropdown(approvedHalls);
+                        },
+                        (string code, string msg) =>
+                        {
+                            // Show halls even without compliance data
+                            UIManager.Instance.topBarPanel.SetSwitchHallDropdown(approvedHalls);
+                        }
+                    );
+                }
+                else
+                {
+                    UIManager.Instance.topBarPanel.SetSwitchHallDropdown(approvedHalls);
+                }
+            },
+            (string code, string message) =>
+            {
+                Debug.LogWarning($"[TopBarPanel] GetHalls failed: {code} — {message}");
+            }
+        );
+    }
+
+    private void RequestHallSwitch(ApprovedHalls hall)
+    {
+        if (hall == null)
         {
-            Debug.Log("PlayerHallLimit: " + packet.ToString());
-            EventResponse<PlayerApprovedHallsResponse> response = JsonUtility.FromJson<EventResponse<PlayerApprovedHallsResponse>>(Utility.Instance.GetPacketString(packet));
-            if (response.status == Constants.EventStatus.SUCCESS)
-            {
-                UIManager.Instance.topBarPanel.SetSwitchHallDropdown(response.result.approvedHalls);
-            }
-            else
-            {
-                Debug.Log("PlayerHallLimit: " + response.message);
-                UIManager.Instance.messagePopup.DisplayMessagePopup(response.message);
-            }
-        });
+            Debug.LogError("RequestHallSwitch: hall missing");
+            return;
+        }
+
+        Debug.Log($"Selected Hall: {hall.hallName}");
+
+        RequestHallSwitch_Spillorama(hall);
+    }
+
+    private void RequestHallSwitch_Spillorama(ApprovedHalls hall)
+    {
+        // In Spillorama, hall switching is client-side — no server roundtrip needed.
+        // Set the active hall and refresh compliance/balance from REST.
+        currentHall = hall;
+        UIManager.Instance.Player_Hall_ID = hall.hallId;
+        UIManager.Instance.Player_Hall_Name = hall.hallName;
+
+        // Refresh balance and compliance for new hall
+        UIManager.Instance.RefreshPlayerWalletFromHost();
+        CallPlayerHallLimit_Spillorama();
+        ApplyCurrentHallVisuals(currentHall);
+        SyncHallContextToHost();
+        OnGamesButtonTap();
+    }
+
+    private void ApplyCurrentHallVisuals(ApprovedHalls hall)
+    {
+        if (hall == null)
+            return;
+
+        string caption = $"{hall.hallName} \n {hall.totalLimitAvailable}kr";
+        string currentHallLabel = hall.hallName + " \n (" + hall.totalLimitAvailable + "kr)";
+        dropdownSwitchHall.captionText.text = caption;
+        txtcurrentHallName.text = currentHallLabel;
+    }
+
+    private void SyncHallContextToHost()
+    {
+        UIManager.Instance.SyncActiveHallToWebHost();
+        UIManager.Instance.SyncApprovedHallsToWebHost();
     }
 
     public void OnBingoBtnTap()
     {
-        isButtonTap = true;
-        EventManager.Instance.StopGameByPlayers((socket, packet, args) =>
-        {
-            Debug.Log($"StopGameByPlayers Response: {packet}");
-            EventResponse response = JsonUtility.FromJson<EventResponse>(Utility.Instance.GetPacketString(packet));
-            if (response.status.Equals("success"))
-            {
-                isButtonTap = false;
-                // SoundManager.Instance.BingoSound();
-                UIManager.Instance.messagePopup.DisplayMessagePopupAutoHide(response.message, true);
-            }
-            else
-            {
-                UIManager.Instance.messagePopup.DisplayMessagePopupAutoHide(response.message, true);
-            }
-        });
+        // Bingo claims are handled via SpilloramaSocketManager (claim:submit event).
+        // This button is kept for UI compatibility but no longer calls AIS StopGameByPlayers.
+        Debug.Log("[TopBarPanel] OnBingoBtnTap: handled via Spillorama game flow");
     }
     public void OnWalletButtonTap()
     {
@@ -276,21 +385,9 @@ public class TopBarPanel : MonoBehaviour
         // }
 
         btnMiniGamePlan.gameObject.SetActive(false);
-        if (UIManager.Instance.splitScreenGameManager.SplitScreenRunningGameCount() > 0)
-        {
-            Debug.Log("IF");
-            RunningGamesButtonEnable = true;
-            UIManager.Instance.lobbyPanel.OpenGameSelectionPanel();
-            UIManager.Instance.game4Panel.Close();
-            UIManager.Instance.game5Panel.Close();
-            //Debug.Log("1");
-        }
-        else
-        {
-            Debug.Log("ELSE");
-            UIManager.Instance.CloseAllPanels();
-            UIManager.Instance.lobbyPanel.OpenGameSelectionPanel();
-        }
+        RunningGamesButtonEnable = UIManager.Instance.splitScreenGameManager.SplitScreenRunningGameCount() > 0;
+        UIManager.Instance.CloseAllPanels();
+        UIManager.Instance.lobbyPanel.OpenHostShellLobbyState();
     }
 
     public void OpenGameSelectionPanel()
@@ -497,8 +594,17 @@ public class TopBarPanel : MonoBehaviour
 
     private void RefreshUniqueIdComponents()
     {
-        btnProfile.gameObject.SetActive(!UIManager.Instance.gameAssetData.IsUniqueIdPlayer);
-        btnDeposit.gameObject.SetActive(!UIManager.Instance.gameAssetData.IsUniqueIdPlayer);
+        bool isUniqueIdPlayer = UIManager.Instance.gameAssetData.IsUniqueIdPlayer;
+        bool useHostShellLobby = UIManager.Instance.isGameWebGL;
+
+        btnProfile.gameObject.SetActive(!isUniqueIdPlayer);
+        btnDeposit.gameObject.SetActive(!isUniqueIdPlayer);
+
+        if (btnSwitchHall != null)
+            btnSwitchHall.gameObject.SetActive(!useHostShellLobby);
+
+        if (dropdownSwitchHall != null)
+            dropdownSwitchHall.gameObject.SetActive(!useHostShellLobby);
     }
     #endregion
 

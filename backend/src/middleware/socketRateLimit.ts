@@ -100,6 +100,34 @@ export class SocketRateLimiter {
     return true;
   }
 
+  /**
+   * BIN-247: Check rate limit by an arbitrary key (e.g., walletId).
+   * Used in addition to socket-based checks so reconnects don't reset counters.
+   */
+  checkByKey(key: string, eventName: string, nowMs: number = Date.now()): boolean {
+    this.activeSockets.add(key);
+    const bucketKey = `${key}:${eventName}`;
+    const config = this.limits[eventName] ?? this.fallback;
+
+    let timestamps = this.buckets.get(bucketKey);
+    if (!timestamps) {
+      timestamps = [];
+      this.buckets.set(bucketKey, timestamps);
+    }
+
+    const cutoff = nowMs - config.windowMs;
+    while (timestamps.length > 0 && timestamps[0] <= cutoff) {
+      timestamps.shift();
+    }
+
+    if (timestamps.length >= config.maxEvents) {
+      return false;
+    }
+
+    timestamps.push(nowMs);
+    return true;
+  }
+
   private checkBucket(key: string, config: RateLimitConfig, nowMs: number): boolean {
     let timestamps = this.buckets.get(key);
     if (!timestamps) {

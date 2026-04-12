@@ -63,13 +63,24 @@ public class SplashScreenPanel : MonoBehaviour
         float intervalTime = 0.1f;
         Debug.Log($"[Recovery] Splash wait started. isGameWebGL={UIManager.Instance.isGameWebGL}");
 
-        while (!GameSocketManager.SocketConnected)
+        // Phase 1: In host mode the shell handles auth via JWT (ReceiveShellToken).
+        // The AIS socket is still used for game events but must not block Unity startup —
+        // cap the wait so the shell can deliver its JWT even if AIS is slow.
+        // Non-host mode keeps the original unlimited wait.
+        float maxWaitSec = UIManager.Instance.isGameWebGL ? 10f : float.MaxValue;
+        float waitedSec = 0f;
+
+        while (!GameSocketManager.SocketConnected && waitedSec < maxWaitSec)
         {
             splashScreenViewTime -= intervalTime;
+            waitedSec += intervalTime;
             yield return new WaitForSeconds(intervalTime);
         }
 
-        Debug.Log($"[Recovery] Socket connected. Remaining splash delay={splashScreenViewTime:0.00}");
+        if (!GameSocketManager.SocketConnected)
+            Debug.Log("[HostMode] AIS socket not yet connected — proceeding with JWT auth path");
+
+        Debug.Log($"[Recovery] Socket connected={GameSocketManager.SocketConnected}. Remaining splash delay={splashScreenViewTime:0.00}");
 
         if (splashScreenViewTime > 0)
             yield return new WaitForSeconds(splashScreenViewTime);
@@ -77,8 +88,14 @@ public class SplashScreenPanel : MonoBehaviour
 #if UNITY_WEBGL// || UNITY_EDITOR
         if (UIManager.Instance.isGameWebGL)
         {
-            Debug.Log("[Recovery] Splash -> OpenLoginPanel() for WebGL Game scene");
-            OpenLoginPanel();
+            // ── Host-driven mode ──────────────────────────────────────────
+            // Web shell handles all login UI. Unity never shows its own login panel.
+            // Signal to JS that we're ready; JS sends JWT via ReceiveShellToken.
+            Debug.Log("[HostMode] Splash -> requesting shell JWT");
+            this.Close();
+            UIManager.Instance.SignalHostReady();
+            // Also ask JS directly (in case OnUnityReady already fired)
+            Application.ExternalCall("ProvideShellCredentials");
         }
         else
         {

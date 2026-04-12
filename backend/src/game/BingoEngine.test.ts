@@ -620,7 +620,7 @@ test("personal loss limits are hall-specific", async () => {
     monthlyLossLimit: 4400
   });
 
-  engine.setPlayerLossLimits({
+  await engine.setPlayerLossLimits({
     walletId: "wallet-host-a",
     hallId: "hall-1",
     daily: 50,
@@ -659,7 +659,7 @@ async function withFakeNow<T>(nowMs: number, work: () => Promise<T>): Promise<T>
   }
 }
 
-test("mandatory pause is enforced after play session limit and includes break summary", async () => {
+test("ending a game activates mandatory pause and blocks gameplay until it expires", async () => {
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
     playSessionLimitMs: 1000,
     pauseDurationMs: 10 * 60 * 1000
@@ -692,6 +692,29 @@ test("mandatory pause is enforced after play session limit and includes break su
     });
   });
 
+  await withFakeNow(2501, async () => {
+    const compliance = engine.getPlayerCompliance("wallet-host", "hall-1");
+    assert.equal(compliance.pause.isOnPause, true);
+    assert.equal(compliance.pause.accumulatedPlayMs, 0);
+    assert.equal(compliance.pause.lastMandatoryBreak?.hallId, "hall-1");
+    assert.equal(compliance.pause.lastMandatoryBreak?.totalPlayMs, 1501);
+    assert.equal(compliance.pause.lastMandatoryBreak?.netLoss.daily, 100);
+    assert.equal(compliance.pause.lastMandatoryBreak?.netLoss.monthly, 100);
+    assert.equal(compliance.restrictions.blockedBy, "MANDATORY_PAUSE");
+
+    await assert.rejects(
+      async () =>
+        engine.createRoom({
+          hallId: "hall-2",
+          playerName: "Host Again",
+          walletId: "wallet-host"
+        }),
+      (error: unknown) => error instanceof DomainError && error.code === "PLAYER_REQUIRED_PAUSE"
+    );
+  });
+
+  // Player on pause is excluded from the round — game starts without them.
+  // The room continues to run; paused players simply don't get tickets.
   const secondRoom = await createRoomWithTwoPlayers({
     engine,
     hallId: "hall-1",
@@ -701,8 +724,6 @@ test("mandatory pause is enforced after play session limit and includes break su
     guestWalletId: "wallet-guest-2"
   });
 
-  // Player on pause is excluded from the round — game starts without them.
-  // The room continues to run; paused players simply don't get tickets.
   await withFakeNow(3000, async () => {
     await engine.startGame({
       roomCode: secondRoom.roomCode,
@@ -711,24 +732,120 @@ test("mandatory pause is enforced after play session limit and includes break su
       ticketsPerPlayer: 1,
       payoutPercent: 80
     });
-    const snapshot = engine.getRoomSnapshot(secondRoom.roomCode);
-    // Host (wallet-host) is on pause. Game should still run for other players.
-    // If no eligible players remained, snapshot has no currentGame — that's ok.
-    const ticketKeys = Object.keys(snapshot?.currentGame?.tickets ?? {});
-    assert.ok(!ticketKeys.includes(secondRoom.hostPlayerId), "paused player should not have tickets");
   });
 
-  const compliance = engine.getPlayerCompliance("wallet-host", "hall-1");
-  assert.equal(compliance.pause.isOnPause, true);
-  assert.ok(compliance.pause.lastMandatoryBreak);
-  assert.equal(compliance.pause.lastMandatoryBreak?.hallId, "hall-1");
+  await withFakeNow(2501 + 10 * 60 * 1000 + 1, async () => {
+    await assert.doesNotReject(async () =>
+      engine.createRoom({
+        hallId: "hall-2",
+        playerName: "Host Again",
+        walletId: "wallet-host"
+      })
+    );
+    const compliance = engine.getPlayerCompliance("wallet-host", "hall-1");
+    assert.equal(compliance.pause.isOnPause, false);
+    assert.equal(compliance.pause.lastMandatoryBreak?.hallId, "hall-1");
+  });
+});
+
+test("loss limit increases are delayed until next local day and month", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    dailyLossLimit: 900,
+    monthlyLossLimit: 4400
+  });
+  const startMs = new Date(2026, 3, 11, 10, 0, 0, 0).getTime();
+  const nextDayStartMs = new Date(2026, 3, 12, 0, 0, 0, 0).getTime();
+  const nextMonthStartMs = new Date(2026, 4, 1, 0, 0, 0, 0).getTime();
+
+  await withFakeNow(startMs, async () => {
+    await engine.setPlayerLossLimits({
+      walletId: "wallet-cooldown",
+      hallId: "hall-1",
+      daily: 400,
+      monthly: 1000
+    });
+  });
+
+  await withFakeNow(startMs + 60_000, async () => {
+    const compliance = await engine.setPlayerLossLimits({
+      walletId: "wallet-cooldown",
+      hallId: "hall-1",
+      daily: 500,
+      monthly: 1200
+    });
+    assert.equal(compliance.personalLossLimits.daily, 400);
+    assert.equal(compliance.personalLossLimits.monthly, 1000);
+    assert.equal(compliance.pendingLossLimits?.daily?.value, 500);
+    assert.equal(
+      compliance.pendingLossLimits?.daily?.effectiveFrom,
+      new Date(nextDayStartMs).toISOString()
+    );
+    assert.equal(compliance.pendingLossLimits?.monthly?.value, 1200);
+    assert.equal(
+      compliance.pendingLossLimits?.monthly?.effectiveFrom,
+      new Date(nextMonthStartMs).toISOString()
+    );
+  });
+
+  await withFakeNow(nextDayStartMs + 1, async () => {
+    const compliance = engine.getPlayerCompliance("wallet-cooldown", "hall-1");
+    assert.equal(compliance.personalLossLimits.daily, 500);
+    assert.equal(compliance.personalLossLimits.monthly, 1000);
+    assert.equal(compliance.pendingLossLimits?.daily, undefined);
+    assert.equal(compliance.pendingLossLimits?.monthly?.value, 1200);
+  });
+
+  await withFakeNow(nextMonthStartMs + 1, async () => {
+    const compliance = engine.getPlayerCompliance("wallet-cooldown", "hall-1");
+    assert.equal(compliance.personalLossLimits.daily, 500);
+    assert.equal(compliance.personalLossLimits.monthly, 1200);
+    assert.equal(compliance.pendingLossLimits, undefined);
+  });
+});
+
+test("loss limit decreases apply immediately and clear pending increases for the same field", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    dailyLossLimit: 900,
+    monthlyLossLimit: 4400
+  });
+  const startMs = new Date(2026, 3, 11, 10, 0, 0, 0).getTime();
+
+  await withFakeNow(startMs, async () => {
+    await engine.setPlayerLossLimits({
+      walletId: "wallet-cooldown-2",
+      hallId: "hall-1",
+      daily: 400,
+      monthly: 1000
+    });
+  });
+
+  await withFakeNow(startMs + 60_000, async () => {
+    await engine.setPlayerLossLimits({
+      walletId: "wallet-cooldown-2",
+      hallId: "hall-1",
+      daily: 500,
+      monthly: 1200
+    });
+  });
+
+  await withFakeNow(startMs + 120_000, async () => {
+    const compliance = await engine.setPlayerLossLimits({
+      walletId: "wallet-cooldown-2",
+      hallId: "hall-1",
+      daily: 350
+    });
+    assert.equal(compliance.personalLossLimits.daily, 350);
+    assert.equal(compliance.personalLossLimits.monthly, 1000);
+    assert.equal(compliance.pendingLossLimits?.daily, undefined);
+    assert.equal(compliance.pendingLossLimits?.monthly?.value, 1200);
+  });
 });
 
 test("timed pause cannot be cancelled early and blocks gameplay actions", async () => {
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter());
 
   await withFakeNow(10_000, async () => {
-    engine.setTimedPause({
+    await engine.setTimedPause({
       walletId: "wallet-paused",
       durationMinutes: 30
     });
@@ -745,14 +862,14 @@ test("timed pause cannot be cancelled early and blocks gameplay actions", async 
       (error: unknown) => error instanceof DomainError && error.code === "PLAYER_TIMED_PAUSE"
     );
 
-    assert.throws(
-      () => engine.clearTimedPause("wallet-paused"),
+    await assert.rejects(
+      async () => engine.clearTimedPause("wallet-paused"),
       (error: unknown) => error instanceof DomainError && error.code === "TIMED_PAUSE_LOCKED"
     );
   });
 
   await withFakeNow(2_000_000, async () => {
-    const compliance = engine.clearTimedPause("wallet-paused");
+    const compliance = await engine.clearTimedPause("wallet-paused");
     assert.equal(compliance.restrictions.timedPause.isActive, false);
   });
 });
@@ -761,7 +878,7 @@ test("self-exclusion cannot be lifted before one year and is checked on gameplay
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter());
 
   await withFakeNow(1_000, async () => {
-    engine.setSelfExclusion("wallet-host");
+    await engine.setSelfExclusion("wallet-host");
   });
 
   await withFakeNow(2_000, async () => {
@@ -775,15 +892,15 @@ test("self-exclusion cannot be lifted before one year and is checked on gameplay
       (error: unknown) => error instanceof DomainError && error.code === "PLAYER_SELF_EXCLUDED"
     );
 
-    assert.throws(
-      () => engine.clearSelfExclusion("wallet-host"),
+    await assert.rejects(
+      async () => engine.clearSelfExclusion("wallet-host"),
       (error: unknown) => error instanceof DomainError && error.code === "SELF_EXCLUSION_LOCKED"
     );
   });
 
   const oneYearAndOneMinuteMs = 365 * 24 * 60 * 60 * 1000 + 60_000;
   await withFakeNow(1_000 + oneYearAndOneMinuteMs, async () => {
-    const compliance = engine.clearSelfExclusion("wallet-host");
+    const compliance = await engine.clearSelfExclusion("wallet-host");
     assert.equal(compliance.restrictions.selfExclusion.isActive, false);
   });
 });
@@ -895,7 +1012,7 @@ test("prize policy supports hall/link effective dates and extra-prize daily cap"
   });
   assert.equal(activeBefore.singlePrizeCap, 2500);
 
-  engine.upsertPrizePolicy({
+  await engine.upsertPrizePolicy({
     hallId: "hall-2",
     linkId: "hall-2",
     effectiveFrom: new Date(nextDay).toISOString(),
@@ -1030,14 +1147,14 @@ test("daily report separates hall/game/channel ledgers and exports csv", async (
   const noonMs = Date.parse(`${reportDate}T12:00:00Z`);
 
   await withFakeNow(noonMs + 1_000, async () => {
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "MAIN_GAME",
       channel: "HALL",
       eventType: "STAKE",
       amount: 1000
     });
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "MAIN_GAME",
       channel: "HALL",
@@ -1045,14 +1162,14 @@ test("daily report separates hall/game/channel ledgers and exports csv", async (
       amount: 400
     });
 
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "MAIN_GAME",
       channel: "INTERNET",
       eventType: "STAKE",
       amount: 500
     });
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "MAIN_GAME",
       channel: "INTERNET",
@@ -1060,14 +1177,14 @@ test("daily report separates hall/game/channel ledgers and exports csv", async (
       amount: 100
     });
 
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "DATABINGO",
       channel: "INTERNET",
       eventType: "STAKE",
       amount: 300
     });
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "DATABINGO",
       channel: "INTERNET",
@@ -1100,7 +1217,7 @@ test("daily report separates hall/game/channel ledgers and exports csv", async (
   assert.ok(csv.includes("hall-1,MAIN_GAME,INTERNET,500,100,400"));
   assert.ok(csv.includes("hall-1,DATABINGO,INTERNET,300,50,250"));
 
-  const archived = engine.runDailyReportJob({ date: reportDate });
+  const archived = await engine.runDailyReportJob({ date: reportDate });
   assert.equal(archived.date, reportDate);
   const fetchedArchive = engine.getArchivedDailyReport(reportDate);
   assert.ok(fetchedArchive);
@@ -1114,28 +1231,28 @@ test("overskudd distribution enforces minimum percentages and links transfers to
   const noonMs = Date.parse(`${date}T12:00:00Z`);
 
   await withFakeNow(noonMs + 1_000, async () => {
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "MAIN_GAME",
       channel: "HALL",
       eventType: "STAKE",
       amount: 1000
     });
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "MAIN_GAME",
       channel: "HALL",
       eventType: "PRIZE",
       amount: 200
     });
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "DATABINGO",
       channel: "INTERNET",
       eventType: "STAKE",
       amount: 1000
     });
-    engine.recordAccountingEvent({
+    await engine.recordAccountingEvent({
       hallId: "hall-1",
       gameType: "DATABINGO",
       channel: "INTERNET",

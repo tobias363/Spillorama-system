@@ -75,7 +75,8 @@ public class GameAssetData : ScriptableObject
         {
             playerGameData._realMoney = value;
             UIManager.Instance.topBarPanel.RealMoney = value;
-            UIManager.Instance.lobbyPanel.walletPanel.balancePanel.RealMoney = value;
+            if (UIManager.Instance.lobbyPanel?.walletPanel?.balancePanel != null)
+                UIManager.Instance.lobbyPanel.walletPanel.balancePanel.RealMoney = value;
             UIManager.Instance.selectPurchaseTypePanel.RealMoney = value;
         }
         get
@@ -90,7 +91,8 @@ public class GameAssetData : ScriptableObject
         {
             playerGameData._todaysBalance = value;
             UIManager.Instance.topBarPanel.TodaysBalance = value;
-            UIManager.Instance.lobbyPanel.walletPanel.balancePanel.TodaysBalance = value;
+            if (UIManager.Instance.lobbyPanel?.walletPanel?.balancePanel != null)
+                UIManager.Instance.lobbyPanel.walletPanel.balancePanel.TodaysBalance = value;
             UIManager.Instance.selectPurchaseTypePanel.TodaysBalance = value;
         }
         get

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import type { BingoSystemAdapter } from "../adapters/BingoSystemAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
@@ -18,6 +18,8 @@ import type {
   ClaimType,
   GameSnapshot,
   GameState,
+  PatternDefinition,
+  PatternResult,
   Player,
   RecoverableGameSnapshot,
   RoomSnapshot,
@@ -26,6 +28,58 @@ import type {
   Ticket
 } from "./types.js";
 import { InMemoryRoomStateStore, type RoomStateStore } from "../store/RoomStateStore.js";
+import type {
+  ResponsibleGamingPersistenceAdapter,
+  ResponsibleGamingPersistenceSnapshot
+} from "./ResponsibleGamingPersistence.js";
+import { ComplianceManager } from "./ComplianceManager.js";
+import type {
+  LossLimits,
+  LossLedgerEntry,
+  PlayerComplianceSnapshot,
+  GameplayBlockType
+} from "./ComplianceManager.js";
+import { PrizePolicyManager } from "./PrizePolicyManager.js";
+import type { PrizeGameType, PrizePolicySnapshot, PrizePolicyVersion, ExtraPrizeEntry, ExtraDrawDenialAudit } from "./PrizePolicyManager.js";
+import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
+import type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
+import { ComplianceLedger } from "./ComplianceLedger.js";
+import type { LedgerGameType, LedgerChannel, LedgerEventType, ComplianceLedgerEntry, DailyComplianceReport, DailyComplianceReportRow, OrganizationAllocationInput, OverskuddDistributionTransfer, OverskuddDistributionBatch } from "./ComplianceLedger.js";
+
+export type {
+  LossLimits,
+  LossLedgerEntry,
+  PlayerComplianceSnapshot,
+  GameplayBlockType,
+  PendingLossLimitField,
+  PendingLossLimitChange,
+  PlaySessionState,
+  MandatoryBreakSummary,
+  RestrictionState,
+  GameplayBlockState
+} from "./ComplianceManager.js";
+
+export type {
+  PrizeGameType,
+  PrizePolicyVersion,
+  PrizePolicySnapshot,
+  ExtraPrizeEntry,
+  ExtraDrawDenialAudit
+} from "./PrizePolicyManager.js";
+
+export type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
+
+export type {
+  LedgerGameType,
+  LedgerChannel,
+  LedgerEventType,
+  ComplianceLedgerEntry,
+  DailyComplianceReportRow,
+  DailyComplianceReport,
+  OrganizationAllocationInput,
+  OverskuddDistributionTransfer,
+  OverskuddDistributionBatch
+} from "./ComplianceLedger.js";
 
 export class DomainError extends Error {
   public readonly code: string;
@@ -43,6 +97,8 @@ interface CreateRoomInput {
   socketId?: string;
   /** Optional fixed room code (e.g. "BINGO1"). Skips random generation. */
   roomCode?: string;
+  /** Game variant slug (e.g. "bingo", "rocket"). Stored on the room. */
+  gameSlug?: string;
 }
 
 interface JoinRoomInput extends CreateRoomInput {
@@ -57,7 +113,14 @@ interface StartGameInput {
   payoutPercent: number;
   /** If provided, only these players get tickets. Others watch without playing. */
   armedPlayerIds?: string[];
+  /** Win-condition patterns for this round. Defaults to [1 Rad, Full Plate]. */
+  patterns?: PatternDefinition[];
 }
+
+const DEFAULT_PATTERNS: PatternDefinition[] = [
+  { id: "1-rad",       name: "1 Rad",       claimType: "LINE",  prizePercent: 30, order: 1, design: 1 },
+  { id: "full-plate",  name: "Full Plate",  claimType: "BINGO", prizePercent: 70, order: 2, design: 2 },
+];
 
 interface DrawNextInput {
   roomCode: string;
@@ -93,266 +156,38 @@ interface ComplianceOptions {
   pauseDurationMs?: number;
   selfExclusionMinMs?: number;
   maxDrawsPerRound?: number;
+  persistence?: ResponsibleGamingPersistenceAdapter;
+  /** BIN-251: External room state store for cross-instance persistence (e.g. Redis). */
+  roomStateStore?: import("../store/RoomStateStore.js").RoomStateStore;
 }
 
-interface LossLimits {
-  daily: number;
-  monthly: number;
-}
 
-interface LossLedgerEntry {
-  type: "BUYIN" | "PAYOUT";
-  amount: number;
-  createdAtMs: number;
-}
-
-interface PlaySessionState {
-  accumulatedMs: number;
-  activeFromMs?: number;
-  pauseUntilMs?: number;
-  lastMandatoryBreak?: MandatoryBreakSummary;
-}
-
-interface MandatoryBreakSummary {
-  triggeredAtMs: number;
-  pauseUntilMs: number;
-  totalPlayMs: number;
-  hallId: string;
-  netLoss: LossLimits;
-}
-
-interface RestrictionState {
-  timedPauseUntilMs?: number;
-  timedPauseSetAtMs?: number;
-  selfExcludedAtMs?: number;
-  selfExclusionMinimumUntilMs?: number;
-}
-
-type GameplayBlockType = "TIMED_PAUSE" | "SELF_EXCLUDED";
-
-interface GameplayBlockState {
-  type: GameplayBlockType;
-  untilMs: number;
-}
-
-type PrizeGameType = "DATABINGO";
-
-interface PrizePolicyVersion {
-  id: string;
-  gameType: PrizeGameType;
-  hallId: string;
-  linkId: string;
-  effectiveFromMs: number;
-  singlePrizeCap: number;
-  dailyExtraPrizeCap: number;
-  createdAtMs: number;
-}
-
-interface PrizePolicySnapshot {
-  id: string;
-  gameType: PrizeGameType;
-  hallId: string;
-  linkId: string;
-  effectiveFrom: string;
-  singlePrizeCap: number;
-  dailyExtraPrizeCap: number;
-  createdAt: string;
-}
-
-interface ExtraPrizeEntry {
-  amount: number;
-  createdAtMs: number;
-  policyId: string;
-}
-
-interface ExtraDrawDenialAudit {
-  id: string;
-  createdAt: string;
-  source: "API" | "SOCKET" | "UNKNOWN";
-  roomCode?: string;
-  playerId?: string;
-  walletId?: string;
-  hallId?: string;
-  reasonCode: "EXTRA_DRAW_NOT_ALLOWED";
-  metadata?: Record<string, unknown>;
-}
-
-type LedgerGameType = "MAIN_GAME" | "DATABINGO";
-type LedgerChannel = "HALL" | "INTERNET";
-type LedgerEventType = "STAKE" | "PRIZE" | "EXTRA_PRIZE" | "ORG_DISTRIBUTION";
-
-interface ComplianceLedgerEntry {
-  id: string;
-  createdAt: string;
-  createdAtMs: number;
-  hallId: string;
-  gameType: LedgerGameType;
-  channel: LedgerChannel;
-  eventType: LedgerEventType;
-  amount: number;
-  currency: "NOK";
-  roomCode?: string;
-  gameId?: string;
-  claimId?: string;
-  playerId?: string;
-  walletId?: string;
-  sourceAccountId?: string;
-  targetAccountId?: string;
-  policyVersion?: string;
-  batchId?: string;
-  metadata?: Record<string, unknown>;
-}
-
-interface PayoutAuditEvent {
-  id: string;
-  createdAt: string;
-  claimId?: string;
-  gameId?: string;
-  roomCode?: string;
-  hallId: string;
-  policyVersion?: string;
-  amount: number;
-  currency: "NOK";
-  walletId: string;
-  playerId?: string;
-  sourceAccountId?: string;
-  txIds: string[];
-  kind: "CLAIM_PRIZE" | "EXTRA_PRIZE";
-  chainIndex: number;
-  previousHash: string;
-  eventHash: string;
-}
-
-interface DailyComplianceReportRow {
-  hallId: string;
-  gameType: LedgerGameType;
-  channel: LedgerChannel;
-  grossTurnover: number;
-  prizesPaid: number;
-  net: number;
-  stakeCount: number;
-  prizeCount: number;
-  extraPrizeCount: number;
-}
-
-interface DailyComplianceReport {
-  date: string;
-  generatedAt: string;
-  rows: DailyComplianceReportRow[];
-  totals: {
-    grossTurnover: number;
-    prizesPaid: number;
-    net: number;
-    stakeCount: number;
-    prizeCount: number;
-    extraPrizeCount: number;
-  };
-}
-
-interface OrganizationAllocationInput {
-  organizationId: string;
-  organizationAccountId: string;
-  sharePercent: number;
-}
-
-interface OverskuddDistributionTransfer {
-  id: string;
-  batchId: string;
-  createdAt: string;
-  date: string;
-  hallId: string;
-  gameType: LedgerGameType;
-  channel: LedgerChannel;
-  sourceAccountId: string;
-  organizationId: string;
-  organizationAccountId: string;
-  amount: number;
-  txIds: string[];
-}
-
-interface OverskuddDistributionBatch {
-  id: string;
-  createdAt: string;
-  date: string;
-  hallId?: string;
-  gameType?: LedgerGameType;
-  channel?: LedgerChannel;
-  requiredMinimum: number;
-  distributedAmount: number;
-  transfers: OverskuddDistributionTransfer[];
-  allocations: OrganizationAllocationInput[];
-}
-
-interface PlayerComplianceSnapshot {
-  walletId: string;
-  hallId?: string;
-  regulatoryLossLimits: LossLimits;
-  personalLossLimits: LossLimits;
-  netLoss: LossLimits;
-  pause: {
-    isOnPause: boolean;
-    pauseUntil?: string;
-    accumulatedPlayMs: number;
-    playSessionLimitMs: number;
-    pauseDurationMs: number;
-    lastMandatoryBreak?: {
-      triggeredAt: string;
-      pauseUntil: string;
-      totalPlayMs: number;
-      hallId: string;
-      netLoss: LossLimits;
-    };
-  };
-  restrictions: {
-    isBlocked: boolean;
-    blockedBy?: GameplayBlockType;
-    blockedUntil?: string;
-    timedPause: {
-      isActive: boolean;
-      pauseUntil?: string;
-      setAt?: string;
-    };
-    selfExclusion: {
-      isActive: boolean;
-      setAt?: string;
-      minimumUntil?: string;
-      canBeRemoved: boolean;
-    };
-  };
-}
-
-const POLICY_WILDCARD = "*";
 const DEFAULT_SELF_EXCLUSION_MIN_MS = 365 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_DRAWS_PER_ROUND = 30;
 const MAX_BINGO_BALLS = 60;
 const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
+/** BIN-253: Minimum milliseconds between successive manual draw calls to prevent rapid-fire draws. */
+const MIN_MANUAL_DRAW_INTERVAL_MS = 500;
 
 export class BingoEngine {
   /** HOEY-7: Pluggable room state store (in-memory or Redis-backed). */
   private readonly rooms: RoomStateStore;
   private readonly roomLastRoundStartMs = new Map<string, number>();
-  private readonly lossEntriesByScope = new Map<string, LossLedgerEntry[]>();
-  private readonly personalLossLimitsByScope = new Map<string, LossLimits>();
-  private readonly playStateByWallet = new Map<string, PlaySessionState>();
-  private readonly restrictionsByWallet = new Map<string, RestrictionState>();
-  private readonly prizePoliciesByScope = new Map<string, PrizePolicyVersion[]>();
-  private readonly extraPrizeEntriesByScope = new Map<string, ExtraPrizeEntry[]>();
-  private readonly extraDrawDenials: ExtraDrawDenialAudit[] = [];
-  private readonly payoutAuditTrail: PayoutAuditEvent[] = [];
-  private readonly complianceLedger: ComplianceLedgerEntry[] = [];
-  private readonly dailyReportArchive = new Map<string, DailyComplianceReport>();
-  private readonly overskuddBatches = new Map<string, OverskuddDistributionBatch>();
-  private lastPayoutAuditHash = "GENESIS";
+  /** BIN-253: Tracks last draw timestamp per room for minimum-interval enforcement. */
+  private readonly roomLastDrawMs = new Map<string, number>();
+  /** BIN-251: Optional external store for cross-instance room state persistence. */
+  private readonly roomStateStore?: import("../store/RoomStateStore.js").RoomStateStore;
 
   private readonly minRoundIntervalMs: number;
   private readonly minDrawIntervalMs: number;
   private readonly lastDrawAtByRoom = new Map<string, number>();
   private readonly minPlayersToStart: number;
-  private readonly regulatoryLossLimits: LossLimits;
-  private readonly playSessionLimitMs: number;
-  private readonly pauseDurationMs: number;
-  private readonly selfExclusionMinMs: number;
   private readonly maxDrawsPerRound: number;
+  private readonly persistence?: ResponsibleGamingPersistenceAdapter;
+  private readonly compliance: ComplianceManager;
+  private readonly prizePolicy: PrizePolicyManager;
+  private readonly payoutAudit: PayoutAuditTrail;
+  private readonly ledger: ComplianceLedger;
 
   constructor(
     private readonly bingoAdapter: BingoSystemAdapter,
@@ -378,7 +213,7 @@ export class BingoEngine {
     if (!Number.isFinite(monthlyLossLimit) || monthlyLossLimit < 0) {
       throw new DomainError("INVALID_CONFIG", "monthlyLossLimit må være >= 0.");
     }
-    this.regulatoryLossLimits = {
+    const regulatoryLossLimits: LossLimits = {
       daily: dailyLossLimit,
       monthly: monthlyLossLimit
     };
@@ -410,19 +245,75 @@ export class BingoEngine {
         `maxDrawsPerRound må være et heltall mellom 1 og ${MAX_BINGO_BALLS}.`
       );
     }
-    this.playSessionLimitMs = Math.floor(playSessionLimitMs);
-    this.pauseDurationMs = Math.floor(pauseDurationMs);
-    this.selfExclusionMinMs = Math.floor(selfExclusionMinMs);
     this.maxDrawsPerRound = Math.floor(maxDrawsPerRound);
+    this.persistence = options.persistence;
 
-    this.upsertPrizePolicy({
-      gameType: "DATABINGO",
-      hallId: POLICY_WILDCARD,
-      linkId: POLICY_WILDCARD,
-      effectiveFrom: new Date(0).toISOString(),
-      singlePrizeCap: 2500,
-      dailyExtraPrizeCap: 12000
+    this.compliance = new ComplianceManager({
+      regulatoryLossLimits,
+      playSessionLimitMs: Math.floor(playSessionLimitMs),
+      pauseDurationMs: Math.floor(pauseDurationMs),
+      selfExclusionMinMs: Math.floor(selfExclusionMinMs),
+      persistence: options.persistence
     });
+
+    this.prizePolicy = new PrizePolicyManager({
+      persistence: options.persistence
+    });
+
+    this.payoutAudit = new PayoutAuditTrail({
+      persistence: options.persistence
+    });
+
+    this.ledger = new ComplianceLedger({
+      walletAdapter: this.walletAdapter,
+      persistence: options.persistence
+    });
+
+    // BIN-251: Wire external room state store if provided
+    this.roomStateStore = options.roomStateStore;
+  }
+
+  async hydratePersistentState(): Promise<void> {
+    if (!this.persistence) {
+      return;
+    }
+
+    await this.persistence.ensureInitialized();
+    const snapshot = await this.persistence.loadSnapshot();
+    const defaultPolicies = snapshot.prizePolicies.length === 0 ? this.prizePolicy.getDefaultPolicies() : [];
+
+    // Delegate compliance-related data to ComplianceManager
+    this.compliance.hydrateFromSnapshot({
+      personalLossLimits: snapshot.personalLossLimits,
+      pendingLossLimitChanges: snapshot.pendingLossLimitChanges,
+      restrictions: snapshot.restrictions,
+      playStates: snapshot.playStates,
+      lossEntries: snapshot.lossEntries
+    });
+
+    // Delegate prize policy data to PrizePolicyManager
+    this.prizePolicy.hydrateFromSnapshot({
+      prizePolicies: snapshot.prizePolicies,
+      extraPrizeEntries: snapshot.extraPrizeEntries
+    });
+
+    // Delegate payout audit trail data to PayoutAuditTrail
+    this.payoutAudit.hydrateFromSnapshot({
+      payoutAuditTrail: snapshot.payoutAuditTrail
+    });
+
+    // Delegate compliance ledger data to ComplianceLedger
+    this.ledger.hydrateFromSnapshot({
+      complianceLedger: snapshot.complianceLedger,
+      dailyReports: snapshot.dailyReports
+    });
+
+    if (snapshot.prizePolicies.length === 0) {
+      for (const policy of defaultPolicies) {
+        const persisted = this.prizePolicy.toPersistedPrizePolicy(policy);
+        await this.persistence.upsertPrizePolicy(persisted);
+      }
+    }
   }
 
   async createRoom(input: CreateRoomInput): Promise<{ roomCode: string; playerId: string }> {
@@ -466,12 +357,14 @@ export class BingoEngine {
       code,
       hallId,
       hostPlayerId: playerId,
+      gameSlug: input.gameSlug?.trim() || undefined,
       createdAt: new Date().toISOString(),
       players: new Map([[playerId, player]]),
       gameHistory: []
     };
 
     this.rooms.set(code, room);
+    this.syncRoomToStore(room); // BIN-251
     return { roomCode: code, playerId };
   }
 
@@ -528,6 +421,10 @@ export class BingoEngine {
     if (!Number.isInteger(ticketsPerPlayer) || ticketsPerPlayer < 1 || ticketsPerPlayer > 5) {
       throw new DomainError("INVALID_TICKETS_PER_PLAYER", "ticketsPerPlayer må være et heltall mellom 1 og 5.");
     }
+    // BIN-252: Explicit payoutPercent required — ?? 100 default removed to prevent accidental 100% payout
+    if (input.payoutPercent === undefined || input.payoutPercent === null) {
+      throw new DomainError("MISSING_PAYOUT_PERCENT", "payoutPercent er påkrevd og må settes eksplisitt.");
+    }
     const payoutPercent = input.payoutPercent;
     if (!Number.isFinite(payoutPercent) || payoutPercent < 0 || payoutPercent > 100) {
       throw new DomainError("INVALID_PAYOUT_PERCENT", "payoutPercent må være mellom 0 og 100.");
@@ -542,7 +439,6 @@ export class BingoEngine {
       if (armedSet && !armedSet.has(player.id)) return false;
       if (this.isPlayerInAnotherRunningGame(room.code, player)) return false;
       if (this.isPlayerBlockedByRestriction(player, nowMs)) return false;
-      if (this.isPlayerOnRequiredPause(player, nowMs)) return false;
       return true;
     });
     if (ticketCandidates.length > 0) {
@@ -555,9 +451,10 @@ export class BingoEngine {
     const gameId = randomUUID();
     const gameType: LedgerGameType = "DATABINGO";
     const channel: LedgerChannel = "INTERNET";
-    const houseAccountId = this.makeHouseAccountId(room.hallId, gameType, channel);
+    const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
     await this.walletAdapter.ensureAccount(houseAccountId);
     // HOEY-4: Track debited players for compensation if startup fails partway through.
+    // BIN-250: If any transfer fails mid-loop, all previously debited players are refunded before rethrowing.
     const debitedPlayers: Array<{ player: Player; fromAccountId: string; toAccountId: string }> = [];
     if (entryFee > 0) {
       try {
@@ -571,12 +468,12 @@ export class BingoEngine {
           );
           debitedPlayers.push({ player, fromAccountId: transfer.fromTx.accountId, toAccountId: transfer.toTx.accountId });
           player.balance -= entryFee;
-          this.recordLossEntry(player.walletId, room.hallId, {
+          await this.compliance.recordLossEntry(player.walletId, room.hallId, {
             type: "BUYIN",
             amount: entryFee,
             createdAtMs: nowMs
           });
-          this.recordComplianceLedgerEvent({
+          await this.ledger.recordComplianceLedgerEvent({
             hallId: room.hallId,
             gameType,
             channel,
@@ -632,6 +529,13 @@ export class BingoEngine {
 
     const prizePool = roundCurrency(entryFee * eligiblePlayers.length);
     const maxPayoutBudget = roundCurrency((prizePool * normalizedPayoutPercent) / 100);
+    const patterns = input.patterns ?? DEFAULT_PATTERNS;
+    const patternResults: PatternResult[] = patterns.map((p) => ({
+      patternId: p.id,
+      patternName: p.name,
+      claimType: p.claimType,
+      isWon: false
+    }));
     const game: GameState = {
       id: gameId,
       status: "RUNNING",
@@ -646,29 +550,31 @@ export class BingoEngine {
       drawnNumbers: [],
       tickets,
       marks,
+      patterns,
+      patternResults,
       claims: [],
       participatingPlayerIds: eligiblePlayers.map(p => p.id),
-      startedAt: new Date().toISOString()
+      startedAt: new Date(nowMs).toISOString()
     };
 
     room.currentGame = game;
     this.roomLastRoundStartMs.set(room.code, Date.parse(game.startedAt));
 
-    // BIN-161: Structured RNG audit log — enables regulatory replay of draw sequence
-    // KRITISK-3: Log cryptographic hash of draw sequence instead of cleartext.
-    // The full drawBag is persisted securely via RecoverableGameSnapshot checkpoint.
+    // BIN-161/BIN-241: Log SHA-256 hash of drawBag only — full sequence is preserved in PostgreSQL checkpoint (BIN-243).
+    // Plaintext drawBag removed to prevent insiders from predicting future draws via log access.
+    const drawBagHash = createHash("sha256").update(JSON.stringify(game.drawBag)).digest("hex");
     logger.info({
-      event: "RNG_DRAW_BAG",
+      event: "RNG_DRAW_BAG_HASH",
       gameId,
       roomCode: room.code,
       hallId: room.hallId,
-      drawBagHash: createHash("sha256").update(JSON.stringify(game.drawBag)).digest("hex"),
+      drawBagHash,
       ballCount: game.drawBag.length,
       timestamp: game.startedAt
-    }, "RNG draw bag generated — hash committed");
+    }, "RNG draw bag hash (full sequence stored in PostgreSQL checkpoint)");
 
     for (const player of eligiblePlayers) {
-      this.startPlaySession(player.walletId, nowMs);
+      await this.compliance.startPlaySession(player.walletId, nowMs);
     }
     // BIN-159: Checkpoint at game start — captures initial state for crash recovery
     if (this.bingoAdapter.onCheckpoint) {
@@ -704,7 +610,7 @@ export class BingoEngine {
     const nowMs = Date.now();
     this.assertWalletAllowedForGameplay(host.walletId, nowMs);
 
-    // MEDIUM-1: Enforce minimum interval between manual draws
+    // MEDIUM-1/BIN-253: Enforce minimum interval between manual draws
     if (this.minDrawIntervalMs > 0) {
       const lastDraw = this.lastDrawAtByRoom.get(room.code);
       if (lastDraw !== undefined) {
@@ -718,24 +624,26 @@ export class BingoEngine {
 
     const game = this.requireRunningGame(room);
     if (game.drawnNumbers.length >= this.maxDrawsPerRound) {
-      const endedAt = new Date();
+      const endedAtMs = Date.now();
+      const endedAt = new Date(endedAtMs);
       game.status = "ENDED";
       game.endedAt = endedAt.toISOString();
       game.endedReason = "MAX_DRAWS_REACHED";
-      this.finishPlaySessionsForGame(room, game, endedAt.getTime());
-      // HOEY-6: Write GAME_END checkpoint for MAX_DRAWS_REACHED
+      await this.finishPlaySessionsForGame(room, game, endedAtMs);
+      // HOEY-6/BIN-248: Write GAME_END checkpoint for MAX_DRAWS_REACHED
       await this.writeGameEndCheckpoint(room, game);
       throw new DomainError("NO_MORE_NUMBERS", `Maks antall trekk (${this.maxDrawsPerRound}) er nådd.`);
     }
 
     const nextNumber = game.drawBag.shift();
     if (!nextNumber) {
-      const endedAt = new Date();
+      const endedAtMs = Date.now();
+      const endedAt = new Date(endedAtMs);
       game.status = "ENDED";
       game.endedAt = endedAt.toISOString();
       game.endedReason = "DRAW_BAG_EMPTY";
-      this.finishPlaySessionsForGame(room, game, endedAt.getTime());
-      // HOEY-6: Write GAME_END checkpoint for DRAW_BAG_EMPTY
+      await this.finishPlaySessionsForGame(room, game, endedAtMs);
+      // HOEY-6/BIN-248: Write GAME_END checkpoint for DRAW_BAG_EMPTY
       await this.writeGameEndCheckpoint(room, game);
       throw new DomainError("NO_MORE_NUMBERS", "Ingen tall igjen i trekken.");
     }
@@ -752,15 +660,16 @@ export class BingoEngine {
     // HOEY-3: Checkpoint after each draw — persists draw sequence state
     await this.writeDrawCheckpoint(room, game);
     if (game.drawnNumbers.length >= this.maxDrawsPerRound) {
-      const endedAt = new Date();
+      const endedAtMs = Date.now();
+      const endedAt = new Date(endedAtMs);
       game.status = "ENDED";
       game.endedAt = endedAt.toISOString();
       game.endedReason = "MAX_DRAWS_REACHED";
-      this.finishPlaySessionsForGame(room, game, endedAt.getTime());
-      // HOEY-6: Write GAME_END checkpoint for MAX_DRAWS_REACHED (post-draw)
+      await this.finishPlaySessionsForGame(room, game, endedAtMs);
+      // HOEY-6/BIN-248: Write GAME_END checkpoint for MAX_DRAWS_REACHED (post-draw)
       await this.writeGameEndCheckpoint(room, game);
     }
-    // MEDIUM-1: Record draw timestamp for interval enforcement
+    // MEDIUM-1/BIN-253: Record draw timestamp for interval enforcement
     this.lastDrawAtByRoom.set(room.code, Date.now());
     return { number: nextNumber, drawIndex: game.drawnNumbers.length, gameId: game.id };
   }
@@ -823,14 +732,14 @@ export class BingoEngine {
       return existingClaim;
     }
 
+    // BIN-238: Explicit armed guard — only players who received tickets in this
+    // game round (i.e. paid buy-in and passed eligibility) may submit claims.
     const playerTickets = game.tickets.get(player.id);
+    if (!playerTickets || playerTickets.length === 0) {
+      throw new DomainError("NOT_ARMED_FOR_GAME", "Spilleren deltok ikke i denne runden og kan ikke gjøre krav.");
+    }
     const playerMarks = game.marks.get(player.id);
-    if (
-      !playerTickets ||
-      !playerMarks ||
-      playerTickets.length === 0 ||
-      playerMarks.length !== playerTickets.length
-    ) {
+    if (!playerMarks || playerMarks.length !== playerTickets.length) {
       throw new DomainError("TICKET_NOT_FOUND", "Spiller mangler brett i aktivt spill.");
     }
 
@@ -860,7 +769,7 @@ export class BingoEngine {
         }
       }
     } else if (input.type === "BINGO") {
-      // KRITISK-4: Guard against duplicate BINGO claims (mirrors LINE guard)
+      // KRITISK-4/BIN-242: Guard against duplicate BINGO claims — reject if BINGO is already claimed.
       if (game.bingoWinnerId) {
         valid = false;
         reason = "BINGO_ALREADY_CLAIMED";
@@ -889,14 +798,14 @@ export class BingoEngine {
     game.claims.push(claim);
     const gameType: LedgerGameType = "DATABINGO";
     const channel: LedgerChannel = "INTERNET";
-    const houseAccountId = this.makeHouseAccountId(room.hallId, gameType, channel);
+    const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
     if (valid && input.type === "LINE") {
       game.lineWinnerId = player.id;
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       const requestedPayout = Math.floor(game.prizePool * 0.3);
-      const cappedLinePayout = this.applySinglePrizeCap({
-        room,
+      const cappedLinePayout = this.prizePolicy.applySinglePrizeCap({
+        hallId: room.hallId,
         gameType: "DATABINGO",
         amount: requestedPayout
       });
@@ -906,6 +815,7 @@ export class BingoEngine {
         game.remainingPayoutBudget
       );
       if (payout > 0) {
+        // BIN-239: idempotencyKey prevents double payout if client retries.
         const transfer = await this.walletAdapter.transfer(
           houseAccountId,
           player.walletId,
@@ -916,12 +826,12 @@ export class BingoEngine {
         player.balance += payout;
         game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
         game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
-        this.recordLossEntry(player.walletId, room.hallId, {
+        await this.compliance.recordLossEntry(player.walletId, room.hallId, {
           type: "PAYOUT",
           amount: payout,
           createdAtMs: Date.now()
         });
-        this.recordComplianceLedgerEvent({
+        await this.ledger.recordComplianceLedgerEvent({
           hallId: room.hallId,
           gameType,
           channel,
@@ -936,7 +846,7 @@ export class BingoEngine {
           targetAccountId: transfer.toTx.accountId,
           policyVersion: cappedLinePayout.policy.id
         });
-        this.appendPayoutAuditEvent({
+        await this.payoutAudit.appendPayoutAuditEvent({
           kind: "CLAIM_PRIZE",
           claimId: claim.id,
           gameId: game.id,
@@ -983,6 +893,15 @@ export class BingoEngine {
       if (claim.bonusTriggered) {
         claim.bonusAmount = payout;
       }
+      // Record pattern result for the first unclaimed LINE pattern
+      const linePatternResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
+      if (linePatternResult) {
+        linePatternResult.isWon = true;
+        linePatternResult.winnerId = player.id;
+        linePatternResult.wonAtDraw = game.drawnNumbers.length;
+        linePatternResult.payoutAmount = payout;
+        linePatternResult.claimId = claim.id;
+      }
     }
 
     if (valid && input.type === "BINGO") {
@@ -992,12 +911,13 @@ export class BingoEngine {
         claim.reason = "BINGO_ALREADY_CLAIMED";
         return claim;
       }
-      const endedAt = new Date();
+      const endedAtMs = Date.now();
+      const endedAt = new Date(endedAtMs);
       game.bingoWinnerId = player.id;
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       const requestedPayout = game.remainingPrizePool;
-      const cappedBingoPayout = this.applySinglePrizeCap({
-        room,
+      const cappedBingoPayout = this.prizePolicy.applySinglePrizeCap({
+        hallId: room.hallId,
         gameType: "DATABINGO",
         amount: requestedPayout
       });
@@ -1007,6 +927,7 @@ export class BingoEngine {
         game.remainingPayoutBudget
       );
       if (payout > 0) {
+        // BIN-239: idempotencyKey prevents double payout if client retries.
         const transfer = await this.walletAdapter.transfer(
           houseAccountId,
           player.walletId,
@@ -1015,12 +936,12 @@ export class BingoEngine {
           { idempotencyKey: `bingo-prize-${game.id}-${claim.id}` }
         );
         player.balance += payout;
-        this.recordLossEntry(player.walletId, room.hallId, {
+        await this.compliance.recordLossEntry(player.walletId, room.hallId, {
           type: "PAYOUT",
           amount: payout,
           createdAtMs: Date.now()
         });
-        this.recordComplianceLedgerEvent({
+        await this.ledger.recordComplianceLedgerEvent({
           hallId: room.hallId,
           gameType,
           channel,
@@ -1035,7 +956,7 @@ export class BingoEngine {
           targetAccountId: transfer.toTx.accountId,
           policyVersion: cappedBingoPayout.policy.id
         });
-        this.appendPayoutAuditEvent({
+        await this.payoutAudit.appendPayoutAuditEvent({
           kind: "CLAIM_PRIZE",
           claimId: claim.id,
           gameId: game.id,
@@ -1076,7 +997,8 @@ export class BingoEngine {
       game.status = "ENDED";
       game.endedAt = endedAt.toISOString();
       game.endedReason = "BINGO_CLAIMED";
-      this.finishPlaySessionsForGame(room, game, endedAt.getTime());
+      await this.finishPlaySessionsForGame(room, game, endedAtMs);
+      await this.writeGameEndCheckpoint(room, game); // BIN-248: final state after payout settled
       const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
       claim.payoutAmount = payout;
       claim.payoutPolicyVersion = cappedBingoPayout.policy.id;
@@ -1084,6 +1006,15 @@ export class BingoEngine {
       claim.rtpBudgetBefore = rtpBudgetBefore;
       claim.rtpBudgetAfter = rtpBudgetAfter;
       claim.rtpCapped = payout < requestedAfterPolicyAndPool;
+      // Record pattern result for the first unclaimed BINGO pattern
+      const bingoPatternResult = game.patternResults?.find((r) => r.claimType === "BINGO" && !r.isWon);
+      if (bingoPatternResult) {
+        bingoPatternResult.isWon = true;
+        bingoPatternResult.winnerId = player.id;
+        bingoPatternResult.wonAtDraw = game.drawnNumbers.length;
+        bingoPatternResult.payoutAmount = payout;
+        bingoPatternResult.claimId = claim.id;
+      }
     }
 
     if (this.bingoAdapter.onClaimLogged) {
@@ -1112,27 +1043,14 @@ export class BingoEngine {
     this.assertWalletAllowedForGameplay(host.walletId, Date.now());
     const game = this.requireRunningGame(room);
 
-    const endedAt = new Date();
+    const endedAtMs = Date.now();
+    const endedAt = new Date(endedAtMs);
     game.status = "ENDED";
     game.endedAt = endedAt.toISOString();
     game.endedReason = input.reason?.trim() || "MANUAL_END";
-    this.finishPlaySessionsForGame(room, game, endedAt.getTime());
-
-    // BIN-48: Synchronous checkpoint after game end
-    if (this.bingoAdapter.onCheckpoint) {
-      try {
-        await this.bingoAdapter.onCheckpoint({
-          roomCode: room.code,
-          gameId: game.id,
-          reason: "GAME_END",
-          snapshot: this.serializeGameForRecovery(game),
-          players: [...room.players.values()],
-          hallId: room.hallId
-        });
-      } catch (err) {
-        logger.error({ err, gameId: game.id }, "CRITICAL: Checkpoint failed after game end");
-      }
-    }
+    await this.finishPlaySessionsForGame(room, game, endedAtMs);
+    // BIN-48/BIN-248: Synchronous checkpoint after game end
+    await this.writeGameEndCheckpoint(room, game);
   }
 
   getRoomSnapshot(roomCode: string): RoomSnapshot {
@@ -1154,6 +1072,7 @@ export class BingoEngine {
           code: room.code,
           hallId: room.hallId,
           hostPlayerId: room.hostPlayerId,
+          gameSlug: room.gameSlug,
           playerCount: room.players.size,
           createdAt: room.createdAt,
           gameStatus
@@ -1174,299 +1093,55 @@ export class BingoEngine {
     this.rooms.delete(code);
     this.roomLastRoundStartMs.delete(code);
     this.lastDrawAtByRoom.delete(code);
+    this.roomStateStore?.delete(code); // BIN-251
   }
 
   getPlayerCompliance(walletId: string, hallId?: string): PlayerComplianceSnapshot {
-    const normalizedWalletId = walletId.trim();
-    if (!normalizedWalletId) {
-      throw new DomainError("INVALID_INPUT", "walletId mangler.");
-    }
-    const normalizedHallId = hallId?.trim() || undefined;
-
-    const nowMs = Date.now();
-    const personalLossLimits = this.getEffectiveLossLimits(normalizedWalletId, normalizedHallId);
-    const netLoss = this.calculateNetLoss(normalizedWalletId, nowMs, normalizedHallId);
-    const pauseState = this.getPlaySessionState(normalizedWalletId, nowMs);
-    const restrictionState = this.getRestrictionState(normalizedWalletId, nowMs);
-    const blockState = this.resolveGameplayBlock(normalizedWalletId, nowMs);
-
-    return {
-      walletId: normalizedWalletId,
-      hallId: normalizedHallId,
-      regulatoryLossLimits: { ...this.regulatoryLossLimits },
-      personalLossLimits,
-      netLoss,
-      pause: {
-        isOnPause: pauseState.pauseUntilMs !== undefined && pauseState.pauseUntilMs > nowMs,
-        pauseUntil:
-          pauseState.pauseUntilMs !== undefined && pauseState.pauseUntilMs > nowMs
-            ? new Date(pauseState.pauseUntilMs).toISOString()
-            : undefined,
-        accumulatedPlayMs: pauseState.accumulatedMs,
-        playSessionLimitMs: this.playSessionLimitMs,
-        pauseDurationMs: this.pauseDurationMs,
-        lastMandatoryBreak: pauseState.lastMandatoryBreak
-          ? {
-              triggeredAt: new Date(pauseState.lastMandatoryBreak.triggeredAtMs).toISOString(),
-              pauseUntil: new Date(pauseState.lastMandatoryBreak.pauseUntilMs).toISOString(),
-              totalPlayMs: pauseState.lastMandatoryBreak.totalPlayMs,
-              hallId: pauseState.lastMandatoryBreak.hallId,
-              netLoss: { ...pauseState.lastMandatoryBreak.netLoss }
-            }
-          : undefined
-      },
-      restrictions: {
-        isBlocked: Boolean(blockState),
-        blockedBy: blockState?.type,
-        blockedUntil: blockState ? new Date(blockState.untilMs).toISOString() : undefined,
-        timedPause: {
-          isActive:
-            restrictionState.timedPauseUntilMs !== undefined && restrictionState.timedPauseUntilMs > nowMs,
-          pauseUntil:
-            restrictionState.timedPauseUntilMs !== undefined && restrictionState.timedPauseUntilMs > nowMs
-              ? new Date(restrictionState.timedPauseUntilMs).toISOString()
-              : undefined,
-          setAt:
-            restrictionState.timedPauseSetAtMs !== undefined
-              ? new Date(restrictionState.timedPauseSetAtMs).toISOString()
-              : undefined
-        },
-        selfExclusion: {
-          isActive:
-            restrictionState.selfExcludedAtMs !== undefined &&
-            restrictionState.selfExclusionMinimumUntilMs !== undefined,
-          setAt:
-            restrictionState.selfExcludedAtMs !== undefined
-              ? new Date(restrictionState.selfExcludedAtMs).toISOString()
-              : undefined,
-          minimumUntil:
-            restrictionState.selfExclusionMinimumUntilMs !== undefined
-              ? new Date(restrictionState.selfExclusionMinimumUntilMs).toISOString()
-              : undefined,
-          canBeRemoved:
-            restrictionState.selfExclusionMinimumUntilMs !== undefined
-              ? nowMs >= restrictionState.selfExclusionMinimumUntilMs
-              : false
-        }
-      }
-    };
+    return this.compliance.getPlayerCompliance(walletId, hallId);
   }
 
-  setPlayerLossLimits(input: {
+  async setPlayerLossLimits(input: {
     walletId: string;
     hallId: string;
     daily?: number;
     monthly?: number;
-  }): PlayerComplianceSnapshot {
-    const walletId = input.walletId.trim();
-    if (!walletId) {
-      throw new DomainError("INVALID_INPUT", "walletId mangler.");
-    }
-    const hallId = input.hallId.trim();
-    if (!hallId) {
-      throw new DomainError("INVALID_INPUT", "hallId mangler.");
-    }
-
-    const current = this.getEffectiveLossLimits(walletId, hallId);
-    const daily = input.daily ?? current.daily;
-    const monthly = input.monthly ?? current.monthly;
-
-    if (!Number.isFinite(daily) || daily < 0) {
-      throw new DomainError("INVALID_INPUT", "dailyLossLimit må være 0 eller større.");
-    }
-    if (!Number.isFinite(monthly) || monthly < 0) {
-      throw new DomainError("INVALID_INPUT", "monthlyLossLimit må være 0 eller større.");
-    }
-    if (daily > this.regulatoryLossLimits.daily) {
-      throw new DomainError(
-        "INVALID_INPUT",
-        `dailyLossLimit kan ikke være høyere enn regulatorisk grense (${this.regulatoryLossLimits.daily}).`
-      );
-    }
-    if (monthly > this.regulatoryLossLimits.monthly) {
-      throw new DomainError(
-        "INVALID_INPUT",
-        `monthlyLossLimit kan ikke være høyere enn regulatorisk grense (${this.regulatoryLossLimits.monthly}).`
-      );
-    }
-
-    this.personalLossLimitsByScope.set(this.makeLossScopeKey(walletId, hallId), {
-      daily: Math.floor(daily),
-      monthly: Math.floor(monthly)
-    });
-
-    return this.getPlayerCompliance(walletId, hallId);
+  }): Promise<PlayerComplianceSnapshot> {
+    return this.compliance.setPlayerLossLimits(input);
   }
 
-  setTimedPause(input: {
+  async setTimedPause(input: {
     walletId: string;
     durationMs?: number;
     durationMinutes?: number;
-  }): PlayerComplianceSnapshot {
-    const walletId = input.walletId.trim();
-    if (!walletId) {
-      throw new DomainError("INVALID_INPUT", "walletId mangler.");
-    }
-
-    const nowMs = Date.now();
-    const durationFromMinutes =
-      input.durationMinutes !== undefined ? Math.floor(Number(input.durationMinutes) * 60 * 1000) : undefined;
-    const rawDurationMs = input.durationMs ?? durationFromMinutes ?? 15 * 60 * 1000;
-    if (!Number.isFinite(rawDurationMs) || rawDurationMs <= 0) {
-      throw new DomainError("INVALID_INPUT", "duration må være større enn 0.");
-    }
-    const durationMs = Math.floor(rawDurationMs);
-    const untilMs = nowMs + durationMs;
-
-    const state = this.getRestrictionState(walletId, nowMs);
-    state.timedPauseSetAtMs = nowMs;
-    state.timedPauseUntilMs = Math.max(untilMs, state.timedPauseUntilMs ?? 0);
-    this.restrictionsByWallet.set(walletId, state);
-    return this.getPlayerCompliance(walletId);
+  }): Promise<PlayerComplianceSnapshot> {
+    return this.compliance.setTimedPause(input);
   }
 
-  clearTimedPause(walletIdInput: string): PlayerComplianceSnapshot {
-    const walletId = walletIdInput.trim();
-    if (!walletId) {
-      throw new DomainError("INVALID_INPUT", "walletId mangler.");
-    }
-    const nowMs = Date.now();
-    const state = this.getRestrictionState(walletId, nowMs);
-    if (state.timedPauseUntilMs !== undefined && state.timedPauseUntilMs > nowMs) {
-      throw new DomainError(
-        "TIMED_PAUSE_LOCKED",
-        `Frivillig pause kan ikke oppheves før ${new Date(state.timedPauseUntilMs).toISOString()}.`
-      );
-    }
-
-    state.timedPauseUntilMs = undefined;
-    state.timedPauseSetAtMs = undefined;
-    this.persistRestrictionState(walletId, state);
-    return this.getPlayerCompliance(walletId);
+  async clearTimedPause(walletIdInput: string): Promise<PlayerComplianceSnapshot> {
+    return this.compliance.clearTimedPause(walletIdInput);
   }
 
-  setSelfExclusion(walletIdInput: string): PlayerComplianceSnapshot {
-    const walletId = walletIdInput.trim();
-    if (!walletId) {
-      throw new DomainError("INVALID_INPUT", "walletId mangler.");
-    }
-    const nowMs = Date.now();
-    const state = this.getRestrictionState(walletId, nowMs);
-    if (state.selfExcludedAtMs !== undefined && state.selfExclusionMinimumUntilMs !== undefined) {
-      return this.getPlayerCompliance(walletId);
-    }
-
-    state.selfExcludedAtMs = nowMs;
-    state.selfExclusionMinimumUntilMs = nowMs + this.selfExclusionMinMs;
-    this.restrictionsByWallet.set(walletId, state);
-    return this.getPlayerCompliance(walletId);
+  async setSelfExclusion(walletIdInput: string): Promise<PlayerComplianceSnapshot> {
+    return this.compliance.setSelfExclusion(walletIdInput);
   }
 
-  clearSelfExclusion(walletIdInput: string): PlayerComplianceSnapshot {
-    const walletId = walletIdInput.trim();
-    if (!walletId) {
-      throw new DomainError("INVALID_INPUT", "walletId mangler.");
-    }
-    const nowMs = Date.now();
-    const state = this.getRestrictionState(walletId, nowMs);
-    if (state.selfExcludedAtMs === undefined || state.selfExclusionMinimumUntilMs === undefined) {
-      return this.getPlayerCompliance(walletId);
-    }
-    if (nowMs < state.selfExclusionMinimumUntilMs) {
-      throw new DomainError(
-        "SELF_EXCLUSION_LOCKED",
-        `Selvutelukkelse kan ikke oppheves før ${new Date(state.selfExclusionMinimumUntilMs).toISOString()}.`
-      );
-    }
-
-    state.selfExcludedAtMs = undefined;
-    state.selfExclusionMinimumUntilMs = undefined;
-    this.persistRestrictionState(walletId, state);
-    return this.getPlayerCompliance(walletId);
+  async clearSelfExclusion(walletIdInput: string): Promise<PlayerComplianceSnapshot> {
+    return this.compliance.clearSelfExclusion(walletIdInput);
   }
 
   assertWalletAllowedForGameplay(walletIdInput: string, nowMs = Date.now()): void {
-    const walletId = walletIdInput.trim();
-    if (!walletId) {
-      return;
-    }
-    const blockState = this.resolveGameplayBlock(walletId, nowMs);
-    if (!blockState) {
-      return;
-    }
-
-    if (blockState.type === "TIMED_PAUSE") {
-      throw new DomainError(
-        "PLAYER_TIMED_PAUSE",
-        `Spiller er på frivillig pause til ${new Date(blockState.untilMs).toISOString()}.`
-      );
-    }
-
-    throw new DomainError(
-      "PLAYER_SELF_EXCLUDED",
-      `Spiller er selvutestengt minst til ${new Date(blockState.untilMs).toISOString()}.`
-    );
+    this.compliance.assertWalletAllowedForGameplay(walletIdInput, nowMs);
   }
 
-  upsertPrizePolicy(input: {
+  async upsertPrizePolicy(input: {
     gameType?: PrizeGameType;
     hallId?: string;
     linkId?: string;
     effectiveFrom: string;
     singlePrizeCap?: number;
     dailyExtraPrizeCap?: number;
-  }): PrizePolicySnapshot {
-    const nowMs = Date.now();
-    const gameType = input.gameType ?? "DATABINGO";
-    const hallId = this.normalizePolicyDimension(input.hallId);
-    const linkId = this.normalizePolicyDimension(input.linkId);
-    const effectiveFromMs = this.assertIsoTimestampMs(input.effectiveFrom, "effectiveFrom");
-    let inheritedSinglePrizeCap: number | undefined;
-    let inheritedDailyExtraPrizeCap: number | undefined;
-    if (input.singlePrizeCap === undefined || input.dailyExtraPrizeCap === undefined) {
-      try {
-        const current = this.resolvePrizePolicy({
-          gameType,
-          hallId,
-          linkId,
-          atMs: effectiveFromMs
-        });
-        inheritedSinglePrizeCap = current.singlePrizeCap;
-        inheritedDailyExtraPrizeCap = current.dailyExtraPrizeCap;
-      } catch (error) {
-        if (!(error instanceof DomainError) || error.code !== "PRIZE_POLICY_MISSING") {
-          throw error;
-        }
-      }
-    }
-
-    const singlePrizeCap = this.assertNonNegativeNumber(
-      input.singlePrizeCap ?? inheritedSinglePrizeCap ?? 2500,
-      "singlePrizeCap"
-    );
-    const dailyExtraPrizeCap = this.assertNonNegativeNumber(
-      input.dailyExtraPrizeCap ?? inheritedDailyExtraPrizeCap ?? 12000,
-      "dailyExtraPrizeCap"
-    );
-
-    const policy: PrizePolicyVersion = {
-      id: randomUUID(),
-      gameType,
-      hallId,
-      linkId,
-      effectiveFromMs,
-      singlePrizeCap: Math.floor(singlePrizeCap),
-      dailyExtraPrizeCap: Math.floor(dailyExtraPrizeCap),
-      createdAtMs: nowMs
-    };
-
-    const scopeKey = this.makePrizePolicyScopeKey(gameType, hallId, linkId);
-    const existing = this.prizePoliciesByScope.get(scopeKey) ?? [];
-    const withoutSameEffectiveFrom = existing.filter((entry) => entry.effectiveFromMs !== effectiveFromMs);
-    withoutSameEffectiveFrom.push(policy);
-    withoutSameEffectiveFrom.sort((a, b) => a.effectiveFromMs - b.effectiveFromMs);
-    this.prizePoliciesByScope.set(scopeKey, withoutSameEffectiveFrom);
-    return this.toPrizePolicySnapshot(policy);
+  }): Promise<PrizePolicySnapshot> {
+    return this.prizePolicy.upsertPrizePolicy(input);
   }
 
   getActivePrizePolicy(input: {
@@ -1475,16 +1150,7 @@ export class BingoEngine {
     gameType?: PrizeGameType;
     at?: string;
   }): PrizePolicySnapshot {
-    const hallId = this.assertHallId(input.hallId);
-    const linkId = input.linkId?.trim() || hallId;
-    const atMs = input.at ? this.assertIsoTimestampMs(input.at, "at") : Date.now();
-    const policy = this.resolvePrizePolicy({
-      hallId,
-      linkId,
-      gameType: input.gameType ?? "DATABINGO",
-      atMs
-    });
-    return this.toPrizePolicySnapshot(policy);
+    return this.prizePolicy.getActivePrizePolicy(input);
   }
 
   async awardExtraPrize(input: {
@@ -1513,7 +1179,7 @@ export class BingoEngine {
     }
 
     const nowMs = Date.now();
-    const policy = this.resolvePrizePolicy({
+    const policy = this.prizePolicy.resolvePrizePolicy({
       hallId,
       linkId,
       gameType: "DATABINGO",
@@ -1527,9 +1193,9 @@ export class BingoEngine {
       );
     }
 
-    const scopeKey = this.makeExtraPrizeScopeKey(hallId, linkId);
-    const todayStartMs = this.startOfLocalDayMs(nowMs);
-    const existingEntries = (this.extraPrizeEntriesByScope.get(scopeKey) ?? []).filter(
+    const scopeKey = this.prizePolicy.makeExtraPrizeScopeKey(hallId, linkId);
+    const todayStartMs = this.compliance.startOfLocalDayMs(nowMs);
+    const existingEntries = this.prizePolicy.getExtraPrizeEntriesForScope(scopeKey).filter(
       (entry) => entry.createdAtMs >= todayStartMs
     );
     const usedToday = existingEntries.reduce((sum, entry) => sum + entry.amount, 0);
@@ -1542,7 +1208,7 @@ export class BingoEngine {
 
     const gameType: LedgerGameType = "DATABINGO";
     const channel: LedgerChannel = "INTERNET";
-    const sourceAccountId = this.makeHouseAccountId(hallId, gameType, channel);
+    const sourceAccountId = this.ledger.makeHouseAccountId(hallId, gameType, channel);
     const extraPrizeId = randomUUID();
     const transfer = await this.walletAdapter.transfer(
       sourceAccountId,
@@ -1551,12 +1217,12 @@ export class BingoEngine {
       input.reason?.trim() || `Extra prize ${hallId}/${linkId}`,
       { idempotencyKey: `extra-prize-${extraPrizeId}` }
     );
-    this.recordLossEntry(walletId, hallId, {
+    await this.compliance.recordLossEntry(walletId, hallId, {
       type: "PAYOUT",
       amount,
       createdAtMs: nowMs
     });
-    this.recordComplianceLedgerEvent({
+    await this.ledger.recordComplianceLedgerEvent({
       hallId,
       gameType,
       channel,
@@ -1570,7 +1236,7 @@ export class BingoEngine {
         linkId
       }
     });
-    this.appendPayoutAuditEvent({
+    await this.payoutAudit.appendPayoutAuditEvent({
       kind: "EXTRA_PRIZE",
       hallId,
       policyVersion: policy.id,
@@ -1584,7 +1250,14 @@ export class BingoEngine {
       createdAtMs: nowMs,
       policyId: policy.id
     });
-    this.extraPrizeEntriesByScope.set(scopeKey, existingEntries);
+    this.prizePolicy.setExtraPrizeEntriesForScope(scopeKey, existingEntries);
+    await this.prizePolicy.persistExtraPrizeEntry({
+      hallId,
+      linkId,
+      amount,
+      createdAtMs: nowMs,
+      policyId: policy.id
+    });
     return {
       walletId,
       hallId,
@@ -1602,7 +1275,6 @@ export class BingoEngine {
     walletId?: string;
     metadata?: Record<string, unknown>;
   }): never {
-    const source = input.source ?? "UNKNOWN";
     let hallId: string | undefined;
     let walletId: string | undefined;
     let normalizedRoomCode: string | undefined;
@@ -1622,31 +1294,18 @@ export class BingoEngine {
       walletId = input.walletId.trim();
     }
 
-    const event: ExtraDrawDenialAudit = {
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
-      source,
+    this.prizePolicy.rejectExtraDrawPurchase({
+      source: input.source,
       roomCode: normalizedRoomCode,
       playerId,
       walletId,
       hallId,
-      reasonCode: "EXTRA_DRAW_NOT_ALLOWED",
       metadata: input.metadata
-    };
-    this.extraDrawDenials.unshift(event);
-    if (this.extraDrawDenials.length > 1000) {
-      this.extraDrawDenials.length = 1000;
-    }
-
-    throw new DomainError(
-      "EXTRA_DRAW_NOT_ALLOWED",
-      "Ekstratrekk er ikke tillatt for databingo. Forsøket er logget for revisjon."
-    );
+    });
   }
 
   listExtraDrawDenials(limit = 100): ExtraDrawDenialAudit[] {
-    const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
-    return this.extraDrawDenials.slice(0, normalizedLimit).map((entry) => ({ ...entry }));
+    return this.prizePolicy.listExtraDrawDenials(limit);
   }
 
   listPayoutAuditTrail(input?: {
@@ -1655,25 +1314,7 @@ export class BingoEngine {
     gameId?: string;
     walletId?: string;
   }): PayoutAuditEvent[] {
-    const limit = Number.isFinite(input?.limit) ? Math.max(1, Math.min(500, Math.floor(input!.limit!))) : 100;
-    const hallId = input?.hallId?.trim();
-    const gameId = input?.gameId?.trim();
-    const walletId = input?.walletId?.trim();
-    return this.payoutAuditTrail
-      .filter((event) => {
-        if (hallId && event.hallId !== hallId) {
-          return false;
-        }
-        if (gameId && event.gameId !== gameId) {
-          return false;
-        }
-        if (walletId && event.walletId !== walletId) {
-          return false;
-        }
-        return true;
-      })
-      .slice(0, limit)
-      .map((event) => ({ ...event, txIds: [...event.txIds] }));
+    return this.payoutAudit.listPayoutAuditTrail(input);
   }
 
   listComplianceLedgerEntries(input?: {
@@ -1681,57 +1322,22 @@ export class BingoEngine {
     dateFrom?: string;
     dateTo?: string;
     hallId?: string;
+    walletId?: string;
     gameType?: LedgerGameType;
     channel?: LedgerChannel;
   }): ComplianceLedgerEntry[] {
-    const limit = Number.isFinite(input?.limit) ? Math.max(1, Math.min(2000, Math.floor(input!.limit!))) : 200;
-    const fromMs = input?.dateFrom ? this.assertIsoTimestampMs(input.dateFrom, "dateFrom") : undefined;
-    const toMs = input?.dateTo ? this.assertIsoTimestampMs(input.dateTo, "dateTo") : undefined;
-    const hallId = input?.hallId?.trim();
-    const gameType = input?.gameType ? this.assertLedgerGameType(input.gameType) : undefined;
-    const channel = input?.channel ? this.assertLedgerChannel(input.channel) : undefined;
-
-    return this.complianceLedger
-      .filter((entry) => {
-        if (fromMs !== undefined && entry.createdAtMs < fromMs) {
-          return false;
-        }
-        if (toMs !== undefined && entry.createdAtMs > toMs) {
-          return false;
-        }
-        if (hallId && entry.hallId !== hallId) {
-          return false;
-        }
-        if (gameType && entry.gameType !== gameType) {
-          return false;
-        }
-        if (channel && entry.channel !== channel) {
-          return false;
-        }
-        return true;
-      })
-      .slice(0, limit)
-      .map((entry) => ({ ...entry }));
+    return this.ledger.listComplianceLedgerEntries(input);
   }
 
-  recordAccountingEvent(input: {
+  async recordAccountingEvent(input: {
     hallId: string;
     gameType: LedgerGameType;
     channel: LedgerChannel;
     eventType: "STAKE" | "PRIZE" | "EXTRA_PRIZE";
     amount: number;
     metadata?: Record<string, unknown>;
-  }): ComplianceLedgerEntry {
-    this.recordComplianceLedgerEvent({
-      hallId: input.hallId,
-      gameType: input.gameType,
-      channel: input.channel,
-      eventType: input.eventType,
-      amount: input.amount,
-      metadata: input.metadata
-    });
-    const latest = this.complianceLedger[0];
-    return { ...latest };
+  }): Promise<ComplianceLedgerEntry> {
+    return this.ledger.recordAccountingEvent(input);
   }
 
   generateDailyReport(input: {
@@ -1740,125 +1346,20 @@ export class BingoEngine {
     gameType?: LedgerGameType;
     channel?: LedgerChannel;
   }): DailyComplianceReport {
-    const dateKey = this.assertDateKey(input.date, "date");
-    const hallId = input.hallId?.trim();
-    const gameType = input.gameType ? this.assertLedgerGameType(input.gameType) : undefined;
-    const channel = input.channel ? this.assertLedgerChannel(input.channel) : undefined;
-    const dateRange = this.dayRangeMs(dateKey);
-    const rowsByKey = new Map<string, DailyComplianceReportRow>();
-
-    for (const entry of this.complianceLedger) {
-      if (entry.createdAtMs < dateRange.startMs || entry.createdAtMs > dateRange.endMs) {
-        continue;
-      }
-      if (hallId && entry.hallId !== hallId) {
-        continue;
-      }
-      if (gameType && entry.gameType !== gameType) {
-        continue;
-      }
-      if (channel && entry.channel !== channel) {
-        continue;
-      }
-
-      const key = `${entry.hallId}::${entry.gameType}::${entry.channel}`;
-      const row = rowsByKey.get(key) ?? {
-        hallId: entry.hallId,
-        gameType: entry.gameType,
-        channel: entry.channel,
-        grossTurnover: 0,
-        prizesPaid: 0,
-        net: 0,
-        stakeCount: 0,
-        prizeCount: 0,
-        extraPrizeCount: 0
-      };
-
-      if (entry.eventType === "STAKE") {
-        row.grossTurnover += entry.amount;
-        row.stakeCount += 1;
-      }
-      if (entry.eventType === "PRIZE") {
-        row.prizesPaid += entry.amount;
-        row.prizeCount += 1;
-      }
-      if (entry.eventType === "EXTRA_PRIZE") {
-        row.prizesPaid += entry.amount;
-        row.extraPrizeCount += 1;
-      }
-
-      row.net = row.grossTurnover - row.prizesPaid;
-      rowsByKey.set(key, row);
-    }
-
-    const rows = [...rowsByKey.values()].sort((a, b) => {
-      const byHall = a.hallId.localeCompare(b.hallId);
-      if (byHall !== 0) {
-        return byHall;
-      }
-      const byGame = a.gameType.localeCompare(b.gameType);
-      if (byGame !== 0) {
-        return byGame;
-      }
-      return a.channel.localeCompare(b.channel);
-    });
-
-    const totals = rows.reduce(
-      (acc, row) => {
-        acc.grossTurnover += row.grossTurnover;
-        acc.prizesPaid += row.prizesPaid;
-        acc.net += row.net;
-        acc.stakeCount += row.stakeCount;
-        acc.prizeCount += row.prizeCount;
-        acc.extraPrizeCount += row.extraPrizeCount;
-        return acc;
-      },
-      {
-        grossTurnover: 0,
-        prizesPaid: 0,
-        net: 0,
-        stakeCount: 0,
-        prizeCount: 0,
-        extraPrizeCount: 0
-      }
-    );
-
-    return {
-      date: dateKey,
-      generatedAt: new Date().toISOString(),
-      rows,
-      totals
-    };
+    return this.ledger.generateDailyReport(input);
   }
 
-  runDailyReportJob(input?: {
+  async runDailyReportJob(input?: {
     date?: string;
     hallId?: string;
     gameType?: LedgerGameType;
     channel?: LedgerChannel;
-  }): DailyComplianceReport {
-    const date = input?.date ?? this.dateKeyFromMs(Date.now());
-    const report = this.generateDailyReport({
-      date,
-      hallId: input?.hallId,
-      gameType: input?.gameType,
-      channel: input?.channel
-    });
-    this.dailyReportArchive.set(report.date, report);
-    return report;
+  }): Promise<DailyComplianceReport> {
+    return this.ledger.runDailyReportJob(input);
   }
 
   getArchivedDailyReport(dateInput: string): DailyComplianceReport | null {
-    const date = this.assertDateKey(dateInput, "date");
-    const archived = this.dailyReportArchive.get(date);
-    if (!archived) {
-      return null;
-    }
-    return {
-      ...archived,
-      rows: archived.rows.map((row) => ({ ...row })),
-      totals: { ...archived.totals }
-    };
+    return this.ledger.getArchivedDailyReport(dateInput);
   }
 
   exportDailyReportCsv(input: {
@@ -1867,53 +1368,7 @@ export class BingoEngine {
     gameType?: LedgerGameType;
     channel?: LedgerChannel;
   }): string {
-    const report = this.generateDailyReport(input);
-    const headers = [
-      "date",
-      "hall_id",
-      "game_type",
-      "channel",
-      "gross_turnover",
-      "prizes_paid",
-      "net",
-      "stake_count",
-      "prize_count",
-      "extra_prize_count"
-    ];
-    const lines = [headers.join(",")];
-
-    for (const row of report.rows) {
-      lines.push(
-        [
-          report.date,
-          row.hallId,
-          row.gameType,
-          row.channel,
-          row.grossTurnover,
-          row.prizesPaid,
-          row.net,
-          row.stakeCount,
-          row.prizeCount,
-          row.extraPrizeCount
-        ].join(",")
-      );
-    }
-
-    lines.push(
-      [
-        report.date,
-        "ALL",
-        "ALL",
-        "ALL",
-        report.totals.grossTurnover,
-        report.totals.prizesPaid,
-        report.totals.net,
-        report.totals.stakeCount,
-        report.totals.prizeCount,
-        report.totals.extraPrizeCount
-      ].join(",")
-    );
-    return lines.join("\n");
+    return this.ledger.exportDailyReportCsv(input);
   }
 
   async createOverskuddDistributionBatch(input: {
@@ -1923,115 +1378,11 @@ export class BingoEngine {
     gameType?: LedgerGameType;
     channel?: LedgerChannel;
   }): Promise<OverskuddDistributionBatch> {
-    const date = this.assertDateKey(input.date, "date");
-    const allocations = this.assertOrganizationAllocations(input.allocations);
-    const report = this.generateDailyReport({
-      date,
-      hallId: input.hallId,
-      gameType: input.gameType,
-      channel: input.channel
-    });
-
-    const rowsWithMinimum = report.rows
-      .map((row) => {
-        const minimumPercent = row.gameType === "DATABINGO" ? 0.3 : 0.15;
-        const net = Math.max(0, row.net);
-        const minimumAmount = roundCurrency(net * minimumPercent);
-        return {
-          row,
-          minimumPercent,
-          minimumAmount
-        };
-      })
-      .filter((entry) => entry.minimumAmount > 0);
-
-    const requiredMinimum = roundCurrency(
-      rowsWithMinimum.reduce((sum, entry) => sum + entry.minimumAmount, 0)
-    );
-    const batchId = randomUUID();
-    const createdAt = new Date().toISOString();
-    const transfers: OverskuddDistributionTransfer[] = [];
-
-    for (const { row, minimumAmount } of rowsWithMinimum) {
-      const sourceAccountId = this.makeHouseAccountId(row.hallId, row.gameType, row.channel);
-      const parts = this.allocateAmountByShares(minimumAmount, allocations.map((allocation) => allocation.sharePercent));
-      for (let i = 0; i < allocations.length; i += 1) {
-        const amount = parts[i];
-        if (amount <= 0) {
-          continue;
-        }
-        const allocation = allocations[i];
-        const transfer = await this.walletAdapter.transfer(
-          sourceAccountId,
-          allocation.organizationAccountId,
-          amount,
-          `Overskudd ${batchId} ${date}`,
-          { idempotencyKey: `surplus-${batchId}-${allocation.organizationAccountId}-${row.hallId}` }
-        );
-        const record: OverskuddDistributionTransfer = {
-          id: randomUUID(),
-          batchId,
-          createdAt: new Date().toISOString(),
-          date,
-          hallId: row.hallId,
-          gameType: row.gameType,
-          channel: row.channel,
-          sourceAccountId,
-          organizationId: allocation.organizationId,
-          organizationAccountId: allocation.organizationAccountId,
-          amount,
-          txIds: [transfer.fromTx.id, transfer.toTx.id]
-        };
-        transfers.push(record);
-
-        this.recordComplianceLedgerEvent({
-          hallId: row.hallId,
-          gameType: row.gameType,
-          channel: row.channel,
-          eventType: "ORG_DISTRIBUTION",
-          amount,
-          sourceAccountId,
-          targetAccountId: allocation.organizationAccountId,
-          batchId,
-          metadata: {
-            organizationId: allocation.organizationId,
-            date
-          }
-        });
-      }
-    }
-
-    const distributedAmount = roundCurrency(transfers.reduce((sum, transfer) => sum + transfer.amount, 0));
-    const batch: OverskuddDistributionBatch = {
-      id: batchId,
-      createdAt,
-      date,
-      hallId: input.hallId?.trim() || undefined,
-      gameType: input.gameType ? this.assertLedgerGameType(input.gameType) : undefined,
-      channel: input.channel ? this.assertLedgerChannel(input.channel) : undefined,
-      requiredMinimum,
-      distributedAmount,
-      transfers: transfers.map((transfer) => ({ ...transfer, txIds: [...transfer.txIds] })),
-      allocations: allocations.map((allocation) => ({ ...allocation }))
-    };
-    this.overskuddBatches.set(batchId, batch);
-    return batch;
+    return this.ledger.createOverskuddDistributionBatch(input);
   }
 
   getOverskuddDistributionBatch(batchIdInput: string): OverskuddDistributionBatch {
-    const batchId = batchIdInput.trim();
-    if (!batchId) {
-      throw new DomainError("INVALID_INPUT", "batchId mangler.");
-    }
-    const batch = this.overskuddBatches.get(batchId);
-    if (!batch) {
-      throw new DomainError("BATCH_NOT_FOUND", "Fordelingsbatch finnes ikke.");
-    }
-    return {
-      ...batch,
-      transfers: batch.transfers.map((transfer) => ({ ...transfer, txIds: [...transfer.txIds] })),
-      allocations: batch.allocations.map((allocation) => ({ ...allocation }))
-    };
+    return this.ledger.getOverskuddDistributionBatch(batchIdInput);
   }
 
   async refreshPlayerBalancesForWallet(walletId: string): Promise<string[]> {
@@ -2237,32 +1588,24 @@ export class BingoEngine {
     const eligible: Player[] = [];
     for (const player of players) {
       if (entryFee > 0 && player.balance < entryFee) continue;
-      if (this.wouldExceedLossLimit(player, entryFee, nowMs, hallId)) continue;
+      if (this.compliance.wouldExceedLossLimit(player.walletId, entryFee, nowMs, hallId)) continue;
       eligible.push(player);
     }
     return eligible;
   }
 
-  private wouldExceedLossLimit(player: Player, entryFee: number, nowMs: number, hallId: string): boolean {
-    if (entryFee <= 0) return false;
-    const limits = this.getEffectiveLossLimits(player.walletId, hallId);
-    const netLoss = this.calculateNetLoss(player.walletId, nowMs, hallId);
-    return (netLoss.daily + entryFee) > limits.daily || (netLoss.monthly + entryFee) > limits.monthly;
-  }
-
   private isPlayerOnRequiredPause(player: Player, nowMs: number): boolean {
-    const state = this.playStateByWallet.get(player.walletId);
-    if (!state?.pauseUntilMs) return false;
-    if (state.pauseUntilMs > nowMs) return true;
-    // Pause expired — clear it
-    state.pauseUntilMs = undefined;
-    state.accumulatedMs = 0;
-    this.playStateByWallet.set(player.walletId, state);
-    return false;
+    const snapshot = this.compliance.getPlayerCompliance(player.walletId);
+    return snapshot.pause.isOnPause;
   }
 
   private isPlayerBlockedByRestriction(player: Player, nowMs: number): boolean {
-    return Boolean(this.resolveGameplayBlock(player.walletId, nowMs));
+    try {
+      this.compliance.assertWalletAllowedForGameplay(player.walletId, nowMs);
+      return false;
+    } catch {
+      return true;
+    }
   }
 
   private isPlayerInAnotherRunningGame(roomCode: string, player: Player): boolean {
@@ -2276,27 +1619,16 @@ export class BingoEngine {
   }
 
   private assertPlayersNotOnRequiredPause(players: Player[], nowMs: number): void {
-    for (const player of players) {
-      const state = this.playStateByWallet.get(player.walletId);
-      if (!state?.pauseUntilMs) {
-        continue;
-      }
-
-      if (state.pauseUntilMs > nowMs) {
-        const summary = state.lastMandatoryBreak;
-        const summaryText = summary
-          ? ` Påkrevd pause trigget etter ${Math.ceil(summary.totalPlayMs / 60000)} min spill. Netto tap i hall ${summary.hallId}: dag ${summary.netLoss.daily}, måned ${summary.netLoss.monthly}.`
-          : "";
-        throw new DomainError(
-          "PLAYER_ON_REQUIRED_PAUSE",
-          `Spiller ${player.name} må ha pause til ${new Date(state.pauseUntilMs).toISOString()}.${summaryText}`
-        );
-      }
-
-      state.pauseUntilMs = undefined;
-      state.accumulatedMs = 0;
-      this.playStateByWallet.set(player.walletId, state);
+    const pausedPlayer = players.find((player) => this.isPlayerOnRequiredPause(player, nowMs));
+    if (!pausedPlayer) {
+      return;
     }
+    const snapshot = this.compliance.getPlayerCompliance(pausedPlayer.walletId);
+    const untilMs = snapshot.pause.pauseUntil ?? new Date(nowMs).toISOString();
+    throw new DomainError(
+      "PLAYER_REQUIRED_PAUSE",
+      `Spiller har pålagt pause til ${untilMs}.`
+    );
   }
 
   private async assertLossLimitsBeforeBuyIn(
@@ -2310,8 +1642,8 @@ export class BingoEngine {
     }
 
     for (const player of players) {
-      const limits = this.getEffectiveLossLimits(player.walletId, hallId);
-      const netLoss = this.calculateNetLoss(player.walletId, nowMs, hallId);
+      const limits = this.compliance.getEffectiveLossLimits(player.walletId, hallId);
+      const netLoss = this.compliance.calculateNetLoss(player.walletId, nowMs, hallId);
 
       if (netLoss.daily + entryFee > limits.daily) {
         throw new DomainError(
@@ -2328,119 +1660,13 @@ export class BingoEngine {
     }
   }
 
-  private getEffectiveLossLimits(walletId: string, hallId?: string): LossLimits {
-    if (!hallId) {
-      return { ...this.regulatoryLossLimits };
-    }
-    const customLimits = this.personalLossLimitsByScope.get(this.makeLossScopeKey(walletId, hallId));
-    if (!customLimits) {
-      return { ...this.regulatoryLossLimits };
-    }
-    return {
-      daily: Math.min(customLimits.daily, this.regulatoryLossLimits.daily),
-      monthly: Math.min(customLimits.monthly, this.regulatoryLossLimits.monthly)
-    };
-  }
-
-  private calculateNetLoss(walletId: string, nowMs: number, hallId?: string): LossLimits {
-    const dayStartMs = this.startOfLocalDayMs(nowMs);
-    const monthStartMs = this.startOfLocalMonthMs(nowMs);
-    const retentionCutoffMs = monthStartMs - 35 * 24 * 60 * 60 * 1000;
-    const entries = hallId
-      ? this.getLossEntriesForScope(walletId, hallId, retentionCutoffMs)
-      : this.getLossEntriesForAllScopes(walletId, retentionCutoffMs);
-
-    let daily = 0;
-    let monthly = 0;
-    for (const entry of entries) {
-      const signed = entry.type === "BUYIN" ? entry.amount : -entry.amount;
-      if (entry.createdAtMs >= monthStartMs) {
-        monthly += signed;
-        if (entry.createdAtMs >= dayStartMs) {
-          daily += signed;
-        }
-      }
-    }
-
-    return {
-      daily: Math.max(0, daily),
-      monthly: Math.max(0, monthly)
-    };
-  }
-
-  private getLossEntriesForScope(walletId: string, hallId: string, retentionCutoffMs: number): LossLedgerEntry[] {
-    const scopeKey = this.makeLossScopeKey(walletId, hallId);
-    const existing = this.lossEntriesByScope.get(scopeKey) ?? [];
-    const pruned = existing.filter((entry) => entry.createdAtMs >= retentionCutoffMs);
-    if (pruned.length !== existing.length) {
-      this.lossEntriesByScope.set(scopeKey, pruned);
-    }
-    return pruned;
-  }
-
-  private getLossEntriesForAllScopes(walletId: string, retentionCutoffMs: number): LossLedgerEntry[] {
-    const normalizedWalletId = walletId.trim();
-    if (!normalizedWalletId) {
-      return [];
-    }
-
-    const prefix = `${normalizedWalletId}::`;
-    const all: LossLedgerEntry[] = [];
-    for (const [scopeKey, entries] of this.lossEntriesByScope.entries()) {
-      if (!scopeKey.startsWith(prefix)) {
-        continue;
-      }
-      const pruned = entries.filter((entry) => entry.createdAtMs >= retentionCutoffMs);
-      if (pruned.length !== entries.length) {
-        this.lossEntriesByScope.set(scopeKey, pruned);
-      }
-      all.push(...pruned);
-    }
-    return all;
-  }
-
-  private makeLossScopeKey(walletId: string, hallId: string): string {
-    return `${walletId.trim()}::${hallId.trim()}`;
-  }
-
-  private recordLossEntry(walletId: string, hallId: string, entry: LossLedgerEntry): void {
-    const normalizedWalletId = walletId.trim();
-    const normalizedHallId = hallId.trim();
-    if (!normalizedWalletId) {
-      return;
-    }
-    if (!normalizedHallId) {
-      return;
-    }
-    const scopeKey = this.makeLossScopeKey(normalizedWalletId, normalizedHallId);
-    const existing = this.lossEntriesByScope.get(scopeKey) ?? [];
-    existing.push(entry);
-    this.lossEntriesByScope.set(scopeKey, existing);
-  }
-
-  private startPlaySession(walletId: string, nowMs: number): void {
-    const state = this.playStateByWallet.get(walletId) ?? { accumulatedMs: 0 };
-    if (state.pauseUntilMs !== undefined && state.pauseUntilMs <= nowMs) {
-      state.pauseUntilMs = undefined;
-      state.accumulatedMs = 0;
-    }
-    if (state.activeFromMs === undefined) {
-      state.activeFromMs = nowMs;
-    }
-    this.playStateByWallet.set(walletId, state);
-  }
-
-  private finishPlaySessionsForGame(room: RoomState, game: GameState, endedAtMs: number): void {
-    const walletToHall = new Map<string, string>();
+  private async finishPlaySessionsForGame(room: RoomState, game: GameState, endedAtMs: number): Promise<void> {
     for (const playerId of game.tickets.keys()) {
       const player = room.players.get(playerId);
-      if (player) {
-        walletToHall.set(player.walletId, room.hallId);
+      if (!player) {
+        continue;
       }
-    }
-
-    for (const [walletId, hallId] of walletToHall.entries()) {
-      this.finishPlaySession(walletId, hallId, endedAtMs);
+      await this.compliance.finishPlaySession(player.walletId, room.hallId, endedAtMs);
     }
 
     // Fire onGameEnded callback (non-blocking).
@@ -2458,418 +1684,6 @@ export class BingoEngine {
         logger.error({ err }, "onGameEnded callback failed");
       });
     }
-  }
-
-  private finishPlaySession(walletId: string, hallId: string, endedAtMs: number): void {
-    const state = this.playStateByWallet.get(walletId);
-    if (!state || state.activeFromMs === undefined) {
-      return;
-    }
-
-    const elapsedMs = Math.max(0, endedAtMs - state.activeFromMs);
-    state.activeFromMs = undefined;
-    state.accumulatedMs += elapsedMs;
-    if (state.accumulatedMs >= this.playSessionLimitMs) {
-      const pauseUntilMs = endedAtMs + this.pauseDurationMs;
-      state.pauseUntilMs = pauseUntilMs;
-      state.lastMandatoryBreak = {
-        triggeredAtMs: endedAtMs,
-        pauseUntilMs,
-        totalPlayMs: state.accumulatedMs,
-        hallId,
-        netLoss: this.calculateNetLoss(walletId, endedAtMs, hallId)
-      };
-      state.accumulatedMs = 0;
-    }
-
-    this.playStateByWallet.set(walletId, state);
-  }
-
-  private getPlaySessionState(walletId: string, nowMs: number): PlaySessionState {
-    const state = this.playStateByWallet.get(walletId) ?? { accumulatedMs: 0 };
-    if (state.pauseUntilMs !== undefined && state.pauseUntilMs <= nowMs) {
-      state.pauseUntilMs = undefined;
-      state.accumulatedMs = 0;
-    }
-    const activeMs = state.activeFromMs !== undefined ? Math.max(0, nowMs - state.activeFromMs) : 0;
-    return {
-      ...state,
-      accumulatedMs: state.accumulatedMs + activeMs
-    };
-  }
-
-  private makeHouseAccountId(hallId: string, gameType: LedgerGameType, channel: LedgerChannel): string {
-    return `house-${hallId.trim()}-${gameType.toLowerCase()}-${channel.toLowerCase()}`;
-  }
-
-  private recordComplianceLedgerEvent(input: {
-    hallId: string;
-    gameType: LedgerGameType;
-    channel: LedgerChannel;
-    eventType: LedgerEventType;
-    amount: number;
-    roomCode?: string;
-    gameId?: string;
-    claimId?: string;
-    playerId?: string;
-    walletId?: string;
-    sourceAccountId?: string;
-    targetAccountId?: string;
-    policyVersion?: string;
-    batchId?: string;
-    metadata?: Record<string, unknown>;
-  }): void {
-    const nowMs = Date.now();
-    const entry: ComplianceLedgerEntry = {
-      id: randomUUID(),
-      createdAt: new Date(nowMs).toISOString(),
-      createdAtMs: nowMs,
-      hallId: this.assertHallId(input.hallId),
-      gameType: this.assertLedgerGameType(input.gameType),
-      channel: this.assertLedgerChannel(input.channel),
-      eventType: input.eventType,
-      amount: roundCurrency(this.assertNonNegativeNumber(input.amount, "amount")),
-      currency: "NOK",
-      roomCode: input.roomCode?.trim() || undefined,
-      gameId: input.gameId?.trim() || undefined,
-      claimId: input.claimId?.trim() || undefined,
-      playerId: input.playerId?.trim() || undefined,
-      walletId: input.walletId?.trim() || undefined,
-      sourceAccountId: input.sourceAccountId?.trim() || undefined,
-      targetAccountId: input.targetAccountId?.trim() || undefined,
-      policyVersion: input.policyVersion?.trim() || undefined,
-      batchId: input.batchId?.trim() || undefined,
-      metadata: input.metadata
-    };
-    this.complianceLedger.unshift(entry);
-    if (this.complianceLedger.length > 50_000) {
-      this.complianceLedger.length = 50_000;
-    }
-  }
-
-  private appendPayoutAuditEvent(input: {
-    kind: "CLAIM_PRIZE" | "EXTRA_PRIZE";
-    claimId?: string;
-    gameId?: string;
-    roomCode?: string;
-    hallId: string;
-    policyVersion?: string;
-    amount: number;
-    walletId: string;
-    playerId?: string;
-    sourceAccountId?: string;
-    txIds: string[];
-  }): void {
-    const now = new Date().toISOString();
-    const normalizedTxIds = input.txIds.map((txId) => txId.trim()).filter(Boolean);
-    const chainIndex = this.payoutAuditTrail.length + 1;
-    const hashPayload = JSON.stringify({
-      kind: input.kind,
-      claimId: input.claimId,
-      gameId: input.gameId,
-      roomCode: input.roomCode,
-      hallId: input.hallId,
-      policyVersion: input.policyVersion,
-      amount: input.amount,
-      walletId: input.walletId,
-      playerId: input.playerId,
-      sourceAccountId: input.sourceAccountId,
-      txIds: normalizedTxIds,
-      createdAt: now,
-      previousHash: this.lastPayoutAuditHash,
-      chainIndex
-    });
-    const eventHash = createHash("sha256").update(hashPayload).digest("hex");
-    const event: PayoutAuditEvent = {
-      id: randomUUID(),
-      createdAt: now,
-      claimId: input.claimId?.trim() || undefined,
-      gameId: input.gameId?.trim() || undefined,
-      roomCode: input.roomCode?.trim() || undefined,
-      hallId: this.assertHallId(input.hallId),
-      policyVersion: input.policyVersion?.trim() || undefined,
-      amount: roundCurrency(this.assertNonNegativeNumber(input.amount, "amount")),
-      currency: "NOK",
-      walletId: input.walletId.trim(),
-      playerId: input.playerId?.trim() || undefined,
-      sourceAccountId: input.sourceAccountId?.trim() || undefined,
-      txIds: normalizedTxIds,
-      kind: input.kind,
-      chainIndex,
-      previousHash: this.lastPayoutAuditHash,
-      eventHash
-    };
-    this.payoutAuditTrail.unshift(event);
-    this.lastPayoutAuditHash = eventHash;
-    if (this.payoutAuditTrail.length > 10_000) {
-      this.payoutAuditTrail.length = 10_000;
-    }
-  }
-
-  private getRestrictionState(walletId: string, nowMs: number): RestrictionState {
-    const existing = this.restrictionsByWallet.get(walletId) ?? {};
-    const next: RestrictionState = { ...existing };
-    if (next.timedPauseUntilMs !== undefined && next.timedPauseUntilMs <= nowMs) {
-      next.timedPauseUntilMs = undefined;
-      next.timedPauseSetAtMs = undefined;
-    }
-    this.persistRestrictionState(walletId, next);
-    return next;
-  }
-
-  private persistRestrictionState(walletId: string, state: RestrictionState): void {
-    const hasAnyRestriction =
-      state.timedPauseUntilMs !== undefined ||
-      state.timedPauseSetAtMs !== undefined ||
-      state.selfExcludedAtMs !== undefined ||
-      state.selfExclusionMinimumUntilMs !== undefined;
-    if (!hasAnyRestriction) {
-      this.restrictionsByWallet.delete(walletId);
-      return;
-    }
-    this.restrictionsByWallet.set(walletId, state);
-  }
-
-  private resolveGameplayBlock(walletId: string, nowMs: number): GameplayBlockState | undefined {
-    const state = this.getRestrictionState(walletId, nowMs);
-    if (state.selfExcludedAtMs !== undefined && state.selfExclusionMinimumUntilMs !== undefined) {
-      return {
-        type: "SELF_EXCLUDED",
-        untilMs: state.selfExclusionMinimumUntilMs
-      };
-    }
-    if (state.timedPauseUntilMs !== undefined && state.timedPauseUntilMs > nowMs) {
-      return {
-        type: "TIMED_PAUSE",
-        untilMs: state.timedPauseUntilMs
-      };
-    }
-    return undefined;
-  }
-
-  private applySinglePrizeCap(input: {
-    room: RoomState;
-    gameType: PrizeGameType;
-    amount: number;
-    atMs?: number;
-  }): {
-    cappedAmount: number;
-    wasCapped: boolean;
-    policy: PrizePolicyVersion;
-  } {
-    const amount = this.assertNonNegativeNumber(input.amount, "amount");
-    const atMs = input.atMs ?? Date.now();
-    const policy = this.resolvePrizePolicy({
-      hallId: input.room.hallId,
-      linkId: input.room.hallId,
-      gameType: input.gameType,
-      atMs
-    });
-    const cappedAmount = Math.min(amount, policy.singlePrizeCap);
-    return {
-      cappedAmount,
-      wasCapped: cappedAmount < amount,
-      policy
-    };
-  }
-
-  private resolvePrizePolicy(input: {
-    hallId: string;
-    linkId: string;
-    gameType: PrizeGameType;
-    atMs: number;
-  }): PrizePolicyVersion {
-    const hallId = this.normalizePolicyDimension(input.hallId);
-    const linkId = this.normalizePolicyDimension(input.linkId);
-    const gameType = input.gameType;
-    const atMs = input.atMs;
-
-    const candidateScopeKeys = [
-      this.makePrizePolicyScopeKey(gameType, hallId, linkId),
-      this.makePrizePolicyScopeKey(gameType, hallId, POLICY_WILDCARD),
-      this.makePrizePolicyScopeKey(gameType, POLICY_WILDCARD, linkId),
-      this.makePrizePolicyScopeKey(gameType, POLICY_WILDCARD, POLICY_WILDCARD)
-    ];
-
-    for (const scopeKey of candidateScopeKeys) {
-      const versions = this.prizePoliciesByScope.get(scopeKey) ?? [];
-      for (let i = versions.length - 1; i >= 0; i -= 1) {
-        if (versions[i].effectiveFromMs <= atMs) {
-          return versions[i];
-        }
-      }
-    }
-
-    throw new DomainError("PRIZE_POLICY_MISSING", "Fant ingen aktiv premiepolicy for spill/hall/link.");
-  }
-
-  private makePrizePolicyScopeKey(gameType: PrizeGameType, hallId: string, linkId: string): string {
-    return `${gameType}::${hallId}::${linkId}`;
-  }
-
-  private makeExtraPrizeScopeKey(hallId: string, linkId: string): string {
-    return `${hallId.trim()}::${linkId.trim()}`;
-  }
-
-  private normalizePolicyDimension(value: string | undefined): string {
-    if (value === undefined || value === null) {
-      return POLICY_WILDCARD;
-    }
-    const normalized = value.trim();
-    if (!normalized) {
-      return POLICY_WILDCARD;
-    }
-    if (normalized.length > 120) {
-      throw new DomainError("INVALID_INPUT", "Policy-dimensjon er for lang.");
-    }
-    return normalized;
-  }
-
-  private assertIsoTimestampMs(value: string, fieldName: string): number {
-    const normalized = value.trim();
-    if (!normalized) {
-      throw new DomainError("INVALID_INPUT", `${fieldName} mangler.`);
-    }
-    const parsed = Date.parse(normalized);
-    if (!Number.isFinite(parsed)) {
-      throw new DomainError("INVALID_INPUT", `${fieldName} må være ISO-8601 dato/tid.`);
-    }
-    return parsed;
-  }
-
-  private assertNonNegativeNumber(value: number, fieldName: string): number {
-    if (!Number.isFinite(value) || value < 0) {
-      throw new DomainError("INVALID_INPUT", `${fieldName} må være 0 eller større.`);
-    }
-    return value;
-  }
-
-  private toPrizePolicySnapshot(policy: PrizePolicyVersion): PrizePolicySnapshot {
-    return {
-      id: policy.id,
-      gameType: policy.gameType,
-      hallId: policy.hallId,
-      linkId: policy.linkId,
-      effectiveFrom: new Date(policy.effectiveFromMs).toISOString(),
-      singlePrizeCap: policy.singlePrizeCap,
-      dailyExtraPrizeCap: policy.dailyExtraPrizeCap,
-      createdAt: new Date(policy.createdAtMs).toISOString()
-    };
-  }
-
-  private assertLedgerGameType(value: string): LedgerGameType {
-    const normalized = value.trim().toUpperCase();
-    if (normalized === "MAIN_GAME" || normalized === "DATABINGO") {
-      return normalized;
-    }
-    throw new DomainError("INVALID_INPUT", "gameType må være MAIN_GAME eller DATABINGO.");
-  }
-
-  private assertLedgerChannel(value: string): LedgerChannel {
-    const normalized = value.trim().toUpperCase();
-    if (normalized === "HALL" || normalized === "INTERNET") {
-      return normalized;
-    }
-    throw new DomainError("INVALID_INPUT", "channel må være HALL eller INTERNET.");
-  }
-
-  private assertDateKey(value: string, fieldName: string): string {
-    const normalized = value.trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-      throw new DomainError("INVALID_INPUT", `${fieldName} må være i format YYYY-MM-DD.`);
-    }
-    const [yearText, monthText, dayText] = normalized.split("-");
-    const year = Number(yearText);
-    const month = Number(monthText);
-    const day = Number(dayText);
-    const date = new Date(year, month - 1, day);
-    if (
-      date.getFullYear() !== year ||
-      date.getMonth() !== month - 1 ||
-      date.getDate() !== day
-    ) {
-      throw new DomainError("INVALID_INPUT", `${fieldName} er ikke en gyldig dato.`);
-    }
-    return normalized;
-  }
-
-  private dayRangeMs(dateKey: string): { startMs: number; endMs: number } {
-    const normalized = this.assertDateKey(dateKey, "date");
-    const [yearText, monthText, dayText] = normalized.split("-");
-    const startMs = new Date(Number(yearText), Number(monthText) - 1, Number(dayText)).getTime();
-    const endMs = startMs + 24 * 60 * 60 * 1000 - 1;
-    return { startMs, endMs };
-  }
-
-  private dateKeyFromMs(referenceMs: number): string {
-    const date = new Date(referenceMs);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
-  private assertOrganizationAllocations(
-    allocations: OrganizationAllocationInput[]
-  ): OrganizationAllocationInput[] {
-    if (!Array.isArray(allocations) || allocations.length === 0) {
-      throw new DomainError("INVALID_INPUT", "allocations må inneholde minst én organisasjon.");
-    }
-
-    const normalized = allocations.map((allocation) => {
-      const organizationId = allocation.organizationId?.trim();
-      const organizationAccountId = allocation.organizationAccountId?.trim();
-      const sharePercent = Number(allocation.sharePercent);
-      if (!organizationId) {
-        throw new DomainError("INVALID_INPUT", "organizationId mangler.");
-      }
-      if (!organizationAccountId) {
-        throw new DomainError("INVALID_INPUT", "organizationAccountId mangler.");
-      }
-      if (!Number.isFinite(sharePercent) || sharePercent <= 0) {
-        throw new DomainError("INVALID_INPUT", "sharePercent må være større enn 0.");
-      }
-      return {
-        organizationId,
-        organizationAccountId,
-        sharePercent
-      };
-    });
-
-    const totalShare = normalized.reduce((sum, allocation) => sum + allocation.sharePercent, 0);
-    if (Math.abs(totalShare - 100) > 0.0001) {
-      throw new DomainError("INVALID_INPUT", "Summen av sharePercent må være 100.");
-    }
-    return normalized;
-  }
-
-  // BIN-163: roundCurrency extracted to ../util/currency.ts
-
-  private allocateAmountByShares(totalAmount: number, shares: number[]): number[] {
-    const total = roundCurrency(totalAmount);
-    if (shares.length === 0) {
-      return [];
-    }
-    const sumShares = shares.reduce((sum, share) => sum + share, 0);
-    if (!Number.isFinite(sumShares) || sumShares <= 0) {
-      throw new DomainError("INVALID_INPUT", "Ugyldige andeler for fordeling.");
-    }
-
-    const amounts = shares.map((share) => roundCurrency((total * share) / sumShares));
-    const allocated = roundCurrency(amounts.reduce((sum, amount) => sum + amount, 0));
-    const remainder = roundCurrency(total - allocated);
-    amounts[0] = roundCurrency(amounts[0] + remainder);
-    return amounts;
-  }
-
-  private startOfLocalDayMs(referenceMs: number): number {
-    const reference = new Date(referenceMs);
-    return new Date(reference.getFullYear(), reference.getMonth(), reference.getDate()).getTime();
-  }
-
-  private startOfLocalMonthMs(referenceMs: number): number {
-    const reference = new Date(referenceMs);
-    return new Date(reference.getFullYear(), reference.getMonth(), 1).getTime();
   }
 
   private requireRoom(roomCode: string): RoomState {
@@ -2918,6 +1732,13 @@ export class BingoEngine {
     return name;
   }
 
+  private assertNonNegativeNumber(value: number, fieldName: string): number {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new DomainError("INVALID_INPUT", `${fieldName} må være 0 eller større.`);
+    }
+    return value;
+  }
+
   private assertHallId(hallId: string): string {
     const normalized = hallId.trim();
     if (!normalized || normalized.length > 120) {
@@ -2926,11 +1747,97 @@ export class BingoEngine {
     return normalized;
   }
 
+  /**
+   * BIN-245: Restore a room and its in-progress game from a PostgreSQL checkpoint snapshot.
+   * Called during startup crash recovery when a game was RUNNING at the time of the last checkpoint.
+   * Reconstructs in-memory Maps/Sets from the snapshot's plain-object serialization.
+   */
+  restoreRoomFromSnapshot(
+    roomCode: string,
+    hallId: string,
+    hostPlayerId: string,
+    players: Player[],
+    snapshot: GameSnapshot,
+    gameSlug?: string
+  ): void {
+    const code = roomCode.trim().toUpperCase();
+    if (this.rooms.has(code)) {
+      throw new DomainError("ROOM_ALREADY_EXISTS", `Rom ${code} finnes allerede — kan ikke gjenopprette.`);
+    }
+
+    const tickets = new Map<string, Ticket[]>(
+      Object.entries(snapshot.tickets).map(([pid, t]) => [
+        pid,
+        t.map((tk) => ({ grid: tk.grid.map((row) => [...row]) }))
+      ])
+    );
+
+    // BIN-244: snapshot.marks is Record<string, number[][]> — restore to Map<string, Set<number>[]>
+    const marks = new Map<string, Set<number>[]>(
+      Object.entries(snapshot.marks).map(([pid, marksByTicket]) => [
+        pid,
+        marksByTicket.map((nums) => new Set(nums))
+      ])
+    );
+
+    const game: GameState = {
+      id: snapshot.id,
+      status: "RUNNING",
+      entryFee: snapshot.entryFee,
+      ticketsPerPlayer: snapshot.ticketsPerPlayer,
+      prizePool: snapshot.prizePool,
+      remainingPrizePool: snapshot.remainingPrizePool,
+      payoutPercent: snapshot.payoutPercent,
+      maxPayoutBudget: snapshot.maxPayoutBudget,
+      remainingPayoutBudget: snapshot.remainingPayoutBudget,
+      // BIN-243: Restore full ordered draw bag from snapshot
+      drawBag: [...snapshot.drawBag],
+      drawnNumbers: [...snapshot.drawnNumbers],
+      tickets,
+      marks,
+      claims: [...snapshot.claims],
+      lineWinnerId: snapshot.lineWinnerId,
+      bingoWinnerId: snapshot.bingoWinnerId,
+      patterns: snapshot.patterns ? [...snapshot.patterns] : undefined,
+      patternResults: snapshot.patternResults ? [...snapshot.patternResults] : undefined,
+      startedAt: snapshot.startedAt,
+      endedAt: snapshot.endedAt,
+      endedReason: snapshot.endedReason
+    };
+
+    const playersMap = new Map<string, Player>(players.map((p) => [p.id, p]));
+
+    const restoredRoom: RoomState = {
+      code,
+      hallId,
+      hostPlayerId,
+      gameSlug,
+      players: playersMap,
+      currentGame: game,
+      gameHistory: [],
+      createdAt: new Date().toISOString()
+    };
+    this.rooms.set(code, restoredRoom);
+    this.syncRoomToStore(restoredRoom); // BIN-251
+
+    logger.warn(
+      { roomCode: code, gameId: snapshot.id, drawn: snapshot.drawnNumbers.length, remaining: snapshot.drawBag.length },
+      "[BIN-245] Room restored from checkpoint"
+    );
+  }
+
+  /** BIN-251: Sync room state to external store (e.g. Redis) after structural mutations.
+   * In-place game mutations (draws, marks, claims) are synced by callers via persist(). */
+  private syncRoomToStore(room: RoomState): void {
+    this.roomStateStore?.set(room.code, room);
+  }
+
   private serializeRoom(room: RoomState): RoomSnapshot {
     return {
       code: room.code,
       hallId: room.hallId,
       hostPlayerId: room.hostPlayerId,
+      gameSlug: room.gameSlug,
       createdAt: room.createdAt,
       players: [...room.players.values()],
       currentGame: room.currentGame ? this.serializeGame(room.currentGame) : undefined,
@@ -3007,16 +1914,13 @@ export class BingoEngine {
     const ticketByPlayerId = Object.fromEntries(
       [...game.tickets.entries()].map(([playerId, tickets]) => [playerId, tickets.map((ticket) => ({ ...ticket }))])
     );
+    // BIN-244: Preserve per-ticket structure — outer array index = ticket index.
+    // Previously merged into a single flat set, making multi-ticket recovery impossible.
     const marksByPlayerId = Object.fromEntries(
-      [...game.marks.entries()].map(([playerId, marksByTicket]) => {
-        const mergedMarks = new Set<number>();
-        for (const marks of marksByTicket) {
-          for (const number of marks.values()) {
-            mergedMarks.add(number);
-          }
-        }
-        return [playerId, [...mergedMarks.values()].sort((a, b) => a - b)];
-      })
+      [...game.marks.entries()].map(([playerId, marksByTicket]) => [
+        playerId,
+        marksByTicket.map((ticketMarks) => [...ticketMarks].sort((a, b) => a - b))
+      ])
     );
 
     return {
@@ -3029,10 +1933,14 @@ export class BingoEngine {
       payoutPercent: game.payoutPercent,
       maxPayoutBudget: game.maxPayoutBudget,
       remainingPayoutBudget: game.remainingPayoutBudget,
+      // BIN-243: Store the full ordered draw bag, not just the count.
+      drawBag: [...game.drawBag],
       drawnNumbers: [...game.drawnNumbers],
       remainingNumbers: game.drawBag.length,
       lineWinnerId: game.lineWinnerId,
       bingoWinnerId: game.bingoWinnerId,
+      patterns: (game.patterns ?? []).map((p) => ({ ...p })),
+      patternResults: (game.patternResults ?? []).map((r) => ({ ...r })),
       claims: [...game.claims],
       tickets: ticketByPlayerId,
       marks: marksByPlayerId,
