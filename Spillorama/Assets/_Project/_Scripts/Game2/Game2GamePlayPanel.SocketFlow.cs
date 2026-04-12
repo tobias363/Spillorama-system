@@ -23,8 +23,6 @@ public partial class Game2GamePlayPanel
         if (!Application.isPlaying)
             return;
 
-        Debug.Log("Game 2 broadcast off");
-
         SpilloramaGameBridge.OnBallDrawn           -= OnBallDrawn_Spillorama;
         SpilloramaGameBridge.OnGameStarted         -= OnGameStart_Spillorama;
         SpilloramaGameBridge.OnGameFinished        -= OnGameFinish_Spillorama;
@@ -37,7 +35,6 @@ public partial class Game2GamePlayPanel
         if (!Application.isPlaying)
         {
             DisplayLoader(false);
-            Debug.Log("[EditModeSmoke] Skipping Game2 SubscribeRoom.");
             return;
         }
 
@@ -63,7 +60,6 @@ public partial class Game2GamePlayPanel
     private void CallPlayerHallLimitEvent()
     {
         // Spillorama backend handles hall limits via REST — AIS socket call removed.
-        Debug.Log("[Game2] CallPlayerHallLimitEvent: skipped (Spillorama backend handles hall limits via REST)");
     }
 
     public void TicketDeleteBtnClose()

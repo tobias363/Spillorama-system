@@ -177,7 +177,6 @@ public class Game2TicketPurchasePanel : MonoBehaviour
 
     public void PaginationUpdateCall()
     {
-        Debug.Log("Selected page: " + paginationPanel.selectedPage);
         RefreshTicketListPage(paginationPanel.selectedPage);
     }
 
@@ -299,14 +298,12 @@ public class Game2TicketPurchasePanel : MonoBehaviour
 
     private void EnableBroadcasts()
     {
-        // TODO: Spillorama broadcasts via SpilloramaSocketManager
-        Debug.Log("[Game2] EnableBroadcasts: handled via Spillorama snapshots");
+        // Spillorama broadcasts handled via SpilloramaSocketManager snapshots
     }
 
     private void DisableBroadcasts()
     {
-        // TODO: Spillorama broadcasts via SpilloramaSocketManager
-        Debug.Log("[Game2] DisableBroadcasts: handled via Spillorama snapshots");
+        // Spillorama broadcasts handled via SpilloramaSocketManager snapshots
     }
 
     private void RefreshTicketListPage(int pageNo)
@@ -466,7 +463,6 @@ public class Game2TicketPurchasePanel : MonoBehaviour
 
     private void HandleLanguageChange()
     {
-        Debug.Log("[Game2] HandleLanguageChange — regenerating jackpot list");
         GenerateJackpotList(jackpotBroadcast.jackpotList);
     }
 
@@ -481,7 +477,6 @@ public class Game2TicketPurchasePanel : MonoBehaviour
 
         foreach (JackpotData data in jackpotList)
         {
-            Debug.Log("Number: " + data.number);
             PrefabJackpotPanel newJackpotPanel = Instantiate(prefabJackpotPanel, transformJackpotContainer);
             newJackpotPanel.SetData(data);
             this.jackpotPanelList.Add(newJackpotPanel);
@@ -496,7 +491,6 @@ public class Game2TicketPurchasePanel : MonoBehaviour
     internal void LeftRocketRoom()
     {
         // TODO: Replace with Spillorama room leave
-        Debug.Log("[Game2] LeftRocketRoom: handled via Spillorama");
     }
 
     #endregion

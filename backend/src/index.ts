@@ -201,11 +201,9 @@ app.use(httpRateLimiter.middleware());
 app.get(["/", "/index.html"], (_req, res) => {
   res.redirect(302, "/web/");
 });
-app.get(["/portal", "/portal/"], (_req, res) => {
-  res.sendFile(path.join(frontendDir, "index.html"));
-});
 
-app.use(express.static(frontendDir));
+// Admin panel served from frontend/admin/
+app.use("/admin", express.static(path.join(frontendDir, "admin")));
 app.use(express.static(publicDir));
 
 const server = http.createServer(app);
@@ -3993,16 +3991,8 @@ app.get("*", (_req, res) => {
     res.sendFile(adminFrontendFile);
     return;
   }
-  if (_req.path === "/portal" || _req.path === "/portal/") {
-    res.sendFile(path.join(frontendDir, "index.html"));
-    return;
-  }
-  if (_req.path.startsWith("/web")) {
-    res.sendFile(path.join(publicDir, "web/index.html"));
-    return;
-  }
-  // Legacy frontend — still served for Unity iframe and direct links
-  res.sendFile(path.join(frontendDir, "index.html"));
+  // All non-API, non-admin routes serve the web shell (Unity host)
+  res.sendFile(path.join(publicDir, "web/index.html"));
 });
 
 const PORT = Number(process.env.PORT ?? 4000);

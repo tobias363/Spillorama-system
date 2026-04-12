@@ -378,10 +378,8 @@ public partial class Game2GamePlayPanel : MonoBehaviour
 
     public void OnLuckyNumberSelection(Int32 luckyNumber)
     {
-        Debug.Log($"Number : {New_Lucky_Number} || Number : {luckyNumber}");
         if (New_Lucky_Number == luckyNumber)
             return;
-        Debug.Log($"Number : {luckyNumber}");
         int lastLuckyNumber = LuckyNumber;
         DisplayLoader(true);
         // TODO: Replace with Spillorama REST endpoint for Game2 lucky number selection
