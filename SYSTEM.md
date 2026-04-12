@@ -256,22 +256,20 @@ Backend håndhever:
 
 ## Frontend & Admin
 
-### Frontend (Spillerportal)
+### Spillerlobby (Web Shell)
 
-**Teknologi:** Vanilla JavaScript + Socket.IO + CSS  
-**Servert fra:** `frontend/index.html` på `/`
+**Teknologi:** Unity WebGL + vanilla JS shell (auth, Spillvett, Candy iframe)  
+**Servert fra:** `backend/public/web/index.html` på `/web/`  
+**Root (`/`) redirecter til `/web/`.**
 
 **Funksjonalitet:**
-- Innlogging/registrering
-- Spillkatalog med spill: Bingo Game, Bingo
-- Wallet-håndtering med Swedbank Pay
-- KYC-verifisering
-- Compliance-kontroller (tapsgrenser, pauser, selvutelukking)
-- Profilhåndtering
+- Innlogging/registrering (auth.js, lobby.js, profile.js)
+- Unity fullskjerm-lobby med 5 bingospill
+- Spillvett-profil med taps-/pausehistorikk (spillvett.js)
+- Candy iframe-overlay (launchet fra Unity via `OpenUrlInSameTab('/candy/')`)
+- Firebase push-notifikasjoner
 
-**Spillstart:**
-- **Bingo Game** ("Instant Launch"): Henter launch-token → åpner Game Web i ny side/iframe
-- **Bingo**: Direkte Socket.IO-tilkobling for live-spill i portalen
+> **Merk:** Den gamle `frontend/index.html`-portalen er fjernet. All spillerfunksjonalitet ligger nå i `/web/`-shellen.
 
 ### Admin-panel
 
