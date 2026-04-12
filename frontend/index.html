@@ -22,6 +22,10 @@
         <nav id="gamesNav" class="games-nav"></nav>
 
         <div class="topbar-actions">
+          <label class="topbar-hall-picker" for="headerHallId">
+            <span>Aktiv hall</span>
+            <select id="headerHallId"></select>
+          </label>
           <button id="profileBtn" class="profile-btn">
             <span class="profile-icon" aria-hidden="true">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="18" height="18">
@@ -177,6 +181,9 @@
             <div class="row profile-account-actions">
               <button id="walletTopupBtn" class="btn-primary">Overfør penger</button>
             </div>
+            <div id="profilePlayOverview" class="profile-play-overview">
+              <p class="subtle">Spillvett lastes når profilen åpnes.</p>
+            </div>
           </section>
 
           <section class="profile-panel profile-personal-panel">
@@ -191,6 +198,9 @@
               <details class="safety-menu-item">
                 <summary>Spillegrenser</summary>
                 <div class="safety-menu-content">
+                  <div id="safetyOverview" class="safety-overview">
+                    <p class="subtle">Velg hall for å se gjenstående tapsgrenser og status.</p>
+                  </div>
                   <label>
                     Hall (for tapsgrenser)
                     <select id="safetyHallId"></select>
@@ -211,7 +221,7 @@
               </details>
 
               <details class="safety-menu-item">
-                <summary>Spillepause</summary>
+                <summary>Frivillig pause</summary>
                 <div class="safety-menu-content">
                   <label>
                     Spillepause (minutter)
@@ -235,12 +245,108 @@
               </details>
 
               <details class="safety-menu-item">
-                <summary>Spillregnskap</summary>
+                <summary>Saldo og transaksjoner</summary>
                 <div class="safety-menu-content">
                   <pre id="walletStatus" class="status-box">Ingen wallet lastet.</pre>
                 </div>
               </details>
+
+              <details class="safety-menu-item">
+                <summary>Spillregnskap</summary>
+                <div class="safety-menu-content report-menu-content">
+                  <p class="subtle">
+                    Spillregnskapet viser hva du har spilt, hvor du har spilt, og hvor mye du har satset, vunnet og tapt i valgt periode.
+                  </p>
+
+                  <div class="report-toolbar">
+                    <div id="reportPeriodButtons" class="report-period-buttons" role="tablist" aria-label="Periode for spillregnskap">
+                      <button type="button" class="report-period-btn active" data-report-period="today">I dag</button>
+                      <button type="button" class="report-period-btn" data-report-period="last7">7 dager</button>
+                      <button type="button" class="report-period-btn" data-report-period="last30">30 dager</button>
+                      <button type="button" class="report-period-btn" data-report-period="last365">365 dager</button>
+                    </div>
+                    <button id="reportRefreshBtn" class="btn-ghost" type="button">Oppdater spillregnskap</button>
+                  </div>
+
+                  <div id="reportSummary" class="report-summary-grid"></div>
+                  <pre id="reportStatus" class="status-box">Ingen spillregnskap lastet.</pre>
+
+                  <div class="report-section">
+                    <h4>Oversikt per hall og spill</h4>
+                    <div class="report-table-wrap">
+                      <table class="report-table">
+                        <thead>
+                          <tr>
+                            <th>Hall</th>
+                            <th>Spill</th>
+                            <th>Kanal</th>
+                            <th>Innsats</th>
+                            <th>Premier</th>
+                            <th>Netto</th>
+                          </tr>
+                        </thead>
+                        <tbody id="reportBreakdownBody"></tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div class="report-section">
+                    <h4>Spilldetaljer</h4>
+                    <div class="report-table-wrap">
+                      <table class="report-table">
+                        <thead>
+                          <tr>
+                            <th>Hall</th>
+                            <th>Spill</th>
+                            <th>Referanse</th>
+                            <th>Start</th>
+                            <th>Siste aktivitet</th>
+                            <th>Innsats</th>
+                            <th>Premier</th>
+                            <th>Netto</th>
+                          </tr>
+                        </thead>
+                        <tbody id="reportPlaysBody"></tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div class="report-section">
+                    <h4>Siste bokførte hendelser</h4>
+                    <div class="report-table-wrap">
+                      <table class="report-table">
+                        <thead>
+                          <tr>
+                            <th>Tidspunkt</th>
+                            <th>Hall</th>
+                            <th>Spill</th>
+                            <th>Hendelse</th>
+                            <th>Beløp</th>
+                          </tr>
+                        </thead>
+                        <tbody id="reportEventsBody"></tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div class="report-export-card">
+                    <p class="subtle">
+                      Last ned eller send en PDF med detaljert spillregnskap. Eksporten bruker valgt periode over.
+                    </p>
+                    <label>
+                      E-post for eksport
+                      <input id="reportEmail" type="email" placeholder="navn@firma.no" />
+                    </label>
+                    <div class="row">
+                      <button id="reportDownloadPdfBtn" class="btn-secondary" type="button">Last ned PDF</button>
+                      <button id="reportEmailBtn" class="btn-primary" type="button">Send PDF på e-post</button>
+                    </div>
+                  </div>
+                </div>
+              </details>
             </div>
+
+            <pre id="safetyStatus" class="status-box">Ingen spillvett-data lastet.</pre>
           </section>
 
           <button id="logoutBtn" class="profile-logout-btn" type="button">

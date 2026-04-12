@@ -27,6 +27,8 @@ const state = {
   snapshot: null,
   walletState: null,
   complianceState: null,
+  reportState: null,
+  reportPeriod: "last7",
   lastSwedbankIntentId: "",
   lastSwedbankCheckoutUrl: "",
   swedbankStatusPollTimer: null,
@@ -41,6 +43,7 @@ const els = {
   gamesNav: document.getElementById("gamesNav"),
   walletMiniId: document.getElementById("walletMiniId"),
   walletMiniBalance: document.getElementById("walletMiniBalance"),
+  headerHallId: document.getElementById("headerHallId"),
   walletTopupAmount: document.getElementById("walletTopupAmount"),
   walletTopupBtn: document.getElementById("walletTopupBtn"),
   walletSwedbankIntentBtn: document.getElementById("walletSwedbankIntentBtn"),
@@ -59,6 +62,7 @@ const els = {
   profileFullName: document.getElementById("profileFullName"),
   profileEmail: document.getElementById("profileEmail"),
   profileBigBalance: document.getElementById("profileBigBalance"),
+  profilePlayOverview: document.getElementById("profilePlayOverview"),
   profileInfoName: document.getElementById("profileInfoName"),
   profileInfoEmail: document.getElementById("profileInfoEmail"),
   profileInfoKycStatus: document.getElementById("profileInfoKycStatus"),
@@ -115,7 +119,18 @@ const els = {
   safetyClearPauseBtn: document.getElementById("safetyClearPauseBtn"),
   safetySetSelfExclusionBtn: document.getElementById("safetySetSelfExclusionBtn"),
   safetyClearSelfExclusionBtn: document.getElementById("safetyClearSelfExclusionBtn"),
+  safetyOverview: document.getElementById("safetyOverview"),
   safetyStatus: document.getElementById("safetyStatus"),
+  reportStatus: document.getElementById("reportStatus"),
+  reportSummary: document.getElementById("reportSummary"),
+  reportBreakdownBody: document.getElementById("reportBreakdownBody"),
+  reportPlaysBody: document.getElementById("reportPlaysBody"),
+  reportEventsBody: document.getElementById("reportEventsBody"),
+  reportPeriodButtons: document.getElementById("reportPeriodButtons"),
+  reportRefreshBtn: document.getElementById("reportRefreshBtn"),
+  reportEmail: document.getElementById("reportEmail"),
+  reportDownloadPdfBtn: document.getElementById("reportDownloadPdfBtn"),
+  reportEmailBtn: document.getElementById("reportEmailBtn"),
 
   bingoView: document.getElementById("bingoView"),
   bingoHallId: document.getElementById("bingoHallId"),
@@ -285,6 +300,388 @@ function formatClockTime(referenceMs) {
     hour: "2-digit",
     minute: "2-digit"
   });
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "-";
+  }
+  return new Date(value).toLocaleString("nb-NO", {
+    dateStyle: "short",
+    timeStyle: "short"
+  });
+}
+
+function formatGameTypeLabel(gameType) {
+  return gameType === "MAIN_GAME" ? "Hovedspill" : gameType === "DATABINGO" ? "Databingo" : gameType || "-";
+}
+
+function formatChannelLabel(channel) {
+  return channel === "HALL" ? "Hall" : channel === "INTERNET" ? "Internett" : channel || "-";
+}
+
+function formatEventTypeLabel(eventType) {
+  if (eventType === "STAKE") {
+    return "Innsats";
+  }
+  if (eventType === "PRIZE") {
+    return "Premie";
+  }
+  if (eventType === "EXTRA_PRIZE") {
+    return "Ekstrapremie";
+  }
+  return eventType || "-";
+}
+
+function formatNetResult(value) {
+  const safe = Number.isFinite(value) ? value : 0;
+  const prefix = safe > 0 ? "+" : "";
+  return `${prefix}${NOK_FORMATTER.format(safe)} kr`;
+}
+
+function getHallLabelById(hallId) {
+  const normalizedHallId = typeof hallId === "string" ? hallId.trim() : "";
+  if (!normalizedHallId) {
+    return "Ingen hall valgt";
+  }
+  const hall = (Array.isArray(state.halls) ? state.halls : []).find((candidate) => candidate.id === normalizedHallId);
+  if (!hall) {
+    return normalizedHallId;
+  }
+  return hall.name || hall.slug || normalizedHallId;
+}
+
+function clampPercentage(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
+function resolveLossLimitTone(limitValue, usedValue) {
+  if (!Number.isFinite(limitValue) || limitValue <= 0) {
+    return "warn";
+  }
+  const ratio = usedValue / limitValue;
+  if (ratio >= 1) {
+    return "danger";
+  }
+  if (ratio >= 0.75) {
+    return "warn";
+  }
+  return "safe";
+}
+
+function buildLossLimitViewModel(limitValue, usedValue) {
+  const normalizedLimit = asFiniteNumber(limitValue);
+  const normalizedUsed = Math.max(0, asFiniteNumber(usedValue) ?? 0);
+  const hasLimit = Number.isFinite(normalizedLimit) && normalizedLimit > 0;
+  const activeLimit = hasLimit ? normalizedLimit : 0;
+  const remainingValue = hasLimit ? Math.max(0, activeLimit - normalizedUsed) : 0;
+  const percent = hasLimit ? clampPercentage((normalizedUsed / activeLimit) * 100) : 0;
+
+  return {
+    hasLimit,
+    limitValue: activeLimit,
+    usedValue: normalizedUsed,
+    remainingValue,
+    percent,
+    tone: resolveLossLimitTone(activeLimit, normalizedUsed),
+    isReached: hasLimit && normalizedUsed >= activeLimit
+  };
+}
+
+function createSafetyPill(label, tone = "neutral") {
+  const pill = document.createElement("span");
+  pill.className = `safety-pill is-${tone}`;
+  pill.textContent = label;
+  return pill;
+}
+
+function createOverviewMetricCard(label, value, helper = "") {
+  const card = document.createElement("article");
+  card.className = "overview-metric-card";
+
+  const title = document.createElement("span");
+  title.className = "overview-metric-label";
+  title.textContent = label;
+
+  const strong = document.createElement("strong");
+  strong.className = "overview-metric-value";
+  strong.textContent = value;
+
+  card.appendChild(title);
+  card.appendChild(strong);
+
+  if (helper) {
+    const note = document.createElement("span");
+    note.className = "overview-metric-helper";
+    note.textContent = helper;
+    card.appendChild(note);
+  }
+
+  return card;
+}
+
+function renderProfilePlayOverview() {
+  if (!els.profilePlayOverview) {
+    return;
+  }
+
+  els.profilePlayOverview.innerHTML = "";
+
+  if (!state.user) {
+    const message = document.createElement("p");
+    message.className = "subtle";
+    message.textContent = "Spillvett vises når du er innlogget.";
+    els.profilePlayOverview.appendChild(message);
+    return;
+  }
+
+  if (!state.complianceState) {
+    const message = document.createElement("p");
+    message.className = "subtle";
+    message.textContent = "Spillvett lastes for valgt hall.";
+    els.profilePlayOverview.appendChild(message);
+    return;
+  }
+
+  const compliance = state.complianceState;
+  const report = state.reportState;
+  const hallLabel = getHallLabelById(compliance.hallId || state.selectedHallId);
+  const daily = buildLossLimitViewModel(compliance?.personalLossLimits?.daily, compliance?.netLoss?.daily);
+  const monthly = buildLossLimitViewModel(compliance?.personalLossLimits?.monthly, compliance?.netLoss?.monthly);
+
+  const shell = document.createElement("div");
+  shell.className = "profile-play-overview-card";
+
+  const header = document.createElement("div");
+  header.className = "profile-play-overview-header";
+
+  const heading = document.createElement("h4");
+  heading.textContent = "Spillvett nå";
+
+  const subtitle = document.createElement("p");
+  subtitle.className = "subtle";
+  subtitle.textContent = report?.range?.label
+    ? `${hallLabel} · ${report.range.label}`
+    : `${hallLabel} · spillregnskap lastes`;
+
+  header.appendChild(heading);
+  header.appendChild(subtitle);
+  shell.appendChild(header);
+
+  const pills = document.createElement("div");
+  pills.className = "safety-status-pills";
+  if (compliance?.restrictions?.isBlocked) {
+    pills.appendChild(createSafetyPill("Blokkert", "danger"));
+  } else {
+    pills.appendChild(createSafetyPill("Klar til spill", "safe"));
+  }
+  if (compliance?.pause?.isOnPause) {
+    pills.appendChild(createSafetyPill("Pålagt pause aktiv", "danger"));
+  }
+  if (compliance?.restrictions?.timedPause?.isActive) {
+    pills.appendChild(createSafetyPill("Frivillig pause", "warn"));
+  }
+  if (compliance?.restrictions?.selfExclusion?.isActive) {
+    pills.appendChild(createSafetyPill("Selvutestengt", "danger"));
+  }
+  shell.appendChild(pills);
+
+  const grid = document.createElement("div");
+  grid.className = "profile-play-overview-grid";
+  grid.appendChild(createOverviewMetricCard("Aktiv hall", hallLabel));
+  grid.appendChild(
+    createOverviewMetricCard(
+      "Dag igjen",
+      daily.hasLimit ? formatNok(daily.remainingValue) : "Sett grense",
+      daily.hasLimit ? `Brukt ${formatNok(daily.usedValue)} av ${formatNok(daily.limitValue)}` : "Må settes før spill"
+    )
+  );
+  grid.appendChild(
+    createOverviewMetricCard(
+      "Måned igjen",
+      monthly.hasLimit ? formatNok(monthly.remainingValue) : "Sett grense",
+      monthly.hasLimit ? `Brukt ${formatNok(monthly.usedValue)} av ${formatNok(monthly.limitValue)}` : "Må settes før spill"
+    )
+  );
+  grid.appendChild(
+    createOverviewMetricCard(
+      report?.range?.label ? `Netto ${report.range.label.toLowerCase()}` : "Netto resultat",
+      report ? formatNetResult(report.summary?.netResult) : "Laster",
+      report ? `Innsats ${formatNok(report.summary?.stakeTotal)} · Premier ${formatNok(report.summary?.prizeTotal)}` : "Spillregnskap oppdateres"
+    )
+  );
+  shell.appendChild(grid);
+
+  const pendingNotes = [];
+  if (compliance?.pendingLossLimits?.daily) {
+    pendingNotes.push(`Daggrense økes til ${formatNok(compliance.pendingLossLimits.daily.value)} fra ${formatDateTime(compliance.pendingLossLimits.daily.effectiveFrom)}.`);
+  }
+  if (compliance?.pendingLossLimits?.monthly) {
+    pendingNotes.push(`Månedsgrense økes til ${formatNok(compliance.pendingLossLimits.monthly.value)} fra ${formatDateTime(compliance.pendingLossLimits.monthly.effectiveFrom)}.`);
+  }
+  if (pendingNotes.length) {
+    const note = document.createElement("div");
+    note.className = "safety-pending-note";
+    note.textContent = pendingNotes.join(" ");
+    shell.appendChild(note);
+  }
+
+  els.profilePlayOverview.appendChild(shell);
+}
+
+function createLossLimitCard({ title, model, regulatoryLimit, resetLabel, pendingLimit }) {
+  const article = document.createElement("article");
+  article.className = `safety-limit-card is-${model.tone}`;
+
+  const top = document.createElement("div");
+  top.className = "safety-limit-top";
+
+  const heading = document.createElement("h4");
+  heading.textContent = title;
+
+  const badge = document.createElement("span");
+  badge.className = `safety-pill is-${model.isReached ? "danger" : model.tone}`;
+  badge.textContent = model.isReached ? "Grense nådd" : model.hasLimit ? "Aktiv grense" : "Grense mangler";
+
+  top.appendChild(heading);
+  top.appendChild(badge);
+  article.appendChild(top);
+
+  const remaining = document.createElement("strong");
+  remaining.className = "safety-limit-remaining";
+  remaining.textContent = model.hasLimit ? `${formatNok(model.remainingValue)} igjen` : "Sett personlig grense";
+  article.appendChild(remaining);
+
+  const meta = document.createElement("div");
+  meta.className = "safety-limit-metrics";
+  meta.appendChild(createOverviewMetricCard("Brukt", formatNok(model.usedValue)));
+  meta.appendChild(createOverviewMetricCard("Aktiv grense", model.hasLimit ? formatNok(model.limitValue) : "Ikke satt"));
+  meta.appendChild(createOverviewMetricCard("Maks", Number.isFinite(regulatoryLimit) ? formatNok(regulatoryLimit) : "-"));
+  article.appendChild(meta);
+
+  const meter = document.createElement("div");
+  meter.className = `safety-meter-track is-${model.tone}`;
+  const fill = document.createElement("span");
+  fill.className = `safety-meter-fill is-${model.tone}`;
+  fill.style.width = `${model.percent}%`;
+  meter.appendChild(fill);
+  article.appendChild(meter);
+
+  const footer = document.createElement("p");
+  footer.className = "safety-limit-footer";
+  footer.textContent = resetLabel;
+  article.appendChild(footer);
+
+  if (pendingLimit) {
+    const note = document.createElement("div");
+    note.className = "safety-pending-note";
+    note.textContent = `Ventende økning til ${formatNok(pendingLimit.value)} fra ${formatDateTime(pendingLimit.effectiveFrom)}.`;
+    article.appendChild(note);
+  }
+
+  return article;
+}
+
+function renderSafetyOverview() {
+  if (!els.safetyOverview) {
+    return;
+  }
+
+  els.safetyOverview.innerHTML = "";
+
+  if (!state.user) {
+    const message = document.createElement("p");
+    message.className = "subtle";
+    message.textContent = "Logg inn for å se tapsgrenser og spillstatus.";
+    els.safetyOverview.appendChild(message);
+    return;
+  }
+
+  if (!state.complianceState) {
+    const message = document.createElement("p");
+    message.className = "subtle";
+    message.textContent = "Ingen spillvett-data lastet for valgt hall ennå.";
+    els.safetyOverview.appendChild(message);
+    return;
+  }
+
+  const snapshot = state.complianceState;
+  const hallLabel = getHallLabelById(snapshot.hallId || state.selectedHallId);
+  const dailyModel = buildLossLimitViewModel(snapshot?.personalLossLimits?.daily, snapshot?.netLoss?.daily);
+  const monthlyModel = buildLossLimitViewModel(snapshot?.personalLossLimits?.monthly, snapshot?.netLoss?.monthly);
+
+  const shell = document.createElement("div");
+  shell.className = "safety-overview-shell";
+
+  const header = document.createElement("div");
+  header.className = "safety-overview-header";
+
+  const titleWrap = document.createElement("div");
+  const heading = document.createElement("h4");
+  heading.textContent = hallLabel;
+  const subtitle = document.createElement("p");
+  subtitle.className = "subtle";
+  subtitle.textContent = `Per hall · maks ${formatNok(snapshot?.regulatoryLossLimits?.daily)} per dag og ${formatNok(snapshot?.regulatoryLossLimits?.monthly)} per måned.`;
+  titleWrap.appendChild(heading);
+  titleWrap.appendChild(subtitle);
+  header.appendChild(titleWrap);
+
+  const pills = document.createElement("div");
+  pills.className = "safety-status-pills";
+  if (snapshot?.restrictions?.isBlocked) {
+    pills.appendChild(createSafetyPill("Blokkert", "danger"));
+  } else {
+    pills.appendChild(createSafetyPill("Aktiv hall", "safe"));
+  }
+  if (!dailyModel.hasLimit || !monthlyModel.hasLimit) {
+    pills.appendChild(createSafetyPill("Grense må settes", "warn"));
+  }
+  if (snapshot?.pause?.isOnPause) {
+    pills.appendChild(createSafetyPill("Pålagt pause", "danger"));
+  }
+  if (snapshot?.restrictions?.timedPause?.isActive) {
+    pills.appendChild(createSafetyPill("Frivillig pause", "warn"));
+  }
+  if (snapshot?.restrictions?.selfExclusion?.isActive) {
+    pills.appendChild(createSafetyPill("Selvutestengt", "danger"));
+  }
+  header.appendChild(pills);
+
+  shell.appendChild(header);
+
+  const grid = document.createElement("div");
+  grid.className = "safety-limit-grid";
+  grid.appendChild(
+    createLossLimitCard({
+      title: "Daglig tapsgrense",
+      model: dailyModel,
+      regulatoryLimit: snapshot?.regulatoryLossLimits?.daily,
+      resetLabel: "Nullstilles ved lokal midnatt.",
+      pendingLimit: snapshot?.pendingLossLimits?.daily
+    })
+  );
+  grid.appendChild(
+    createLossLimitCard({
+      title: "Månedlig tapsgrense",
+      model: monthlyModel,
+      regulatoryLimit: snapshot?.regulatoryLossLimits?.monthly,
+      resetLabel: "Nullstilles ved ny kalendermåned.",
+      pendingLimit: snapshot?.pendingLossLimits?.monthly
+    })
+  );
+  shell.appendChild(grid);
+
+  if (snapshot?.pause?.isOnPause && snapshot?.pause?.pauseUntil) {
+    const note = document.createElement("div");
+    note.className = "safety-pending-note";
+    note.textContent = `Pålagt pause er aktiv til ${formatDateTime(snapshot.pause.pauseUntil)}.`;
+    shell.appendChild(note);
+  }
+
+  els.safetyOverview.appendChild(shell);
 }
 
 function resolveShowcaseTheme(gameSlug) {
@@ -557,6 +954,8 @@ function resetAuthState() {
   state.snapshot = null;
   state.walletState = null;
   state.complianceState = null;
+  state.reportState = null;
+  state.reportPeriod = "last7";
   state.lastSwedbankIntentId = "";
   state.lastSwedbankCheckoutUrl = "";
   saveAuthToStorage();
@@ -959,6 +1358,7 @@ function renderProfileSummary() {
     }
     els.profileBigBalance.textContent = "0 kr";
     renderTransferPanel();
+    renderProfilePlayOverview();
     return;
   }
 
@@ -988,6 +1388,7 @@ function renderProfileSummary() {
   }
   els.profileBigBalance.textContent = `${formatNokWhole(balance)}`;
   renderTransferPanel();
+  renderProfilePlayOverview();
 }
 
 async function openProfileModal() {
@@ -1002,7 +1403,7 @@ async function openProfileModal() {
   renderProfileSummary();
 
   try {
-    await Promise.all([loadWalletState(), loadComplianceState()]);
+    await Promise.all([loadWalletState(), loadComplianceState(), loadPlayerReport()]);
     renderProfileSummary();
   } catch (error) {
     setStatusBox(els.safetyStatus, error.message || "Kunne ikke oppdatere profil.", "error");
@@ -1225,14 +1626,71 @@ function renderWalletCard() {
   setStatusBox(els.walletStatus, lines.join("\n"));
 }
 
+function populateHallSelect(selectElement, options = {}) {
+  if (!selectElement) {
+    return;
+  }
+
+  const { includePlaceholder = false, placeholderLabel = "Velg hall" } = options;
+  selectElement.innerHTML = "";
+
+  if (includePlaceholder) {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = placeholderLabel;
+    selectElement.appendChild(placeholder);
+  }
+
+  const halls = Array.isArray(state.halls) ? state.halls : [];
+  for (const hall of halls) {
+    const option = document.createElement("option");
+    option.value = hall.id;
+    option.textContent = `${hall.name} (${hall.slug})`;
+    selectElement.appendChild(option);
+  }
+}
+
+function syncHallSelectors() {
+  const selectedHallId = state.selectedHallId || "";
+  for (const element of [els.headerHallId, els.safetyHallId, els.bingoHallId]) {
+    if (!element) {
+      continue;
+    }
+    const exists = [...element.options].some((option) => option.value === selectedHallId);
+    if (exists) {
+      element.value = selectedHallId;
+    }
+  }
+}
+
+function renderHeaderHallSelect() {
+  if (!els.headerHallId) {
+    return;
+  }
+
+  populateHallSelect(els.headerHallId);
+  if (!state.halls.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Ingen aktive haller";
+    els.headerHallId.appendChild(option);
+    els.headerHallId.disabled = true;
+    return;
+  }
+
+  ensureDefaultSelectedHall();
+  syncHallSelectors();
+  els.headerHallId.disabled = false;
+}
+
 function renderSafetyHallSelect() {
   if (!els.safetyHallId) {
     return;
   }
 
-  els.safetyHallId.innerHTML = "";
   const halls = Array.isArray(state.halls) ? state.halls : [];
   if (!halls.length) {
+    els.safetyHallId.innerHTML = "";
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "Ingen aktive haller";
@@ -1241,17 +1699,11 @@ function renderSafetyHallSelect() {
     return;
   }
 
-  for (const hall of halls) {
-    const option = document.createElement("option");
-    option.value = hall.id;
-    option.textContent = `${hall.name} (${hall.slug})`;
-    els.safetyHallId.appendChild(option);
-  }
-
+  populateHallSelect(els.safetyHallId);
   ensureDefaultSelectedHall();
   const selectedHallId = state.selectedHallId || halls[0].id;
-  els.safetyHallId.value = selectedHallId;
   state.selectedHallId = selectedHallId;
+  syncHallSelectors();
   els.safetyHallId.disabled = false;
 }
 
@@ -1260,8 +1712,8 @@ function syncSafetyInputsFromCompliance(compliance) {
     return;
   }
 
-  const daily = compliance?.personalLossLimits?.daily;
-  const monthly = compliance?.personalLossLimits?.monthly;
+  const daily = compliance?.pendingLossLimits?.daily?.value ?? compliance?.personalLossLimits?.daily;
+  const monthly = compliance?.pendingLossLimits?.monthly?.value ?? compliance?.personalLossLimits?.monthly;
   if (els.safetyDailyLossLimit) {
     els.safetyDailyLossLimit.value = Number.isFinite(daily) ? String(daily) : "";
   }
@@ -1279,16 +1731,22 @@ function syncSafetyInputsFromCompliance(compliance) {
       els.bingoHallId.value = hallId;
     }
   }
+
+  renderSafetyOverview();
+  renderProfilePlayOverview();
 }
 
 function formatComplianceForPlayer(snapshot) {
   const timedPause = snapshot?.restrictions?.timedPause;
   const selfExclusion = snapshot?.restrictions?.selfExclusion;
   const mandatoryPause = snapshot?.pause;
+  const lastMandatoryBreak = mandatoryPause?.lastMandatoryBreak;
   const regulatoryDaily = snapshot?.regulatoryLossLimits?.daily;
   const regulatoryMonthly = snapshot?.regulatoryLossLimits?.monthly;
   const personalDaily = snapshot?.personalLossLimits?.daily;
   const personalMonthly = snapshot?.personalLossLimits?.monthly;
+  const pendingDaily = snapshot?.pendingLossLimits?.daily;
+  const pendingMonthly = snapshot?.pendingLossLimits?.monthly;
   const netDaily = snapshot?.netLoss?.daily;
   const netMonthly = snapshot?.netLoss?.monthly;
 
@@ -1297,19 +1755,27 @@ function formatComplianceForPlayer(snapshot) {
     `Hall: ${snapshot?.hallId || state.selectedHallId || "-"}`,
     `Blokkert: ${snapshot?.restrictions?.isBlocked ? "Ja" : "Nei"}`,
     `Blokkert av: ${snapshot?.restrictions?.blockedBy || "-"}`,
+    `Pålagt pause: ${mandatoryPause?.isOnPause ? "Aktiv" : "Ikke aktiv"}`,
+    `Pålagt pause til: ${mandatoryPause?.pauseUntil || "-"}`,
+    `Spilletid i aktiv økt: ${mandatoryPause?.accumulatedPlayMs ?? 0} ms av ${mandatoryPause?.playSessionLimitMs ?? "-"} ms`,
+    `Siste pålagte pause: ${lastMandatoryBreak?.triggeredAt || "-"}`,
+    `Siste pause hall: ${lastMandatoryBreak?.hallId || "-"}`,
+    `Tap ved pålagt pause: dag=${lastMandatoryBreak?.netLoss?.daily ?? "-"} / måned=${lastMandatoryBreak?.netLoss?.monthly ?? "-"}`,
     `Frivillig pause: ${timedPause?.isActive ? "Aktiv" : "Ikke aktiv"}`,
-    `Pause til: ${timedPause?.pauseUntil || "-"}`,
-    `Påkrevd pause: ${mandatoryPause?.isOnPause ? "Aktiv" : "Ikke aktiv"}`,
-    `Påkrevd pause til: ${mandatoryPause?.pauseUntil || "-"}`,
-    `Selvekskludering: ${selfExclusion?.isActive ? "Aktiv" : "Ikke aktiv"}`,
-    `Selvekskludering til: ${selfExclusion?.minimumUntil || "-"}`,
+    `Frivillig pause til: ${timedPause?.pauseUntil || "-"}`,
+    `Selvutestenging: ${selfExclusion?.isActive ? "Aktiv" : "Ikke aktiv"}`,
+    `Selvutestengt til: ${selfExclusion?.minimumUntil || "-"}`,
     `Regulatoriske grenser: dag=${regulatoryDaily ?? "-"} / måned=${regulatoryMonthly ?? "-"}`,
     `Personlige grenser: dag=${personalDaily ?? "-"} / måned=${personalMonthly ?? "-"}`,
+    `Ventende daggrense: ${pendingDaily ? `${pendingDaily.value} fra ${pendingDaily.effectiveFrom}` : "-"}`,
+    `Ventende månedsgrense: ${pendingMonthly ? `${pendingMonthly.value} fra ${pendingMonthly.effectiveFrom}` : "-"}`,
     `Netto tap: dag=${netDaily ?? "-"} / måned=${netMonthly ?? "-"}`
   ].join("\n");
 }
 
 function renderSafetyStatus() {
+  renderSafetyOverview();
+
   if (!els.safetyStatus) {
     return;
   }
@@ -1325,6 +1791,210 @@ function renderSafetyStatus() {
   }
 
   setStatusBox(els.safetyStatus, formatComplianceForPlayer(state.complianceState));
+}
+
+function renderReportPeriodButtons() {
+  if (!els.reportPeriodButtons) {
+    return;
+  }
+  const buttons = els.reportPeriodButtons.querySelectorAll("[data-report-period]");
+  for (const button of buttons) {
+    const isActive = button.dataset.reportPeriod === state.reportPeriod;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  }
+}
+
+function createTableCell(tagName, text, className = "") {
+  const cell = document.createElement(tagName);
+  cell.textContent = text;
+  if (className) {
+    cell.className = className;
+  }
+  return cell;
+}
+
+function renderEmptyTableState(tbody, colSpan, message) {
+  if (!tbody) {
+    return;
+  }
+  tbody.innerHTML = "";
+  const row = document.createElement("tr");
+  const cell = createTableCell("td", message, "report-empty-row");
+  cell.colSpan = colSpan;
+  row.appendChild(cell);
+  tbody.appendChild(row);
+}
+
+function renderReportSummary() {
+  if (!els.reportSummary) {
+    return;
+  }
+
+  const report = state.reportState;
+  els.reportSummary.innerHTML = "";
+  if (!report) {
+    return;
+  }
+
+  const cards = [
+    {
+      label: "Periode",
+      value: report.range?.label || "-"
+    },
+    {
+      label: "Innsats",
+      value: formatNok(report.summary?.stakeTotal)
+    },
+    {
+      label: "Premier",
+      value: formatNok(report.summary?.prizeTotal)
+    },
+    {
+      label: "Netto resultat",
+      value: formatNetResult(report.summary?.netResult)
+    },
+    {
+      label: "Antall spill",
+      value: String(report.summary?.totalPlays ?? 0)
+    },
+    {
+      label: "Bokførte hendelser",
+      value: String(report.summary?.totalEvents ?? 0)
+    }
+  ];
+
+  for (const card of cards) {
+    const article = document.createElement("article");
+    article.className = "report-summary-card";
+
+    const label = document.createElement("span");
+    label.className = "report-summary-label";
+    label.textContent = card.label;
+
+    const value = document.createElement("strong");
+    value.className = "report-summary-value";
+    value.textContent = card.value;
+
+    article.appendChild(label);
+    article.appendChild(value);
+    els.reportSummary.appendChild(article);
+  }
+}
+
+function renderReportBreakdown() {
+  if (!els.reportBreakdownBody) {
+    return;
+  }
+
+  const rows = Array.isArray(state.reportState?.breakdown) ? state.reportState.breakdown : [];
+  if (!rows.length) {
+    renderEmptyTableState(els.reportBreakdownBody, 6, "Ingen registrerte spill i valgt periode.");
+    return;
+  }
+
+  els.reportBreakdownBody.innerHTML = "";
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.appendChild(createTableCell("td", row.hallName || row.hallId || "-"));
+    tr.appendChild(createTableCell("td", formatGameTypeLabel(row.gameType)));
+    tr.appendChild(createTableCell("td", formatChannelLabel(row.channel)));
+    tr.appendChild(createTableCell("td", formatNok(row.stakeTotal), "report-number-cell"));
+    tr.appendChild(createTableCell("td", formatNok(row.prizeTotal), "report-number-cell"));
+    tr.appendChild(createTableCell("td", formatNetResult(row.netResult), "report-number-cell"));
+    els.reportBreakdownBody.appendChild(tr);
+  }
+}
+
+function renderReportPlays() {
+  if (!els.reportPlaysBody) {
+    return;
+  }
+
+  const rows = Array.isArray(state.reportState?.plays) ? state.reportState.plays : [];
+  if (!rows.length) {
+    renderEmptyTableState(els.reportPlaysBody, 8, "Ingen spilldetaljer å vise i valgt periode.");
+    return;
+  }
+
+  els.reportPlaysBody.innerHTML = "";
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.appendChild(createTableCell("td", row.hallName || row.hallId || "-"));
+    tr.appendChild(createTableCell("td", formatGameTypeLabel(row.gameType)));
+    tr.appendChild(createTableCell("td", row.roomCode || row.gameId || row.playId || "-"));
+    tr.appendChild(createTableCell("td", formatDateTime(row.startedAt)));
+    tr.appendChild(createTableCell("td", formatDateTime(row.lastActivityAt)));
+    tr.appendChild(createTableCell("td", formatNok(row.stakeTotal), "report-number-cell"));
+    tr.appendChild(createTableCell("td", formatNok(row.prizeTotal), "report-number-cell"));
+    tr.appendChild(createTableCell("td", formatNetResult(row.netResult), "report-number-cell"));
+    els.reportPlaysBody.appendChild(tr);
+  }
+}
+
+function renderReportEvents() {
+  if (!els.reportEventsBody) {
+    return;
+  }
+
+  const rows = Array.isArray(state.reportState?.events) ? state.reportState.events : [];
+  if (!rows.length) {
+    renderEmptyTableState(els.reportEventsBody, 5, "Ingen bokførte hendelser å vise i valgt periode.");
+    return;
+  }
+
+  els.reportEventsBody.innerHTML = "";
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.appendChild(createTableCell("td", formatDateTime(row.createdAt)));
+    tr.appendChild(createTableCell("td", row.hallName || row.hallId || "-"));
+    tr.appendChild(createTableCell("td", formatGameTypeLabel(row.gameType)));
+    tr.appendChild(createTableCell("td", formatEventTypeLabel(row.eventType)));
+    tr.appendChild(createTableCell("td", formatNok(row.amount), "report-number-cell"));
+    els.reportEventsBody.appendChild(tr);
+  }
+}
+
+function renderPlayerReport() {
+  renderReportPeriodButtons();
+  renderProfilePlayOverview();
+
+  if (!els.reportStatus) {
+    return;
+  }
+
+  if (!state.user) {
+    setStatusBox(els.reportStatus, "Ikke innlogget.");
+    renderReportSummary();
+    renderReportBreakdown();
+    renderReportPlays();
+    renderReportEvents();
+    return;
+  }
+
+  if (!state.reportState) {
+    setStatusBox(els.reportStatus, "Ingen spillregnskap lastet. Trykk «Oppdater spillregnskap»."); 
+    renderReportSummary();
+    renderReportBreakdown();
+    renderReportPlays();
+    renderReportEvents();
+    return;
+  }
+
+  const report = state.reportState;
+  const lines = [
+    `Periode: ${report.range?.label || "-"}`,
+    `Hallfilter: ${report.hallName || "Alle haller"}`,
+    `Innsats: ${formatNok(report.summary?.stakeTotal)}`,
+    `Premier: ${formatNok(report.summary?.prizeTotal)}`,
+    `Netto resultat: ${formatNetResult(report.summary?.netResult)}`,
+    `Generert: ${formatDateTime(report.generatedAt)}`
+  ];
+  setStatusBox(els.reportStatus, lines.join("\n"), "success");
+  renderReportSummary();
+  renderReportBreakdown();
+  renderReportPlays();
+  renderReportEvents();
 }
 
 function renderBingoStatus(text, tone = "neutral") {
@@ -1413,9 +2083,9 @@ function renderBingoHallSelect() {
     return;
   }
 
-  els.bingoHallId.innerHTML = "";
   const halls = Array.isArray(state.halls) ? state.halls : [];
   if (!halls.length) {
+    els.bingoHallId.innerHTML = "";
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "Ingen aktive haller";
@@ -1424,21 +2094,11 @@ function renderBingoHallSelect() {
     return;
   }
 
-  for (const hall of halls) {
-    const option = document.createElement("option");
-    option.value = hall.id;
-    option.textContent = `${hall.name} (${hall.slug})`;
-    els.bingoHallId.appendChild(option);
-  }
-
+  populateHallSelect(els.bingoHallId);
   ensureDefaultSelectedHall();
-  els.bingoHallId.value = state.selectedHallId || halls[0].id;
-  state.selectedHallId = els.bingoHallId.value;
+  state.selectedHallId = state.selectedHallId || halls[0].id;
+  syncHallSelectors();
   els.bingoHallId.disabled = false;
-
-  if (els.safetyHallId && [...els.safetyHallId.options].some((option) => option.value === state.selectedHallId)) {
-    els.safetyHallId.value = state.selectedHallId;
-  }
 }
 
 function renderBingoPlayers() {
@@ -1659,8 +2319,10 @@ function renderAfterLogin() {
   renderWalletMini();
   renderKycCard();
   renderWalletCard();
+  renderHeaderHallSelect();
   renderSafetyHallSelect();
   renderSafetyStatus();
+  renderPlayerReport();
   renderSelectedGame();
 }
 
@@ -1679,6 +2341,17 @@ async function loadWalletState() {
   }
   renderWalletMini();
   renderWalletCard();
+}
+
+async function loadPlayerReport() {
+  const hallId = (state.selectedHallId || "").trim();
+  const query = new URLSearchParams({ period: state.reportPeriod });
+  if (hallId) {
+    query.set("hallId", hallId);
+  }
+  const report = await api(`/api/spillevett/report?${query.toString()}`);
+  state.reportState = report;
+  renderPlayerReport();
 }
 
 function getSelectedSafetyHallId() {
@@ -1713,7 +2386,7 @@ function buildLossLimitsPayload() {
 
 async function onSafetyRefresh() {
   try {
-    await Promise.all([loadWalletState(), loadComplianceState()]);
+    await Promise.all([loadWalletState(), loadComplianceState(), loadPlayerReport()]);
   } catch (error) {
     setStatusBox(els.safetyStatus, error.message || "Kunne ikke hente spillvett-data.", "error");
   }
@@ -1744,6 +2417,7 @@ async function onSafetySetPause() {
       }
     });
     state.complianceState = compliance;
+    syncSafetyInputsFromCompliance(compliance);
     setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
   } catch (error) {
     setStatusBox(els.safetyStatus, error.message || "Kunne ikke sette spillepause.", "error");
@@ -1756,6 +2430,7 @@ async function onSafetyClearPause() {
       method: "DELETE"
     });
     state.complianceState = compliance;
+    syncSafetyInputsFromCompliance(compliance);
     setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
   } catch (error) {
     setStatusBox(els.safetyStatus, error.message || "Kunne ikke fjerne spillepause.", "error");
@@ -1768,6 +2443,7 @@ async function onSafetySetSelfExclusion() {
       method: "POST"
     });
     state.complianceState = compliance;
+    syncSafetyInputsFromCompliance(compliance);
     setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
   } catch (error) {
     setStatusBox(els.safetyStatus, error.message || "Kunne ikke aktivere selvekskludering.", "error");
@@ -1780,9 +2456,103 @@ async function onSafetyClearSelfExclusion() {
       method: "DELETE"
     });
     state.complianceState = compliance;
+    syncSafetyInputsFromCompliance(compliance);
     setStatusBox(els.safetyStatus, formatComplianceForPlayer(compliance), "success");
   } catch (error) {
     setStatusBox(els.safetyStatus, error.message || "Kunne ikke oppheve selvekskludering.", "error");
+  }
+}
+
+async function onReportRefresh() {
+  try {
+    setStatusBox(els.reportStatus, "Laster spillregnskap...");
+    await loadPlayerReport();
+  } catch (error) {
+    state.reportState = null;
+    renderPlayerReport();
+    setStatusBox(els.reportStatus, error.message || "Kunne ikke hente spillregnskap.", "error");
+  }
+}
+
+async function requestReportExport(delivery) {
+  if (!state.accessToken) {
+    throw new Error("Ikke innlogget.");
+  }
+
+  const hallId = (state.selectedHallId || "").trim();
+  const payload = {
+    delivery,
+    period: state.reportPeriod,
+    hallId: hallId || undefined,
+    email: delivery === "email" ? (els.reportEmail?.value || state.user?.email || "").trim() : undefined
+  };
+
+  const response = await fetch("/api/spillevett/report/export", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${state.accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (delivery === "download") {
+    if (!response.ok || !contentType.includes("application/pdf")) {
+      let message = `Eksport feilet (${response.status}).`;
+      try {
+        const errorJson = await response.json();
+        message = errorJson?.error?.message || message;
+      } catch {
+        // Ignore invalid json when pdf export fails before body is serialized.
+      }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const periodLabel = state.reportPeriod || "rapport";
+    anchor.href = url;
+    anchor.download = `spillregnskap-${periodLabel}.pdf`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    return { delivery: "download" };
+  }
+
+  let json;
+  try {
+    json = await response.json();
+  } catch {
+    throw new Error(`Ugyldig svar fra server (${response.status}).`);
+  }
+
+  if (!json?.ok) {
+    throw new Error(json?.error?.message || `Eksport feilet (${response.status}).`);
+  }
+
+  return json.data;
+}
+
+async function onReportDownloadPdf() {
+  try {
+    setStatusBox(els.reportStatus, "Genererer PDF...");
+    await requestReportExport("download");
+    setStatusBox(els.reportStatus, "PDF lastet ned.", "success");
+  } catch (error) {
+    setStatusBox(els.reportStatus, error.message || "Kunne ikke laste ned PDF.", "error");
+  }
+}
+
+async function onReportEmail() {
+  try {
+    setStatusBox(els.reportStatus, "Sender PDF på e-post...");
+    const result = await requestReportExport("email");
+    setStatusBox(els.reportStatus, `PDF sendt til ${result.recipientEmail}.`, "success");
+  } catch (error) {
+    setStatusBox(els.reportStatus, error.message || "Kunne ikke sende PDF på e-post.", "error");
   }
 }
 
@@ -1803,12 +2573,7 @@ function ensureDefaultSelectedGame() {
 function ensureDefaultSelectedHall() {
   if (state.snapshot?.hallId) {
     state.selectedHallId = state.snapshot.hallId;
-    if (els.bingoHallId) {
-      els.bingoHallId.value = state.selectedHallId;
-    }
-    if (els.safetyHallId) {
-      els.safetyHallId.value = state.selectedHallId;
-    }
+    syncHallSelectors();
     return;
   }
 
@@ -1823,11 +2588,28 @@ function ensureDefaultSelectedHall() {
   }
 
   state.selectedHallId = state.halls[0].id;
-  if (els.bingoHallId) {
-    els.bingoHallId.value = state.selectedHallId;
+  syncHallSelectors();
+}
+
+async function onSelectedHallChanged(nextHallId) {
+  const normalizedHallId = (nextHallId || "").trim();
+  if (!normalizedHallId || normalizedHallId === state.selectedHallId) {
+    syncHallSelectors();
+    return;
   }
-  if (els.safetyHallId) {
-    els.safetyHallId.value = state.selectedHallId;
+
+  state.selectedHallId = normalizedHallId;
+  syncHallSelectors();
+
+  if (!state.user) {
+    return;
+  }
+
+  try {
+    await Promise.all([loadComplianceState(), loadPlayerReport()]);
+  } catch (error) {
+    setStatusBox(els.safetyStatus, error.message || "Kunne ikke oppdatere data for valgt hall.", "error");
+    setStatusBox(els.reportStatus, error.message || "Kunne ikke oppdatere spillregnskap.", "error");
   }
 }
 
@@ -1841,16 +2623,21 @@ async function loadAuthenticatedData() {
   state.user = me;
   state.games = getVisiblePortalGames(games);
   state.halls = Array.isArray(halls) ? halls : [];
+  if (els.reportEmail) {
+    els.reportEmail.value = me?.email || "";
+  }
   ensureDefaultSelectedGame();
   ensureDefaultSelectedHall();
   state.adminGames = [];
 
   await loadWalletState();
   try {
-    await loadComplianceState();
+    await Promise.all([loadComplianceState(), loadPlayerReport()]);
   } catch (error) {
     state.complianceState = null;
+    state.reportState = null;
     setStatusBox(els.safetyStatus, error.message || "Kunne ikke laste spillvett-data.", "error");
+    setStatusBox(els.reportStatus, error.message || "Kunne ikke laste spillregnskap.", "error");
   }
 }
 
@@ -2434,21 +3221,44 @@ if (els.safetySetSelfExclusionBtn) {
 if (els.safetyClearSelfExclusionBtn) {
   els.safetyClearSelfExclusionBtn.addEventListener("click", onSafetyClearSelfExclusion);
 }
+if (els.reportRefreshBtn) {
+  els.reportRefreshBtn.addEventListener("click", onReportRefresh);
+}
+if (els.reportDownloadPdfBtn) {
+  els.reportDownloadPdfBtn.addEventListener("click", onReportDownloadPdf);
+}
+if (els.reportEmailBtn) {
+  els.reportEmailBtn.addEventListener("click", onReportEmail);
+}
+if (els.reportPeriodButtons) {
+  els.reportPeriodButtons.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-report-period]");
+    if (!button) {
+      return;
+    }
+    const nextPeriod = (button.dataset.reportPeriod || "").trim();
+    if (!nextPeriod || nextPeriod === state.reportPeriod) {
+      return;
+    }
+    state.reportPeriod = nextPeriod;
+    renderReportPeriodButtons();
+    onReportRefresh();
+  });
+}
+if (els.headerHallId) {
+  els.headerHallId.addEventListener("change", () => {
+    onSelectedHallChanged(els.headerHallId.value);
+  });
+}
 if (els.safetyHallId) {
   els.safetyHallId.addEventListener("change", () => {
-    state.selectedHallId = (els.safetyHallId.value || "").trim();
-    if (els.bingoHallId && [...els.bingoHallId.options].some((option) => option.value === state.selectedHallId)) {
-      els.bingoHallId.value = state.selectedHallId;
-    }
+    onSelectedHallChanged(els.safetyHallId.value);
   });
 }
 
 if (els.bingoHallId) {
   els.bingoHallId.addEventListener("change", () => {
-    state.selectedHallId = (els.bingoHallId.value || "").trim();
-    if (els.safetyHallId && [...els.safetyHallId.options].some((option) => option.value === state.selectedHallId)) {
-      els.safetyHallId.value = state.selectedHallId;
-    }
+    onSelectedHallChanged(els.bingoHallId.value);
   });
 }
 
@@ -2474,8 +3284,10 @@ function initialRender() {
   renderWalletMini();
   renderKycCard();
   renderWalletCard();
+  renderHeaderHallSelect();
   renderSafetyHallSelect();
   renderSafetyStatus();
+  renderPlayerReport();
   renderBingoState();
   setStatusBox(els.loginStatus, "Ikke logget inn.");
   setStatusBox(els.registerStatus, "Ikke opprettet bruker ennå.");

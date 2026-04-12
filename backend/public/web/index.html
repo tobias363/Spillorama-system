@@ -1,7 +1,7 @@
 <!--
   LIVE BINGO UNITY HOST
-  Denne filen er den rene /web/-hosten for Spillorama i Spillorama-system.
-  Ekstern demo-logikk skal ikke ligge her.
+  Denne filen er den operative /web/-hosten for Spillorama i Spillorama-system.
+  Kundevendt lobby, Spillvett og shell-UI skal ligge her rundt Unity-spillflaten.
 -->
 <!DOCTYPE html>
 <html lang="en-us">
@@ -12,37 +12,435 @@
   <title>SPILLORAMA</title>
   <link rel="shortcut icon" href="TemplateData/favicon.ico">
   <link rel="stylesheet" href="TemplateData/style.css">
+  <link rel="stylesheet" href="spillvett.css">
 
   <style>
+    :root {
+      color-scheme: dark;
+    }
+
     body {
       margin: 0;
-      overflow: hidden;
+      min-height: 100vh;
       background: url('TemplateData/bg.png') center / cover no-repeat fixed;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #f4f6fb;
+    }
+
+    .host-page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding: 18px;
+      box-sizing: border-box;
+      background: linear-gradient(180deg, rgba(6, 10, 24, 0.78), rgba(7, 11, 27, 0.62));
+    }
+
+    .host-topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 18px 22px;
+      border-radius: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(9, 14, 34, 0.76);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+    }
+
+    .host-branding {
+      max-width: 700px;
+    }
+
+    .host-kicker {
+      margin: 0 0 8px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(200, 213, 255, 0.66);
+    }
+
+    .host-title {
+      margin: 0;
+      font-size: clamp(28px, 3vw, 40px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    .host-copy {
+      margin: 10px 0 0;
+      max-width: 60ch;
+      font-size: 15px;
+      line-height: 1.55;
+      color: rgba(227, 234, 255, 0.8);
+    }
+
+    .host-meta {
+      display: grid;
+      gap: 12px;
+      min-width: min(360px, 100%);
+    }
+
+    .host-meta-card {
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+    }
+
+    .host-meta-label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(195, 208, 255, 0.62);
+    }
+
+    .host-meta-value {
+      display: block;
+      font-size: 18px;
+      font-weight: 800;
+      color: #f8fbff;
+    }
+
+    .host-meta-note {
+      margin-top: 6px;
+      font-size: 13px;
+      line-height: 1.45;
+      color: rgba(228, 234, 255, 0.72);
+    }
+
+    .host-layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+      gap: 18px;
+      min-height: 0;
+    }
+
+    .host-sidebar,
+    .host-main {
+      min-height: 0;
+    }
+
+    .host-main {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .unity-frame {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 1;
+      padding: 16px;
+      border-radius: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(9, 14, 34, 0.76);
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+      backdrop-filter: blur(16px);
+    }
+
+    .unity-frame-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .unity-frame-title {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .unity-frame-copy {
+      margin: 6px 0 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: rgba(227, 234, 255, 0.76);
+      max-width: 62ch;
+    }
+
+    .host-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .host-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(245, 248, 255, 0.84);
+    }
+
+    .host-button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      background: #edf3ff;
+      color: #163160;
+    }
+
+    .host-button.is-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #f6f8ff;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .host-hall-select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+      color: #f7faff;
+      font: inherit;
+      font-weight: 700;
+    }
+
+    .host-hall-select:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .host-game-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .host-game-button {
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.05);
+      color: #f5f8ff;
+      border-radius: 14px;
+      padding: 12px 10px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .host-game-button:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .unity-stage {
+      position: relative;
+      min-height: 0;
+      flex: 1;
+      border-radius: 18px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    #unity-container {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    @media (max-width: 1120px) {
+      .host-topbar,
+      .unity-frame-header {
+        flex-direction: column;
+      }
+
+      .host-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .host-page {
+        padding: 12px;
+      }
+
+      .unity-frame {
+        padding: 12px;
+      }
     }
   </style>
 
-  <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
-
 </head>
 
 <body>
-  <div id="unity-container" class="unity-desktop" style="width:100%; height:100%; overflow:hidden">
-    <canvas id="unity-canvas" width=960 height=600></canvas>
-    <div id="unity-loading-bar">
-      <div id="unity-logo"></div>
-      <div id="unity-progress-bar-empty">
-        <div id="unity-progress-bar-full"></div>
+  <div class="host-page">
+    <header class="host-topbar">
+      <div class="host-branding">
+        <p class="host-kicker">Spillorama Lobby Shell</p>
+        <h1 class="host-title">Lobby, Spillvett og konto utenfor Unity</h1>
+        <p class="host-copy">
+          Dette er den riktige kundeflaten for hallvalg, spillegrenser og spillregnskap. Unity brukes videre som spillflate,
+          mens compliance og kundekontekst ligger i web-shellen rundt canvaset.
+        </p>
       </div>
-    </div>
-    <div id="unity-warning"> </div>
-    <div id="unity-footer">
-      <div id="unity-webgl-logo"></div>
-      <div id="unity-fullscreen-button"></div>
-      <div id="unity-build-title">SPILLORAMA</div>
+      <div class="host-meta">
+        <div class="host-meta-card">
+          <span class="host-meta-label">Aktiv hall</span>
+          <strong class="host-meta-value" id="host-active-hall">Venter på hall fra Spillorama</strong>
+          <div class="host-meta-note" id="host-session-state">
+            Logg inn i Spillorama og velg hall i lobbyen for å synkronisere Spillvett i hosten.
+          </div>
+        </div>
+        <div class="host-meta-card">
+          <label class="host-meta-label" for="host-hall-select">Velg hall i shellen</label>
+          <select id="host-hall-select" class="host-hall-select" disabled>
+            <option>Venter på haller fra Spillorama</option>
+          </select>
+          <div class="host-meta-note" id="host-hall-note">
+            Hallvelgeren i shellen blir aktiv når Unity har sendt godkjente haller til hosten.
+          </div>
+        </div>
+        <div class="host-meta-card">
+          <span class="host-meta-label">Spillnavigasjon</span>
+          <div class="host-game-grid">
+            <button class="host-game-button" type="button" data-host-game="0">Lobby</button>
+            <button class="host-game-button" type="button" data-host-game="1">Game 1</button>
+            <button class="host-game-button" type="button" data-host-game="2">Game 2</button>
+            <button class="host-game-button" type="button" data-host-game="3">Game 3</button>
+            <button class="host-game-button" type="button" data-host-game="4">Game 4</button>
+            <button class="host-game-button" type="button" data-host-game="5">Game 5</button>
+            <button class="host-game-button" type="button" data-host-game="6">Candy</button>
+          </div>
+          <div class="host-meta-note">Neste steg er å la shellen eie hele lobbynavigasjonen og bruke Unity kun til spillflaten.</div>
+        </div>
+        <div class="host-chip-row">
+          <span class="host-chip">Konto og Spillvett i shell</span>
+          <span class="host-chip">Spill og realtime i Unity</span>
+          <button class="host-button is-secondary" type="button" id="host-return-lobby">Til lobby i Unity</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="host-layout">
+      <aside class="host-sidebar">
+        <section id="spillvett-shell" class="spillvett-shell">
+          <div class="spillvett-card">
+            <div class="spillvett-header">
+              <div>
+                <p class="spillvett-kicker">Spillvett</p>
+                <h2 class="spillvett-title">Grenser og spillregnskap</h2>
+                <p class="spillvett-subtitle" id="spillvett-hall-name">Venter på valgt hall</p>
+              </div>
+              <div class="spillvett-actions">
+                <button class="spillvett-button is-secondary" type="button" id="spillvett-toggle">Åpne spillregnskap</button>
+              </div>
+            </div>
+
+            <div class="spillvett-status-row" id="spillvett-status-row"></div>
+
+            <div class="spillvett-limits">
+              <article class="spillvett-limit">
+                <div class="spillvett-limit-head">
+                  <span class="spillvett-limit-label" id="spillvett-daily-label">Dagsgrense</span>
+                  <span class="spillvett-limit-value" id="spillvett-daily-value">0 kr igjen</span>
+                </div>
+                <div class="spillvett-meter">
+                  <div class="spillvett-meter-fill is-safe" id="spillvett-daily-fill"></div>
+                </div>
+                <div class="spillvett-limit-meta">
+                  <span id="spillvett-daily-used">Brukt: 0 kr</span>
+                  <span id="spillvett-daily-remaining">Grense: 0 kr</span>
+                </div>
+                <div class="spillvett-note" id="spillvett-daily-reset">Venter på data</div>
+              </article>
+
+              <article class="spillvett-limit">
+                <div class="spillvett-limit-head">
+                  <span class="spillvett-limit-label" id="spillvett-monthly-label">Månedsgrense</span>
+                  <span class="spillvett-limit-value" id="spillvett-monthly-value">0 kr igjen</span>
+                </div>
+                <div class="spillvett-meter">
+                  <div class="spillvett-meter-fill is-safe" id="spillvett-monthly-fill"></div>
+                </div>
+                <div class="spillvett-limit-meta">
+                  <span id="spillvett-monthly-used">Brukt: 0 kr</span>
+                  <span id="spillvett-monthly-remaining">Grense: 0 kr</span>
+                </div>
+                <div class="spillvett-note" id="spillvett-monthly-reset">Venter på data</div>
+              </article>
+            </div>
+
+            <p class="spillvett-note" id="spillvett-note">
+              Spillvett oppdateres når Unity har sendt aktiv hall og spiller-token til hosten.
+            </p>
+            <div class="spillvett-error" id="spillvett-inline-error" hidden></div>
+          </div>
+
+          <div class="spillvett-drawer" id="spillvett-drawer" hidden>
+            <h3 class="spillvett-section-title">Spillregnskap</h3>
+            <div class="spillvett-periods">
+              <button class="spillvett-period" type="button" data-period="today">I dag</button>
+              <button class="spillvett-period" type="button" data-period="last7">7 dager</button>
+              <button class="spillvett-period" type="button" data-period="last30">30 dager</button>
+              <button class="spillvett-period" type="button" data-period="last365">365 dager</button>
+            </div>
+            <div id="spillvett-report-content"></div>
+          </div>
+        </section>
+      </aside>
+
+      <main class="host-main">
+        <section class="unity-frame">
+          <div class="unity-frame-header">
+            <div>
+              <p class="host-kicker">Spillflate</p>
+              <h2 class="unity-frame-title">Unity brukes nå som spillmotor</h2>
+              <p class="unity-frame-copy">
+                Hallvalg styres fortsatt i dagens Unity-topbar og synkroniseres tilbake til web-shellen. Neste naturlige steg er å flytte
+                også hallvalg og annen lobby-navigasjon ut hit, slik at Unity bare håndterer spillopplevelsen.
+              </p>
+            </div>
+          </div>
+
+          <div class="unity-stage">
+            <div id="unity-container" class="unity-desktop">
+              <canvas id="unity-canvas" width=960 height=600></canvas>
+              <div id="unity-loading-bar">
+                <div id="unity-logo"></div>
+                <div id="unity-progress-bar-empty">
+                  <div id="unity-progress-bar-full"></div>
+                </div>
+              </div>
+              <div id="unity-warning"> </div>
+              <div id="unity-footer">
+                <div id="unity-webgl-logo"></div>
+                <div id="unity-fullscreen-button"></div>
+                <div id="unity-build-title">SPILLORAMA</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   </div>
+
+  <script src="spillvett.js"></script>
   <script>
     var container = document.querySelector("#unity-container");
     var canvas = document.querySelector("#unity-canvas");
@@ -50,13 +448,8 @@
     var progressBarFull = document.querySelector("#unity-progress-bar-full");
     var fullscreenButton = document.querySelector("#unity-fullscreen-button");
     var warningBanner = document.querySelector("#unity-warning");
+    var returnLobbyButton = document.querySelector("#host-return-lobby");
 
-    // Shows a temporary message banner/ribbon for a few seconds, or
-    // a permanent error message on top of the canvas if type=='error'.
-    // If type=='warning', a yellow highlight color is used.
-    // Modify or remove this function to customize the visually presented
-    // way that non-critical warnings and error messages are presented to the
-    // user.
     function unityShowBanner(msg, type) {
       function updateBannerVisibility() {
         warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
@@ -80,39 +473,22 @@
     var config = {
       dataUrl: buildUrl + "/Spillorama.data.unityweb",
       frameworkUrl: buildUrl + "/Spillorama.framework.js.unityweb",
-        codeUrl: buildUrl + "/Spillorama.wasm.unityweb",
+      codeUrl: buildUrl + "/Spillorama.wasm.unityweb",
       streamingAssetsUrl: "StreamingAssets",
-        companyName: "AIS Technolabs",
-        productName: "SPILLORAMA",
-        productVersion: "8.1",
-        showBanner: unityShowBanner,
-      };
-
-    // By default Unity keeps WebGL canvas render target size matched with
-    // the DOM size of the canvas element (scaled by window.devicePixelRatio)
-    // Set this to false if you want to decouple this synchronization from
-    // happening inside the engine, and you would instead like to size up
-    // the canvas DOM size and WebGL render target sizes yourself.
-    // config.matchWebGLToCanvasSize = false;
+      companyName: "AIS Technolabs",
+      productName: "SPILLORAMA",
+      productVersion: "8.1",
+      showBanner: unityShowBanner,
+    };
 
     if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-      // Mobile device style: fill the whole browser client area with the game canvas:
-
       var meta = document.createElement('meta');
       meta.name = 'viewport';
       meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
       document.getElementsByTagName('head')[0].appendChild(meta);
       container.className = "unity-mobile";
       canvas.className = "unity-mobile";
-
-      // To lower canvas resolution on mobile devices to gain some
-      // performance, uncomment the following line:
-      // config.devicePixelRatio = 1;
-
-      //unityShowBanner('WebGL builds are not supported on mobile devices.');
     } else {
-      // Desktop style: Render the game canvas in a window that can be maximized to fullscreen:
-
       canvas.style.width = "100%";
       canvas.style.height = "100%";
     }
@@ -120,7 +496,6 @@
     canvas.style.background = "url('" + buildUrl + "/Spillorama.jpg') center / cover";
     loadingBar.style.display = "block";
 
-    // DynamicWebgl: Unity kaller denne for å hente server-URL dynamisk
     function requestDomainData() {
       var serverUrl = window.location.origin;
       if (typeof unityInstanceRef !== 'undefined' && unityInstanceRef) {
@@ -128,6 +503,28 @@
       }
     }
     var unityInstanceRef = null;
+
+    function returnToUnityLobby() {
+      if (unityInstanceRef) {
+        unityInstanceRef.SendMessage('UIManager', 'ReturnToLobby');
+      }
+    }
+
+    window.NavigateSpilloramaGame = function NavigateSpilloramaGame(gameNumber) {
+      if (unityInstanceRef) {
+        unityInstanceRef.SendMessage('UIManager', 'NavigateToGame', String(gameNumber));
+      }
+    };
+
+    window.SwitchActiveHallFromHost = function SwitchActiveHallFromHost(hallId) {
+      if (unityInstanceRef && hallId) {
+        unityInstanceRef.SendMessage('UIManager', 'SwitchActiveHallFromHost', hallId);
+      }
+    };
+
+    if (returnLobbyButton) {
+      returnLobbyButton.addEventListener('click', returnToUnityLobby);
+    }
 
     var script = document.createElement("script");
     script.src = loaderUrl;
@@ -138,10 +535,9 @@
         unityInstanceRef = unityInstance;
         loadingBar.style.display = "none";
         fullscreenButton.onclick = () => {
-          window.vuplex.SetFullscreen(1)/*https://support.vuplex.com/articles/webgl-fullscreen*/;
+          window.vuplex.SetFullscreen(1);
         };
 
-        // Initialize Firebase Cloud Messaging
         const firebaseConfig = {
           apiKey: "AIzaSyCn63hcAqgw-iWLRFCxKmJk6Wa6UrK8Ucc",
           authDomain: "spillorama-bingo-ca229.firebaseapp.com",
@@ -156,7 +552,6 @@
         firebase.initializeApp(firebaseConfig);
         const messaging = firebase.messaging();
 
-        // Get the path where index.html is hosted (like /web/, / or /custom/path/)
         let swDir = window.location.pathname.replace(/[^\/]+$/, '');
         let swPath = swDir + 'firebase-messaging-sw.js';
 
@@ -164,7 +559,6 @@
           scope: swDir
         }).then((registration) => {
           console.log("✅ Service worker registered");
-          // ✅ Call getToken with service worker reference
           Notification.requestPermission().then((permission) => {
             if (permission === 'granted') {
               messaging.getToken({
@@ -182,11 +576,9 @@
           });
         });
 
-        // Foreground push messages
         messaging.onMessage((payload) => {
           console.log('Push received in foreground:', payload);
           unityInstance.SendMessage('FirebaseManager', 'OnWebMessageReceived', JSON.stringify(payload));
-                // Forward to service worker for native notification
           const title = payload.notification?.title || 'Notification';
           const body = payload.notification?.body || '';
           const icon = 'TemplateData/favicon.ico';
@@ -225,18 +617,6 @@
         existingTab = window.open(url, 'myUniqueTab');
       }
     }
-
-    // function ShowBrowserNotification(title, body) {
-    //   if (Notification.permission === "granted") {
-    //     new Notification(title, { body: body });
-    //   } else if (Notification.permission !== "denied") {
-    //     Notification.requestPermission().then(function (permission) {
-    //       if (permission === "granted") {
-    //         new Notification(title, { body: body });
-    //       }
-    //     });
-    //   }
-    // }
   </script>
 </body>
 
