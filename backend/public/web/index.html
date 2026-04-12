@@ -202,6 +202,28 @@
       text-transform: none; letter-spacing: 0;
     }
 
+    .register-photo-row {
+      display: flex; gap: 12px; margin: 8px 0 16px;
+    }
+    .register-photo-upload {
+      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
+    }
+    .register-photo-label { cursor: pointer; width: 100%; }
+    .register-photo-preview {
+      width: 100%; aspect-ratio: 1.6;
+      border: 2px dashed rgba(255,255,255,0.2); border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.35); font-size: 12px; font-weight: 700;
+      background: rgba(255,255,255,0.04); overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .register-photo-preview.has-image { border-color: rgba(239,154,154,0.5); }
+    .register-photo-preview img { width: 100%; height: 100%; object-fit: cover; }
+    .register-photo-caption {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+      color: rgba(255,255,255,0.4); text-transform: uppercase;
+    }
+
     .register-step-title {
       font-size: 16px; font-weight: 800;
       margin-bottom: 16px;
@@ -1091,8 +1113,16 @@
                 <input type="tel" id="register-phone" placeholder="+47 000 00 000">
               </div>
               <div class="login-field">
+                <label for="register-nickname">Kallenavn (vises i spillet) *</label>
+                <input type="text" id="register-nickname" placeholder="F.eks. BingoKongen" maxlength="40" minlength="3" required>
+              </div>
+              <div class="login-field">
                 <label for="register-password">Passord *</label>
                 <input type="password" id="register-password" placeholder="Minst 8 tegn" required minlength="8">
+              </div>
+              <div class="login-field">
+                <label for="register-password-confirm">Gjenta passord *</label>
+                <input type="password" id="register-password-confirm" placeholder="Skriv passordet på nytt" required>
               </div>
               <button type="button" id="register-next-1" class="login-btn">Neste</button>
             </div>
@@ -1104,7 +1134,26 @@
               <button type="button" id="register-bankid-btn" class="login-btn-secondary">Verifiser med BankID</button>
               <div id="register-bankid-status" class="register-verify-status" hidden></div>
 
-              <div style="margin-top:20px">
+              <div class="register-section-label" style="margin-top:20px">Foto-ID</div>
+              <p class="profile-section-note" style="margin-bottom:10px">Last opp gyldig ID (pass, nasjonalt ID-kort).</p>
+              <div class="register-photo-row">
+                <div class="register-photo-upload">
+                  <label class="register-photo-label" for="register-photo-front">
+                    <div class="register-photo-preview" id="photo-front-preview"><span>Klikk for å laste opp</span></div>
+                  </label>
+                  <input type="file" id="register-photo-front" accept="image/png,image/jpeg,image/jpg" hidden>
+                  <span class="register-photo-caption">Forside *</span>
+                </div>
+                <div class="register-photo-upload">
+                  <label class="register-photo-label" for="register-photo-back">
+                    <div class="register-photo-preview" id="photo-back-preview"><span>Klikk for å laste opp</span></div>
+                  </label>
+                  <input type="file" id="register-photo-back" accept="image/png,image/jpeg,image/jpg" hidden>
+                  <span class="register-photo-caption">Bakside *</span>
+                </div>
+              </div>
+
+              <div style="margin-top:4px">
                 <div class="login-field">
                   <label>Er du en politisk eksponert person (PEP)?</label>
                   <div class="register-pep-group">
@@ -1296,8 +1345,8 @@
       <form class="profile-section" id="profile-edit-form" hidden>
         <span class="profile-section-label">Rediger profil</span>
         <div class="profile-field">
-          <label for="profile-edit-name">Navn</label>
-          <input type="text" id="profile-edit-name">
+          <label for="profile-edit-name">Kallenavn (spillernavn)</label>
+          <input type="text" id="profile-edit-name" minlength="3" maxlength="40">
         </div>
         <div class="profile-field">
           <label for="profile-edit-email">E-post</label>

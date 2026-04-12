@@ -186,7 +186,11 @@ const corsOrigins: string[] | "*" = corsAllowedOriginsRaw
   ? corsAllowedOriginsRaw.split(",").map((o) => o.trim()).filter(Boolean)
   : "*";
 app.use(cors({ origin: corsOrigins, credentials: true }));
-app.use(express.json({ limit: "100kb" }));
+// LAV-3: 100 KB for all endpoints, except registration which carries compressed photo IDs (~2 * 100KB base64)
+app.use((req, _res, next) => {
+  const limit = req.path === "/api/auth/register" ? "5mb" : "100kb";
+  express.json({ limit })(req, _res, next);
+});
 
 // BIN-277: REST API rate limiting — sliding-window per IP per route tier
 const httpRateLimiter = new HttpRateLimiter();

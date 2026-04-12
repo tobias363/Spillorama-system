@@ -65,7 +65,7 @@
     var nameEl = document.getElementById('profile-display-name');
     var emailEl = document.getElementById('profile-display-email');
     var phoneEl = document.getElementById('profile-display-phone');
-    if (nameEl) nameEl.textContent = user?.displayName || '--';
+    if (nameEl) nameEl.textContent = (user?.displayName ? 'Kallenavn: ' + user.displayName : '--');
     if (emailEl) emailEl.textContent = user?.email || '--';
     if (phoneEl) phoneEl.textContent = user?.phone || '--';
   }
@@ -104,12 +104,19 @@
         if (errEl) errEl.hidden = true;
         if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Lagrer...'; }
 
+        var newName = document.getElementById('profile-edit-name').value.trim();
+        if (!newName || newName.length < 3) {
+          if (errEl) { errEl.textContent = 'Kallenavn må være minst 3 tegn'; errEl.hidden = false; }
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Lagre'; }
+          return;
+        }
+
         try {
           var updated = await apiFetch('/api/auth/me', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              displayName: document.getElementById('profile-edit-name').value.trim(),
+              displayName: newName,
               email: document.getElementById('profile-edit-email').value.trim(),
               phone: document.getElementById('profile-edit-phone').value.trim()
             })

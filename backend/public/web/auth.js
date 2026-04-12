@@ -52,6 +52,43 @@
     }, Math.min(delay, 2147483647)); // Cap at max setTimeout value
   }
 
+  // ── Image compression ───────────────────────────────────────────────────
+
+  function compressImageToBase64(file, maxPx, quality, callback) {
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var img = new Image();
+      img.onload = function () {
+        var w = img.width, h = img.height;
+        if (w > maxPx || h > maxPx) {
+          if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+          else { w = Math.round(w * maxPx / h); h = maxPx; }
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        callback(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function setupPhotoInput(inputId, previewId, stateKey, store) {
+    var input = document.getElementById(inputId);
+    var preview = document.getElementById(previewId);
+    if (!input || !preview) return;
+    input.addEventListener('change', function () {
+      var file = input.files[0];
+      if (!file) return;
+      compressImageToBase64(file, 1024, 0.7, function (b64) {
+        store[stateKey] = b64;
+        preview.classList.add('has-image');
+        preview.innerHTML = '<img src="' + b64 + '" alt="ID foto">';
+      });
+    });
+  }
+
   // ── API ─────────────────────────────────────────────────────────────────
 
   async function apiFetch(path, options) {
@@ -277,6 +314,9 @@
 
     // ── Register multi-step form ─────────────────────────────────────
     if (registerForm) {
+      var photoStore = { front: null, back: null };
+      setupPhotoInput('register-photo-front', 'photo-front-preview', 'front', photoStore);
+      setupPhotoInput('register-photo-back', 'photo-back-preview', 'back', photoStore);
       const step1 = document.getElementById('register-step-1');
       const step2 = document.getElementById('register-step-2');
       const step3 = document.getElementById('register-step-3');
@@ -310,6 +350,7 @@
           if (errorEl) { errorEl.textContent = msg; errorEl.hidden = false; }
           else alert(msg);
         }
+        const confirmPw = document.getElementById('register-password-confirm')?.value || '';
         if (errorEl) errorEl.hidden = true;
         if (!fn) { showErr('Fornavn er påkrevd'); return; }
         if (!ln) { showErr('Etternavn er påkrevd'); return; }
@@ -322,9 +363,20 @@
         if (age < 18) { showErr('Du må være minst 18 år for å registrere deg.'); return; }
         if (!em) { showErr('E-post er påkrevd'); return; }
         if (!pw || pw.length < 8) { showErr('Passord må være minst 8 tegn'); return; }
+        if (pw !== confirmPw) { showErr('Passordene er ikke like.'); return; }
+        const kn = document.getElementById('register-nickname')?.value?.trim();
+        if (!kn || kn.length < 3) { showErr('Kallenavn er påkrevd og må være minst 3 tegn.'); return; }
         showStep(2);
       });
-      if (next2) next2.addEventListener('click', function () { showStep(3); });
+      if (next2) next2.addEventListener('click', function () {
+        var errorEl = document.getElementById('register-error');
+        if (errorEl) errorEl.hidden = true;
+        if (!photoStore.front || !photoStore.back) {
+          if (errorEl) { errorEl.textContent = 'Last opp både forside og bakside av ID.'; errorEl.hidden = false; }
+          return;
+        }
+        showStep(3);
+      });
       if (next3) next3.addEventListener('click', function () {
         const errorEl = document.getElementById('register-error');
         function showErr(msg) {
@@ -427,6 +479,7 @@
         e.preventDefault();
         const firstName = document.getElementById('register-firstname')?.value?.trim() || '';
         const lastName = document.getElementById('register-lastname')?.value?.trim() || '';
+        const nickname = document.getElementById('register-nickname')?.value?.trim() || '';
         const birthDate = document.getElementById('register-dob')?.value || '';
         const email = document.getElementById('register-email')?.value?.trim() || '';
         const phone = document.getElementById('register-phone')?.value?.trim() || '';
@@ -451,6 +504,8 @@
             zip: document.getElementById('register-zip')?.value?.trim() || '',
             city: document.getElementById('register-city')?.value?.trim() || ''
           },
+          photoFront: photoStore.front || '',
+          photoBack: photoStore.back || '',
           incomeSources: {
             salary: !!(document.getElementById('income-salary')?.checked),
             sale: !!(document.getElementById('income-sale')?.checked),
@@ -474,7 +529,9 @@
         if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Oppretter konto...'; }
 
         try {
-          const data = await registerRequest(firstName, lastName, email, password, phone, birthDate, complianceData);
+          // Kallenavn brukes som spillernavn (displayName) — faller tilbake til fornavn
+          const displayName = nickname || firstName;
+          const data = await registerRequest(displayName, lastName, email, password, phone, birthDate, complianceData);
           sessionStorage.setItem('spillvett.token', data.accessToken);
           notifySpillvett(data.accessToken);
           showStep(1); // Reset form
