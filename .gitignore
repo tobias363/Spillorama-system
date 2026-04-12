@@ -33,3 +33,16 @@ Spillorama/**/.DS_Store
 
 # Local Unity vendor SDK bundles
 unity-vendor-bundles/
+
+# Unity build output
+SpilloramaBuilds/
+
+# Raw source assets (already imported into Assets/)
+assets spingo/
+
+# Runtime / generated data
+backend/data/
+
+# Temp files
+tmp-*.png
+spinngo-anim-test.html
