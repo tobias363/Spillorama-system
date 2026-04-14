@@ -20,7 +20,7 @@ export class CountdownTimer extends Container {
         fontFamily: "Arial",
         fontSize: 48,
         fontWeight: "bold",
-        fill: 0xffffff,
+        fill: 0xffe83d,
         align: "center",
       },
     });

@@ -57,7 +57,7 @@ export class LobbyScreen extends Container {
     const luckyBtn = new Container();
     const luckyText = new Text({
       text: "Velg heldig tall",
-      style: { fontFamily: "Arial", fontSize: 18, fill: 0xffc107, align: "center" },
+      style: { fontFamily: "Arial", fontSize: 18, fill: 0xffe83d, align: "center" },
     });
     luckyText.anchor.set(0.5);
     luckyBtn.addChild(luckyText);

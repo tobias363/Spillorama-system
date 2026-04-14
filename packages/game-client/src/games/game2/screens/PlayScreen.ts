@@ -37,7 +37,7 @@ export class PlayScreen extends Container {
     // Lucky number display
     this.luckyNumberText = new Text({
       text: "",
-      style: { fontFamily: "Arial", fontSize: 16, fill: 0xffc107 },
+      style: { fontFamily: "Arial", fontSize: 16, fill: 0xffe83d },
     });
     this.luckyNumberText.x = screenWidth - 150;
     this.luckyNumberText.y = 14;

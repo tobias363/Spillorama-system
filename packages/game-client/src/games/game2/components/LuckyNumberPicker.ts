@@ -38,13 +38,13 @@ export class LuckyNumberPicker extends Container {
 
     const panelBg = new Graphics();
     panelBg.roundRect(0, 0, panelW, panelH, 12);
-    panelBg.fill(0x2a2a4a);
-    panelBg.stroke({ color: 0x444466, width: 2 });
+    panelBg.fill(0x2e0000);
+    panelBg.stroke({ color: 0x790001, width: 2 });
     this.panel.addChild(panelBg);
 
     const title = new Text({
       text: "Velg heldig tall",
-      style: { fontFamily: "Arial", fontSize: 20, fontWeight: "bold", fill: 0xffffff },
+      style: { fontFamily: "Arial", fontSize: 20, fontWeight: "bold", fill: 0xffe83d },
     });
     title.anchor.set(0.5, 0);
     title.x = panelW / 2;
@@ -62,7 +62,7 @@ export class LuckyNumberPicker extends Container {
 
       const circle = new Graphics();
       circle.circle(BALL_SIZE / 2, BALL_SIZE / 2, BALL_SIZE / 2 - 1);
-      circle.fill(0x3366aa);
+      circle.fill(0x790001);
       ball.addChild(circle);
 
       const num = new Text({

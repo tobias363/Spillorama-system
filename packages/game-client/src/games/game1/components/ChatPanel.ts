@@ -37,13 +37,13 @@ export class ChatPanel extends Container {
     // Background
     this.bg = new Graphics();
     this.bg.roundRect(0, 0, PANEL_WIDTH, panelHeight, 8);
-    this.bg.fill(0x222244);
+    this.bg.fill(0x2e0000);
     this.addChild(this.bg);
 
     // Title
     const title = new Text({
       text: "Chat",
-      style: { fontFamily: "Arial", fontSize: 16, fontWeight: "bold", fill: 0xffffff },
+      style: { fontFamily: "Arial", fontSize: 16, fontWeight: "bold", fill: 0xffe83d },
     });
     title.x = 12;
     title.y = 8;
@@ -67,7 +67,7 @@ export class ChatPanel extends Container {
     const inputY = panelHeight - INPUT_HEIGHT - 4;
     this.inputBg = new Graphics();
     this.inputBg.roundRect(8, inputY, PANEL_WIDTH - 16, INPUT_HEIGHT - 4, 6);
-    this.inputBg.fill(0x333355);
+    this.inputBg.fill(0x3e0000);
     this.inputBg.eventMode = "static";
     this.inputBg.cursor = "pointer";
     this.inputBg.on("pointerdown", () => this.promptSendMessage());
@@ -75,7 +75,7 @@ export class ChatPanel extends Container {
 
     this.inputText = new Text({
       text: "Skriv melding...",
-      style: { fontFamily: "Arial", fontSize: 13, fill: 0x888899 },
+      style: { fontFamily: "Arial", fontSize: 13, fill: 0x997766 },
     });
     this.inputText.x = 16;
     this.inputText.y = inputY + 8;
@@ -127,7 +127,7 @@ export class ChatPanel extends Container {
 
       const nameText = new Text({
         text: `${msg.playerName}: `,
-        style: { fontFamily: "Arial", fontSize: 12, fontWeight: "bold", fill: 0x6699cc },
+        style: { fontFamily: "Arial", fontSize: 12, fontWeight: "bold", fill: 0xffe83d },
       });
       nameText.x = 8;
       nameText.y = y;
@@ -135,7 +135,7 @@ export class ChatPanel extends Container {
 
       const msgText = new Text({
         text: msg.message.substring(0, 30),
-        style: { fontFamily: "Arial", fontSize: 12, fill: 0xcccccc },
+        style: { fontFamily: "Arial", fontSize: 12, fill: 0xfff2ce },
       });
       msgText.x = 8 + nameText.width;
       msgText.y = y;
