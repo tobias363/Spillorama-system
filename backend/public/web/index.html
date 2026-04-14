@@ -4,6 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>SPILLORAMA</title>
   <link rel="shortcut icon" href="TemplateData/favicon.ico">
   <link rel="stylesheet" href="TemplateData/style.css">
@@ -622,7 +623,8 @@
       right: 0 !important;
       bottom: 0 !important;
       width: 100% !important;
-      height: calc(100vh - 80px) !important;
+      height: calc(100dvh - 80px) !important;
+      height: calc(var(--vh, 100vh) - 80px) !important;
       transform: none !important;
     }
 
@@ -1133,6 +1135,18 @@
       .lobby-wallet-btn span { display: none; }
       .lobby-topbar-divider { display: none; }
       .lobby-topbar-hall { max-width: 140px; }
+
+      /* Game bar — compact on tablet */
+      .lobby-back-bar { padding: 0 14px; height: 60px; gap: 10px; }
+      .game-bar-logo-img { height: 32px; }
+      .game-bar-left .lobby-topbar-divider { display: none; }
+      .game-bar-left { gap: 10px; }
+      .game-bar-right { gap: 10px; }
+      .game-bar-right .lobby-wallet-btn span { display: none; }
+
+      /* Candy overlay — fill more of the screen */
+      #candy-shell { width: calc(100vw - 16px); height: calc(100vh - 16px); border-radius: 14px; }
+      #candy-overlay { padding: 8px; }
     }
     @media (max-width: 900px) {
       .lobby-game-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1144,6 +1158,47 @@
       .lobby-game-grid { grid-template-columns: 1fr; }
       .login-brand-title { font-size: 32px; }
       .lobby-topbar-logo-sub { display: none; }
+
+      /* Game bar — mobile: stack or hide non-essential */
+      .lobby-back-bar {
+        padding: 0 10px;
+        padding-left: max(10px, env(safe-area-inset-left));
+        padding-right: max(10px, env(safe-area-inset-right));
+        height: 52px; gap: 6px;
+      }
+      .game-bar-logo-img { height: 26px; }
+      .game-bar-title { font-size: 12px; }
+      .lobby-back-btn span,
+      .lobby-back-btn svg + span { display: none; }
+      .lobby-back-btn { padding: 0 10px; height: 32px; }
+      .game-bar-right .lobby-topbar-hall-wrap { max-width: 100px; }
+      .game-bar-right .lobby-balance-chip { font-size: 12px; padding: 4px 10px; }
+
+      /* Candy overlay — full bleed on small phones */
+      #candy-shell { width: 100vw; height: 100dvh; border-radius: 0; }
+      #candy-overlay { padding: 0; }
+      #candy-close-btn { top: 8px; right: 8px; padding: 8px 12px; font-size: 12px; }
+
+      /* Unity container — account for shorter game bar */
+      .lobby-back-bar.is-visible ~ #unity-container { top: 52px !important; height: calc(100dvh - 52px) !important; }
+      .lobby-back-bar.is-visible ~ #web-game-container { top: 52px; height: calc(100dvh - 52px); }
+    }
+
+    /* ── Safe area insets (notched phones) ─────────────────────────────── */
+    @supports (padding: env(safe-area-inset-top)) {
+      .lobby-topbar { padding-top: max(10px, env(safe-area-inset-top)); }
+      .lobby-back-bar { padding-top: env(safe-area-inset-top); }
+      .spillvett-fab { bottom: max(18px, env(safe-area-inset-bottom)); left: max(18px, env(safe-area-inset-left)); }
+    }
+
+    /* ── Orientation: landscape on mobile ──────────────────────────────── */
+    @media (max-height: 500px) and (orientation: landscape) {
+      .lobby-back-bar { height: 44px; padding: 0 10px; }
+      .game-bar-logo-img { height: 24px; }
+      .game-bar-title { display: none; }
+      .lobby-back-btn { height: 28px; font-size: 12px; }
+      .lobby-back-bar.is-visible ~ #unity-container { top: 44px !important; height: calc(100dvh - 44px) !important; }
+      .lobby-back-bar.is-visible ~ #web-game-container { top: 44px; height: calc(100dvh - 44px); }
     }
 
     body.candy-overlay-open {
@@ -2132,6 +2187,38 @@
       document.body.appendChild(script);
     };
 
+    /* ── Orientation & resize handling ─────────────────────────────── */
+    (function () {
+      // On iOS, 100vh doesn't update on orientation change until a repaint.
+      // Force a layout recalc on orientation change so game containers resize.
+      var resizeTimer;
+      function handleViewportResize() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function () {
+          // Update CSS custom property for real viewport height (100dvh fallback)
+          document.documentElement.style.setProperty('--vh', window.innerHeight + 'px');
+
+          // Resize Unity canvas if running
+          if (canvas && canvas.style.width === '100%') {
+            canvas.style.height = window.innerHeight + 'px';
+          }
+
+          // Resize web game container if visible
+          var webContainer = document.getElementById('web-game-container');
+          if (webContainer && webContainer.style.display !== 'none') {
+            webContainer.dispatchEvent(new Event('resize'));
+          }
+        }, 150);
+      }
+      window.addEventListener('resize', handleViewportResize);
+      window.addEventListener('orientationchange', function () {
+        // orientationchange fires before the viewport actually updates — delay
+        setTimeout(handleViewportResize, 300);
+      });
+      // Set initial value
+      handleViewportResize();
+    })();
+
     /* ── Unity → JS bridge callbacks ────────────────────────────────── */
 
     /* Called by Unity (SplashScreenPanel) when socket is connected (or timed out) and ready */
@@ -2189,11 +2276,18 @@
 
     /* ── Game Bar ────────────────────────────────────────────────────── */
 
-    // Syncs saldo fra lobby til game-baren (hall synkes av renderLobby i lobby.js)
+    // Syncs saldo + hall fra lobby til game-baren
     window.syncGameBar = function() {
       var lobbyBal = document.getElementById('lobby-balance');
       var gameBal  = document.getElementById('game-bar-balance');
       if (lobbyBal && gameBal) gameBal.textContent = lobbyBal.textContent;
+
+      // Sync hall selector value
+      var lobbyHall = document.getElementById('lobby-hall-select');
+      var gameBarHall = document.getElementById('game-bar-hall-select');
+      if (lobbyHall && gameBarHall && lobbyHall.value) {
+        gameBarHall.value = lobbyHall.value;
+      }
     };
 
     // no-op — back bar visibility is handled entirely by lobby.js
@@ -2555,7 +2649,6 @@
                 vapidKey: "BO8GlGnlSoBYtA0oZx6SzY-dlLNdh__TeFS6WNIY5X_SWsXfejE-B5I9gsn6O6a0rCYt8eOXTCO7-lcVAOgsPMc",
                 serviceWorkerRegistration: registration
               }).then(function (token) {
-                console.log("Web Push Token:", token);
                 _firebaseWebToken = token;
                 // If Unity already loaded, send now
                 if (unityInstanceRef) {

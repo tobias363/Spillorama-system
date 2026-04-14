@@ -162,6 +162,14 @@
       window.SwitchActiveHallFromHost(hallId);
     }
 
+    // Notify web game client of hall change
+    window.dispatchEvent(new CustomEvent('spillorama:hallChanged', {
+      detail: { hallId: hallId, hallName: hall ? hall.name : hallId }
+    }));
+
+    // Immediately refresh balance for the new hall context
+    refreshBalanceNow();
+
     await loadCompliance();
     renderLobby();
   }
@@ -169,7 +177,11 @@
   // Populates any hall <select> element with current lobbyState.halls
   function renderHallSelect(el) {
     if (!el) return;
-    if (el.value === lobbyState.activeHallId && el.options.length > 1) return;
+    // Always sync the value; only skip full rebuild if options are already populated
+    if (el.options.length > 1 && el.querySelector('option[value="' + lobbyState.activeHallId + '"]')) {
+      el.value = lobbyState.activeHallId;
+      return;
+    }
     el.innerHTML = '';
     if (lobbyState.halls.length === 0) {
       const opt = document.createElement('option');
@@ -219,7 +231,6 @@
     }
 
     // BIN-330: Feature flag — web game client or Unity
-    console.log('[lobby] launchGame called with slug:', game.slug);
     if (shouldUseWebClient(game)) {
       loadWebGame(game);
       return;
@@ -243,7 +254,6 @@
     // Override via URL param for testing: ?webClient=game_2
     var params = new URLSearchParams(window.location.search);
     var webClientParam = params.get('webClient');
-    console.log('[lobby] shouldUseWebClient:', game.slug, 'webClientParam:', webClientParam);
     if (webClientParam === game.slug || webClientParam === 'all') return true;
 
     // Also match by game number for convenience (?webClient=game_2 matches slug "rocket" via gameNumber 2)
@@ -270,6 +280,7 @@
     if (backBar) backBar.classList.add('is-visible');
     if (typeof window.syncGameBar === 'function') window.syncGameBar();
     startGameBarBalancePoll();
+    startGameBarSocketSync();
 
     try {
       // Dynamic import of the web game client (stable path, no hash)
@@ -348,6 +359,21 @@
   // dedicated wallet poll every 30 s so balance reflects recent round results.
   var _gameBarWalletInterval = null;
 
+  // Immediately fetch and update balance (used on hall switch)
+  async function refreshBalanceNow() {
+    try {
+      var wallet = await apiFetch('/api/wallet/me');
+      if (wallet?.account) {
+        lobbyState.wallet = wallet;
+        var formatted = formatKr(wallet.account.balance);
+        var lobbyBal = document.getElementById('lobby-balance');
+        var gameBal  = document.getElementById('game-bar-balance');
+        if (lobbyBal) lobbyBal.textContent = formatted;
+        if (gameBal)  gameBal.textContent  = formatted;
+      }
+    } catch { /* network hiccup — ignore */ }
+  }
+
   function startGameBarBalancePoll() {
     if (_gameBarWalletInterval) return; // already running
     _gameBarWalletInterval = setInterval(async function () {
@@ -372,6 +398,34 @@
     }
   }
 
+  // Real-time balance sync from web game client socket events.
+  // The game client dispatches 'spillorama:balanceChanged' on every room:update.
+  var _balanceSyncHandler = null;
+
+  function startGameBarSocketSync() {
+    if (_balanceSyncHandler) return;
+    _balanceSyncHandler = function (e) {
+      var balance = e.detail && e.detail.balance;
+      if (typeof balance !== 'number') return;
+      var formatted = formatKr(balance);
+      var gameBal = document.getElementById('game-bar-balance');
+      var lobbyBal = document.getElementById('lobby-balance');
+      if (gameBal) gameBal.textContent = formatted;
+      if (lobbyBal) lobbyBal.textContent = formatted;
+      if (lobbyState.wallet && lobbyState.wallet.account) {
+        lobbyState.wallet.account.balance = balance;
+      }
+    };
+    window.addEventListener('spillorama:balanceChanged', _balanceSyncHandler);
+  }
+
+  function stopGameBarSocketSync() {
+    if (_balanceSyncHandler) {
+      window.removeEventListener('spillorama:balanceChanged', _balanceSyncHandler);
+      _balanceSyncHandler = null;
+    }
+  }
+
   // Called from Unity/host when returning to lobby
   window.returnToShellLobby = function returnToShellLobby() {
     const lobbyEl = document.getElementById('lobby-screen');
@@ -392,8 +446,9 @@
     // Clear game name in bar
     var gameBarName = document.getElementById('game-bar-name');
     if (gameBarName) gameBarName.textContent = '';
-    // Stop game-bar wallet poll and refresh lobby data
+    // Stop game-bar wallet poll + socket sync, refresh lobby data
     stopGameBarBalancePoll();
+    stopGameBarSocketSync();
     loadLobbyData();
   };
 
