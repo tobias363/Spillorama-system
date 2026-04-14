@@ -1,5 +1,4 @@
 import { Container, Graphics, Text } from "pixi.js";
-import gsap from "gsap";
 import type { ChatMessage } from "@spillorama/shared-types/socket-events";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 
@@ -10,7 +9,7 @@ const INPUT_HEIGHT = 40;
 
 /**
  * Real-time chat panel for bingo games.
- * Displays messages and allows sending via socket.
+ * Uses an HTML <input> overlay for text entry (PixiJS has no native text input).
  */
 export class ChatPanel extends Container {
   private socket: SpilloramaSocket;
@@ -21,7 +20,7 @@ export class ChatPanel extends Container {
   private panelHeight: number;
   private bg: Graphics;
   private inputBg: Graphics;
-  private inputText: Text;
+  private htmlInput: HTMLInputElement | null = null;
   private unsubChat: (() => void) | null = null;
 
   constructor(
@@ -63,23 +62,15 @@ export class ChatPanel extends Container {
     this.messageContainer.mask = this.scrollMask;
     this.addChild(this.messageContainer);
 
-    // Input area
+    // Input area background (visual only — real input is HTML overlay)
     const inputY = panelHeight - INPUT_HEIGHT - 4;
     this.inputBg = new Graphics();
     this.inputBg.roundRect(8, inputY, PANEL_WIDTH - 16, INPUT_HEIGHT - 4, 6);
     this.inputBg.fill(0x3e0000);
-    this.inputBg.eventMode = "static";
-    this.inputBg.cursor = "pointer";
-    this.inputBg.on("pointerdown", () => this.promptSendMessage());
     this.addChild(this.inputBg);
 
-    this.inputText = new Text({
-      text: "Skriv melding...",
-      style: { fontFamily: "Arial", fontSize: 13, fill: 0x997766 },
-    });
-    this.inputText.x = 16;
-    this.inputText.y = inputY + 8;
-    this.addChild(this.inputText);
+    // Create HTML input overlay
+    this.createHtmlInput();
 
     // Load chat history
     this.loadHistory();
@@ -100,10 +91,84 @@ export class ChatPanel extends Container {
 
   destroy(): void {
     this.unsubChat?.();
+    this.htmlInput?.remove();
+    this.htmlInput = null;
     super.destroy({ children: true });
   }
 
   // ── Private ───────────────────────────────────────────────────────────
+
+  private createHtmlInput(): void {
+    const container = document.getElementById("web-game-container");
+    if (!container) return;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Skriv melding...";
+    input.maxLength = 100;
+    input.autocomplete = "off";
+
+    Object.assign(input.style, {
+      position: "absolute",
+      width: `${PANEL_WIDTH - 32}px`,
+      height: `${INPUT_HEIGHT - 12}px`,
+      border: "1px solid #790001",
+      borderRadius: "6px",
+      background: "#3e0000",
+      color: "#fff2ce",
+      fontFamily: "Arial, sans-serif",
+      fontSize: "13px",
+      padding: "0 8px",
+      outline: "none",
+      zIndex: "1000",
+      // Position will be updated once we know our global coords
+      display: "none",
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const message = input.value.trim();
+        if (message) {
+          this.socket.sendChat({ roomCode: this.roomCode, message });
+          input.value = "";
+        }
+      }
+      // Prevent PixiJS/game from capturing these keys
+      e.stopPropagation();
+    });
+
+    container.appendChild(input);
+    this.htmlInput = input;
+
+    // Position the input once the panel is rendered (next frame)
+    requestAnimationFrame(() => this.positionHtmlInput());
+  }
+
+  private positionHtmlInput(): void {
+    if (!this.htmlInput) return;
+
+    const canvas = document.querySelector("#web-game-container canvas") as HTMLCanvasElement | null;
+    if (!canvas) return;
+
+    // Get world position of this container
+    const globalPos = this.getGlobalPosition();
+
+    // Convert PixiJS coords to CSS coords (account for resolution scaling)
+    const canvasRect = canvas.getBoundingClientRect();
+    const scaleX = canvasRect.width / canvas.width;
+    const scaleY = canvasRect.height / canvas.height;
+    const resolution = window.devicePixelRatio || 1;
+
+    const inputY = this.panelHeight - INPUT_HEIGHT - 4;
+    const cssX = canvasRect.left + (globalPos.x + 16) * scaleX * resolution;
+    const cssY = canvasRect.top + (globalPos.y + inputY + 4) * scaleY * resolution;
+
+    Object.assign(this.htmlInput.style, {
+      left: `${cssX}px`,
+      top: `${cssY}px`,
+      display: "block",
+    });
+  }
 
   private async loadHistory(): Promise<void> {
     const result = await this.socket.getChatHistory({ roomCode: this.roomCode });
@@ -140,16 +205,6 @@ export class ChatPanel extends Container {
       msgText.x = 8 + nameText.width;
       msgText.y = y;
       this.messageContainer.addChild(msgText);
-    }
-  }
-
-  private promptSendMessage(): void {
-    const message = prompt("Skriv melding:");
-    if (message && message.trim()) {
-      this.socket.sendChat({
-        roomCode: this.roomCode,
-        message: message.trim(),
-      });
     }
   }
 }
