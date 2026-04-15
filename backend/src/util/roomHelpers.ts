@@ -5,6 +5,7 @@
 import type { RoomSnapshot, RoomSummary, Ticket } from "../game/types.js";
 import type { DrawScheduler } from "../draw-engine/DrawScheduler.js";
 import type { BingoSchedulerSettings } from "./bingoSettings.js";
+import type { GameVariantConfig, TicketTypeConfig } from "../game/variantConfig.js";
 
 // ── Room priority ──────────────────────────────────────────────────────────────
 
@@ -93,6 +94,12 @@ export type RoomUpdatePayload = RoomSnapshot & {
   preRoundTickets: Record<string, Ticket[]>;
   luckyNumbers: Record<string, number>;
   serverTimestamp: number;
+  /** BIN-443: Game variant info for the client's purchase UI. */
+  gameVariant?: {
+    gameType: string;
+    ticketTypes: TicketTypeConfig[];
+    replaceAmount?: number;
+  };
 };
 
 export function buildRoomUpdatePayload(
@@ -107,6 +114,8 @@ export function buildRoomUpdatePayload(
     getRoomConfiguredEntryFee: (roomCode: string) => number;
     getOrCreateDisplayTickets: (roomCode: string, playerId: string, count: number) => Ticket[];
     getLuckyNumbers: (roomCode: string) => Record<string, number>;
+    /** BIN-443: Variant config for client purchase UI. */
+    getVariantConfig?: (roomCode: string) => { gameType: string; config: GameVariantConfig } | null;
   }
 ): RoomUpdatePayload {
   const { getOrCreateDisplayTickets, getLuckyNumbers, runtimeBingoSettings } = opts;
@@ -122,12 +131,21 @@ export function buildRoomUpdatePayload(
     preRoundTickets[player.id] = getOrCreateDisplayTickets(snapshot.code, player.id, ticketsPerPlayer);
   }
 
+  // BIN-443: Include variant info so client can show correct purchase UI
+  const variantInfo = opts.getVariantConfig?.(snapshot.code);
+  const gameVariant = variantInfo ? {
+    gameType: variantInfo.gameType,
+    ticketTypes: variantInfo.config.ticketTypes,
+    replaceAmount: variantInfo.config.replaceAmount,
+  } : undefined;
+
   return {
     ...snapshot,
     preRoundTickets,
     luckyNumbers: getLuckyNumbers(snapshot.code),
     scheduler: buildRoomSchedulerState(snapshot, nowMs, opts),
     serverTimestamp: nowMs,
+    gameVariant,
   };
 }
 

@@ -95,11 +95,26 @@ export interface ChatSendPayload extends RoomActionPayload {
 
 // ── Server → Client payloads ────────────────────────────────────────────────
 
+/** Ticket type config sent from backend to client for purchase UI. */
+export interface TicketTypeInfo {
+  name: string;
+  type: string;
+  priceMultiplier: number;
+  ticketCount: number;
+  colors?: string[];
+}
+
 export type RoomUpdatePayload = RoomSnapshot & {
   scheduler: Record<string, unknown>;
   preRoundTickets: Record<string, Ticket[]>;
   luckyNumbers: Record<string, number>;
   serverTimestamp: number;
+  /** BIN-443: Active game variant info for client purchase UI. */
+  gameVariant?: {
+    gameType: string;
+    ticketTypes: TicketTypeInfo[];
+    replaceAmount?: number;
+  };
 };
 
 export interface DrawNewPayload {

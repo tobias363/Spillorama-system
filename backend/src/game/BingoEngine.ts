@@ -4,6 +4,7 @@ import { WalletError } from "../adapters/WalletAdapter.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
+import * as variantConfigModule from "./variantConfig.js";
 
 const logger = rootLogger.child({ module: "engine" });
 import {
@@ -118,6 +119,10 @@ interface StartGameInput {
   armedPlayerIds?: string[];
   /** Win-condition patterns for this round. Defaults to [1 Rad, Full Plate]. */
   patterns?: PatternDefinition[];
+  /** Game variant type (from hall_game_schedules.game_type). */
+  gameType?: string;
+  /** Variant config with ticket types and patterns (from hall_game_schedules.variant_config). */
+  variantConfig?: import("./variantConfig.js").GameVariantConfig;
 }
 
 const DEFAULT_PATTERNS: PatternDefinition[] = [
@@ -505,18 +510,20 @@ export class BingoEngine {
     const tickets = new Map<string, Ticket[]>();
     const marks = new Map<string, Set<number>[]>();
 
-    // Default ticket color cycling — matches Unity's SpilloramaGameBridge gridColors.
-    // When game variant config is implemented (BIN-437), colors will come from variant config instead.
-    const DEFAULT_TICKET_COLORS = ["Small Yellow", "Small White", "Small Purple", "Small Red", "Small Green", "Small Orange"];
+    // BIN-437: Use variant config for ticket colors (replaces hardcoded cycling).
+    const variantGameType = input.gameType ?? "standard";
+    const variantConfig = input.variantConfig ?? variantConfigModule.getDefaultVariantConfig(variantGameType);
 
     try {
-      let globalTicketIndex = 0;
       for (const player of eligiblePlayers) {
         const playerTickets: Ticket[] = [];
         const playerMarks: Set<number>[] = [];
 
+        // Assign colors for this player's tickets based on variant
+        const colorAssignments = variantConfigModule.assignTicketColors(ticketsPerPlayer, variantConfig, variantGameType);
+
         for (let ticketIndex = 0; ticketIndex < ticketsPerPlayer; ticketIndex += 1) {
-          const color = DEFAULT_TICKET_COLORS[globalTicketIndex % DEFAULT_TICKET_COLORS.length];
+          const assignment = colorAssignments[ticketIndex] ?? { color: "Small Yellow", type: "small" };
           const ticket = await this.bingoAdapter.createTicket({
             roomCode: room.code,
             gameId,
@@ -524,12 +531,11 @@ export class BingoEngine {
             player,
             ticketIndex,
             ticketsPerPlayer,
-            color,
-            type: "small",
+            color: assignment.color,
+            type: assignment.type,
           });
           playerTickets.push(ticket);
           playerMarks.push(new Set<number>());
-          globalTicketIndex++;
         }
 
         tickets.set(player.id, playerTickets);
@@ -545,7 +551,11 @@ export class BingoEngine {
 
     const prizePool = roundCurrency(entryFee * eligiblePlayers.length);
     const maxPayoutBudget = roundCurrency((prizePool * normalizedPayoutPercent) / 100);
-    const patterns = input.patterns ?? DEFAULT_PATTERNS;
+    // BIN-448: Use patterns from variant config if available, else explicit input, else defaults.
+    const patterns = input.patterns
+      ?? (variantConfig.patterns.length > 0
+        ? variantConfigModule.patternConfigToDefinitions(variantConfig.patterns)
+        : DEFAULT_PATTERNS);
     const patternResults: PatternResult[] = patterns.map((p) => ({
       patternId: p.id,
       patternName: p.name,
