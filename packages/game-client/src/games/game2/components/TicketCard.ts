@@ -162,6 +162,11 @@ export class TicketCard extends Container {
     return this.cardH;
   }
 
+  /** Update the header label (e.g. for Elvis variant: "Elvis 1" or Traffic Light colors). */
+  setHeaderLabel(label: string): void {
+    this.headerText.text = label;
+  }
+
   private updateToGo(): void {
     const remaining = this.grid.getRemainingCount();
     if (remaining === 0) {

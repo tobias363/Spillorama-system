@@ -300,9 +300,11 @@ export class PlayScreen extends Container {
     }
 
     // Build inline tickets with color from backend (falls back to cycling)
+    // BIN-413/415: Variant-aware grouping — Elvis shows color name, Traffic Light shows R/Y/G
     this.inlineScroller.clearCards();
     for (let i = 0; i < state.myTickets.length; i++) {
-      const theme = getTicketThemeByName(state.myTickets[i].color, i);
+      const ticket = state.myTickets[i];
+      const theme = getTicketThemeByName(ticket.color, i);
       const card = new TicketCard(i, {
         gridSize: "5x5",
         cardBg: theme.cardBg,
@@ -312,7 +314,16 @@ export class PlayScreen extends Container {
         toGoCloseColor: theme.toGoCloseColor,
         cellColors: theme.cellColors,
       });
-      card.loadTicket(state.myTickets[i]);
+      card.loadTicket(ticket);
+
+      // Set variant-specific header label (Unity: ticketColor as name for Elvis)
+      if (ticket.type === "elvis" && ticket.color) {
+        card.setHeaderLabel(ticket.color);
+      } else if (ticket.type?.startsWith("traffic-") && ticket.color) {
+        card.setHeaderLabel(ticket.color);
+      } else {
+        card.setHeaderLabel(`${i + 1} — ${ticket.color ?? "standard"}`);
+      }
 
       if (state.myMarks[i]) {
         card.markNumbers(state.myMarks[i]);
