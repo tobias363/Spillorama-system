@@ -421,8 +421,19 @@ export class PlayScreen extends Container {
 
   private updateClaimButtons(state: GameState): void {
     const { canClaimLine, canClaimBingo } = checkClaims(state.myTickets, state.myMarks, state.drawnNumbers);
-    if (canClaimLine && !this.lineAlreadyWon) this.lineBtn.setState("ready");
-    if (canClaimBingo && !this.bingoAlreadyWon) this.bingoBtn.setState("ready");
+
+    // Auto-claim: Unity automatically sends claim when pattern is complete
+    // (Game1GamePlayPanel.MarkWithdrawNumbers → Pattern_Remaining_Cell_Count == 0)
+    if (canClaimLine && !this.lineAlreadyWon) {
+      this.lineBtn.setState("ready");
+      this.lineAlreadyWon = true; // prevent duplicate auto-claims
+      this.onClaim?.("LINE");
+    }
+    if (canClaimBingo && !this.bingoAlreadyWon) {
+      this.bingoBtn.setState("ready");
+      this.bingoAlreadyWon = true;
+      this.onClaim?.("BINGO");
+    }
   }
 
   private async loadBackground(w: number, h: number): Promise<void> {
