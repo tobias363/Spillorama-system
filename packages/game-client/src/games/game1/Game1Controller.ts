@@ -10,6 +10,7 @@ import { WheelOverlay } from "./components/WheelOverlay.js";
 import { TreasureChestOverlay } from "./components/TreasureChestOverlay.js";
 import { LuckyNumberPicker } from "./components/LuckyNumberPicker.js";
 import { LoadingOverlay } from "./components/LoadingOverlay.js";
+import { ToastNotification } from "./components/ToastNotification.js";
 
 type Phase = "LOADING" | "WAITING" | "PLAYING" | "ENDED";
 
@@ -44,6 +45,7 @@ class Game1Controller implements GameController {
   private gameRoundCount = 0;
   private luckyPicker: LuckyNumberPicker | null = null;
   private loader: LoadingOverlay | null = null;
+  private toast: ToastNotification | null = null;
 
   constructor(deps: GameDeps) {
     this.deps = deps;
@@ -54,10 +56,11 @@ class Game1Controller implements GameController {
     const { app, socket, bridge } = this.deps;
     app.stage.addChild(this.root);
 
-    // Loading overlay (Unity: DisplayLoader)
-    const loaderContainer = app.app.canvas.parentElement ?? document.body;
-    this.loader = new LoadingOverlay(loaderContainer);
+    // UI overlays (Unity: DisplayLoader, UtilityMessagePanel)
+    const overlayContainer = app.app.canvas.parentElement ?? document.body;
+    this.loader = new LoadingOverlay(overlayContainer);
     this.loader.show("Kobler til...");
+    this.toast = new ToastNotification(overlayContainer);
 
     // Connect socket
     socket.connect();
@@ -159,6 +162,8 @@ class Game1Controller implements GameController {
     this.luckyPicker = null;
     this.loader?.destroy();
     this.loader = null;
+    this.toast?.destroy();
+    this.toast = null;
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
     this.miniGameOverlay?.destroy({ children: true });
@@ -185,6 +190,7 @@ class Game1Controller implements GameController {
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
         this.playScreen.setOnBuy(() => this.handleBuy());
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
+        this.playScreen.setOnCancelTickets(() => this.handleCancelTickets());
         this.playScreen.subscribeChatToBridge((listener) =>
           this.deps.bridge.on("chatMessage", listener),
         );
@@ -200,6 +206,7 @@ class Game1Controller implements GameController {
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
         this.playScreen.setOnBuy(() => this.handleBuy());
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
+        this.playScreen.setOnCancelTickets(() => this.handleCancelTickets());
         this.playScreen.subscribeChatToBridge((listener) =>
           this.deps.bridge.on("chatMessage", listener),
         );
@@ -281,9 +288,19 @@ class Game1Controller implements GameController {
 
   private onPatternWon(result: PatternWonPayload, _state: GameState): void {
     if (this.phase === "PLAYING" && this.playScreen) this.playScreen.onPatternWon(result);
+
+    // Toast notification (Unity: OnPatternWon_Spillorama shows winner info)
+    const isMe = result.winnerId === this.myPlayerId;
+    if (isMe) {
+      this.toast?.win(`Du vant ${result.patternName}! ${result.payoutAmount} kr`);
+      this.deps.audio.playSfx("win");
+    } else {
+      this.toast?.info(`${result.patternName} vunnet av en annen spiller`);
+    }
+
     telemetry.trackEvent("pattern_won", {
       patternName: result.patternName,
-      isMe: result.winnerId === this.myPlayerId,
+      isMe,
       payoutAmount: result.payoutAmount,
     });
   }
@@ -302,6 +319,22 @@ class Game1Controller implements GameController {
   private async handleClaim(type: "LINE" | "BINGO"): Promise<void> {
     const result = await this.deps.socket.submitClaim({ roomCode: this.actualRoomCode, type });
     if (!result.ok) console.error("[Game1] Claim failed:", result.error);
+  }
+
+  /** Unity: Cancel/delete tickets = disarm player (bet:arm false). */
+  private async handleCancelTickets(): Promise<void> {
+    const result = await this.deps.socket.armBet({ roomCode: this.actualRoomCode, armed: false });
+    if (result.ok) {
+      this.toast?.info("Bonger avbestilt");
+      // Clear tickets from display and show buy popup
+      if (this.playScreen) {
+        this.playScreen.reset();
+        const state = this.deps.bridge.getState();
+        this.playScreen.enterWaitingMode(state);
+      }
+    } else {
+      this.toast?.error(result.error?.message || "Kunne ikke avbestille");
+    }
   }
 
   private async handleLuckyNumber(n: number): Promise<void> {
@@ -390,14 +423,19 @@ class Game1Controller implements GameController {
   }
 
   private showError(message: string): void {
-    const errorText = new Text({
-      text: message,
-      style: { fontFamily: "Arial", fontSize: 24, fill: 0xff4444, align: "center" },
-    });
-    errorText.anchor.set(0.5);
-    errorText.x = this.deps.app.app.screen.width / 2;
-    errorText.y = this.deps.app.app.screen.height / 2;
-    this.root.addChild(errorText);
+    // Use toast if available, fallback to centered text
+    if (this.toast) {
+      this.toast.error(message, 8000);
+    } else {
+      const errorText = new Text({
+        text: message,
+        style: { fontFamily: "Arial", fontSize: 24, fill: 0xff4444, align: "center" },
+      });
+      errorText.anchor.set(0.5);
+      errorText.x = this.deps.app.app.screen.width / 2;
+      errorText.y = this.deps.app.app.screen.height / 2;
+      this.root.addChild(errorText);
+    }
   }
 }
 

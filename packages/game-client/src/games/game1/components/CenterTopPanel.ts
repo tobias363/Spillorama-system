@@ -5,7 +5,7 @@ import { PatternMiniGrid } from "./PatternMiniGrid.js";
 export interface CenterTopCallbacks {
   onShowCalledNumbers?: () => void;
   onPreBuy?: () => void;
-  onChangeBackground?: () => void;
+  onCancelTickets?: () => void;
   onBuyMoreTickets?: () => void;
   onSelectLuckyNumber?: () => void;
 }
@@ -29,6 +29,7 @@ export class CenterTopPanel {
   private callbacks: CenterTopCallbacks;
   private buyMoreBtn: HTMLButtonElement | null = null;
   private preBuyBtn: HTMLButtonElement | null = null;
+  private cancelBtn: HTMLButtonElement | null = null;
 
   constructor(overlay: HtmlOverlayManager, callbacks: CenterTopCallbacks = {}) {
     this.callbacks = callbacks;
@@ -75,11 +76,12 @@ export class CenterTopPanel {
     const actionsGrid = document.createElement("div");
     actionsGrid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-top:2px;";
 
-    const buttons: { label: string; key: keyof CenterTopCallbacks; ref?: "buyMore" | "preBuy" }[] = [
+    const buttons: { label: string; key: keyof CenterTopCallbacks; ref?: "buyMore" | "preBuy" | "cancel" }[] = [
       { label: "Se oppleste tall", key: "onShowCalledNumbers" },
       { label: "Forhåndskjøp", key: "onPreBuy", ref: "preBuy" },
       { label: "Heldig tall", key: "onSelectLuckyNumber" },
       { label: "Kjøp flere brett", key: "onBuyMoreTickets", ref: "buyMore" },
+      { label: "Avbestill bonger", key: "onCancelTickets", ref: "cancel" },
     ];
 
     for (const { label, key, ref } of buttons) {
@@ -112,6 +114,7 @@ export class CenterTopPanel {
 
       if (ref === "buyMore") this.buyMoreBtn = btn;
       if (ref === "preBuy") this.preBuyBtn = btn;
+      if (ref === "cancel") { this.cancelBtn = btn; btn.style.borderColor = "rgba(239,83,80,0.6)"; btn.style.color = "#ef5350"; }
     }
 
     topRow.appendChild(actionsGrid);
@@ -191,6 +194,12 @@ export class CenterTopPanel {
       btn.style.cursor = "pointer";
       btn.style.opacity = "1";
     }, 2000);
+  }
+
+  /** Hide cancel button during game (Unity: deleteBtn hidden after game start). */
+  setGameRunning(running: boolean): void {
+    if (this.cancelBtn) this.cancelBtn.style.display = running ? "none" : "";
+    if (this.buyMoreBtn) this.buyMoreBtn.style.display = running ? "" : "none";
   }
 
   setBadge(text: string): void {

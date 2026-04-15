@@ -57,8 +57,9 @@ export class PlayScreen extends Container {
   // Buy popup (Unity-matching ticket purchase)
   private buyPopup: Game1BuyPopup | null = null;
 
-  // Lucky number callback (set by controller)
+  // Callbacks (set by controller)
   private onLuckyNumberTap: (() => void) | null = null;
+  private onCancelTickets: (() => void) | null = null;
 
   // Inline ticket display
   private inlineScroller: TicketScroller;
@@ -171,6 +172,9 @@ export class PlayScreen extends Container {
         const fee = this.lastState?.entryFee || 10;
         this.buyPopup?.show(fee);
       },
+      onCancelTickets: () => {
+        this.onCancelTickets?.();
+      },
     });
 
     // Chat panel (right sidebar)
@@ -187,6 +191,11 @@ export class PlayScreen extends Container {
 
   setOnLuckyNumberTap(callback: () => void): void {
     this.onLuckyNumberTap = callback;
+  }
+
+  /** Unity: delete button cancels tickets (disarms player). */
+  setOnCancelTickets(callback: () => void): void {
+    this.onCancelTickets = callback;
   }
 
   subscribeChatToBridge(
@@ -210,6 +219,7 @@ export class PlayScreen extends Container {
   enterWaitingMode(state: GameState): void {
     this.isWaitingMode = true;
     this.lastState = state;
+    this.centerTop.setGameRunning(false);
 
     // Reset from previous game — clear ball tube and called numbers
     // (Unity: bingoBallPanelManager.Reset() + withdrawNumberHistoryPanel.Close())
@@ -276,6 +286,7 @@ export class PlayScreen extends Container {
   buildTickets(state: GameState): void {
     this.isWaitingMode = false;
     this.lastState = state;
+    this.centerTop.setGameRunning(true);
     this.lineAlreadyWon = false;
     this.bingoAlreadyWon = false;
 
