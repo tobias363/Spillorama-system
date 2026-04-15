@@ -1,6 +1,6 @@
 import { Container } from "pixi.js";
 import type { Ticket } from "@spillorama/shared-types/game";
-import { BingoCell } from "./BingoCell.js";
+import { BingoCell, type BingoCellColors } from "./BingoCell.js";
 
 export type GridSize = "3x3" | "3x5" | "5x5";
 
@@ -11,6 +11,8 @@ export interface BingoGridOptions {
   cellSize?: number;
   /** Gap between cells */
   gap?: number;
+  /** Optional cell color theme (from Unity's TicketColorData) */
+  cellColors?: BingoCellColors;
 }
 
 interface GridDimensions {
@@ -32,8 +34,9 @@ function parseGridSize(size: GridSize): GridDimensions {
  * Renders a grid of BingoCell instances from a Ticket.
  * Supports marking, 1-to-go blink, pattern highlighting.
  *
- * Backend Ticket format is always 3x5 (3 rows, 5 cols).
- * For 5x5 grids (Game 1, 3), the ticket data is reshaped into 5x5 with center free space.
+ * Backend Ticket format depends on game type:
+ * - Databingo60 (Game 2-5): 3x5 grid (3 rows, 5 cols), numbers 1-60.
+ * - Bingo75 (Game 1): 5x5 grid (5 rows, 5 cols), numbers 1-75, center=0 (free space).
  * For 3x3 grids (Game 2, 5), only the first 3x3 portion is used.
  */
 export class BingoGrid extends Container {
@@ -42,12 +45,14 @@ export class BingoGrid extends Container {
   private dims: GridDimensions;
   private cellSize: number;
   private gap: number;
+  private cellColors?: BingoCellColors;
 
   constructor(options: BingoGridOptions) {
     super();
     this.dims = parseGridSize(options.gridSize);
     this.cellSize = options.cellSize ?? 60;
     this.gap = options.gap ?? 4;
+    this.cellColors = options.cellColors;
   }
 
   /** Load ticket data into the grid. */
@@ -72,6 +77,7 @@ export class BingoGrid extends Container {
           size: this.cellSize,
           number: isFreeSpace ? 0 : num,
           isFreeSpace,
+          colors: this.cellColors,
         });
 
         cell.x = col * (this.cellSize + this.gap);
@@ -130,10 +136,10 @@ export class BingoGrid extends Container {
     return this.getUnmarkedNumbers().length;
   }
 
-  /** Start blink on specific cells (1-to-go). */
-  blinkCells(numbers: number[]): void {
+  /** Start blink on specific cells (1-to-go), optionally with background highlight color. */
+  blinkCells(numbers: number[], oneToGoColor?: number): void {
     for (const n of numbers) {
-      this.cellMap.get(n)?.startBlink();
+      this.cellMap.get(n)?.startBlink(oneToGoColor);
     }
   }
 
@@ -177,7 +183,8 @@ export class BingoGrid extends Container {
   // ── Private ───────────────────────────────────────────────────────────
 
   private extractNumbers(ticket: Ticket): number[] {
-    // Backend ticket is always 3x5 (3 rows, 5 cols)
+    const ticketRows = ticket.grid.length;
+    const ticketCols = ticket.grid[0]?.length ?? 0;
     const flat = ticket.grid.flat();
 
     if (this.dims.rows === 3 && this.dims.cols === 5) {
@@ -197,8 +204,11 @@ export class BingoGrid extends Container {
     }
 
     if (this.dims.rows === 5 && this.dims.cols === 5) {
-      // 5x5 — reshape 15 numbers into 25 slots with center free
-      // Map: row 0-4, col 0-4. Index 12 (row 2, col 2) is free.
+      // Native 5x5 ticket from backend (75-ball bingo) — use as-is
+      if (ticketRows === 5 && ticketCols === 5) {
+        return flat;
+      }
+      // Legacy fallback: reshape 3x5 (15 numbers) into 5x5 (25 slots) with center free
       const nums: number[] = [];
       let srcIdx = 0;
       for (let i = 0; i < 25; i++) {

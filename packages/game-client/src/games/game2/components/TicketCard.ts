@@ -2,6 +2,7 @@ import { Container, Graphics, Text } from "pixi.js";
 import type { Ticket } from "@spillorama/shared-types/game";
 import { BingoGrid, type GridSize } from "../../../components/BingoGrid.js";
 import type { BingoCellColors } from "../../../components/BingoCell.js";
+import { ONE_TO_GO_COLOR } from "../../game1/colors/TicketColorThemes.js";
 
 export interface TicketCardOptions {
   gridSize?: GridSize;
@@ -171,8 +172,8 @@ export class TicketCard extends Container {
     } else if (remaining === 1) {
       this.toGoText.text = "1 ToGo!";
       this.toGoText.style.fill = this.toGoCloseColor;
-      // Blink the remaining unmarked cell (Unity: Start_NumberBlink)
-      this.grid.blinkCells(this.grid.getUnmarkedNumbers());
+      // Blink the remaining unmarked cell with one-to-go color (Unity: Start_NumberBlink + imgCellOneToGo)
+      this.grid.blinkCells(this.grid.getUnmarkedNumbers(), ONE_TO_GO_COLOR);
     } else {
       this.toGoText.text = `${remaining} ToGo`;
       this.toGoText.style.fill = remaining <= 3 ? this.toGoCloseColor : this.toGoNormalColor;

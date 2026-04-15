@@ -1,10 +1,26 @@
 import { Container, Graphics, Text } from "pixi.js";
 import gsap from "gsap";
 
+/**
+ * Color theme for a bingo cell — matches Unity's TicketColorData.
+ * Each ticket can have its own theme (7 themes available in Unity).
+ */
+export interface BingoCellColors {
+  bgDefault: number;       // Grid cell background
+  bgFree: number;          // Free/lucky number background
+  bgHighlight: number;     // Highlighted cell background
+  markerColor: number;     // Marked number circle fill
+  textDefault: number;     // Normal number text
+  textMarked: number;      // Marked number text
+  textFree: number;        // Free/lucky number text
+  borderColor: number;     // Cell border
+}
+
 export interface BingoCellOptions {
   size: number;
   number: number;
   isFreeSpace?: boolean;
+  colors?: BingoCellColors;
 }
 
 /**
@@ -23,25 +39,30 @@ export class BingoCell extends Container {
   private size: number;
   private isFreeSpace: boolean;
 
-  // Unity color palette
-  private static readonly BG_DEFAULT = 0xffd6a7; // Peachy tan (#FFD6A7)
-  private static readonly BG_FREE = 0xffe83d;     // Bright yellow
-  private static readonly BG_HIGHLIGHT = 0xffe83d; // Yellow highlight
-  private static readonly MARKER_COLOR = 0x7e001b; // Deep maroon marker (#7E001B)
-  private static readonly TEXT_DEFAULT = 0x1a0a0a; // Near black
-  private static readonly TEXT_MARKED = 0xffd6a7;  // Tan (matches cell bg for contrast)
-  private static readonly TEXT_FREE = 0x790001;    // Dark maroon
-  private static readonly BORDER_COLOR = 0xd4a574; // Subtle border
+  // Default Unity color palette (can be overridden per-cell via options.colors)
+  static readonly DEFAULT_COLORS: BingoCellColors = {
+    bgDefault: 0xffd6a7,    // Peachy tan (#FFD6A7)
+    bgFree: 0xffe83d,       // Bright yellow
+    bgHighlight: 0xffe83d,  // Yellow highlight
+    markerColor: 0x7e001b,  // Deep maroon marker (#7E001B)
+    textDefault: 0x1a0a0a,  // Near black
+    textMarked: 0xffd6a7,   // Tan (matches cell bg for contrast)
+    textFree: 0x790001,     // Dark maroon
+    borderColor: 0xd4a574,  // Subtle border
+  };
+
+  private colors: BingoCellColors;
 
   constructor(options: BingoCellOptions) {
     super();
     this.cellNumber = options.number;
     this.size = options.size;
     this.isFreeSpace = options.isFreeSpace ?? false;
+    this.colors = options.colors ?? BingoCell.DEFAULT_COLORS;
 
     // Cell background
     this.bg = new Graphics();
-    this.drawBg(this.isFreeSpace ? BingoCell.BG_FREE : BingoCell.BG_DEFAULT);
+    this.drawBg(this.isFreeSpace ? this.colors.bgFree : this.colors.bgDefault);
     this.addChild(this.bg);
 
     // Marker circle (hidden until marked)
@@ -56,7 +77,7 @@ export class BingoCell extends Container {
       style: {
         fontFamily: "Arial, Helvetica, sans-serif",
         fontSize,
-        fill: this.isFreeSpace ? BingoCell.TEXT_FREE : BingoCell.TEXT_DEFAULT,
+        fill: this.isFreeSpace ? this.colors.textFree : this.colors.textDefault,
         fontWeight: "bold",
         align: "center",
       },
@@ -101,9 +122,19 @@ export class BingoCell extends Container {
     this.stopBlink();
   }
 
-  startBlink(): void {
+  /**
+   * Start one-to-go blink animation.
+   * Matches Unity BingoTicketSingleCellData.Start_NumberBlink():
+   * - Scale punch 1.5x loop
+   * - Optional background color highlight (imgCellOneToGo)
+   */
+  startBlink(oneToGoColor?: number): void {
     if (this.blinking || this.marked) return;
     this.blinking = true;
+    // Highlight cell background with one-to-go color (Unity: imgCellOneToGo)
+    if (oneToGoColor !== undefined) {
+      this.drawBg(oneToGoColor);
+    }
     this.blinkTween = gsap.to(this.scale, {
       x: 1.15,
       y: 1.15,
@@ -127,13 +158,13 @@ export class BingoCell extends Container {
   setHighlight(on: boolean): void {
     this.highlighted = on;
     if (on) {
-      this.drawBg(BingoCell.BG_HIGHLIGHT);
-      this.numberText.style.fill = BingoCell.TEXT_FREE;
+      this.drawBg(this.colors.bgHighlight);
+      this.numberText.style.fill = this.colors.textFree;
     } else if (this.marked) {
       this.showMarker();
     } else {
-      this.drawBg(BingoCell.BG_DEFAULT);
-      this.numberText.style.fill = BingoCell.TEXT_DEFAULT;
+      this.drawBg(this.colors.bgDefault);
+      this.numberText.style.fill = this.colors.textDefault;
     }
   }
 
@@ -143,8 +174,8 @@ export class BingoCell extends Container {
     if (!this.isFreeSpace) {
       this.marked = false;
       this.hideMarker();
-      this.drawBg(BingoCell.BG_DEFAULT);
-      this.numberText.style.fill = BingoCell.TEXT_DEFAULT;
+      this.drawBg(this.colors.bgDefault);
+      this.numberText.style.fill = this.colors.textDefault;
     }
   }
 
@@ -154,7 +185,7 @@ export class BingoCell extends Container {
     this.bg.clear();
     // Outer border
     this.bg.roundRect(0, 0, this.size, this.size, 4);
-    this.bg.fill(BingoCell.BORDER_COLOR);
+    this.bg.fill(this.colors.borderColor);
     // Inner fill
     this.bg.roundRect(1, 1, this.size - 2, this.size - 2, 3);
     this.bg.fill(color);
@@ -164,14 +195,14 @@ export class BingoCell extends Container {
     const radius = (this.size - 6) / 2;
     this.marker.clear();
     this.marker.circle(this.size / 2, this.size / 2, radius);
-    this.marker.fill(BingoCell.MARKER_COLOR);
+    this.marker.fill(this.colors.markerColor);
     this.marker.visible = true;
-    this.numberText.style.fill = BingoCell.TEXT_MARKED;
+    this.numberText.style.fill = this.colors.textMarked;
   }
 
   private hideMarker(): void {
     this.marker.visible = false;
     this.marker.clear();
-    this.numberText.style.fill = BingoCell.TEXT_DEFAULT;
+    this.numberText.style.fill = this.colors.textDefault;
   }
 }
