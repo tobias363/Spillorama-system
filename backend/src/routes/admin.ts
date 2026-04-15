@@ -652,7 +652,8 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         prizeDescription: req.body?.prizeDescription,
         maxTickets: req.body?.maxTickets,
         isActive: req.body?.isActive,
-        sortOrder: req.body?.sortOrder
+        sortOrder: req.body?.sortOrder,
+        variantConfig: req.body?.variantConfig,
       });
       apiSuccess(res, slot);
     } catch (error) {

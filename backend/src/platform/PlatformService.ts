@@ -182,6 +182,8 @@ export interface UpdateScheduleSlotInput {
   maxTickets?: number;
   isActive?: boolean;
   sortOrder?: number;
+  /** BIN-442: Variant config with ticket types, patterns, etc. */
+  variantConfig?: Record<string, unknown>;
 }
 
 export interface ScheduleLogEntry {
@@ -918,16 +920,18 @@ export class PlatformService {
         : c.dayOfWeek;
     const isActive = input.isActive !== undefined ? Boolean(input.isActive) : c.isActive;
     const sortOrder = input.sortOrder !== undefined ? Number(input.sortOrder) : c.sortOrder;
+    const variantConfig = input.variantConfig !== undefined ? input.variantConfig : c.variantConfig;
     const { rows } = await this.pool.query<ScheduleSlotRow>(
       `UPDATE ${this.scheduleTable()}
        SET game_type=$2, display_name=$3, day_of_week=$4, start_time=$5::time,
-           prize_description=$6, max_tickets=$7, is_active=$8, sort_order=$9, updated_at=now()
+           prize_description=$6, max_tickets=$7, is_active=$8, sort_order=$9,
+           variant_config=$10::jsonb, updated_at=now()
        WHERE id=$1
        RETURNING id, hall_id, game_type, display_name, day_of_week,
                  start_time::text, prize_description, max_tickets,
-                 is_active, sort_order, created_at, updated_at`,
+                 is_active, sort_order, variant_config, created_at, updated_at`,
       [slotId, gameType, displayName, dayOfWeek, startTime,
-       prizeDescription, maxTickets, isActive, sortOrder]
+       prizeDescription, maxTickets, isActive, sortOrder, JSON.stringify(variantConfig)]
     );
     return this.mapScheduleSlot(rows[0]);
   }

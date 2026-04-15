@@ -23,6 +23,8 @@ export class Game1BuyPopup {
   private currentQty = 1;
   private minQty = 1;
   private maxQty = 30;
+  /** BIN-447: Weight = actual tickets generated per purchase unit. */
+  private ticketWeight = 1;
   private onBuy: (() => void) | null = null;
 
   constructor(private overlay: HtmlOverlayManager) {
@@ -180,6 +182,7 @@ export class Game1BuyPopup {
   /** Show the popup with entry fee. Matches Unity's Game1TicketPurchasePanel open flow. */
   show(entryFee: number, maxTickets = 30): void {
     this.ticketPrice = entryFee;
+    this.ticketWeight = 1;
     this.maxQty = maxTickets;
     this.currentQty = 1;
     this.statusMsg.textContent = "";
@@ -219,7 +222,8 @@ export class Game1BuyPopup {
     }
 
     this.ticketPrice = effectivePrice;
-    this.maxQty = Math.floor(maxTickets / (primaryType?.ticketCount ?? 1));
+    this.ticketWeight = primaryType?.ticketCount ?? 1;
+    this.maxQty = Math.floor(maxTickets / this.ticketWeight);
     this.currentQty = 1;
     this.statusMsg.textContent = "";
     this.buyBtn.disabled = false;
@@ -277,7 +281,13 @@ export class Game1BuyPopup {
   private updateDisplay(): void {
     this.qtyLabel.textContent = String(this.currentQty);
     const total = this.currentQty * this.ticketPrice;
-    this.totalLabel.textContent = `Totalt: ${total} kr`;
+    const actualTickets = this.currentQty * this.ticketWeight;
+    // BIN-447: Show both cost and actual ticket count when weight > 1
+    if (this.ticketWeight > 1) {
+      this.totalLabel.textContent = `Totalt: ${total} kr (${actualTickets} bonger)`;
+    } else {
+      this.totalLabel.textContent = `Totalt: ${total} kr`;
+    }
 
     // Update price label in type row
     const priceEl = this.card.querySelector('[data-role="price"]') as HTMLSpanElement | null;

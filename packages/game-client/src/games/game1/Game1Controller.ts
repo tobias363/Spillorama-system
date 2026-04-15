@@ -219,6 +219,10 @@ class Game1Controller implements GameController {
           this.deps.bridge.on("chatMessage", listener),
         );
         this.playScreen.enterWaitingMode(state);
+        // BIN-419: Show Elvis replace option in waiting mode
+        if (state.gameType === "elvis" && state.myTickets.length > 0) {
+          this.playScreen.showElvisReplace(0, () => this.handleElvisReplace());
+        }
         this.setScreen(this.playScreen);
         break;
       }
@@ -394,6 +398,24 @@ class Game1Controller implements GameController {
       }
     } else {
       console.error("[Game1] setLuckyNumber failed:", result.error);
+    }
+  }
+
+  /** BIN-419: Elvis replace — re-arm with new tickets for a fee. */
+  private async handleElvisReplace(): Promise<void> {
+    // Disarm (cancel old tickets) then re-arm (get new ones)
+    await this.deps.socket.armBet({ roomCode: this.actualRoomCode, armed: false });
+    const result = await this.deps.socket.armBet({ roomCode: this.actualRoomCode, armed: true });
+    if (result.ok) {
+      this.toast?.info("Bonger byttet!");
+      // Rebuild from fresh snapshot
+      const state = this.deps.bridge.getState();
+      if (this.playScreen) {
+        this.playScreen.reset();
+        this.playScreen.enterWaitingMode(state);
+      }
+    } else {
+      this.toast?.error("Kunne ikke bytte bonger");
     }
   }
 

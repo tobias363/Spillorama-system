@@ -380,6 +380,49 @@ export class PlayScreen extends Container {
     this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool);
   }
 
+  /**
+   * BIN-419: Show Elvis replace option — swap tickets for a fee between rounds.
+   * Only shown for Elvis variant in waiting mode when player has tickets.
+   */
+  showElvisReplace(replaceAmount: number, onReplace: () => void): void {
+    if (replaceAmount <= 0) return;
+    // Show a toast-like bar at the bottom with replace option
+    const bar = document.createElement("div");
+    Object.assign(bar.style, {
+      position: "absolute",
+      bottom: "10px",
+      left: "50%",
+      transform: "translateX(-50%)",
+      background: "rgba(75,0,0,0.95)",
+      border: "1.5px solid rgba(255,165,95,0.5)",
+      borderRadius: "10px",
+      padding: "10px 20px",
+      display: "flex",
+      alignItems: "center",
+      gap: "12px",
+      zIndex: "55",
+      pointerEvents: "auto",
+    });
+    const text = document.createElement("span");
+    text.textContent = `Bytt bonger (${replaceAmount} kr)`;
+    text.style.cssText = "color:#ffa55f;font-size:14px;font-weight:600;";
+    bar.appendChild(text);
+    const btn = document.createElement("button");
+    btn.textContent = "Bytt";
+    btn.style.cssText = "background:linear-gradient(180deg,#c41030,#8a0020);border:none;border-radius:6px;padding:6px 16px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;";
+    btn.addEventListener("click", () => {
+      onReplace();
+      bar.remove();
+    });
+    bar.appendChild(btn);
+    const dismissBtn = document.createElement("button");
+    dismissBtn.textContent = "\u2715";
+    dismissBtn.style.cssText = "background:none;border:none;color:#999;font-size:16px;cursor:pointer;";
+    dismissBtn.addEventListener("click", () => bar.remove());
+    bar.appendChild(dismissBtn);
+    this.overlayManager.getRoot().appendChild(bar);
+  }
+
   /** BIN-451: Disable buy-more button (Unity: buyMoreTicket.interactable = false after N balls). */
   disableBuyMore(): void {
     this.centerTop.showButtonFeedback("buyMore", false);
@@ -455,6 +498,12 @@ export class PlayScreen extends Container {
       this.bgSprite.width = width;
       this.bgSprite.height = height;
     }
+
+    // BIN-401: Resize ticket scroller to fit new dimensions
+    const chatW = this.chatPanel ? CHAT_WIDTH : 0;
+    const scrollerW = width - TUBE_COLUMN_WIDTH - chatW - 20;
+    const scrollerH = height - TICKET_TOP - 60;
+    this.inlineScroller.setViewportSize(Math.max(200, scrollerW), Math.max(100, scrollerH));
   }
 
   destroy(): void {
