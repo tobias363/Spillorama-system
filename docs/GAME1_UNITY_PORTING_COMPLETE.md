@@ -1,10 +1,11 @@
 # Spill 1 — Komplett Unity-portering til web-native
 
-> **Status:** Prosjekt opprettet i Linear — [Spill 1 — Komplett Unity-portering](https://linear.app/bingosystem/project/spill-1-komplett-unity-portering-889ee436aba1)
-> **Prioritet:** Urgent — blocker for produksjonsklart spill
-> **Scope:** 17 epics, ~100 issues
+> **Status:** ~55 av ~100 issues implementert og committed (2026-04-15)
+> **Linear:** [Spill 1 — Komplett Unity-portering](https://linear.app/bingosystem/project/spill-1-komplett-unity-portering-889ee436aba1)
+> **Scope:** 17 epics, ~100 issues — 55 Done, ~15 gjenstår (lyd-assets, admin-UI, E2E-verifisering)
 > **Team:** Bingosystem (BIN)
 > **Lead:** Tobias Haugen
+> **Commits:** 15 commits på feat/seed-halls branch
 
 ---
 
