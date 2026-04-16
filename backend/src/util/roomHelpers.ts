@@ -85,7 +85,9 @@ export function buildRoomSchedulerState(
     nextStartAt: nextStartAtMs === null ? null : new Date(nextStartAtMs).toISOString(),
     millisUntilNextStart,
     canStartNow,
-    serverTime: new Date(nowMs).toISOString()
+    serverTime: new Date(nowMs).toISOString(),
+    /** BIN-451: Draw count after which the client must disable buy-more. */
+    disableBuyAfterBalls: Math.floor(bingoMaxDrawsPerRound * 0.8),
   };
 }
 

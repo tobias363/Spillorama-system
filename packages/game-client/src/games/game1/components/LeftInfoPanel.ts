@@ -156,9 +156,17 @@ export class LeftInfoPanel {
       this.progressEl.textContent = "";
       this.stopCountdown();
     } else {
-      this.numberRingEl.textContent = String(remaining);
-      this.progressEl.textContent = `Neste spill om ${remaining}s`;
+      const formatted = this.formatCountdown(remaining);
+      this.numberRingEl.textContent = formatted;
+      this.progressEl.textContent = `Neste spill om ${formatted}`;
     }
+  }
+
+  /** Format seconds as MM:SS (e.g. 150 → "02:30", 45 → "00:45"). */
+  private formatCountdown(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
   destroy(): void {

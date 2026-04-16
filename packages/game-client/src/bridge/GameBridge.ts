@@ -55,6 +55,8 @@ export interface GameState {
   autoDrawEnabled: boolean;
   /** A6: True when the host/admin can manually start the game right now. */
   canStartNow: boolean;
+  /** BIN-451: Draw count after which buy-more is disabled (server-authoritative). */
+  disableBuyAfterBalls: number;
 
   // BIN-460: Game pause state
   isPaused: boolean;
@@ -228,6 +230,9 @@ export class GameBridge {
     if (typeof scheduler?.canStartNow === "boolean") {
       this.state.canStartNow = scheduler.canStartNow;
     }
+    if (typeof scheduler?.disableBuyAfterBalls === "number") {
+      this.state.disableBuyAfterBalls = scheduler.disableBuyAfterBalls;
+    }
 
     // BIN-417: Game variant info
     if (payload.gameVariant) {
@@ -331,6 +336,7 @@ export class GameBridge {
       millisUntilNextStart: null,
       autoDrawEnabled: false,
       canStartNow: false,
+      disableBuyAfterBalls: 0,
       isPaused: false,
       pauseMessage: null,
       gameType: "standard",

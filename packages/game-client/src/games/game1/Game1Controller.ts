@@ -350,8 +350,8 @@ class Game1Controller implements GameController {
     if (this.phase === "PLAYING" && this.playScreen) {
       this.playScreen.onNumberDrawn(number, drawIndex, state);
 
-      // BIN-451: Disable buy-more after ~80% of draws (Unity: BuyMoreDisableFlagVal)
-      if (!this.buyMoreDisabled && state.drawCount >= Math.floor(state.totalDrawCapacity * 0.8)) {
+      // BIN-451: Disable buy-more using server-authoritative threshold (Unity: BuyMoreDisableFlagVal)
+      if (!this.buyMoreDisabled && state.disableBuyAfterBalls > 0 && state.drawCount >= state.disableBuyAfterBalls) {
         this.buyMoreDisabled = true;
         this.playScreen.disableBuyMore();
       }
