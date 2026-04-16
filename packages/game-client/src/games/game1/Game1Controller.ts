@@ -14,9 +14,10 @@ import { LuckyNumberPicker } from "./components/LuckyNumberPicker.js";
 import { LoadingOverlay } from "./components/LoadingOverlay.js";
 import { ToastNotification } from "./components/ToastNotification.js";
 import { PauseOverlay } from "./components/PauseOverlay.js";
-import { SettingsPanel } from "./components/SettingsPanel.js";
+import { SettingsPanel, type Game1Settings } from "./components/SettingsPanel.js";
 import { MarkerBackgroundPanel } from "./components/MarkerBackgroundPanel.js";
 import { GamePlanPanel } from "./components/GamePlanPanel.js";
+import { AudioManager } from "../../audio/AudioManager.js";
 
 type Phase = "LOADING" | "WAITING" | "PLAYING" | "ENDED";
 
@@ -73,6 +74,9 @@ class Game1Controller implements GameController {
     this.toast = new ToastNotification(overlayContainer);
     this.pauseOverlay = new PauseOverlay(overlayContainer);
     this.settingsPanel = new SettingsPanel(overlayContainer);
+    // Wire settings panel to AudioManager
+    this.syncSettingsToAudio(this.settingsPanel.getSettings());
+    this.settingsPanel.setOnChange((settings) => this.syncSettingsToAudio(settings));
     this.markerBgPanel = new MarkerBackgroundPanel(overlayContainer);
     this.gamePlanPanel = new GamePlanPanel(overlayContainer);
 
@@ -288,6 +292,9 @@ class Game1Controller implements GameController {
     this.gameRoundCount++;
     this.buyMoreDisabled = false;
 
+    // Reset announced numbers for the new round
+    this.deps.audio.resetAnnouncedNumbers();
+
     // Unity OnGameStart: close lucky number panel, hide delete buttons
     this.luckyPicker?.hide();
 
@@ -307,7 +314,8 @@ class Game1Controller implements GameController {
     this.dismissMiniGame();
 
     // Unity OnGameFinish: stop blink animations, reset sounds
-    this.deps.audio.stopAll?.();
+    this.deps.audio.resetAnnouncedNumbers();
+    this.deps.audio.stopAll();
 
     // Refresh player balance (Unity: dispatch balance event for game-bar sync)
     if (this.myPlayerId) {
@@ -358,7 +366,7 @@ class Game1Controller implements GameController {
     const isMe = result.winnerId === this.myPlayerId;
     if (isMe) {
       this.toast?.win(`Du vant ${result.patternName}! ${result.payoutAmount} kr`);
-      this.deps.audio.playSfx("win");
+      this.deps.audio.playBingoSound();
     } else {
       this.toast?.info(`${result.patternName} vunnet av en annen spiller`);
     }
@@ -576,6 +584,17 @@ class Game1Controller implements GameController {
     }
     this.playScreen = null;
     this.endScreen = null;
+  }
+
+  /**
+   * Sync SettingsPanel settings to AudioManager.
+   * Called on init and whenever settings change.
+   */
+  private syncSettingsToAudio(settings: Game1Settings): void {
+    const audio = this.deps.audio;
+    audio.setSoundEnabled(settings.soundEnabled);
+    audio.setVoiceEnabled(settings.voiceEnabled);
+    audio.setVoiceLanguage(AudioManager.settingsToVoice(settings.voiceLanguage));
   }
 
   private showError(message: string): void {

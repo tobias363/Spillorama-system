@@ -12,6 +12,7 @@
 const STORAGE_KEY = "spillorama_game1_settings";
 
 export interface Game1Settings {
+  soundEnabled: boolean;
   voiceEnabled: boolean;
   voiceLanguage: "nor-male" | "nor-female" | "english";
   luckyAutoSelect: boolean;
@@ -19,6 +20,7 @@ export interface Game1Settings {
 }
 
 const DEFAULTS: Game1Settings = {
+  soundEnabled: true,
   voiceEnabled: true,
   voiceLanguage: "nor-male",
   luckyAutoSelect: false,
@@ -87,6 +89,12 @@ export class SettingsPanel {
     closeBtn.addEventListener("click", () => this.hide());
     header.appendChild(closeBtn);
     panel.appendChild(header);
+
+    // Sound on/off (master mute) toggle
+    panel.appendChild(this.createToggle("Lyd", this.settings.soundEnabled, (on) => {
+      this.settings.soundEnabled = on;
+      this.save();
+    }));
 
     // Voice on/off toggle
     panel.appendChild(this.createToggle("Lydannonsering", this.settings.voiceEnabled, (on) => {

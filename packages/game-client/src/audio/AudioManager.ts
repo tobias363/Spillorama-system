@@ -1,6 +1,42 @@
 import { Howl, Howler } from "howler";
 
-export type VoiceLanguage = "nb-m" | "nb-f" | "en";
+export type VoiceLanguage = "no-male" | "no-female" | "en";
+
+/**
+ * SFX names that can be played via playSfx().
+ * Maps to files in the sfx/ directory.
+ */
+export type SfxName = "mark" | "click" | "notification" | "bingo";
+
+/** Map from SFX name to file info (name + extension). */
+const SFX_FILES: Record<SfxName, { file: string }> = {
+  mark: { file: "mark.wav" },
+  click: { file: "click.wav" },
+  notification: { file: "notification.wav" },
+  bingo: { file: "bingo.ogg" },
+};
+
+/**
+ * Map from SettingsPanel voice language values to AudioManager VoiceLanguage.
+ * SettingsPanel uses "nor-male" | "nor-female" | "english", but the audio
+ * directory structure uses "no-male" | "no-female" | "en".
+ */
+const SETTINGS_TO_VOICE: Record<string, VoiceLanguage> = {
+  "nor-male": "no-male",
+  "nor-female": "no-female",
+  "english": "en",
+};
+
+const VOICE_TO_SETTINGS: Record<VoiceLanguage, string> = {
+  "no-male": "nor-male",
+  "no-female": "nor-female",
+  "en": "english",
+};
+
+// localStorage keys
+const LS_SOUND_ENABLED = "spillorama-sound-enabled";
+const LS_VOICE_ENABLED = "spillorama-voice-enabled";
+const LS_VOICE_LANG = "spillorama-voice-lang";
 
 /**
  * Audio manager for bingo number announcements and sound effects.
@@ -8,37 +44,59 @@ export type VoiceLanguage = "nb-m" | "nb-f" | "en";
  *
  * Handles:
  * - Number announcements in multiple languages (Norwegian male/female, English)
- * - Sound effects (mark, win, draw, etc.)
+ * - Double-announce mode (Unity callTwoTime — plays number twice)
+ * - Sound effects (mark, click, notification, bingo)
+ * - BINGO celebration sequencing (waits for voice → 1s pause → bingo SFX)
+ * - Separate voice/SFX mute controls
  * - Mobile audio unlock (user gesture requirement)
- * - Volume control and language selection
+ * - On-demand number audio loading with caching
+ * - SFX preloading
  */
 export class AudioManager {
   private numberSounds = new Map<string, Howl>();
-  private sfxSounds = new Map<string, Howl>();
-  private language: VoiceLanguage = "nb-m";
-  private volume = 0.8;
-  private muted = false;
+  private sfxSounds = new Map<SfxName, Howl>();
+  private voiceLanguage: VoiceLanguage = "no-male";
+  private soundEnabled = true;
+  private voiceEnabled = true;
+  private doubleAnnounce = false;
   private unlocked = false;
   private audioBasePath: string;
 
-  constructor(audioBasePath = "/web/games/audio") {
+  /** Numbers announced this round — prevents duplicate announcements. */
+  private announcedNumbers = new Set<number>();
+
+  /** Currently playing number announcement Howl (for sequencing). */
+  private currentNumberSound: Howl | null = null;
+
+  /** Pending timeout IDs for cleanup. */
+  private pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
+
+  constructor(audioBasePath = "/web/games/assets/game1/audio") {
     this.audioBasePath = audioBasePath;
 
-    // Restore preferences from localStorage
-    const savedLang = localStorage.getItem("spillorama.audio.language");
-    if (savedLang === "nb-m" || savedLang === "nb-f" || savedLang === "en") {
-      this.language = savedLang;
-    }
-    const savedVol = localStorage.getItem("spillorama.audio.volume");
-    if (savedVol !== null) {
-      this.volume = Math.max(0, Math.min(1, parseFloat(savedVol) || 0.8));
-    }
-    const savedMute = localStorage.getItem("spillorama.audio.muted");
-    if (savedMute === "true") {
-      this.muted = true;
+    // Restore voice language from localStorage
+    const savedLang = localStorage.getItem(LS_VOICE_LANG);
+    if (savedLang === "no-male" || savedLang === "no-female" || savedLang === "en") {
+      this.voiceLanguage = savedLang;
     }
 
-    Howler.volume(this.muted ? 0 : this.volume);
+    // Restore sound enabled
+    const savedSound = localStorage.getItem(LS_SOUND_ENABLED);
+    if (savedSound === "false") {
+      this.soundEnabled = false;
+    }
+
+    // Restore voice enabled
+    const savedVoice = localStorage.getItem(LS_VOICE_ENABLED);
+    if (savedVoice === "false") {
+      this.voiceEnabled = false;
+    }
+
+    // Apply master mute
+    Howler.volume(this.soundEnabled ? 1.0 : 0);
+
+    // Preload SFX files (small files, safe to preload)
+    this.preloadSfx();
   }
 
   // ── Mobile unlock ─────────────────────────────────────────────────────
@@ -66,101 +124,249 @@ export class AudioManager {
     return this.unlocked;
   }
 
+  // ── Voice language ────────────────────────────────────────────────────
+
+  /**
+   * Set the voice pack language for number announcements.
+   * Persisted in localStorage.
+   */
+  setVoiceLanguage(lang: VoiceLanguage): void {
+    this.voiceLanguage = lang;
+    localStorage.setItem(LS_VOICE_LANG, lang);
+  }
+
+  getVoiceLanguage(): VoiceLanguage {
+    return this.voiceLanguage;
+  }
+
+  /**
+   * Convert a SettingsPanel language value to AudioManager VoiceLanguage.
+   * SettingsPanel uses "nor-male" | "nor-female" | "english".
+   */
+  static settingsToVoice(settingsLang: string): VoiceLanguage {
+    return SETTINGS_TO_VOICE[settingsLang] ?? "no-male";
+  }
+
+  /**
+   * Convert AudioManager VoiceLanguage to SettingsPanel value.
+   */
+  static voiceToSettings(voice: VoiceLanguage): string {
+    return VOICE_TO_SETTINGS[voice] ?? "nor-male";
+  }
+
   // ── Number announcements ──────────────────────────────────────────────
 
   /**
    * Play the announcement for a drawn number.
-   * Audio files expected at: {basePath}/{language}/{number}.mp3
+   * Audio files: {basePath}/{voiceLanguage}/{number}.ogg
+   *
+   * Tracks announced numbers to prevent duplicate announcements per round.
+   * In double-announce mode, plays the number twice (second at lower volume).
    */
   playNumber(number: number): void {
-    if (this.muted || number < 1 || number > 60) return;
+    if (!this.soundEnabled || !this.voiceEnabled) return;
+    if (number < 1 || number > 60) return;
 
-    const key = `${this.language}-${number}`;
-    let sound = this.numberSounds.get(key);
+    // Prevent duplicate announcement in same round
+    if (this.announcedNumbers.has(number)) return;
+    this.announcedNumbers.add(number);
 
-    if (!sound) {
-      sound = new Howl({
-        src: [`${this.audioBasePath}/${this.language}/${number}.mp3`],
-        volume: this.volume,
-        onloaderror: () => {
-          // Silently fail — missing audio file shouldn't break gameplay
-        },
-      });
-      this.numberSounds.set(key, sound);
-    }
-
-    sound.volume(this.volume);
-    sound.play();
+    this.playNumberInternal(number, 1.0).then((sound) => {
+      if (this.doubleAnnounce && sound) {
+        // Wait for first to finish + 0.3s gap, then play at 0.6 volume
+        const onEnd = () => {
+          const tid = setTimeout(() => {
+            this.removePendingTimeout(tid);
+            this.playNumberInternal(number, 0.6);
+          }, 300);
+          this.pendingTimeouts.push(tid);
+        };
+        // If sound is already finished by the time we attach, play immediately
+        if (!sound.playing()) {
+          onEnd();
+        } else {
+          sound.once("end", onEnd);
+        }
+      }
+    });
   }
 
-  // ── Sound effects ─────────────────────────────────────────────────────
+  /**
+   * Internal: load (or retrieve from cache) and play a number sound.
+   * Returns the Howl instance or null if load fails.
+   */
+  private playNumberInternal(number: number, volume: number): Promise<Howl | null> {
+    const key = `${this.voiceLanguage}-${number}`;
+    let sound = this.numberSounds.get(key);
+
+    if (sound) {
+      sound.volume(volume);
+      sound.play();
+      this.currentNumberSound = sound;
+      return Promise.resolve(sound);
+    }
+
+    // Load on demand
+    return new Promise<Howl | null>((resolve) => {
+      const newSound = new Howl({
+        src: [`${this.audioBasePath}/${this.voiceLanguage}/${number}.ogg`],
+        volume,
+        preload: true,
+        onload: () => {
+          this.numberSounds.set(key, newSound);
+          newSound.play();
+          this.currentNumberSound = newSound;
+          resolve(newSound);
+        },
+        onloaderror: () => {
+          // Silently fail — missing audio file shouldn't break gameplay
+          resolve(null);
+        },
+      });
+    });
+  }
 
   /**
-   * Play a sound effect.
-   * Audio files expected at: {basePath}/sfx/{name}.mp3
+   * Reset the set of announced numbers.
+   * Call at game start and game end.
    */
-  playSfx(name: string): void {
-    if (this.muted) return;
+  resetAnnouncedNumbers(): void {
+    this.announcedNumbers.clear();
+  }
 
-    let sound = this.sfxSounds.get(name);
+  // ── Double announce ───────────────────────────────────────────────────
 
-    if (!sound) {
-      sound = new Howl({
-        src: [`${this.audioBasePath}/sfx/${name}.mp3`],
-        volume: this.volume,
-        onloaderror: () => {},
+  /**
+   * Enable/disable double-announce mode (Unity callTwoTime).
+   * When enabled, each number announcement plays twice —
+   * second play at 0.6 volume after a 0.3s gap.
+   */
+  setDoubleAnnounce(enabled: boolean): void {
+    this.doubleAnnounce = enabled;
+  }
+
+  isDoubleAnnounce(): boolean {
+    return this.doubleAnnounce;
+  }
+
+  // ── BINGO celebration ─────────────────────────────────────────────────
+
+  /**
+   * Play the BINGO celebration sound with Unity sequencing:
+   * 1. Wait for any playing number announcement to finish
+   * 2. Wait 1.0s pause
+   * 3. Play sfx/bingo.ogg
+   */
+  playBingoSound(): void {
+    if (!this.soundEnabled) return;
+
+    const playBingo = () => {
+      const tid = setTimeout(() => {
+        this.removePendingTimeout(tid);
+        this.playSfxInternal("bingo");
+      }, 1000);
+      this.pendingTimeouts.push(tid);
+    };
+
+    // Check if a number announcement is currently playing
+    if (this.currentNumberSound && this.currentNumberSound.playing()) {
+      this.currentNumberSound.once("end", playBingo);
+    } else {
+      playBingo();
+    }
+  }
+
+  // ── SFX ───────────────────────────────────────────────────────────────
+
+  /**
+   * Play a named sound effect.
+   * SFX are preloaded on init.
+   */
+  playSfx(name: SfxName): void {
+    if (!this.soundEnabled) return;
+    this.playSfxInternal(name);
+  }
+
+  private playSfxInternal(name: SfxName): void {
+    const sound = this.sfxSounds.get(name);
+    if (sound) {
+      sound.volume(1.0);
+      sound.play();
+    }
+  }
+
+  private preloadSfx(): void {
+    for (const [name, info] of Object.entries(SFX_FILES) as [SfxName, { file: string }][]) {
+      const sound = new Howl({
+        src: [`${this.audioBasePath}/sfx/${info.file}`],
+        preload: true,
+        onloaderror: () => {
+          // Silently fail — missing SFX shouldn't break gameplay
+        },
       });
       this.sfxSounds.set(name, sound);
     }
-
-    sound.volume(this.volume);
-    sound.play();
   }
 
-  // ── Settings ──────────────────────────────────────────────────────────
-
-  setLanguage(lang: VoiceLanguage): void {
-    this.language = lang;
-    localStorage.setItem("spillorama.audio.language", lang);
-  }
-
-  getLanguage(): VoiceLanguage {
-    return this.language;
-  }
-
-  setVolume(vol: number): void {
-    this.volume = Math.max(0, Math.min(1, vol));
-    Howler.volume(this.muted ? 0 : this.volume);
-    localStorage.setItem("spillorama.audio.volume", String(this.volume));
-  }
-
-  getVolume(): number {
-    return this.volume;
-  }
-
-  setMuted(muted: boolean): void {
-    this.muted = muted;
-    Howler.volume(muted ? 0 : this.volume);
-    localStorage.setItem("spillorama.audio.muted", String(muted));
-  }
-
-  isMuted(): boolean {
-    return this.muted;
-  }
+  // ── Master sound on/off ───────────────────────────────────────────────
 
   /**
-   * Stop all currently playing sounds (Unity: reset sound announcements on game end).
+   * Master mute — disables all audio (voice + SFX).
+   * Persisted in localStorage.
+   */
+  setSoundEnabled(enabled: boolean): void {
+    this.soundEnabled = enabled;
+    Howler.volume(enabled ? 1.0 : 0);
+    localStorage.setItem(LS_SOUND_ENABLED, String(enabled));
+  }
+
+  isSoundEnabled(): boolean {
+    return this.soundEnabled;
+  }
+
+  // ── Voice on/off (separate from SFX) ──────────────────────────────────
+
+  /**
+   * Mute just voice announcements. SFX still play.
+   * Persisted in localStorage.
+   */
+  setVoiceEnabled(enabled: boolean): void {
+    this.voiceEnabled = enabled;
+    localStorage.setItem(LS_VOICE_ENABLED, String(enabled));
+  }
+
+  isVoiceEnabled(): boolean {
+    return this.voiceEnabled;
+  }
+
+  // ── Stop all ──────────────────────────────────────────────────────────
+
+  /**
+   * Stop all currently playing sounds and cancel pending timeouts.
+   * Unity: reset sound announcements on game end.
    */
   stopAll(): void {
+    // Cancel pending double-announce and bingo timeouts
+    for (const tid of this.pendingTimeouts) clearTimeout(tid);
+    this.pendingTimeouts = [];
+    this.currentNumberSound = null;
     Howler.stop();
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────
 
   destroy(): void {
+    this.stopAll();
     for (const sound of this.numberSounds.values()) sound.unload();
     for (const sound of this.sfxSounds.values()) sound.unload();
     this.numberSounds.clear();
     this.sfxSounds.clear();
+  }
+
+  // ── Internal helpers ──────────────────────────────────────────────────
+
+  private removePendingTimeout(tid: ReturnType<typeof setTimeout>): void {
+    const idx = this.pendingTimeouts.indexOf(tid);
+    if (idx !== -1) this.pendingTimeouts.splice(idx, 1);
   }
 }

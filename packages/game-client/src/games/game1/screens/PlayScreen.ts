@@ -460,7 +460,8 @@ export class PlayScreen extends Container {
     this.centerBall.showNumber(number);
 
     // Inline tickets — mark number on all cards
-    this.inlineScroller.markNumberOnAll(number);
+    // Returns true if any ticket had that number (for mark SFX)
+    const anyMatched = this.inlineScroller.markNumberOnAll(number);
     this.inlineScroller.sortBestFirst();
     this.updateClaimButtons(state);
 
@@ -470,8 +471,13 @@ export class PlayScreen extends Container {
     // Called numbers — add to grid
     this.calledNumbers.addNumber(number);
 
-    // Audio
+    // Audio: play number announcement
     this.audio.playNumber(number);
+
+    // Audio: play mark SFX once per draw if any ticket matched
+    if (anyMatched) {
+      this.audio.playSfx("mark");
+    }
 
     // Update info panels
     this.updateInfo(state);
