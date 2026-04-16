@@ -7,18 +7,19 @@ test("roundCurrency: 0.1 + 0.2 = 0.3", () => {
 });
 
 test("roundCurrency: rounds to 2 decimal places", () => {
-  // Note: Math.round(1.005 * 100) = 100 due to float representation of 1.005
-  assert.equal(roundCurrency(1.005), 1.0);
+  assert.equal(roundCurrency(1.005), 1.01); // Fixed: penny rounding now correct
   assert.equal(roundCurrency(1.006), 1.01);
   assert.equal(roundCurrency(1.004), 1.0);
   assert.equal(roundCurrency(99.999), 100);
   assert.equal(roundCurrency(0), 0);
   assert.equal(roundCurrency(100), 100);
+  assert.equal(roundCurrency(2.675), 2.68); // Additional half-penny case
+  assert.equal(roundCurrency(1.255), 1.26);
 });
 
 test("roundCurrency: handles negative amounts", () => {
   assert.equal(roundCurrency(-0.1 - 0.2), -0.3);
-  assert.equal(roundCurrency(-1.005), -1.0); // Math.round(-100.5) = -100
+  assert.equal(roundCurrency(-1.005), -1); // Negative half-penny rounds toward zero
 });
 
 test("assertSafeCurrencyAmount: passes for normal values", () => {

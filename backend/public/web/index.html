@@ -1868,7 +1868,7 @@
               <p class="spillvett-subtitle" id="spillvett-hall-name">Venter pa valgt hall</p>
             </div>
             <div class="spillvett-actions">
-              <button class="spillvett-button is-secondary" type="button" id="spillvett-toggle">Apne spillregnskap</button>
+              <button class="spillvett-button is-secondary" type="button" id="spillvett-toggle">Spillregnskap →</button>
             </div>
           </div>
 
@@ -2057,6 +2057,269 @@
     </div>
   </div>
 
+  <!-- ═══ SPILLREGNSKAP FULL-PAGE VIEW ═══════════════════════════════════ -->
+  <section id="spillregnskap-view" hidden aria-label="Spillregnskap">
+    <div class="sr-topbar">
+      <button id="sr-back-btn" class="sr-back-btn" type="button">← Tilbake</button>
+      <h1 class="sr-topbar-title">Spillregnskap</h1>
+    </div>
+
+    <div class="sr-loading" id="sr-loading">Henter spillregnskap…</div>
+    <div class="sr-error" id="sr-error" hidden></div>
+
+    <div class="sr-body" id="sr-content" hidden>
+
+      <!-- Totalt forbruk — øverst -->
+      <section>
+        <h2 class="sr-section-title">Totalt forbruk</h2>
+        <div class="sr-total-card">
+          <div class="sr-card-tabs">
+            <button class="sr-ctab is-active" data-days="1">I dag</button>
+            <button class="sr-ctab" data-days="7">7 dager</button>
+            <button class="sr-ctab" data-days="30">30 dager</button>
+            <button class="sr-ctab" data-days="182">182 dager</button>
+            <button class="sr-ctab" data-days="365">365 dager</button>
+          </div>
+          <div class="sr-card-metric">
+            <span class="sr-metric-label" id="sr-total-period-label">—</span>
+            <strong class="sr-metric-value" id="sr-total-forbruk-metric">—</strong>
+          </div>
+          <div class="sr-card-stats" id="sr-total-forbruk-stats"></div>
+          <p class="sr-card-footnote">Totalt netto forbruk på tvers av alle spill for valgt periode. Forbruk = − innsats + premier</p>
+        </div>
+      </section>
+
+      <!-- Ditt forbruk — stolpediagram -->
+      <section>
+        <h2 class="sr-section-title">Ditt forbruk</h2>
+        <div class="sr-ditt-card">
+          <div class="sr-ditt-tabs">
+            <button class="sr-dtab is-active" data-ditt-section="forbruk" data-ditt-period="dag">Dag</button>
+            <button class="sr-dtab" data-ditt-section="forbruk" data-ditt-period="uke">Uke</button>
+            <button class="sr-dtab" data-ditt-section="forbruk" data-ditt-period="måned">Måned</button>
+          </div>
+          <div class="sr-ditt-nav" id="sr-ditt-forbruk-nav">
+            <button class="sr-ditt-arrow" id="sr-ditt-forbruk-prev" aria-label="Forrige periode">&#8249;</button>
+            <span class="sr-ditt-nav-label" id="sr-ditt-forbruk-nav-label">—</span>
+            <button class="sr-ditt-arrow" id="sr-ditt-forbruk-next" aria-label="Neste periode">&#8250;</button>
+          </div>
+          <p class="sr-ditt-summary">Forbruk for perioden: <strong id="sr-ditt-forbruk-label">—</strong></p>
+          <p class="sr-ditt-chart-title" id="sr-ditt-forbruk-chart-title">—</p>
+          <div id="sr-ditt-forbruk-chart" class="sr-ditt-chart-wrap"></div>
+        </div>
+      </section>
+
+      <!-- Forbruk per spill -->
+      <section>
+        <h2 class="sr-section-title">Forbruk per spill</h2>
+        <div class="sr-games-grid">
+          <div class="sr-game-card">
+            <h3 class="sr-card-game-title">Databingo</h3>
+            <div class="sr-card-tabs">
+              <button class="sr-ctab is-active" data-section="forbruk" data-card="DATABINGO" data-cperiod="week">Uke</button>
+              <button class="sr-ctab" data-section="forbruk" data-card="DATABINGO" data-cperiod="month">Måned</button>
+              <button class="sr-ctab" data-section="forbruk" data-card="DATABINGO" data-cperiod="year">Siste 12 mnd</button>
+              <button class="sr-ctab" data-section="forbruk" data-card="DATABINGO" data-cperiod="custom">Egendefinert</button>
+            </div>
+            <div class="sr-card-nav" id="sr-forbruk-DATABINGO-nav">
+              <button class="sr-card-arrow" id="sr-forbruk-DATABINGO-prev" type="button">‹</button>
+              <span class="sr-card-period-label" id="sr-forbruk-DATABINGO-label">—</span>
+              <button class="sr-card-arrow" id="sr-forbruk-DATABINGO-next" type="button" disabled>›</button>
+            </div>
+            <div class="sr-card-custom" id="sr-forbruk-DATABINGO-custom" hidden>
+              <input type="date" id="sr-forbruk-DATABINGO-from" class="sr-date-input">
+              <span class="sr-date-sep">—</span>
+              <input type="date" id="sr-forbruk-DATABINGO-to" class="sr-date-input">
+              <button class="sr-date-apply" data-section-apply="forbruk" data-card-apply="DATABINGO" type="button">Vis</button>
+            </div>
+            <div class="sr-card-metric">
+              <span class="sr-metric-label">Forbruk for perioden</span>
+              <strong class="sr-metric-value" id="sr-forbruk-DATABINGO-metric">—</strong>
+            </div>
+            <div class="sr-card-stats" id="sr-forbruk-DATABINGO-stats"></div>
+            <div id="sr-forbruk-DATABINGO-chart" class="sr-forbruk-chart"></div>
+            <p class="sr-card-footnote">Oversikten viser netto forbruk per uke, måned og siste 12 måneder. Forbruk = − innsats + premier</p>
+          </div>
+          <div class="sr-game-card">
+            <h3 class="sr-card-game-title">Bingo</h3>
+            <div class="sr-card-tabs">
+              <button class="sr-ctab is-active" data-section="forbruk" data-card="MAIN_GAME" data-cperiod="week">Uke</button>
+              <button class="sr-ctab" data-section="forbruk" data-card="MAIN_GAME" data-cperiod="month">Måned</button>
+              <button class="sr-ctab" data-section="forbruk" data-card="MAIN_GAME" data-cperiod="year">Siste 12 mnd</button>
+              <button class="sr-ctab" data-section="forbruk" data-card="MAIN_GAME" data-cperiod="custom">Egendefinert</button>
+            </div>
+            <div class="sr-card-nav" id="sr-forbruk-MAIN_GAME-nav">
+              <button class="sr-card-arrow" id="sr-forbruk-MAIN_GAME-prev" type="button">‹</button>
+              <span class="sr-card-period-label" id="sr-forbruk-MAIN_GAME-label">—</span>
+              <button class="sr-card-arrow" id="sr-forbruk-MAIN_GAME-next" type="button" disabled>›</button>
+            </div>
+            <div class="sr-card-custom" id="sr-forbruk-MAIN_GAME-custom" hidden>
+              <input type="date" id="sr-forbruk-MAIN_GAME-from" class="sr-date-input">
+              <span class="sr-date-sep">—</span>
+              <input type="date" id="sr-forbruk-MAIN_GAME-to" class="sr-date-input">
+              <button class="sr-date-apply" data-section-apply="forbruk" data-card-apply="MAIN_GAME" type="button">Vis</button>
+            </div>
+            <div class="sr-card-metric">
+              <span class="sr-metric-label">Forbruk for perioden</span>
+              <strong class="sr-metric-value" id="sr-forbruk-MAIN_GAME-metric">—</strong>
+            </div>
+            <div class="sr-card-stats" id="sr-forbruk-MAIN_GAME-stats"></div>
+            <div id="sr-forbruk-MAIN_GAME-chart" class="sr-forbruk-chart"></div>
+            <p class="sr-card-footnote">Oversikten viser netto forbruk per uke, måned og siste 12 måneder. Forbruk = − innsats + premier</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Innsats per spill -->
+      <section>
+        <h2 class="sr-section-title">Innsats per spill</h2>
+        <div class="sr-games-grid">
+          <div class="sr-game-card">
+            <h3 class="sr-card-game-title">Databingo</h3>
+            <div class="sr-card-tabs">
+              <button class="sr-ctab is-active" data-section="innsats" data-card="DATABINGO" data-cperiod="week">Uke</button>
+              <button class="sr-ctab" data-section="innsats" data-card="DATABINGO" data-cperiod="month">Måned</button>
+              <button class="sr-ctab" data-section="innsats" data-card="DATABINGO" data-cperiod="year">Siste 12 mnd</button>
+            </div>
+            <div class="sr-card-nav" id="sr-innsats-DATABINGO-nav">
+              <button class="sr-card-arrow" id="sr-innsats-DATABINGO-prev" type="button">‹</button>
+              <span class="sr-card-period-label" id="sr-innsats-DATABINGO-label">—</span>
+              <button class="sr-card-arrow" id="sr-innsats-DATABINGO-next" type="button" disabled>›</button>
+            </div>
+            <div class="sr-card-metric">
+              <span class="sr-metric-label">Innsats for perioden</span>
+              <strong class="sr-metric-value" id="sr-innsats-DATABINGO-metric">—</strong>
+            </div>
+            <div id="sr-innsats-DATABINGO-chart" class="sr-card-chart-wrap"></div>
+            <p class="sr-card-footnote">Total innsats per uke, måned og siste 12 måneder.</p>
+          </div>
+          <div class="sr-game-card">
+            <h3 class="sr-card-game-title">Bingo</h3>
+            <div class="sr-card-tabs">
+              <button class="sr-ctab is-active" data-section="innsats" data-card="MAIN_GAME" data-cperiod="week">Uke</button>
+              <button class="sr-ctab" data-section="innsats" data-card="MAIN_GAME" data-cperiod="month">Måned</button>
+              <button class="sr-ctab" data-section="innsats" data-card="MAIN_GAME" data-cperiod="year">Siste 12 mnd</button>
+            </div>
+            <div class="sr-card-nav" id="sr-innsats-MAIN_GAME-nav">
+              <button class="sr-card-arrow" id="sr-innsats-MAIN_GAME-prev" type="button">‹</button>
+              <span class="sr-card-period-label" id="sr-innsats-MAIN_GAME-label">—</span>
+              <button class="sr-card-arrow" id="sr-innsats-MAIN_GAME-next" type="button" disabled>›</button>
+            </div>
+            <div class="sr-card-metric">
+              <span class="sr-metric-label">Innsats for perioden</span>
+              <strong class="sr-metric-value" id="sr-innsats-MAIN_GAME-metric">—</strong>
+            </div>
+            <div id="sr-innsats-MAIN_GAME-chart" class="sr-card-chart-wrap"></div>
+            <p class="sr-card-footnote">Total innsats per uke, måned og siste 12 måneder.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Premier per spill -->
+      <section>
+        <h2 class="sr-section-title">Premier per spill</h2>
+        <div class="sr-games-grid">
+          <div class="sr-game-card">
+            <h3 class="sr-card-game-title">Databingo</h3>
+            <div class="sr-card-tabs">
+              <button class="sr-ctab is-active" data-section="premier" data-card="DATABINGO" data-cperiod="week">Uke</button>
+              <button class="sr-ctab" data-section="premier" data-card="DATABINGO" data-cperiod="month">Måned</button>
+              <button class="sr-ctab" data-section="premier" data-card="DATABINGO" data-cperiod="year">Siste 12 mnd</button>
+            </div>
+            <div class="sr-card-nav" id="sr-premier-DATABINGO-nav">
+              <button class="sr-card-arrow" id="sr-premier-DATABINGO-prev" type="button">‹</button>
+              <span class="sr-card-period-label" id="sr-premier-DATABINGO-label">—</span>
+              <button class="sr-card-arrow" id="sr-premier-DATABINGO-next" type="button" disabled>›</button>
+            </div>
+            <div class="sr-card-metric">
+              <span class="sr-metric-label">Premier for perioden</span>
+              <strong class="sr-metric-value" id="sr-premier-DATABINGO-metric">—</strong>
+            </div>
+            <div id="sr-premier-DATABINGO-chart" class="sr-card-chart-wrap"></div>
+            <p class="sr-card-footnote">Total premier per uke, måned og siste 12 måneder.</p>
+          </div>
+          <div class="sr-game-card">
+            <h3 class="sr-card-game-title">Bingo</h3>
+            <div class="sr-card-tabs">
+              <button class="sr-ctab is-active" data-section="premier" data-card="MAIN_GAME" data-cperiod="week">Uke</button>
+              <button class="sr-ctab" data-section="premier" data-card="MAIN_GAME" data-cperiod="month">Måned</button>
+              <button class="sr-ctab" data-section="premier" data-card="MAIN_GAME" data-cperiod="year">Siste 12 mnd</button>
+            </div>
+            <div class="sr-card-nav" id="sr-premier-MAIN_GAME-nav">
+              <button class="sr-card-arrow" id="sr-premier-MAIN_GAME-prev" type="button">‹</button>
+              <span class="sr-card-period-label" id="sr-premier-MAIN_GAME-label">—</span>
+              <button class="sr-card-arrow" id="sr-premier-MAIN_GAME-next" type="button" disabled>›</button>
+            </div>
+            <div class="sr-card-metric">
+              <span class="sr-metric-label">Premier for perioden</span>
+              <strong class="sr-metric-value" id="sr-premier-MAIN_GAME-metric">—</strong>
+            </div>
+            <div id="sr-premier-MAIN_GAME-chart" class="sr-card-chart-wrap"></div>
+            <p class="sr-card-footnote">Total premier per uke, måned og siste 12 måneder.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Forbruk per hall -->
+      <section>
+        <h2 class="sr-section-title">Forbruk per hall</h2>
+        <div class="sr-section-nav">
+          <button id="sr-hall-prev" class="sr-nav-arrow" type="button">‹</button>
+          <span id="sr-hall-nav-label" class="sr-nav-label">—</span>
+          <button id="sr-hall-next" class="sr-nav-arrow" type="button">›</button>
+        </div>
+        <div class="sr-period-tabs" id="sr-hall-period-tabs">
+          <button class="sr-ptab is-active" data-hall-period="week">Uke</button>
+          <button class="sr-ptab" data-hall-period="month">Måned</button>
+          <button class="sr-ptab" data-hall-period="year">Siste 12 måneder</button>
+        </div>
+        <div class="sr-offset-nav">
+          <button id="sr-hall-offset-prev" class="sr-period-arrow" type="button">‹</button>
+          <span id="sr-hall-offset-label" class="sr-period-label">—</span>
+          <button id="sr-hall-offset-next" class="sr-period-arrow" type="button" disabled>›</button>
+        </div>
+        <div id="sr-hall-summary" class="sr-mini-summary"></div>
+        <div class="sr-chart-wrap"><div id="sr-hall-chart"></div></div>
+      </section>
+
+      <!-- Detaljert spillregnskap — e-post -->
+      <section class="sr-export-section">
+        <h2 class="sr-section-title">Detaljert spillregnskap</h2>
+        <p class="sr-export-desc">
+          Ønsker du en mer detaljert oversikt over din spilleaktivitet?
+          Vi sender et fullstendig spillregnskap til din registrerte e-postadresse.
+        </p>
+        <button id="sr-email-btn" class="sr-export-btn" type="button">Send spillregnskap på e-post</button>
+        <p class="sr-export-msg" id="sr-export-msg" hidden></p>
+      </section>
+    </div>
+  </section>
+
+  <!-- ═══ OBLIGATORISK PAUSE (§ 66) ══════════════════════════════════════ -->
+  <div id="mandatory-pause-modal" class="mandatory-pause-modal" hidden aria-modal="true" role="alertdialog" aria-labelledby="mandatory-pause-title">
+    <div class="mandatory-pause-card">
+      <div class="mandatory-pause-icon">⏸</div>
+      <h2 class="mandatory-pause-title" id="mandatory-pause-title">Obligatorisk spillepause</h2>
+      <p class="mandatory-pause-subtitle">Du har spilt i 1 time. Loven krever at du tar en pause på 5 minutter (§ 66).</p>
+      <div class="mandatory-pause-countdown" id="mandatory-pause-countdown">05:00</div>
+      <div class="mandatory-pause-stats">
+        <div class="mandatory-pause-stat">
+          <span class="mandatory-pause-stat-label">Samlet tap denne sesjonen</span>
+          <span class="mandatory-pause-stat-value" id="mandatory-pause-loss">—</span>
+        </div>
+        <div class="mandatory-pause-stat">
+          <span class="mandatory-pause-stat-label">Spilletid</span>
+          <span class="mandatory-pause-stat-value" id="mandatory-pause-playtime">—</span>
+        </div>
+        <div class="mandatory-pause-stat">
+          <span class="mandatory-pause-stat-label">Antall spill</span>
+          <span class="mandatory-pause-stat-value" id="mandatory-pause-gamecount">—</span>
+        </div>
+      </div>
+      <p class="mandatory-pause-note">Spillet er låst til pausen er over. Pausen kan ikke avbrytes.</p>
+    </div>
+  </div>
+
   <!-- ═══ 11. CANDY OVERLAY ═════════════════════════════════════════════ -->
   <div id="candy-overlay" class="candy-overlay">
     <div class="candy-overlay-bar">
@@ -2077,6 +2340,7 @@
   </div>
 
   <!-- ═══ SCRIPTS ═══════════════════════════════════════════════════════ -->
+  <script src="spillregnskap.js"></script>
   <script src="spillvett.js"></script>
 
   <script>

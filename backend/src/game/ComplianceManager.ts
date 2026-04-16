@@ -1,4 +1,5 @@
 import { DomainError } from "./BingoEngine.js";
+import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type {
   PersistedLossEntry,
@@ -43,6 +44,7 @@ export interface PlaySessionState {
   activeFromMs?: number;
   pauseUntilMs?: number;
   lastMandatoryBreak?: MandatoryBreakSummary;
+  gamesPlayedInSession?: number;
 }
 
 export interface MandatoryBreakSummary {
@@ -51,6 +53,7 @@ export interface MandatoryBreakSummary {
   totalPlayMs: number;
   hallId: string;
   netLoss: LossLimits;
+  gamesPlayed: number;
 }
 
 export interface RestrictionState {
@@ -95,6 +98,7 @@ export interface PlayerComplianceSnapshot {
       totalPlayMs: number;
       hallId: string;
       netLoss: LossLimits;
+      gamesPlayed: number;
     };
   };
   restrictions: {
@@ -227,12 +231,14 @@ export class ComplianceManager {
           accumulatedMs: Math.max(0, Math.floor(playState.accumulatedMs)),
           activeFromMs: playState.activeFromMs,
           pauseUntilMs: playState.pauseUntilMs,
+          gamesPlayedInSession: playState.gamesPlayedInSession ?? 0,
           lastMandatoryBreak: playState.lastMandatoryBreak
             ? {
                 triggeredAtMs: playState.lastMandatoryBreak.triggeredAtMs,
                 pauseUntilMs: playState.lastMandatoryBreak.pauseUntilMs,
                 totalPlayMs: playState.lastMandatoryBreak.totalPlayMs,
                 hallId: playState.lastMandatoryBreak.hallId,
+                gamesPlayed: playState.lastMandatoryBreak.gamesPlayed ?? 0,
                 netLoss: {
                   daily: playState.lastMandatoryBreak.netLoss.daily,
                   monthly: playState.lastMandatoryBreak.netLoss.monthly
@@ -296,6 +302,7 @@ export class ComplianceManager {
               pauseUntil: new Date(playState.lastMandatoryBreak.pauseUntilMs).toISOString(),
               totalPlayMs: playState.lastMandatoryBreak.totalPlayMs,
               hallId: playState.lastMandatoryBreak.hallId,
+              gamesPlayed: playState.lastMandatoryBreak.gamesPlayed,
               netLoss: {
                 daily: playState.lastMandatoryBreak.netLoss.daily,
                 monthly: playState.lastMandatoryBreak.netLoss.monthly
@@ -562,6 +569,17 @@ export class ComplianceManager {
     }
   }
 
+  async incrementSessionGameCount(walletIdInput: string): Promise<void> {
+    const walletId = walletIdInput.trim();
+    if (!walletId) return;
+    const existing = this.playStateByWallet.get(walletId);
+    if (!existing) return;
+    await this.persistPlaySessionState(walletId, {
+      ...existing,
+      gamesPlayedInSession: (existing.gamesPlayedInSession ?? 0) + 1
+    });
+  }
+
   async startPlaySession(walletIdInput: string, nowMs: number): Promise<void> {
     const walletId = walletIdInput.trim();
     if (!walletId) {
@@ -592,12 +610,14 @@ export class ComplianceManager {
           accumulatedMs: existing.accumulatedMs,
           activeFromMs: existing.activeFromMs,
           pauseUntilMs: existing.pauseUntilMs,
+          gamesPlayedInSession: existing.gamesPlayedInSession ?? 0,
           lastMandatoryBreak: existing.lastMandatoryBreak
             ? {
                 triggeredAtMs: existing.lastMandatoryBreak.triggeredAtMs,
                 pauseUntilMs: existing.lastMandatoryBreak.pauseUntilMs,
                 totalPlayMs: existing.lastMandatoryBreak.totalPlayMs,
                 hallId: existing.lastMandatoryBreak.hallId,
+                gamesPlayed: existing.lastMandatoryBreak.gamesPlayed,
                 netLoss: {
                   daily: existing.lastMandatoryBreak.netLoss.daily,
                   monthly: existing.lastMandatoryBreak.netLoss.monthly
@@ -605,7 +625,7 @@ export class ComplianceManager {
               }
             : undefined
       }
-      : { accumulatedMs: 0 };
+      : { accumulatedMs: 0, gamesPlayedInSession: 0 };
     if (state.activeFromMs === undefined) {
       return;
     }
@@ -618,11 +638,13 @@ export class ComplianceManager {
         accumulatedMs: 0,
         activeFromMs: undefined,
         pauseUntilMs,
+        gamesPlayedInSession: 0,
         lastMandatoryBreak: {
           triggeredAtMs: endedAtMs,
           pauseUntilMs,
           totalPlayMs,
           hallId,
+          gamesPlayed: state.gamesPlayedInSession ?? 0,
           netLoss: this.calculateNetLoss(walletId, endedAtMs, hallId)
         }
       });
@@ -649,9 +671,9 @@ export class ComplianceManager {
     for (const entry of entries) {
       const signed = entry.type === "BUYIN" ? entry.amount : -entry.amount;
       if (entry.createdAtMs >= monthStartMs) {
-        monthly += signed;
+        monthly = roundCurrency(monthly + signed);
         if (entry.createdAtMs >= dayStartMs) {
-          daily += signed;
+          daily = roundCurrency(daily + signed);
         }
       }
     }
@@ -812,12 +834,14 @@ export class ComplianceManager {
       accumulatedMs: Math.max(0, existing.accumulatedMs + activeElapsedMs),
       activeFromMs: existing.activeFromMs,
       pauseUntilMs: existing.pauseUntilMs,
+      gamesPlayedInSession: existing.gamesPlayedInSession ?? 0,
       lastMandatoryBreak: existing.lastMandatoryBreak
         ? {
             triggeredAtMs: existing.lastMandatoryBreak.triggeredAtMs,
             pauseUntilMs: existing.lastMandatoryBreak.pauseUntilMs,
             totalPlayMs: existing.lastMandatoryBreak.totalPlayMs,
             hallId: existing.lastMandatoryBreak.hallId,
+            gamesPlayed: existing.lastMandatoryBreak.gamesPlayed,
             netLoss: {
               daily: existing.lastMandatoryBreak.netLoss.daily,
               monthly: existing.lastMandatoryBreak.netLoss.monthly
@@ -957,12 +981,14 @@ export class ComplianceManager {
       accumulatedMs: Math.max(0, Math.floor(state.accumulatedMs ?? 0)),
       activeFromMs: state.activeFromMs,
       pauseUntilMs: state.pauseUntilMs,
+      gamesPlayedInSession: state.gamesPlayedInSession ?? 0,
       lastMandatoryBreak: state.lastMandatoryBreak
         ? {
             triggeredAtMs: state.lastMandatoryBreak.triggeredAtMs,
             pauseUntilMs: state.lastMandatoryBreak.pauseUntilMs,
             totalPlayMs: Math.max(0, Math.floor(state.lastMandatoryBreak.totalPlayMs)),
             hallId: state.lastMandatoryBreak.hallId,
+            gamesPlayed: state.lastMandatoryBreak.gamesPlayed,
             netLoss: {
               daily: state.lastMandatoryBreak.netLoss.daily,
               monthly: state.lastMandatoryBreak.netLoss.monthly
@@ -1007,6 +1033,7 @@ export class ComplianceManager {
       accumulatedMs: Math.max(0, Math.floor(state.accumulatedMs)),
       activeFromMs: state.activeFromMs,
       pauseUntilMs: state.pauseUntilMs,
+      gamesPlayedInSession: state.gamesPlayedInSession ?? 0,
       lastMandatoryBreak: state.lastMandatoryBreak
         ? this.toPersistedMandatoryBreakSummary(state.lastMandatoryBreak)
         : undefined
@@ -1019,6 +1046,7 @@ export class ComplianceManager {
       pauseUntilMs: summary.pauseUntilMs,
       totalPlayMs: Math.max(0, Math.floor(summary.totalPlayMs)),
       hallId: summary.hallId,
+      gamesPlayed: summary.gamesPlayed,
       netLoss: {
         daily: summary.netLoss.daily,
         monthly: summary.netLoss.monthly

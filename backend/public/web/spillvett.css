@@ -427,3 +427,902 @@
 .candy-iframe[hidden] {
   display: none;
 }
+
+/* ── Obligatorisk pause modal (§ 66) ────────────────────────────────────── */
+
+.mandatory-pause-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 16px;
+}
+
+.mandatory-pause-modal[hidden] {
+  display: none;
+}
+
+.mandatory-pause-card {
+  background: #1a1a2e;
+  border: 1px solid rgba(255, 190, 60, 0.3);
+  border-radius: 20px;
+  padding: 36px 32px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+
+.mandatory-pause-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.mandatory-pause-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #ffd380;
+  margin: 0 0 8px;
+}
+
+.mandatory-pause-subtitle {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.65);
+  margin: 0 0 24px;
+  line-height: 1.5;
+}
+
+.mandatory-pause-countdown {
+  font-size: 52px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #ffd380;
+  letter-spacing: 2px;
+  margin-bottom: 28px;
+}
+
+.mandatory-pause-stats {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.mandatory-pause-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.mandatory-pause-stat-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.mandatory-pause-stat-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.mandatory-pause-note {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  margin: 0;
+}
+
+/* ── Spillregnskap full-page view ──────────────────────────────────────────── */
+
+#spillregnskap-view {
+  position: fixed;
+  inset: 0;
+  z-index: 10500; /* above login-overlay (10000) and candy-overlay (9999) */
+  background: linear-gradient(160deg, #0e1422 0%, #121929 60%, #0c111e 100%);
+  color: #f4f6fb;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#spillregnskap-view[hidden] {
+  display: none;
+}
+
+.sr-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 24px;
+  background: rgba(9, 14, 34, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  flex-shrink: 0;
+}
+
+.sr-back-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.07);
+  color: #f4f6fb;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 120ms;
+  flex-shrink: 0;
+}
+
+.sr-back-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.sr-topbar-title {
+  font-size: 17px;
+  font-weight: 800;
+  margin: 0;
+  flex: 1;
+  letter-spacing: -0.01em;
+}
+
+.sr-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* ── Period navigator ── */
+
+.sr-period-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sr-period-type {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #f4f6fb;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.sr-period-arrows {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.sr-period-arrow {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f6fb;
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+
+.sr-period-arrow:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.sr-period-arrow:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.sr-period-label {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 140px;
+  text-align: center;
+}
+
+/* ── Summary tiles ── */
+
+.sr-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sr-summary-tile {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 16px;
+  text-align: center;
+}
+
+.sr-summary-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0 0 8px;
+}
+
+.sr-summary-value {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.sr-summary-value.is-negative {
+  color: #ff9aaa;
+}
+
+.sr-summary-value.is-positive {
+  color: #97efb1;
+}
+
+/* ── Section headings ── */
+
+.sr-section-title {
+  font-size: 15px;
+  font-weight: 800;
+  margin: 0 0 14px;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* ── Donut grid ── */
+
+.sr-donut-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.sr-donut-tile {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 16px;
+  text-align: center;
+  min-width: 140px;
+}
+
+.sr-donut-hall {
+  margin: 0 0 2px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 600;
+}
+
+.sr-donut-game {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sr-donut-svg {
+  display: block;
+  margin: 0 auto;
+}
+
+.sr-donut-value {
+  margin: 10px 0 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+/* ── Bar charts ── */
+
+.sr-chart-wrap {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+/* ── Export section ── */
+
+.sr-export-section {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.sr-export-desc {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.5;
+}
+
+.sr-export-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 22px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #eaf2ff;
+  color: #14274a;
+  transition: opacity 120ms;
+}
+
+.sr-export-btn:hover {
+  opacity: 0.9;
+}
+
+.sr-export-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sr-export-msg {
+  margin-top: 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.sr-export-msg[hidden] {
+  display: none;
+}
+
+/* ── Loading / empty / error ── */
+
+.sr-loading {
+  padding: 40px;
+  text-align: center;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.sr-loading[hidden] {
+  display: none;
+}
+
+.sr-error {
+  margin: 16px 0;
+  padding: 14px 16px;
+  background: rgba(242, 79, 95, 0.12);
+  border-radius: 12px;
+  color: #ffb3bb;
+  font-size: 13px;
+}
+
+.sr-error[hidden] {
+  display: none;
+}
+
+.sr-empty {
+  padding: 16px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 600px) {
+  .sr-body {
+    padding: 16px;
+    gap: 20px;
+  }
+
+  .sr-period-nav {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  .sr-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .sr-summary-value {
+    font-size: 16px;
+  }
+}
+
+/* ── Section nav (game/hall carousel) ─────────────────────────────────── */
+.sr-section-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.sr-nav-arrow {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.06);
+  color: #f4f6fb;
+  border-radius: 8px;
+  width: 32px; height: 32px;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.sr-nav-arrow:disabled { opacity: 0.3; cursor: not-allowed; }
+.sr-nav-arrow:hover:not(:disabled) { background: rgba(255,255,255,0.14); }
+.sr-nav-label {
+  font-size: 15px; font-weight: 700; flex: 1;
+}
+
+/* ── Period tabs within section ────────────────────────────────────────── */
+.sr-period-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.sr-ptab {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.65);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font: inherit; font-size: 12px; font-weight: 700;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.sr-ptab.is-active {
+  background: #edf3ff; color: #17315f; border-color: transparent;
+}
+.sr-ptab:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── Offset nav inside section ─────────────────────────────────────────── */
+.sr-offset-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* ── Mini summary (innsats/gevinst/netto) ──────────────────────────────── */
+.sr-mini-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.sr-mini-tile {
+  flex: 1;
+  min-width: 80px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+}
+.sr-mini-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(255,255,255,0.5); margin: 0 0 4px;
+}
+.sr-mini-value {
+  font-size: 16px; font-weight: 800; margin: 0;
+}
+.sr-mini-value.is-negative { color: #ff9aaa; }
+.sr-mini-value.is-positive { color: #97efb1; }
+
+/* ── Section head with side tabs ───────────────────────────────────────── */
+.sr-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.sr-section-head .sr-section-title {
+  margin: 0;
+}
+
+/* ── Footnote ──────────────────────────────────────────────────────────── */
+.sr-footnote {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: rgba(255,255,255,0.45);
+  line-height: 1.4;
+}
+
+/* ── Ditt forbruk — overview tiles ────────────────────────────────────── */
+.sr-ov-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+@media (max-width: 700px) {
+  .sr-ov-grid { grid-template-columns: 1fr 1fr; }
+}
+.sr-ov-tile {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.14);
+  color: #1a1a2e;
+}
+.sr-ov-label {
+  font-size: 0.72rem;
+  color: #999;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.sr-ov-value {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #1a1a2e;
+  margin: 0 0 10px;
+  letter-spacing: -0.3px;
+}
+.sr-ov-value.is-negative { color: #c0392b; }
+.sr-ov-value.is-positive { color: #1a9c59; }
+.sr-ov-value.is-zero     { color: #aaa; }
+.sr-ov-bar-wrap {
+  height: 5px;
+  background: #ededf2;
+  border-radius: 3px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.sr-ov-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #e85d5d;
+  width: 0%;
+  transition: width 0.5s ease;
+}
+.sr-ov-bar-fill.is-warning { background: #f39c12; }
+.sr-ov-bar-fill.is-safe    { background: #1a9c59; }
+.sr-ov-sublabel {
+  font-size: 0.67rem;
+  color: #bbb;
+  margin: 0;
+}
+
+/* ── Total forbruk card (full-width) ───────────────────────────────────── */
+.sr-total-card {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.18);
+  color: #1a1a2e;
+}
+.sr-total-card .sr-card-tabs {
+  margin-bottom: 20px;
+}
+.sr-total-card .sr-metric-value {
+  font-size: 2rem;
+}
+.sr-total-card .sr-metric-label {
+  font-size: 0.82rem;
+}
+
+/* ── Ditt forbruk card ───────────────────────────────────────────────────── */
+.sr-ditt-card {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 20px 24px 24px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.18);
+  color: #1a1a2e;
+}
+
+/* Tab strip */
+.sr-ditt-tabs {
+  display: flex;
+  background: #ebebf0;
+  border-radius: 999px;
+  padding: 3px;
+  gap: 0;
+  margin-bottom: 18px;
+  width: fit-content;
+}
+.sr-dtab {
+  flex: 0 0 auto;
+  min-width: 90px;
+  padding: 7px 22px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #666;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.sr-dtab.is-active {
+  background: #ffffff;
+  color: #1a1a2e;
+  font-weight: 700;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.12);
+}
+
+/* Period nav */
+.sr-ditt-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.sr-ditt-nav[hidden] { display: none !important; }
+.sr-ditt-arrow {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  background: #f5f5f8;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #333;
+  transition: background 0.12s;
+}
+.sr-ditt-arrow:hover:not(:disabled) { background: #e8e8f0; }
+.sr-ditt-arrow:disabled { opacity: 0.35; cursor: default; }
+.sr-ditt-nav-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1a1a2e;
+  min-width: 100px;
+}
+
+/* Summary line */
+.sr-ditt-summary {
+  font-size: 0.88rem;
+  color: #555;
+  margin: 0 0 6px;
+}
+.sr-ditt-summary strong {
+  color: #1a1a2e;
+}
+.sr-ditt-summary strong.is-negative { color: #e85d5d; }
+.sr-ditt-summary strong.is-positive { color: #42c471; }
+
+/* Chart title */
+.sr-ditt-chart-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: center;
+  color: #1a1a2e;
+  margin: 0 0 4px;
+}
+
+/* Chart wrap */
+.sr-ditt-chart-wrap {
+  width: 100%;
+  margin-top: 4px;
+}
+.sr-ditt-chart-wrap .sr-empty {
+  font-size: 0.82rem;
+  color: #aaa;
+  text-align: center;
+  padding: 20px 0;
+}
+
+/* ── Game cards (Forbruk per spill) ────────────────────────────────────── */
+.sr-games-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 680px) {
+  .sr-games-grid { grid-template-columns: 1fr; }
+}
+
+.sr-game-card {
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.18);
+  color: #1a1a2e;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.sr-card-game-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 0 14px;
+}
+
+/* Segmented-control tabs */
+.sr-card-tabs {
+  display: flex;
+  background: #ededf2;
+  border-radius: 100px;
+  padding: 3px;
+  margin-bottom: 14px;
+  gap: 2px;
+}
+.sr-ctab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  border-radius: 100px;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #666;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1.2;
+}
+.sr-ctab.is-active {
+  background: #ffffff;
+  color: #1a1a2e;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+}
+.sr-ctab:hover:not(.is-active) { background: rgba(255,255,255,0.55); }
+
+/* Period navigation row */
+.sr-card-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.sr-card-arrow {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  background: #ffffff;
+  color: #333;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  transition: background 0.15s;
+}
+.sr-card-arrow:hover:not(:disabled) { background: #f0f0f6; }
+.sr-card-arrow:disabled { opacity: 0.28; cursor: not-allowed; }
+.sr-card-period-label {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+/* Custom date range */
+.sr-card-custom[hidden] { display: none !important; }
+.sr-card-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.sr-date-sep { color: #aaa; font-size: 0.85rem; }
+.sr-date-input {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  color: #1a1a2e;
+  background: #fff;
+  cursor: pointer;
+  min-width: 0;
+  flex: 1;
+}
+.sr-date-apply {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sr-date-apply:hover { background: #4f51cc; }
+
+/* Main metric */
+.sr-card-metric {
+  margin-bottom: 14px;
+}
+.sr-metric-label {
+  font-size: 0.78rem;
+  color: #888;
+  display: block;
+  margin-bottom: 3px;
+}
+.sr-metric-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #1a1a2e;
+  letter-spacing: -0.5px;
+}
+.sr-metric-value.is-negative { color: #c0392b; }
+.sr-metric-value.is-positive { color: #1a9c59; }
+.sr-metric-value.is-zero     { color: #888; }
+
+/* Inline bar chart in game cards */
+.sr-card-chart-wrap {
+  margin: 12px 0 8px;
+}
+.sr-card-chart-wrap svg {
+  width: 100%;
+  height: auto;
+}
+
+/* Mini stat tiles */
+.sr-card-stats {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.sr-stat-tile {
+  flex: 1;
+  background: #f5f5fb;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.sr-stat-label {
+  font-size: 0.7rem;
+  color: #999;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.sr-stat-value {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 3px 0 0;
+}
+.sr-stat-value.is-negative { color: #c0392b; }
+.sr-stat-value.is-positive { color: #1a9c59; }
+
+/* Card footnote */
+.sr-card-footnote {
+  font-size: 0.7rem;
+  color: #bbb;
+  margin: auto 0 0;
+  padding-top: 4px;
+  line-height: 1.45;
+}
+
+.sr-forbruk-chart {
+  margin-top: 12px;
+  border-top: 1px solid rgba(0,0,0,0.07);
+  padding-top: 10px;
+}
+.sr-forbruk-chart .sr-empty {
+  font-size: 0.78rem;
+  color: #aaa;
+  text-align: center;
+  padding: 8px 0;
+}

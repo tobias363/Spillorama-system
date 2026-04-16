@@ -252,10 +252,10 @@ test("startGame rejects ticketsPerPlayer below 1", async () => {
   );
 });
 
-test("startGame rejects ticketsPerPlayer above 5", async () => {
+test("startGame rejects ticketsPerPlayer above 30", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
   await assert.rejects(
-    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 6, payoutPercent: 80 }),
+    async () => engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 31, payoutPercent: 80 }),
     (error: unknown) => error instanceof DomainError && error.code === "INVALID_TICKETS_PER_PLAYER"
   );
 });
@@ -267,11 +267,11 @@ test("startGame accepts ticketsPerPlayer equal to 1", async () => {
   assert.equal(snapshot.currentGame?.ticketsPerPlayer, 1);
 });
 
-test("startGame accepts ticketsPerPlayer equal to 5", async () => {
+test("startGame accepts ticketsPerPlayer equal to 30", async () => {
   const { engine, roomCode, hostPlayerId } = await makeEngineWithRoom();
-  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 5, payoutPercent: 80 });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 30, payoutPercent: 80 });
   const snapshot = engine.getRoomSnapshot(roomCode);
-  assert.equal(snapshot.currentGame?.ticketsPerPlayer, 5);
+  assert.equal(snapshot.currentGame?.ticketsPerPlayer, 30);
 });
 
 test("startGame rejects payoutPercent outside 0-100", async () => {
@@ -312,7 +312,12 @@ test("rtp payout budget caps total payouts across line and bingo claims", async 
     actorPlayerId: hostPlayerId,
     entryFee: 100,
     ticketsPerPlayer: 1,
-    payoutPercent: 50
+    payoutPercent: 50,
+    // Explicit patterns so test is self-documenting about payout percentages
+    patterns: [
+      { id: "1-rad", name: "1 Rad", claimType: "LINE" as const, prizePercent: 30, order: 1, design: 1 },
+      { id: "full-plate", name: "Full Plate", claimType: "BINGO" as const, prizePercent: 70, order: 2, design: 2 },
+    ]
   });
 
   const lineNumbers = new Set([1, 2, 3, 4, 5]);
@@ -352,7 +357,7 @@ test("rtp payout budget caps total payouts across line and bingo claims", async 
   assert.equal(lineClaim.patternIndex, 0);
   assert.equal(lineClaim.bonusTriggered, false);
   assert.equal(lineClaim.bonusAmount, undefined);
-  assert.equal(lineClaim.payoutAmount, 60);
+  assert.equal(lineClaim.payoutAmount, 60); // 30% of prizePool 200
   assert.equal(lineClaim.payoutWasCapped, false);
   assert.equal(lineClaim.rtpBudgetBefore, 100);
   assert.equal(lineClaim.rtpBudgetAfter, 40);
@@ -941,7 +946,12 @@ test("prize policy caps single databingo payouts and stores policy reference", a
     actorPlayerId: hostPlayerId,
     entryFee: 3000,
     ticketsPerPlayer: 1,
-    payoutPercent: 80
+    payoutPercent: 80,
+    // Explicit patterns: 30% LINE payout on 9000 pool = 2700, exceeds 2500 singlePrizeCap
+    patterns: [
+      { id: "1-rad", name: "1 Rad", claimType: "LINE" as const, prizePercent: 30, order: 1, design: 1 },
+      { id: "full-plate", name: "Full Plate", claimType: "BINGO" as const, prizePercent: 70, order: 2, design: 2 },
+    ]
   });
 
   const needed = new Set([1, 2, 3, 4, 5]);
@@ -973,6 +983,7 @@ test("prize policy caps single databingo payouts and stores policy reference", a
   });
 
   assert.equal(claim.valid, true);
+  // 30% of 9000 prizePool = 2700, capped to singlePrizeCap of 2500
   assert.equal(claim.payoutAmount, 2500);
   assert.equal(claim.payoutWasCapped, true);
   assert.ok(claim.payoutPolicyVersion);

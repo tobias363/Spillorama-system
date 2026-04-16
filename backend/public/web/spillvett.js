@@ -737,6 +737,64 @@
     }
   }
 
+  // ── Obligatorisk pause modal ──────────────────────────────────────────
+
+  let _pauseCountdownInterval = null;
+
+  function renderMandatoryPauseModal(compliance) {
+    if (!els.mandatoryPauseModal) return;
+
+    const r = compliance && compliance.restrictions;
+    const isOnMandatoryPause = r && r.isBlocked && r.blockedBy === "MANDATORY_PAUSE";
+
+    if (!isOnMandatoryPause) {
+      els.mandatoryPauseModal.hidden = true;
+      clearInterval(_pauseCountdownInterval);
+      _pauseCountdownInterval = null;
+      return;
+    }
+
+    els.mandatoryPauseModal.hidden = false;
+
+    // Fill in activity stats from lastMandatoryBreak
+    const brk = compliance.pause && compliance.pause.lastMandatoryBreak;
+    if (brk) {
+      if (els.mandatoryPauseLoss) {
+        const loss = brk.netLoss && typeof brk.netLoss.daily === "number" ? brk.netLoss.daily : 0;
+        els.mandatoryPauseLoss.textContent = formatCurrency(loss);
+      }
+      if (els.mandatoryPausePlaytime) {
+        els.mandatoryPausePlaytime.textContent = formatDuration(brk.totalPlayMs);
+      }
+      if (els.mandatoryPauseGamecount) {
+        const count = typeof brk.gamesPlayed === "number" ? brk.gamesPlayed : 0;
+        els.mandatoryPauseGamecount.textContent = count === 1 ? "1 spill" : `${count} spill`;
+      }
+    }
+
+    // Start live countdown
+    if (_pauseCountdownInterval) {
+      clearInterval(_pauseCountdownInterval);
+    }
+    _pauseCountdownInterval = setInterval(function () {
+      const blockedUntil = r.blockedUntil ? new Date(r.blockedUntil).getTime() : 0;
+      const remaining = Math.max(0, blockedUntil - Date.now());
+      if (els.mandatoryPauseCountdown) {
+        const totalSec = Math.ceil(remaining / 1000);
+        const min = Math.floor(totalSec / 60);
+        const sec = totalSec % 60;
+        els.mandatoryPauseCountdown.textContent =
+          String(min).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
+      }
+      if (remaining <= 0) {
+        clearInterval(_pauseCountdownInterval);
+        _pauseCountdownInterval = null;
+        // Refresh compliance once pause expires
+        void refreshData({ silent: true });
+      }
+    }, 500);
+  }
+
   function render() {
     if (!els.shell) {
       return;
@@ -746,25 +804,15 @@
     if (els.spillvettFab) {
       els.spillvettFab.hidden = !state.token;
     }
+    renderMandatoryPauseModal(state.compliance);
     renderHallSelector();
     renderGameButtons();
     renderSummary(state.compliance);
 
-    const isReady = Boolean(state.token && state.hallId);
+    const isReady = Boolean(state.token);
     els.toggle.disabled = !isReady;
-    els.toggle.textContent = state.drawerOpen ? "Skjul spillregnskap" : "Åpne spillregnskap";
-    els.drawer.hidden = !state.drawerOpen || !isReady;
-
-    for (const button of els.periodButtons) {
-      const period = button.getAttribute("data-period") || "";
-      button.classList.toggle("is-active", period === state.reportPeriod);
-    }
-
-    if (state.drawerOpen && isReady) {
-      renderReport(state.report);
-    } else if (els.reportContent && !isReady) {
-      els.reportContent.innerHTML = "<div class=\"spillvett-empty\">Velg aktiv hall i Spillorama for å laste spillregnskap.</div>";
-    }
+    // Drawer is hidden — full-page view is used instead
+    if (els.drawer) els.drawer.hidden = true;
 
     if (state.error && els.inlineError) {
       els.inlineError.textContent = state.error;
@@ -805,8 +853,18 @@
     els.monthlyRemaining = getElement("spillvett-monthly-remaining");
     els.monthlyReset = getElement("spillvett-monthly-reset");
 
+    els.mandatoryPauseModal = getElement("mandatory-pause-modal");
+    els.mandatoryPauseCountdown = getElement("mandatory-pause-countdown");
+    els.mandatoryPauseLoss = getElement("mandatory-pause-loss");
+    els.mandatoryPausePlaytime = getElement("mandatory-pause-playtime");
+    els.mandatoryPauseGamecount = getElement("mandatory-pause-gamecount");
+
     if (els.toggle) {
-      els.toggle.addEventListener("click", () => setDrawerOpen(!state.drawerOpen));
+      els.toggle.addEventListener("click", () => {
+        if (window.Spillregnskap) {
+          window.Spillregnskap.show({ token: state.token, hallId: state.hallId });
+        }
+      });
     }
 
     if (els.hostHallSelect) {

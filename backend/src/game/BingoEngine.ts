@@ -489,6 +489,7 @@ export class BingoEngine {
             amount: entryFee,
             createdAtMs: nowMs
           });
+          await this.compliance.incrementSessionGameCount(player.walletId);
           await this.ledger.recordComplianceLedgerEvent({
             hallId: room.hallId,
             gameType,
@@ -508,7 +509,15 @@ export class BingoEngine {
         }
       } catch (err) {
         // Compensate: refund all already-debited players
-        await this.refundDebitedPlayers(debitedPlayers, houseAccountId, entryFee, room.code, gameId);
+        const { failedRefunds } = await this.refundDebitedPlayers(debitedPlayers, houseAccountId, entryFee, room.code, gameId);
+        if (failedRefunds.length > 0 && this.bingoAdapter.onCheckpoint) {
+          // Persist failed refund data so it can be recovered/reconciled after restart
+          await this.bingoAdapter.onCheckpoint({
+            roomCode: room.code, gameId, reason: "REFUND_FAILURE" as never,
+            snapshot: { failedRefunds } as never,
+            players: [...room.players.values()], hallId: room.hallId
+          }).catch(() => { /* best-effort checkpoint */ });
+        }
         throw err;
       }
     }
@@ -549,7 +558,14 @@ export class BingoEngine {
     } catch (err) {
       // Compensate: refund all debited players if ticket generation fails
       if (entryFee > 0) {
-        await this.refundDebitedPlayers(debitedPlayers, houseAccountId, entryFee, room.code, gameId);
+        const { failedRefunds } = await this.refundDebitedPlayers(debitedPlayers, houseAccountId, entryFee, room.code, gameId);
+        if (failedRefunds.length > 0 && this.bingoAdapter.onCheckpoint) {
+          await this.bingoAdapter.onCheckpoint({
+            roomCode: room.code, gameId, reason: "REFUND_FAILURE" as never,
+            snapshot: { failedRefunds } as never,
+            players: [...room.players.values()], hallId: room.hallId
+          }).catch(() => { /* best-effort checkpoint */ });
+        }
       }
       throw err;
     }
@@ -840,7 +856,15 @@ export class BingoEngine {
     if (valid && input.type === "LINE") {
       game.lineWinnerId = player.id;
       const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
-      const requestedPayout = Math.floor(game.prizePool * 0.3);
+      // Use the pattern's configured prizePercent instead of hardcoded 30%.
+      // For multi-LINE variants (e.g. 4-row with 10% each), find the specific
+      // unclaimed pattern to get the correct percentage for this claim.
+      const nextLineResult = game.patternResults?.find((r) => r.claimType === "LINE" && !r.isWon);
+      const linePattern = nextLineResult
+        ? game.patterns?.find((p) => p.id === nextLineResult.patternId)
+        : game.patterns?.find((p) => p.claimType === "LINE");
+      const linePrizePercent = linePattern?.prizePercent ?? 30;
+      const requestedPayout = Math.floor(game.prizePool * linePrizePercent / 100);
       const cappedLinePayout = this.prizePolicy.applySinglePrizeCap({
         hallId: room.hallId,
         gameType: "DATABINGO",
@@ -2121,14 +2145,16 @@ export class BingoEngine {
     };
   }
 
-  /** HOEY-4: Refund buy-ins when game startup fails partway through. */
+  /** HOEY-4: Refund buy-ins when game startup fails partway through.
+   *  Returns structured data about any failed refunds for reconciliation. */
   private async refundDebitedPlayers(
     debitedPlayers: Array<{ player: Player; fromAccountId: string; toAccountId: string }>,
     houseAccountId: string,
     entryFee: number,
     roomCode: string,
     gameId: string
-  ): Promise<void> {
+  ): Promise<{ failedRefunds: Array<{ playerId: string; walletId: string; amount: number; error: string }> }> {
+    const failedRefunds: Array<{ playerId: string; walletId: string; amount: number; error: string }> = [];
     for (const { player } of debitedPlayers) {
       try {
         await this.walletAdapter.transfer(
@@ -2140,12 +2166,25 @@ export class BingoEngine {
         );
         player.balance += entryFee;
       } catch (refundErr) {
+        failedRefunds.push({
+          playerId: player.id,
+          walletId: player.walletId,
+          amount: entryFee,
+          error: String(refundErr)
+        });
         logger.error(
           { err: refundErr, playerId: player.id, walletId: player.walletId, gameId, roomCode },
-          "CRITICAL: Failed to refund buy-in after game start failure"
+          "CRITICAL: Failed to refund buy-in after game start failure — requires manual reconciliation"
         );
       }
     }
+    if (failedRefunds.length > 0) {
+      logger.error(
+        { failedRefunds, gameId, roomCode, totalFailedAmount: failedRefunds.length * entryFee },
+        `RECONCILIATION: ${failedRefunds.length} refund(s) failed for game ${gameId} — players owe money`
+      );
+    }
+    return { failedRefunds };
   }
 
   /** HOEY-3: Write a DRAW checkpoint after each ball draw. */

@@ -13,7 +13,7 @@
  * floating-point cases (e.g., 0.1 + 0.2 → 0.30 not 0.30000000000000004).
  */
 export function roundCurrency(value: number): number {
-  return Math.round(value * 100) / 100;
+  return Number(Math.round(parseFloat(value + "e2")) + "e-2");
 }
 
 /**

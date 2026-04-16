@@ -21,21 +21,23 @@
 |--------|-----------------|------------------|
 | Grid | 3x5 (15 celler) | 5x5 (25 celler, sentercelle fri) |
 | Chat | Ingen | Sanntids chat-panel (høyreside) |
-| Mini-spill | Ingen | Utsatt (backend endpoints mangler) |
+| Mini-spill | Ingen | ✅ Lykkehjul + Skattekiste (veksler, server-styrt) |
 | Mønstervisualisering | Ingen | Utsatt (5 Unity design-typer er UI-only) |
 
 ### Filer
 
 ```
 packages/game-client/src/games/game1/
-├── Game1Controller.ts          # State machine, gjenbruker Game 2-arkitektur
+├── Game1Controller.ts          # State machine, mini-game routing, gjenbruker Game 2-arkitektur
 ├── README.md                   # ← denne filen
 ├── screens/
 │   ├── PlayScreen.ts           # 5x5 grids + chat-panel + claim-knapper
 │   ├── LobbyScreen.ts          # → gjenbruker Game 2 LobbyScreen direkte
 │   └── EndScreen.ts            # → gjenbruker Game 2 EndScreen direkte
 └── components/
-    └── ChatPanel.ts            # Sanntids chat med meldingshistorikk
+    ├── ChatPanel.ts            # Sanntids chat med meldingshistorikk
+    ├── WheelOverlay.ts         # Lykkehjul mini-game (8 segmenter, GSAP spin)
+    └── TreasureChestOverlay.ts # Skattekiste mini-game (N kister, server-styrt)
 ```
 
 ### Gjenbruk fra Game 2
@@ -63,10 +65,12 @@ Identisk med Game 2, pluss chat:
 | `draw:new` | server→client | Nytt trukket tall |
 | `pattern:won` | server→client | Mønster vunnet |
 | `chat:message` | server→client | Ny chat-melding |
+| `minigame:activated` | server→client | Mini-spill aktivert etter BINGO (lykkehjul/skattekiste) |
+| `minigame:play` | client→server | Spill mini-game (selectedIndex for skattekiste) |
 
 ### Kjente begrensninger (MVP)
 
-- **Mini-spill utsatt** — Lykkehjul og skattekiste krever backend endpoints som ikke er implementert
+- ~~**Mini-spill utsatt**~~ — ✅ Lykkehjul og skattekiste er fullstendig implementert (backend + frontend)
 - **Mønstervisualisering utsatt** — De 5 Unity design-typene (rad, 2-rader, 3-rader, etc.) er UI-only, ikke claim-logikk
 - **3 billettyper utsatt** — Farge/trafikklys/elvis-varianter er visuell styling
 - **Chat bruker HTML overlay input** — Fungerer, men posisjonering kan forbedres ved resize
