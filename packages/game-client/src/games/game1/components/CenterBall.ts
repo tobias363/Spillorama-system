@@ -1,4 +1,4 @@
-import { Container, Sprite, Text, Assets } from "pixi.js";
+import { Container, Graphics, Sprite, Text, Assets } from "pixi.js";
 import gsap from "gsap";
 
 const BALL_SIZE = 120;
@@ -6,15 +6,19 @@ const BALL_SIZE = 120;
 /**
  * Large animated bingo ball displayed in the center of the play area.
  *
- * Loads the `center-ball.png` sprite and overlays the most recently
- * drawn number. Animates on new draws with a scale-in + glow pulse.
- * Floats gently when idle.
+ * Tries to load `center-ball.png` sprite. If unavailable, draws a
+ * procedural gradient ball (matching Unity's red-to-dark-red radial
+ * gradient with a glossy highlight and gold rim).
+ *
+ * Overlays the most recently drawn number. Animates on new draws
+ * with a scale-in + glow pulse. Floats gently when idle.
  *
  * Also supports countdown mode: displays seconds remaining before
  * the next game starts, ticking down each second.
  */
 export class CenterBall extends Container {
   private ballSprite: Sprite | null = null;
+  private proceduralBall: Graphics | null = null;
   private numberText: Text;
   private currentNumber: number | null = null;
   private idleTween: gsap.core.Tween | null = null;
@@ -24,7 +28,10 @@ export class CenterBall extends Container {
   constructor() {
     super();
 
-    // Number text (created first, positioned after sprite loads)
+    // Draw procedural ball immediately (replaced by sprite if it loads)
+    this.drawProceduralBall();
+
+    // Number text — centered on ball
     this.numberText = new Text({
       text: "",
       style: {
@@ -47,9 +54,40 @@ export class CenterBall extends Container {
     this.addChild(this.numberText);
 
     this.loadSprite();
+    this.startIdleFloat();
   }
 
   private isDestroyed = false;
+
+  /**
+   * Draw a procedural ball matching Unity's red gradient look.
+   * Outer ring (gold), main body (dark red → red gradient), glossy highlight.
+   */
+  private drawProceduralBall(): void {
+    const g = new Graphics();
+    const cx = BALL_SIZE / 2;
+    const cy = BALL_SIZE / 2;
+    const r = BALL_SIZE / 2;
+
+    // Gold outer ring (3px border)
+    g.circle(cx, cy, r);
+    g.fill(0xd4a017);
+
+    // Main ball body — dark maroon
+    g.circle(cx, cy, r - 3);
+    g.fill(0x8b0000);
+
+    // Inner gradient highlight — brighter red, upper-left
+    g.circle(cx - 8, cy - 8, r * 0.65);
+    g.fill({ color: 0xc0392b, alpha: 0.7 });
+
+    // Glossy highlight — small white ellipse, top-left
+    g.ellipse(cx - 14, cy - 18, r * 0.28, r * 0.18);
+    g.fill({ color: 0xffffff, alpha: 0.35 });
+
+    this.proceduralBall = g;
+    this.addChildAt(g, 0);
+  }
 
   private async loadSprite(): Promise<void> {
     try {
@@ -58,11 +96,14 @@ export class CenterBall extends Container {
       this.ballSprite = new Sprite(texture);
       this.ballSprite.width = BALL_SIZE;
       this.ballSprite.height = BALL_SIZE;
+      // Replace procedural ball with sprite
+      if (this.proceduralBall) {
+        this.proceduralBall.destroy();
+        this.proceduralBall = null;
+      }
       this.addChildAt(this.ballSprite, 0);
-      this.startIdleFloat();
     } catch {
-      // Sprite not available — number text still works standalone
-      console.warn("[CenterBall] Could not load center-ball.png");
+      // Sprite not available — procedural ball is already rendering
     }
   }
 

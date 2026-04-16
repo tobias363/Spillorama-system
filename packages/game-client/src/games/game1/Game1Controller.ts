@@ -356,9 +356,9 @@ class Game1Controller implements GameController {
 
   private async handleBuy(): Promise<void> {
     const result = await this.deps.socket.armBet({ roomCode: this.actualRoomCode, armed: true });
-    if (result.ok) {
-      this.playScreen?.hideBuyPopup();
-    } else {
+    // Report result back to popup (showBuyPopupResult hides popup on success).
+    this.playScreen?.showBuyPopupResult(result.ok, result.error?.message);
+    if (!result.ok) {
       this.showError(result.error?.message || "Kunne ikke kjøpe billetter");
     }
   }
