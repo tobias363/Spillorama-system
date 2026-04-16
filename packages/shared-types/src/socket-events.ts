@@ -107,8 +107,15 @@ export interface TicketTypeInfo {
 export type RoomUpdatePayload = RoomSnapshot & {
   scheduler: Record<string, unknown>;
   preRoundTickets: Record<string, Ticket[]>;
+  /** Player IDs who have explicitly armed (bet:arm) for the next round. */
+  armedPlayerIds: string[];
   luckyNumbers: Record<string, number>;
   serverTimestamp: number;
+  /**
+   * Server-authoritative stake per player (in kroner).
+   * Only populated for players with an active stake; absence = no stake.
+   */
+  playerStakes: Record<string, number>;
   /** BIN-443: Active game variant info for client purchase UI. */
   gameVariant?: {
     gameType: string;

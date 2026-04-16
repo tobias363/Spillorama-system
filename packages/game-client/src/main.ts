@@ -41,10 +41,17 @@ export function unmountGame(): void {
 if (import.meta.env.DEV) {
   const container = document.getElementById("game-container");
   if (container) {
+    const params = new URLSearchParams(window.location.search);
+    const gameParam = params.get("game") ?? "bingo";
+    const gameSlugMap: Record<string, string> = {
+      bingo: "game_1",
+      rocket: "game_2",
+      monster: "game_3",
+    };
     mountGame(container, {
-      gameSlug: "game_2",
+      gameSlug: gameSlugMap[gameParam] ?? "game_1",
       accessToken: "dev-token",
-      hallId: "dev-hall",
+      hallId: params.get("hall") ?? "notodden",
       serverUrl: "http://localhost:4000",
     });
   }
