@@ -100,7 +100,8 @@ class Game1Controller implements GameController {
           this.loader?.show("Kobler til igjen...");
         }
         if (state === "connected" && this.loader?.isShowing()) {
-          this.loader.hide();
+          // Reconnected — resume room to rebuild state from server snapshot
+          this.handleReconnect();
         }
         if (state === "disconnected") {
           telemetry.trackDisconnect("socket");
@@ -287,6 +288,9 @@ class Game1Controller implements GameController {
     this.gameRoundCount++;
     this.buyMoreDisabled = false;
 
+    // Unity OnGameStart: close lucky number panel, hide delete buttons
+    this.luckyPicker?.hide();
+
     console.log("[Game1] onGameStarted — myTickets:", state.myTickets.length, "gameStatus:", state.gameStatus, "isArmed:", state.isArmed, "myPlayerId:", state.myPlayerId, "preRoundTickets:", state.preRoundTickets.length);
 
     if (state.myTickets.length > 0) {
@@ -301,6 +305,17 @@ class Game1Controller implements GameController {
   private onGameEnded(state: GameState): void {
     // Dismiss any active mini-game overlay so it doesn't block the EndScreen
     this.dismissMiniGame();
+
+    // Unity OnGameFinish: stop blink animations, reset sounds
+    this.deps.audio.stopAll?.();
+
+    // Refresh player balance (Unity: dispatch balance event for game-bar sync)
+    if (this.myPlayerId) {
+      const me = state.players.find((p) => p.id === this.myPlayerId);
+      if (me && typeof me.balance === "number" && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("spillorama:balanceChanged", { detail: { balance: me.balance } }));
+      }
+    }
 
     if (this.phase === "PLAYING") {
       this.transitionTo("ENDED", state);
@@ -497,6 +512,54 @@ class Game1Controller implements GameController {
   private dismissMiniGame(): void {
     this.miniGameOverlay?.destroy({ children: true });
     this.miniGameOverlay = null;
+  }
+
+  // ── Reconnect handling ────────────────────────────────────────────────
+
+  /**
+   * Resume room after socket reconnect — rebuild state from server snapshot.
+   * Matches Unity's reconnect flow: call room:resume, apply snapshot,
+   * deduplicate draws, and transition to the correct phase.
+   */
+  private async handleReconnect(): Promise<void> {
+    if (!this.actualRoomCode) {
+      this.loader?.hide();
+      return;
+    }
+
+    try {
+      const result = await this.deps.socket.resumeRoom({ roomCode: this.actualRoomCode });
+      if (result.ok && result.data?.snapshot) {
+        this.deps.bridge.applySnapshot(result.data.snapshot);
+        const state = this.deps.bridge.getState();
+
+        // Transition based on current game status
+        if (state.gameStatus === "RUNNING" && state.myTickets.length > 0) {
+          this.transitionTo("PLAYING", state);
+        } else {
+          this.transitionTo("WAITING", state);
+        }
+
+        console.log("[Game1] Reconnected — state restored, phase:", this.phase);
+      } else {
+        console.warn("[Game1] Room resume failed:", result.error?.message);
+        // Fallback: try getRoomState
+        const fallback = await this.deps.socket.getRoomState({ roomCode: this.actualRoomCode });
+        if (fallback.ok && fallback.data?.snapshot) {
+          this.deps.bridge.applySnapshot(fallback.data.snapshot);
+          const state = this.deps.bridge.getState();
+          if (state.gameStatus === "RUNNING" && state.myTickets.length > 0) {
+            this.transitionTo("PLAYING", state);
+          } else {
+            this.transitionTo("WAITING", state);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[Game1] Reconnect error:", err);
+    }
+
+    this.loader?.hide();
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────

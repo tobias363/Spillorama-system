@@ -97,9 +97,12 @@ export class LeftInfoPanel {
     this.playerCountEl.textContent = String(playerCount).padStart(2, "0");
     this.entryFeeEl.textContent = totalStake > 0
       ? `Innsats: ${totalStake} kr`
-      : "Innsats: —";
+      : `Innsats: \u2014`;
     this.prizeEl.textContent = `Gevinst: ${prizePool} kr`;
-    this.numberRingEl.textContent = lastDrawnNumber !== null ? String(lastDrawnNumber) : "--";
+    // Unity: last drawn number is zero-padded 2 digits ("07", "42")
+    this.numberRingEl.textContent = lastDrawnNumber !== null
+      ? String(lastDrawnNumber).padStart(2, "0")
+      : "--";
     this.progressEl.textContent = `${drawCount}/${totalDrawCapacity}`;
   }
 

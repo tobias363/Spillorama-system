@@ -73,7 +73,7 @@ export class AudioManager {
    * Audio files expected at: {basePath}/{language}/{number}.mp3
    */
   playNumber(number: number): void {
-    if (this.muted || number < 1 || number > 75) return;
+    if (this.muted || number < 1 || number > 60) return;
 
     const key = `${this.language}-${number}`;
     let sound = this.numberSounds.get(key);
@@ -146,6 +146,13 @@ export class AudioManager {
 
   isMuted(): boolean {
     return this.muted;
+  }
+
+  /**
+   * Stop all currently playing sounds (Unity: reset sound announcements on game end).
+   */
+  stopAll(): void {
+    Howler.stop();
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────
