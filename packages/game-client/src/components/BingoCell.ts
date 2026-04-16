@@ -135,13 +135,15 @@ export class BingoCell extends Container {
     if (oneToGoColor !== undefined) {
       this.drawBg(oneToGoColor);
     }
+    // Unity: LeanTween scale punch 1.5x, 1.0s duration, infinite loop.
+    // Uses elastic ease to mimic LeanTween's "punch" overshoot behaviour.
     this.blinkTween = gsap.to(this.scale, {
-      x: 1.15,
-      y: 1.15,
-      duration: 0.5,
+      x: 1.5,
+      y: 1.5,
+      duration: 1.0,
       yoyo: true,
       repeat: -1,
-      ease: "sine.inOut",
+      ease: "elastic.out(1, 0.3)",
     });
   }
 

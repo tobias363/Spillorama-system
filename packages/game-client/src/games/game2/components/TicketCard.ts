@@ -1,4 +1,5 @@
 import { Container, Graphics, Text } from "pixi.js";
+import gsap from "gsap";
 import type { Ticket } from "@spillorama/shared-types/game";
 import { BingoGrid, type GridSize } from "../../../components/BingoGrid.js";
 import type { BingoCellColors } from "../../../components/BingoCell.js";
@@ -40,6 +41,12 @@ export class TicketCard extends Container {
 
   private toGoNormalColor: number;
   private toGoCloseColor: number;
+  private cardBgColor: number;
+
+  // Card-level animations (background blink, BINGO pulse)
+  private bgBlinkTween: gsap.core.Tween | null = null;
+  private bingoTimeline: gsap.core.Timeline | null = null;
+  private bingoOverlay: Text | null = null;
 
   constructor(index: number, options?: TicketCardOptions) {
     super();
@@ -48,6 +55,7 @@ export class TicketCard extends Container {
 
     // Theme colors (from Unity TicketColorTheme or defaults)
     const cardBgColor = options?.cardBg ?? TicketCard.DEFAULT_CARD_BG;
+    this.cardBgColor = cardBgColor;
     const headerBgColor = options?.headerBg ?? TicketCard.DEFAULT_HEADER_BG;
     const headerTextColor = options?.headerText ?? TicketCard.DEFAULT_HEADER_TEXT;
     this.toGoNormalColor = options?.toGoColor ?? TicketCard.DEFAULT_TOGO_NORMAL;
@@ -167,6 +175,12 @@ export class TicketCard extends Container {
     this.headerText.text = label;
   }
 
+  /** Stop all card-level animations (background blink, BINGO pulse). */
+  stopCardAnimations(): void {
+    this.stopBgBlink();
+    this.stopBingoAnimation();
+  }
+
   private updateToGo(): void {
     const remaining = this.grid.getRemainingCount();
     if (remaining === 0) {
@@ -174,14 +188,127 @@ export class TicketCard extends Container {
       this.toGoText.style.fill = 0x2a9d8f;
       // Stop any one-to-go blink animations (Unity: Stop_Blink)
       this.grid.stopAllBlinks();
+      this.stopBgBlink();
+      // Play BINGO celebration animation (Unity: pattern complete pulse)
+      this.playBingoAnimation();
     } else if (remaining === 1) {
       this.toGoText.text = "1 ToGo!";
       this.toGoText.style.fill = this.toGoCloseColor;
       // Blink the remaining unmarked cell with one-to-go color (Unity: Start_NumberBlink + imgCellOneToGo)
       this.grid.blinkCells(this.grid.getUnmarkedNumbers(), ONE_TO_GO_COLOR);
+      // Blink the entire card background (Unity: Blink_On_1_Color, 0.5s ping-pong)
+      this.startBgBlink();
     } else {
       this.toGoText.text = `${remaining} ToGo`;
       this.toGoText.style.fill = remaining <= 3 ? this.toGoCloseColor : this.toGoNormalColor;
+      // Stop card-level blinks when no longer 1-to-go
+      this.stopBgBlink();
     }
+  }
+
+  // ── Card background blink (Unity: Blink_On_1_Color) ──────────────────
+
+  /** Highlight color for 1-to-go background blink (bright gold / yellow). */
+  private static readonly BLINK_ON_1_COLOR = 0xffe83d;
+
+  /**
+   * Start blinking the card background between its normal color and
+   * the highlight color.  Unity: 0.5s per color transition, infinite yoyo.
+   */
+  private startBgBlink(): void {
+    if (this.bgBlinkTween) return; // already blinking
+
+    // GSAP color tween requires an object proxy — we interpolate a 0→1 ratio
+    // and redraw the card background each frame.
+    const proxy = { t: 0 };
+    this.bgBlinkTween = gsap.to(proxy, {
+      t: 1,
+      duration: 0.5,
+      yoyo: true,
+      repeat: -1,
+      ease: "sine.inOut",
+      onUpdate: () => {
+        const blended = this.lerpColor(this.cardBgColor, TicketCard.BLINK_ON_1_COLOR, proxy.t);
+        this.cardBg.clear();
+        this.cardBg.roundRect(0, 0, this.cardW, this.cardH, 8);
+        this.cardBg.fill(blended);
+      },
+    });
+  }
+
+  private stopBgBlink(): void {
+    if (!this.bgBlinkTween) return;
+    this.bgBlinkTween.kill();
+    this.bgBlinkTween = null;
+    // Restore original card background
+    this.cardBg.clear();
+    this.cardBg.roundRect(0, 0, this.cardW, this.cardH, 8);
+    this.cardBg.fill(this.cardBgColor);
+  }
+
+  // ── BINGO pulse animation (Unity: scale 0.85→1.05, 0.25s, 5 reps) ───
+
+  /**
+   * Play the BINGO celebration animation when a pattern is completed.
+   * Unity: ticket scales 0.85x → 1.05x, 0.25s per phase, 5 repetitions,
+   * then a "BINGO!" overlay text appears.
+   */
+  playBingoAnimation(): void {
+    this.stopBingoAnimation();
+
+    // Scale pulse timeline
+    this.bingoTimeline = gsap.timeline();
+    for (let i = 0; i < 5; i++) {
+      this.bingoTimeline
+        .to(this.scale, { x: 0.85, y: 0.85, duration: 0.25, ease: "power2.inOut" })
+        .to(this.scale, { x: 1.05, y: 1.05, duration: 0.25, ease: "power2.inOut" });
+    }
+    // Settle back to 1.0 at the end
+    this.bingoTimeline.to(this.scale, { x: 1, y: 1, duration: 0.15, ease: "power2.out" });
+
+    // Show "BINGO!" overlay text on the card
+    if (!this.bingoOverlay) {
+      this.bingoOverlay = new Text({
+        text: "BINGO!",
+        style: {
+          fontFamily: "Arial, Helvetica, sans-serif",
+          fontSize: 28,
+          fontWeight: "bold",
+          fill: 0xffe83d,
+          stroke: { color: 0x790001, width: 3 },
+          align: "center",
+        },
+      });
+      this.bingoOverlay.anchor.set(0.5);
+      this.bingoOverlay.x = this.cardW / 2;
+      this.bingoOverlay.y = this.cardH / 2;
+      this.addChild(this.bingoOverlay);
+    }
+    this.bingoOverlay.visible = true;
+    this.bingoOverlay.alpha = 0;
+    gsap.to(this.bingoOverlay, { alpha: 1, duration: 0.3, delay: 0.5 });
+  }
+
+  private stopBingoAnimation(): void {
+    if (this.bingoTimeline) {
+      this.bingoTimeline.kill();
+      this.bingoTimeline = null;
+    }
+    gsap.set(this.scale, { x: 1, y: 1 });
+    if (this.bingoOverlay) {
+      this.bingoOverlay.visible = false;
+    }
+  }
+
+  // ── Utility ──────────────────────────────────────────────────────────
+
+  /** Linear interpolation between two 0xRRGGBB colors. */
+  private lerpColor(a: number, b: number, t: number): number {
+    const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+    const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
+    const r = Math.round(ar + (br - ar) * t);
+    const g = Math.round(ag + (bg - ag) * t);
+    const bl = Math.round(ab + (bb - ab) * t);
+    return (r << 16) | (g << 8) | bl;
   }
 }

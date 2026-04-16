@@ -172,9 +172,12 @@ export class PatternMiniGrid {
     }
   }
 
-  /** CSS pulse animation on a cell (matches Unity LeanTween scale 1.06x). */
+  /**
+   * CSS breathe animation on a cell.
+   * Unity: LeanTween scale 1.06x, 0.5s, easeInOutSine, pingPong (infinite).
+   */
   private pulseCell(cell: HTMLDivElement): void {
-    cell.style.animation = "pattern-pulse 1s ease-in-out infinite alternate";
+    cell.style.animation = "pattern-pulse 0.5s ease-in-out infinite alternate";
   }
 
   private clearAll(): void {
@@ -203,6 +206,6 @@ export class PatternMiniGrid {
 if (typeof document !== "undefined" && !document.getElementById("pattern-pulse-style")) {
   const style = document.createElement("style");
   style.id = "pattern-pulse-style";
-  style.textContent = `@keyframes pattern-pulse { from { transform: scale(1); } to { transform: scale(1.15); } }`;
+  style.textContent = `@keyframes pattern-pulse { from { transform: scale(1); } to { transform: scale(1.06); } }`;
   document.head.appendChild(style);
 }
