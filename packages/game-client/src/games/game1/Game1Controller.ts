@@ -225,8 +225,8 @@ class Game1Controller implements GameController {
         );
         this.playScreen.enterWaitingMode(state);
         // BIN-419: Show Elvis replace option in waiting mode
-        if (state.gameType === "elvis" && state.myTickets.length > 0) {
-          this.playScreen.showElvisReplace(0, () => this.handleElvisReplace());
+        if (state.gameType === "elvis" && state.myTickets.length > 0 && state.replaceAmount > 0) {
+          this.playScreen.showElvisReplace(state.replaceAmount, () => this.handleElvisReplace());
         }
         this.setScreen(this.playScreen);
         break;
