@@ -148,8 +148,8 @@ class Game1Controller implements GameController {
     this.root.eventMode = "static";
     this.root.on("pointerdown", () => this.deps.audio.unlock(), { once: true });
 
-    // Auto-arm
-    await socket.armBet({ roomCode: this.actualRoomCode, armed: true });
+    // No auto-arm — player must explicitly buy tickets via the popup.
+    // (Unity also requires explicit purchase via Game1TicketPurchasePanel.)
 
     // Hide loader — game is ready (Unity: DisplayLoader(false))
     this.loader.hide();
@@ -316,7 +316,7 @@ class Game1Controller implements GameController {
     } else {
       this.transitionTo("WAITING", state);
     }
-    this.deps.socket.armBet({ roomCode: this.actualRoomCode, armed: true });
+    // No auto-arm after game end — player chooses in the buy popup.
   }
 
   private buyMoreDisabled = false;
