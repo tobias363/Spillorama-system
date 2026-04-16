@@ -1,0 +1,2768 @@
+openapi: "3.1.0"
+info:
+  title: Spillorama Bingo API
+  version: "0.1.0"
+  description: |
+    Backend API for the Spillorama bingo platform.
+
+    **Authentication**: All player and admin endpoints (except `/api/auth/login`,
+    `/api/auth/register`, and Swedbank webhooks) require a Bearer token in the
+    `Authorization` header obtained from the login or register endpoints.
+
+    **Error shape**: All errors return `{ ok: false, error: { code, message } }`.
+    Success responses return `{ ok: true, data: <payload> }`.
+
+servers:
+  - url: http://localhost:4000
+    description: Local development
+  - url: https://api.spillorama.no
+    description: Production
+
+tags:
+  - name: Auth
+    description: Authentication, profile management, and session handling
+  - name: KYC
+    description: Identity verification (BankID and manual)
+  - name: Games
+    description: Available games, halls, rooms, and leaderboard
+  - name: Wallet
+    description: Player wallet, top-ups, and transfers
+  - name: Spillevett
+    description: Responsible gaming — reports, loss limits, pauses, self-exclusion
+  - name: Payments
+    description: Swedbank Pay payment intents and callbacks
+  - name: Admin — Auth
+    description: Admin login, bootstrap, RBAC
+  - name: Admin — Games
+    description: Game settings, rooms, draw control
+  - name: Admin — Halls
+    description: Hall and terminal management, spilleplan
+  - name: Admin — Compliance
+    description: Player compliance, prize policy, payout audit
+  - name: Admin — Ledger
+    description: Compliance ledger entries and daily reports
+  - name: Admin — Overskudd
+    description: Surplus distribution to organisations (pengespillforskriften)
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+
+  schemas:
+    ApiSuccess:
+      type: object
+      required: [ok, data]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        data:
+          description: Endpoint-specific payload
+
+    ApiError:
+      type: object
+      required: [ok, error]
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: INVALID_INPUT
+            message:
+              type: string
+              example: E-post er påkrevd.
+
+    Session:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        userId:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: string
+        role:
+          type: string
+          enum: [player, operator, support, admin]
+        walletId:
+          type: string
+
+    AppUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: string
+        surname:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        birthDate:
+          type: string
+          format: date
+          nullable: true
+        role:
+          type: string
+        walletId:
+          type: string
+        kycStatus:
+          type: string
+          enum: [PENDING, VERIFIED, REJECTED]
+        kycVerifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    WalletAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        balance:
+          type: number
+        currency:
+          type: string
+          example: NOK
+        createdAt:
+          type: string
+          format: date-time
+
+    WalletTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+        walletId:
+          type: string
+        type:
+          type: string
+          enum: [TOPUP, WITHDRAWAL, STAKE, PRIZE, REFUND, TRANSFER_IN, TRANSFER_OUT]
+        amount:
+          type: number
+        reason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    PlayerCompliance:
+      type: object
+      properties:
+        walletId:
+          type: string
+        canPlay:
+          type: boolean
+        selfExcluded:
+          type: boolean
+        timedPauseUntil:
+          type: string
+          format: date-time
+          nullable: true
+        dailyLossLimit:
+          type: number
+          nullable: true
+        monthlyLossLimit:
+          type: number
+          nullable: true
+
+    AppGame:
+      type: object
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+        isEnabled:
+          type: boolean
+
+    Hall:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        orgNumber:
+          type: string
+        settlementAccount:
+          type: string
+        isActive:
+          type: boolean
+
+    RoomSummary:
+      type: object
+      properties:
+        code:
+          type: string
+        gameSlug:
+          type: string
+        gameStatus:
+          type: string
+          enum: [NONE, WAITING, RUNNING, ENDED]
+        status:
+          type: string
+          enum: [OPEN, PLAYING, WAITING, ENDED]
+        hallId:
+          type: string
+          nullable: true
+        nextRoundAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ScheduleSlot:
+      type: object
+      properties:
+        id:
+          type: string
+        hallId:
+          type: string
+        gameSlug:
+          type: string
+        dayOfWeek:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: "0=Sunday, 1=Monday, …, 6=Saturday"
+        startTime:
+          type: string
+          example: "19:00"
+        isActive:
+          type: boolean
+
+    SwedbankIntent:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        walletId:
+          type: string
+        amountMajor:
+          type: number
+        status:
+          type: string
+          enum: [PENDING, PAID, FAILED, CANCELLED]
+        paymentUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        nickname:
+          type: string
+        displayName:
+          type: string
+        points:
+          type: number
+
+security:
+  - BearerAuth: []
+
+paths:
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new player account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, displayName, surname, birthDate]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 12
+                  description: Min 12 chars, must include uppercase, lowercase, and digit
+                displayName:
+                  type: string
+                surname:
+                  type: string
+                birthDate:
+                  type: string
+                  format: date
+                phone:
+                  type: string
+                complianceData:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Account created — returns session token
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Session"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Session token
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Session"
+        "401":
+          description: Wrong credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current session token
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          loggedOut:
+                            type: boolean
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Issue a new token, invalidate the current one
+      responses:
+        "200":
+          description: New session
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Session"
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the authenticated user's profile
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AppUser"
+    put:
+      tags: [Auth]
+      summary: Update display name, email, or phone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                phone:
+                  type: string
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AppUser"
+    delete:
+      tags: [Auth]
+      summary: Delete the authenticated player's account
+      responses:
+        "200":
+          description: Account deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          deleted:
+                            type: boolean
+
+  /api/auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change password (requires current password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 12
+      responses:
+        "200":
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          changed:
+                            type: boolean
+
+  /api/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset email (always returns success to prevent user enumeration)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: Always succeeds
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          sent:
+                            type: boolean
+
+  # ── KYC ──────────────────────────────────────────────────────────────────
+
+  /api/kyc/me:
+    get:
+      tags: [KYC]
+      summary: Get the authenticated player's KYC status
+      responses:
+        "200":
+          description: KYC status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          userId:
+                            type: string
+                          status:
+                            type: string
+                            enum: [PENDING, VERIFIED, REJECTED]
+                          birthDate:
+                            type: string
+                            format: date
+                            nullable: true
+                          verifiedAt:
+                            type: string
+                            format: date-time
+                            nullable: true
+                          providerReference:
+                            type: string
+                            nullable: true
+
+  /api/kyc/verify:
+    post:
+      tags: [KYC]
+      summary: Submit manual KYC verification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [birthDate]
+              properties:
+                birthDate:
+                  type: string
+                  format: date
+                nationalId:
+                  type: string
+                  description: Norwegian national identity number (personnummer) — redacted in logs
+      responses:
+        "200":
+          description: Verification submitted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          user:
+                            $ref: "#/components/schemas/AppUser"
+
+  /api/auth/bankid/init:
+    post:
+      tags: [KYC]
+      summary: Start a BankID verification session
+      responses:
+        "200":
+          description: BankID session created (or NOT_CONFIGURED if BankID is not wired up)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          sessionId:
+                            type: string
+                          authUrl:
+                            type: string
+                            nullable: true
+                          status:
+                            type: string
+                            enum: [PENDING, NOT_CONFIGURED]
+
+  /api/auth/bankid/status/{sessionId}:
+    get:
+      tags: [KYC]
+      summary: Poll BankID verification status
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          sessionId:
+                            type: string
+                          status:
+                            type: string
+                            enum: [COMPLETE, PENDING, NOT_CONFIGURED]
+                          verified:
+                            type: boolean
+
+  # ── Games & Rooms ─────────────────────────────────────────────────────────
+
+  /api/games:
+    get:
+      tags: [Games]
+      summary: List all enabled games
+      responses:
+        "200":
+          description: Game list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AppGame"
+
+  /api/games/status:
+    get:
+      tags: [Games]
+      summary: Live status per game slug — used by lobby for Open/Starting/Closed badges
+      responses:
+        "200":
+          description: Map of slug → status entry
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          properties:
+                            status:
+                              type: string
+                              enum: [OPEN, STARTING, CLOSED]
+                            nextRoundAt:
+                              type: string
+                              format: date-time
+                              nullable: true
+
+  /api/games/{slug}/launch:
+    post:
+      tags: [Games]
+      summary: Launch an external game (e.g. Candy) — returns an embed URL
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hallId:
+                  type: string
+                returnUrl:
+                  type: string
+                  format: uri
+      responses:
+        "200":
+          description: Embed URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          embedUrl:
+                            type: string
+                          expiresAt:
+                            type: string
+                            format: date-time
+                            nullable: true
+
+  /api/halls:
+    get:
+      tags: [Games]
+      summary: List active bingo halls
+      responses:
+        "200":
+          description: Hall list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Hall"
+
+  /api/halls/{hallId}/schedule:
+    get:
+      tags: [Games]
+      summary: Today's game schedule for a hall (§ 64 spilleplan)
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Today's schedule slots
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ScheduleSlot"
+
+  /api/rooms:
+    get:
+      tags: [Games]
+      summary: List active rooms (optionally filtered by hallId)
+      security: []
+      parameters:
+        - in: query
+          name: hallId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Room list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/RoomSummary"
+
+  /api/rooms/{roomCode}:
+    get:
+      tags: [Games]
+      summary: Get full room snapshot
+      parameters:
+        - in: path
+          name: roomCode
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Room snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/rooms/{roomCode}/game/end:
+    post:
+      tags: [Games]
+      summary: End the current game round in a room
+      parameters:
+        - in: path
+          name: roomCode
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorPlayerId]
+              properties:
+                actorPlayerId:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Updated room snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/rooms/{roomCode}/game/extra-draw:
+    post:
+      tags: [Games]
+      summary: Reject an extra-draw purchase request for a player
+      parameters:
+        - in: path
+          name: roomCode
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorPlayerId]
+              properties:
+                actorPlayerId:
+                  type: string
+                requestedCount:
+                  type: integer
+                packageId:
+                  type: string
+      responses:
+        "200":
+          description: Rejection recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/leaderboard:
+    get:
+      tags: [Games]
+      summary: Prize leaderboard (top 50)
+      parameters:
+        - in: query
+          name: period
+          schema:
+            type: string
+            enum: [today, week, month]
+            default: week
+        - in: query
+          name: hallId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Leaderboard entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LeaderboardEntry"
+
+  /api/notifications:
+    get:
+      tags: [Games]
+      summary: List player notifications (stub — returns empty array in V1)
+      responses:
+        "200":
+          description: Notification list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/notifications/read:
+    post:
+      tags: [Games]
+      summary: Mark notifications as read
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Wallet ────────────────────────────────────────────────────────────────
+
+  /api/wallet/me:
+    get:
+      tags: [Wallet]
+      summary: Get authenticated player's wallet account and last 20 transactions
+      responses:
+        "200":
+          description: Wallet data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          account:
+                            $ref: "#/components/schemas/WalletAccount"
+                          transactions:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/WalletTransaction"
+
+  /api/wallet/me/transactions:
+    get:
+      tags: [Wallet]
+      summary: Get player transaction history
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+            maximum: 500
+      responses:
+        "200":
+          description: Transactions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/WalletTransaction"
+
+  /api/wallet/me/compliance:
+    get:
+      tags: [Wallet]
+      summary: Get player compliance status (can play, limits, exclusions)
+      parameters:
+        - in: query
+          name: hallId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Compliance status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PlayerCompliance"
+
+  /api/wallet/me/topup:
+    post:
+      tags: [Wallet]
+      summary: Top up the authenticated player's wallet (manual or simulated)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: number
+                  minimum: 0.01
+                provider:
+                  type: string
+                  enum: [manual, swedbank_simulated]
+                  default: manual
+      responses:
+        "200":
+          description: Transaction record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/wallets:
+    get:
+      tags: [Wallet]
+      summary: List all wallet accounts (admin use)
+      responses:
+        "200":
+          description: Account list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/WalletAccount"
+    post:
+      tags: [Wallet]
+      summary: Create a wallet account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                walletId:
+                  type: string
+                initialBalance:
+                  type: number
+                  default: 1000
+      responses:
+        "200":
+          description: Created account
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WalletAccount"
+
+  /api/wallets/{walletId}:
+    get:
+      tags: [Wallet]
+      summary: Get a wallet account and last 20 transactions
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Wallet data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/wallets/{walletId}/transactions:
+    get:
+      tags: [Wallet]
+      summary: List transactions for a wallet
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+      responses:
+        "200":
+          description: Transactions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/wallets/{walletId}/topup:
+    post:
+      tags: [Wallet]
+      summary: Top up a specific wallet
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: number
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Transaction record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/wallets/{walletId}/withdraw:
+    post:
+      tags: [Wallet]
+      summary: Withdraw from a wallet
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: number
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Transaction record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/wallets/transfer:
+    post:
+      tags: [Wallet]
+      summary: Transfer between two wallets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromWalletId, toWalletId, amount]
+              properties:
+                fromWalletId:
+                  type: string
+                toWalletId:
+                  type: string
+                amount:
+                  type: number
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Transfer record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Spillevett ───────────────────────────────────────────────────────────
+
+  /api/spillevett/report:
+    get:
+      tags: [Spillevett]
+      summary: Get the authenticated player's gambling activity report
+      parameters:
+        - in: query
+          name: period
+          schema:
+            type: string
+            enum: [today, last7, last30, last365, custom]
+            default: last7
+        - in: query
+          name: hallId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Player activity report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/spillevett/report/export:
+    post:
+      tags: [Spillevett]
+      summary: Export activity report as PDF (download or email)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                period:
+                  type: string
+                  enum: [today, last7, last30, last365]
+                  default: last365
+                hallId:
+                  type: string
+                delivery:
+                  type: string
+                  enum: [download, email]
+                  default: download
+                email:
+                  type: string
+                  format: email
+                  description: Recipient email for email delivery (defaults to account email)
+      responses:
+        "200":
+          description: PDF binary (download) or confirmation object (email)
+
+  /api/wallet/me/timed-pause:
+    post:
+      tags: [Spillevett]
+      summary: Activate a timed play pause
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                durationMinutes:
+                  type: integer
+                  default: 15
+                  minimum: 1
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Spillevett]
+      summary: Cancel an active timed pause
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/wallet/me/self-exclusion:
+    post:
+      tags: [Spillevett]
+      summary: Activate 1-year self-exclusion (pengespillforskriften § 23)
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Spillevett]
+      summary: Lift self-exclusion (only after exclusion period ends)
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/wallet/me/loss-limits:
+    put:
+      tags: [Spillevett]
+      summary: Set daily and/or monthly loss limits for a hall
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hallId]
+              properties:
+                hallId:
+                  type: string
+                dailyLossLimit:
+                  type: number
+                  minimum: 0
+                monthlyLossLimit:
+                  type: number
+                  minimum: 0
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Payments ──────────────────────────────────────────────────────────────
+
+  /api/payments/swedbank/topup-intent:
+    post:
+      tags: [Payments]
+      summary: Create a Swedbank Pay top-up payment intent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: number
+                  minimum: 1
+      responses:
+        "200":
+          description: Payment intent with redirect URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SwedbankIntent"
+
+  /api/payments/swedbank/confirm:
+    post:
+      tags: [Payments]
+      summary: Confirm / reconcile a Swedbank Pay intent after redirect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [intentId]
+              properties:
+                intentId:
+                  type: string
+      responses:
+        "200":
+          description: Updated intent
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SwedbankIntent"
+
+  /api/payments/swedbank/intents/{intentId}:
+    get:
+      tags: [Payments]
+      summary: Get a payment intent by ID
+      parameters:
+        - in: path
+          name: intentId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: refresh
+          schema:
+            type: boolean
+            default: false
+          description: If true, re-reconcile with Swedbank before returning
+      responses:
+        "200":
+          description: Intent
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SwedbankIntent"
+
+  /api/payments/swedbank/callback:
+    post:
+      tags: [Payments]
+      summary: Swedbank Pay server-side callback (webhook — no auth required)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Raw Swedbank Pay callback payload
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  # ── Admin — Auth ──────────────────────────────────────────────────────────
+
+  /api/admin/auth/login:
+    post:
+      tags: [Admin — Auth]
+      summary: Admin login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/auth/logout:
+    post:
+      tags: [Admin — Auth]
+      summary: Revoke admin session
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/auth/me:
+    get:
+      tags: [Admin — Auth]
+      summary: Get the current admin user profile
+      responses:
+        "200":
+          description: Admin user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/permissions:
+    get:
+      tags: [Admin — Auth]
+      summary: Get the RBAC permission list for the current admin role
+      responses:
+        "200":
+          description: Permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/bootstrap:
+    post:
+      tags: [Admin — Auth]
+      summary: Bootstrap first admin account (only works when no admins exist)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, displayName]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 12
+                displayName:
+                  type: string
+      responses:
+        "200":
+          description: Admin session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/users/{userId}/role:
+    put:
+      tags: [Admin — Auth]
+      summary: Assign a role to a user
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [player, operator, support, admin]
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Admin — Games ─────────────────────────────────────────────────────────
+
+  /api/admin/games:
+    get:
+      tags: [Admin — Games]
+      summary: List all games (including disabled)
+      responses:
+        "200":
+          description: Game list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/games/{slug}:
+    put:
+      tags: [Admin — Games]
+      summary: Update game metadata (enable/disable, name)
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isEnabled:
+                  type: boolean
+                name:
+                  type: string
+      responses:
+        "200":
+          description: Updated game
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/settings/catalog:
+    get:
+      tags: [Admin — Games]
+      summary: Get the settings schema catalog (all configurable keys with types and defaults)
+      responses:
+        "200":
+          description: Settings catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/settings/games/{slug}:
+    get:
+      tags: [Admin — Games]
+      summary: Get effective settings for a game
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    put:
+      tags: [Admin — Games]
+      summary: Update settings for a game (partial patch)
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Partial settings object — only changed keys need to be sent
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/game-settings/change-log:
+    get:
+      tags: [Admin — Games]
+      summary: Audit log of game settings changes
+      parameters:
+        - in: query
+          name: slug
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Change log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/rooms:
+    get:
+      tags: [Admin — Games]
+      summary: List all active rooms
+      responses:
+        "200":
+          description: Room list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Admin — Games]
+      summary: Create a new room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gameSlug:
+                  type: string
+                hallId:
+                  type: string
+                roomCode:
+                  type: string
+                settings:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Created room snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/rooms/{roomCode}:
+    get:
+      tags: [Admin — Games]
+      summary: Get full room snapshot
+      parameters:
+        - in: path
+          name: roomCode
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Room snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Admin — Games]
+      summary: Destroy a room
+      parameters:
+        - in: path
+          name: roomCode
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/rooms/{roomCode}/start:
+    post:
+      tags: [Admin — Games]
+      summary: Start a game round in a room
+      parameters:
+        - in: path
+          name: roomCode
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated room
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/rooms/{roomCode}/draw-next:
+    post:
+      tags: [Admin — Games]
+      summary: Advance the draw by one number
+      parameters:
+        - in: path
+          name: roomCode
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated room
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/rooms/{roomCode}/end:
+    post:
+      tags: [Admin — Games]
+      summary: End a game round
+      parameters:
+        - in: path
+          name: roomCode
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Updated room
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/games/{gameId}/replay:
+    get:
+      tags: [Admin — Games]
+      summary: Replay a completed game session event-by-event (audit)
+      parameters:
+        - in: path
+          name: gameId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 1000
+      responses:
+        "200":
+          description: Ordered event list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Admin — Halls ─────────────────────────────────────────────────────────
+
+  /api/admin/halls:
+    get:
+      tags: [Admin — Halls]
+      summary: List all halls (including inactive)
+      responses:
+        "200":
+          description: Hall list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Admin — Halls]
+      summary: Create a hall
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                orgNumber:
+                  type: string
+                settlementAccount:
+                  type: string
+                isActive:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Created hall
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/halls/{hallId}:
+    put:
+      tags: [Admin — Halls]
+      summary: Update a hall
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                orgNumber:
+                  type: string
+                settlementAccount:
+                  type: string
+                isActive:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated hall
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/terminals:
+    get:
+      tags: [Admin — Halls]
+      summary: List all terminals
+      parameters:
+        - in: query
+          name: hallId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Terminal list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Admin — Halls]
+      summary: Create a terminal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hallId, name]
+              properties:
+                hallId:
+                  type: string
+                name:
+                  type: string
+                isActive:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Created terminal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/terminals/{terminalId}:
+    put:
+      tags: [Admin — Halls]
+      summary: Update a terminal
+      parameters:
+        - in: path
+          name: terminalId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                isActive:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated terminal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/halls/{hallId}/game-config:
+    get:
+      tags: [Admin — Halls]
+      summary: Get hall-level game configuration overrides
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Game config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/halls/{hallId}/game-config/{gameSlug}:
+    put:
+      tags: [Admin — Halls]
+      summary: Update a hall's game config override for a specific game
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: gameSlug
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Partial settings patch
+      responses:
+        "200":
+          description: Updated config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/halls/{hallId}/schedule:
+    get:
+      tags: [Admin — Halls]
+      summary: Get all schedule slots for a hall
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Schedule slots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Admin — Halls]
+      summary: Add a schedule slot to a hall
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gameSlug, dayOfWeek, startTime]
+              properties:
+                gameSlug:
+                  type: string
+                dayOfWeek:
+                  type: integer
+                  minimum: 0
+                  maximum: 6
+                startTime:
+                  type: string
+                  example: "19:00"
+                isActive:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Created slot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/halls/{hallId}/schedule/{slotId}:
+    put:
+      tags: [Admin — Halls]
+      summary: Update a schedule slot
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: slotId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gameSlug:
+                  type: string
+                dayOfWeek:
+                  type: integer
+                startTime:
+                  type: string
+                isActive:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated slot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Admin — Halls]
+      summary: Delete a schedule slot
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: slotId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/halls/{hallId}/schedule/{slotId}/log:
+    post:
+      tags: [Admin — Halls]
+      summary: Add an operator log entry to a schedule slot (§ 64 audit)
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: slotId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [STARTED, CANCELLED, DELAYED, ENDED_EARLY, NOTE]
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Log entry created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/halls/{hallId}/schedule-log:
+    get:
+      tags: [Admin — Halls]
+      summary: Get schedule audit log for a hall
+      parameters:
+        - in: path
+          name: hallId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Admin — Compliance ────────────────────────────────────────────────────
+
+  /api/admin/wallets/{walletId}/compliance:
+    get:
+      tags: [Admin — Compliance]
+      summary: Get compliance state for a player wallet
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/wallets/{walletId}/loss-limits:
+    put:
+      tags: [Admin — Compliance]
+      summary: Set loss limits for a player wallet (admin override)
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hallId]
+              properties:
+                hallId:
+                  type: string
+                dailyLossLimit:
+                  type: number
+                monthlyLossLimit:
+                  type: number
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/wallets/{walletId}/timed-pause:
+    post:
+      tags: [Admin — Compliance]
+      summary: Set timed pause for a player wallet (admin)
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                durationMinutes:
+                  type: integer
+                  default: 15
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Admin — Compliance]
+      summary: Cancel timed pause (admin)
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/wallets/{walletId}/self-exclusion:
+    post:
+      tags: [Admin — Compliance]
+      summary: Set self-exclusion for a player wallet (admin)
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    delete:
+      tags: [Admin — Compliance]
+      summary: Lift self-exclusion (admin)
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated compliance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/wallets/{walletId}/extra-prize:
+    post:
+      tags: [Admin — Compliance]
+      summary: Award a manual extra prize to a player wallet
+      parameters:
+        - in: path
+          name: walletId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, reason]
+              properties:
+                amount:
+                  type: number
+                reason:
+                  type: string
+                hallId:
+                  type: string
+                gameSessionId:
+                  type: string
+      responses:
+        "200":
+          description: Prize awarded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/compliance/extra-draw-denials:
+    get:
+      tags: [Admin — Compliance]
+      summary: List extra-draw purchase denials (compliance audit)
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+        - in: query
+          name: roomCode
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Denial entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/prize-policy/active:
+    get:
+      tags: [Admin — Compliance]
+      summary: Get the active prize policy
+      responses:
+        "200":
+          description: Prize policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/prize-policy:
+    put:
+      tags: [Admin — Compliance]
+      summary: Update the prize policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Updated policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/payout-audit:
+    get:
+      tags: [Admin — Compliance]
+      summary: List payout audit trail entries
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+        - in: query
+          name: gameSessionId
+          schema:
+            type: string
+        - in: query
+          name: walletId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Admin — Ledger & Reports ──────────────────────────────────────────────
+
+  /api/admin/ledger/entries:
+    get:
+      tags: [Admin — Ledger]
+      summary: Query compliance ledger entries
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+        - in: query
+          name: walletId
+          schema:
+            type: string
+        - in: query
+          name: hallId
+          schema:
+            type: string
+        - in: query
+          name: dateFrom
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: dateTo
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Admin — Ledger]
+      summary: Manually insert a ledger entry (correction / manual prize)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [walletId, eventType, amount]
+              properties:
+                walletId:
+                  type: string
+                eventType:
+                  type: string
+                  enum: [STAKE, PRIZE, EXTRA_PRIZE, REFUND, CORRECTION]
+                amount:
+                  type: number
+                hallId:
+                  type: string
+                gameSessionId:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Created entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/reports/daily/run:
+    post:
+      tags: [Admin — Ledger]
+      summary: Generate and persist the daily activity report for a given date
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date:
+                  type: string
+                  format: date
+                  description: Defaults to yesterday
+      responses:
+        "200":
+          description: Report summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/reports/daily:
+    get:
+      tags: [Admin — Ledger]
+      summary: List generated daily reports
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 30
+      responses:
+        "200":
+          description: Report list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/reports/daily/archive/{date}:
+    get:
+      tags: [Admin — Ledger]
+      summary: Get a specific archived daily report
+      parameters:
+        - in: path
+          name: date
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  # ── Admin — Overskudd ─────────────────────────────────────────────────────
+
+  /api/admin/overskudd/preview:
+    get:
+      tags: [Admin — Overskudd]
+      summary: Preview surplus (overskudd) distribution amounts before committing
+      parameters:
+        - in: query
+          name: dateFrom
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: dateTo
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: hallId
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Distribution preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/overskudd/distributions:
+    get:
+      tags: [Admin — Overskudd]
+      summary: List surplus distribution batches
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Batch list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Admin — Overskudd]
+      summary: Create and commit a surplus distribution batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dateFrom, dateTo]
+              properties:
+                dateFrom:
+                  type: string
+                  format: date
+                dateTo:
+                  type: string
+                  format: date
+                hallId:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Created batch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/overskudd/distributions/{batchId}:
+    get:
+      tags: [Admin — Overskudd]
+      summary: Get a specific distribution batch with line items
+      parameters:
+        - in: path
+          name: batchId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Batch detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/overskudd/organizations:
+    get:
+      tags: [Admin — Overskudd]
+      summary: List recipient organisations
+      responses:
+        "200":
+          description: Organisation list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+    post:
+      tags: [Admin — Overskudd]
+      summary: Register a new recipient organisation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, orgNumber]
+              properties:
+                name:
+                  type: string
+                orgNumber:
+                  type: string
+                  description: Norwegian organisation number (9 digits)
+                sharePercent:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                hallId:
+                  type: string
+                isActive:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: Created organisation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
+
+  /api/admin/overskudd/organizations/{id}:
+    delete:
+      tags: [Admin — Overskudd]
+      summary: Remove a recipient organisation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiSuccess"
