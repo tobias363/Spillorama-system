@@ -54,6 +54,7 @@ assets spingo/
 
 # Runtime / generated data
 backend/data/
+backend/*.db
 
 # Temp files
 tmp-*.png
