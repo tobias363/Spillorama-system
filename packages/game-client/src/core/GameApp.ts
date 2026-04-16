@@ -2,7 +2,7 @@ import { Application, Container } from "pixi.js";
 import { SpilloramaSocket } from "../net/SpilloramaSocket.js";
 import { GameBridge } from "../bridge/GameBridge.js";
 import { AudioManager } from "../audio/AudioManager.js";
-import { createGame, type GameController } from "../games/registry.js";
+import { createGame, registryReady, type GameController } from "../games/registry.js";
 import { telemetry } from "../telemetry/Telemetry.js";
 
 export interface GameMountConfig {
@@ -61,6 +61,9 @@ export class GameApp {
     this.socket = new SpilloramaSocket(config.serverUrl);
     this.bridge = new GameBridge(this.socket);
     this.audio = new AudioManager();
+
+    // Wait for all game controllers to be registered before creating one
+    await registryReady;
 
     // Create and start game controller
     const roomCode = `BINGO1`; // Canonical room alias — backend resolves to hall-specific room

@@ -75,6 +75,8 @@ function makeRoomUpdate(overrides: Partial<RoomUpdatePayload> = {}): RoomUpdateP
     ...snap,
     scheduler: {},
     preRoundTickets: {},
+    armedPlayerIds: [],
+    playerStakes: {},
     luckyNumbers: {},
     serverTimestamp: Date.now(),
     ...overrides,

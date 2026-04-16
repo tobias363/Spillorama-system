@@ -252,8 +252,8 @@ class Game1Controller implements GameController {
           this.transitionTo("WAITING", this.deps.bridge.getState());
         });
         this.endScreen.show(state);
-        if (this.lastMiniGamePrize > 0) {
-          this.endScreen.showMiniGameBonus(this.lastMiniGamePrize);
+        if (this.lastMiniGamePrize > 0 && typeof (this.endScreen as any).showMiniGameBonus === "function") {
+          (this.endScreen as any).showMiniGameBonus(this.lastMiniGamePrize);
         }
         this.setScreen(this.endScreen);
         break;

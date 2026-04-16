@@ -31,8 +31,11 @@ export function createGame(slug: string, deps: GameDeps): GameController | null 
   return factory(deps);
 }
 
-// Game registrations (side-effect imports)
-import("./game1/Game1Controller.js").catch(() => {});
-import("./game2/Game2Controller.js").catch(() => {});
-import("./game3/Game3Controller.js").catch(() => {});
-import("./game5/Game5Controller.js").catch(() => {});
+// Game registrations (side-effect imports).
+// Await this promise before calling createGame() to ensure all controllers are loaded.
+export const registryReady: Promise<void> = Promise.all([
+  import("./game1/Game1Controller.js").catch((e) => console.warn("[registry] game1 load failed:", e.message)),
+  import("./game2/Game2Controller.js").catch((e) => console.warn("[registry] game2 load failed:", e.message)),
+  import("./game3/Game3Controller.js").catch((e) => console.warn("[registry] game3 load failed:", e.message)),
+  import("./game5/Game5Controller.js").catch((e) => console.warn("[registry] game5 load failed:", e.message)),
+]).then(() => {});
