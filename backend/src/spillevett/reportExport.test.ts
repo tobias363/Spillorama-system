@@ -12,7 +12,8 @@ test("generatePlayerReportPdf returns a PDF buffer", async () => {
         period: "last7",
         from: "2026-04-05T00:00:00.000Z",
         to: "2026-04-11T20:00:00.000Z",
-        label: "05.04.2026–11.04.2026"
+        label: "05.04.2026–11.04.2026",
+        offset: 0
       },
       summary: {
         stakeTotal: 17,
@@ -63,7 +64,11 @@ test("generatePlayerReportPdf returns a PDF buffer", async () => {
           amount: 4,
           roomCode: "ROOM-1"
         }
-      ]
+      ],
+      dailyBreakdown: [],
+      gameBreakdown: [],
+      dailyGameBreakdown: [],
+      hallBreakdown: []
     }
   });
 

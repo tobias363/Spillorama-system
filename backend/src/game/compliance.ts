@@ -4,10 +4,10 @@ export function assertTicketsPerPlayerWithinHallLimit(
   ticketsPerPlayer: number | undefined,
   hallMaxTicketsPerPlayer: number
 ): void {
-  if (!Number.isInteger(hallMaxTicketsPerPlayer) || hallMaxTicketsPerPlayer < 1 || hallMaxTicketsPerPlayer > 5) {
+  if (!Number.isInteger(hallMaxTicketsPerPlayer) || hallMaxTicketsPerPlayer < 1 || hallMaxTicketsPerPlayer > 30) {
     throw new DomainError(
       "INVALID_HALL_CONFIG",
-      "Hall-konfigurasjon for maxTicketsPerPlayer må være et heltall mellom 1 og 5."
+      "Hall-konfigurasjon for maxTicketsPerPlayer må være et heltall mellom 1 og 30."
     );
   }
 

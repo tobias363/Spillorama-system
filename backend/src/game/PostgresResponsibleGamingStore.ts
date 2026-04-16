@@ -200,21 +200,24 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
          active_from_ms,
          pause_until_ms,
          last_mandatory_break_json,
+         games_played_in_session,
          updated_at
        )
-       VALUES ($1, $2, $3, $4, $5::jsonb, now())
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
        ON CONFLICT (wallet_id)
        DO UPDATE SET accumulated_ms = EXCLUDED.accumulated_ms,
                      active_from_ms = EXCLUDED.active_from_ms,
                      pause_until_ms = EXCLUDED.pause_until_ms,
                      last_mandatory_break_json = EXCLUDED.last_mandatory_break_json,
+                     games_played_in_session = EXCLUDED.games_played_in_session,
                      updated_at = now()`,
       [
         entry.walletId,
         entry.accumulatedMs,
         entry.activeFromMs ?? null,
         entry.pauseUntilMs ?? null,
-        JSON.stringify(entry.lastMandatoryBreak ?? null)
+        JSON.stringify(entry.lastMandatoryBreak ?? null),
+        entry.gamesPlayedInSession ?? 0
       ]
     );
   }
@@ -697,8 +700,9 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
       active_from_ms: string | null;
       pause_until_ms: string | null;
       last_mandatory_break_json: unknown;
+      games_played_in_session: string | null;
     }>(
-      `SELECT wallet_id, accumulated_ms, active_from_ms, pause_until_ms, last_mandatory_break_json
+      `SELECT wallet_id, accumulated_ms, active_from_ms, pause_until_ms, last_mandatory_break_json, games_played_in_session
        FROM ${this.playStatesTable()}`
     );
     return rows.map((row) => ({
@@ -706,6 +710,7 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
       accumulatedMs: Number(row.accumulated_ms),
       activeFromMs: row.active_from_ms !== null ? Number(row.active_from_ms) : undefined,
       pauseUntilMs: row.pause_until_ms !== null ? Number(row.pause_until_ms) : undefined,
+      gamesPlayedInSession: row.games_played_in_session !== null ? Number(row.games_played_in_session) : 0,
       lastMandatoryBreak: asJsonObject(row.last_mandatory_break_json) as PersistedPlaySessionState["lastMandatoryBreak"]
     }));
   }
@@ -936,9 +941,13 @@ export class PostgresResponsibleGamingStore implements ResponsibleGamingPersiste
           active_from_ms BIGINT,
           pause_until_ms BIGINT,
           last_mandatory_break_json JSONB,
+          games_played_in_session INT NOT NULL DEFAULT 0,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`
+      );
+      await client.query(
+        `ALTER TABLE ${this.playStatesTable()} ADD COLUMN IF NOT EXISTS games_played_in_session INT NOT NULL DEFAULT 0`
       );
 
       await client.query(

@@ -76,8 +76,8 @@ export function parseLimit(value: unknown, fallback = 100): number {
 
 export function parseTicketsPerPlayerInput(value: unknown): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > 5) {
-    throw new DomainError("INVALID_TICKETS_PER_PLAYER", "ticketsPerPlayer ma vaere et heltall mellom 1 og 5.");
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 1 || parsed > 30) {
+    throw new DomainError("INVALID_TICKETS_PER_PLAYER", "ticketsPerPlayer må være et heltall mellom 1 og 30.");
   }
   return parsed;
 }

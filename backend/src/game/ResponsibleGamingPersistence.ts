@@ -31,6 +31,7 @@ export interface PersistedMandatoryBreakSummary {
     daily: number;
     monthly: number;
   };
+  gamesPlayed?: number;
 }
 
 export interface PersistedPlaySessionState {
@@ -39,6 +40,7 @@ export interface PersistedPlaySessionState {
   activeFromMs?: number;
   pauseUntilMs?: number;
   lastMandatoryBreak?: PersistedMandatoryBreakSummary;
+  gamesPlayedInSession?: number;
 }
 
 export interface PersistedLossEntry {

@@ -6,6 +6,8 @@ import type { RoomSnapshot, RoomSummary, Ticket } from "../game/types.js";
 import type { DrawScheduler } from "../draw-engine/DrawScheduler.js";
 import type { BingoSchedulerSettings } from "./bingoSettings.js";
 import type { GameVariantConfig, TicketTypeConfig } from "../game/variantConfig.js";
+import { getDefaultVariantConfig } from "../game/variantConfig.js";
+import { roundCurrency } from "./currency.js";
 
 // ── Room priority ──────────────────────────────────────────────────────────────
 
@@ -92,8 +94,20 @@ export function buildRoomSchedulerState(
 export type RoomUpdatePayload = RoomSnapshot & {
   scheduler: Record<string, unknown>;
   preRoundTickets: Record<string, Ticket[]>;
+  /** Player IDs who have explicitly armed (bet:arm) for the next round. */
+  armedPlayerIds: string[];
   luckyNumbers: Record<string, number>;
   serverTimestamp: number;
+  /**
+   * Server-authoritative stake per player (in kroner).
+   * Clients display this directly — no client-side calculation needed.
+   *
+   * Only populated for players with an active stake:
+   *   - RUNNING game → participant's ticket cost (entryFee × priceMultiplier per ticket)
+   *   - Between rounds + armed → projected cost for next round
+   * Players with 0 stake are omitted (absence = "—" / no stake).
+   */
+  playerStakes: Record<string, number>;
   /** BIN-443: Game variant info for the client's purchase UI. */
   gameVariant?: {
     gameType: string;
@@ -112,7 +126,7 @@ export function buildRoomUpdatePayload(
     schedulerTickMs: number;
     getArmedPlayerIds: (roomCode: string) => string[];
     getRoomConfiguredEntryFee: (roomCode: string) => number;
-    getOrCreateDisplayTickets: (roomCode: string, playerId: string, count: number) => Ticket[];
+    getOrCreateDisplayTickets: (roomCode: string, playerId: string, count: number, gameSlug?: string) => Ticket[];
     getLuckyNumbers: (roomCode: string) => Record<string, number>;
     /** BIN-443: Variant config for client purchase UI. */
     getVariantConfig?: (roomCode: string) => { gameType: string; config: GameVariantConfig } | null;
@@ -128,20 +142,57 @@ export function buildRoomUpdatePayload(
   const ticketsPerPlayer = runtimeBingoSettings.autoRoundTicketsPerPlayer;
   for (const player of snapshot.players) {
     if (gameTickets[player.id] && gameTickets[player.id].length > 0) continue;
-    preRoundTickets[player.id] = getOrCreateDisplayTickets(snapshot.code, player.id, ticketsPerPlayer);
+    preRoundTickets[player.id] = getOrCreateDisplayTickets(snapshot.code, player.id, ticketsPerPlayer, snapshot.gameSlug);
   }
 
-  // BIN-443: Include variant info so client can show correct purchase UI
+  // BIN-443: Include variant info so client can show correct purchase UI.
+  // Fall back to default standard config so client always receives ticket types.
   const variantInfo = opts.getVariantConfig?.(snapshot.code);
-  const gameVariant = variantInfo ? {
-    gameType: variantInfo.gameType,
-    ticketTypes: variantInfo.config.ticketTypes,
-    replaceAmount: variantInfo.config.replaceAmount,
-  } : undefined;
+  const effectiveGameType = variantInfo?.gameType ?? "standard";
+  const effectiveConfig = variantInfo?.config ?? getDefaultVariantConfig(effectiveGameType);
+  const gameVariant = {
+    gameType: effectiveGameType,
+    ticketTypes: effectiveConfig.ticketTypes,
+    replaceAmount: effectiveConfig.replaceAmount,
+  };
+
+  // ── Server-authoritative stake per player ──────────────────────────────────
+  // Calculated here so the client never has to derive monetary amounts itself.
+  // Rules mirror StakeCalculator.ts but are the single source of truth.
+  const armedPlayerIds = opts.getArmedPlayerIds(snapshot.code);
+  const isGameRunning = snapshot.currentGame?.status === "RUNNING";
+  const playerStakes: Record<string, number> = {};
+
+  for (const player of snapshot.players) {
+    let tickets: Ticket[] = [];
+    let fee = 0;
+
+    if (isGameRunning && gameTickets[player.id]?.length > 0) {
+      // Active game participant — stake from actual game tickets & game's entry fee.
+      tickets = gameTickets[player.id];
+      fee = snapshot.currentGame!.entryFee;
+    } else if (armedPlayerIds.includes(player.id)) {
+      // Armed for next round — stake from pre-round tickets & room's configured fee.
+      tickets = preRoundTickets[player.id] ?? [];
+      fee = opts.getRoomConfiguredEntryFee(snapshot.code);
+    }
+
+    if (tickets.length > 0 && fee > 0) {
+      const ticketTypes = effectiveConfig.ticketTypes;
+      playerStakes[player.id] = roundCurrency(
+        tickets.reduce((sum, t) => {
+          const tt = ticketTypes.find((x: TicketTypeConfig) => x.type === t.type);
+          return sum + fee * (tt?.priceMultiplier ?? 1);
+        }, 0),
+      );
+    }
+  }
 
   return {
     ...snapshot,
     preRoundTickets,
+    armedPlayerIds,
+    playerStakes,
     luckyNumbers: getLuckyNumbers(snapshot.code),
     scheduler: buildRoomSchedulerState(snapshot, nowMs, opts),
     serverTimestamp: nowMs,

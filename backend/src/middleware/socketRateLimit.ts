@@ -46,6 +46,14 @@ export class SocketRateLimiter {
   private readonly socketToPlayer = new Map<string, string>();
   private readonly activePlayers = new Set<string>();
 
+  /**
+   * BIN-303: IP-based connection rate limiting.
+   * Separate from socket/player buckets so GC doesn't delete active-window entries
+   * when connections close. Keyed by IP address.
+   */
+  private readonly connectionBuckets = new Map<string, number[]>();
+  private static readonly CONNECTION_RATE: RateLimitConfig = { windowMs: 60_000, maxEvents: 30 };
+
   constructor(limits?: Record<string, RateLimitConfig>, fallback?: RateLimitConfig) {
     this.limits = limits ?? DEFAULT_RATE_LIMITS;
     this.fallback = fallback ?? DEFAULT_FALLBACK;
@@ -128,6 +136,33 @@ export class SocketRateLimiter {
     return true;
   }
 
+  /**
+   * BIN-303: Check whether a new WebSocket connection from an IP is allowed.
+   * Limits to 30 new connections per minute per IP to prevent connection-flood abuse.
+   * Uses a separate bucket map so GC never removes active-window entries when
+   * connections disconnect.
+   */
+  checkConnection(ip: string, nowMs: number = Date.now()): boolean {
+    const config = SocketRateLimiter.CONNECTION_RATE;
+    let timestamps = this.connectionBuckets.get(ip);
+    if (!timestamps) {
+      timestamps = [];
+      this.connectionBuckets.set(ip, timestamps);
+    }
+
+    const cutoff = nowMs - config.windowMs;
+    while (timestamps.length > 0 && timestamps[0] <= cutoff) {
+      timestamps.shift();
+    }
+
+    if (timestamps.length >= config.maxEvents) {
+      return false;
+    }
+
+    timestamps.push(nowMs);
+    return true;
+  }
+
   private checkBucket(key: string, config: RateLimitConfig, nowMs: number): boolean {
     let timestamps = this.buckets.get(key);
     if (!timestamps) {
@@ -182,6 +217,18 @@ export class SocketRateLimiter {
         if (!this.activeSockets.has(socketId)) {
           this.buckets.delete(key);
         }
+      }
+    }
+
+    // BIN-303: Prune connection buckets by time (not by active sockets — connections
+    // may have closed but we still need to track their rate window).
+    const connCutoff = Date.now() - SocketRateLimiter.CONNECTION_RATE.windowMs;
+    for (const [ip, timestamps] of this.connectionBuckets) {
+      while (timestamps.length > 0 && timestamps[0] <= connCutoff) {
+        timestamps.shift();
+      }
+      if (timestamps.length === 0) {
+        this.connectionBuckets.delete(ip);
       }
     }
   }

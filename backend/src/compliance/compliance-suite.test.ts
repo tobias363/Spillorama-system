@@ -272,7 +272,7 @@ test("compliance: enforces ticket max and hall ticket cap", async () => {
         roomCode: room.roomCode,
         actorPlayerId: room.hostPlayerId,
         entryFee: 0,
-        ticketsPerPlayer: 6,
+        ticketsPerPlayer: 31,
         payoutPercent: 80
       }),
     (error: unknown) => error instanceof DomainError && error.code === "INVALID_TICKETS_PER_PLAYER"
@@ -281,6 +281,16 @@ test("compliance: enforces ticket max and hall ticket cap", async () => {
   assert.throws(
     () => assertTicketsPerPlayerWithinHallLimit(5, 4),
     (error: unknown) => error instanceof DomainError && error.code === "TICKETS_ABOVE_HALL_LIMIT"
+  );
+
+  // Hall config with max 30 should be accepted (§2-10 allows up to 30)
+  assert.doesNotThrow(() => assertTicketsPerPlayerWithinHallLimit(30, 30));
+  assert.doesNotThrow(() => assertTicketsPerPlayerWithinHallLimit(5, 30));
+
+  // Hall config above 30 should be rejected
+  assert.throws(
+    () => assertTicketsPerPlayerWithinHallLimit(1, 31),
+    (error: unknown) => error instanceof DomainError && error.code === "INVALID_HALL_CONFIG"
   );
 });
 

@@ -3,7 +3,7 @@
  * Extracted from index.ts. Owns: armed players, lucky numbers, display ticket cache,
  * per-room configured entry fees. All helpers are method wrappers around these Maps.
  */
-import { generateDatabingo60Ticket } from "../game/ticket.js";
+import { generateDatabingo60Ticket, generateBingo75Ticket } from "../game/ticket.js";
 import type { Ticket } from "../game/types.js";
 import type { GameVariantConfig } from "../game/variantConfig.js";
 
@@ -66,12 +66,14 @@ export class RoomStateManager {
 
   // ── Display tickets ────────────────────────────────────────────────────────
 
-  getOrCreateDisplayTickets(roomCode: string, playerId: string, count: number): Ticket[] {
+  getOrCreateDisplayTickets(roomCode: string, playerId: string, count: number, gameSlug?: string): Ticket[] {
     const key = `${roomCode}:${playerId}`;
     const cached = this.displayTicketCache.get(key);
     if (cached && cached.length === count) return cached;
+    // Game 1 (bingo) uses 75-ball 5x5 tickets; all other games use 60-ball 3x5 tickets.
+    const generator = gameSlug === "bingo" ? generateBingo75Ticket : generateDatabingo60Ticket;
     const tickets: Ticket[] = [];
-    for (let i = 0; i < count; i++) tickets.push(generateDatabingo60Ticket());
+    for (let i = 0; i < count; i++) tickets.push(generator());
     this.displayTicketCache.set(key, tickets);
     return tickets;
   }
