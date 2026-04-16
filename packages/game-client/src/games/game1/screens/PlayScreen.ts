@@ -198,6 +198,14 @@ export class PlayScreen extends Container {
 
     // Chat panel (right sidebar)
     this.chatPanel = new ChatPanelV2(this.overlayManager, socket, roomCode);
+
+    // Resize ticket scroller when chat panel is toggled (Unity: slides in/out)
+    this.chatPanel.setOnToggle((collapsed) => {
+      const chatW = collapsed ? 48 : CHAT_WIDTH;
+      const scrollerW = screenWidth - TUBE_COLUMN_WIDTH - chatW - 20;
+      const scrollerH = screenHeight - TICKET_TOP - 62;
+      this.inlineScroller.setViewportSize(Math.max(200, scrollerW), Math.max(100, scrollerH));
+    });
   }
 
   setOnClaim(callback: (type: "LINE" | "BINGO") => void): void {
@@ -368,6 +376,11 @@ export class PlayScreen extends Container {
       });
       card.loadTicket(ticket);
 
+      // Set ticket price (Unity: each ticket shows price on the card)
+      const ticketType = state.ticketTypes?.find((t) => t.type === ticket.type);
+      const ticketPrice = Math.round((state.entryFee || 10) * (ticketType?.priceMultiplier ?? 1));
+      card.setPrice(ticketPrice);
+
       // Set variant-specific header label (Unity: ticketColor as name for Elvis)
       if (ticket.type === "elvis" && ticket.color) {
         card.setHeaderLabel(ticket.color);
@@ -535,7 +548,7 @@ export class PlayScreen extends Container {
     this.centerBall.x = TUBE_COLUMN_WIDTH + (width - TUBE_COLUMN_WIDTH - CHAT_WIDTH) / 2 - 60;
 
     // BIN-401: Resize ticket scroller to fit new dimensions
-    const chatW = this.chatPanel ? CHAT_WIDTH : 0;
+    const chatW = this.chatPanel?.isCollapsed() ? 48 : CHAT_WIDTH;
     const scrollerW = width - TUBE_COLUMN_WIDTH - chatW - 20;
     const scrollerH = height - TICKET_TOP - 60;
     this.inlineScroller.setViewportSize(Math.max(200, scrollerW), Math.max(100, scrollerH));

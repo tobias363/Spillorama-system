@@ -175,6 +175,11 @@ export class TicketCard extends Container {
     this.headerText.text = label;
   }
 
+  /** Set the price display on the card (right side of header bar). */
+  setPrice(amount: number): void {
+    this.priceText.text = `${amount}kr`;
+  }
+
   /** Stop all card-level animations (background blink, BINGO pulse). */
   stopCardAnimations(): void {
     this.stopBgBlink();

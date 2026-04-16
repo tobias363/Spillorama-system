@@ -141,7 +141,7 @@ export class LeftInfoPanel {
       this.stopCountdown();
     } else {
       this.numberRingEl.textContent = String(remaining);
-      this.progressEl.textContent = "";
+      this.progressEl.textContent = `Neste spill om ${remaining}s`;
     }
   }
 

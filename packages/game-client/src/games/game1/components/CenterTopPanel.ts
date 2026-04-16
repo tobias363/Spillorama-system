@@ -163,16 +163,24 @@ export class CenterTopPanel {
 
       // Display name mapping (Unity: FormatRowText)
       let displayName = pattern.name;
-      if (pattern.name === "Full House") displayName = `Rad ${patterns.length}`;
+      if (pattern.name === "Full House") displayName = "Full Hus";
+      else if (pattern.name === "Picture" || pattern.name === "picture") displayName = "Bilde";
+      else if (pattern.name === "Frame" || pattern.name === "frame") displayName = "Ramme";
       else if (/^Row \d/.test(pattern.name)) displayName = pattern.name.replace("Row", "Rad");
 
       span.textContent = `${displayName} – ${prize} kr`;
       if (won) {
-        span.style.color = "#81c784";
-        span.style.textDecoration = "line-through";
+        // Unity: ActiveColour (green highlight for won patterns)
+        span.style.color = "#4caf50";
+        span.style.fontWeight = "700";
+        span.textContent = `\u2714 ${displayName} – ${prize} kr`;
       } else if (i === currentPatternIdx) {
+        // Current active pattern — bright yellow
         span.style.color = "#ffe83d";
         span.style.fontWeight = "700";
+      } else {
+        // Unity: DeActiveColour (muted gray for pending patterns)
+        span.style.color = "#888";
       }
       row.appendChild(span);
       this.prizeRowsEl.appendChild(row);
