@@ -8,7 +8,8 @@ import { LobbyScreen } from "../game2/screens/LobbyScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { EndScreen } from "../game2/screens/EndScreen.js";
 
-type Phase = "LOADING" | "LOBBY" | "PLAYING" | "ENDED";
+/** BIN-507 port: SPECTATING lagt til for late-joiner midt i runde. */
+type Phase = "LOADING" | "LOBBY" | "PLAYING" | "SPECTATING" | "ENDED";
 
 /**
  * Game 3 (Monster Bingo / Mønsterbingo) controller.
@@ -87,12 +88,15 @@ class Game3Controller implements GameController {
     this.root.eventMode = "static";
     this.root.on("pointerdown", () => this.deps.audio.unlock(), { once: true });
 
-    console.log("[Game3] Auto-arming...");
-    await socket.armBet({ roomCode: this.actualRoomCode, armed: true });
-
+    // BIN-530 port: ingen auto-arm. Eksplisitt kjøp via BuyPopup.
     const state = bridge.getState();
-    if (state.gameStatus === "RUNNING" && state.myTickets.length > 0) {
-      this.transitionTo("PLAYING", state);
+    if (state.gameStatus === "RUNNING") {
+      // BIN-507 port: late-joiner uten tickets → SPECTATING
+      if (state.myTickets.length > 0) {
+        this.transitionTo("PLAYING", state);
+      } else {
+        this.transitionTo("SPECTATING", state);
+      }
     } else {
       this.transitionTo("LOBBY", state);
     }
@@ -129,6 +133,16 @@ class Game3Controller implements GameController {
         this.playScreen.updateInfo(state);
         this.setScreen(this.playScreen);
         break;
+      case "SPECTATING":
+        // BIN-507 port: samme render som PLAYING men uten tickets.
+        // Server-guards blokkerer mark/claim fra spectators.
+        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
+        this.playScreen.setOnClaim((type) => this.handleClaim(type));
+        this.playScreen.subscribeChatToBridge((listener) => this.deps.bridge.on("chatMessage", listener));
+        this.playScreen.buildTickets(state);
+        this.playScreen.updateInfo(state);
+        this.setScreen(this.playScreen);
+        break;
       case "ENDED":
         this.endScreen = new EndScreen(w, h);
         this.endScreen.setOnDismiss(() => this.transitionTo("LOBBY", this.deps.bridge.getState()));
@@ -140,21 +154,28 @@ class Game3Controller implements GameController {
 
   private onStateChanged(state: GameState): void {
     if (this.phase === "LOBBY" && this.lobbyScreen) this.lobbyScreen.update(state);
-    if (this.phase === "PLAYING" && this.playScreen) this.playScreen.updateInfo(state);
+    if ((this.phase === "PLAYING" || this.phase === "SPECTATING") && this.playScreen) this.playScreen.updateInfo(state);
   }
 
   private onGameStarted(state: GameState): void {
-    if (state.myTickets.length > 0) this.transitionTo("PLAYING", state);
+    if (state.myTickets.length > 0) {
+      this.transitionTo("PLAYING", state);
+    } else {
+      // BIN-507 port: runde starter uten billetter → SPECTATING
+      this.transitionTo("SPECTATING", state);
+    }
   }
 
   private onGameEnded(state: GameState): void {
     if (this.phase === "PLAYING") this.transitionTo("ENDED", state);
     else this.transitionTo("LOBBY", state);
-    this.deps.socket.armBet({ roomCode: this.actualRoomCode, armed: true });
+    // BIN-530 port: ingen auto-re-arm. Spilleren velger i BuyPopup.
   }
 
   private onNumberDrawn(number: number, drawIndex: number, state: GameState): void {
-    if (this.phase === "PLAYING" && this.playScreen) this.playScreen.onNumberDrawn(number, drawIndex, state);
+    if ((this.phase === "PLAYING" || this.phase === "SPECTATING") && this.playScreen) {
+      this.playScreen.onNumberDrawn(number, drawIndex, state);
+    }
   }
 
   private onPatternWon(result: PatternWonPayload, _state: GameState): void {

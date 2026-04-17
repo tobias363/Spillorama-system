@@ -117,8 +117,8 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Chat | 🔴 | ✅ | ❌ | ❌ | ❌ | Egen issue må opprettes |
 | Audio (nummerannouncement) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue må opprettes |
 | Loader-barriere (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-500-mønster til G2 |
-| SPECTATING-fase | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-507-mønster til G2 |
-| Eksplisitt kjøp (fjern auto-arm) | ❌ | ✅ | ❌ | ✅ | ❌ | G1 har dette, G2 mangler |
+| SPECTATING-fase | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-507](https://linear.app/bingosystem/issue/BIN-507) portet til G2 |
+| Eksplisitt kjøp (fjern auto-arm) | ✅ | ✅ | ✅ | ✅ | 🟡 | G1 har dette, portet til G2 |
 
 ### 3.2 Game-specific features
 
@@ -133,7 +133,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-529** — `docs/engineering/game2-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game2.js`. Se spec §11 for kjente avvik.
 
-**Game 2 totalt:** 14 rader — 0 ✅, 9 🟡, 5 ❌. **Release-klar: 0/14 (0 %) — MVP-nivå, trenger flere features + staging-integrasjon.**
+**Game 2 totalt:** 14 rader — 0 ✅, 11 🟡, 3 ❌. **Release-klar: 0/14 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp portet).
 
 ---
 
@@ -157,8 +157,8 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Lucky number | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
 | Audio (nummerannouncement) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue |
 | Loader-barriere (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-500-mønster til G3 |
-| SPECTATING-fase | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-507-mønster til G3 |
-| Eksplisitt kjøp (fjern auto-arm) | ❌ | ✅ | ❌ | ✅ | ❌ | G1 har dette, G3 mangler |
+| SPECTATING-fase | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-507](https://linear.app/bingosystem/issue/BIN-507) portet til G3 |
+| Eksplisitt kjøp (fjern auto-arm) | ✅ | ✅ | ✅ | ✅ | 🟡 | G1 har dette, portet til G3 |
 
 ### 4.2 Game-specific features
 
@@ -174,7 +174,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-530** — `docs/engineering/game3-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game3.js`. Se spec §11 for kjente avvik.
 
-**Game 3 totalt:** 16 rader — 0 ✅, 10 🟡, 6 ❌. **Release-klar: 0/16 (0 %) — MVP-nivå.**
+**Game 3 totalt:** 16 rader — 0 ✅, 12 🟡, 4 ❌. **Release-klar: 0/16 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp portet).
 
 ---
 
@@ -196,8 +196,8 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Chat | 🔴 | ✅ | ❌ | ❌ | ❌ | Egen issue må opprettes |
 | Audio | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue må opprettes |
 | Loader-barriere (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-500-mønster til G5 |
-| SPECTATING-fase | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-507-mønster til G5 |
-| Eksplisitt kjøp (fjern auto-arm) | ❌ | ✅ | ❌ | ✅ | ❌ | G1 har dette, G5 mangler |
+| SPECTATING-fase | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-507](https://linear.app/bingosystem/issue/BIN-507) portet til G5 |
+| Eksplisitt kjøp (fjern auto-arm) | ✅ | ✅ | ✅ | ✅ | 🟡 | G1 har dette, portet til G5 |
 | KYC-gatekeep (verified player) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-514](https://linear.app/bingosystem/issue/BIN-514) |
 
 ### 5.2 Game-specific features
@@ -218,7 +218,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-531** — `docs/engineering/game5-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game5.js`. Se spec §11 for kjente avvik.
 
-**Game 5 totalt:** 20 rader — 0 ✅, 11 🟡, 9 ❌. **Release-klar: 0/20 (0 %) — MVP-nivå.**
+**Game 5 totalt:** 20 rader — 0 ✅, 13 🟡, 7 ❌. **Release-klar: 0/20 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp portet).
 
 ---
 
@@ -227,10 +227,10 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Spill | Rader | ✅ | 🟡 | ❌ | Release-klar % |
 |-------|------:|---:|---:|---:|---------------:|
 | Game 1 (Databingo) | 32 | 14 | 16 | 2 | 31 % |
-| Game 2 (Rocket) | 14 | 0 | 9 | 5 | 0 % |
-| Game 3 (Monster) | 16 | 0 | 10 | 6 | 0 % |
-| Game 5 (Spillorama) | 20 | 0 | 11 | 9 | 0 % |
-| **Totalt** | **82** | **14** | **46** | **22** | **17 %** |
+| Game 2 (Rocket) | 14 | 0 | 11 | 3 | 0 % |
+| Game 3 (Monster) | 16 | 0 | 12 | 4 | 0 % |
+| Game 5 (Spillorama) | 20 | 0 | 13 | 7 | 0 % |
+| **Totalt** | **82** | **14** | **52** | **16** | **17 %** |
 
 Totalsum regnet per **Release-klar**-kolonnen — det er den som styrer cutover-beslutning per [`LEGACY_DECOUPLING_STATUS.md`](../architecture/LEGACY_DECOUPLING_STATUS.md).
 
@@ -295,3 +295,4 @@ Automatisk generator fra YAML front-matter i per-spill canonical specs er planla
 | 2026-04-17 | BIN-509/505/506 batch | Agent 2 leverte: BIN-509 Elvis-replace + replaceAmount debitering (PR #121 `41740f2f`); BIN-505/506 Mystery + ColorDraft 4-way rotation (PR #122 `f31f36c2`). BIN-521 (replaceAmount) dekket via BIN-509. G1 4 rader flyttet ❌ → 🟡. Totalsum G1: 14 ✅, 16 🟡, 2 ❌. |
 | 2026-04-17 | BIN-531 PR | Game 5 canonical spec levert — `docs/engineering/game5-canonical-spec.md` med YAML front-matter. G5-matrise utvidet fra 12 → 20 rader: 0 ✅, 11 🟡, 9 ❌. Spec §11 lister 8 G5-unike avvik (rulett-fysikk, Free Spin Jackpot, SwapTicket, KYC, billettfarger, auto-select m.fl.) + G1-paritets-avvik. Totalsum 75 rader (G1: 32, G2: 14, G3: 9, G5: 20). |
 | 2026-04-17 | BIN-530 PR | Game 3 canonical spec levert — `docs/engineering/game3-canonical-spec.md`. G3-matrise utvidet fra 9 → 16 rader: 0 ✅, 10 🟡, 6 ❌. G3 har chat (delt fra G1) men mangler waypoint-bane, pattern-animasjon og multiple patterns. **Siste i per-spill canonical spec-serien — alle fire spill nå fullt spesifisert.** Totalsum 82 rader. |
+| 2026-04-17 | G2+G3+G5 G1-paritet PR | SPECTATING-fase + eksplisitt kjøp (fjern auto-arm) portet fra G1 til G2/G3/G5. 6 rader flyttet fra ❌ til 🟡. Canonical specs oppdatert (`autoArm: false` i alle tre YAML-front-matter). tsc + 72/72 tester grønne. Totalsum: 14 ✅, 52 🟡, 16 ❌ (17 % release-klar). Loader-barriere-port (BIN-500-mønster) gjenstår som oppfølger — krever LoadingOverlay-komponent per spill. |
