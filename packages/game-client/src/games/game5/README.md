@@ -1,7 +1,10 @@
 # Game 5 — Spillorama Bingo (Web-implementasjon)
 
 **Status:** Funksjonell MVP — 3x5 grids + ruletthjul + LINE/BINGO
-**Dato:** 2026-04-14
+**Dato:** 2026-04-17 (opprinnelig: 2026-04-14)
+
+> **Autoritativ spesifikasjon:** [`docs/engineering/game5-canonical-spec.md`](../../../../../docs/engineering/game5-canonical-spec.md) (BIN-531).
+> Ved motsigelser vinner canonical spec. Se spec §11 for 8 G5-unike avvik (rulett-fysikk, Free Spin Jackpot, SwapTicket, KYC-gate, billettfarger, auto-select m.fl.) + G1-paritets-avvik.
 
 ## Hva er implementert
 

@@ -172,37 +172,45 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 ## 5. Game 5 — Spillorama Bingo
 
-**Canonical spec:** *skal skrives — [BIN-531](https://linear.app/bingosystem/issue/BIN-531)*
-**Slug:** (TBD)
-**Grid:** 3×5 + ruletthjul
+**Canonical spec:** [`game5-canonical-spec.md`](game5-canonical-spec.md) (BIN-531 levert)
+**Slug:** `spillorama`
+**Grid:** 3×5 (15 celler) — 60-ball range + ruletthjul
 
 ### 5.1 Kjerne-features
 
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
-| Rom-join + authoritative state | ❌ | 🟡 | ✅ | ❌ | ❌ | [BIN-531](https://linear.app/bingosystem/issue/BIN-531) |
-| Billett-kjøp | ❌ | 🟡 | ✅ | ❌ | ❌ | [BIN-531](https://linear.app/bingosystem/issue/BIN-531) |
-| Ticket-mark (slim) | 🔴 | 🔴 | ❌ | ❌ | ❌ | [BIN-499](https://linear.app/bingosystem/issue/BIN-499) (shared) |
-| Claim LINE + BINGO | ❌ | 🟡 | ✅ | ❌ | ❌ | [BIN-531](https://linear.app/bingosystem/issue/BIN-531) |
-| Trekning + drawIndex | ❌ | ✅ | ✅ | ❌ | ❌ | [BIN-502](https://linear.app/bingosystem/issue/BIN-502) (shared) |
+| Rom-join + authoritative state | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
+| Billett-kjøp (1 type "standard") | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
+| Ticket-mark (slim) | ✅ | ✅ | 🟡 | ✅ | 🟡 | [BIN-499](https://linear.app/bingosystem/issue/BIN-499) shared (merged) |
+| Claim LINE + BINGO | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
+| Trekning + drawIndex | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-502](https://linear.app/bingosystem/issue/BIN-502) shared (merged) |
+| Chat | 🔴 | ✅ | ❌ | ❌ | ❌ | Egen issue må opprettes |
+| Audio | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue må opprettes |
+| Loader-barriere (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-500-mønster til G5 |
+| SPECTATING-fase | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-507-mønster til G5 |
+| Eksplisitt kjøp (fjern auto-arm) | ❌ | ✅ | ❌ | ✅ | ❌ | G1 har dette, G5 mangler |
 | KYC-gatekeep (verified player) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-514](https://linear.app/bingosystem/issue/BIN-514) |
 
 ### 5.2 Game-specific features
 
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
-| Ruletthjul (fysikk-basert) | 🔴 | 🔵 | 🟡 | ❌ | ❌ | [BIN-531](https://linear.app/bingosystem/issue/BIN-531) |
-| Free Spin Jackpot | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-531](https://linear.app/bingosystem/issue/BIN-531) |
+| Ruletthjul (ren GSAP, MVP) | 🔴 | 🔵 | ✅ | ❌ | 🟡 | — |
+| Ruletthjul m/ fysikk (matter.js) | 🔴 | 🔵 | 🟡 | ❌ | ❌ | Egen issue: fysikk-port |
+| DrumRotation (kontinuerlig) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue |
+| Free Spin Jackpot | 🔴 | ❌ | 🟡 (stub) | ❌ | ❌ | [BIN-531](https://linear.app/bingosystem/issue/BIN-531) oppfølger |
 | `SwapTicket` (bytt midt i runde) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-510](https://linear.app/bingosystem/issue/BIN-510) |
 | `SelectWofAuto` / `SelectRouletteAuto` | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-519](https://linear.app/bingosystem/issue/BIN-519) |
 | `checkForWinners` eksplisitt | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-512](https://linear.app/bingosystem/issue/BIN-512) |
-| Billettfarger (4 varianter) | 🔴 | 🔵 | 🟡 | ❌ | ❌ | [BIN-531](https://linear.app/bingosystem/issue/BIN-531) |
+| Billettfarger (4 varianter) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue som del av G5 paritet |
 
 ### 5.3 Canonical spec status
 
-- [ ] **BIN-531** — skriv `docs/engineering/game5-canonical-spec.md`
+- [x] **BIN-531** — `docs/engineering/game5-canonical-spec.md` skrevet med YAML front-matter (levert)
+- Rader verifisert mot kode + legacy `Sockets/game5.js`. Se spec §11 for kjente avvik.
 
-**Game 5 totalt:** 12 rader — 0 ✅, 5 🟡, 7 ❌. **Venter på canonical spec.**
+**Game 5 totalt:** 20 rader — 0 ✅, 11 🟡, 9 ❌. **Release-klar: 0/20 (0 %) — MVP-nivå.**
 
 ---
 
@@ -213,8 +221,8 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Game 1 (Databingo) | 32 | 14 | 16 | 2 | 31 % |
 | Game 2 (Rocket) | 14 | 0 | 9 | 5 | 0 % |
 | Game 3 (Monster) | 9 | 0 | 5 | 4 | 0 % |
-| Game 5 (Spillorama) | 12 | 0 | 5 | 7 | 0 % |
-| **Totalt** | **67** | **14** | **35** | **18** | **21 %** |
+| Game 5 (Spillorama) | 20 | 0 | 11 | 9 | 0 % |
+| **Totalt** | **75** | **14** | **41** | **20** | **19 %** |
 
 Totalsum regnet per **Release-klar**-kolonnen — det er den som styrer cutover-beslutning per [`LEGACY_DECOUPLING_STATUS.md`](../architecture/LEGACY_DECOUPLING_STATUS.md).
 
@@ -277,3 +285,4 @@ Automatisk generator fra YAML front-matter i per-spill canonical specs er planla
 | 2026-04-17 | BIN-507 PR | BIN-507 SPECTATING-fase ✅ (klient i main) — ny phase i Game1Controller, transitions fra start/onGameStarted/handleReconnect, live draws via onSpectatorNumberDrawn, server-guards verifisert (PLAYER_NOT_PARTICIPATING, NOT_ARMED_FOR_GAME, MARKS_NOT_FOUND). Rad nå 🟡 Release-klar (venter på manuell late-join-test mot staging). G1 totalt: 14 ✅, 12 🟡, 6 ❌. |
 | 2026-04-17 | BIN-529 PR | Game 2 canonical spec levert — `docs/engineering/game2-canonical-spec.md` med YAML front-matter. G2-matrise utvidet fra 10 → 14 rader (verifisert mot kode + legacy `Sockets/game2.js`): 0 ✅, 9 🟡, 5 ❌. Spec §11 lister avvik fra G1 (SPECTATING, loader-barriere, eksplisitt kjøp) som egne port-issues. Totalsum 67 rader (G1: 32, G2: 14, G3: 9, G5: 12). |
 | 2026-04-17 | BIN-509/505/506 batch | Agent 2 leverte: BIN-509 Elvis-replace + replaceAmount debitering (PR #121 `41740f2f`); BIN-505/506 Mystery + ColorDraft 4-way rotation (PR #122 `f31f36c2`). BIN-521 (replaceAmount) dekket via BIN-509. G1 4 rader flyttet ❌ → 🟡. Totalsum G1: 14 ✅, 16 🟡, 2 ❌. |
+| 2026-04-17 | BIN-531 PR | Game 5 canonical spec levert — `docs/engineering/game5-canonical-spec.md` med YAML front-matter. G5-matrise utvidet fra 12 → 20 rader: 0 ✅, 11 🟡, 9 ❌. Spec §11 lister 8 G5-unike avvik (rulett-fysikk, Free Spin Jackpot, SwapTicket, KYC, billettfarger, auto-select m.fl.) + G1-paritets-avvik. Totalsum 75 rader (G1: 32, G2: 14, G3: 9, G5: 20). |
