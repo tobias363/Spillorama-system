@@ -5,6 +5,8 @@ import { AudioManager } from "../audio/AudioManager.js";
 import { createGame, registryReady, type GameController } from "../games/registry.js";
 import { telemetry } from "../telemetry/Telemetry.js";
 import { initSentry, captureClientMessage } from "../telemetry/Sentry.js";
+import { LoadingOverlay } from "../components/LoadingOverlay.js";
+import { WebGLContextGuard } from "./WebGLContextGuard.js";
 
 export interface GameMountConfig {
   gameSlug: string;
@@ -28,6 +30,11 @@ export class GameApp {
   private gameController: GameController | null = null;
   /** BIN-539: 30-second gap-metric watchdog. */
   private gapWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  /** BIN-542: WebGL context-loss recovery. */
+  private contextGuard: WebGLContextGuard | null = null;
+  private recoveryOverlay: LoadingOverlay | null = null;
+  private container: HTMLElement | null = null;
+  private restartInFlight = false;
 
   constructor() {
     this.app = new Application();
@@ -36,6 +43,7 @@ export class GameApp {
 
   async init(container: HTMLElement, config: GameMountConfig): Promise<void> {
     this.config = config;
+    this.container = container;
 
     // Store token for socket/api access
     if (config.accessToken) {
@@ -51,6 +59,16 @@ export class GameApp {
       autoDensity: true,
     });
     container.appendChild(this.app.canvas);
+
+    // BIN-542: Guard against WebGL context-loss (iOS Safari, low memory).
+    // On loss: show overlay. On restored: destroy + re-init via onRestored.
+    this.contextGuard = new WebGLContextGuard({
+      canvas: this.app.canvas,
+      gameSlug: config.gameSlug,
+      hallId: config.hallId,
+      onContextLost: () => this.handleContextLost(),
+      onContextRestored: () => this.handleContextRestored(),
+    });
 
     // Init telemetry + Sentry sidecar. Sentry is a no-op when
     // VITE_SENTRY_DSN is unset, so dev stays noise-free.
@@ -124,6 +142,10 @@ export class GameApp {
       clearTimeout(this.gapWatchdogTimer);
       this.gapWatchdogTimer = null;
     }
+    this.contextGuard?.destroy();
+    this.contextGuard = null;
+    this.recoveryOverlay?.destroy();
+    this.recoveryOverlay = null;
     this.gameController?.destroy();
     this.gameController = null;
     this.bridge?.stop();
@@ -133,5 +155,61 @@ export class GameApp {
     this.audio?.destroy();
     this.audio = null;
     this.app.destroy(true, { children: true });
+  }
+
+  /**
+   * BIN-542: Show recovery overlay when WebGL context is lost.
+   * The PIXI canvas is frozen; we can't render anything on-canvas.
+   * Use HTML overlay instead.
+   */
+  private handleContextLost(): void {
+    if (!this.container) return;
+    this.recoveryOverlay?.destroy();
+    this.recoveryOverlay = new LoadingOverlay(this.container);
+    this.recoveryOverlay.show("Gjenoppretter visning...");
+  }
+
+  /**
+   * BIN-542: On context-restored, destroy + re-init the app. The existing
+   * access token in sessionStorage + server-side room:state snapshot restores
+   * the full game state via the normal late-join flow (SPECTATING + loader-
+   * barrier + checkpoint recovery). `restartInFlight` prevents re-entrant
+   * restarts if context is lost again during recovery.
+   */
+  private async handleContextRestored(): Promise<void> {
+    if (this.restartInFlight || !this.container || !this.config) return;
+    this.restartInFlight = true;
+
+    const container = this.container;
+    const config = this.config;
+
+    try {
+      // Tear down everything bound to the lost context.
+      this.contextGuard?.destroy();
+      this.contextGuard = null;
+      this.gameController?.destroy();
+      this.gameController = null;
+      this.bridge?.stop();
+      this.bridge = null;
+      this.socket?.disconnect();
+      this.socket = null;
+      this.audio?.destroy();
+      this.audio = null;
+
+      // Replace the dead PIXI app with a fresh one. Can't reuse `this.app`
+      // because its GL state is bound to the (now-disposed) lost context.
+      this.app.destroy(true, { children: true });
+      (this as { app: Application }).app = new Application();
+      (this as { stage: Container }).stage = this.app.stage;
+
+      // Re-run init. This re-attaches the guard, reconnects, re-subscribes,
+      // and triggers the normal late-join flow.
+      await this.init(container, config);
+    } finally {
+      this.restartInFlight = false;
+      this.recoveryOverlay?.hide();
+      this.recoveryOverlay?.destroy();
+      this.recoveryOverlay = null;
+    }
   }
 }

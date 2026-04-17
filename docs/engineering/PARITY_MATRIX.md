@@ -87,12 +87,12 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Observability (Sentry + funnel) | 🔵 | ✅ | ✅ | ✅ | 🟡 | [BIN-539](https://linear.app/bingosystem/issue/BIN-539) ✅ merged — venter på Grafana-dashboards provisjonert |
 | Feature-flag rollback-runbook | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-540](https://linear.app/bingosystem/issue/BIN-540) ✅ merged — backend + klient + runbook + `halls.client_variant`-migrasjon |
 | Unity arkiv-bundle (CDN) | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-532](https://linear.app/bingosystem/issue/BIN-532) — scope-endret til ett-gangs lokal build → read-only CDN-arkiv på `/legacy-unity-archive/v1.0.0/`. Runbook `docs/operations/UNITY_ARCHIVE_RUNBOOK.md`. Status flippes til ✅ når Tobias har lastet opp bundle og `curl -I` gir 200. |
-| iOS Safari WebGL context-loss test | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-542](https://linear.app/bingosystem/issue/BIN-542) |
+| iOS Safari WebGL context-loss test | 🔵 | 🔵 | ✅ | ✅ | 🟡 | [BIN-542](https://linear.app/bingosystem/issue/BIN-542) — `WebGLContextGuard.ts` håndterer `webglcontextlost`/`restored` (preventDefault + destroy+reinit PIXI app + state-recovery via room:state snapshot). 7 unit-tester grønne. Release-klar 🟡 venter på første live iOS Safari-verifisering i pilot. |
 | GSAP-lisensavklaring | 🔵 | 🔵 | ✅ | ✅ | ✅ | [BIN-538](https://linear.app/bingosystem/issue/BIN-538) — GSAP er 100 % gratis for kommersiell bruk (Webflow-oppkjøp fjernet alle Business-tier). Ingen lisens-innkjøp eller Lotteritilsynet-avklaring nødvendig. Se `docs/compliance/GSAP_LICENSE.md`. |
 | Asset-pipeline (Unity → PixiJS) | 🔵 | 🔵 | 🟡 | ✅ | ❌ | [BIN-543](https://linear.app/bingosystem/issue/BIN-543) |
 | PlayerPrefs → localStorage mapping | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-544](https://linear.app/bingosystem/issue/BIN-544) |
 
-**Game 1 totalt:** 42 rader — 15 ✅, 24 🟡, 3 ❌. Release-klar: 15 / 42 (36 %). Bolk 5-leveransene (BIN-516 chat-persistens, BIN-541 Spillvett cross-game, BIN-498 hall-display + BIN-504 konsolidert) flyttet 3 rader ❌ → 🟡 på Backend-paritet. Bolk 4 flyttet BIN-526 (❌→✅) og BIN-540 (🟡→✅) til fullt Release-klar. Bolk 6 BIN-532 la til ny rad "Unity rollback-bundle CI" (🟡 Release-klar). Bolk 7 BIN-503 + BIN-515 + BIN-517 flyttet AdminHallDisplayLogin, Admin hall-events og Admin-dashboard ❌ → 🟡 Release-klar (DB-tokens + live-operator-panel + dashboard m/ live-rom + finansielle rapporter + per-spill statistikk). Gjenstående 🟡 venter i hovedsak på staging-verifisering eller pilot-cutover.
+**Game 1 totalt:** 42 rader — 15 ✅, 25 🟡, 2 ❌. Release-klar: 15 / 42 (36 %). Bolk 5-leveransene (BIN-516 chat-persistens, BIN-541 Spillvett cross-game, BIN-498 hall-display + BIN-504 konsolidert) flyttet 3 rader ❌ → 🟡 på Backend-paritet. Bolk 4 flyttet BIN-526 (❌→✅) og BIN-540 (🟡→✅) til fullt Release-klar. Bolk 6 BIN-532 la til ny rad "Unity rollback-bundle CI" (🟡 Release-klar). Bolk 7 BIN-503 + BIN-515 + BIN-517 flyttet AdminHallDisplayLogin, Admin hall-events og Admin-dashboard ❌ → 🟡 Release-klar (DB-tokens + live-operator-panel + dashboard m/ live-rom + finansielle rapporter + per-spill statistikk). Gjenstående 🟡 venter i hovedsak på staging-verifisering eller pilot-cutover.
 
 ---
 
@@ -219,11 +219,11 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 | Spill | Rader | ✅ | 🟡 | ❌ | Release-klar % |
 |-------|------:|---:|---:|---:|---------------:|
-| Game 1 (Databingo) | 42 | 15 | 24 | 3 | 36 % |
+| Game 1 (Databingo) | 42 | 15 | 25 | 2 | 36 % |
 | Game 2 (Rocket) | 15 | 0 | 13 | 2 | 0 % |
 | Game 3 (Monster) | 16 | 0 | 13 | 3 | 0 % |
 | Game 5 (Spillorama) | 19 | 0 | 11 | 8 | 0 % |
-| **Totalt** | **92** | **15** | **61** | **16** | **16 %** |
+| **Totalt** | **92** | **15** | **62** | **15** | **16 %** |
 
 Totalsum regnet per **Release-klar**-kolonnen — det er den som styrer cutover-beslutning per [`LEGACY_DECOUPLING_STATUS.md`](../architecture/LEGACY_DECOUPLING_STATUS.md).
 
