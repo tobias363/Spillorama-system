@@ -40,6 +40,7 @@ import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { errorReporter } from "./middleware/errorReporter.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
+import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -440,7 +441,33 @@ const registerGameEvents = createGameEventHandlers({
   chatMessageStore,
 });
 
-io.on("connection", (socket: Socket) => { registerGameEvents(socket); });
+// BIN-498: TV-display socket handlers. Validation is a simple env-var token
+// gate (`HALL_DISPLAY_TOKEN_<HALL_SLUG>` → hall slug). Full RBAC lands with
+// BIN-503; this is sufficient for the pilot single-hall TV.
+const registerAdminDisplayEvents = createAdminDisplayHandlers({
+  engine, platformService, io,
+  validateDisplayToken: async (token) => {
+    // Token format: "<HALL_SLUG>:<SECRET>". The matching env var is
+    // HALL_DISPLAY_TOKEN_<UPPER_HALL_SLUG>=SECRET. Empty/missing env-var
+    // means the hall has no display token configured — reject closed.
+    const colon = token.indexOf(":");
+    if (colon <= 0) throw new Error("token format ugyldig (forventer <hallSlug>:<secret>)");
+    const hallSlug = token.slice(0, colon).trim();
+    const secret = token.slice(colon + 1).trim();
+    if (!hallSlug || !secret) throw new Error("token format ugyldig");
+    const envName = `HALL_DISPLAY_TOKEN_${hallSlug.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+    const expected = (process.env[envName] ?? "").trim();
+    if (!expected) throw new Error(`hall ${hallSlug} har ingen display-token konfigurert`);
+    if (expected !== secret) throw new Error("token mismatch");
+    const hall = await platformService.getHall(hallSlug);
+    return { hallId: hall.id };
+  },
+});
+
+io.on("connection", (socket: Socket) => {
+  registerGameEvents(socket);
+  registerAdminDisplayEvents(socket);
+});
 
 // ── Debug/test endpoint — room gap detection (localhost-only) ─────────────────
 app.get("/api/room-gap/:code", (req, res) => {

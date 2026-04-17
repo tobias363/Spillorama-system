@@ -77,6 +77,8 @@ export interface HallDefinition {
   isActive: boolean;
   /** BIN-540: which client engine this hall serves (unity | web | unity-fallback). */
   clientVariant: HallClientVariant;
+  /** BIN-498: optional embed URL shown on the hall TV-display between rounds. */
+  tvUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -278,6 +280,8 @@ interface HallRow {
   is_active: boolean;
   /** BIN-540. */
   client_variant: HallClientVariant;
+  /** BIN-498. */
+  tv_url: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -732,7 +736,7 @@ export class PlatformService {
     await this.ensureInitialized();
     const includeInactive = options?.includeInactive ?? false;
     const { rows } = await this.pool.query<HallRow>(
-      `SELECT id, slug, name, region, address, is_active, client_variant, created_at, updated_at
+      `SELECT id, slug, name, region, address, is_active, client_variant, tv_url, created_at, updated_at
        FROM ${this.hallsTable()}
        ${includeInactive ? "" : "WHERE is_active = true"}
        ORDER BY name ASC, slug ASC`
@@ -1606,6 +1610,7 @@ export class PlatformService {
       // happen — CHECK constraint enforces non-null with DEFAULT 'unity' — but
       // guards against rows pre-dating the migration on a mid-flight deploy).
       clientVariant: (row.client_variant ?? "unity") as HallClientVariant,
+      tvUrl: row.tv_url ?? undefined,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
@@ -1796,7 +1801,7 @@ export class PlatformService {
     const normalizedReference = this.assertEntityReference(hallReference, "hallId");
     const normalizedSlug = normalizedReference.toLowerCase();
     const { rows } = await this.pool.query<HallRow>(
-      `SELECT id, slug, name, region, address, is_active, client_variant, created_at, updated_at
+      `SELECT id, slug, name, region, address, is_active, client_variant, tv_url, created_at, updated_at
        FROM ${this.hallsTable()}
        WHERE id = $1
           OR slug = $2
