@@ -41,6 +41,7 @@ import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushS
 import { errorReporter } from "./middleware/errorReporter.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
 import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
+import { createAdminHallHandlers } from "./sockets/adminHallEvents.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -479,9 +480,17 @@ const registerAdminDisplayEvents = createAdminDisplayHandlers({
   },
 });
 
+// BIN-515: Admin hall-event socket handlers. Authentication is the
+// existing JWT access-token path; the handler itself checks
+// ROOM_CONTROL_WRITE per event.
+const registerAdminHallEvents = createAdminHallHandlers({
+  engine, platformService, io, emitRoomUpdate,
+});
+
 io.on("connection", (socket: Socket) => {
   registerGameEvents(socket);
   registerAdminDisplayEvents(socket);
+  registerAdminHallEvents(socket);
 });
 
 // ── Debug/test endpoint — room gap detection (localhost-only) ─────────────────

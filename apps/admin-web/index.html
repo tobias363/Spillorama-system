@@ -732,6 +732,40 @@
             <button id="drawNextBtn" class="secondary">Trekk neste</button>
             <button id="endRoomBtn" class="secondary">Avslutt spill</button>
           </div>
+
+          <!-- BIN-515: Live hall-operator controls. -->
+          <div style="margin-top: 16px; padding: 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+            <h3 style="margin: 0 0 8px; font-size: 16px;">Live hall-kontroll (BIN-515)</h3>
+            <p class="muted" style="margin: 0 0 8px; font-size: 13px;">
+              Signaliser klar før spill starter, pause/fortsett mellom trekninger (regulatorisk),
+              force-end ved teknisk feil (Lotteritilsynet-krav).
+            </p>
+            <div class="grid">
+              <div class="field">
+                <label for="roomReadyCountdown">Nedtelling (sek)</label>
+                <input id="roomReadyCountdown" type="number" min="0" max="300" value="15" />
+              </div>
+              <div class="field">
+                <label for="roomReadyMessage">Melding (valgfri)</label>
+                <input id="roomReadyMessage" placeholder="Starter snart!" maxlength="200" />
+              </div>
+              <div class="field">
+                <label for="pauseResumeMessage">Pause-melding (valgfri)</label>
+                <input id="pauseResumeMessage" placeholder="Teknisk pause" maxlength="200" />
+              </div>
+              <div class="field">
+                <label for="forceEndReason">Force-end grunn</label>
+                <input id="forceEndReason" placeholder="F.eks. strømbrudd" maxlength="200" />
+              </div>
+            </div>
+            <div class="toolbar">
+              <button id="roomReadyBtn">Signaliser klar</button>
+              <button id="pauseGameBtn" class="secondary">Pause spill</button>
+              <button id="resumeGameBtn" class="secondary">Fortsett spill</button>
+              <button id="forceEndBtn" class="secondary" style="background: #fee2e2; color: #991b1b;">Force-end (teknisk feil)</button>
+            </div>
+            <pre id="hallEventStatus" class="status" style="margin-top: 8px;">Klar.</pre>
+          </div>
           <pre id="roomStatus" class="status">Ingen rom valgt.</pre>
         </article>
           </div>

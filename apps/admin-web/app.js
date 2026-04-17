@@ -32,6 +32,10 @@ const CHAT3_ACTION_PERMISSION_RULES = {
   startRoomBtn: "ROOM_CONTROL_WRITE",
   drawNextBtn: "ROOM_CONTROL_WRITE",
   endRoomBtn: "ROOM_CONTROL_WRITE",
+  roomReadyBtn: "ROOM_CONTROL_WRITE",
+  pauseGameBtn: "ROOM_CONTROL_WRITE",
+  resumeGameBtn: "ROOM_CONTROL_WRITE",
+  forceEndBtn: "ROOM_CONTROL_WRITE",
   loadComplianceBtn: "WALLET_COMPLIANCE_READ",
   saveLossLimitsBtn: "WALLET_COMPLIANCE_WRITE",
   setTimedPauseBtn: "WALLET_COMPLIANCE_WRITE",
@@ -174,6 +178,17 @@ const elements = {
   drawNextBtn: document.getElementById("drawNextBtn"),
   endRoomBtn: document.getElementById("endRoomBtn"),
   roomStatus: document.getElementById("roomStatus"),
+
+  // BIN-515: Live hall-operator controls.
+  roomReadyCountdown: document.getElementById("roomReadyCountdown"),
+  roomReadyMessage: document.getElementById("roomReadyMessage"),
+  pauseResumeMessage: document.getElementById("pauseResumeMessage"),
+  forceEndReason: document.getElementById("forceEndReason"),
+  roomReadyBtn: document.getElementById("roomReadyBtn"),
+  pauseGameBtn: document.getElementById("pauseGameBtn"),
+  resumeGameBtn: document.getElementById("resumeGameBtn"),
+  forceEndBtn: document.getElementById("forceEndBtn"),
+  hallEventStatus: document.getElementById("hallEventStatus"),
   // Chat3: RBAC block start
   settingsLogGameSlug: null,
   settingsLogLimit: null,
@@ -2304,6 +2319,90 @@ async function handleEndRoom() {
   }
 }
 
+// BIN-515: Live hall-operator handlers ────────────────────────────────────
+
+async function handleRoomReady() {
+  const roomCode = getSelectedRoomCode();
+  const countdownRaw = Number(elements.roomReadyCountdown.value);
+  const countdownSeconds = Number.isFinite(countdownRaw) ? countdownRaw : undefined;
+  const message = (elements.roomReadyMessage.value || "").trim() || undefined;
+  setLoading(elements.roomReadyBtn, true, "Sender...", "Signaliser klar");
+  try {
+    const event = await apiRequest(
+      `/api/admin/rooms/${encodeURIComponent(roomCode)}/room-ready`,
+      { method: "POST", auth: true, body: { countdownSeconds, message } },
+    );
+    setStatus(
+      elements.hallEventStatus,
+      [
+        `Klar-signal sendt til ${event.roomCode}`,
+        event.countdownSeconds !== undefined ? `Nedtelling: ${event.countdownSeconds}s` : "Ingen nedtelling",
+        event.message ? `Melding: ${event.message}` : ""
+      ].filter(Boolean).join("\n"),
+      "success",
+    );
+  } finally {
+    setLoading(elements.roomReadyBtn, false, "Sender...", "Signaliser klar");
+  }
+}
+
+async function handlePauseGame() {
+  const roomCode = getSelectedRoomCode();
+  const message = (elements.pauseResumeMessage.value || "").trim() || undefined;
+  setLoading(elements.pauseGameBtn, true, "Pauser...", "Pause spill");
+  try {
+    const result = await apiRequest(
+      `/api/admin/rooms/${encodeURIComponent(roomCode)}/game/pause`,
+      { method: "POST", auth: true, body: { message } },
+    );
+    setStatus(
+      elements.hallEventStatus,
+      `Spill pauset i ${result.roomCode}${message ? ` — ${message}` : ""}`,
+      "success",
+    );
+  } finally {
+    setLoading(elements.pauseGameBtn, false, "Pauser...", "Pause spill");
+  }
+}
+
+async function handleResumeGame() {
+  const roomCode = getSelectedRoomCode();
+  setLoading(elements.resumeGameBtn, true, "Fortsetter...", "Fortsett spill");
+  try {
+    const result = await apiRequest(
+      `/api/admin/rooms/${encodeURIComponent(roomCode)}/game/resume`,
+      { method: "POST", auth: true, body: {} },
+    );
+    setStatus(elements.hallEventStatus, `Spill fortsatt i ${result.roomCode}.`, "success");
+  } finally {
+    setLoading(elements.resumeGameBtn, false, "Fortsetter...", "Fortsett spill");
+  }
+}
+
+async function handleForceEnd() {
+  const roomCode = getSelectedRoomCode();
+  const reason = (elements.forceEndReason.value || "").trim() || "FORCE_END_ADMIN";
+  // Force-end is destructive and Lotteritilsynet-logged — require confirmation.
+  if (!window.confirm(
+    `Force-end spill i ${roomCode}?\n\nDette avslutter spillet umiddelbart og logges til Lotteritilsynet.\nÅrsak: ${reason}`
+  )) return;
+  setLoading(elements.forceEndBtn, true, "Avslutter...", "Force-end (teknisk feil)");
+  try {
+    const result = await apiRequest(
+      `/api/admin/rooms/${encodeURIComponent(roomCode)}/end`,
+      { method: "POST", auth: true, body: { reason } },
+    );
+    await loadRooms();
+    setStatus(
+      elements.hallEventStatus,
+      `Spill force-ended i ${result.roomCode}. Årsak: ${reason}`,
+      "success",
+    );
+  } finally {
+    setLoading(elements.forceEndBtn, false, "Avslutter...", "Force-end (teknisk feil)");
+  }
+}
+
 function buildGameUpdatePayload() {
   let parsedSettings;
   try {
@@ -3234,6 +3333,28 @@ async function bootstrap() {
   elements.endRoomBtn.addEventListener("click", () => {
     handleEndRoom().catch((error) => {
       setStatus(elements.roomStatus, error.message || "Kunne ikke avslutte spill.", "error");
+    });
+  });
+
+  // BIN-515: Live hall-operator wiring.
+  elements.roomReadyBtn.addEventListener("click", () => {
+    handleRoomReady().catch((err) => {
+      setStatus(elements.hallEventStatus, err.message || "Kunne ikke signalisere klar.", "error");
+    });
+  });
+  elements.pauseGameBtn.addEventListener("click", () => {
+    handlePauseGame().catch((err) => {
+      setStatus(elements.hallEventStatus, err.message || "Kunne ikke pause spill.", "error");
+    });
+  });
+  elements.resumeGameBtn.addEventListener("click", () => {
+    handleResumeGame().catch((err) => {
+      setStatus(elements.hallEventStatus, err.message || "Kunne ikke fortsette spill.", "error");
+    });
+  });
+  elements.forceEndBtn.addEventListener("click", () => {
+    handleForceEnd().catch((err) => {
+      setStatus(elements.hallEventStatus, err.message || "Kunne ikke force-avslutte spill.", "error");
     });
   });
 

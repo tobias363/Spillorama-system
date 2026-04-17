@@ -931,6 +931,43 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
     }
   });
 
+  // ── BIN-515: Room-ready broadcast (admin) ─────────────────────────────────
+  //
+  // Mirrors the socket-event `admin:room-ready` for admin-web operators who
+  // aren't on a live socket. Fires the same fan-out emit
+  // (`admin:hall-event` → room-code + `hall:<id>:display`) so the TV and
+  // spectator clients see the signal identically regardless of path.
+
+  router.post("/api/admin/rooms/:roomCode/room-ready", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
+      const roomCode = mustBeNonEmptyString(req.params.roomCode, "roomCode").toUpperCase();
+      const countdownRaw = req.body?.countdownSeconds;
+      const countdownSeconds = Number.isFinite(Number(countdownRaw))
+        ? Math.max(0, Math.min(300, Math.floor(Number(countdownRaw))))
+        : undefined;
+      const message = typeof req.body?.message === "string"
+        ? req.body.message.slice(0, 200)
+        : undefined;
+      // Confirm the room exists before advertising readiness.
+      const snapshot = engine.getRoomSnapshot(roomCode);
+      const event = {
+        kind: "room-ready" as const,
+        roomCode,
+        hallId: snapshot.hallId ?? null,
+        at: Date.now(),
+        countdownSeconds,
+        message,
+        actor: { id: adminUser.id, displayName: adminUser.displayName },
+      };
+      io.to(roomCode).emit("admin:hall-event", event);
+      if (event.hallId) io.to(`hall:${event.hallId}:display`).emit("admin:hall-event", event);
+      apiSuccess(res, event);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   // ── BIN-460: Game pause/resume (admin) ────────────────────────────────────
 
   router.post("/api/admin/rooms/:roomCode/game/pause", async (req, res) => {
