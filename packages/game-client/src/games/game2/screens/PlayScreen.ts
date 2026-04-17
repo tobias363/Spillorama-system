@@ -2,13 +2,18 @@ import { Container, Text } from "pixi.js";
 import type { GameState } from "../../../bridge/GameBridge.js";
 import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
 import type { AudioManager } from "../../../audio/AudioManager.js";
+import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 import { TicketScroller } from "../components/TicketScroller.js";
 import { TicketCard } from "../components/TicketCard.js";
 import { DrawnBallsPanel } from "../components/DrawnBallsPanel.js";
 import { ClaimButton } from "../components/ClaimButton.js";
 import { PlayerInfoBar } from "../components/PlayerInfoBar.js";
 import { RocketStack } from "../components/RocketStack.js";
+import { ChatPanel } from "../../game1/components/ChatPanel.js";
 import { checkClaims } from "../logic/ClaimDetector.js";
+
+const CHAT_WIDTH = 280;
+const CHAT_MARGIN = 12;
 
 /**
  * Main gameplay screen — shown during PLAYING state.
@@ -17,6 +22,7 @@ export class PlayScreen extends Container {
   private scroller: TicketScroller;
   private drawnBalls: DrawnBallsPanel;
   private rocketStack: RocketStack;
+  private chatPanel: ChatPanel | null = null;
   private lineBtn: ClaimButton;
   private bingoBtn: ClaimButton;
   private infoBar: PlayerInfoBar;
@@ -26,7 +32,13 @@ export class PlayScreen extends Container {
   private lineAlreadyWon = false;
   private bingoAlreadyWon = false;
 
-  constructor(screenWidth: number, screenHeight: number, audio: AudioManager) {
+  constructor(
+    screenWidth: number,
+    screenHeight: number,
+    audio: AudioManager,
+    socket?: SpilloramaSocket,
+    roomCode?: string,
+  ) {
     super();
     this.audio = audio;
 
@@ -51,24 +63,38 @@ export class PlayScreen extends Container {
     this.drawnBalls.y = 45;
     this.addChild(this.drawnBalls);
 
+    // Chat (right sidebar) — optional, enabled when socket + roomCode provided
+    const chatEnabled = socket != null && roomCode != null;
+    const chatRightEdge = screenWidth - CHAT_MARGIN;
+    const chatLeftEdge = chatEnabled ? chatRightEdge - CHAT_WIDTH : screenWidth;
+
     // Rocket-stabling — G2 signature. 60-ball range matches BingoEngine capacity.
     const rocketWidth = 42;
     const rocketMargin = 12;
     const rocketTop = 110;
     const rocketHeight = screenHeight - rocketTop - 80;
     this.rocketStack = new RocketStack(rocketWidth, rocketHeight, 60);
-    this.rocketStack.x = screenWidth - rocketWidth - rocketMargin;
+    this.rocketStack.x = (chatEnabled ? chatLeftEdge - rocketMargin : chatRightEdge) - rocketWidth;
     this.rocketStack.y = rocketTop;
     this.addChild(this.rocketStack);
 
-    // Ticket scroller (main area) — leave room for rocket on right.
+    // Ticket scroller (main area) — leave room for rocket (always) and chat (optional).
     const scrollerY = 100;
     const scrollerHeight = screenHeight - scrollerY - 80;
-    const scrollerWidth = screenWidth - 40 - rocketWidth - rocketMargin;
+    const scrollerWidth = this.rocketStack.x - rocketMargin - 20;
     this.scroller = new TicketScroller(scrollerWidth, scrollerHeight);
     this.scroller.x = 20;
     this.scroller.y = scrollerY;
     this.addChild(this.scroller);
+
+    if (chatEnabled) {
+      const chatTop = 45;
+      const chatHeight = screenHeight - chatTop - 20;
+      this.chatPanel = new ChatPanel(socket, roomCode, chatHeight);
+      this.chatPanel.x = chatLeftEdge;
+      this.chatPanel.y = chatTop;
+      this.addChild(this.chatPanel);
+    }
 
     // Claim buttons (bottom)
     this.lineBtn = new ClaimButton("LINE", 140, 50);

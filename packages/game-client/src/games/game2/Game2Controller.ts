@@ -215,7 +215,7 @@ class Game2Controller implements GameController {
         break;
 
       case "PLAYING":
-        this.playScreen = new PlayScreen(w, h, this.deps.audio);
+        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
@@ -226,7 +226,7 @@ class Game2Controller implements GameController {
         // BIN-507 port: samme render som PLAYING men uten tickets å markere.
         // Server-guards (MARKS_NOT_FOUND, PLAYER_NOT_PARTICIPATING) blokkerer
         // mark/claim fra spectators uansett.
-        this.playScreen = new PlayScreen(w, h, this.deps.audio);
+        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
         this.playScreen.buildTickets(state); // tom ticket-seksjon for spectator
         this.playScreen.updateInfo(state);

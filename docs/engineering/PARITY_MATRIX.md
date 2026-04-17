@@ -114,7 +114,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Claim LINE + BINGO | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
 | Trekning + drawIndex | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-502](https://linear.app/bingosystem/issue/BIN-502) shared (merged) |
 | Lucky number | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
-| Chat | 🔴 | ✅ | ❌ | ❌ | ❌ | Egen issue må opprettes |
+| Chat | 🔴 | ✅ | ✅ | ❌ | 🟡 | Gjenbruker G1 `ChatPanel` + BIN-516 DB-persistens |
 | Audio (nummerannouncement) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue må opprettes |
 | Loader-barriere (late-join) | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-500](https://linear.app/bingosystem/issue/BIN-500) portet til G2 |
 | SPECTATING-fase | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-507](https://linear.app/bingosystem/issue/BIN-507) portet til G2 |
