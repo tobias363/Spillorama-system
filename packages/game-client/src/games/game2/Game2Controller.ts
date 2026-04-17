@@ -8,7 +8,11 @@ import { LobbyScreen } from "./screens/LobbyScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { EndScreen } from "./screens/EndScreen.js";
 
-type Phase = "LOADING" | "LOBBY" | "PLAYING" | "ENDED";
+/**
+ * Phase-maskin for Game 2 (Rocket).
+ * BIN-507 port: SPECTATING lagt til for late-joiner midt i runde.
+ */
+type Phase = "LOADING" | "LOBBY" | "PLAYING" | "SPECTATING" | "ENDED";
 
 /**
  * Game 2 (Rocket Bingo) controller.
@@ -97,20 +101,21 @@ class Game2Controller implements GameController {
     this.root.eventMode = "static";
     this.root.on("pointerdown", () => this.deps.audio.unlock(), { once: true });
 
-    // Auto-arm so we're ready for the next game
-    console.log("[Game2] Auto-arming for next game...");
-    const armResult = await socket.armBet({
-      roomCode: this.actualRoomCode,
-      armed: true,
-    });
-    console.log("[Game2] Arm result:", armResult.ok, armResult.error || "");
+    // BIN-530/531 port: ingen auto-arm. Spilleren må eksplisitt kjøpe via
+    // BuyPopup i LOBBY-fasen. G1 fjernet auto-arm 2026-04-16 (commit dc03e24e);
+    // G2 følger nå samme mønster.
 
     // Transition based on initial game state
     const state = bridge.getState();
     console.log("[Game2] Initial state:", state.gameStatus, "tickets:", state.myTickets.length, "players:", state.playerCount);
 
-    if (state.gameStatus === "RUNNING" && state.myTickets.length > 0) {
-      this.transitionTo("PLAYING", state);
+    if (state.gameStatus === "RUNNING") {
+      // BIN-507 port: late-joiner midt i runde uten tickets → SPECTATING
+      if (state.myTickets.length > 0) {
+        this.transitionTo("PLAYING", state);
+      } else {
+        this.transitionTo("SPECTATING", state);
+      }
     } else {
       this.transitionTo("LOBBY", state);
     }
@@ -151,6 +156,17 @@ class Game2Controller implements GameController {
         this.setScreen(this.playScreen);
         break;
 
+      case "SPECTATING":
+        // BIN-507 port: samme render som PLAYING men uten tickets å markere.
+        // Server-guards (MARKS_NOT_FOUND, PLAYER_NOT_PARTICIPATING) blokkerer
+        // mark/claim fra spectators uansett.
+        this.playScreen = new PlayScreen(w, h, this.deps.audio);
+        this.playScreen.setOnClaim((type) => this.handleClaim(type));
+        this.playScreen.buildTickets(state); // tom ticket-seksjon for spectator
+        this.playScreen.updateInfo(state);
+        this.setScreen(this.playScreen);
+        break;
+
       case "ENDED":
         this.endScreen = new EndScreen(w, h);
         this.endScreen.setOnDismiss(() => {
@@ -168,7 +184,7 @@ class Game2Controller implements GameController {
     if (this.phase === "LOBBY" && this.lobbyScreen) {
       this.lobbyScreen.update(state);
     }
-    if (this.phase === "PLAYING" && this.playScreen) {
+    if ((this.phase === "PLAYING" || this.phase === "SPECTATING") && this.playScreen) {
       this.playScreen.updateInfo(state);
     }
   }
@@ -178,11 +194,11 @@ class Game2Controller implements GameController {
     if (state.myTickets.length > 0) {
       this.transitionTo("PLAYING", state);
     } else {
-      // We're not participating — stay in lobby, show message
-      console.log("[Game2] No tickets — staying in lobby");
-      if (this.lobbyScreen) {
-        this.lobbyScreen.update(state);
-      }
+      // BIN-507 port: runde starter uten billetter → SPECTATING (ikke LOBBY).
+      // Spilleren ser live trekninger midt i runde i stedet for lobby-
+      // countdown mot neste runde.
+      console.log("[Game2] → SPECTATING (no tickets, round is running)");
+      this.transitionTo("SPECTATING", state);
     }
   }
 
@@ -191,18 +207,15 @@ class Game2Controller implements GameController {
     if (this.phase === "PLAYING") {
       this.transitionTo("ENDED", state);
     } else {
+      // SPECTATING eller LOBBY → LOBBY (ny runde kan kjøpes til)
       this.transitionTo("LOBBY", state);
     }
 
-    // Auto-arm for next game
-    this.deps.socket.armBet({
-      roomCode: this.actualRoomCode,
-      armed: true,
-    }).then(r => console.log("[Game2] Re-armed for next game:", r.ok));
+    // BIN-530/531 port: ingen auto-re-arm. Spilleren velger i BuyPopup.
   }
 
   private onNumberDrawn(number: number, drawIndex: number, state: GameState): void {
-    if (this.phase === "PLAYING" && this.playScreen) {
+    if ((this.phase === "PLAYING" || this.phase === "SPECTATING") && this.playScreen) {
       this.playScreen.onNumberDrawn(number, drawIndex, state);
     }
   }

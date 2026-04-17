@@ -10,7 +10,7 @@ ticketTypes:
   - code: standard
     weight: 1
 maxTicketWeights: 30
-autoArm: true  # MVP-state per 2026-04-17; skal vurderes i separat issue
+autoArm: false  # Fjernet 2026-04-17 — port fra G1 (commit fra denne PR-en)
 patterns:
   - id: line
     name: "Line"
