@@ -84,17 +84,17 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Admin hall-events (ready, countdowns) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-515](https://linear.app/bingosystem/issue/BIN-515) |
 | Admin-dashboard m/ rapporter | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-517](https://linear.app/bingosystem/issue/BIN-517) |
 | Spillvett cross-game-test | 🔵 | ❌ | 🔵 | ✅ | ❌ | [BIN-541](https://linear.app/bingosystem/issue/BIN-541) |
-| E2E pengeflyt-test | 🔵 | ❌ | 🔵 | ✅ | ❌ | [BIN-526](https://linear.app/bingosystem/issue/BIN-526) |
-| Wire-kontrakt-test (Zod) | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-527](https://linear.app/bingosystem/issue/BIN-527) / [BIN-545](https://linear.app/bingosystem/issue/BIN-545) — i denne PR |
+| E2E pengeflyt-test | 🔵 | ✅ | 🔵 | ✅ | ✅ | [BIN-526](https://linear.app/bingosystem/issue/BIN-526) ✅ merged — `apps/backend/src/compliance/__tests__/pengeflyt-e2e.test.ts` dekker G1/G2/G3/G5 |
+| Wire-kontrakt-test (Zod) | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-527](https://linear.app/bingosystem/issue/BIN-527) / [BIN-545](https://linear.app/bingosystem/issue/BIN-545) ✅ merged |
 | Load-test 1000+ spillere | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-508](https://linear.app/bingosystem/issue/BIN-508) ✅ merged, venter på første nattlig-kjøring |
-| Observability (Sentry + funnel) | 🔵 | ✅ | ✅ | ✅ | 🟡 | [BIN-539](https://linear.app/bingosystem/issue/BIN-539) — backend + klient + runbook i denne PR |
-| Feature-flag rollback-runbook | 🔵 | ✅ | ✅ | ✅ | 🟡 | [BIN-540](https://linear.app/bingosystem/issue/BIN-540) — backend + klient + runbook i denne PR; venter på staging-smoke |
+| Observability (Sentry + funnel) | 🔵 | ✅ | ✅ | ✅ | 🟡 | [BIN-539](https://linear.app/bingosystem/issue/BIN-539) ✅ merged — venter på Grafana-dashboards provisjonert |
+| Feature-flag rollback-runbook | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-540](https://linear.app/bingosystem/issue/BIN-540) ✅ merged — backend + klient + runbook + `halls.client_variant`-migrasjon |
 | iOS Safari WebGL context-loss test | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-542](https://linear.app/bingosystem/issue/BIN-542) |
 | GSAP-lisensavklaring | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-538](https://linear.app/bingosystem/issue/BIN-538) |
 | Asset-pipeline (Unity → PixiJS) | 🔵 | 🔵 | 🟡 | ✅ | ❌ | [BIN-543](https://linear.app/bingosystem/issue/BIN-543) |
 | PlayerPrefs → localStorage mapping | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-544](https://linear.app/bingosystem/issue/BIN-544) |
 
-**Game 1 totalt:** 32 rader — 14 ✅, 16 🟡, 2 ❌. Release-klar: 10 / 32 (31 %). Denne sesjonen: BIN-494, BIN-499, BIN-502, BIN-500, BIN-507, BIN-520 (✅ fullført), BIN-505, BIN-506, BIN-509 (backend ✅), BIN-545, BIN-508, BIN-539 (alle 🟡 release-klar, venter på staging).
+**Game 1 totalt:** 32 rader — 16 ✅, 14 🟡, 2 ❌. Release-klar: 12 / 32 (38 %). Bolk 4-leveransene flyttet BIN-526 (❌→✅) og BIN-540 (🟡→✅) til fullt Release-klar. Gjenstående 🟡 venter i hovedsak på staging-verifisering eller pilot-cutover.
 
 ---
 
@@ -226,11 +226,11 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 | Spill | Rader | ✅ | 🟡 | ❌ | Release-klar % |
 |-------|------:|---:|---:|---:|---------------:|
-| Game 1 (Databingo) | 32 | 14 | 16 | 2 | 31 % |
+| Game 1 (Databingo) | 32 | 16 | 14 | 2 | 38 % |
 | Game 2 (Rocket) | 14 | 0 | 12 | 2 | 0 % |
 | Game 3 (Monster) | 16 | 0 | 13 | 3 | 0 % |
 | Game 5 (Spillorama) | 20 | 0 | 14 | 6 | 0 % |
-| **Totalt** | **82** | **14** | **55** | **13** | **17 %** |
+| **Totalt** | **82** | **16** | **53** | **13** | **20 %** |
 
 Totalsum regnet per **Release-klar**-kolonnen — det er den som styrer cutover-beslutning per [`LEGACY_DECOUPLING_STATUS.md`](../architecture/LEGACY_DECOUPLING_STATUS.md).
 
@@ -297,3 +297,4 @@ Automatisk generator fra YAML front-matter i per-spill canonical specs er planla
 | 2026-04-17 | BIN-530 PR | Game 3 canonical spec levert — `docs/engineering/game3-canonical-spec.md`. G3-matrise utvidet fra 9 → 16 rader: 0 ✅, 10 🟡, 6 ❌. G3 har chat (delt fra G1) men mangler waypoint-bane, pattern-animasjon og multiple patterns. **Siste i per-spill canonical spec-serien — alle fire spill nå fullt spesifisert.** Totalsum 82 rader. |
 | 2026-04-17 | G2+G3+G5 G1-paritet PR | SPECTATING-fase + eksplisitt kjøp (fjern auto-arm) portet fra G1 til G2/G3/G5. 6 rader flyttet fra ❌ til 🟡. Canonical specs oppdatert (`autoArm: false` i alle tre YAML-front-matter). tsc + 72/72 tester grønne. Totalsum: 14 ✅, 52 🟡, 16 ❌ (17 % release-klar). Loader-barriere-port (BIN-500-mønster) gjenstår som oppfølger — krever LoadingOverlay-komponent per spill. |
 | 2026-04-17 | Loader-barriere-port PR | LoadingOverlay flyttet fra `games/game1/components/` til delt `packages/game-client/src/components/`. `waitForSyncReady`-mønster portet til G2/G3/G5 med `late_join_sync`-telemetri (game-tagget). 3 rader flyttet ❌ → 🟡. Totalsum: 14 ✅, 55 🟡, 13 ❌ (17 %). **Alle fire spill deler nå samme reliability-fundament** (Redis, gap-deteksjon, loader-barriere, SPECTATING, eksplisitt kjøp). |
+| 2026-04-17 | Bolk 4 reconcile (slot-2) | Bolk 4-leveransene (BIN-527/540/526) reconcilert: BIN-526 E2E pengeflyt (`apps/backend/src/compliance/__tests__/pengeflyt-e2e.test.ts` dekker G1/G2/G3/G5) flyttet ❌ → ✅ på Backend-paritet og Release-klar. BIN-540 Feature-flag + `halls.client_variant`-migrasjon flyttet 🟡 → ✅ Release-klar. BIN-527 Wire-kontrakt (Zod) bekreftet fullt ✅. G1: 14 → 16 ✅, 16 → 14 🟡. Totalsum: 16 ✅, 53 🟡, 13 ❌ (20 %). **Alle release-gates i Uke 7-planen er nå merged** — gjenstår kun staging-verifisering + pilot-cutover før GO. |
