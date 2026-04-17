@@ -4,6 +4,7 @@ import { registerGame } from "../registry.js";
 import type { GameState } from "../../bridge/GameBridge.js";
 import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
 import { telemetry } from "../../telemetry/Telemetry.js";
+import { LoadingOverlay } from "../../components/LoadingOverlay.js";
 import { LobbyScreen } from "../game2/screens/LobbyScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { EndScreen } from "../game2/screens/EndScreen.js";
@@ -27,6 +28,7 @@ class Game3Controller implements GameController {
   private myPlayerId: string | null = null;
   private actualRoomCode: string = "";
   private unsubs: (() => void)[] = [];
+  private loader: LoadingOverlay | null = null;
 
   constructor(deps: GameDeps) {
     this.deps = deps;
@@ -36,6 +38,11 @@ class Game3Controller implements GameController {
   async start(): Promise<void> {
     const { app, socket, bridge } = this.deps;
     app.stage.addChild(this.root);
+
+    // BIN-500 port
+    const overlayContainer = app.app.canvas.parentElement ?? document.body;
+    this.loader = new LoadingOverlay(overlayContainer);
+    this.loader.show("Kobler til...");
 
     console.log("[Game3] Connecting socket...");
     socket.connect();
@@ -48,8 +55,9 @@ class Game3Controller implements GameController {
       });
     });
 
-    if (!connected) { this.showError("Kunne ikke koble til server"); return; }
+    if (!connected) { this.loader?.hide(); this.showError("Kunne ikke koble til server"); return; }
     console.log("[Game3] Socket connected");
+    this.loader?.show("Joiner rom...");
 
     this.unsubs.push(
       socket.on("connectionStateChanged", (state) => {
@@ -66,6 +74,7 @@ class Game3Controller implements GameController {
 
     if (!joinResult.ok || !joinResult.data) {
       console.error("[Game3] Room join failed:", joinResult.error);
+      this.loader?.hide();
       this.showError(joinResult.error?.message || "Kunne ikke joine rom");
       return;
     }
@@ -89,6 +98,10 @@ class Game3Controller implements GameController {
     this.root.on("pointerdown", () => this.deps.audio.unlock(), { once: true });
 
     // BIN-530 port: ingen auto-arm. Eksplisitt kjøp via BuyPopup.
+    // BIN-500 port: loader-barriere før transition
+    await this.waitForSyncReady();
+    this.loader?.hide();
+
     const state = bridge.getState();
     if (state.gameStatus === "RUNNING") {
       // BIN-507 port: late-joiner uten tickets → SPECTATING
@@ -102,9 +115,42 @@ class Game3Controller implements GameController {
     }
   }
 
+  /** BIN-500 port: samme som G1/G2. */
+  private async waitForSyncReady(): Promise<void> {
+    const { bridge } = this.deps;
+    const syncStartedAt = Date.now();
+    const SYNC_TIMEOUT_MS = 5000;
+    const state = bridge.getState();
+    const isRunningAtEntry = state.gameStatus === "RUNNING";
+
+    if (!isRunningAtEntry) {
+      telemetry.trackEvent("late_join_sync", {
+        game: "game3", syncGapMs: Date.now() - syncStartedAt, gotLiveEvent: false, skipped: "not-running",
+      });
+      return;
+    }
+
+    this.loader?.show("Syncer...");
+    const gotLiveEvent = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), SYNC_TIMEOUT_MS);
+      const unsubDraw = bridge.on("numberDrawn", () => { clearTimeout(timer); unsubDraw(); unsubState(); resolve(true); });
+      const unsubState = bridge.on("stateChanged", (s) => {
+        if (s.drawnNumbers.length > state.drawnNumbers.length) {
+          clearTimeout(timer); unsubDraw(); unsubState(); resolve(true);
+        }
+      });
+    });
+
+    const syncGap = Date.now() - syncStartedAt;
+    telemetry.trackEvent("late_join_sync", { game: "game3", syncGapMs: syncGap, gotLiveEvent });
+    if (!gotLiveEvent) console.warn(`[Game3] sync-timeout etter ${syncGap}ms`);
+  }
+
   destroy(): void {
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
+    this.loader?.destroy();
+    this.loader = null;
     this.clearScreen();
     this.root.destroy({ children: true });
   }

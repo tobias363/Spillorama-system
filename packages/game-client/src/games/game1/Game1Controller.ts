@@ -11,7 +11,7 @@ import { TreasureChestOverlay } from "./components/TreasureChestOverlay.js";
 import { MysteryGameOverlay } from "./components/MysteryGameOverlay.js";
 import { ColorDraftOverlay } from "./components/ColorDraftOverlay.js";
 import { LuckyNumberPicker } from "./components/LuckyNumberPicker.js";
-import { LoadingOverlay } from "./components/LoadingOverlay.js";
+import { LoadingOverlay } from "../../components/LoadingOverlay.js";
 import { ToastNotification } from "./components/ToastNotification.js";
 import { PauseOverlay } from "./components/PauseOverlay.js";
 import { SettingsPanel, type Game1Settings } from "./components/SettingsPanel.js";

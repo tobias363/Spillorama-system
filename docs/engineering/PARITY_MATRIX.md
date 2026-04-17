@@ -116,7 +116,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Lucky number | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
 | Chat | 🔴 | ✅ | ❌ | ❌ | ❌ | Egen issue må opprettes |
 | Audio (nummerannouncement) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue må opprettes |
-| Loader-barriere (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-500-mønster til G2 |
+| Loader-barriere (late-join) | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-500](https://linear.app/bingosystem/issue/BIN-500) portet til G2 |
 | SPECTATING-fase | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-507](https://linear.app/bingosystem/issue/BIN-507) portet til G2 |
 | Eksplisitt kjøp (fjern auto-arm) | ✅ | ✅ | ✅ | ✅ | 🟡 | G1 har dette, portet til G2 |
 
@@ -133,7 +133,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-529** — `docs/engineering/game2-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game2.js`. Se spec §11 for kjente avvik.
 
-**Game 2 totalt:** 14 rader — 0 ✅, 11 🟡, 3 ❌. **Release-klar: 0/14 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp portet).
+**Game 2 totalt:** 14 rader — 0 ✅, 12 🟡, 2 ❌. **Release-klar: 0/14 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
 
 ---
 
@@ -156,7 +156,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Chat (sanntids) | 🔴 | ✅ | ✅ | ❌ | 🟡 | — (G3 har chat i motsetning til G2/G5) |
 | Lucky number | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
 | Audio (nummerannouncement) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue |
-| Loader-barriere (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-500-mønster til G3 |
+| Loader-barriere (late-join) | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-500](https://linear.app/bingosystem/issue/BIN-500) portet til G3 |
 | SPECTATING-fase | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-507](https://linear.app/bingosystem/issue/BIN-507) portet til G3 |
 | Eksplisitt kjøp (fjern auto-arm) | ✅ | ✅ | ✅ | ✅ | 🟡 | G1 har dette, portet til G3 |
 
@@ -174,7 +174,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-530** — `docs/engineering/game3-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game3.js`. Se spec §11 for kjente avvik.
 
-**Game 3 totalt:** 16 rader — 0 ✅, 12 🟡, 4 ❌. **Release-klar: 0/16 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp portet).
+**Game 3 totalt:** 16 rader — 0 ✅, 13 🟡, 3 ❌. **Release-klar: 0/16 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
 
 ---
 
@@ -195,7 +195,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Trekning + drawIndex | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-502](https://linear.app/bingosystem/issue/BIN-502) shared (merged) |
 | Chat | 🔴 | ✅ | ❌ | ❌ | ❌ | Egen issue må opprettes |
 | Audio | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue må opprettes |
-| Loader-barriere (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | Port BIN-500-mønster til G5 |
+| Loader-barriere (late-join) | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-500](https://linear.app/bingosystem/issue/BIN-500) portet til G5 |
 | SPECTATING-fase | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-507](https://linear.app/bingosystem/issue/BIN-507) portet til G5 |
 | Eksplisitt kjøp (fjern auto-arm) | ✅ | ✅ | ✅ | ✅ | 🟡 | G1 har dette, portet til G5 |
 | KYC-gatekeep (verified player) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-514](https://linear.app/bingosystem/issue/BIN-514) |
@@ -218,7 +218,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-531** — `docs/engineering/game5-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game5.js`. Se spec §11 for kjente avvik.
 
-**Game 5 totalt:** 20 rader — 0 ✅, 13 🟡, 7 ❌. **Release-klar: 0/20 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp portet).
+**Game 5 totalt:** 20 rader — 0 ✅, 14 🟡, 6 ❌. **Release-klar: 0/20 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
 
 ---
 
@@ -227,10 +227,10 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Spill | Rader | ✅ | 🟡 | ❌ | Release-klar % |
 |-------|------:|---:|---:|---:|---------------:|
 | Game 1 (Databingo) | 32 | 14 | 16 | 2 | 31 % |
-| Game 2 (Rocket) | 14 | 0 | 11 | 3 | 0 % |
-| Game 3 (Monster) | 16 | 0 | 12 | 4 | 0 % |
-| Game 5 (Spillorama) | 20 | 0 | 13 | 7 | 0 % |
-| **Totalt** | **82** | **14** | **52** | **16** | **17 %** |
+| Game 2 (Rocket) | 14 | 0 | 12 | 2 | 0 % |
+| Game 3 (Monster) | 16 | 0 | 13 | 3 | 0 % |
+| Game 5 (Spillorama) | 20 | 0 | 14 | 6 | 0 % |
+| **Totalt** | **82** | **14** | **55** | **13** | **17 %** |
 
 Totalsum regnet per **Release-klar**-kolonnen — det er den som styrer cutover-beslutning per [`LEGACY_DECOUPLING_STATUS.md`](../architecture/LEGACY_DECOUPLING_STATUS.md).
 
@@ -296,3 +296,4 @@ Automatisk generator fra YAML front-matter i per-spill canonical specs er planla
 | 2026-04-17 | BIN-531 PR | Game 5 canonical spec levert — `docs/engineering/game5-canonical-spec.md` med YAML front-matter. G5-matrise utvidet fra 12 → 20 rader: 0 ✅, 11 🟡, 9 ❌. Spec §11 lister 8 G5-unike avvik (rulett-fysikk, Free Spin Jackpot, SwapTicket, KYC, billettfarger, auto-select m.fl.) + G1-paritets-avvik. Totalsum 75 rader (G1: 32, G2: 14, G3: 9, G5: 20). |
 | 2026-04-17 | BIN-530 PR | Game 3 canonical spec levert — `docs/engineering/game3-canonical-spec.md`. G3-matrise utvidet fra 9 → 16 rader: 0 ✅, 10 🟡, 6 ❌. G3 har chat (delt fra G1) men mangler waypoint-bane, pattern-animasjon og multiple patterns. **Siste i per-spill canonical spec-serien — alle fire spill nå fullt spesifisert.** Totalsum 82 rader. |
 | 2026-04-17 | G2+G3+G5 G1-paritet PR | SPECTATING-fase + eksplisitt kjøp (fjern auto-arm) portet fra G1 til G2/G3/G5. 6 rader flyttet fra ❌ til 🟡. Canonical specs oppdatert (`autoArm: false` i alle tre YAML-front-matter). tsc + 72/72 tester grønne. Totalsum: 14 ✅, 52 🟡, 16 ❌ (17 % release-klar). Loader-barriere-port (BIN-500-mønster) gjenstår som oppfølger — krever LoadingOverlay-komponent per spill. |
+| 2026-04-17 | Loader-barriere-port PR | LoadingOverlay flyttet fra `games/game1/components/` til delt `packages/game-client/src/components/`. `waitForSyncReady`-mønster portet til G2/G3/G5 med `late_join_sync`-telemetri (game-tagget). 3 rader flyttet ❌ → 🟡. Totalsum: 14 ✅, 55 🟡, 13 ❌ (17 %). **Alle fire spill deler nå samme reliability-fundament** (Redis, gap-deteksjon, loader-barriere, SPECTATING, eksplisitt kjøp). |

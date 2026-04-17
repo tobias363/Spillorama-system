@@ -4,6 +4,7 @@ import { registerGame } from "../registry.js";
 import type { GameState } from "../../bridge/GameBridge.js";
 import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
 import { telemetry } from "../../telemetry/Telemetry.js";
+import { LoadingOverlay } from "../../components/LoadingOverlay.js";
 import { LobbyScreen } from "./screens/LobbyScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { EndScreen } from "./screens/EndScreen.js";
@@ -29,6 +30,7 @@ class Game2Controller implements GameController {
   private myPlayerId: string | null = null;
   private actualRoomCode: string = "";
   private unsubs: (() => void)[] = [];
+  private loader: LoadingOverlay | null = null;
 
   constructor(deps: GameDeps) {
     this.deps = deps;
@@ -38,6 +40,11 @@ class Game2Controller implements GameController {
   async start(): Promise<void> {
     const { app, socket, bridge } = this.deps;
     app.stage.addChild(this.root);
+
+    // BIN-500 port: loader holdes til syncReady (se waitForSyncReady).
+    const overlayContainer = app.app.canvas.parentElement ?? document.body;
+    this.loader = new LoadingOverlay(overlayContainer);
+    this.loader.show("Kobler til...");
 
     // Connect socket
     console.log("[Game2] Connecting socket...");
@@ -54,10 +61,12 @@ class Game2Controller implements GameController {
     });
 
     if (!connected) {
+      this.loader?.hide();
       this.showError("Kunne ikke koble til server");
       return;
     }
     console.log("[Game2] Socket connected");
+    this.loader?.show("Joiner rom...");
 
     // Track socket stability
     this.unsubs.push(
@@ -76,6 +85,7 @@ class Game2Controller implements GameController {
 
     if (!joinResult.ok || !joinResult.data) {
       console.error("[Game2] Room join failed:", joinResult.error);
+      this.loader?.hide();
       this.showError(joinResult.error?.message || "Kunne ikke joine rom");
       return;
     }
@@ -105,6 +115,11 @@ class Game2Controller implements GameController {
     // BuyPopup i LOBBY-fasen. G1 fjernet auto-arm 2026-04-16 (commit dc03e24e);
     // G2 følger nå samme mønster.
 
+    // BIN-500 port: loader-barriere før transition — sikrer at late-joiner
+    // ser live trekning i stedet for visual pop-in.
+    await this.waitForSyncReady();
+    this.loader?.hide();
+
     // Transition based on initial game state
     const state = bridge.getState();
     console.log("[Game2] Initial state:", state.gameStatus, "tickets:", state.myTickets.length, "players:", state.playerCount);
@@ -121,9 +136,60 @@ class Game2Controller implements GameController {
     }
   }
 
+  /**
+   * BIN-500 port: loader-barriere for late-join. For RUNNING ved inngang:
+   * vent på første live drawNew eller stateChanged (maks 5 sek) før loader
+   * fjernes — sikrer at klient rendrer samme tilstand som resten av rommet.
+   */
+  private async waitForSyncReady(): Promise<void> {
+    const { bridge } = this.deps;
+    const syncStartedAt = Date.now();
+    const SYNC_TIMEOUT_MS = 5000;
+
+    const state = bridge.getState();
+    const isRunningAtEntry = state.gameStatus === "RUNNING";
+
+    if (!isRunningAtEntry) {
+      telemetry.trackEvent("late_join_sync", {
+        game: "game2",
+        syncGapMs: Date.now() - syncStartedAt,
+        gotLiveEvent: false,
+        skipped: "not-running",
+      });
+      return;
+    }
+
+    this.loader?.show("Syncer...");
+    const gotLiveEvent = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), SYNC_TIMEOUT_MS);
+      const unsubDraw = bridge.on("numberDrawn", () => {
+        clearTimeout(timer);
+        unsubDraw();
+        unsubState();
+        resolve(true);
+      });
+      const unsubState = bridge.on("stateChanged", (s) => {
+        if (s.drawnNumbers.length > state.drawnNumbers.length) {
+          clearTimeout(timer);
+          unsubDraw();
+          unsubState();
+          resolve(true);
+        }
+      });
+    });
+
+    const syncGap = Date.now() - syncStartedAt;
+    telemetry.trackEvent("late_join_sync", { game: "game2", syncGapMs: syncGap, gotLiveEvent });
+    if (!gotLiveEvent) {
+      console.warn(`[Game2] sync-timeout etter ${syncGap}ms — slipper loader med snapshot-state`);
+    }
+  }
+
   destroy(): void {
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
+    this.loader?.destroy();
+    this.loader = null;
     this.clearScreen();
     this.root.destroy({ children: true });
   }
