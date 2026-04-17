@@ -4,7 +4,7 @@ import path from "path";
 export default defineConfig({
   base: "/web/games/",
   build: {
-    outDir: path.resolve(__dirname, "../../backend/public/web/games"),
+    outDir: path.resolve(__dirname, "../../apps/backend/public/web/games"),
     emptyOutDir: true,
     lib: {
       entry: path.resolve(__dirname, "src/main.ts"),
