@@ -117,6 +117,9 @@
 
       if (lobbyState.activeHallId) {
         sessionStorage.setItem(HALL_KEY, lobbyState.activeHallId);
+        // BIN-540: prefetch the hall's client-variant flag so shouldUseWebClient
+        // has a cached answer ready by the time the user clicks "Spill".
+        void fetchHallClientVariant(lobbyState.activeHallId);
         await loadCompliance();
       }
     } catch (err) {
@@ -147,9 +150,47 @@
 
   // ── Hall switch ──────────────────────────────────────────────────────────
 
+  // BIN-540: read the hall-level rollback flag once per session. Sticky per
+  // sessionStorage so flipping the flag in the DB never changes the engine
+  // a currently-loaded player is using mid-session. Re-fetched on each
+  // switchHall() so a hall-switch during a session does pick up the flag.
+  var CLIENT_VARIANT_KEY_PREFIX = 'spilloramaClientVariant:';
+
+  async function fetchHallClientVariant(hallId) {
+    if (!hallId) return 'unity';
+    var cacheKey = CLIENT_VARIANT_KEY_PREFIX + hallId;
+    var cached = sessionStorage.getItem(cacheKey);
+    if (cached === 'unity' || cached === 'web' || cached === 'unity-fallback') {
+      return cached;
+    }
+    try {
+      var res = await fetch('/api/halls/' + encodeURIComponent(hallId) + '/client-variant', { credentials: 'include' });
+      if (!res.ok) return 'unity';
+      var body = await res.json();
+      var variant = body && body.data && body.data.clientVariant;
+      if (variant === 'unity' || variant === 'web' || variant === 'unity-fallback') {
+        sessionStorage.setItem(cacheKey, variant);
+        return variant;
+      }
+    } catch (err) {
+      console.warn('[BIN-540] client-variant fetch failed — defaulting to unity', err);
+    }
+    return 'unity';
+  }
+
+  function readCachedHallClientVariant(hallId) {
+    if (!hallId) return 'unity';
+    var cached = sessionStorage.getItem(CLIENT_VARIANT_KEY_PREFIX + hallId);
+    return (cached === 'web' || cached === 'unity-fallback') ? cached : 'unity';
+  }
+
   async function switchHall(hallId) {
     lobbyState.activeHallId = hallId;
     sessionStorage.setItem(HALL_KEY, hallId);
+    // BIN-540: refresh the client-variant cache for the new hall in the
+    // background. Fire-and-forget — the value is only consulted at the next
+    // launchGame() call, by which time this request has usually returned.
+    void fetchHallClientVariant(hallId);
 
     // Sync to spillvett.js
     const hall = lobbyState.halls.find(h => h.id === hallId);
@@ -248,6 +289,13 @@
    * Default is Unity during pilot — web is opt-in per game via admin.
    */
   function shouldUseWebClient(game) {
+    // BIN-540: hall-level rollback flag has the highest priority and is the
+    // only way to force all halls back to Unity in < 2 min without a redeploy.
+    // `unity-fallback` is the emergency-rollback state; `unity` is the default.
+    // Only `web` unlocks the per-game / ?webClient override.
+    var hallVariant = readCachedHallClientVariant(lobbyState.activeHallId);
+    if (hallVariant === 'unity' || hallVariant === 'unity-fallback') return false;
+
     // Check game-level setting from backend
     if (game.settings && game.settings.clientEngine === 'web') return true;
 

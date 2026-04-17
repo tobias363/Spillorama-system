@@ -73,6 +73,7 @@ test("buildPlayerReport groups stakes and prizes by hall and play", () => {
         region: "NO",
         address: "",
         isActive: true,
+        clientVariant: "unity" as const,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       },
@@ -83,6 +84,7 @@ test("buildPlayerReport groups stakes and prizes by hall and play", () => {
         region: "NO",
         address: "",
         isActive: true,
+        clientVariant: "unity" as const,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }

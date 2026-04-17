@@ -88,7 +88,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Wire-kontrakt-test (Zod) | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-527](https://linear.app/bingosystem/issue/BIN-527) / [BIN-545](https://linear.app/bingosystem/issue/BIN-545) — i denne PR |
 | Load-test 1000+ spillere | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-508](https://linear.app/bingosystem/issue/BIN-508) ✅ merged, venter på første nattlig-kjøring |
 | Observability (Sentry + funnel) | 🔵 | ✅ | ✅ | ✅ | 🟡 | [BIN-539](https://linear.app/bingosystem/issue/BIN-539) — backend + klient + runbook i denne PR |
-| Feature-flag rollback-runbook | 🔵 | ❌ | ❌ | ✅ | ❌ | [BIN-540](https://linear.app/bingosystem/issue/BIN-540) |
+| Feature-flag rollback-runbook | 🔵 | ✅ | ✅ | ✅ | 🟡 | [BIN-540](https://linear.app/bingosystem/issue/BIN-540) — backend + klient + runbook i denne PR; venter på staging-smoke |
 | iOS Safari WebGL context-loss test | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-542](https://linear.app/bingosystem/issue/BIN-542) |
 | GSAP-lisensavklaring | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-538](https://linear.app/bingosystem/issue/BIN-538) |
 | Asset-pipeline (Unity → PixiJS) | 🔵 | 🔵 | 🟡 | ✅ | ❌ | [BIN-543](https://linear.app/bingosystem/issue/BIN-543) |

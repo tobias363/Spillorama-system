@@ -159,6 +159,20 @@ export function createGameRouter(deps: GameRouterDeps): express.Router {
     }
   });
 
+  // BIN-540: public — used by the web shell at game-mount time to decide
+  // which client engine to load. No auth so a new (unauthenticated) shell
+  // can read the flag before the user has picked a hall. Fail-safes to
+  // 'unity' inside PlatformService on any DB error.
+  router.get("/api/halls/:hallReference/client-variant", async (req, res) => {
+    try {
+      const hallReference = mustBeNonEmptyString(req.params.hallReference, "hallReference");
+      const variant = await platformService.getHallClientVariant(hallReference);
+      apiSuccess(res, { hallReference, clientVariant: variant });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   // ── Spilleplan — public (§ 64) ────────────────────────────────────────────
 
   // Public: today's schedule for a hall (filtered by day of week)

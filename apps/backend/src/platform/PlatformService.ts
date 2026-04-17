@@ -61,6 +61,10 @@ export interface UpdateGameInput {
   settings?: Record<string, unknown>;
 }
 
+/** BIN-540: per-hall rollback flag. */
+export type HallClientVariant = "unity" | "web" | "unity-fallback";
+export const HALL_CLIENT_VARIANTS: readonly HallClientVariant[] = ["unity", "web", "unity-fallback"] as const;
+
 export interface HallDefinition {
   id: string;
   slug: string;
@@ -71,6 +75,8 @@ export interface HallDefinition {
   settlementAccount?: string;
   invoiceMethod?: string;
   isActive: boolean;
+  /** BIN-540: which client engine this hall serves (unity | web | unity-fallback). */
+  clientVariant: HallClientVariant;
   createdAt: string;
   updatedAt: string;
 }
@@ -270,6 +276,8 @@ interface HallRow {
   settlement_account: string | null;
   invoice_method: string | null;
   is_active: boolean;
+  /** BIN-540. */
+  client_variant: HallClientVariant;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -715,7 +723,7 @@ export class PlatformService {
     await this.ensureInitialized();
     const includeInactive = options?.includeInactive ?? false;
     const { rows } = await this.pool.query<HallRow>(
-      `SELECT id, slug, name, region, address, is_active, created_at, updated_at
+      `SELECT id, slug, name, region, address, is_active, client_variant, created_at, updated_at
        FROM ${this.hallsTable()}
        ${includeInactive ? "" : "WHERE is_active = true"}
        ORDER BY name ASC, slug ASC`
@@ -738,6 +746,43 @@ export class PlatformService {
       throw new DomainError("HALL_INACTIVE", "Hallen er ikke aktiv.");
     }
     return hall;
+  }
+
+  // ── BIN-540: client-variant feature flag ─────────────────────────────────
+  // Read-through cache so the rollout flag doesn't hit Postgres on every
+  // /api/halls/:slug/client-variant call. TTL 60s is a deliberate trade-off:
+  // fast enough that a rollback is effective inside the SLA (< 2 min), slow
+  // enough that the DB never takes more than ~1 rps per hall even under a
+  // thundering-herd reconnect storm.
+  private readonly clientVariantCache = new Map<string, { value: HallClientVariant; expiresAt: number }>();
+  private static readonly CLIENT_VARIANT_TTL_MS = 60_000;
+
+  /**
+   * Public entry point used by the web shell / admin web to decide which
+   * client engine to mount. Fails CLOSED to "unity" on any DB error so a
+   * flipped-flag rollout can never turn into a deny-all.
+   */
+  async getHallClientVariant(hallReference: string): Promise<HallClientVariant> {
+    const cached = this.clientVariantCache.get(hallReference);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+    try {
+      const hall = await this.getHall(hallReference);
+      const value = hall.clientVariant;
+      this.clientVariantCache.set(hallReference, { value, expiresAt: Date.now() + PlatformService.CLIENT_VARIANT_TTL_MS });
+      return value;
+    } catch (err) {
+      // Fail-safe: DB miss / connection error defaults to the legacy client.
+      // This is the safe direction — a broken rollout keeps the status quo.
+      console.warn("[BIN-540] getHallClientVariant failed, defaulting to 'unity'", err);
+      return "unity";
+    }
+  }
+
+  /** Test-only: clear the client-variant cache so tests can rotate the flag. */
+  clearClientVariantCache(): void {
+    this.clientVariantCache.clear();
   }
 
   async createHall(input: CreateHallInput): Promise<HallDefinition> {
@@ -1548,6 +1593,10 @@ export class PlatformService {
       settlementAccount: row.settlement_account ?? undefined,
       invoiceMethod: row.invoice_method ?? undefined,
       isActive: row.is_active,
+      // BIN-540: default to "unity" if the column is somehow null (should not
+      // happen — CHECK constraint enforces non-null with DEFAULT 'unity' — but
+      // guards against rows pre-dating the migration on a mid-flight deploy).
+      clientVariant: (row.client_variant ?? "unity") as HallClientVariant,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
@@ -1738,7 +1787,7 @@ export class PlatformService {
     const normalizedReference = this.assertEntityReference(hallReference, "hallId");
     const normalizedSlug = normalizedReference.toLowerCase();
     const { rows } = await this.pool.query<HallRow>(
-      `SELECT id, slug, name, region, address, is_active, created_at, updated_at
+      `SELECT id, slug, name, region, address, is_active, client_variant, created_at, updated_at
        FROM ${this.hallsTable()}
        WHERE id = $1
           OR slug = $2
