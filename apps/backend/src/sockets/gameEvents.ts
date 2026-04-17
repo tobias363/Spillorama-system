@@ -145,6 +145,12 @@ export interface GameEventsDeps {
   clearDisplayTicketCache: (roomCode: string) => void;
   /** BIN-509: swap one pre-round ticket in place; returns null if ticketId is unknown. */
   replaceDisplayTicket?: (roomCode: string, playerId: string, ticketId: string, gameSlug?: string) => Ticket | null;
+  /**
+   * BIN-516: optional chat persistence. When provided, chat:send writes through
+   * to the store and chat:history reads from it (falls back to in-memory cache
+   * if absent or returns empty).
+   */
+  chatMessageStore?: import("../store/ChatMessageStore.js").ChatMessageStore;
   resolveBingoHallGameConfigForRoom: (roomCode: string) => Promise<{ hallId: string; maxTicketsPerPlayer: number }>;
   requireActiveHallIdFromInput: (input: unknown) => Promise<string>;
   buildLeaderboard: (roomCode?: string) => LeaderboardEntry[];
@@ -852,6 +858,11 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
         }
         const snapshot = engine.getRoomSnapshot(roomCode);
         const player = snapshot.players.find((p) => p.id === playerId);
+        // BIN-516 hall-scoping: a player must belong to the room's hall to chat
+        // in it. Cross-hall chat is a spillevett audit hazard.
+        if (player?.hallId && snapshot.hallId && player.hallId !== snapshot.hallId) {
+          throw new DomainError("FORBIDDEN", "Spilleren tilhører en annen hall enn rommet.");
+        }
         const chatMsg: ChatMessage = {
           id: randomUUID(),
           playerId,
@@ -861,6 +872,18 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
           createdAt: new Date().toISOString()
         };
         appendChatMessage(roomCode, chatMsg);
+        // BIN-516: fire-and-forget persistence. The store implementations log
+        // and swallow errors — chat must keep flowing even if the DB is sick.
+        if (deps.chatMessageStore) {
+          void deps.chatMessageStore.insert({
+            hallId: snapshot.hallId,
+            roomCode,
+            playerId,
+            playerName: chatMsg.playerName,
+            message: chatMsg.message,
+            emojiId: chatMsg.emojiId,
+          });
+        }
         io.to(roomCode).emit("chat:message", chatMsg);
         ackSuccess(callback, { message: chatMsg });
       } catch (error) {
@@ -871,6 +894,14 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     socket.on("chat:history", rateLimited("chat:history", async (payload: RoomActionPayload, callback: (response: AckResponse<{ messages: ChatMessage[] }>) => void) => {
       try {
         const { roomCode } = await requireAuthenticatedPlayerAction(payload);
+        // BIN-516: prefer the persistent store when available so a fresh
+        // browser session sees pre-load chat history. Fall back to the
+        // in-memory window for the dev-without-DB case.
+        if (deps.chatMessageStore) {
+          const persisted = await deps.chatMessageStore.listRecent(roomCode);
+          ackSuccess(callback, { messages: persisted as ChatMessage[] });
+          return;
+        }
         const messages = chatHistoryByRoom.get(roomCode) ?? [];
         ackSuccess(callback, { messages });
       } catch (error) {

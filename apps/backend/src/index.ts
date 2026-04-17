@@ -39,6 +39,7 @@ import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { errorReporter } from "./middleware/errorReporter.js";
+import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,6 +157,13 @@ const platformService = new PlatformService(walletAdapter, {
   sessionTtlHours,
   minAgeYears: kycMinAge,
   kycAdapter,
+});
+
+// BIN-516: chat persistence. Postgres-backed when the platform pool is up,
+// in-memory fallback for dev-without-DB so chat:history still works.
+const chatMessageStore: ChatMessageStore = new PostgresChatMessageStore({
+  pool: platformService.getPool(),
+  schema: pgSchema,
 });
 
 const swedbankPayService = new SwedbankPayService(walletAdapter, {
@@ -429,6 +437,7 @@ const registerGameEvents = createGameEventHandlers({
   replaceDisplayTicket: (code, id, ticketId, slug) => roomState.replaceDisplayTicket(code, id, ticketId, slug),
   resolveBingoHallGameConfigForRoom, requireActiveHallIdFromInput, buildLeaderboard,
   getVariantConfig: (code) => roomState.getVariantConfig(code),
+  chatMessageStore,
 });
 
 io.on("connection", (socket: Socket) => { registerGameEvents(socket); });

@@ -426,6 +426,15 @@ export class PlatformService {
     });
   }
 
+  /**
+   * BIN-516: expose the underlying pg Pool so other stores (e.g.
+   * ChatMessageStore) can share the same connection pool instead of
+   * spinning up a parallel one. Read-only — callers must NOT close it.
+   */
+  getPool(): Pool {
+    return this.pool;
+  }
+
   async register(input: {
     email: string;
     password: string;
