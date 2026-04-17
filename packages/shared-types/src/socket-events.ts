@@ -32,6 +32,8 @@ export const SocketEvents = {
   CHAT_MESSAGE: "chat:message",
   JACKPOT_ACTIVATED: "jackpot:activated",
   MINIGAME_ACTIVATED: "minigame:activated",
+  // Server → Client (private, to marking socket only — BIN-499)
+  TICKET_MARKED: "ticket:marked",
 } as const;
 
 // ── Generic ack response ────────────────────────────────────────────────────
@@ -140,6 +142,17 @@ export interface DrawNewPayload {
   number: number;
   drawIndex: number;
   gameId: string;
+}
+
+/**
+ * BIN-499: Private ack event sent to the marking socket only after ticket:mark.
+ * Replaces the old full room-snapshot broadcast. No room-fanout here — claims
+ * (LINE/BINGO via claim:submit) still trigger room:update as before.
+ */
+export interface TicketMarkedPayload {
+  roomCode: string;
+  playerId: string;
+  number: number;
 }
 
 export interface PatternWonPayload {

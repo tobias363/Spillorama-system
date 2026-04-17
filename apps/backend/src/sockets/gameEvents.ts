@@ -625,19 +625,26 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
       }
     }));
 
-    socket.on("ticket:mark", rateLimited("ticket:mark", async (payload: MarkPayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
+    // BIN-499: ticket:mark is high-frequency. Room-fanout scaled as O(players × marks);
+    // at 1000 players × 15 tickets × 20 marks/round = 300k full-snapshot broadcasts per
+    // round. Since engine.markNumber does not auto-submit claims, a mark never changes
+    // shared room state observable to other players — so the room-fanout is pure waste.
+    //
+    // New behavior:
+    //   - Update the player's marks (engine.markNumber).
+    //   - Send a private ticket:marked event to this socket only (optimistic UI hook).
+    //   - No room-fanout. Claims (LINE/BINGO) still fanout via the claim:submit handler.
+    socket.on("ticket:mark", rateLimited("ticket:mark", async (payload: MarkPayload, callback: (response: AckResponse<{ number: number; playerId: string }>) => void) => {
       try {
         const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
         if (!Number.isFinite(payload?.number)) {
           throw new DomainError("INVALID_INPUT", "number mangler.");
         }
-        await engine.markNumber({
-          roomCode,
-          playerId,
-          number: Number(payload.number)
-        });
-        const snapshot = await emitRoomUpdate(roomCode);
-        ackSuccess(callback, { snapshot });
+        const number = Number(payload.number);
+        await engine.markNumber({ roomCode, playerId, number });
+        // Private ack event — no room-fanout.
+        socket.emit("ticket:marked", { roomCode, playerId, number });
+        ackSuccess(callback, { number, playerId });
       } catch (error) {
         ackFailure(callback, error);
       }

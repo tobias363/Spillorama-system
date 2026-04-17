@@ -156,6 +156,90 @@ describe("Socket.IO integration", () => {
     assert.ok(markResult.ok, `ticket:mark failed: ${markResult.error?.message}`);
   });
 
+  // ── 3b. BIN-499: ticket:mark is private — no room-fanout on non-claim marks ─
+
+  test("BIN-499: 10 non-claim ticket:mark events emit 0 room:update broadcasts", async () => {
+    const alice = await server.connectClient("token-alice");
+    const bob = await server.connectClient("token-bob");
+
+    const r1 = await alice.emit<AckResponse<{ roomCode: string }>>("room:create", { hallId: "hall-test" });
+    const roomCode = r1.data!.roomCode;
+    await bob.emit("room:create", { hallId: "hall-test" });
+    await alice.emit("bet:arm", { roomCode, armed: true });
+    await bob.emit("bet:arm", { roomCode, armed: true });
+    await alice.emit("game:start", { roomCode, entryFee: 10, ticketsPerPlayer: 1 });
+
+    // Draw 10 grid numbers so alice can mark them. Each mark must NOT trigger
+    // a room:update on bob. Bob's counter starts AFTER draws are done so we
+    // only measure mark-induced broadcasts.
+    const gridNumbers = new Set([1,2,3,4,5, 13,14,15,16,17, 25,26,27,28, 37,38,39,40,41, 49,50,51,52,53]);
+    const drawn: number[] = [];
+    for (let i = 0; i < 60 && drawn.length < 10; i++) {
+      const dr = await alice.emit<AckResponse<{ number: number }>>("draw:next", { roomCode });
+      if (!dr.ok) break;
+      if (gridNumbers.has(dr.data!.number)) drawn.push(dr.data!.number);
+    }
+    assert.equal(drawn.length, 10, "should have drawn 10 grid numbers");
+
+    // Let any in-flight room:update broadcasts from draw:next / game:start settle
+    // before we start counting mark-induced broadcasts.
+    await new Promise((r) => setTimeout(r, 100));
+
+    let bobRoomUpdates = 0;
+    let aliceMarkedPrivate = 0;
+    bob.socket.on("room:update", () => { bobRoomUpdates++; });
+    alice.socket.on("ticket:marked", () => { aliceMarkedPrivate++; });
+
+    for (const num of drawn) {
+      const mark = await alice.emit<AckResponse>("ticket:mark", { roomCode, number: num });
+      assert.ok(mark.ok, `ticket:mark failed: ${mark.error?.message}`);
+    }
+
+    // Flush any pending events.
+    await new Promise((r) => setTimeout(r, 100));
+
+    assert.equal(bobRoomUpdates, 0, `Bob should receive 0 room:update events for 10 non-claim marks, got ${bobRoomUpdates}`);
+    assert.equal(aliceMarkedPrivate, 10, `Alice should receive 10 private ticket:marked events, got ${aliceMarkedPrivate}`);
+  });
+
+  // ── 3c. BIN-499: claim:submit still triggers room-fanout ───────────────────
+
+  test("BIN-499: claim:submit LINE triggers at least one room:update on the other client", async () => {
+    const alice = await server.connectClient("token-alice");
+    const bob = await server.connectClient("token-bob");
+
+    const r1 = await alice.emit<AckResponse<{ roomCode: string }>>("room:create", { hallId: "hall-test" });
+    const roomCode = r1.data!.roomCode;
+    await bob.emit("room:create", { hallId: "hall-test" });
+    await alice.emit("bet:arm", { roomCode, armed: true });
+    await bob.emit("bet:arm", { roomCode, armed: true });
+    await alice.emit("game:start", { roomCode, entryFee: 10, ticketsPerPlayer: 1 });
+
+    const gridNumbers = new Set([1,2,3,4,5, 13,14,15,16,17, 25,26,27,28, 37,38,39,40,41, 49,50,51,52,53]);
+    const neededForLine = [1, 2, 3, 4, 5];
+    const drawnNumbers: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      const dr = await alice.emit<AckResponse<{ number: number }>>("draw:next", { roomCode });
+      if (!dr.ok) break;
+      drawnNumbers.push(dr.data!.number);
+      if (gridNumbers.has(dr.data!.number)) {
+        await alice.emit("ticket:mark", { roomCode, number: dr.data!.number });
+      }
+      if (neededForLine.every((n) => drawnNumbers.includes(n))) break;
+    }
+    assert.ok(neededForLine.every((n) => drawnNumbers.includes(n)), "LINE numbers should have been drawn");
+
+    let bobRoomUpdatesAfterClaim = 0;
+    bob.socket.on("room:update", () => { bobRoomUpdatesAfterClaim++; });
+
+    const claim = await alice.emit<AckResponse>("claim:submit", { roomCode, type: "LINE" });
+    assert.ok(claim.ok, `claim:submit failed: ${claim.error?.message}`);
+
+    // Give the claim handler time to fanout.
+    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(bobRoomUpdatesAfterClaim >= 1, `Bob should receive >= 1 room:update after a LINE claim, got ${bobRoomUpdatesAfterClaim}`);
+  });
+
   // ── 4. claim:submit → pattern:won ─────────────────────────────────────────
 
   test("claim:submit LINE after completing a row → pattern:won broadcast", async () => {
