@@ -224,7 +224,10 @@ VALUES
   ('bingo',        'Bingo',        '75-kulsbingo med flere spillvarianter',   '/bingo',        true, 1, '{"gameNumber":1}'::jsonb),
   ('rocket',       'Rocket',       'Tallspill med 3x3 brett og Lucky Number', '/rocket',       true, 2, '{"gameNumber":2}'::jsonb),
   ('monsterbingo', 'Mønsterbingo', 'Bingo med mønstergevinster',              '/monsterbingo', true, 3, '{"gameNumber":3}'::jsonb),
-  ('temabingo',    'Temabingo',    'Bingo med temaer og multiplikator',       '/temabingo',    true, 4, '{"gameNumber":4}'::jsonb),
+  -- temabingo (game 4): deaktivert per BIN-496. Beholdes i seed for historisk
+  -- kontinuitet; is_enabled=false gjør at den ikke vises i lobby. Se også
+  -- migration 20260417120000_deactivate_game4_temabingo.sql for eksisterende DB.
+  ('temabingo',    'Temabingo',    'Bingo med temaer og multiplikator (utgått, BIN-496)', '/temabingo', false, 4, '{"gameNumber":4,"deprecated":true}'::jsonb),
   ('spillorama',   'Spillorama',   'Spillorama-bingo med bonusspill',         '/spillorama',   true, 5, '{"gameNumber":5}'::jsonb),
   ('candy',        'Candy Mania',  'Candy-spillet',                           '/candy',        true, 6, '{"gameNumber":6}'::jsonb)
 ON CONFLICT (slug) DO NOTHING;
