@@ -1318,6 +1318,132 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
     }
   });
 
+  // ── BIN-517: Admin dashboard + range/game reports ─────────────────────────
+  //
+  // Live dashboard: grouped active-room summary per hall + aggregated
+  // player counts. Driven by the in-memory engine.listRoomSummaries; the
+  // response is cheap to compute and safe to poll from the admin UI
+  // every few seconds.
+
+  router.get("/api/admin/dashboard/live", async (req, res) => {
+    try {
+      await requireAdminPermissionUser(req, "ROOM_CONTROL_READ");
+      const rooms = engine.listRoomSummaries();
+      const halls = await platformService.listHalls({ includeInactive: true });
+      const hallById = new Map(halls.map((h) => [h.id, h]));
+
+      // Group the room summaries by hall so the dashboard can render
+      // one card per hall. Unknown hallIds (stale room) surface under
+      // "orphan" so they can be investigated instead of silently hidden.
+      interface HallBucket {
+        hallId: string;
+        hallName: string;
+        hallSlug: string;
+        isActive: boolean;
+        clientVariant: string;
+        rooms: Array<{
+          code: string;
+          gameSlug: string | undefined;
+          gameStatus: string;
+          playerCount: number;
+          hostPlayerId: string;
+          createdAt: string;
+        }>;
+        activeRoomCount: number;
+        totalPlayers: number;
+      }
+      const bucketByHall = new Map<string, HallBucket>();
+
+      const ensureBucket = (hallId: string): HallBucket => {
+        const existing = bucketByHall.get(hallId);
+        if (existing) return existing;
+        const hall = hallById.get(hallId);
+        const bucket: HallBucket = {
+          hallId,
+          hallName: hall?.name ?? "(ukjent hall)",
+          hallSlug: hall?.slug ?? hallId,
+          isActive: hall?.isActive ?? false,
+          clientVariant: hall?.clientVariant ?? "unity",
+          rooms: [],
+          activeRoomCount: 0,
+          totalPlayers: 0,
+        };
+        bucketByHall.set(hallId, bucket);
+        return bucket;
+      };
+
+      // Seed all active halls even if they have no rooms — empty cards
+      // still carry signal ("is the TV up? yes, but no game scheduled").
+      for (const hall of halls) {
+        if (hall.isActive) ensureBucket(hall.id);
+      }
+
+      for (const room of rooms) {
+        const bucket = ensureBucket(room.hallId);
+        bucket.rooms.push({
+          code: room.code,
+          gameSlug: room.gameSlug,
+          gameStatus: room.gameStatus,
+          playerCount: room.playerCount,
+          hostPlayerId: room.hostPlayerId,
+          createdAt: room.createdAt,
+        });
+        if (room.gameStatus === "RUNNING" || room.gameStatus === "WAITING") {
+          bucket.activeRoomCount += 1;
+        }
+        bucket.totalPlayers += room.playerCount;
+      }
+
+      const halls_payload = [...bucketByHall.values()].sort((a, b) =>
+        a.hallName.localeCompare(b.hallName)
+      );
+      const totals = halls_payload.reduce(
+        (acc, h) => {
+          acc.roomCount += h.rooms.length;
+          acc.activeRoomCount += h.activeRoomCount;
+          acc.totalPlayers += h.totalPlayers;
+          return acc;
+        },
+        { roomCount: 0, activeRoomCount: 0, totalPlayers: 0 },
+      );
+      apiSuccess(res, {
+        halls: halls_payload,
+        totals: { ...totals, hallCount: halls_payload.length },
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.get("/api/admin/reports/range", async (req, res) => {
+    try {
+      await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const hallId = typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      const gameType = parseOptionalLedgerGameType(req.query.gameType);
+      const channel = parseOptionalLedgerChannel(req.query.channel);
+      const report = engine.generateRangeReport({ startDate, endDate, hallId, gameType, channel });
+      apiSuccess(res, report);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.get("/api/admin/reports/games", async (req, res) => {
+    try {
+      await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const hallId = typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      const report = engine.generateGameStatistics({ startDate, endDate, hallId });
+      apiSuccess(res, report);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   // ── Overskudd ─────────────────────────────────────────────────────────────
 
   router.post("/api/admin/overskudd/distributions", async (req, res) => {

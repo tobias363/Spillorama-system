@@ -48,7 +48,7 @@ import type { PrizeGameType, PrizePolicySnapshot, PrizePolicyVersion, ExtraPrize
 import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
 import type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
 import { ComplianceLedger } from "./ComplianceLedger.js";
-import type { LedgerGameType, LedgerChannel, LedgerEventType, ComplianceLedgerEntry, DailyComplianceReport, DailyComplianceReportRow, OrganizationAllocationInput, OverskuddDistributionTransfer, OverskuddDistributionBatch } from "./ComplianceLedger.js";
+import type { LedgerGameType, LedgerChannel, LedgerEventType, ComplianceLedgerEntry, DailyComplianceReport, DailyComplianceReportRow, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionTransfer, OverskuddDistributionBatch } from "./ComplianceLedger.js";
 
 export type {
   LossLimits,
@@ -1817,6 +1817,26 @@ export class BingoEngine {
     channel?: LedgerChannel;
   }): string {
     return this.ledger.exportDailyReportCsv(input);
+  }
+
+  // BIN-517: Range + per-game aggregations for the admin dashboard.
+
+  generateRangeReport(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    channel?: LedgerChannel;
+  }): RangeComplianceReport {
+    return this.ledger.generateRangeReport(input);
+  }
+
+  generateGameStatistics(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+  }): GameStatisticsReport {
+    return this.ledger.generateGameStatistics(input);
   }
 
   async createOverskuddDistributionBatch(input: {

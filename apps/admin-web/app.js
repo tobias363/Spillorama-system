@@ -10,6 +10,7 @@ const CHAT3_SECTION_ACCESS_RULES = {
   "section-wallet-compliance": { permissions: ["WALLET_COMPLIANCE_READ"], mode: "all" },
   "section-prize-policy": { permissions: ["PRIZE_POLICY_READ"], mode: "all" },
   "section-room-control": { permissions: ["ROOM_CONTROL_READ"], mode: "all" },
+  "section-dashboard": { permissions: ["ROOM_CONTROL_READ", "DAILY_REPORT_READ"], mode: "any" },
   "section-settings-change-log": { permissions: ["GAME_SETTINGS_CHANGELOG_READ"], mode: "all" }
 };
 
@@ -36,6 +37,9 @@ const CHAT3_ACTION_PERMISSION_RULES = {
   pauseGameBtn: "ROOM_CONTROL_WRITE",
   resumeGameBtn: "ROOM_CONTROL_WRITE",
   forceEndBtn: "ROOM_CONTROL_WRITE",
+  refreshDashboardBtn: "ROOM_CONTROL_READ",
+  loadRangeReportBtn: "DAILY_REPORT_READ",
+  loadGameStatsBtn: "DAILY_REPORT_READ",
   loadComplianceBtn: "WALLET_COMPLIANCE_READ",
   saveLossLimitsBtn: "WALLET_COMPLIANCE_WRITE",
   setTimedPauseBtn: "WALLET_COMPLIANCE_WRITE",
@@ -189,6 +193,29 @@ const elements = {
   resumeGameBtn: document.getElementById("resumeGameBtn"),
   forceEndBtn: document.getElementById("forceEndBtn"),
   hallEventStatus: document.getElementById("hallEventStatus"),
+  // BIN-517: Dashboard elements.
+  refreshDashboardBtn: document.getElementById("refreshDashboardBtn"),
+  dashboardAutoRefresh: document.getElementById("dashboardAutoRefresh"),
+  dashboardHallsContainer: document.getElementById("dashboardHallsContainer"),
+  dashboardLiveStatus: document.getElementById("dashboardLiveStatus"),
+  liveTotalHalls: document.getElementById("liveTotalHalls"),
+  liveTotalRooms: document.getElementById("liveTotalRooms"),
+  liveTotalActive: document.getElementById("liveTotalActive"),
+  liveTotalPlayers: document.getElementById("liveTotalPlayers"),
+  reportStartDate: document.getElementById("reportStartDate"),
+  reportEndDate: document.getElementById("reportEndDate"),
+  reportHallFilter: document.getElementById("reportHallFilter"),
+  loadRangeReportBtn: document.getElementById("loadRangeReportBtn"),
+  loadGameStatsBtn: document.getElementById("loadGameStatsBtn"),
+  reportRangeTotals: document.getElementById("reportRangeTotals"),
+  rangeTotalStakes: document.getElementById("rangeTotalStakes"),
+  rangeTotalPrizes: document.getElementById("rangeTotalPrizes"),
+  rangeTotalNet: document.getElementById("rangeTotalNet"),
+  rangeTotalDays: document.getElementById("rangeTotalDays"),
+  reportRangeChart: document.getElementById("reportRangeChart"),
+  reportRangeTableBody: document.getElementById("reportRangeTableBody"),
+  reportGameStatsBody: document.getElementById("reportGameStatsBody"),
+  reportRangeStatus: document.getElementById("reportRangeStatus"),
   // Chat3: RBAC block start
   settingsLogGameSlug: null,
   settingsLogLimit: null,
@@ -2403,6 +2430,257 @@ async function handleForceEnd() {
   }
 }
 
+// BIN-517: Dashboard helpers ──────────────────────────────────────────────
+
+const dashboardState = {
+  autoRefreshTimer: null,
+};
+
+function formatNok(amount) {
+  if (typeof amount !== "number" || !Number.isFinite(amount)) return "—";
+  return amount.toLocaleString("nb-NO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderDashboardLive(payload) {
+  const { halls, totals } = payload;
+  elements.liveTotalHalls.textContent = String(totals?.hallCount ?? 0);
+  elements.liveTotalRooms.textContent = String(totals?.roomCount ?? 0);
+  elements.liveTotalActive.textContent = String(totals?.activeRoomCount ?? 0);
+  elements.liveTotalPlayers.textContent = String(totals?.totalPlayers ?? 0);
+
+  elements.dashboardHallsContainer.innerHTML = "";
+  if (!Array.isArray(halls) || halls.length === 0) {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "Ingen haller.";
+    elements.dashboardHallsContainer.appendChild(p);
+    return;
+  }
+
+  for (const hall of halls) {
+    const card = document.createElement("div");
+    card.className = "dashboard-hall-card" + (hall.isActive ? "" : " inactive");
+    const title = document.createElement("div");
+    title.style.display = "flex";
+    title.style.justifyContent = "space-between";
+    title.innerHTML = `<strong>${escapeHtml(hall.hallName)}</strong><span class="muted" style="font-size: 12px;">${escapeHtml(hall.hallSlug)}</span>`;
+    const meta = document.createElement("div");
+    meta.className = "muted";
+    meta.style.fontSize = "12px";
+    meta.style.margin = "4px 0";
+    meta.textContent = `${hall.activeRoomCount} aktive · ${hall.totalPlayers} spillere · variant: ${hall.clientVariant}`;
+    card.append(title, meta);
+
+    if (hall.rooms.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.style.fontSize = "12px";
+      empty.textContent = "Ingen rom.";
+      card.appendChild(empty);
+    } else {
+      for (const room of hall.rooms) {
+        const row = document.createElement("div");
+        row.className = "dashboard-room-row";
+        row.innerHTML = `
+          <span><code>${escapeHtml(room.code)}</code> · ${escapeHtml(room.gameSlug || "—")}</span>
+          <span>
+            <span class="dashboard-room-status ${escapeHtml(room.gameStatus)}">${escapeHtml(room.gameStatus)}</span>
+            <span style="margin-left: 4px;">${room.playerCount} 👥</span>
+          </span>`;
+        card.appendChild(row);
+      }
+    }
+    elements.dashboardHallsContainer.appendChild(card);
+  }
+}
+
+function escapeHtml(str) {
+  if (typeof str !== "string") return "";
+  return str.replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+async function loadDashboardLive() {
+  try {
+    const payload = await apiRequest("/api/admin/dashboard/live", { auth: true });
+    renderDashboardLive(payload);
+    setStatus(
+      elements.dashboardLiveStatus,
+      `Oppdatert ${new Date().toLocaleTimeString("nb-NO")}.`,
+      "success",
+    );
+  } catch (err) {
+    setStatus(elements.dashboardLiveStatus, err.message || "Kunne ikke hente live-data.", "error");
+  }
+}
+
+function startDashboardAutoRefresh() {
+  stopDashboardAutoRefresh();
+  if (!elements.dashboardAutoRefresh.checked) return;
+  dashboardState.autoRefreshTimer = setInterval(() => {
+    loadDashboardLive().catch(() => undefined);
+  }, 10000);
+}
+
+function stopDashboardAutoRefresh() {
+  if (dashboardState.autoRefreshTimer) {
+    clearInterval(dashboardState.autoRefreshTimer);
+    dashboardState.autoRefreshTimer = null;
+  }
+}
+
+function populateDashboardHallFilter() {
+  const current = elements.reportHallFilter.value;
+  elements.reportHallFilter.innerHTML = "";
+  const allOpt = document.createElement("option");
+  allOpt.value = "";
+  allOpt.textContent = "Alle haller";
+  elements.reportHallFilter.appendChild(allOpt);
+  for (const hall of state.halls || []) {
+    const opt = document.createElement("option");
+    opt.value = hall.id;
+    opt.textContent = `${hall.name} (${hall.slug})`;
+    elements.reportHallFilter.appendChild(opt);
+  }
+  if (current) elements.reportHallFilter.value = current;
+}
+
+function renderRangeChart(days) {
+  elements.reportRangeChart.innerHTML = "";
+  if (!Array.isArray(days) || days.length === 0) return;
+  const maxValue = Math.max(
+    1,
+    ...days.map((d) => Math.max(d.totals.grossTurnover, d.totals.prizesPaid)),
+  );
+  const chart = document.createElement("div");
+  chart.className = "dashboard-bar-chart";
+  // Legend
+  const legend = document.createElement("div");
+  legend.style.cssText = "display: flex; gap: 12px; font-size: 11px; margin-bottom: 4px;";
+  legend.innerHTML = `
+    <span><span style="display:inline-block; width:10px; height:10px; background:#3b82f6; vertical-align: middle;"></span> Innsats</span>
+    <span><span style="display:inline-block; width:10px; height:10px; background:#f97316; vertical-align: middle;"></span> Premier</span>`;
+  elements.reportRangeChart.appendChild(legend);
+  for (const day of days) {
+    const bar = document.createElement("div");
+    bar.className = "dashboard-bar";
+    const stakesH = Math.round((day.totals.grossTurnover / maxValue) * 100);
+    const prizesH = Math.round((day.totals.prizesPaid / maxValue) * 100);
+    const stakesEl = document.createElement("div");
+    stakesEl.className = "dashboard-bar-fill-stakes";
+    stakesEl.style.height = `${stakesH}px`;
+    stakesEl.title = `${day.date}: Innsats ${formatNok(day.totals.grossTurnover)}`;
+    const prizesEl = document.createElement("div");
+    prizesEl.className = "dashboard-bar-fill-prizes";
+    prizesEl.style.height = `${prizesH}px`;
+    prizesEl.title = `${day.date}: Premier ${formatNok(day.totals.prizesPaid)}`;
+    const label = document.createElement("div");
+    label.className = "dashboard-bar-label";
+    label.textContent = day.date.slice(5); // MM-DD
+    bar.append(stakesEl, prizesEl, label);
+    chart.appendChild(bar);
+  }
+  elements.reportRangeChart.appendChild(chart);
+}
+
+async function handleLoadRangeReport() {
+  const startDate = (elements.reportStartDate.value || "").trim();
+  const endDate = (elements.reportEndDate.value || "").trim();
+  if (!startDate || !endDate) {
+    setStatus(elements.reportRangeStatus, "Velg fra- og til-dato.", "error");
+    return;
+  }
+  const hallId = elements.reportHallFilter.value || undefined;
+  const params = new URLSearchParams({ startDate, endDate });
+  if (hallId) params.set("hallId", hallId);
+  setLoading(elements.loadRangeReportBtn, true, "Henter...", "Hent finansiell rapport");
+  try {
+    const report = await apiRequest(`/api/admin/reports/range?${params.toString()}`, { auth: true });
+    elements.reportRangeTotals.style.display = "block";
+    elements.rangeTotalStakes.textContent = formatNok(report.totals.grossTurnover);
+    elements.rangeTotalPrizes.textContent = formatNok(report.totals.prizesPaid);
+    elements.rangeTotalNet.textContent = formatNok(report.totals.net);
+    elements.rangeTotalDays.textContent = String(report.days.length);
+    renderRangeChart(report.days);
+    elements.reportRangeTableBody.innerHTML = "";
+    for (const day of report.days) {
+      const tr = document.createElement("tr");
+      tr.style.borderBottom = "1px solid #e5e7eb";
+      tr.innerHTML = `
+        <td style="padding: 6px;">${escapeHtml(day.date)}</td>
+        <td style="padding: 6px;">${formatNok(day.totals.grossTurnover)}</td>
+        <td style="padding: 6px;">${formatNok(day.totals.prizesPaid)}</td>
+        <td style="padding: 6px;">${formatNok(day.totals.net)}</td>
+        <td style="padding: 6px;">${day.totals.stakeCount}</td>
+        <td style="padding: 6px;">${day.totals.prizeCount}</td>`;
+      elements.reportRangeTableBody.appendChild(tr);
+    }
+    setStatus(elements.reportRangeStatus, `Hentet rapport for ${report.days.length} dager.`, "success");
+  } catch (err) {
+    setStatus(elements.reportRangeStatus, err.message || "Kunne ikke hente rapport.", "error");
+  } finally {
+    setLoading(elements.loadRangeReportBtn, false, "Henter...", "Hent finansiell rapport");
+  }
+}
+
+async function handleLoadGameStats() {
+  const startDate = (elements.reportStartDate.value || "").trim();
+  const endDate = (elements.reportEndDate.value || "").trim();
+  if (!startDate || !endDate) {
+    setStatus(elements.reportRangeStatus, "Velg fra- og til-dato.", "error");
+    return;
+  }
+  const hallId = elements.reportHallFilter.value || undefined;
+  const params = new URLSearchParams({ startDate, endDate });
+  if (hallId) params.set("hallId", hallId);
+  setLoading(elements.loadGameStatsBtn, true, "Henter...", "Hent spill-statistikk");
+  try {
+    const stats = await apiRequest(`/api/admin/reports/games?${params.toString()}`, { auth: true });
+    elements.reportGameStatsBody.innerHTML = "";
+    if (stats.rows.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 8;
+      td.style.padding = "8px";
+      td.className = "muted";
+      td.textContent = "Ingen data for valgt periode.";
+      tr.appendChild(td);
+      elements.reportGameStatsBody.appendChild(tr);
+    } else {
+      for (const row of stats.rows) {
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid #e5e7eb";
+        const hallName = (state.halls || []).find((h) => h.id === row.hallId)?.name || row.hallId;
+        tr.innerHTML = `
+          <td style="padding: 6px;">${escapeHtml(hallName)}</td>
+          <td style="padding: 6px;">${escapeHtml(row.gameType)}</td>
+          <td style="padding: 6px;">${row.roundCount}</td>
+          <td style="padding: 6px;">${row.distinctPlayerCount}</td>
+          <td style="padding: 6px;">${formatNok(row.totalStakes)}</td>
+          <td style="padding: 6px;">${formatNok(row.totalPrizes)}</td>
+          <td style="padding: 6px;">${formatNok(row.net)}</td>
+          <td style="padding: 6px;">${formatNok(row.averagePrizePerRound)}</td>`;
+        elements.reportGameStatsBody.appendChild(tr);
+      }
+    }
+    setStatus(elements.reportRangeStatus, `Spill-statistikk: ${stats.rows.length} grupper, ${stats.totals.roundCount} runder.`, "success");
+  } catch (err) {
+    setStatus(elements.reportRangeStatus, err.message || "Kunne ikke hente spill-statistikk.", "error");
+  } finally {
+    setLoading(elements.loadGameStatsBtn, false, "Henter...", "Hent spill-statistikk");
+  }
+}
+
+function initDashboardDefaults() {
+  if (!elements.reportStartDate.value) {
+    const today = new Date();
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    elements.reportStartDate.value = weekAgo.toISOString().slice(0, 10);
+    elements.reportEndDate.value = today.toISOString().slice(0, 10);
+  }
+}
+
 function buildGameUpdatePayload() {
   let parsedSettings;
   try {
@@ -3013,6 +3291,15 @@ async function loadAllAdminData() {
   } else {
     setStatus(elements.settingsLogStatus, "Låst: mangler GAME_SETTINGS_CHANGELOG_READ.");
   }
+
+  // BIN-517: dashboard bootstrap. Fire-and-forget — a failed live fetch
+  // shouldn't block the rest of the admin UI from rendering.
+  if (chat3HasPermission("ROOM_CONTROL_READ") || chat3HasPermission("DAILY_REPORT_READ")) {
+    initDashboardDefaults();
+    populateDashboardHallFilter();
+    loadDashboardLive().catch(() => undefined);
+    startDashboardAutoRefresh();
+  }
 }
 
 async function bootstrap() {
@@ -3356,6 +3643,24 @@ async function bootstrap() {
     handleForceEnd().catch((err) => {
       setStatus(elements.hallEventStatus, err.message || "Kunne ikke force-avslutte spill.", "error");
     });
+  });
+
+  // BIN-517: Dashboard wiring.
+  elements.refreshDashboardBtn.addEventListener("click", () => {
+    loadDashboardLive().catch(() => undefined);
+  });
+  elements.dashboardAutoRefresh.addEventListener("change", () => {
+    if (elements.dashboardAutoRefresh.checked) {
+      startDashboardAutoRefresh();
+    } else {
+      stopDashboardAutoRefresh();
+    }
+  });
+  elements.loadRangeReportBtn.addEventListener("click", () => {
+    handleLoadRangeReport().catch(() => undefined);
+  });
+  elements.loadGameStatsBtn.addEventListener("click", () => {
+    handleLoadGameStats().catch(() => undefined);
   });
 
   elements.logoutBtn.addEventListener("click", () => {
