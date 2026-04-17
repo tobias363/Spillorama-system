@@ -16,6 +16,8 @@
     "test:compliance": "npm --prefix apps/backend run test:compliance",
     "test:games": "npm -w @spillorama/game-client run test",
     "check:all": "npm run check && npm run build && npm run test:compliance",
-    "deploy:backend": "bash infra/deploy-backend.sh"
+    "deploy:backend": "bash infra/deploy-backend.sh",
+    "matrix:generate": "tsx scripts/generate-parity-matrix.ts",
+    "matrix:check": "tsx scripts/generate-parity-matrix.ts --check"
   }
 }

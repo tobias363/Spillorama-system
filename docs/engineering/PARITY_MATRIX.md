@@ -39,7 +39,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 **Grid:** 5×5 (fri sentercelle) — 75-ball range
 
 ### 2.1 Kjerne-features
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Rom-join + authoritative state | ✅ | ✅ | ✅ | ✅ | 🟡 | — |
@@ -60,7 +59,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | MAX_DRAWS 75 (fiks fra 60) | ✅ | ✅ | 🔵 | ✅ | ✅ | [BIN-520](https://linear.app/bingosystem/issue/BIN-520) ✅ merged |
 
 ### 2.2 Game-specific features
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Mini-game rotasjon — Wheel of Fortune | ✅ | ✅ | ✅ | ✅ | ✅ | — |
@@ -75,7 +73,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Billett-animasjoner (GSAP-parametre) | ✅ | 🔵 | ✅ | ✅ | ✅ | — |
 
 ### 2.3 Infrastruktur og drift
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Socket.IO Redis-adapter (multi-node) | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-494](https://linear.app/bingosystem/issue/BIN-494) ✅ merged #108 |
@@ -87,15 +84,15 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | E2E pengeflyt-test | 🔵 | ✅ | 🔵 | ✅ | ✅ | [BIN-526](https://linear.app/bingosystem/issue/BIN-526) ✅ merged — `apps/backend/src/compliance/__tests__/pengeflyt-e2e.test.ts` dekker G1/G2/G3/G5 |
 | Wire-kontrakt-test (Zod) | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-527](https://linear.app/bingosystem/issue/BIN-527) / [BIN-545](https://linear.app/bingosystem/issue/BIN-545) ✅ merged |
 | Load-test 1000+ spillere | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-508](https://linear.app/bingosystem/issue/BIN-508) ✅ merged, venter på første nattlig-kjøring |
-| Observability (Sentry + funnel) | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-539](https://linear.app/bingosystem/issue/BIN-539) ✅ merged — 3 Grafana-dashboards som kode under `infra/grafana/dashboards/` (draws-and-claims, connection-health, finance-gates) + `infra/deploy/grafana-provision.sh`; første opplasting verifiseres i staging-rehearsal |
+| Observability (Sentry + funnel) | 🔵 | ✅ | ✅ | ✅ | 🟡 | [BIN-539](https://linear.app/bingosystem/issue/BIN-539) ✅ merged — venter på Grafana-dashboards provisjonert |
 | Feature-flag rollback-runbook | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-540](https://linear.app/bingosystem/issue/BIN-540) ✅ merged — backend + klient + runbook + `halls.client_variant`-migrasjon |
-| Unity arkiv-bundle (CDN) | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-532](https://linear.app/bingosystem/issue/BIN-532) — scope-endret 2026-04-17 til **ett-gangs lokal build → read-only CDN-arkiv på `/legacy-unity-archive/v1.0.0/`**. CI-workflow fjernet, `UNITY_LICENSE` ikke lenger nødvendig. Runbook rename-t til `docs/operations/UNITY_ARCHIVE_RUNBOOK.md`. Status flippes til ✅ når Tobias har lastet opp og arkiv-verifisering (rehearsal-steg 1, `curl -I` → 200) består. |
+| Unity rollback-bundle CI | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-532](https://linear.app/bingosystem/issue/BIN-532) — `.github/workflows/unity-build.yml` (GameCI Unity 6000.3.10f1 WebGL-build), runbook `docs/operations/UNITY_BUILD_RUNBOOK.md`; venter på `UNITY_LICENSE`-secret + første staging-rehearsal |
 | iOS Safari WebGL context-loss test | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-542](https://linear.app/bingosystem/issue/BIN-542) |
 | GSAP-lisensavklaring | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-538](https://linear.app/bingosystem/issue/BIN-538) |
 | Asset-pipeline (Unity → PixiJS) | 🔵 | 🔵 | 🟡 | ✅ | ❌ | [BIN-543](https://linear.app/bingosystem/issue/BIN-543) |
 | PlayerPrefs → localStorage mapping | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-544](https://linear.app/bingosystem/issue/BIN-544) |
 
-**Game 1 totalt:** 33 rader — 17 ✅, 16 🟡, 0 ❌. Release-klar: 13 / 33 (39 %). Bolk 4-7-leveransene flyttet BIN-526/540 til ✅ Release-klar og BIN-503/515/517/516/541/498/532 til 🟡 Release-klar. Bolk 8 BIN-539 flyttet Observability 🟡 → ✅ Release-klar (Grafana-as-code dashboards provisjonert). Tall normaliseres automatisk av `npm run matrix:generate` (BIN-528).
+**Game 1 totalt:** 42 rader — 14 ✅, 24 🟡, 4 ❌. Release-klar: 14 / 42 (33 %). Bolk 5-leveransene (BIN-516 chat-persistens, BIN-541 Spillvett cross-game, BIN-498 hall-display + BIN-504 konsolidert) flyttet 3 rader ❌ → 🟡 på Backend-paritet. Bolk 4 flyttet BIN-526 (❌→✅) og BIN-540 (🟡→✅) til fullt Release-klar. Bolk 6 BIN-532 la til ny rad "Unity rollback-bundle CI" (🟡 Release-klar). Bolk 7 BIN-503 + BIN-515 + BIN-517 flyttet AdminHallDisplayLogin, Admin hall-events og Admin-dashboard ❌ → 🟡 Release-klar (DB-tokens + live-operator-panel + dashboard m/ live-rom + finansielle rapporter + per-spill statistikk). Gjenstående 🟡 venter i hovedsak på staging-verifisering eller pilot-cutover.
 
 ---
 
@@ -106,7 +103,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 **Grid:** 3×5 (15 celler) — 60-ball range
 
 ### 3.1 Kjerne-features
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Rom-join + authoritative state | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
@@ -122,7 +118,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Eksplisitt kjøp (fjern auto-arm) | ✅ | ✅ | ✅ | ✅ | 🟡 | G1 har dette, portet til G2 |
 
 ### 3.2 Game-specific features
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Rakettstabling / animasjon | 🔴 | 🔵 | ✅ | ❌ | 🟡 | [BIN-529](https://linear.app/bingosystem/issue/BIN-529) — `components/RocketStack.ts` (60 segmenter, GSAP stacking) |
@@ -135,7 +130,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-529** — `docs/engineering/game2-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game2.js`. Se spec §11 for kjente avvik.
 
-**Game 2 totalt:** 14 rader — 0 ✅, 12 🟡, 2 ❌. **Release-klar: 0/14 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
+**Game 2 totalt:** 15 rader — 0 ✅, 13 🟡, 2 ❌. Release-klar: 0 / 15 (0 %). — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
 
 ---
 
@@ -146,7 +141,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 **Grid:** 5×5 (fri sentercelle) — 60-ball range + animert kulekø
 
 ### 4.1 Kjerne-features
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Rom-join + authoritative state | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
@@ -163,7 +157,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Eksplisitt kjøp (fjern auto-arm) | ✅ | ✅ | ✅ | ✅ | 🟡 | G1 har dette, portet til G3 |
 
 ### 4.2 Game-specific features
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Animert kulekø vertikal FIFO (MVP) | 🔴 | 🔵 | ✅ | ❌ | 🟡 | — |
@@ -176,7 +169,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-530** — `docs/engineering/game3-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game3.js`. Se spec §11 for kjente avvik.
 
-**Game 3 totalt:** 16 rader — 0 ✅, 13 🟡, 3 ❌. **Release-klar: 0/16 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
+**Game 3 totalt:** 16 rader — 0 ✅, 13 🟡, 3 ❌. Release-klar: 0 / 16 (0 %). — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
 
 ---
 
@@ -187,7 +180,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 **Grid:** 3×5 (15 celler) — 60-ball range + ruletthjul
 
 ### 5.1 Kjerne-features
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Rom-join + authoritative state | 🔴 | ✅ | ✅ | ❌ | 🟡 | — |
@@ -203,7 +195,6 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | KYC-gatekeep (verified player) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-514](https://linear.app/bingosystem/issue/BIN-514) |
 
 ### 5.2 Game-specific features
-
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Ruletthjul (ren GSAP, MVP) | 🔴 | 🔵 | ✅ | ❌ | 🟡 | — |
@@ -220,7 +211,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 - [x] **BIN-531** — `docs/engineering/game5-canonical-spec.md` skrevet med YAML front-matter (levert)
 - Rader verifisert mot kode + legacy `Sockets/game5.js`. Se spec §11 for kjente avvik.
 
-**Game 5 totalt:** 20 rader — 0 ✅, 14 🟡, 6 ❌. **Release-klar: 0/20 (0 %)** — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
+**Game 5 totalt:** 19 rader — 0 ✅, 11 🟡, 8 ❌. Release-klar: 0 / 19 (0 %). — G1-paritet forbedret (SPECTATING + eksplisitt kjøp + loader-barriere portet).
 
 ---
 
@@ -228,11 +219,11 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 | Spill | Rader | ✅ | 🟡 | ❌ | Release-klar % |
 |-------|------:|---:|---:|---:|---------------:|
-| Game 1 (Databingo) | 32 | 16 | 14 | 2 | 38 % |
-| Game 2 (Rocket) | 14 | 0 | 12 | 2 | 0 % |
+| Game 1 (Databingo) | 42 | 14 | 24 | 4 | 33 % |
+| Game 2 (Rocket) | 15 | 0 | 13 | 2 | 0 % |
 | Game 3 (Monster) | 16 | 0 | 13 | 3 | 0 % |
-| Game 5 (Spillorama) | 20 | 0 | 14 | 6 | 0 % |
-| **Totalt** | **82** | **16** | **53** | **13** | **20 %** |
+| Game 5 (Spillorama) | 19 | 0 | 11 | 8 | 0 % |
+| **Totalt** | **92** | **14** | **61** | **17** | **15 %** |
 
 Totalsum regnet per **Release-klar**-kolonnen — det er den som styrer cutover-beslutning per [`LEGACY_DECOUPLING_STATUS.md`](../architecture/LEGACY_DECOUPLING_STATUS.md).
 
@@ -305,5 +296,3 @@ Automatisk generator fra YAML front-matter i per-spill canonical specs er planla
 | 2026-04-17 | BIN-503 PR | AdminHallDisplayLogin konsolidert: ny migrasjon `20260418150000_hall_display_tokens.sql` (hash-only lagring, `app_hall_display_tokens`), PlatformService-CRUD (`listHallDisplayTokens` / `createHallDisplayToken` / `revokeHallDisplayToken` / `verifyHallDisplayToken` med hall-slug-replay-vern), admin-ruter på `/api/admin/halls/:hallId/display-tokens`, admin-web UI m/ generere-knapp + klartext-engangsvisning + QR-kode via api.qrserver.com + tilbakekall. `index.ts` socket-handler bruker DB-verifier primært, env-var-fallback bevart for dev/staging. 6 nye tester i `hallDisplayTokens.test.ts` dekker plaintext-engangsvisning, hash-lagring, revoke-scoping, hall-mismatch-avvisning. Rad flyttet ❌ → Backend ✅ / Klient ✅ / Release-klar 🟡 (venter på staging-verifisering). |
 | 2026-04-17 | BIN-515 PR | Admin hall-events levert: ny socket-handler `apps/backend/src/sockets/adminHallEvents.ts` med `admin:login` (JWT via `getUserFromAccessToken`), `admin:room-ready` (broadcast `admin:hall-event` til room-code + `hall:<id>:display`, countdown clamp 0–300s), `admin:pause-game` / `admin:resume-game` (wrapper på `engine.pauseGame/resumeGame` fra BIN-460 + room:update-emit), `admin:force-end` (wrapper på `engine.endGame` med Lotteritilsynet-audit-log). Per-event ROOM_CONTROL_WRITE-guard, login kan lykkes for ikke-autoriserte men hver event avviser FORBIDDEN. HTTP-paritet: ny `POST /api/admin/rooms/:code/room-ready` for admin-web-bruken. Admin-web Romkontroll-seksjonen har ny "Live hall-kontroll"-panel med 4 knapper + input for countdown/melding/grunn; force-end bekrefter før utførelse. 11 nye tester i `adminHallEvents.test.ts`. G1-rad "Admin hall-events" flyttet ❌ → Backend ✅ / Klient ✅ / Release-klar 🟡. |
 | 2026-04-17 | BIN-517 PR | Admin-dashboard levert: ny `ComplianceLedger.generateRangeReport` (multi-day finansiell rapport med per-dag rader + total-sum, 366-dagers cap, cross-date validation) og `generateGameStatistics` (grupper per hallId × gameType med distinct-counts for runder + spillere, gjennomsnittspris per runde). 3 nye admin-ruter: `GET /api/admin/dashboard/live` (live-rom per hall, via `engine.listRoomSummaries`; ROOM_CONTROL_READ), `GET /api/admin/reports/range` + `GET /api/admin/reports/games` (DAILY_REPORT_READ). Admin-web har ny Dashboard-seksjon øverst i menyen med live-rom-kort per hall (auto-oppdater 10s), finansiell range-rapport med enkel SVG-stolpe-graf (innsats vs premier, ingen ekstern chart-lib) + tabell, og per-spill-statistikk-tabell. 5 nye tester i `ComplianceLedger.test.ts`. G1-rad "Admin-dashboard m/ rapporter" flyttet ❌ → Backend ✅ / Klient ✅ / Release-klar 🟡. |
-| 2026-04-17 | BIN-532 teardown (bolk 8 Task 0) | Unity-CI-scope endret til ett-gangs arkiv: slettet `.github/workflows/unity-build.yml`, renamet `docs/operations/UNITY_BUILD_RUNBOOK.md` → `UNITY_ARCHIVE_RUNBOOK.md` (beskriver nå CDN-upload + verifisering istedenfor CI-bygging), fjernet `UNITY_LICENSE`-referanse fra `docs/compliance/RELEASE_GATE.md` §7 og oppdatert bullet-teksten til arkiv-verifisering. G1-rad renamet fra "Unity rollback-bundle CI" → "Unity arkiv-bundle (CDN)". Status forblir 🟡 Release-klar — flipper til ✅ når teknisk leder har lastet opp bundle til `/legacy-unity-archive/v1.0.0/` og `curl -I` gir 200. Besparelse: ingen GameCI minutes, ingen Unity Pro-lisens, ingen GitHub secrets. |
-| 2026-04-17 | BIN-539 PR (bolk 8) | Grafana-as-code levert: 3 dashboards under `infra/grafana/dashboards/` (`draws-and-claims.json`, `connection-health.json`, `finance-gates.json`) med tempel-variabel `${DS_PROM}` for Prometheus-datakilde. Terskler i JSON-ene: reconnect-ratio grønn ≤ 2 % / rød ≥ 5 %, scheduler p99 rød > 500 ms, draw-engine-feil rød > 5/5m, stuck-rooms/lock-timeouts rød > 0, wallet-op p99 rød > 2000 ms. `infra/deploy/grafana-provision.sh` gjør idempotent opplasting via Grafana HTTP-API (service-account token). `infra/grafana/validate-dashboards.mjs` strukturell sanity-check kjører lokalt på < 1 s. Runbook-oppdatering i `docs/operations/OBSERVABILITY_RUNBOOK.md` §3 med panel→PromQL-referanse per dashboard. G1-rad "Observability (Sentry + funnel)" flyttet 🟡 → ✅ Release-klar. |
