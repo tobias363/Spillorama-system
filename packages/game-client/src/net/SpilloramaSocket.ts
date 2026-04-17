@@ -81,8 +81,96 @@ export class SpilloramaSocket {
     connectionStateChanged: new Set(),
   };
 
+  /**
+   * BIN-501: Event-buffer between socket.connect() and the first listener
+   * registration.
+   *
+   * Race scenario we fix: the socket connects faster than GameBridge.start(),
+   * so the backend can fire a `draw:new` (or any other broadcast) before
+   * the bridge has subscribed via `socket.on("drawNew", ...)`. Without a
+   * buffer those events are dropped silently — the client's drawIndex gap
+   * detector (BIN-502) would later catch it, but that costs a full
+   * resync round-trip per miss. The buffer avoids the drop entirely.
+   *
+   * Policy:
+   *   - Only *broadcast* channels are buffered (not connectionStateChanged).
+   *   - Buffering only happens while a channel has zero subscribers.
+   *   - When the first listener attaches, the queue is drained in order
+   *     and cleared. Later listeners see only live events.
+   *   - Capped at BUFFER_LIMIT per channel (FIFO eviction).
+   *   - Cleared on disconnect — a fresh session starts fresh.
+   */
+  private static readonly BUFFER_LIMIT = 100;
+  private readonly bufferedEvents: {
+    [K in keyof SpilloramaSocketListeners]: Array<Parameters<SpilloramaSocketListeners[K]>[0]>;
+  } = {
+    roomUpdate: [],
+    drawNew: [],
+    patternWon: [],
+    chatMessage: [],
+    jackpotActivated: [],
+    minigameActivated: [],
+    connectionStateChanged: [],
+  };
+
   constructor(serverUrl: string) {
     this.serverUrl = serverUrl;
+  }
+
+  /**
+   * BIN-501: central dispatch. Fires all registered listeners if any exist,
+   * otherwise buffers (bounded FIFO) for replay on the first subscription.
+   * Exposed as `private` but called via `this` from both the socket.on
+   * handlers and the test shim.
+   */
+  private dispatchOrBuffer<K extends keyof SpilloramaSocketListeners>(
+    channel: K,
+    payload: Parameters<SpilloramaSocketListeners[K]>[0],
+  ): void {
+    const set = this.listeners[channel] as Set<SpilloramaSocketListeners[K]>;
+    if (set.size > 0) {
+      // Live dispatch — no buffering while at least one listener exists.
+      set.forEach((fn) => (fn as (p: typeof payload) => void)(payload));
+      return;
+    }
+    const buffer = this.bufferedEvents[channel] as Array<typeof payload>;
+    buffer.push(payload);
+    if (buffer.length > SpilloramaSocket.BUFFER_LIMIT) {
+      buffer.splice(0, buffer.length - SpilloramaSocket.BUFFER_LIMIT);
+    }
+  }
+
+  /**
+   * BIN-501: replay any buffered events of the given channel to a
+   * newly-attached listener, then clear the buffer.
+   */
+  private drainBufferTo<K extends keyof SpilloramaSocketListeners>(
+    channel: K,
+    listener: SpilloramaSocketListeners[K],
+  ): void {
+    const buffer = this.bufferedEvents[channel] as Array<Parameters<SpilloramaSocketListeners[K]>[0]>;
+    if (buffer.length === 0) return;
+    const queued = buffer.splice(0, buffer.length);
+    for (const payload of queued) {
+      (listener as (p: typeof payload) => void)(payload);
+    }
+  }
+
+  /** BIN-501 test-only: read current buffer size for a channel. */
+  __getBufferedCount(channel: keyof SpilloramaSocketListeners): number {
+    return this.bufferedEvents[channel].length;
+  }
+
+  /**
+   * BIN-501 test-only: invoke the internal dispatch path as if the socket
+   * had just received `channel`. Lets unit tests simulate an init race
+   * without wiring a fake io-client.
+   */
+  __dispatchForTest<K extends keyof SpilloramaSocketListeners>(
+    channel: K,
+    payload: Parameters<SpilloramaSocketListeners[K]>[0],
+  ): void {
+    this.dispatchOrBuffer(channel, payload);
   }
 
   // ── Connection ──────────────────────────────────────────────────────────
@@ -121,29 +209,31 @@ export class SpilloramaSocket {
       this.setConnectionState("connected");
     });
 
-    // Server → Client broadcasts
+    // Server → Client broadcasts. All routed through dispatchOrBuffer so
+    // early events (BIN-501 init-race) are queued until the first listener
+    // subscribes.
     this.socket.on(SocketEvents.ROOM_UPDATE, (payload: RoomUpdatePayload) => {
-      this.listeners.roomUpdate.forEach((fn) => fn(payload));
+      this.dispatchOrBuffer("roomUpdate", payload);
     });
 
     this.socket.on(SocketEvents.DRAW_NEW, (payload: DrawNewPayload) => {
-      this.listeners.drawNew.forEach((fn) => fn(payload));
+      this.dispatchOrBuffer("drawNew", payload);
     });
 
     this.socket.on(SocketEvents.PATTERN_WON, (payload: PatternWonPayload) => {
-      this.listeners.patternWon.forEach((fn) => fn(payload));
+      this.dispatchOrBuffer("patternWon", payload);
     });
 
     this.socket.on(SocketEvents.CHAT_MESSAGE, (payload: ChatMessage) => {
-      this.listeners.chatMessage.forEach((fn) => fn(payload));
+      this.dispatchOrBuffer("chatMessage", payload);
     });
 
     this.socket.on(SocketEvents.JACKPOT_ACTIVATED, (payload: JackpotActivatedPayload) => {
-      this.listeners.jackpotActivated.forEach((fn) => fn(payload));
+      this.dispatchOrBuffer("jackpotActivated", payload);
     });
 
     this.socket.on(SocketEvents.MINIGAME_ACTIVATED, (payload: MiniGameActivatedPayload) => {
-      this.listeners.minigameActivated.forEach((fn) => fn(payload));
+      this.dispatchOrBuffer("minigameActivated", payload);
     });
   }
 
@@ -152,6 +242,12 @@ export class SpilloramaSocket {
       this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
+    }
+    // BIN-501: a fresh session starts with a fresh buffer. Leftover events
+    // from a previous session would be out-of-date (e.g. draws for a game
+    // that has long since ended) and could confuse the next bridge.
+    for (const channel of Object.keys(this.bufferedEvents) as Array<keyof SpilloramaSocketListeners>) {
+      this.bufferedEvents[channel].length = 0;
     }
     this.setConnectionState("disconnected");
   }
@@ -171,7 +267,14 @@ export class SpilloramaSocket {
     listener: SpilloramaSocketListeners[K],
   ): () => void {
     const set = this.listeners[event] as Set<SpilloramaSocketListeners[K]>;
+    const wasEmpty = set.size === 0;
     set.add(listener);
+    // BIN-501: drain any events buffered between connect() and this first
+    // listener subscription. Skip connectionStateChanged — that channel is
+    // state-transition-only and never buffered.
+    if (wasEmpty && event !== "connectionStateChanged") {
+      this.drainBufferTo(event, listener);
+    }
     return () => set.delete(listener);
   }
 

@@ -50,7 +50,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Trekning (draw:new, drawIndex) | ✅ | ✅ | ✅ | ✅ | 🟡 | — |
 | `drawIndex` gap-deteksjon | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-502](https://linear.app/bingosystem/issue/BIN-502) ✅ merged |
 | Checkpoint + recovery | ✅ | ✅ | 🔵 | ✅ | 🟡 | — |
-| Event-buffer (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | [BIN-501](https://linear.app/bingosystem/issue/BIN-501) |
+| Event-buffer (late-join) | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-501](https://linear.app/bingosystem/issue/BIN-501) — SpilloramaSocket event-buffer med replay på første subscribe + 9 unit-tester i denne PR |
 | Chat (sanntids) | ✅ | ✅ | ✅ | ✅ | 🟡 | — |
 | Chat-persistens (DB) | 🔴 | ✅ | 🔵 | ✅ | 🟡 | [BIN-516](https://linear.app/bingosystem/issue/BIN-516) — backend+migration i denne PR; klient leser nå replay via chat:history |
 | Audio (3 stemmepakker, 60 clips) | ✅ | 🔵 | ✅ | ✅ | ✅ | — |
