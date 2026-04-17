@@ -45,10 +45,10 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Rom-join + authoritative state | ✅ | ✅ | ✅ | ✅ | 🟡 | — |
 | Billett-kjøp (per-type `TicketSelection[]`) | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Server-autoritativ stake | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| `ticket:mark` (privat, ikke full fanout) | 🔴 | 🔴 | 🟡 | ❌ | ❌ | [BIN-499](https://linear.app/bingosystem/issue/BIN-499) |
+| `ticket:mark` (privat, ikke full fanout) | ✅ | ✅ | 🟡 | ✅ | 🟡 | [BIN-499](https://linear.app/bingosystem/issue/BIN-499) ✅ merged #108 |
 | Claim LINE + BINGO (server-validert) | ✅ | ✅ | ✅ | ✅ | 🟡 | — |
 | Trekning (draw:new, drawIndex) | ✅ | ✅ | ✅ | ✅ | 🟡 | — |
-| `drawIndex` gap-deteksjon | ❌ | ✅ | ❌ | ✅ | ❌ | [BIN-502](https://linear.app/bingosystem/issue/BIN-502) |
+| `drawIndex` gap-deteksjon | ✅ | ✅ | ✅ | ✅ | 🟡 | [BIN-502](https://linear.app/bingosystem/issue/BIN-502) ✅ merged |
 | Checkpoint + recovery | ✅ | ✅ | 🔵 | ✅ | 🟡 | — |
 | Event-buffer (late-join) | ❌ | ✅ | ❌ | ✅ | ❌ | [BIN-501](https://linear.app/bingosystem/issue/BIN-501) |
 | Chat (sanntids) | ✅ | ✅ | ✅ | ✅ | 🟡 | — |
@@ -78,7 +78,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
-| Socket.IO Redis-adapter (multi-node) | 🔵 | ❌ | 🔵 | ✅ | ❌ | [BIN-494](https://linear.app/bingosystem/issue/BIN-494) |
+| Socket.IO Redis-adapter (multi-node) | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-494](https://linear.app/bingosystem/issue/BIN-494) ✅ merged #108 |
 | Hall-display / TV-skjerm broadcast | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-498](https://linear.app/bingosystem/issue/BIN-498) |
 | AdminHallDisplayLogin | 🔴 | 🟡 | ❌ | ❌ | ❌ | [BIN-503](https://linear.app/bingosystem/issue/BIN-503) |
 | Admin hall-events (ready, countdowns) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-515](https://linear.app/bingosystem/issue/BIN-515) |
@@ -94,7 +94,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Asset-pipeline (Unity → PixiJS) | 🔵 | 🔵 | 🟡 | ✅ | ❌ | [BIN-543](https://linear.app/bingosystem/issue/BIN-543) |
 | PlayerPrefs → localStorage mapping | 🔵 | 🔵 | ❌ | ✅ | ❌ | [BIN-544](https://linear.app/bingosystem/issue/BIN-544) |
 
-**Game 1 totalt:** 32 rader — 13 ✅, 5 🟡, 14 ❌. Release-klar: 9 / 32 (28 %).
+**Game 1 totalt:** 32 rader — 13 ✅, 8 🟡, 11 ❌. Release-klar: 9 / 32 (28 %). Tre nye rader merged (BIN-494, 499, 502) — alle nå 🟡 "nesten klar" (venter på sluttest/dokumentasjon).
 
 ---
 
@@ -206,11 +206,11 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 | Spill | Rader | ✅ | 🟡 | ❌ | Release-klar % |
 |-------|------:|---:|---:|---:|---------------:|
-| Game 1 (Databingo) | 32 | 13 | 5 | 14 | 28 % |
+| Game 1 (Databingo) | 32 | 13 | 8 | 11 | 28 % |
 | Game 2 (Rocket) | 10 | 0 | 4 | 6 | 0 % |
 | Game 3 (Monster) | 9 | 0 | 5 | 4 | 0 % |
 | Game 5 (Spillorama) | 12 | 0 | 5 | 7 | 0 % |
-| **Totalt** | **63** | **13** | **19** | **31** | **21 %** |
+| **Totalt** | **63** | **13** | **22** | **28** | **21 %** |
 
 Totalsum regnet per **Release-klar**-kolonnen — det er den som styrer cutover-beslutning per [`LEGACY_DECOUPLING_STATUS.md`](../architecture/LEGACY_DECOUPLING_STATUS.md).
 
@@ -266,3 +266,4 @@ Automatisk generator fra YAML front-matter i per-spill canonical specs er planla
 | Dato | Commit-ref | Endring |
 |------|-----------|---------|
 | 2026-04-17 | (denne PR) | Initial versjon. G1 verifisert mot kode og canonical spec (BIN-528). G2/G3/G5 delvis utfyllt fra README — venter på respektive canonical specs (BIN-529/530/531). |
+| 2026-04-17 | BIN-502 PR | Oppdatert G1-rader: BIN-494 Redis-adapter ✅ (backend i main), BIN-499 ticket:mark slim ✅ (backend i main) — begge levert av slot-2 via PR #108. BIN-502 drawIndex gap-deteksjon ✅ (klient i main) — levert i denne PR. Alle tre nå 🟡 "Release-klar" (venter på integrasjon-test i staging). |

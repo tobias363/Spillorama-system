@@ -116,6 +116,27 @@ export class GameBridge {
   private myPlayerId: string | null = null;
   private previousGameStatus: GameStatus | "NONE" = "NONE";
   private unsubscribers: (() => void)[] = [];
+
+  /**
+   * BIN-502: Last drawIndex we have applied. `-1` means no draws received yet
+   * in the current game. Reset to `-1` on applyGameSnapshot (fresh baseline)
+   * and on gameStatus transitions to new RUNNING.
+   */
+  private lastAppliedDrawIndex = -1;
+
+  /**
+   * BIN-502: Guard against concurrent resync requests. Once we detect a gap we
+   * kick off one resync and wait for snapshot before we trust drawNew again.
+   */
+  private resyncInFlight = false;
+
+  /**
+   * BIN-502: Client-side metric counter for observability (BIN-539 will wire
+   * this into Sentry/Prometheus). Read via `getGapMetrics()` for tests.
+   */
+  private drawGapCount = 0;
+  private drawDuplicateCount = 0;
+
   private events: EventMap = {
     stateChanged: new Set(),
     gameStarted: new Set(),
@@ -152,6 +173,11 @@ export class GameBridge {
     for (const unsub of this.unsubscribers) unsub();
     this.unsubscribers = [];
     this.state = this.createEmptyState();
+    // BIN-502: reset gap-detection bookkeeping so a re-`start()` behaves fresh.
+    this.lastAppliedDrawIndex = -1;
+    this.resyncInFlight = false;
+    this.drawGapCount = 0;
+    this.drawDuplicateCount = 0;
   }
 
   getState(): GameState {
@@ -263,12 +289,85 @@ export class GameBridge {
     this.emit("stateChanged", this.state);
   }
 
+  /**
+   * BIN-502: Apply draw:new with drawIndex gap-detection.
+   *
+   * Expected sequence: drawIndex = lastAppliedDrawIndex + 1.
+   * - Duplicate (drawIndex <= lastAppliedDrawIndex): ignore (reconnect replay).
+   * - Gap (drawIndex > lastAppliedDrawIndex + 1): we missed one or more draws.
+   *   Trigger a room:state resync and drop this event — snapshot will catch us up.
+   * - Ordered: apply normally.
+   */
   private handleDrawNew(payload: DrawNewPayload): void {
+    const expected = this.lastAppliedDrawIndex + 1;
+
+    if (payload.drawIndex < expected) {
+      // Duplicate — reconnect/replay scenario. Ignore.
+      this.drawDuplicateCount += 1;
+      console.debug(
+        "[GameBridge] drawNew duplicate ignored",
+        { got: payload.drawIndex, expected },
+      );
+      return;
+    }
+
+    if (payload.drawIndex > expected) {
+      // Gap — we missed one or more draws. Trigger resync.
+      this.drawGapCount += 1;
+      console.warn(
+        "[GameBridge] drawNew gap detected — requesting room:state resync",
+        { got: payload.drawIndex, expected, gapSize: payload.drawIndex - expected },
+      );
+      this.requestResync();
+      return;
+    }
+
+    // Ordered — apply.
     this.state.drawnNumbers.push(payload.number);
     this.state.lastDrawnNumber = payload.number;
     this.state.drawCount = this.state.drawnNumbers.length;
+    this.lastAppliedDrawIndex = payload.drawIndex;
     this.emit("numberDrawn", payload.number, payload.drawIndex, this.state);
     this.emit("stateChanged", this.state);
+  }
+
+  /**
+   * BIN-502: Request authoritative room state from backend to close a gap.
+   * Guards against concurrent calls — once one resync is in flight we wait
+   * for applySnapshot/applyGameSnapshot to reset `lastAppliedDrawIndex`.
+   */
+  private requestResync(): void {
+    if (this.resyncInFlight) return;
+    if (!this.state.roomCode) {
+      console.warn("[GameBridge] cannot resync — no roomCode");
+      return;
+    }
+    this.resyncInFlight = true;
+
+    this.socket
+      .getRoomState({ roomCode: this.state.roomCode, hallId: this.state.hallId || undefined })
+      .then((ack) => {
+        if (ack.ok && ack.data?.snapshot) {
+          this.applySnapshot(ack.data.snapshot);
+        } else {
+          console.warn("[GameBridge] resync failed", ack);
+        }
+      })
+      .catch((err) => {
+        console.error("[GameBridge] resync threw", err);
+      })
+      .finally(() => {
+        this.resyncInFlight = false;
+      });
+  }
+
+  /** BIN-502: Observability hook — read gap/duplicate counters. */
+  getGapMetrics(): { gaps: number; duplicates: number; lastAppliedDrawIndex: number } {
+    return {
+      gaps: this.drawGapCount,
+      duplicates: this.drawDuplicateCount,
+      lastAppliedDrawIndex: this.lastAppliedDrawIndex,
+    };
   }
 
   private handlePatternWon(payload: PatternWonPayload): void {
@@ -297,6 +396,8 @@ export class GameBridge {
         ? game.drawnNumbers[game.drawnNumbers.length - 1]
         : null;
     this.state.drawCount = game.drawnNumbers.length;
+    // BIN-502: snapshot is authoritative — align lastAppliedDrawIndex with it.
+    this.lastAppliedDrawIndex = game.drawnNumbers.length - 1;
     this.state.totalDrawCapacity = game.drawBag.length + game.drawnNumbers.length;
     this.state.prizePool = game.prizePool;
     this.state.entryFee = game.entryFee;

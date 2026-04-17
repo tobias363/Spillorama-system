@@ -13,6 +13,13 @@ import type {
 class MockSocket {
   private listeners: Record<string, Set<(...args: any[]) => void>> = {};
 
+  /** BIN-502: records resync-requests from bridge, and lets tests stub the response. */
+  public getRoomStateCalls: Array<{ roomCode: string; hallId?: string }> = [];
+  public getRoomStateResponse: { ok: boolean; data?: { snapshot: RoomSnapshot }; error?: string } = {
+    ok: false,
+    error: "not-stubbed",
+  };
+
   on<K extends keyof SpilloramaSocketListeners>(
     event: K,
     listener: SpilloramaSocketListeners[K],
@@ -30,6 +37,12 @@ class MockSocket {
     for (const fn of this.listeners[event] || []) {
       (fn as (...a: any[]) => void)(...args);
     }
+  }
+
+  /** BIN-502: stubs SpilloramaSocket.getRoomState. */
+  async getRoomState(payload: { roomCode: string; hallId?: string }) {
+    this.getRoomStateCalls.push(payload);
+    return this.getRoomStateResponse;
   }
 }
 
@@ -242,7 +255,8 @@ describe("GameBridge", () => {
       bridge.on("numberDrawn", () => events.push("numberDrawn"));
       bridge.on("stateChanged", () => events.push("stateChanged"));
 
-      socket.fire("drawNew", { number: 7, drawIndex: 0, gameId: "game-1" });
+      // Snapshot has drawnNumbers=[1,2,3] → lastAppliedDrawIndex=2; next is 3.
+      socket.fire("drawNew", { number: 7, drawIndex: 3, gameId: "game-1" });
       expect(events).toEqual(["numberDrawn", "stateChanged"]);
     });
   });
@@ -333,6 +347,112 @@ describe("GameBridge", () => {
 
       socket.fire("drawNew", { number: 1, drawIndex: 0, gameId: "game-1" });
       expect(listener).not.toHaveBeenCalled();
+    });
+  });
+
+  // BIN-502: drawIndex gap-deteksjon
+  describe("drawIndex gap-deteksjon (BIN-502)", () => {
+    beforeEach(() => {
+      bridge.start("player-1");
+      // Baseline: snapshot med drawnNumbers=[1,2,3] → lastAppliedDrawIndex=2
+      bridge.applySnapshot(
+        makeRoomSnapshot({ currentGame: makeGameSnapshot({ drawnNumbers: [1, 2, 3] }) }),
+      );
+    });
+
+    it("accepts ordered drawNew (drawIndex = expected)", () => {
+      const listener = vi.fn();
+      bridge.on("numberDrawn", listener);
+
+      socket.fire("drawNew", { number: 42, drawIndex: 3, gameId: "game-1" });
+
+      expect(listener).toHaveBeenCalledWith(42, 3, expect.any(Object));
+      expect(bridge.getState().drawnNumbers).toEqual([1, 2, 3, 42]);
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(3);
+      expect(bridge.getGapMetrics().gaps).toBe(0);
+      expect(bridge.getGapMetrics().duplicates).toBe(0);
+      expect(socket.getRoomStateCalls).toHaveLength(0);
+    });
+
+    it("ignores duplicate drawNew (drawIndex < expected)", () => {
+      const listener = vi.fn();
+      bridge.on("numberDrawn", listener);
+
+      // drawIndex 2 is already applied (lastAppliedDrawIndex=2)
+      socket.fire("drawNew", { number: 99, drawIndex: 2, gameId: "game-1" });
+
+      expect(listener).not.toHaveBeenCalled();
+      expect(bridge.getState().drawnNumbers).toEqual([1, 2, 3]); // unchanged
+      expect(bridge.getGapMetrics().duplicates).toBe(1);
+      expect(socket.getRoomStateCalls).toHaveLength(0);
+    });
+
+    it("detects gap and triggers getRoomState resync (drawIndex > expected)", () => {
+      const listener = vi.fn();
+      bridge.on("numberDrawn", listener);
+
+      // Expected drawIndex=3, got 5 → gap of 2 missed draws
+      socket.fire("drawNew", { number: 77, drawIndex: 5, gameId: "game-1" });
+
+      expect(listener).not.toHaveBeenCalled();
+      expect(bridge.getState().drawnNumbers).toEqual([1, 2, 3]); // unchanged
+      expect(bridge.getGapMetrics().gaps).toBe(1);
+      expect(socket.getRoomStateCalls).toHaveLength(1);
+      expect(socket.getRoomStateCalls[0].roomCode).toBe("ROOM-1");
+    });
+
+    it("resync applies snapshot and updates lastAppliedDrawIndex", async () => {
+      // Stub resync to return snapshot with drawnNumbers=[1..5]
+      socket.getRoomStateResponse = {
+        ok: true,
+        data: {
+          snapshot: makeRoomSnapshot({
+            currentGame: makeGameSnapshot({ drawnNumbers: [1, 2, 3, 4, 5] }),
+          }),
+        },
+      };
+
+      socket.fire("drawNew", { number: 77, drawIndex: 5, gameId: "game-1" });
+      // Wait for async resync promise to resolve
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(bridge.getState().drawnNumbers).toEqual([1, 2, 3, 4, 5]);
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(4);
+
+      // After resync, next ordered drawNew (drawIndex=5) should apply cleanly
+      const listener = vi.fn();
+      bridge.on("numberDrawn", listener);
+      socket.fire("drawNew", { number: 77, drawIndex: 5, gameId: "game-1" });
+      expect(listener).toHaveBeenCalledWith(77, 5, expect.any(Object));
+      expect(bridge.getState().drawnNumbers).toEqual([1, 2, 3, 4, 5, 77]);
+    });
+
+    it("does not trigger concurrent resyncs", () => {
+      // Fire two gaps back-to-back — only one resync should be issued.
+      socket.fire("drawNew", { number: 77, drawIndex: 5, gameId: "game-1" });
+      socket.fire("drawNew", { number: 88, drawIndex: 7, gameId: "game-1" });
+
+      expect(socket.getRoomStateCalls).toHaveLength(1);
+      expect(bridge.getGapMetrics().gaps).toBe(2); // both gaps counted
+    });
+
+    it("accepts ordered drawNew from drawIndex=0 on fresh game (no prior snapshot)", () => {
+      // Simulate room without active game, then first drawNew arrives
+      const freshSocket = new MockSocket();
+      const freshBridge = new GameBridge(freshSocket as any);
+      freshBridge.start("player-1");
+      freshBridge.applySnapshot(makeRoomSnapshot()); // no currentGame
+
+      const listener = vi.fn();
+      freshBridge.on("numberDrawn", listener);
+      // lastAppliedDrawIndex is still -1 (no snapshot game), so drawIndex=0 is expected
+      freshSocket.fire("drawNew", { number: 5, drawIndex: 0, gameId: "game-1" });
+
+      // This currently is expected to fall into the "no roomCode/no game" edge case.
+      // After applySnapshot(no-game), roomCode is set but lastAppliedDrawIndex remains -1.
+      // So drawIndex=0 matches expected=0 → applies.
+      expect(listener).toHaveBeenCalledWith(5, 0, expect.any(Object));
+      expect(freshBridge.getGapMetrics().lastAppliedDrawIndex).toBe(0);
     });
   });
 
