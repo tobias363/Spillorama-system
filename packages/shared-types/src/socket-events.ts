@@ -1,7 +1,33 @@
 // ── Socket.IO event contract ────────────────────────────────────────────────
 // Codifies the event names and payload types exchanged between client and server.
+//
+// BIN-545: Three of the highest-risk payloads — RoomUpdate, DrawNew, ClaimSubmit
+// — are now defined as Zod schemas in ./schemas.ts. The types below for those
+// three are re-exported from there via z.infer<>. All other interfaces remain
+// compile-time only; broader Zod rollout is tracked as a separate issue.
 
 import type { RoomSnapshot, Ticket, Player } from "./game.js";
+export {
+  RoomUpdatePayloadSchema,
+  DrawNewPayloadSchema,
+  ClaimSubmitPayloadSchema,
+  TicketSelectionSchema,
+  TicketTypeInfoSchema,
+  RoomSnapshotSchema,
+  GameSnapshotSchema,
+  PlayerSchema,
+  TicketSchema,
+  ClaimRecordSchema,
+  PatternDefinitionSchema,
+  PatternResultSchema,
+} from "./schemas.js";
+import type {
+  RoomUpdatePayload as RoomUpdatePayloadT,
+  DrawNewPayload as DrawNewPayloadT,
+  ClaimSubmitPayload as ClaimSubmitPayloadT,
+  TicketSelection as TicketSelectionT,
+  TicketTypeInfo as TicketTypeInfoT,
+} from "./schemas.js";
 
 // ── Event names ─────────────────────────────────────────────────────────────
 
@@ -69,13 +95,11 @@ export interface RoomJoinPayload extends AuthenticatedSocketPayload {
   hallId?: string;
 }
 
-/** Per-type ticket selection sent from client to server during bet:arm. */
-export interface TicketSelection {
-  /** Ticket type code, e.g. "small-yellow", "large-white", "elvis". */
-  type: string;
-  /** How many of this ticket type to purchase. */
-  qty: number;
-}
+/**
+ * Per-type ticket selection sent from client to server during bet:arm.
+ * Runtime-validated — derived from `TicketSelectionSchema`.
+ */
+export type TicketSelection = TicketSelectionT;
 
 export interface BetArmPayload extends RoomActionPayload {
   armed?: boolean;
@@ -94,9 +118,11 @@ export interface TicketMarkPayload extends RoomActionPayload {
   number: number;
 }
 
-export interface ClaimSubmitPayload extends RoomActionPayload {
-  type: "LINE" | "BINGO";
-}
+/**
+ * Runtime-validated via `ClaimSubmitPayloadSchema`. The backend calls
+ * `.safeParse()` before acting on the payload — see BIN-545.
+ */
+export type ClaimSubmitPayload = ClaimSubmitPayloadT;
 
 export interface LuckyNumberPayload extends RoomActionPayload {
   luckyNumber: number;
@@ -109,40 +135,23 @@ export interface ChatSendPayload extends RoomActionPayload {
 
 // ── Server → Client payloads ────────────────────────────────────────────────
 
-/** Ticket type config sent from backend to client for purchase UI. */
-export interface TicketTypeInfo {
-  name: string;
-  type: string;
-  priceMultiplier: number;
-  ticketCount: number;
-  colors?: string[];
-}
+/**
+ * Ticket type config sent from backend to client for purchase UI.
+ * Runtime-validated — derived from `TicketTypeInfoSchema`.
+ */
+export type TicketTypeInfo = TicketTypeInfoT;
 
-export type RoomUpdatePayload = RoomSnapshot & {
-  scheduler: Record<string, unknown>;
-  preRoundTickets: Record<string, Ticket[]>;
-  /** Player IDs who have explicitly armed (bet:arm) for the next round. */
-  armedPlayerIds: string[];
-  luckyNumbers: Record<string, number>;
-  serverTimestamp: number;
-  /**
-   * Server-authoritative stake per player (in kroner).
-   * Only populated for players with an active stake; absence = no stake.
-   */
-  playerStakes: Record<string, number>;
-  /** BIN-443: Active game variant info for client purchase UI. */
-  gameVariant?: {
-    gameType: string;
-    ticketTypes: TicketTypeInfo[];
-    replaceAmount?: number;
-  };
-};
+/**
+ * Runtime-validated via `RoomUpdatePayloadSchema` (see ./schemas.ts).
+ * The schema inlines the RoomSnapshot shape via `.extend()` so new RoomSnapshot
+ * fields must also be added to the schema or validation will reject them.
+ */
+export type RoomUpdatePayload = RoomUpdatePayloadT;
 
-export interface DrawNewPayload {
-  number: number;
-  drawIndex: number;
-  gameId: string;
-}
+/**
+ * Server → client draw broadcast. Runtime-validated via `DrawNewPayloadSchema`.
+ */
+export type DrawNewPayload = DrawNewPayloadT;
 
 /**
  * BIN-499: Private ack event sent to the marking socket only after ticket:mark.

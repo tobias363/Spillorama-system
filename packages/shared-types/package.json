@@ -23,9 +23,15 @@
   },
   "scripts": {
     "build": "tsc",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "tsx --test \"__tests__/**/*.test.ts\""
   },
   "devDependencies": {
+    "tsx": "^4.19.3",
     "typescript": "~5.8.2"
+  },
+  "dependencies": {
+    "zod": "^4.3.6",
+    "zod-to-json-schema": "^3.25.2"
   }
 }
