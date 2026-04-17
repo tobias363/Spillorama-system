@@ -18,6 +18,7 @@
     "check:all": "npm run check && npm run build && npm run test:compliance",
     "deploy:backend": "bash infra/deploy-backend.sh",
     "matrix:generate": "tsx scripts/generate-parity-matrix.ts",
-    "matrix:check": "tsx scripts/generate-parity-matrix.ts --check"
+    "matrix:check": "tsx scripts/generate-parity-matrix.ts --check",
+    "assets:build": "tsx scripts/build-assets.ts"
   }
 }
