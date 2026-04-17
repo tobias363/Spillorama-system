@@ -1,0 +1,7 @@
+{
+  "$ref": "#/definitions/DrawNewPayload",
+  "definitions": {
+    "DrawNewPayload": {}
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

@@ -1,0 +1,14 @@
+{
+  "roomCode": "HALL-LONG-CODE-12345",
+  "playerId": "player-stress-abcdef012345",
+  "armed": true,
+  "ticketSelections": [
+    { "type": "small-yellow", "qty": 5 },
+    { "type": "small-white", "qty": 5 },
+    { "type": "small-red", "qty": 5 },
+    { "type": "large-white", "qty": 2 },
+    { "type": "elvis", "qty": 3 },
+    { "type": "trafficLight", "qty": 1 }
+  ],
+  "accessToken": "tok-stress-000000000000000000000000000000"
+}

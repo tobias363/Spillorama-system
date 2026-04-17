@@ -1,0 +1,7 @@
+{
+  "$ref": "#/definitions/ChatMessage",
+  "definitions": {
+    "ChatMessage": {}
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

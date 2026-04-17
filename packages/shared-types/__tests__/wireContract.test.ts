@@ -21,6 +21,10 @@ import {
   RoomUpdatePayloadSchema,
   DrawNewPayloadSchema,
   ClaimSubmitPayloadSchema,
+  BetArmPayloadSchema,
+  TicketMarkPayloadSchema,
+  PatternWonPayloadSchema,
+  ChatMessageSchema,
 } from "../src/schemas.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +39,11 @@ const cases = [
   { schema: RoomUpdatePayloadSchema, name: "RoomUpdatePayload", files: ["roomUpdate.baseline.json", "roomUpdate.edge.json", "roomUpdate.stress.json"] },
   { schema: DrawNewPayloadSchema, name: "DrawNewPayload", files: ["drawNew.baseline.json", "drawNew.edge.json", "drawNew.stress.json"] },
   { schema: ClaimSubmitPayloadSchema, name: "ClaimSubmitPayload", files: ["claimSubmit.baseline.json", "claimSubmit.edge.json", "claimSubmit.stress.json"] },
+  // BIN-527: wire-contract extension.
+  { schema: BetArmPayloadSchema, name: "BetArmPayload", files: ["betArm.baseline.json", "betArm.edge.json", "betArm.stress.json"] },
+  { schema: TicketMarkPayloadSchema, name: "TicketMarkPayload", files: ["ticketMark.baseline.json", "ticketMark.edge.json", "ticketMark.stress.json"] },
+  { schema: PatternWonPayloadSchema, name: "PatternWonPayload", files: ["patternWon.baseline.json", "patternWon.edge.json", "patternWon.stress.json"] },
+  { schema: ChatMessageSchema, name: "ChatMessage", files: ["chatMessage.baseline.json", "chatMessage.edge.json", "chatMessage.stress.json"] },
 ];
 
 for (const { schema, name, files } of cases) {
@@ -80,4 +89,40 @@ test("BIN-545 negative: RoomUpdatePayload rejects missing serverTimestamp", () =
   };
   const result = RoomUpdatePayloadSchema.safeParse(bad);
   assert.equal(result.success, false, "missing serverTimestamp must be rejected");
+});
+
+// BIN-527: negative tests for the four new schemas.
+
+test("BIN-527 negative: TicketMarkPayload rejects number > 75", () => {
+  const result = TicketMarkPayloadSchema.safeParse({ roomCode: "X", number: 76 });
+  assert.equal(result.success, false, "number > 75 must be rejected — bingo ball range is 1..75");
+});
+
+test("BIN-527 negative: TicketMarkPayload rejects number <= 0", () => {
+  const result = TicketMarkPayloadSchema.safeParse({ roomCode: "X", number: 0 });
+  assert.equal(result.success, false, "number <= 0 must be rejected");
+});
+
+test("BIN-527 negative: PatternWonPayload rejects missing winnerId", () => {
+  const bad = {
+    patternId: "x", patternName: "X", wonAtDraw: 1, payoutAmount: 10,
+    claimType: "LINE", gameId: "g",
+  };
+  const result = PatternWonPayloadSchema.safeParse(bad);
+  assert.equal(result.success, false, "missing winnerId must be rejected");
+});
+
+test("BIN-527 negative: ChatMessage rejects message longer than 500 chars", () => {
+  const message = "x".repeat(501);
+  const bad = {
+    id: "m", playerId: "p", playerName: "P", message,
+    emojiId: 0, createdAt: "2026-01-01T00:00:00Z",
+  };
+  const result = ChatMessageSchema.safeParse(bad);
+  assert.equal(result.success, false, "501-char messages must be rejected");
+});
+
+test("BIN-527 negative: BetArmPayload rejects negative ticketCount", () => {
+  const result = BetArmPayloadSchema.safeParse({ roomCode: "X", ticketCount: -1 });
+  assert.equal(result.success, false, "negative ticketCount must be rejected");
 });

@@ -1,0 +1,6 @@
+{
+  "roomCode": "AB12",
+  "playerId": "player-alice",
+  "armed": false,
+  "accessToken": "tok-alice"
+}

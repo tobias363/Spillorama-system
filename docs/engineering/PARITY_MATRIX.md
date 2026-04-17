@@ -85,7 +85,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Admin-dashboard m/ rapporter | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-517](https://linear.app/bingosystem/issue/BIN-517) |
 | Spillvett cross-game-test | 🔵 | ❌ | 🔵 | ✅ | ❌ | [BIN-541](https://linear.app/bingosystem/issue/BIN-541) |
 | E2E pengeflyt-test | 🔵 | ❌ | 🔵 | ✅ | ❌ | [BIN-526](https://linear.app/bingosystem/issue/BIN-526) |
-| Wire-kontrakt-test (Zod) | 🔵 | 🟡 | 🟡 | ✅ | 🟡 | [BIN-527](https://linear.app/bingosystem/issue/BIN-527) / [BIN-545](https://linear.app/bingosystem/issue/BIN-545) ✅ merged |
+| Wire-kontrakt-test (Zod) | 🔵 | ✅ | ✅ | ✅ | ✅ | [BIN-527](https://linear.app/bingosystem/issue/BIN-527) / [BIN-545](https://linear.app/bingosystem/issue/BIN-545) — i denne PR |
 | Load-test 1000+ spillere | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-508](https://linear.app/bingosystem/issue/BIN-508) ✅ merged, venter på første nattlig-kjøring |
 | Observability (Sentry + funnel) | 🔵 | ✅ | ✅ | ✅ | 🟡 | [BIN-539](https://linear.app/bingosystem/issue/BIN-539) — backend + klient + runbook i denne PR |
 | Feature-flag rollback-runbook | 🔵 | ❌ | ❌ | ✅ | ❌ | [BIN-540](https://linear.app/bingosystem/issue/BIN-540) |

@@ -24,7 +24,8 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "tsx --test \"__tests__/**/*.test.ts\""
+    "test": "tsx --test \"__tests__/**/*.test.ts\"",
+    "schema:export": "tsx scripts/export-json-schemas.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.3",
