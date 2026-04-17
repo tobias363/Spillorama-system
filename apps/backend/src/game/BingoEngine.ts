@@ -1348,12 +1348,26 @@ export class BingoEngine {
   /** Default prize segments for Game 1 mini-games (in kr). */
   private static readonly MINIGAME_PRIZES = [5, 10, 15, 20, 25, 50, 10, 15];
 
-  /** Mini-game type counter — alternates between wheel and chest per room. */
+  /**
+   * BIN-505/506: 4-way rotation order for Game 1 mini-games. Legacy ran the
+   * same rotation per hall (wheel → chest → mystery → colorDraft), reading
+   * prize lists from the admin-configured `otherGame` collection. We keep the
+   * rotation but default every type to MINIGAME_PRIZES until per-type admin
+   * config lands (follow-up issue).
+   */
+  private static readonly MINIGAME_ROTATION: readonly MiniGameType[] = [
+    "wheelOfFortune",
+    "treasureChest",
+    "mysteryGame",
+    "colorDraft",
+  ];
+
+  /** Mini-game rotation counter — indexes into MINIGAME_ROTATION. */
   private miniGameCounter = 0;
 
   /**
    * Activate a mini-game for a player (called after BINGO win in Game 1).
-   * Alternates between wheelOfFortune and treasureChest.
+   * Rotates wheelOfFortune → treasureChest → mysteryGame → colorDraft.
    */
   activateMiniGame(roomCode: string, playerId: string): MiniGameState | null {
     const room = this.requireRoom(roomCode);
@@ -1361,9 +1375,8 @@ export class BingoEngine {
     if (!game) return null;
     if (game.miniGame) return game.miniGame; // Already activated
 
-    const type: MiniGameType = this.miniGameCounter % 2 === 0
-      ? "wheelOfFortune"
-      : "treasureChest";
+    const rotation = BingoEngine.MINIGAME_ROTATION;
+    const type: MiniGameType = rotation[this.miniGameCounter % rotation.length];
     this.miniGameCounter += 1;
 
     const miniGame: MiniGameState = {

@@ -178,3 +178,31 @@ export const TicketReplacePayloadSchema = z.object({
   ticketId: z.string().min(1),
 });
 export type TicketReplacePayload = z.infer<typeof TicketReplacePayloadSchema>;
+
+/**
+ * BIN-505/506: MiniGamePlayResult — sent as the ack payload from
+ * `minigame:play`. The 4-way rotation (wheel → chest → mystery → colorDraft)
+ * uses this shape for all variants.
+ */
+export const MiniGameTypeSchema = z.enum([
+  "wheelOfFortune",
+  "treasureChest",
+  "mysteryGame",
+  "colorDraft",
+]);
+
+export const MiniGamePlayResultSchema = z.object({
+  type: MiniGameTypeSchema,
+  segmentIndex: z.number().int().nonnegative(),
+  prizeAmount: z.number().nonnegative(),
+  prizeList: z.array(z.number()),
+});
+export type MiniGamePlayResult = z.infer<typeof MiniGamePlayResultSchema>;
+
+export const MiniGameActivatedPayloadSchema = z.object({
+  gameId: z.string(),
+  playerId: z.string(),
+  type: MiniGameTypeSchema,
+  prizeList: z.array(z.number()),
+});
+export type MiniGameActivatedPayload = z.infer<typeof MiniGameActivatedPayloadSchema>;

@@ -12,6 +12,9 @@ export {
   DrawNewPayloadSchema,
   ClaimSubmitPayloadSchema,
   TicketReplacePayloadSchema,
+  MiniGameTypeSchema,
+  MiniGamePlayResultSchema,
+  MiniGameActivatedPayloadSchema,
   TicketSelectionSchema,
   TicketTypeInfoSchema,
   RoomSnapshotSchema,
@@ -27,6 +30,8 @@ import type {
   DrawNewPayload as DrawNewPayloadT,
   ClaimSubmitPayload as ClaimSubmitPayloadT,
   TicketReplacePayload as TicketReplacePayloadT,
+  MiniGamePlayResult as MiniGamePlayResultT,
+  MiniGameActivatedPayload as MiniGameActivatedPayloadT,
   TicketSelection as TicketSelectionT,
   TicketTypeInfo as TicketTypeInfoT,
 } from "./schemas.js";
@@ -229,29 +234,25 @@ export interface JackpotSpinEntry {
 
 // ── Mini-games (Game 1 — Wheel of Fortune / Treasure Chest) ──────────────────
 
+/**
+ * BIN-505/506: 4-way mini-game rotation — wheel of fortune → treasure chest →
+ * mystery game → color draft. Runtime-validated via `MiniGameTypeSchema`.
+ */
 export type MiniGameType = "wheelOfFortune" | "treasureChest" | "mysteryGame" | "colorDraft";
 
-export interface MiniGameActivatedPayload {
-  gameId: string;
-  playerId: string;
-  type: MiniGameType;
-  prizeList: number[];
-}
+/** Runtime-validated — see `MiniGameActivatedPayloadSchema`. */
+export type MiniGameActivatedPayload = MiniGameActivatedPayloadT;
 
 export interface MiniGamePlayPayload extends RoomActionPayload {
-  /** For treasureChest: which chest the player picked (0-based index). */
+  /** For treasureChest / mysteryGame / colorDraft: which slot the player picked (0-based index). */
   selectedIndex?: number;
 }
 
-export interface MiniGamePlayResult {
-  type: MiniGameType;
-  /** Index of the winning segment/chest. */
-  segmentIndex: number;
-  /** Prize amount won. */
-  prizeAmount: number;
-  /** Full prize list revealed (all segments/chests). */
-  prizeList: number[];
-}
+/**
+ * BIN-505/506: unified ack shape for all four mini-game types.
+ * Runtime-validated via `MiniGamePlayResultSchema`.
+ */
+export type MiniGamePlayResult = MiniGamePlayResultT;
 
 // ── Scheduler settings (sent inside room:update scheduler field) ────────────
 
