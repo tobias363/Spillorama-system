@@ -207,7 +207,7 @@ Samme som G1/G2. `BINGO_CHECKPOINT_ENABLED=true` default. Shared gap-deteksjon f
 | SelectWofAuto / SelectRouletteAuto | ❌ | [BIN-519](https://linear.app/bingosystem/issue/BIN-519) |
 | 4+ billettfarger (index-cycle) | ✅ Portet — gjenbruker G1 `TICKET_THEMES` (8 varianter) via `getTicketThemeByName(ticket.color, i)`. `ticket.color` fra backend tillater framtidig SwapTicket. | — |
 | Rulett med fysikk (Rigidbody2D + Collider2D) | 🟡 Ren GSAP, ingen fysikk | Egen issue hvis fysikk må matches |
-| DrumRotation (kontinuerlig) | ❌ | Egen issue |
+| DrumRotation (kontinuerlig) | ✅ Portet — GSAP infinite-loop 2π/12s på `JackpotOverlay` wheelInner mens spiller venter; killed før spin-tween og preserver offset ved overgang | — |
 
 ### 11.2 Delte avvik (gjelder alle spill)
 

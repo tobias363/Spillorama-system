@@ -207,7 +207,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Ruletthjul (ren GSAP, MVP) | 🔴 | 🔵 | ✅ | ❌ | 🟡 | — |
 | Ruletthjul m/ fysikk (matter.js) | 🔴 | 🔵 | 🟡 | ❌ | ❌ | Egen issue: fysikk-port |
-| DrumRotation (kontinuerlig) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue |
+| DrumRotation (kontinuerlig) | 🔴 | 🔵 | ✅ | ❌ | 🟡 | GSAP infinite-loop 2π/12s i `JackpotOverlay`, preserver offset ved spin-overgang |
 | Free Spin Jackpot | 🔴 | ❌ | 🟡 (stub) | ❌ | ❌ | [BIN-531](https://linear.app/bingosystem/issue/BIN-531) oppfølger |
 | `SwapTicket` (bytt midt i runde) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-510](https://linear.app/bingosystem/issue/BIN-510) |
 | `SelectWofAuto` / `SelectRouletteAuto` | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-519](https://linear.app/bingosystem/issue/BIN-519) |

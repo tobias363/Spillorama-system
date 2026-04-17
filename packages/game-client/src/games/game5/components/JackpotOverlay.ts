@@ -29,6 +29,7 @@ export class JackpotOverlay extends Container {
   private onDismiss: (() => void) | null = null;
   private autoSpinTimer: ReturnType<typeof setInterval> | null = null;
   private autoSpinCountdown = 10;
+  private idleTween: gsap.core.Tween | null = null;
 
   constructor(screenWidth: number, screenHeight: number) {
     super();
@@ -149,6 +150,10 @@ export class JackpotOverlay extends Container {
     this.resultText.visible = false;
     this.visible = true;
 
+    // Idle DrumRotation — port of Unity DrumRotation.cs: wheel slowly rotates
+    // while waiting for player input, so it feels alive rather than static.
+    this.startIdleRotation();
+
     // Start auto-spin countdown (10 seconds)
     this.autoSpinCountdown = 10;
     this.timerText.text = `Auto-spinn om ${this.autoSpinCountdown}s`;
@@ -170,16 +175,18 @@ export class JackpotOverlay extends Container {
     this.spinBtn.visible = false;
     this.clearAutoTimer();
     this.timerText.text = "";
+    this.stopIdleRotation();
 
     const segmentAngle = 360 / NUM_SEGMENTS;
     const targetAngle = result.segmentIndex * segmentAngle + segmentAngle / 2;
     const totalRotation = 360 * 5 + (360 - targetAngle);
 
-    this.wheelContainer.children[0].rotation = 0;
     const wheelInner = this.wheelContainer.children[0] as Container;
+    const startRotation = wheelInner.rotation; // Preserve idle-rotation offset
+    const targetRotationRad = startRotation + (totalRotation * Math.PI) / 180;
 
     gsap.to(wheelInner, {
-      rotation: (totalRotation * Math.PI) / 180,
+      rotation: targetRotationRad,
       duration: 5,
       ease: "power3.out",
       onComplete: () => {
@@ -198,8 +205,26 @@ export class JackpotOverlay extends Container {
 
   destroy(options?: Parameters<Container["destroy"]>[0]): void {
     this.clearAutoTimer();
+    this.stopIdleRotation();
     gsap.killTweensOf(this.wheelContainer.children[0]);
     super.destroy(options);
+  }
+
+  /** Unity DrumRotation port — slow continuous idle spin while waiting. */
+  private startIdleRotation(): void {
+    this.stopIdleRotation();
+    const wheelInner = this.wheelContainer.children[0] as Container;
+    this.idleTween = gsap.to(wheelInner, {
+      rotation: `+=${Math.PI * 2}`,
+      duration: 12,
+      repeat: -1,
+      ease: "none",
+    });
+  }
+
+  private stopIdleRotation(): void {
+    this.idleTween?.kill();
+    this.idleTween = null;
   }
 
   // ── Private ───────────────────────────────────────────────────────────
