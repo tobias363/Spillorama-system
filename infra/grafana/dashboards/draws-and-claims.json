@@ -1,0 +1,277 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "BIN-539: Live operational view per hall. Claim rate, payout distribution, active rooms, per-game-slug split. Watched by on-call during a pilot run.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": ["spillorama"],
+      "targetBlank": true,
+      "title": "Spillorama dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "description": "Rate of claim:submit events per minute, split by game slug. Flat line with live players → possible claim-retry loop or engine-side bug.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "claims / min",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "cpm"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+          "editorMode": "code",
+          "expr": "sum by (game, type) (rate(spillorama_claim_submitted_total{hall=~\"$hall\"}[5m])) * 60",
+          "legendFormat": "{{game}} — {{type}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Claim submit rate (per min, by game + type)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "description": "Per-hall draw activity. NB: source is bingo_game_rounds_total (no per-draw counter yet). Use as a sanity gauge for whether rounds are starting.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "rounds / min",
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "lineWidth": 1,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "normal" }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "cpm"
+        }
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": ["mean"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+          "editorMode": "code",
+          "expr": "sum (rate(bingo_game_rounds_total[5m])) * 60",
+          "legendFormat": "rounds / min",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Game rounds started (per min)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "description": "Payout-amount histogram — p50/p95/p99 per game slug. A drift in p99 ≈ prize-pool math shifted; watch this across a pilot week.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "NOK",
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 500 }
+            ]
+          },
+          "unit": "currencyNOK"
+        }
+      },
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 9 },
+      "id": 3,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (game, le) (rate(spillorama_payout_amount_bucket{hall=~\"$hall\"}[10m])))",
+          "legendFormat": "{{game}} p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (game, le) (rate(spillorama_payout_amount_bucket{hall=~\"$hall\"}[10m])))",
+          "legendFormat": "{{game}} p95",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (game, le) (rate(spillorama_payout_amount_bucket{hall=~\"$hall\"}[10m])))",
+          "legendFormat": "{{game}} p99",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Payout amount quantiles (NOK, per game)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+      "description": "Active rooms + players right now. Drop to 0 during a scheduled round → bug; drop mid-round → something wiped room state.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 9 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+          "editorMode": "code",
+          "expr": "bingo_active_rooms",
+          "legendFormat": "active rooms",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+          "editorMode": "code",
+          "expr": "bingo_active_players",
+          "legendFormat": "active players",
+          "refId": "B"
+        }
+      ],
+      "title": "Active rooms / players (now)",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["spillorama", "pilot", "BIN-539"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": ".*", "value": ".*" },
+        "description": "Hall label filter (regex). Leave as .* for all halls.",
+        "hide": 0,
+        "label": "Hall",
+        "name": "hall",
+        "options": [
+          { "selected": true, "text": ".*", "value": ".*" }
+        ],
+        "query": ".*",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": { "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "DS_PROM",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m"]
+  },
+  "timezone": "Europe/Oslo",
+  "title": "Spillorama — Draws and claims (BIN-539)",
+  "uid": "spillorama-draws-claims",
+  "version": 1,
+  "weekStart": ""
+}

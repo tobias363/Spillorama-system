@@ -60,12 +60,36 @@ Pre-pilot the alerts default to **Slack warning**, not PagerDuty. Flip to pager 
 
 ## 3. Dashboards
 
-| Dashboard | Location | Purpose |
-| --- | --- | --- |
-| **Spillorama — Pilot overview** | `grafana.internal/d/spillorama-pilot` (_TBD once Grafana is provisioned_) | Reconnect rate, p99 draw latency, active rooms, claim rate. The single screen on-call watches during a pilot. |
-| **Spillorama — Backend health** | `grafana.internal/d/spillorama-backend` | Scheduler tick, draw errors, wallet operation duration, rate-limit rejections. |
-| **Sentry — spillorama-backend** | `sentry.io/organizations/<org>/projects/spillorama-backend` | All captured backend exceptions + breadcrumbs. |
-| **Sentry — spillorama-client** | `sentry.io/organizations/<org>/projects/spillorama-client` | All captured client exceptions + breadcrumbs. |
+Dashboards ship as Grafana-as-code JSON under [`infra/grafana/dashboards/`](../../infra/grafana/dashboards/) and are provisioned via [`infra/deploy/grafana-provision.sh`](../../infra/deploy/grafana-provision.sh). See [`infra/README.md`](../../infra/README.md) for full deploy instructions.
+
+| Dashboard | Source file | Grafana uid | Purpose |
+| --- | --- | --- | --- |
+| **Spillorama — Draws and claims** | [`draws-and-claims.json`](../../infra/grafana/dashboards/draws-and-claims.json) | `spillorama-draws-claims` | Per-hall claim rate, payout quantiles (p50/p95/p99), game rounds started, active rooms/players. Watched by on-call during a pilot run. Has a `$hall` template variable. |
+| **Spillorama — Connection health** | [`connection-health.json`](../../infra/grafana/dashboards/connection-health.json) | `spillorama-connection-health` | Reconnect ratio (the "page oncall" SLO), reconnects-by-reason, rate-limit rejections per event, scheduler tick p95/p99, active socket count. First dashboard the on-call opens if something flaps. |
+| **Spillorama — Finance gates** | [`finance-gates.json`](../../infra/grafana/dashboards/finance-gates.json) | `spillorama-finance-gates` | Draw-engine errors by category, stuck-room count, wallet-operation latency (per operation), claim-type distribution, per-hall payout volume, scheduler lock timeouts. Watched by compliance-eier + on-call. |
+| **Sentry — spillorama-backend** | — | — | `sentry.io/organizations/<org>/projects/spillorama-backend` — all captured backend exceptions + breadcrumbs. |
+| **Sentry — spillorama-client** | — | — | `sentry.io/organizations/<org>/projects/spillorama-client` — all captured client exceptions + breadcrumbs. |
+
+### Panels — quick reference
+
+- **Draws and claims** (`spillorama-draws-claims`):
+  - *Claim submit rate (per min, by game + type)* — `sum by (game, type) (rate(spillorama_claim_submitted_total{hall=~"$hall"}[5m])) * 60`
+  - *Game rounds started (per min)* — `sum(rate(bingo_game_rounds_total[5m])) * 60`
+  - *Payout amount quantiles (NOK, per game)* — `histogram_quantile({0.50, 0.95, 0.99}, ...spillorama_payout_amount_bucket...)`
+  - *Active rooms / players (now)* — `bingo_active_rooms`, `bingo_active_players`
+- **Connection health** (`spillorama-connection-health`):
+  - *Reconnect ratio (per 5m, vs active sockets)* — `sum(rate(spillorama_reconnect_total[5m])) * 60 / clamp_min(sum(bingo_socket_connections), 1)` · thresholds green ≤ 2 % / orange 2–5 % / red ≥ 5 %
+  - *Active socket connections* — `bingo_socket_connections`
+  - *Reconnects by reason (per min)* — `sum by (reason) (rate(spillorama_reconnect_total[5m])) * 60`
+  - *Rate-limit rejections by event (per min)* — `sum by (event) (rate(bingo_rate_limit_rejections_total[5m])) * 60`
+  - *Scheduler tick p95/p99 (ms)* — `histogram_quantile({0.95, 0.99}, ...bingo_scheduler_tick_duration_ms_bucket...)` · red > 500 ms
+- **Finance gates** (`spillorama-finance-gates`):
+  - *Draw-engine errors by category* — `sum by (category) (rate(bingo_draw_errors_total[5m])) * 60`
+  - *Stuck rooms (now)* — `bingo_stuck_rooms` · red > 0
+  - *Wallet operation latency (ms)* — `histogram_quantile({0.95, 0.99}, ...bingo_wallet_operation_duration_ms_bucket...)`
+  - *Claim submits by type* / *Payout volume per hall* / *Scheduler lock timeouts (15m rolling)*
+
+**If a link is missing or returns 404**, assume the dashboard isn't provisioned yet. Run `./infra/deploy/grafana-provision.sh` against the target Grafana (see `infra/README.md`) or file a sub-issue under BIN-539. A dashboard gap is a pilot blocker.
 
 **If a link is missing or returns 404**, assume the dashboard isn't provisioned yet. File a sub-issue under BIN-539 rather than silently working around — the dashboard gap is part of pilot readiness.
 
