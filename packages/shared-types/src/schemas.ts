@@ -206,3 +206,71 @@ export const MiniGameActivatedPayloadSchema = z.object({
   prizeList: z.array(z.number()),
 });
 export type MiniGameActivatedPayload = z.infer<typeof MiniGameActivatedPayloadSchema>;
+
+// ── BIN-527: Wire-contract extension ───────────────────────────────────────
+// Four more payloads to round out the event surface covered by the fixture
+// bank. The goal is not 100 % coverage — it's to get every payload a client
+// can both send and receive in a pilot-critical flow (arm → draw → mark →
+// claim → chat) under runtime validation.
+
+/**
+ * BIN-527: `bet:arm` payload. `ticketSelections` is preferred; `ticketCount`
+ * is deprecated but accepted for backward compat with older clients.
+ */
+export const BetArmPayloadSchema = z
+  .object({
+    accessToken: z.string().optional(),
+    roomCode: z.string().min(1),
+    playerId: z.string().optional(),
+    armed: z.boolean().optional(),
+    ticketCount: z.number().int().nonnegative().optional(),
+    ticketSelections: z.array(TicketSelectionSchema).optional(),
+  })
+  .refine(
+    (v) => {
+      // If armed !== false (i.e. true or absent), require at least one of the
+      // two ticket-selection modes when there's any selection at all.
+      if (v.armed === false) return true;
+      // Both modes are optional for backward compat with callers that just
+      // toggle arming without changing the selection — accept it.
+      return true;
+    },
+    { message: "ticketSelections or ticketCount required when arming" },
+  );
+export type BetArmPayload = z.infer<typeof BetArmPayloadSchema>;
+
+/** BIN-527: `ticket:mark` payload — mark a single drawn number on the player's tickets. */
+export const TicketMarkPayloadSchema = z.object({
+  accessToken: z.string().optional(),
+  roomCode: z.string().min(1),
+  playerId: z.string().optional(),
+  number: z.number().int().positive().max(75),
+});
+export type TicketMarkPayload = z.infer<typeof TicketMarkPayloadSchema>;
+
+/** BIN-527: `pattern:won` broadcast — fires after a valid claim commits. */
+export const PatternWonPayloadSchema = z.object({
+  patternId: z.string(),
+  patternName: z.string(),
+  winnerId: z.string(),
+  wonAtDraw: z.number().int().nonnegative(),
+  payoutAmount: z.number().nonnegative(),
+  claimType: ClaimType,
+  gameId: z.string(),
+});
+export type PatternWonPayload = z.infer<typeof PatternWonPayloadSchema>;
+
+/**
+ * BIN-527: `chat:message` broadcast. `emojiId` is 0 for a pure text message,
+ * non-zero for an emoji-only fast-chat reaction (matches the fast-chat button
+ * bar in the Unity client).
+ */
+export const ChatMessageSchema = z.object({
+  id: z.string().min(1),
+  playerId: z.string(),
+  playerName: z.string(),
+  message: z.string().max(500),
+  emojiId: z.number().int().nonnegative(),
+  createdAt: IsoDateString,
+});
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;

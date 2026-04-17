@@ -15,6 +15,11 @@ export {
   MiniGameTypeSchema,
   MiniGamePlayResultSchema,
   MiniGameActivatedPayloadSchema,
+  // BIN-527: wire-contract extension
+  BetArmPayloadSchema,
+  TicketMarkPayloadSchema,
+  PatternWonPayloadSchema,
+  ChatMessageSchema,
   TicketSelectionSchema,
   TicketTypeInfoSchema,
   RoomSnapshotSchema,
@@ -32,6 +37,10 @@ import type {
   TicketReplacePayload as TicketReplacePayloadT,
   MiniGamePlayResult as MiniGamePlayResultT,
   MiniGameActivatedPayload as MiniGameActivatedPayloadT,
+  BetArmPayload as BetArmPayloadT,
+  TicketMarkPayload as TicketMarkPayloadT,
+  PatternWonPayload as PatternWonPayloadT,
+  ChatMessage as ChatMessageT,
   TicketSelection as TicketSelectionT,
   TicketTypeInfo as TicketTypeInfoT,
 } from "./schemas.js";
@@ -110,22 +119,21 @@ export interface RoomJoinPayload extends AuthenticatedSocketPayload {
  */
 export type TicketSelection = TicketSelectionT;
 
-export interface BetArmPayload extends RoomActionPayload {
-  armed?: boolean;
-  /** @deprecated Use ticketSelections instead. Flat count (1-30). Kept for backward compat. */
-  ticketCount?: number;
-  /** Per-type ticket selections. Overrides ticketCount when present. */
-  ticketSelections?: TicketSelection[];
-}
+/**
+ * BIN-527: runtime-validated via `BetArmPayloadSchema`.
+ *
+ * `ticketSelections` is the preferred path; `ticketCount` is a deprecated
+ * flat fallback kept for older clients mid-rollout.
+ */
+export type BetArmPayload = BetArmPayloadT;
 
 export interface GameStartPayload extends RoomActionPayload {
   entryFee?: number;
   ticketsPerPlayer?: number;
 }
 
-export interface TicketMarkPayload extends RoomActionPayload {
-  number: number;
-}
+/** BIN-527: runtime-validated via `TicketMarkPayloadSchema`. */
+export type TicketMarkPayload = TicketMarkPayloadT;
 
 /**
  * Runtime-validated via `ClaimSubmitPayloadSchema`. The backend calls
@@ -180,24 +188,11 @@ export interface TicketMarkedPayload {
   number: number;
 }
 
-export interface PatternWonPayload {
-  patternId: string;
-  patternName: string;
-  winnerId: string;
-  wonAtDraw: number;
-  payoutAmount: number;
-  claimType: "LINE" | "BINGO";
-  gameId: string;
-}
+/** BIN-527: runtime-validated via `PatternWonPayloadSchema`. */
+export type PatternWonPayload = PatternWonPayloadT;
 
-export interface ChatMessage {
-  id: string;
-  playerId: string;
-  playerName: string;
-  message: string;
-  emojiId: number;
-  createdAt: string;
-}
+/** BIN-527: runtime-validated via `ChatMessageSchema`. */
+export type ChatMessage = ChatMessageT;
 
 export interface LeaderboardEntry {
   nickname: string;
