@@ -88,7 +88,7 @@ When this test fails, the likely causes in priority order:
 Before pilot go-live (hall-for-hall cutover), all rows below must be ticked. Any unticked row is a pilot-blocker.
 
 - [ ] **Risk-register closure** ([`RISK_REGISTER_CLOSURE.md`](./RISK_REGISTER_CLOSURE.md)) approved by technical lead. At doc-v1 (2026-04-18): 9 Mitigated / 2 Accepted / 1 Open. The Open risk (R11 — GSAP licence) must be resolved or explicitly accepted with a time-bounded waiver before pilot.
-- [ ] **Unity build reproducibility** ([BIN-532](https://linear.app/bingosystem/issue/BIN-532)) — CI job produces a deployable Unity WebGL bundle from `legacy/unity-client/` on demand. Required so BIN-540's `unity-fallback` flag has something to fall back to.
+- [ ] **Unity archive available on CDN** ([BIN-532](https://linear.app/bingosystem/issue/BIN-532) — scope-endret 2026-04-17) — one-time local build of `legacy/unity-client/` at the current prod tag, uploaded read-only to `<cdn>/legacy-unity-archive/v1.0.0/`. Required so BIN-540's `unity` flag serves the archived build on rollback. Supersedes the canceled CI workflow (no GitHub Actions, no `UNITY_LICENSE` secret, no ongoing rebuild cost). Verify with `curl -I <cdn>/legacy-unity-archive/v1.0.0/index.html → 200 OK`. See [`UNITY_ARCHIVE_RUNBOOK.md`](../operations/UNITY_ARCHIVE_RUNBOOK.md) for archive-access details.
 - [ ] **Spillvett cross-game test** green in CI (BIN-541, merged `cac67dec`).
 - [ ] **Pengeflyt E2E gate** green in CI (BIN-526, merged `3bca6da0`); `compliance` status check marked required in branch-protection.
 - [ ] **Observability** ([BIN-539](https://linear.app/bingosystem/issue/BIN-539)) wired: Sentry DSN set in staging + production; Grafana pilot dashboard provisioned.
