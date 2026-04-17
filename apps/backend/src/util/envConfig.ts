@@ -56,7 +56,10 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const bingoPlaySessionLimitMs = parsePositiveIntEnv(process.env.BINGO_PLAY_SESSION_LIMIT_MS, 60 * 60 * 1000);
   const bingoPauseDurationMs = parsePositiveIntEnv(process.env.BINGO_PAUSE_DURATION_MS, 5 * 60 * 1000);
   const bingoSelfExclusionMinMs = Math.max(365 * 24 * 60 * 60 * 1000, parsePositiveIntEnv(process.env.BINGO_SELF_EXCLUSION_MIN_MS, 365 * 24 * 60 * 60 * 1000));
-  const bingoMaxDrawsPerRound = Math.min(60, Math.max(1, parsePositiveIntEnv(process.env.BINGO_MAX_DRAWS_PER_ROUND, 30)));
+  // BIN-520: upper bound raised from 60 → 75. Databingo 75-ball needs up to 75
+  // draws for a guaranteed BINGO; with the old clamp, long rounds could hang
+  // at draw #60 before any player reached a full-card claim.
+  const bingoMaxDrawsPerRound = Math.min(75, Math.max(1, parsePositiveIntEnv(process.env.BINGO_MAX_DRAWS_PER_ROUND, 30)));
   const isProductionRuntime = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
   const bingoMinPlayersToStart = 1;
   const fixedAutoDrawIntervalMs = 2000;

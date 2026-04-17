@@ -515,6 +515,70 @@ test("round ends automatically when max draws is reached", async () => {
   );
 });
 
+test("BIN-520: engine allows all 75 draws when maxDrawsPerRound=75 (databingo75)", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    maxDrawsPerRound: 75,
+    minDrawIntervalMs: 0,
+  });
+  // gameSlug "bingo" is a 75-ball variant (BINGO75_SLUGS) — required so the
+  // engine seeds the draw bag with 75 balls, not 60.
+  const { roomCode, playerId: hostPlayerId } = await engine.createRoom({
+    hallId: "hall-1",
+    playerName: "Host",
+    walletId: "wallet-host",
+    gameSlug: "bingo",
+  });
+  await engine.joinRoom({ roomCode, hallId: "hall-1", playerName: "Guest", walletId: "wallet-guest" });
+  await engine.startGame({ roomCode, actorPlayerId: hostPlayerId, ticketsPerPlayer: 1, payoutPercent: 80 });
+
+  // Drain the whole bag — all 75 draws must succeed with no early NO_MORE_NUMBERS.
+  for (let i = 1; i <= 75; i += 1) {
+    const result = await engine.drawNextNumber({ roomCode, actorPlayerId: hostPlayerId });
+    assert.ok(Number.isFinite(result.number), `draw #${i} must return a finite number`);
+  }
+
+  const snapshot = engine.getRoomSnapshot(roomCode);
+  assert.equal(snapshot.currentGame?.drawnNumbers.length, 75, "all 75 numbers must be drawn");
+  assert.equal(snapshot.currentGame?.status, "ENDED", "game ends exactly at 75 (not before)");
+  assert.equal(snapshot.currentGame?.endedReason, "MAX_DRAWS_REACHED");
+
+  // 76th draw must reject cleanly, not silently drop.
+  await assert.rejects(
+    async () => engine.drawNextNumber({ roomCode, actorPlayerId: hostPlayerId }),
+    (err: unknown) => err instanceof DomainError && err.code === "GAME_NOT_RUNNING",
+    "draw #76 must reject because the game already ended at the 75-cap",
+  );
+});
+
+test("BIN-520: envConfig clamp — BINGO_MAX_DRAWS_PER_ROUND=75 is preserved (not capped at 60)", async () => {
+  // Spawn loadBingoRuntimeConfig via a fresh dynamic import so the env mutation
+  // is scoped to this test. Other tests may already have cached an import; that
+  // is fine — loadBingoRuntimeConfig reads process.env each call.
+  const originalMax = process.env.BINGO_MAX_DRAWS_PER_ROUND;
+  process.env.BINGO_MAX_DRAWS_PER_ROUND = "75";
+  try {
+    const { loadBingoRuntimeConfig } = await import("../util/envConfig.js");
+    const cfg = loadBingoRuntimeConfig();
+    assert.equal(cfg.bingoMaxDrawsPerRound, 75, "clamp upper bound is 75, not 60");
+  } finally {
+    if (originalMax === undefined) delete process.env.BINGO_MAX_DRAWS_PER_ROUND;
+    else process.env.BINGO_MAX_DRAWS_PER_ROUND = originalMax;
+  }
+});
+
+test("BIN-520: envConfig clamp — values above 75 are still capped at 75", async () => {
+  const originalMax = process.env.BINGO_MAX_DRAWS_PER_ROUND;
+  process.env.BINGO_MAX_DRAWS_PER_ROUND = "999";
+  try {
+    const { loadBingoRuntimeConfig } = await import("../util/envConfig.js");
+    const cfg = loadBingoRuntimeConfig();
+    assert.equal(cfg.bingoMaxDrawsPerRound, 75, "out-of-range values must clamp to 75");
+  } finally {
+    if (originalMax === undefined) delete process.env.BINGO_MAX_DRAWS_PER_ROUND;
+    else process.env.BINGO_MAX_DRAWS_PER_ROUND = originalMax;
+  }
+});
+
 test("joinRoom rejects duplicate wallet in same room", async () => {
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter());
   const { roomCode } = await engine.createRoom({
