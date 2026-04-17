@@ -3,6 +3,7 @@ import type { Server, Socket } from "socket.io";
 import { ClaimSubmitPayloadSchema, TicketReplacePayloadSchema } from "@spillorama/shared-types/socket-events";
 import { DomainError, toPublicError } from "../game/BingoEngine.js";
 import { addBreadcrumb, captureError } from "../observability/sentry.js";
+import { metrics as promMetrics } from "../util/metrics.js";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
@@ -727,6 +728,26 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
           type: parsed.data.type
         });
         const snapshot = await emitRoomUpdate(roomCode);
+        // BIN-539: Record the claim + payout so operator dashboards can
+        // correlate wallet movement with in-game state. `hallId` is taken
+        // from the room snapshot because `snapshot.hallId` is the canonical
+        // source of truth (client-claimed hall is untrusted).
+        const gameLabel = snapshot.gameSlug ?? "unknown";
+        const hallLabel = snapshot.hallId ?? "unknown";
+        promMetrics.claimSubmitted.inc({ game: gameLabel, hall: hallLabel, type: parsed.data.type });
+        if (claim.valid && typeof claim.payoutAmount === "number" && claim.payoutAmount > 0) {
+          promMetrics.payoutAmount.observe(
+            { game: gameLabel, hall: hallLabel, type: parsed.data.type },
+            claim.payoutAmount,
+          );
+        }
+        addBreadcrumb("claim:submit", {
+          game: gameLabel,
+          hall: hallLabel,
+          type: parsed.data.type,
+          valid: claim.valid,
+          payoutAmount: claim.payoutAmount ?? 0,
+        });
         // Emit pattern:won if a pattern was completed by this claim
         if (claim.valid) {
           const wonPattern = snapshot.currentGame?.patternResults?.find(
@@ -867,9 +888,14 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
       }
     }));
 
-    socket.on("disconnect", () => {
+    socket.on("disconnect", (reason: string) => {
       engine.detachSocket(socket.id);
       socketRateLimiter.cleanup(socket.id);
+      // BIN-539: Every disconnect rolls into reconnect/retry dashboards. The
+      // `reason` label is bounded (Socket.IO enumerates it), so cardinality
+      // stays safe for Prometheus.
+      promMetrics.reconnectTotal.inc({ reason: reason || "unknown" });
+      addBreadcrumb("socket.disconnected", { socketId: socket.id, reason }, "warning");
     });
   };
 }

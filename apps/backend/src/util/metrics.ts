@@ -83,5 +83,25 @@ export const metrics = {
     name: "bingo_webhook_deliveries_total",
     help: "Total webhook deliveries by status",
     labelNames: ["status"] as const
-  })
+  }),
+
+  // BIN-539: Claims + payouts + reconnects — the three signals that tell us
+  // whether a pilot run is healthy. `game` lets us split wheel/chest/bingo
+  // variants once multi-slug hall scheduling lands; `hall` splits by room.
+  claimSubmitted: new client.Counter({
+    name: "spillorama_claim_submitted_total",
+    help: "Total claim:submit events by game slug, hall, and claim type",
+    labelNames: ["game", "hall", "type"] as const,
+  }),
+  payoutAmount: new client.Histogram({
+    name: "spillorama_payout_amount",
+    help: "Distribution of individual payout amounts in kroner (per claim)",
+    labelNames: ["game", "hall", "type"] as const,
+    buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000],
+  }),
+  reconnectTotal: new client.Counter({
+    name: "spillorama_reconnect_total",
+    help: "Total socket reconnects by reason (client-visible disconnect cause)",
+    labelNames: ["reason"] as const,
+  }),
 };
