@@ -1,0 +1,47 @@
+{
+  "code": "ED99",
+  "hallId": "hall-042",
+  "hostPlayerId": "player-host",
+  "gameSlug": "bingo",
+  "createdAt": "2026-04-17T12:30:00.000Z",
+  "players": [
+    { "id": "player-host", "name": "Host", "walletId": "wallet-host", "balance": 250 },
+    { "id": "player-guest", "name": "Guest", "walletId": "wallet-guest", "balance": 0, "hallId": "hall-042" }
+  ],
+  "currentGame": {
+    "id": "game-001",
+    "status": "RUNNING",
+    "entryFee": 10,
+    "ticketsPerPlayer": 1,
+    "prizePool": 20,
+    "remainingPrizePool": 20,
+    "payoutPercent": 80,
+    "maxPayoutBudget": 16,
+    "remainingPayoutBudget": 16,
+    "drawBag": [1, 2, 3],
+    "drawnNumbers": [],
+    "remainingNumbers": 3,
+    "claims": [],
+    "tickets": {
+      "player-host": [{ "grid": [[1, 2, 3, 4, 5]] }]
+    },
+    "marks": {
+      "player-host": [[]]
+    },
+    "startedAt": "2026-04-17T12:30:05.000Z"
+  },
+  "gameHistory": [],
+  "scheduler": {},
+  "preRoundTickets": {},
+  "armedPlayerIds": ["player-host", "player-guest"],
+  "luckyNumbers": { "player-host": 7 },
+  "serverTimestamp": 1745929200000,
+  "playerStakes": { "player-host": 10 },
+  "gameVariant": {
+    "gameType": "bingo",
+    "ticketTypes": [
+      { "name": "Small Yellow", "type": "small-yellow", "priceMultiplier": 1, "ticketCount": 1, "colors": ["yellow"] }
+    ],
+    "replaceAmount": 5
+  }
+}

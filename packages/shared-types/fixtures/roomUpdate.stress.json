@@ -1,0 +1,119 @@
+{
+  "code": "ST01",
+  "hallId": "hall-stress",
+  "hostPlayerId": "player-1",
+  "gameSlug": "bingo",
+  "createdAt": "2026-04-17T13:00:00.000Z",
+  "players": [
+    { "id": "player-1", "name": "Player1", "walletId": "w1", "balance": 500, "hallId": "hall-stress" },
+    { "id": "player-2", "name": "Player2", "walletId": "w2", "balance": 500, "hallId": "hall-stress" },
+    { "id": "player-3", "name": "Player3", "walletId": "w3", "balance": 500, "hallId": "hall-stress" },
+    { "id": "player-4", "name": "Player4", "walletId": "w4", "balance": 500, "hallId": "hall-stress" }
+  ],
+  "currentGame": {
+    "id": "game-stress-001",
+    "status": "RUNNING",
+    "entryFee": 20,
+    "ticketsPerPlayer": 3,
+    "prizePool": 240,
+    "remainingPrizePool": 120,
+    "payoutPercent": 85,
+    "maxPayoutBudget": 204,
+    "remainingPayoutBudget": 108,
+    "drawBag": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    "drawnNumbers": [1, 2, 3, 70, 71, 72, 73, 74, 75],
+    "remainingNumbers": 20,
+    "lineWinnerId": "player-2",
+    "patterns": [
+      { "id": "line", "name": "Linje", "claimType": "LINE", "prizePercent": 30, "order": 1, "design": 1 },
+      { "id": "bingo", "name": "Bingo", "claimType": "BINGO", "prizePercent": 70, "order": 2, "design": 2 }
+    ],
+    "patternResults": [
+      { "patternId": "line", "patternName": "Linje", "claimType": "LINE", "isWon": true, "winnerId": "player-2", "wonAtDraw": 4, "payoutAmount": 72, "claimId": "c-001" },
+      { "patternId": "bingo", "patternName": "Bingo", "claimType": "BINGO", "isWon": false }
+    ],
+    "claims": [
+      {
+        "id": "c-001",
+        "playerId": "player-2",
+        "type": "LINE",
+        "valid": true,
+        "winningPatternIndex": 0,
+        "patternIndex": 0,
+        "bonusTriggered": false,
+        "payoutAmount": 72,
+        "payoutPolicyVersion": "v1",
+        "payoutWasCapped": false,
+        "rtpBudgetBefore": 204,
+        "rtpBudgetAfter": 132,
+        "rtpCapped": false,
+        "payoutTransactionIds": ["tx-001", "tx-002"],
+        "createdAt": "2026-04-17T13:02:00.000Z"
+      }
+    ],
+    "tickets": {
+      "player-1": [{ "grid": [[1, 2, 3, 4, 5], [13, 14, 15, 16, 17]], "color": "Small Yellow", "type": "small" }],
+      "player-2": [{ "grid": [[1, 2, 3, 4, 5]], "color": "Large White", "type": "large" }],
+      "player-3": [{ "grid": [[70, 71, 72, 73, 74]] }],
+      "player-4": [{ "grid": [[75, 1, 2, 3, 4]] }]
+    },
+    "marks": {
+      "player-1": [[1, 2, 3]],
+      "player-2": [[1, 2, 3]],
+      "player-3": [[70, 71, 72, 73, 74]],
+      "player-4": [[75, 1, 2, 3]]
+    },
+    "participatingPlayerIds": ["player-1", "player-2", "player-3", "player-4"],
+    "isPaused": false,
+    "isTestGame": false,
+    "startedAt": "2026-04-17T13:01:00.000Z"
+  },
+  "gameHistory": [
+    {
+      "id": "game-stress-000",
+      "status": "ENDED",
+      "entryFee": 10,
+      "ticketsPerPlayer": 1,
+      "prizePool": 40,
+      "remainingPrizePool": 0,
+      "payoutPercent": 80,
+      "maxPayoutBudget": 32,
+      "remainingPayoutBudget": 0,
+      "drawBag": [],
+      "drawnNumbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "remainingNumbers": 0,
+      "claims": [],
+      "tickets": {},
+      "marks": {},
+      "startedAt": "2026-04-17T12:55:00.000Z",
+      "endedAt": "2026-04-17T12:59:00.000Z",
+      "endedReason": "BINGO_WON"
+    }
+  ],
+  "scheduler": {
+    "autoRoundStartEnabled": true,
+    "autoRoundStartIntervalMs": 180000,
+    "autoRoundMinPlayers": 2,
+    "autoRoundTicketsPerPlayer": 3,
+    "autoRoundEntryFee": 20,
+    "payoutPercent": 85,
+    "autoDrawEnabled": true,
+    "autoDrawIntervalMs": 2000
+  },
+  "preRoundTickets": {
+    "player-1": [{ "grid": [[1, 2, 3, 4, 5]], "type": "small" }]
+  },
+  "armedPlayerIds": ["player-1", "player-2", "player-3", "player-4"],
+  "luckyNumbers": { "player-1": 7, "player-2": 13, "player-3": 42, "player-4": 75 },
+  "serverTimestamp": 1745931200000,
+  "playerStakes": { "player-1": 60, "player-2": 20, "player-3": 60, "player-4": 40 },
+  "gameVariant": {
+    "gameType": "bingo",
+    "ticketTypes": [
+      { "name": "Small Yellow", "type": "small-yellow", "priceMultiplier": 1, "ticketCount": 1, "colors": ["yellow"] },
+      { "name": "Large White", "type": "large-white", "priceMultiplier": 2, "ticketCount": 1, "colors": ["white"] },
+      { "name": "Elvis 1", "type": "elvis", "priceMultiplier": 3, "ticketCount": 1, "colors": ["red", "blue"] }
+    ],
+    "replaceAmount": 5
+  }
+}
