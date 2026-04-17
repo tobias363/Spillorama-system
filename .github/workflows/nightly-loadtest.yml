@@ -1,0 +1,103 @@
+name: Nightly Load-test (BIN-508)
+
+# Runs the 1000-player Artillery scenario against the staging backend every
+# night at 02:00 UTC. Non-blocking for PRs — this is an ops signal, not a gate.
+
+on:
+  schedule:
+    # 02:00 UTC — well after the nightly build + deploy that staging uses.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Socket.IO target URL (e.g. wss://staging.example.com)"
+        required: false
+        default: ""
+      scenario:
+        description: "Scenario name (1-player-lifecycle | 500-player-smoke)"
+        required: false
+        default: "1-player-lifecycle"
+
+concurrency:
+  group: nightly-loadtest
+  cancel-in-progress: false
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/backend/package-lock.json
+
+      - name: Install apps/backend dependencies
+        run: npm --prefix apps/backend ci
+
+      # 1000 concurrent WebSocket connections exceed the default FD limit.
+      # The ubuntu-latest runner image defaults to 65536 so this is mostly a
+      # belt-and-braces check — we log it so future debugging has a reference.
+      - name: Bump file-descriptor limit
+        run: |
+          ulimit -n 65536 || true
+          echo "ulimit -n = $(ulimit -n)"
+
+      - name: Run Artillery scenario
+        env:
+          # Required: URL of the staging backend. Must point at an environment
+          # with REDIS_URL configured AND AUTH_ALLOW_LOADTEST=true (see
+          # apps/backend/load-tests/README.md).
+          TARGET: ${{ github.event.inputs.target || secrets.LOADTEST_TARGET_URL }}
+          SCENARIO: ${{ github.event.inputs.scenario || '1-player-lifecycle' }}
+        run: |
+          if [ -z "$TARGET" ]; then
+            echo "::error::TARGET is not set. Configure LOADTEST_TARGET_URL secret or dispatch with a target input."
+            exit 1
+          fi
+          mkdir -p load-test-report
+          npx --prefix apps/backend artillery run \
+            --scenario-name "$SCENARIO" \
+            --output load-test-report/report.json \
+            apps/backend/load-tests/room-1000-players.yml | tee load-test-report/console.log
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          npx --prefix apps/backend artillery report \
+            --output load-test-report/report.html \
+            load-test-report/report.json || echo "report generation failed — JSON is still available"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-report-${{ github.run_id }}
+          path: load-test-report/
+          retention-days: 14
+
+      # Acceptance-criteria gate: non-blocking, but the job turns yellow so
+      # oncall can triage. Extract p99, CPU is checked out-of-band in Grafana.
+      - name: Evaluate acceptance criteria
+        if: always()
+        run: |
+          if ! [ -f load-test-report/report.json ]; then
+            echo "::warning::No report.json — skipping acceptance evaluation"
+            exit 0
+          fi
+          P99=$(node -e "const r=require('./load-test-report/report.json');const h=r.aggregate?.summaries?.['latency_draw_to_client_ms'];console.log(h?h.p99:'null')")
+          echo "p99 draw-to-client latency = ${P99} ms"
+          if [ "$P99" = "null" ]; then
+            echo "::warning::No latency_draw_to_client_ms histogram in report — processor wiring broken?"
+            exit 0
+          fi
+          # Soft threshold — warn but don't fail. Flip to 'exit 1' once we have
+          # a stable baseline and want this to page oncall.
+          awk -v v="$P99" 'BEGIN{exit !(v+0 >= 500)}' && \
+            echo "::warning::p99 (${P99} ms) >= 500ms SLO — investigate" || \
+            echo "p99 within SLO (<500ms)"
