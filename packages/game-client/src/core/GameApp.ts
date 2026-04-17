@@ -4,6 +4,7 @@ import { GameBridge } from "../bridge/GameBridge.js";
 import { AudioManager } from "../audio/AudioManager.js";
 import { createGame, registryReady, type GameController } from "../games/registry.js";
 import { telemetry } from "../telemetry/Telemetry.js";
+import { initSentry, captureClientMessage } from "../telemetry/Sentry.js";
 
 export interface GameMountConfig {
   gameSlug: string;
@@ -25,6 +26,8 @@ export class GameApp {
   private bridge: GameBridge | null = null;
   private audio: AudioManager | null = null;
   private gameController: GameController | null = null;
+  /** BIN-539: 30-second gap-metric watchdog. */
+  private gapWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.app = new Application();
@@ -49,11 +52,21 @@ export class GameApp {
     });
     container.appendChild(this.app.canvas);
 
-    // Init telemetry
+    // Init telemetry + Sentry sidecar. Sentry is a no-op when
+    // VITE_SENTRY_DSN is unset, so dev stays noise-free.
     telemetry.init({
       gameSlug: config.gameSlug,
       hallId: config.hallId,
       releaseVersion: "0.1.0",
+    });
+    void initSentry({
+      release: "0.1.0",
+      environment: import.meta.env.MODE,
+      gameSlug: config.gameSlug,
+      hallId: config.hallId,
+      // accessToken is an opaque JWT; using it as the PII source keeps the
+      // hash consistent across reconnects without needing the player id.
+      playerId: config.accessToken,
     });
     telemetry.trackFunnelStep("game_loaded");
 
@@ -85,6 +98,21 @@ export class GameApp {
     } else {
       console.warn("[GameApp] No game controller found for slug:", config.gameSlug);
     }
+
+    // BIN-539: 30 seconds after mount, check whether GameBridge has seen any
+    // drawIndex gaps. A gap means at least one draw:new arrived out of order
+    // or was lost — BIN-502's resync should have handled it, but we still
+    // want to know because a healthy pilot has gaps=0 on most sessions.
+    this.gapWatchdogTimer = setTimeout(() => {
+      const metrics = this.bridge?.getGapMetrics();
+      if (metrics && metrics.gaps > 0) {
+        captureClientMessage(
+          `client_draw_gap: ${metrics.gaps} gaps, ${metrics.duplicates} duplicates, last=${metrics.lastAppliedDrawIndex}`,
+          "warning",
+        );
+        telemetry.trackEvent("client_draw_gap", metrics);
+      }
+    }, 30_000);
   }
 
   getConfig(): GameMountConfig | null {
@@ -92,6 +120,10 @@ export class GameApp {
   }
 
   destroy(): void {
+    if (this.gapWatchdogTimer) {
+      clearTimeout(this.gapWatchdogTimer);
+      this.gapWatchdogTimer = null;
+    }
     this.gameController?.destroy();
     this.gameController = null;
     this.bridge?.stop();

@@ -13,6 +13,7 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@sentry/browser": "^8.48.0",
     "@spillorama/shared-types": "*",
     "pixi.js": "^8.6.6",
     "gsap": "^3.12.7",

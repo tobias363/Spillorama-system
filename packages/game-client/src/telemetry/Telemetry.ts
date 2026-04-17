@@ -6,9 +6,13 @@
  * - Socket stability (reconnects, disconnects per session)
  * - Client errors with game context
  *
- * In Fase 0 this is a lightweight local implementation.
- * Sentry integration is added when the team confirms it as the error-tracking platform.
+ * BIN-539: every call also flows into Sentry (when enabled via
+ * VITE_SENTRY_DSN at build time). Funnel steps + events become breadcrumbs;
+ * trackError calls captureException. The Sentry module is a lazy-loaded
+ * sidecar, so this file stays import-safe for unit tests.
  */
+
+import { addClientBreadcrumb, captureClientError } from "./Sentry.js";
 
 export interface TelemetryContext {
   gameSlug: string;
@@ -50,6 +54,7 @@ export class Telemetry {
   trackFunnelStep(step: string): void {
     this.funnelSteps.push({ step, timestamp: Date.now() });
     this.log("funnel", { step, elapsed: Date.now() - this.sessionStart });
+    addClientBreadcrumb("funnel", { step, elapsed: Date.now() - this.sessionStart });
   }
 
   getFunnelSteps(): FunnelStep[] {
@@ -61,11 +66,13 @@ export class Telemetry {
   trackReconnect(): void {
     this.reconnectCount++;
     this.log("socket_reconnect", { count: this.reconnectCount });
+    addClientBreadcrumb("socket.reconnect", { count: this.reconnectCount });
   }
 
   trackDisconnect(reason: string): void {
     this.disconnectCount++;
     this.log("socket_disconnect", { reason, count: this.disconnectCount });
+    addClientBreadcrumb("socket.disconnect", { reason, count: this.disconnectCount });
   }
 
   getSocketStats(): { reconnects: number; disconnects: number } {
@@ -88,14 +95,19 @@ export class Telemetry {
       ...this.context,
     });
 
-    // TODO: Send to Sentry when configured
-    // Sentry.captureException(error, { tags: this.context });
+    captureClientError(error, {
+      type,
+      gameSlug: this.context?.gameSlug,
+      hallId: this.context?.hallId,
+      releaseVersion: this.context?.releaseVersion,
+    });
   }
 
   // ── Business events ───────────────────────────────────────────────────
 
   trackEvent(name: string, data?: Record<string, unknown>): void {
     this.log("event", { name, ...data, ...this.context });
+    addClientBreadcrumb(`event.${name}`, { ...data });
   }
 
   // ── Internal ──────────────────────────────────────────────────────────
