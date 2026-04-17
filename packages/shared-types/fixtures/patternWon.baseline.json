@@ -1,0 +1,9 @@
+{
+  "patternId": "1-rad",
+  "patternName": "1 Rad",
+  "winnerId": "player-alice",
+  "wonAtDraw": 12,
+  "payoutAmount": 50,
+  "claimType": "LINE",
+  "gameId": "game-20260417-abc123"
+}
