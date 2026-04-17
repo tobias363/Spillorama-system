@@ -36,8 +36,9 @@ patterns:
 miniGames:
   - wheelOfFortune
   - treasureChest
-# Note: mystery and colordraft pending per BIN-505/506 (server-side activation)
-miniGameRotation: round-robin
+  - mysteryGame   # BIN-505 — backend rotation active; client UI via MysteryGameOverlay
+  - colorDraft    # BIN-506 — backend rotation active; client UI via ColorDraftOverlay
+miniGameRotation: round-robin  # wheel → chest → mystery → colorDraft → wheel …
 audioVoicePacks:
   - no-male
   - no-female
@@ -170,15 +171,23 @@ Server-trigget etter BINGO-claim. `BingoEngine.ts:1297` alternerer:
 ```
 drawIndex 0 (first BINGO)  → wheelOfFortune
 drawIndex 1 (second BINGO) → treasureChest
-drawIndex 2                → wheelOfFortune
+drawIndex 2                → mysteryGame
+drawIndex 3                → colorDraft
+drawIndex 4                → wheelOfFortune (wraps)
 ...
 ```
 
-**Kun 2-veis rotasjon i dag.** 4-veis (wheel → chest → mystery → colordraft) er scoped i [BIN-505](https://linear.app/bingosystem/issue/BIN-505) og [BIN-506](https://linear.app/bingosystem/issue/BIN-506). Klient-UI for mystery/colordraft er stub-implementert men serveraktivering mangler.
+**4-veis rotasjon aktiv (backend).** Wheel → Chest → Mystery → ColorDraft, implementert i `BingoEngine.MINIGAME_ROTATION` ([BIN-505](https://linear.app/bingosystem/issue/BIN-505) + [BIN-506](https://linear.app/bingosystem/issue/BIN-506)). Klient-UI finnes som stubs (`MysteryGameOverlay.ts`, `ColorDraftOverlay.ts`); full klient-integrasjon spores som egne oppfølgings-issuer.
 
-**Wheel of Fortune:** 8 segmenter, default prize-tabell i `BingoEngine.ts:1163`. GSAP `rotateZ`-animasjon. Spiller klikker "spin", server velger segment deterministisk.
+**Wheel of Fortune:** 8 segmenter, default prize-tabell i `BingoEngine.ts:1282` (`MINIGAME_PRIZES`). GSAP `rotateZ`-animasjon. Spiller klikker "spin", server velger segment deterministisk.
 
-**Treasure Chest:** N kister, spiller klikker, server velger. Visning: sprite-swap + GSAP scale.
+**Treasure Chest:** N kister, spiller klikker, server velger prize. Visning: sprite-swap + GSAP scale.
+
+**Mystery Game:** Ball-picker. 8 balls som vises hemmelig; spiller velger én, server avslører prize. Samme `minigame:play { selectedIndex }`-kontrakt som Treasure Chest.
+
+**Color Draft:** Color-pick variant. Spiller velger én av flere fargeknapper, server avslører prize. Samme `minigame:play`-kontrakt.
+
+**Prize-konfigurasjon:** Alle fire typer bruker `MINIGAME_PRIZES` per-default. Admin-konfigurerbar prize-tabell per mini-game-type er en oppfølgende issue — legacy leste fra `otherGame`-collection, hvilket skal porters når Admin-panelet får support.
 
 ---
 
@@ -272,8 +281,8 @@ Referanse: `legacy/unity-backend/Game/Game1/Sockets/game1.js`
 | Legacy-feature | Status i ny stack | Issue |
 |----------------|-------------------|-------|
 | `AdminHallDisplayLogin` / `TvscreenUrlForPlayers` | ❌ Mangler | [BIN-498](https://linear.app/bingosystem/issue/BIN-498) |
-| `SelectMystery` (mini-game) | ❌ Stub i klient, ikke server-aktivert | [BIN-505](https://linear.app/bingosystem/issue/BIN-505) |
-| `SelectColorDraft` (mini-game) | ❌ Stub i klient, ikke server-aktivert | [BIN-506](https://linear.app/bingosystem/issue/BIN-506) |
+| `SelectMystery` (mini-game) | 🟡 Backend i main (4-veis rotasjon aktiv); klient-UI gjennom `minigame:play { selectedIndex }` er stub (`MysteryGameOverlay`) — full klient-integrasjon i oppfølgings-issue | [BIN-505](https://linear.app/bingosystem/issue/BIN-505) |
+| `SelectColorDraft` (mini-game) | 🟡 Backend i main (4-veis rotasjon aktiv); klient-UI gjennom `minigame:play { selectedIndex }` er stub (`ColorDraftOverlay`) | [BIN-506](https://linear.app/bingosystem/issue/BIN-506) |
 | `ReplaceElvisTickets` (in-place replace) | 🟡 Implementert som disarm+rearm, trenger real replace | [BIN-509](https://linear.app/bingosystem/issue/BIN-509) |
 | `replaceAmount` debitering | ❌ Ikke koblet | [BIN-521](https://linear.app/bingosystem/issue/BIN-521) (dup → 509) |
 | `ticket:mark` per-merking fanout | 🔴 Fortsatt kvadratisk broadcast | [BIN-499](https://linear.app/bingosystem/issue/BIN-499) |

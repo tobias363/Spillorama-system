@@ -1677,3 +1677,74 @@ test("KRITISK-5/6: checkpoint captures RecoverableGameSnapshot with drawBag and 
   assert.equal((drawSnap.drawnNumbers as number[]).length, 1);
   assert.ok(drawCheckpoint!.players, "DRAW checkpoint should include players");
 });
+
+test("BIN-505/506: mini-game rotation cycles wheel → chest → mystery → colorDraft", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0,
+  });
+  const types: string[] = [];
+
+  // Five activations to prove the rotation wraps cleanly back to wheelOfFortune.
+  for (let i = 0; i < 5; i += 1) {
+    const hallId = `hall-rot-${i}`;
+    const { roomCode, playerId: hostId } = await engine.createRoom({
+      hallId,
+      playerName: `Host${i}`,
+      walletId: `wallet-host-${i}`,
+      gameSlug: "bingo",
+    });
+    await engine.joinRoom({ roomCode, hallId, playerName: `Guest${i}`, walletId: `wallet-guest-${i}` });
+    await engine.startGame({ roomCode, actorPlayerId: hostId, ticketsPerPlayer: 1, payoutPercent: 80 });
+    const mg = engine.activateMiniGame(roomCode, hostId);
+    assert.ok(mg, `activation #${i} returned null`);
+    types.push(mg!.type);
+  }
+
+  assert.deepEqual(
+    types,
+    ["wheelOfFortune", "treasureChest", "mysteryGame", "colorDraft", "wheelOfFortune"],
+    `rotation mismatch: ${JSON.stringify(types)}`,
+  );
+});
+
+test("BIN-505/506: mystery + colorDraft prizes flow through playMiniGame same as wheel/chest", async () => {
+  const engine = new BingoEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0,
+  });
+
+  // Force rotation counter to the mysteryGame slot by burning two activations first.
+  for (let i = 0; i < 2; i += 1) {
+    const hallId = `hall-burn-${i}`;
+    const { roomCode, playerId: hostId } = await engine.createRoom({ hallId, playerName: "H", walletId: `w-burn-${i}` });
+    await engine.joinRoom({ roomCode, hallId, playerName: "G", walletId: `w-burn-g-${i}` });
+    await engine.startGame({ roomCode, actorPlayerId: hostId, ticketsPerPlayer: 1, payoutPercent: 80 });
+    engine.activateMiniGame(roomCode, hostId);
+  }
+
+  // Third room: expect mysteryGame.
+  const hallMystery = "hall-mystery";
+  const { roomCode: mysteryRoom, playerId: mysteryHost } = await engine.createRoom({
+    hallId: hallMystery, playerName: "MHost", walletId: "wallet-m-host",
+  });
+  await engine.joinRoom({ roomCode: mysteryRoom, hallId: hallMystery, playerName: "MGuest", walletId: "wallet-m-guest" });
+  await engine.startGame({ roomCode: mysteryRoom, actorPlayerId: mysteryHost, ticketsPerPlayer: 1, payoutPercent: 80 });
+  const mysteryState = engine.activateMiniGame(mysteryRoom, mysteryHost);
+  assert.equal(mysteryState?.type, "mysteryGame");
+  const mysteryResult = await engine.playMiniGame(mysteryRoom, mysteryHost, 3);
+  assert.equal(mysteryResult.type, "mysteryGame");
+  assert.ok(mysteryResult.prizeAmount >= 0, "prizeAmount must be non-negative");
+  assert.ok(mysteryResult.prizeList.length > 0, "prizeList must be populated");
+
+  // Fourth room: expect colorDraft.
+  const hallColor = "hall-color";
+  const { roomCode: colorRoom, playerId: colorHost } = await engine.createRoom({
+    hallId: hallColor, playerName: "CHost", walletId: "wallet-c-host",
+  });
+  await engine.joinRoom({ roomCode: colorRoom, hallId: hallColor, playerName: "CGuest", walletId: "wallet-c-guest" });
+  await engine.startGame({ roomCode: colorRoom, actorPlayerId: colorHost, ticketsPerPlayer: 1, payoutPercent: 80 });
+  const colorState = engine.activateMiniGame(colorRoom, colorHost);
+  assert.equal(colorState?.type, "colorDraft");
+  const colorResult = await engine.playMiniGame(colorRoom, colorHost, 1);
+  assert.equal(colorResult.type, "colorDraft");
+  assert.ok(colorResult.prizeAmount >= 0);
+});
