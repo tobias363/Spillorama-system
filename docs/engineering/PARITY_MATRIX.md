@@ -168,7 +168,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Animert kulekø vertikal FIFO (MVP) | 🔴 | 🔵 | ✅ | ❌ | 🟡 | — |
 | Kulekø FIFO (maks 5) | 🔴 | 🔵 | ✅ | ❌ | 🟡 | — |
 | Waypoint-bane (`BallPathRottate.cs`) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue — krever GSAP-timeline eller fysikk |
-| Mønsteranimasjon (ping-pong) | 🔴 | 🔵 | ❌ | ❌ | ❌ | Egen issue |
+| Mønsteranimasjon (ping-pong) | 🔴 | 🔵 | ✅ | ❌ | 🟡 | `components/PatternBanner.ts` — GSAP yoyo-pulse på neste un-won pattern; cellnivå-preview utsatt |
 
 ### 4.3 Canonical spec status
 
