@@ -83,6 +83,28 @@ When this test fails, the likely causes in priority order:
 
 ---
 
+## 7. Pre-pilot acceptance checklist (BIN-533)
+
+Before pilot go-live (hall-for-hall cutover), all rows below must be ticked. Any unticked row is a pilot-blocker.
+
+- [ ] **Risk-register closure** ([`RISK_REGISTER_CLOSURE.md`](./RISK_REGISTER_CLOSURE.md)) approved by technical lead. At doc-v1 (2026-04-18): 9 Mitigated / 2 Accepted / 1 Open. The Open risk (R11 — GSAP licence) must be resolved or explicitly accepted with a time-bounded waiver before pilot.
+- [ ] **Unity build reproducibility** ([BIN-532](https://linear.app/bingosystem/issue/BIN-532)) — CI job produces a deployable Unity WebGL bundle from `legacy/unity-client/` on demand. Required so BIN-540's `unity-fallback` flag has something to fall back to.
+- [ ] **Spillvett cross-game test** green in CI (BIN-541, merged `cac67dec`).
+- [ ] **Pengeflyt E2E gate** green in CI (BIN-526, merged `3bca6da0`); `compliance` status check marked required in branch-protection.
+- [ ] **Observability** ([BIN-539](https://linear.app/bingosystem/issue/BIN-539)) wired: Sentry DSN set in staging + production; Grafana pilot dashboard provisioned.
+- [ ] **Rollback runbook** ([`ROLLBACK_RUNBOOK.md`](../operations/ROLLBACK_RUNBOOK.md)) staging-smoke passed at least once (§7 of that runbook).
+- [ ] **Load-test baseline** ([BIN-508](https://linear.app/bingosystem/issue/BIN-508)) — first three nightly 1000-VU runs logged with p99 < 500 ms.
+
+Sign-off format:
+
+```
+Pre-pilot acceptance approved by: <name>
+Date: YYYY-MM-DD
+Open items: <list or "none">
+```
+
+---
+
 ## 5. Scope limits
 
 This gate covers **backend money flow only**. It does NOT cover:
