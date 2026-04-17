@@ -7,6 +7,7 @@ import { TicketCard } from "../components/TicketCard.js";
 import { DrawnBallsPanel } from "../components/DrawnBallsPanel.js";
 import { ClaimButton } from "../components/ClaimButton.js";
 import { PlayerInfoBar } from "../components/PlayerInfoBar.js";
+import { RocketStack } from "../components/RocketStack.js";
 import { checkClaims } from "../logic/ClaimDetector.js";
 
 /**
@@ -15,6 +16,7 @@ import { checkClaims } from "../logic/ClaimDetector.js";
 export class PlayScreen extends Container {
   private scroller: TicketScroller;
   private drawnBalls: DrawnBallsPanel;
+  private rocketStack: RocketStack;
   private lineBtn: ClaimButton;
   private bingoBtn: ClaimButton;
   private infoBar: PlayerInfoBar;
@@ -49,10 +51,21 @@ export class PlayScreen extends Container {
     this.drawnBalls.y = 45;
     this.addChild(this.drawnBalls);
 
-    // Ticket scroller (main area)
+    // Rocket-stabling — G2 signature. 60-ball range matches BingoEngine capacity.
+    const rocketWidth = 42;
+    const rocketMargin = 12;
+    const rocketTop = 110;
+    const rocketHeight = screenHeight - rocketTop - 80;
+    this.rocketStack = new RocketStack(rocketWidth, rocketHeight, 60);
+    this.rocketStack.x = screenWidth - rocketWidth - rocketMargin;
+    this.rocketStack.y = rocketTop;
+    this.addChild(this.rocketStack);
+
+    // Ticket scroller (main area) — leave room for rocket on right.
     const scrollerY = 100;
     const scrollerHeight = screenHeight - scrollerY - 80;
-    this.scroller = new TicketScroller(screenWidth - 40, scrollerHeight);
+    const scrollerWidth = screenWidth - 40 - rocketWidth - rocketMargin;
+    this.scroller = new TicketScroller(scrollerWidth, scrollerHeight);
     this.scroller.x = 20;
     this.scroller.y = scrollerY;
     this.addChild(this.scroller);
@@ -78,6 +91,7 @@ export class PlayScreen extends Container {
   /** Build ticket grids from game state. */
   buildTickets(state: GameState): void {
     this.scroller.clearCards();
+    this.rocketStack.syncTo(state.drawnNumbers.length);
     this.lineAlreadyWon = false;
     this.bingoAlreadyWon = false;
 
@@ -117,6 +131,7 @@ export class PlayScreen extends Container {
   onNumberDrawn(number: number, drawIndex: number, state: GameState): void {
     this.scroller.markNumberOnAll(number);
     this.drawnBalls.addBall(number);
+    this.rocketStack.addSegment();
     this.audio.playNumber(number);
     this.scroller.sortBestFirst();
     this.updateClaimButtons(state);
@@ -152,6 +167,7 @@ export class PlayScreen extends Container {
   reset(): void {
     this.scroller.clearCards();
     this.drawnBalls.clear();
+    this.rocketStack.reset();
     this.lineBtn.reset();
     this.bingoBtn.reset();
     this.lineAlreadyWon = false;

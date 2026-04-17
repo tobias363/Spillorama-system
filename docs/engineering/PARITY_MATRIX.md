@@ -124,7 +124,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
-| Rakettstabling / animasjon (MVP) | 🔴 | 🔵 | 🟡 | ❌ | ❌ | Polish: egen issue |
+| Rakettstabling / animasjon | 🔴 | 🔵 | ✅ | ❌ | 🟡 | [BIN-529](https://linear.app/bingosystem/issue/BIN-529) — `components/RocketStack.ts` (60 segmenter, GSAP stacking) |
 | Paginering (multiple tickets) | 🔴 | 🔵 | 🟡 | ❌ | 🟡 | — |
 | Blind ticket purchase (`Game2BuyBlindTickets`) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-511](https://linear.app/bingosystem/issue/BIN-511) |
 

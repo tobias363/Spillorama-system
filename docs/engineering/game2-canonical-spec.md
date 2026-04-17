@@ -151,7 +151,7 @@ G2-signatur: rakettstabling-animasjon (LeanTween i Unity → GSAP i web). MVP ha
 | Countdown pulse | GSAP scale + color, varierende frekvens | Active countdown |
 | Claim-button pulse | GSAP scale repeat | Når LINE/BINGO er mulig |
 | Cell mark | scale 1 → 1.15 → 1, 0.4 s | Tall markeres |
-| Raketstabling | *(ikke fullført)* | Hver draw under RUNNING |
+| Raketstabling | 60 segmenter, GSAP `back.out(2)` scale-in + `power1.out` fade-in, ~0.35 s | Hver draw under RUNNING; `syncTo(drawCount)` ved late-join/SPECTATING |
 
 ---
 
@@ -193,7 +193,7 @@ Referanse: `legacy/unity-backend/Game/Game2/Sockets/game2.js`
 | Chat (`SendGameChat`, `GameChatHistory`) | ❌ Ikke portet | Egen issue |
 | Lydfiler / nummerannouncement | ❌ Ikke portet | Egen issue |
 | Auto-arm ved join | ✅ Har (avviker fra G1 som eksplisitt fjernet) | Vurder om dette bør være eksplisitt kjøp som G1 |
-| Rocket-stabling polish | 🟡 MVP | Egen issue |
+| Rocket-stabling polish | ✅ Levert (BIN-529 — `components/RocketStack.ts`) | Lyd + partikkel-effekter kan komme senere |
 | `LeftRocketRoom` (spesifikk leave-event) | 🟡 Dekket av generelt `disconnect`-handling | OK |
 
 ### 11.2 Delte avvik (gjelder alle spill)
