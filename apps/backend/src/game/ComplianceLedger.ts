@@ -67,6 +67,50 @@ export interface DailyComplianceReport {
   };
 }
 
+/** BIN-517: multi-day range report used by the admin dashboard. */
+export interface RangeComplianceReport {
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  /** One entry per day in the range, even for days with no activity (empty rows). */
+  days: DailyComplianceReport[];
+  /** Sum across the full range. */
+  totals: {
+    grossTurnover: number;
+    prizesPaid: number;
+    net: number;
+    stakeCount: number;
+    prizeCount: number;
+    extraPrizeCount: number;
+  };
+}
+
+/** BIN-517: per-game-slug statistics (rounds, distinct players, money flow). */
+export interface GameStatisticsRow {
+  hallId: string;
+  gameType: LedgerGameType;
+  roundCount: number;
+  distinctPlayerCount: number;
+  totalStakes: number;
+  totalPrizes: number;
+  net: number;
+  averagePrizePerRound: number;
+}
+
+export interface GameStatisticsReport {
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  rows: GameStatisticsRow[];
+  totals: {
+    roundCount: number;
+    distinctPlayerCount: number;
+    totalStakes: number;
+    totalPrizes: number;
+    net: number;
+  };
+}
+
 export interface OrganizationAllocationInput {
   organizationId: string;
   organizationAccountId: string;
@@ -362,6 +406,179 @@ export class ComplianceLedger {
       generatedAt: new Date().toISOString(),
       rows,
       totals
+    };
+  }
+
+  /**
+   * BIN-517: range report — calls generateDailyReport for each day in the
+   * [startDate, endDate] inclusive range and sums the totals. Days with no
+   * activity still produce an entry with empty `rows` so the dashboard
+   * can render a zero-bar for that day (gap-free x-axis).
+   */
+  generateRangeReport(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    channel?: LedgerChannel;
+  }): RangeComplianceReport {
+    const startDate = this.assertDateKey(input.startDate, "startDate");
+    const endDate = this.assertDateKey(input.endDate, "endDate");
+    const startRange = this.dayRangeMs(startDate);
+    const endRange = this.dayRangeMs(endDate);
+    if (startRange.startMs > endRange.startMs) {
+      throw new DomainError("INVALID_INPUT", "startDate må være ≤ endDate.");
+    }
+    // Hard cap to keep the dashboard response bounded. 366 days = full year +
+    // leap day. Callers wanting larger windows should paginate.
+    const MAX_DAYS = 366;
+    const days: DailyComplianceReport[] = [];
+    const totals = {
+      grossTurnover: 0, prizesPaid: 0, net: 0,
+      stakeCount: 0, prizeCount: 0, extraPrizeCount: 0,
+    };
+    let cursorMs = startRange.startMs;
+    let dayCount = 0;
+    while (cursorMs <= endRange.startMs) {
+      dayCount += 1;
+      if (dayCount > MAX_DAYS) {
+        throw new DomainError("INVALID_INPUT", `Datointervall for stort (maks ${MAX_DAYS} dager).`);
+      }
+      const dateKey = this.dateKeyFromMs(cursorMs);
+      const day = this.generateDailyReport({
+        date: dateKey,
+        hallId: input.hallId,
+        gameType: input.gameType,
+        channel: input.channel,
+      });
+      days.push(day);
+      totals.grossTurnover += day.totals.grossTurnover;
+      totals.prizesPaid += day.totals.prizesPaid;
+      totals.net += day.totals.net;
+      totals.stakeCount += day.totals.stakeCount;
+      totals.prizeCount += day.totals.prizeCount;
+      totals.extraPrizeCount += day.totals.extraPrizeCount;
+      cursorMs += 24 * 60 * 60 * 1000;
+    }
+    return {
+      startDate,
+      endDate,
+      generatedAt: new Date().toISOString(),
+      days,
+      totals: {
+        grossTurnover: roundCurrency(totals.grossTurnover),
+        prizesPaid: roundCurrency(totals.prizesPaid),
+        net: roundCurrency(totals.net),
+        stakeCount: totals.stakeCount,
+        prizeCount: totals.prizeCount,
+        extraPrizeCount: totals.extraPrizeCount,
+      },
+    };
+  }
+
+  /**
+   * BIN-517: per-game statistics for the admin dashboard.
+   *
+   * Groups ledger entries by (hallId, gameType) and counts:
+   *   - roundCount = distinct gameId values with at least one entry
+   *   - distinctPlayerCount = distinct playerId values that staked
+   *   - totalStakes / totalPrizes (PRIZE + EXTRA_PRIZE)
+   *
+   * Player-count is scoped to the (hallId, gameType) bucket — a player
+   * who staked in two halls counts once per hall, which is the right
+   * granularity for "how many unique players did hall X serve".
+   */
+  generateGameStatistics(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+  }): GameStatisticsReport {
+    const startDate = this.assertDateKey(input.startDate, "startDate");
+    const endDate = this.assertDateKey(input.endDate, "endDate");
+    const startRange = this.dayRangeMs(startDate);
+    const endRange = this.dayRangeMs(endDate);
+    if (startRange.startMs > endRange.startMs) {
+      throw new DomainError("INVALID_INPUT", "startDate må være ≤ endDate.");
+    }
+    const hallFilter = input.hallId?.trim() || undefined;
+
+    interface Bucket {
+      hallId: string;
+      gameType: LedgerGameType;
+      gameIds: Set<string>;
+      playerIds: Set<string>;
+      totalStakes: number;
+      totalPrizes: number;
+    }
+    const bucketByKey = new Map<string, Bucket>();
+
+    for (const entry of this.complianceLedger) {
+      if (entry.createdAtMs < startRange.startMs || entry.createdAtMs > endRange.endMs) continue;
+      if (hallFilter && entry.hallId !== hallFilter) continue;
+      const key = `${entry.hallId}::${entry.gameType}`;
+      let bucket = bucketByKey.get(key);
+      if (!bucket) {
+        bucket = {
+          hallId: entry.hallId,
+          gameType: entry.gameType,
+          gameIds: new Set<string>(),
+          playerIds: new Set<string>(),
+          totalStakes: 0,
+          totalPrizes: 0,
+        };
+        bucketByKey.set(key, bucket);
+      }
+      if (entry.gameId) bucket.gameIds.add(entry.gameId);
+      if (entry.eventType === "STAKE") {
+        bucket.totalStakes += entry.amount;
+        if (entry.playerId) bucket.playerIds.add(entry.playerId);
+      } else if (entry.eventType === "PRIZE" || entry.eventType === "EXTRA_PRIZE") {
+        bucket.totalPrizes += entry.amount;
+      }
+    }
+
+    const rows: GameStatisticsRow[] = [...bucketByKey.values()]
+      .map((b) => {
+        const roundCount = b.gameIds.size;
+        const net = b.totalStakes - b.totalPrizes;
+        const averagePrizePerRound = roundCount > 0 ? b.totalPrizes / roundCount : 0;
+        return {
+          hallId: b.hallId,
+          gameType: b.gameType,
+          roundCount,
+          distinctPlayerCount: b.playerIds.size,
+          totalStakes: roundCurrency(b.totalStakes),
+          totalPrizes: roundCurrency(b.totalPrizes),
+          net: roundCurrency(net),
+          averagePrizePerRound: roundCurrency(averagePrizePerRound),
+        };
+      })
+      .sort((a, b) => {
+        const byHall = a.hallId.localeCompare(b.hallId);
+        if (byHall !== 0) return byHall;
+        return a.gameType.localeCompare(b.gameType);
+      });
+
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.roundCount += row.roundCount;
+        acc.distinctPlayerCount += row.distinctPlayerCount;
+        acc.totalStakes += row.totalStakes;
+        acc.totalPrizes += row.totalPrizes;
+        acc.net += row.net;
+        return acc;
+      },
+      { roundCount: 0, distinctPlayerCount: 0, totalStakes: 0, totalPrizes: 0, net: 0 },
+    );
+    totals.totalStakes = roundCurrency(totals.totalStakes);
+    totals.totalPrizes = roundCurrency(totals.totalPrizes);
+    totals.net = roundCurrency(totals.net);
+
+    return {
+      startDate, endDate,
+      generatedAt: new Date().toISOString(),
+      rows,
+      totals,
     };
   }
 

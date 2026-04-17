@@ -334,6 +334,7 @@
           <aside class="card admin-sidebar">
             <h2>Meny</h2>
             <nav class="admin-nav">
+              <a href="#section-dashboard">Dashboard</a>
               <a href="#section-game-settings">Spillinnstillinger</a>
               <a href="#section-games">Spillkatalog (andre spill)</a>
               <a href="#section-halls">Haller</a>
@@ -347,6 +348,134 @@
           </aside>
 
           <div class="admin-content">
+        <!-- BIN-517: Admin dashboard. -->
+        <article id="section-dashboard" class="card admin-section">
+          <div class="section-header">
+            <h2>Dashboard</h2>
+            <div class="toolbar" style="margin-top: 0;">
+              <button id="refreshDashboardBtn" class="secondary">Oppdater nå</button>
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+                <input id="dashboardAutoRefresh" type="checkbox" checked /> Auto-oppdater hvert 10. sek
+              </label>
+            </div>
+          </div>
+          <p class="muted" style="margin-top: 0;">
+            Live-oversikt per hall, finansielle rapporter og per-spill statistikk. Polling-basert
+            (10s); ingen socket-abonnement nødvendig.
+          </p>
+
+          <h3 style="margin-top: 16px; font-size: 16px;">Live-rom per hall</h3>
+          <div id="dashboardLiveTotals" style="margin: 8px 0; display: flex; gap: 16px; flex-wrap: wrap;">
+            <div class="dashboard-tile"><strong id="liveTotalHalls">—</strong> haller</div>
+            <div class="dashboard-tile"><strong id="liveTotalRooms">—</strong> rom totalt</div>
+            <div class="dashboard-tile"><strong id="liveTotalActive">—</strong> aktive rom</div>
+            <div class="dashboard-tile"><strong id="liveTotalPlayers">—</strong> spillere</div>
+          </div>
+          <div id="dashboardHallsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 8px;">
+            <p class="muted">Laster...</p>
+          </div>
+          <pre id="dashboardLiveStatus" class="status">—</pre>
+
+          <h3 style="margin-top: 24px; font-size: 16px;">Finansiell rapport</h3>
+          <div class="grid-3">
+            <div class="field">
+              <label for="reportStartDate">Fra-dato</label>
+              <input id="reportStartDate" type="date" />
+            </div>
+            <div class="field">
+              <label for="reportEndDate">Til-dato</label>
+              <input id="reportEndDate" type="date" />
+            </div>
+            <div class="field">
+              <label for="reportHallFilter">Hall-filter</label>
+              <select id="reportHallFilter"><option value="">Alle haller</option></select>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button id="loadRangeReportBtn">Hent finansiell rapport</button>
+            <button id="loadGameStatsBtn" class="secondary">Hent spill-statistikk</button>
+          </div>
+          <div id="reportRangeTotals" style="display: none; margin-top: 12px; padding: 10px; background: #ecfdf5; border: 1px solid #10b981; border-radius: 8px;">
+            <strong>Totalt:</strong>
+            <span style="margin-left: 8px;">Innsats: <span id="rangeTotalStakes">—</span></span>
+            <span style="margin-left: 16px;">Premier: <span id="rangeTotalPrizes">—</span></span>
+            <span style="margin-left: 16px;">Netto: <span id="rangeTotalNet">—</span></span>
+            <span style="margin-left: 16px;">Dager: <span id="rangeTotalDays">—</span></span>
+          </div>
+          <div id="reportRangeChart" style="margin-top: 12px;"></div>
+          <table id="reportRangeTable" style="width: 100%; border-collapse: collapse; margin-top: 12px;">
+            <thead>
+              <tr style="text-align: left; border-bottom: 1px solid #d1d5db;">
+                <th style="padding: 6px;">Dato</th>
+                <th style="padding: 6px;">Innsats (NOK)</th>
+                <th style="padding: 6px;">Premier (NOK)</th>
+                <th style="padding: 6px;">Netto (NOK)</th>
+                <th style="padding: 6px;">Stake-count</th>
+                <th style="padding: 6px;">Prize-count</th>
+              </tr>
+            </thead>
+            <tbody id="reportRangeTableBody"></tbody>
+          </table>
+
+          <h3 style="margin-top: 24px; font-size: 16px;">Per-spill statistikk</h3>
+          <table id="reportGameStatsTable" style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+            <thead>
+              <tr style="text-align: left; border-bottom: 1px solid #d1d5db;">
+                <th style="padding: 6px;">Hall</th>
+                <th style="padding: 6px;">Spill-type</th>
+                <th style="padding: 6px;">Runder</th>
+                <th style="padding: 6px;">Unike spillere</th>
+                <th style="padding: 6px;">Innsats (NOK)</th>
+                <th style="padding: 6px;">Premier (NOK)</th>
+                <th style="padding: 6px;">Netto (NOK)</th>
+                <th style="padding: 6px;">Snitt-premie/runde</th>
+              </tr>
+            </thead>
+            <tbody id="reportGameStatsBody"></tbody>
+          </table>
+          <pre id="reportRangeStatus" class="status" style="margin-top: 12px;">—</pre>
+
+          <style>
+            .dashboard-tile {
+              padding: 8px 12px;
+              background: #f3f4f6;
+              border: 1px solid #e5e7eb;
+              border-radius: 8px;
+              font-size: 14px;
+            }
+            .dashboard-hall-card {
+              border: 1px solid #e5e7eb;
+              border-radius: 8px;
+              padding: 10px;
+              background: #fff;
+            }
+            .dashboard-hall-card.inactive { opacity: 0.55; }
+            .dashboard-room-row {
+              display: flex;
+              justify-content: space-between;
+              gap: 8px;
+              padding: 4px 0;
+              font-size: 13px;
+              border-top: 1px dashed #e5e7eb;
+            }
+            .dashboard-room-status {
+              padding: 1px 6px;
+              border-radius: 6px;
+              font-size: 11px;
+              font-weight: 600;
+            }
+            .dashboard-room-status.RUNNING { background: #d1fae5; color: #065f46; }
+            .dashboard-room-status.WAITING { background: #dbeafe; color: #1e3a8a; }
+            .dashboard-room-status.ENDED { background: #e5e7eb; color: #374151; }
+            .dashboard-room-status.NONE { background: #f3f4f6; color: #6b7280; }
+            .dashboard-bar-chart { display: flex; gap: 2px; align-items: flex-end; height: 120px; padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; }
+            .dashboard-bar { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 12px; }
+            .dashboard-bar-fill-stakes { width: 100%; background: #3b82f6; border-radius: 2px 2px 0 0; }
+            .dashboard-bar-fill-prizes { width: 100%; background: #f97316; }
+            .dashboard-bar-label { font-size: 9px; color: #6b7280; margin-top: 2px; writing-mode: vertical-rl; transform: rotate(180deg); }
+          </style>
+        </article>
+
         <article id="section-game-settings" class="card admin-section">
           <div class="section-header">
             <h2>Spillinnstillinger</h2>
