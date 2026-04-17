@@ -1,87 +1,197 @@
 /**
- * Typed localStorage wrapper with Unity PlayerPrefs key migration.
+ * BIN-544: Typed localStorage wrapper with Unity PlayerPrefs key migration.
  *
  * Unity WebGL stores PlayerPrefs in localStorage with keys like
- * "unity.player_prefs.MarkerDesign". This class reads existing Unity keys
- * and provides a typed API for the web client.
+ * "unity.player_prefs.MarkerDesign" or plain "Game_Marker". This class reads
+ * existing Unity keys on first access and copies them to our namespaced
+ * "spillorama.prefs.*" keys — so users who migrate from Unity to web keep
+ * their audio, language, marker and notification settings.
+ *
+ * Unity key-inventory extracted from
+ * `legacy/unity-client/Assets/_Project/_Scripts/**` via grep for
+ * `PlayerPrefs\.(GetString|GetInt|GetFloat|SetString|...)` calls.
  */
 
 const PREFIX = "spillorama.prefs.";
 
 /** Known preference keys with their types. */
 export interface PrefsSchema {
+  /** Marker-design index (Unity: `Game_Marker` / `MarkerDesign`). */
   markerDesign: number;
+  /** Game background style (Unity: `Game_Background`). */
+  background: number;
+  /** Language code, e.g. "no", "en" (Unity: `CurrentGameLanguage`). */
   language: string;
+  /** Master volume 0.0–1.0. */
   volume: number;
+  /** Voice-pack code, e.g. "no-male", "no-female", "en" (Unity: `VoiceStatus`). */
   voiceGender: string;
+  /** Sound effects on/off (Unity: `SoundStatus`). */
   soundEnabled: boolean;
+  /** Voice announcements on/off. */
+  voiceEnabled: boolean;
+  /** Notifications toggle (Unity: `NotificationsEnabled`). */
+  notificationsEnabled: boolean;
+  /** Double-announce toggle (web-native only, no Unity equivalent). */
+  doubleAnnounce: boolean;
 }
 
-/** Unity PlayerPrefs key → web key mapping. */
+/**
+ * Unity PlayerPrefs key candidates per web key.
+ *
+ * Each entry lists all Unity key-name variants observed in the legacy
+ * codebase. The migrator tries them in order and copies the first hit to
+ * the namespaced web key.
+ */
 const UNITY_KEY_MAP: Partial<Record<keyof PrefsSchema, string[]>> = {
-  markerDesign: ["MarkerDesign", "Marker_Design"],
-  language: ["Language", "SelectedLanguage"],
+  markerDesign: ["Game_Marker", "MarkerDesign", "Marker_Design"],
+  background: ["Game_Background"],
+  language: ["CurrentGameLanguage", "Language", "SelectedLanguage"],
   volume: ["Volume", "SoundVolume", "MasterVolume"],
-  voiceGender: ["VoiceGender", "SoundGender"],
-  soundEnabled: ["SoundEnabled", "IsSoundOn"],
+  voiceGender: ["VoiceStatus", "VOICE_STATUS", "VoiceGender", "SoundGender"],
+  soundEnabled: ["SoundStatus", "SOUND_STATUS", "SoundEnabled", "IsSoundOn"],
+  notificationsEnabled: ["NotificationsEnabled"],
+};
+
+/**
+ * Unity localStorage-prefix variants. Unity WebGL builds store keys with
+ * at least these prefixes depending on version + configuration.
+ */
+const UNITY_PREFIXES = ["", "unity.player_prefs.", "PlayerPrefs."];
+
+/**
+ * Secondary write-targets during migration. `AudioManager` was written before
+ * `PlayerPrefs` existed and uses its own legacy localStorage keys. When we
+ * migrate a Unity value into the new namespaced key, we ALSO copy it into
+ * the AudioManager legacy keys so AudioManager picks it up on next init
+ * without needing to be refactored.
+ *
+ * Value-mapping handles boolean normalization ("0"/"1" → "true"/"false")
+ * and voice-gender normalization (Unity's "Male"/"Female" → web's
+ * "no-male"/"no-female").
+ */
+const LEGACY_AUDIOMANAGER_TARGETS: Partial<
+  Record<keyof PrefsSchema, { key: string; transform?: (raw: string) => string }>
+> = {
+  soundEnabled: {
+    key: "spillorama-sound-enabled",
+    transform: (raw) => (raw === "1" || raw === "true" ? "true" : "false"),
+  },
+  voiceEnabled: {
+    key: "spillorama-voice-enabled",
+    transform: (raw) => (raw === "1" || raw === "true" ? "true" : "false"),
+  },
+  voiceGender: {
+    key: "spillorama-voice-lang",
+    transform: (raw) => {
+      const lower = raw.toLowerCase();
+      if (lower === "male" || lower === "no-male") return "no-male";
+      if (lower === "female" || lower === "no-female") return "no-female";
+      if (lower === "en" || lower === "english") return "en";
+      return raw;
+    },
+  },
 };
 
 export class PlayerPrefs {
   private migrated = false;
+  private readonly storage: Storage;
+
+  constructor(
+    storage: Storage = typeof localStorage !== "undefined"
+      ? localStorage
+      : (null as unknown as Storage),
+  ) {
+    this.storage = storage;
+  }
 
   /**
-   * Try to migrate Unity PlayerPrefs values on first access.
-   * Unity WebGL stores in localStorage with various key formats.
+   * Copy Unity PlayerPrefs values to our namespaced keys on first access.
+   * Idempotent — subsequent calls are no-ops. Also skips keys where a web
+   * value already exists (user-modified web prefs must not be overwritten
+   * by stale Unity values).
    */
   private migrateFromUnity(): void {
     if (this.migrated) return;
     this.migrated = true;
+    if (!this.storage) return;
 
+    let migratedCount = 0;
     for (const [webKey, unityKeys] of Object.entries(UNITY_KEY_MAP)) {
       const fullWebKey = PREFIX + webKey;
-      // Skip if web value already exists
-      if (localStorage.getItem(fullWebKey) !== null) continue;
+      if (this.storage.getItem(fullWebKey) !== null) continue;
 
-      // Try each possible Unity key
-      for (const unityKey of unityKeys ?? []) {
-        // Unity WebGL uses several possible prefixes
-        const candidates = [
-          unityKey,
-          `unity.player_prefs.${unityKey}`,
-          `PlayerPrefs.${unityKey}`,
-        ];
-        for (const candidate of candidates) {
-          const val = localStorage.getItem(candidate);
+      outer: for (const unityKey of unityKeys ?? []) {
+        for (const prefix of UNITY_PREFIXES) {
+          const val = this.storage.getItem(prefix + unityKey);
           if (val !== null) {
-            localStorage.setItem(fullWebKey, val);
-            break;
+            this.storage.setItem(fullWebKey, val);
+            migratedCount++;
+
+            // Also populate AudioManager's legacy keys if this web-key has
+            // a secondary target. Skip if a value already exists at the
+            // legacy key (web user may have already configured audio).
+            const legacyTarget = LEGACY_AUDIOMANAGER_TARGETS[webKey as keyof PrefsSchema];
+            if (legacyTarget && this.storage.getItem(legacyTarget.key) === null) {
+              const transformed = legacyTarget.transform ? legacyTarget.transform(val) : val;
+              this.storage.setItem(legacyTarget.key, transformed);
+            }
+            break outer;
           }
         }
       }
+    }
+
+    if (migratedCount > 0) {
+      this.storage.setItem(PREFIX + "_migration.unity.completedAt", String(Date.now()));
+      this.storage.setItem(PREFIX + "_migration.unity.keysMigrated", String(migratedCount));
     }
   }
 
   get<K extends keyof PrefsSchema>(key: K, defaultValue: PrefsSchema[K]): PrefsSchema[K] {
     this.migrateFromUnity();
-    const raw = localStorage.getItem(PREFIX + key);
+    if (!this.storage) return defaultValue;
+    const raw = this.storage.getItem(PREFIX + key);
     if (raw === null) return defaultValue;
 
-    // Type coercion based on default value type
-    if (typeof defaultValue === "number") return Number(raw) as PrefsSchema[K];
-    if (typeof defaultValue === "boolean") return (raw === "true") as PrefsSchema[K];
+    // Unity stores booleans as "0"/"1" or "true"/"false" — normalize both.
+    if (typeof defaultValue === "boolean") {
+      return (raw === "1" || raw === "true") as PrefsSchema[K];
+    }
+    if (typeof defaultValue === "number") {
+      const n = Number(raw);
+      return (Number.isFinite(n) ? n : defaultValue) as PrefsSchema[K];
+    }
     return raw as PrefsSchema[K];
   }
 
   set<K extends keyof PrefsSchema>(key: K, value: PrefsSchema[K]): void {
-    localStorage.setItem(PREFIX + key, String(value));
+    if (!this.storage) return;
+    this.storage.setItem(PREFIX + key, String(value));
   }
 
   delete<K extends keyof PrefsSchema>(key: K): void {
-    localStorage.removeItem(PREFIX + key);
+    if (!this.storage) return;
+    this.storage.removeItem(PREFIX + key);
   }
 
   has<K extends keyof PrefsSchema>(key: K): boolean {
     this.migrateFromUnity();
-    return localStorage.getItem(PREFIX + key) !== null;
+    if (!this.storage) return false;
+    return this.storage.getItem(PREFIX + key) !== null;
+  }
+
+  /** Diagnostics: returns migration-state for support/debugging. */
+  getMigrationInfo(): { completedAt: number | null; keysMigrated: number } {
+    if (!this.storage) return { completedAt: null, keysMigrated: 0 };
+    const at = this.storage.getItem(PREFIX + "_migration.unity.completedAt");
+    const count = this.storage.getItem(PREFIX + "_migration.unity.keysMigrated");
+    return {
+      completedAt: at === null ? null : Number(at),
+      keysMigrated: count === null ? 0 : Number(count),
+    };
   }
 }
+
+/** Shared singleton for convenience. */
+export const playerPrefs = new PlayerPrefs();

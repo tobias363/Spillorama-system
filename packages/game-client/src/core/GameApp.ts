@@ -7,6 +7,7 @@ import { telemetry } from "../telemetry/Telemetry.js";
 import { initSentry, captureClientMessage } from "../telemetry/Sentry.js";
 import { LoadingOverlay } from "../components/LoadingOverlay.js";
 import { WebGLContextGuard } from "./WebGLContextGuard.js";
+import { playerPrefs } from "../storage/PlayerPrefs.js";
 
 export interface GameMountConfig {
   gameSlug: string;
@@ -44,6 +45,23 @@ export class GameApp {
   async init(container: HTMLElement, config: GameMountConfig): Promise<void> {
     this.config = config;
     this.container = container;
+
+    // BIN-544: Trigger one-time Unity → web PlayerPrefs migration before any
+    // consumer (AudioManager) reads localStorage. The migration is idempotent
+    // so this is safe on every mount. First migration also populates
+    // AudioManager's legacy keys so audio settings survive the cutover.
+    const migrationInfo = playerPrefs.getMigrationInfo();
+    if (migrationInfo.completedAt === null) {
+      playerPrefs.has("markerDesign"); // force first-call migration
+      const info = playerPrefs.getMigrationInfo();
+      if (info.keysMigrated > 0) {
+        telemetry.trackEvent("unity_prefs_migrated", {
+          gameSlug: config.gameSlug,
+          hallId: config.hallId,
+          keysMigrated: info.keysMigrated,
+        });
+      }
+    }
 
     // Store token for socket/api access
     if (config.accessToken) {
