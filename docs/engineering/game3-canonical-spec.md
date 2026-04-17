@@ -128,7 +128,7 @@ Samme default som G2/G5 (`BingoEngine.ts:142`): LINE (30 %) + Full Card (70 %).
 **Ikke portet (MVP-begrensninger):**
 
 - **Waypoint-bane** (Unity `BallPathRottate.cs`): Unity lerp'er kule langs waypoints med `speed modifier`. Ny klient bruker enkel vertikal drop. Kan utvides med GSAP-timeline.
-- **Pattern-animasjon** (Unity `PrefabBingoGame3Pattern.cs`): ping-pong skala for aktiv pattern. Ikke portet.
+- **Pattern-animasjon** (Unity `PrefabBingoGame3Pattern.cs`): ✅ Portet via `components/PatternBanner.ts` — navn på neste un-won pattern vises i banner på toppen av gameplay-området med GSAP `sine.inOut` yoyo-pulse (1.0x ↔ 1.08x, 0.6 s). Cellnivå-preview utsatt (krever `cells`-array i `PatternDefinition`).
 
 `packages/game-client/src/games/game3/components/AnimatedBallQueue.ts` inneholder MVP-logikken.
 

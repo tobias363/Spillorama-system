@@ -10,6 +10,7 @@ import { ClaimButton } from "../../game2/components/ClaimButton.js";
 import { PlayerInfoBar } from "../../game2/components/PlayerInfoBar.js";
 import { ChatPanel } from "../../game1/components/ChatPanel.js";
 import { AnimatedBallQueue } from "../components/AnimatedBallQueue.js";
+import { PatternBanner } from "../components/PatternBanner.js";
 import { checkClaims } from "../../game2/logic/ClaimDetector.js";
 
 const CHAT_WIDTH = 280;
@@ -24,6 +25,7 @@ export class PlayScreen extends Container {
   private scroller: TicketScroller;
   private drawnBalls: DrawnBallsPanel;
   private ballQueue: AnimatedBallQueue;
+  private patternBanner: PatternBanner;
   private lineBtn: ClaimButton;
   private bingoBtn: ClaimButton;
   private infoBar: PlayerInfoBar;
@@ -80,8 +82,14 @@ export class PlayScreen extends Container {
     this.drawnBalls.y = 45;
     this.addChild(this.drawnBalls);
 
-    // Ticket scroller (main area)
-    const scrollerY = 100;
+    // Pattern ping-pong banner (port of Unity PrefabBingoGame3Pattern)
+    this.patternBanner = new PatternBanner(gameAreaWidth);
+    this.patternBanner.x = gameAreaLeft;
+    this.patternBanner.y = 78;
+    this.addChild(this.patternBanner);
+
+    // Ticket scroller (main area) — pushed down to make room for banner
+    const scrollerY = 124;
     const scrollerHeight = screenHeight - scrollerY - 80;
     this.scroller = new TicketScroller(gameAreaWidth, scrollerHeight);
     this.scroller.x = gameAreaLeft;
@@ -144,6 +152,7 @@ export class PlayScreen extends Container {
     }
 
     this.scroller.sortBestFirst();
+    this.patternBanner.update(state.patterns, state.patternResults);
     this.updateClaimButtons(state);
   }
 
@@ -160,6 +169,11 @@ export class PlayScreen extends Container {
   onPatternWon(payload: PatternWonPayload): void {
     if (payload.claimType === "LINE") { this.lineAlreadyWon = true; this.lineBtn.reset(); }
     if (payload.claimType === "BINGO") { this.bingoAlreadyWon = true; this.bingoBtn.reset(); }
+  }
+
+  /** Refresh banner after patternWon/state changes from controller. */
+  refreshPatternBanner(state: GameState): void {
+    this.patternBanner.update(state.patterns, state.patternResults);
   }
 
   updateInfo(state: GameState): void {

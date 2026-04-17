@@ -224,8 +224,11 @@ class Game3Controller implements GameController {
     }
   }
 
-  private onPatternWon(result: PatternWonPayload, _state: GameState): void {
-    if (this.phase === "PLAYING" && this.playScreen) this.playScreen.onPatternWon(result);
+  private onPatternWon(result: PatternWonPayload, state: GameState): void {
+    if (this.phase === "PLAYING" && this.playScreen) {
+      this.playScreen.onPatternWon(result);
+      this.playScreen.refreshPatternBanner(state);
+    }
     telemetry.trackEvent("pattern_won", { patternName: result.patternName, isMe: result.winnerId === this.myPlayerId });
   }
 
