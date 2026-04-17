@@ -181,6 +181,12 @@ interface ComplianceOptions {
   persistence?: ResponsibleGamingPersistenceAdapter;
   /** BIN-251: External room state store for cross-instance persistence (e.g. Redis). */
   roomStateStore?: import("../store/RoomStateStore.js").RoomStateStore;
+  /**
+   * Test-only: override the draw bag generator. Receives the nominal ball count
+   * (60 or 75) and must return that many unique integers in 1..count. Intended
+   * for deterministic integration tests; production must not set this.
+   */
+  drawBagFactory?: (size: number) => number[];
 }
 
 
@@ -213,6 +219,7 @@ export class BingoEngine {
   private readonly prizePolicy: PrizePolicyManager;
   private readonly payoutAudit: PayoutAuditTrail;
   private readonly ledger: ComplianceLedger;
+  private readonly drawBagFactory?: (size: number) => number[];
 
   constructor(
     private readonly bingoAdapter: BingoSystemAdapter,
@@ -272,6 +279,7 @@ export class BingoEngine {
     }
     this.maxDrawsPerRound = Math.floor(maxDrawsPerRound);
     this.persistence = options.persistence;
+    this.drawBagFactory = options.drawBagFactory;
 
     this.compliance = new ComplianceManager({
       regulatoryLossLimits,
@@ -674,7 +682,7 @@ export class BingoEngine {
       payoutPercent: normalizedPayoutPercent,
       maxPayoutBudget,
       remainingPayoutBudget: maxPayoutBudget,
-      drawBag: makeShuffledBallBag(BINGO75_SLUGS.has(room.gameSlug ?? "") ? MAX_BINGO_BALLS_75 : MAX_BINGO_BALLS_60),
+      drawBag: (this.drawBagFactory ?? makeShuffledBallBag)(BINGO75_SLUGS.has(room.gameSlug ?? "") ? MAX_BINGO_BALLS_75 : MAX_BINGO_BALLS_60),
       drawnNumbers: [],
       tickets,
       marks,
