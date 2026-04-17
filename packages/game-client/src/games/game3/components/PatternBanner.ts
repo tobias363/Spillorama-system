@@ -9,7 +9,7 @@ import type { PatternDefinition, PatternResult } from "@spillorama/shared-types/
  */
 export class PatternBanner extends Container {
   private bg: Graphics;
-  private label: Text;
+  private patternText: Text;
   private pulseTween: gsap.core.Tween | null = null;
   private currentPatternId: string | null = null;
 
@@ -22,7 +22,7 @@ export class PatternBanner extends Container {
     this.bg.stroke({ color: 0x9d4edd, width: 1, alpha: 0.8 });
     this.addChild(this.bg);
 
-    this.label = new Text({
+    this.patternText = new Text({
       text: "",
       style: {
         fontFamily: "Arial, Helvetica, sans-serif",
@@ -31,10 +31,10 @@ export class PatternBanner extends Container {
         fill: 0xffe83d,
       },
     });
-    this.label.anchor.set(0.5);
-    this.label.x = width / 2;
-    this.label.y = 18;
-    this.addChild(this.label);
+    this.patternText.anchor.set(0.5);
+    this.patternText.x = width / 2;
+    this.patternText.y = 18;
+    this.addChild(this.patternText);
 
     this.visible = false;
   }
@@ -53,7 +53,7 @@ export class PatternBanner extends Container {
     if (next.id === this.currentPatternId) return;
     this.currentPatternId = next.id;
 
-    this.label.text = `Neste mønster: ${next.name}`;
+    this.patternText.text = `Neste mønster: ${next.name}`;
     this.visible = true;
     this.startPulse();
   }
@@ -71,8 +71,8 @@ export class PatternBanner extends Container {
 
   private startPulse(): void {
     this.stopPulse();
-    this.label.scale.set(1);
-    this.pulseTween = gsap.to(this.label.scale, {
+    this.patternText.scale.set(1);
+    this.pulseTween = gsap.to(this.patternText.scale, {
       x: 1.08,
       y: 1.08,
       duration: 0.6,
@@ -85,6 +85,6 @@ export class PatternBanner extends Container {
   private stopPulse(): void {
     this.pulseTween?.kill();
     this.pulseTween = null;
-    this.label.scale.set(1);
+    this.patternText.scale.set(1);
   }
 }
