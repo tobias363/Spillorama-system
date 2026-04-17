@@ -79,7 +79,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 | Feature | Legacy i bruk? | Backend-paritet | Klient-paritet | Legacy-refs fjernet? | Release-klar | Issue-ref |
 |---------|----------------|-----------------|----------------|----------------------|--------------|-----------|
 | Socket.IO Redis-adapter (multi-node) | 🔵 | ✅ | 🔵 | ✅ | 🟡 | [BIN-494](https://linear.app/bingosystem/issue/BIN-494) ✅ merged #108 |
-| Hall-display / TV-skjerm broadcast | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-498](https://linear.app/bingosystem/issue/BIN-498) |
+| Hall-display / TV-skjerm broadcast | 🔴 | ✅ | 🟡 | ✅ | 🟡 | [BIN-498](https://linear.app/bingosystem/issue/BIN-498) — backend socket-handlers + statisk TV-side i denne PR; venter på admin-CRUD for tvUrl + staging-test |
 | AdminHallDisplayLogin | 🔴 | 🟡 | ❌ | ❌ | ❌ | [BIN-503](https://linear.app/bingosystem/issue/BIN-503) |
 | Admin hall-events (ready, countdowns) | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-515](https://linear.app/bingosystem/issue/BIN-515) |
 | Admin-dashboard m/ rapporter | 🔴 | ❌ | ❌ | ❌ | ❌ | [BIN-517](https://linear.app/bingosystem/issue/BIN-517) |

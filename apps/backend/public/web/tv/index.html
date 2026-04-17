@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<title>Spillorama hall-display</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  /* BIN-498: hall TV-display. Read-only full-screen client.
+     Reuses the player's primary palette (dark maroon) and sticks to plain
+     CSS so the page works on any TV browser without a JS framework. */
+  :root {
+    --bg: #1a0a0a;
+    --fg: #fff;
+    --accent: #ffe83d;
+    --muted: rgba(255,255,255,0.55);
+  }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: 1fr; gap: 1rem; padding: 2rem; box-sizing: border-box; }
+  header { display: flex; justify-content: space-between; align-items: baseline; }
+  h1 { font-size: clamp(2rem, 4vw, 4rem); margin: 0; }
+  .hall { font-size: clamp(1rem, 1.5vw, 1.5rem); color: var(--muted); }
+  .last-number { font-size: clamp(8rem, 22vw, 22rem); text-align: center; font-weight: 700; color: var(--accent); line-height: 1; align-self: center; }
+  .last-number.empty { color: var(--muted); font-size: clamp(2rem, 4vw, 4rem); }
+  .drawn-grid { display: grid; grid-template-columns: repeat(15, 1fr); gap: 0.4rem; margin-top: 1rem; }
+  .drawn-grid .ball { background: rgba(255,255,255,0.08); border-radius: 0.5rem; padding: 0.4rem 0; text-align: center; font-size: clamp(0.7rem, 1vw, 1rem); }
+  .drawn-grid .ball.hit { background: var(--accent); color: var(--bg); font-weight: 700; }
+  footer { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 0.9rem; }
+  iframe.tv-promo { width: 100%; height: 100%; border: 0; border-radius: 0.5rem; }
+  .status-running { color: #6ee37a; }
+  .status-waiting { color: var(--accent); }
+  .status-ended,
+  .status-NONE   { color: var(--muted); }
+  .reconnecting { background: rgba(255, 80, 80, 0.2); padding: 0.5rem 1rem; border-radius: 0.5rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Spillorama bingo</h1>
+  <div class="hall" id="hall-info">Logger inn …</div>
+</header>
+<main id="main">
+  <div class="last-number empty" id="last-number">–</div>
+  <div class="drawn-grid" id="drawn-grid"></div>
+</main>
+<footer>
+  <span id="status">Kobler til …</span>
+  <span id="connection-meta"></span>
+</footer>
+<script type="module">
+// BIN-498: TV-display client. The display URL must be opened with two query
+// parameters so the same static file can serve every hall:
+//   /web/tv/?hall=<HALL_SLUG>&token=<SECRET>
+// `token` matches the server's HALL_DISPLAY_TOKEN_<HALL_SLUG> env-var
+// secret. The composite handshake `<hallSlug>:<secret>` is sent to the
+// admin-display:login event.
+const params = new URLSearchParams(window.location.search);
+const hallSlug = (params.get("hall") || "").trim();
+const secret = (params.get("token") || "").trim();
+const hallInfo = document.getElementById("hall-info");
+const lastNumber = document.getElementById("last-number");
+const drawnGrid = document.getElementById("drawn-grid");
+const statusEl = document.getElementById("status");
+const connMeta = document.getElementById("connection-meta");
+
+if (!hallSlug || !secret) {
+  hallInfo.textContent = "Mangler ?hall= og ?token=";
+  statusEl.textContent = "Konfigurasjonsfeil";
+  throw new Error("missing hall/token query params");
+}
+
+// Lazy-load socket.io-client from the existing backend bundle (already on /web/).
+const { io } = await import("/web/games/chunks/socket.io.esm.js").catch(async () => {
+  // Fallback: the backend already serves a vendored socket.io-client at /socket.io/socket.io.esm.min.js
+  const mod = await import(/* @vite-ignore */ "/socket.io/socket.io.esm.min.js");
+  return { io: mod.io ?? mod.default ?? mod };
+});
+
+const sock = io(window.location.origin, { transports: ["websocket"], reconnection: true });
+
+function renderState(snapshot) {
+  if (!snapshot) return;
+  hallInfo.textContent = snapshot.hallName ?? "—";
+  const room = snapshot.activeRoom;
+  if (!room || !room.currentGame) {
+    lastNumber.textContent = "–";
+    lastNumber.classList.add("empty");
+    drawnGrid.innerHTML = "";
+    statusEl.textContent = room ? `Status: ${room.gameStatus}` : "Ingen aktiv runde";
+    statusEl.className = `status-${room?.gameStatus ?? "NONE"}`;
+    return;
+  }
+  const drawn = room.currentGame.drawnNumbers ?? [];
+  lastNumber.textContent = drawn.length > 0 ? drawn[drawn.length - 1] : "–";
+  lastNumber.classList.toggle("empty", drawn.length === 0);
+  drawnGrid.innerHTML = "";
+  const max = 75;
+  for (let n = 1; n <= max; n += 1) {
+    const cell = document.createElement("div");
+    cell.className = "ball" + (drawn.includes(n) ? " hit" : "");
+    cell.textContent = String(n);
+    drawnGrid.appendChild(cell);
+  }
+  statusEl.textContent = `Status: ${room.gameStatus} · ${drawn.length} trekk`;
+  statusEl.className = `status-${room.gameStatus}`;
+}
+
+sock.on("connect", async () => {
+  connMeta.textContent = `socket: ${sock.id}`;
+  const login = await new Promise((resolve) => sock.emit("admin-display:login", { token: `${hallSlug}:${secret}` }, resolve));
+  if (!login.ok) {
+    statusEl.textContent = `Login feilet: ${login.error?.message ?? "ukjent"}`;
+    return;
+  }
+  const sub = await new Promise((resolve) => sock.emit("admin-display:subscribe", {}, resolve));
+  if (!sub.ok) {
+    statusEl.textContent = `Subscribe feilet: ${sub.error?.message ?? "ukjent"}`;
+    return;
+  }
+  renderState(sub.data);
+  // Periodic refresh in case we miss a broadcast.
+  setInterval(async () => {
+    const s = await new Promise((resolve) => sock.emit("admin-display:state", {}, resolve));
+    if (s.ok) renderState(s.data);
+  }, 5000);
+});
+
+// Live broadcasts from the room the display joined on subscribe.
+sock.on("draw:new", (payload) => {
+  if (!payload || typeof payload.number !== "number") return;
+  // Re-fetch state to keep the rendering simple.
+  sock.emit("admin-display:state", {}, (s) => { if (s?.ok) renderState(s.data); });
+});
+sock.on("pattern:won", () => {
+  sock.emit("admin-display:state", {}, (s) => { if (s?.ok) renderState(s.data); });
+});
+sock.on("room:update", () => {
+  sock.emit("admin-display:state", {}, (s) => { if (s?.ok) renderState(s.data); });
+});
+
+sock.on("hall:tv-url", (payload) => {
+  if (!payload || !payload.tvUrl) return;
+  // Replace the main pane with an embed if a URL is set.
+  const main = document.getElementById("main");
+  main.innerHTML = `<iframe class="tv-promo" src="${payload.tvUrl}" allow="autoplay" referrerpolicy="no-referrer"></iframe>`;
+});
+
+sock.io.on("reconnect_attempt", () => { statusEl.textContent = "Kobler til på nytt …"; statusEl.className = "reconnecting"; });
+sock.io.on("reconnect", () => { statusEl.textContent = "Tilkoblet"; statusEl.className = ""; });
+sock.on("disconnect", () => { statusEl.textContent = "Frakoblet"; statusEl.className = "reconnecting"; });
+</script>
+</body>
+</html>
