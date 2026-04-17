@@ -66,11 +66,11 @@ export class CenterBall extends Container {
     }
   }
 
-  /** Show a new drawn number with animation. */
+  /** Show a new drawn number with animation (zero-padded 2 digits). */
   showNumber(number: number): void {
     this.stopCountdown();
     this.currentNumber = number;
-    this.numberText.text = String(number);
+    this.numberText.text = String(number).padStart(2, "0");
     this.numberText.style.fontSize = 42;
 
     // Kill idle animation during reveal
@@ -89,11 +89,11 @@ export class CenterBall extends Container {
     });
   }
 
-  /** Set number without animation (e.g. state restore). */
+  /** Set number without animation (e.g. state restore, zero-padded 2 digits). */
   setNumber(number: number | null): void {
     this.stopCountdown();
     this.currentNumber = number;
-    this.numberText.text = number !== null ? String(number) : "";
+    this.numberText.text = number !== null ? String(number).padStart(2, "0") : "";
     this.numberText.style.fontSize = 42;
     if (!this.idleTween) this.startIdleFloat();
   }

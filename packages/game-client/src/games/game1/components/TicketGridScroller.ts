@@ -120,7 +120,10 @@ export class TicketGridScroller extends Container {
   }
 
   clearCards(): void {
-    for (const card of this.cards) card.destroy({ children: true });
+    for (const card of this.cards) {
+      card.stopCardAnimations();
+      card.destroy({ children: true });
+    }
     this.cards = [];
     this.innerContainer.removeChildren();
     this.innerContainer.y = 0;
@@ -131,8 +134,13 @@ export class TicketGridScroller extends Container {
     return [...this.cards];
   }
 
-  markNumberOnAll(number: number): void {
-    for (const card of this.cards) card.markNumber(number);
+  /** Mark a number on all cards. Returns true if any card had that number. */
+  markNumberOnAll(number: number): boolean {
+    let anyMatched = false;
+    for (const card of this.cards) {
+      if (card.markNumber(number)) anyMatched = true;
+    }
+    return anyMatched;
   }
 
   /** Sort cards best-first (fewest remaining cells at top). */

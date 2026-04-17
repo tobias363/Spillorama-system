@@ -1,15 +1,15 @@
 import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
 
 /**
- * Maps number to CSS ball color matching Unity BINGO columns:
- * B(1-15)=blue, I(16-30)=red, N(31-45)=purple, G(46-60)=green, O(61-75)=yellow
+ * Maps number to CSS ball color for Databingo60 columns (5 cols of 12):
+ * Col 1 (1-12)=blue, Col 2 (13-24)=red, Col 3 (25-36)=purple, Col 4 (37-48)=green, Col 5 (49-60)=yellow
  */
 function getBallColorCSS(n: number): string {
-  if (n <= 15) return "background:radial-gradient(circle at 38% 32%,#3a7adf,#0d2f8a 70%);box-shadow:0 0 8px rgba(40,80,220,0.4);";   // Blue (B)
-  if (n <= 30) return "background:radial-gradient(circle at 38% 32%,#e84040,#8b0000 70%);box-shadow:0 0 8px rgba(220,40,40,0.4);";   // Red (I)
-  if (n <= 45) return "background:radial-gradient(circle at 38% 32%,#cc44cc,#6a006a 70%);box-shadow:0 0 8px rgba(180,40,180,0.4);";   // Purple (N)
-  if (n <= 60) return "background:radial-gradient(circle at 38% 32%,#6ecf3a,#2a7a00 70%);box-shadow:0 0 8px rgba(100,220,40,0.4);";   // Green (G)
-  return "background:radial-gradient(circle at 38% 32%,#f0c020,#8a7000 70%);box-shadow:0 0 8px rgba(200,170,20,0.4);";                 // Yellow (O)
+  if (n <= 12) return "background:radial-gradient(circle at 38% 32%,#3a7adf,#0d2f8a 70%);box-shadow:0 0 8px rgba(40,80,220,0.4);";   // Blue  (col 1)
+  if (n <= 24) return "background:radial-gradient(circle at 38% 32%,#e84040,#8b0000 70%);box-shadow:0 0 8px rgba(220,40,40,0.4);";   // Red   (col 2)
+  if (n <= 36) return "background:radial-gradient(circle at 38% 32%,#cc44cc,#6a006a 70%);box-shadow:0 0 8px rgba(180,40,180,0.4);";   // Purple(col 3)
+  if (n <= 48) return "background:radial-gradient(circle at 38% 32%,#6ecf3a,#2a7a00 70%);box-shadow:0 0 8px rgba(100,220,40,0.4);";   // Green (col 4)
+  return "background:radial-gradient(circle at 38% 32%,#f0c020,#8a7000 70%);box-shadow:0 0 8px rgba(200,170,20,0.4);";                 // Yellow(col 5)
 }
 
 /**

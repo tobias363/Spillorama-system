@@ -56,7 +56,10 @@ export class TicketScroller extends Container {
   }
 
   clearCards(): void {
-    for (const card of this.cards) card.destroy();
+    for (const card of this.cards) {
+      card.stopCardAnimations();
+      card.destroy();
+    }
     this.innerContainer.removeChildren();
     this.cards = [];
   }

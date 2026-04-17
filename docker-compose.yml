@@ -1,11 +1,11 @@
 services:
   backend:
     build:
-      context: backend
+      context: apps/backend
       dockerfile: Dockerfile
     ports:
       - "${PORT:-4000}:4000"
-    env_file: backend/.env.production
+    env_file: apps/backend/.env.production
     environment:
       NODE_ENV: production
       PORT: "4000"

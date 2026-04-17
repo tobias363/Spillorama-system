@@ -39,6 +39,8 @@ export interface Player {
   walletId: string;
   balance: number;
   socketId?: string;
+  /** G2/G3: Hall the player joined from — enables per-hall distribution display. */
+  hallId?: string;
 }
 
 export interface Ticket {

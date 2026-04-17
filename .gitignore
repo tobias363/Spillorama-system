@@ -1,29 +1,9 @@
 node_modules/
-backend/dist/
-backend/.env
-backend/.env.production
+apps/backend/dist/
+apps/backend/.env
+apps/backend/.env.production
 .DS_Store
 *.log
-
-# Unity
-# Track authored Unity source, but keep generated/editor/build folders out of git.
-Spillorama/*
-!Spillorama/Assets/
-Spillorama/Assets/*
-!Spillorama/Assets/_Project/
-!Spillorama/Assets/_Project/**
-!Spillorama/Assets/WebGLTemplates/
-!Spillorama/Assets/WebGLTemplates/**
-!Spillorama/Packages/
-!Spillorama/Packages/**
-!Spillorama/ProjectSettings/
-!Spillorama/ProjectSettings/**
-Spillorama/.DS_Store
-Spillorama/**/.DS_Store
-*.csproj
-*.sln
-*.suo
-*.user
 
 # IDE
 .vscode/
@@ -32,29 +12,16 @@ Spillorama/**/.DS_Store
 # Claude
 .claude/
 
-# Local Unity vendor SDK bundles
-unity-vendor-bundles/
-
-# Unity build output
-SpilloramaBuilds/
-Spillorama/WebBuild/
-Spillorama/WebGLBuild/
-backend/public/web/Build/
-backend/public/web/TemplateData/
-
-# Web game client build output
-backend/public/web/games/
-
 # Packages build output
 packages/shared-types/dist/
 packages/game-client/dist/
 
-# Raw source assets (already imported into Assets/)
-assets spingo/
-
 # Runtime / generated data
-backend/data/
-backend/*.db
+apps/backend/data/
+apps/backend/*.db
+apps/backend/public/web/Build/
+apps/backend/public/web/TemplateData/
+apps/backend/public/web/games/
 
 # Temp files
 tmp-*.png
@@ -63,5 +30,36 @@ spinngo-anim-test.html
 # Runtime session data
 sessions/
 
+# Raw source assets (already imported into Assets/)
+assets spingo/
+
+# ---------------------------------------------------------------------------
+# Legacy Unity project (quarantined in legacy/ — see legacy/README.md)
+# Track authored Unity source, but keep generated/editor/build folders out of git.
+# ---------------------------------------------------------------------------
+legacy/unity-client/*
+!legacy/unity-client/Assets/
+legacy/unity-client/Assets/*
+!legacy/unity-client/Assets/_Project/
+!legacy/unity-client/Assets/_Project/**
+!legacy/unity-client/Assets/WebGLTemplates/
+!legacy/unity-client/Assets/WebGLTemplates/**
+!legacy/unity-client/Packages/
+!legacy/unity-client/Packages/**
+!legacy/unity-client/ProjectSettings/
+!legacy/unity-client/ProjectSettings/**
+legacy/unity-client/.DS_Store
+legacy/unity-client/**/.DS_Store
+legacy/unity-client/WebBuild/
+legacy/unity-client/WebGLBuild/
+SpilloramaBuilds/
+*.csproj
+*.sln
+*.suo
+*.user
+
+# Local Unity vendor SDK bundles
+unity-vendor-bundles/
+
 # Legacy AIS backend recovery dumps
-unity-bingo-backend/recovery-backups/
+legacy/unity-backend/recovery-backups/

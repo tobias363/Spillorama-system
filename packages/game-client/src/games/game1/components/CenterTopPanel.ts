@@ -10,6 +10,8 @@ export interface CenterTopCallbacks {
   onSelectLuckyNumber?: () => void;
   onOpenSettings?: () => void;
   onOpenMarkerBg?: () => void;
+  /** A6: Host/admin manual game start. */
+  onStartGame?: () => void;
 }
 
 /**
@@ -32,6 +34,8 @@ export class CenterTopPanel {
   private buyMoreBtn: HTMLButtonElement | null = null;
   private preBuyBtn: HTMLButtonElement | null = null;
   private cancelBtn: HTMLButtonElement | null = null;
+  /** A6: Host manual start button — visible only when canStartNow === true. */
+  private startGameBtn: HTMLButtonElement;
 
   constructor(overlay: HtmlOverlayManager, callbacks: CenterTopCallbacks = {}) {
     this.callbacks = callbacks;
@@ -122,7 +126,37 @@ export class CenterTopPanel {
     }
 
     topRow.appendChild(actionsGrid);
+
+    // A6: Host manual start button — prominent action button, hidden by default
+    this.startGameBtn = document.createElement("button");
+    this.startGameBtn.textContent = "Start spill";
+    Object.assign(this.startGameBtn.style, {
+      display: "none",
+      background: "linear-gradient(180deg, #2e7d32, #1b5e20)",
+      border: "2px solid #4caf50",
+      borderRadius: "10px",
+      padding: "12px 32px",
+      fontSize: "16px",
+      fontWeight: "700",
+      color: "#fff",
+      cursor: "pointer",
+      fontFamily: "inherit",
+      marginTop: "12px",
+      alignSelf: "flex-start",
+      boxShadow: "0 2px 8px rgba(76,175,80,0.4)",
+    });
+    this.startGameBtn.addEventListener("mouseenter", () => {
+      this.startGameBtn.style.background = "linear-gradient(180deg, #388e3c, #2e7d32)";
+    });
+    this.startGameBtn.addEventListener("mouseleave", () => {
+      this.startGameBtn.style.background = "linear-gradient(180deg, #2e7d32, #1b5e20)";
+    });
+    this.startGameBtn.addEventListener("click", () => {
+      this.callbacks.onStartGame?.();
+    });
+
     this.root.appendChild(topRow);
+    this.root.appendChild(this.startGameBtn);
   }
 
   private patternGrids: PatternMiniGrid[] = [];
@@ -163,16 +197,24 @@ export class CenterTopPanel {
 
       // Display name mapping (Unity: FormatRowText)
       let displayName = pattern.name;
-      if (pattern.name === "Full House") displayName = `Rad ${patterns.length}`;
+      if (pattern.name === "Full House") displayName = "Full Hus";
+      else if (pattern.name === "Picture" || pattern.name === "picture") displayName = "Bilde";
+      else if (pattern.name === "Frame" || pattern.name === "frame") displayName = "Ramme";
       else if (/^Row \d/.test(pattern.name)) displayName = pattern.name.replace("Row", "Rad");
 
       span.textContent = `${displayName} – ${prize} kr`;
       if (won) {
-        span.style.color = "#81c784";
-        span.style.textDecoration = "line-through";
+        // Unity: ActiveColour (green highlight for won patterns)
+        span.style.color = "#4caf50";
+        span.style.fontWeight = "700";
+        span.textContent = `\u2714 ${displayName} – ${prize} kr`;
       } else if (i === currentPatternIdx) {
+        // Current active pattern — bright yellow
         span.style.color = "#ffe83d";
         span.style.fontWeight = "700";
+      } else {
+        // Unity: DeActiveColour (muted gray for pending patterns)
+        span.style.color = "#888";
       }
       row.appendChild(span);
       this.prizeRowsEl.appendChild(row);
@@ -204,6 +246,11 @@ export class CenterTopPanel {
   setGameRunning(running: boolean): void {
     if (this.cancelBtn) this.cancelBtn.style.display = running ? "none" : "";
     if (this.buyMoreBtn) this.buyMoreBtn.style.display = running ? "" : "none";
+  }
+
+  /** A6: Show/hide the manual start button based on scheduler.canStartNow + game status. */
+  setCanStartNow(canStart: boolean, gameRunning: boolean): void {
+    this.startGameBtn.style.display = canStart && !gameRunning ? "block" : "none";
   }
 
   setBadge(text: string): void {

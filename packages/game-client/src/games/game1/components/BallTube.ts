@@ -7,16 +7,20 @@ const BALL_GAP = 10;
 const BALL_PADDING = 12;
 
 /**
- * Maps bingo number to BINGO column color.
- * Matches Unity SpilloramaGameBridge.GetBallColorFromNumber():
- *   B(1-15)=blue, I(16-30)=red, N(31-45)=purple, G(46-60)=green, O(61-75)=yellow
+ * Maps bingo number to Databingo60 column color.
+ * Databingo60 uses 5 columns of 12 numbers each (1-60):
+ *   Col 1 (1-12)  = blue
+ *   Col 2 (13-24) = red
+ *   Col 3 (25-36) = purple
+ *   Col 4 (37-48) = green
+ *   Col 5 (49-60) = yellow/orange
  */
 function getBallColor(n: number): { center: number; edge: number; glow: number } {
-  if (n <= 15) return { center: 0x3a7adf, edge: 0x0d2f8a, glow: 0x2850dc };   // Blue (B)
-  if (n <= 30) return { center: 0xe84040, edge: 0x8b0000, glow: 0xdc2828 };   // Red (I)
-  if (n <= 45) return { center: 0xcc44cc, edge: 0x6a006a, glow: 0xb428b4 };   // Purple (N)
-  if (n <= 60) return { center: 0x6ecf3a, edge: 0x2a7a00, glow: 0x64dc28 };   // Green (G)
-  return { center: 0xf0c020, edge: 0x8a7000, glow: 0xc8a814 };               // Yellow (O)
+  if (n <= 12) return { center: 0x3a7adf, edge: 0x0d2f8a, glow: 0x2850dc };   // Blue  (col 1)
+  if (n <= 24) return { center: 0xe84040, edge: 0x8b0000, glow: 0xdc2828 };   // Red   (col 2)
+  if (n <= 36) return { center: 0xcc44cc, edge: 0x6a006a, glow: 0xb428b4 };   // Purple(col 3)
+  if (n <= 48) return { center: 0x6ecf3a, edge: 0x2a7a00, glow: 0x64dc28 };   // Green (col 4)
+  return { center: 0xf0c020, edge: 0x8a7000, glow: 0xc8a814 };               // Yellow(col 5)
 }
 
 /**

@@ -11,11 +11,13 @@ import { ChatPanelV2 } from "../components/ChatPanelV2.js";
 import { TicketOverlay } from "../components/TicketOverlay.js";
 import { CalledNumbersOverlay } from "../components/CalledNumbersOverlay.js";
 import { Game1BuyPopup } from "../components/Game1BuyPopup.js";
-import { TicketScroller } from "../../game2/components/TicketScroller.js";
+import { TicketGridScroller } from "../components/TicketGridScroller.js";
+import { CenterBall } from "../components/CenterBall.js";
 import { TicketCard } from "../../game2/components/TicketCard.js";
 import { ClaimButton } from "../../game2/components/ClaimButton.js";
 import { checkClaims } from "../../game2/logic/ClaimDetector.js";
 import { getTicketThemeByName } from "../colors/TicketColorThemes.js";
+import { stakeFromState } from "../logic/StakeCalculator.js";
 
 const TUBE_COLUMN_WIDTH = 130;
 const CHAT_WIDTH = 265;
@@ -49,10 +51,13 @@ export class PlayScreen extends Container {
   private chatPanel: ChatPanelV2;
   private audio: AudioManager;
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
-  private onBuy: ((count: number) => void) | null = null;
+  private onBuy: ((selections: Array<{ type: string; qty: number }>) => void) | null = null;
   private bgSprite: Sprite | null = null;
   private screenW: number;
   private screenH: number;
+
+  // CenterBall (Unity-matching animated bingo ball in center area)
+  private centerBall: CenterBall;
 
   // Buy popup (Unity-matching ticket purchase)
   private buyPopup: Game1BuyPopup | null = null;
@@ -62,9 +67,11 @@ export class PlayScreen extends Container {
   private onCancelTickets: (() => void) | null = null;
   private onOpenSettings: (() => void) | null = null;
   private onOpenMarkerBg: (() => void) | null = null;
+  /** A6: Host manual start callback. */
+  private onStartGame: (() => void) | null = null;
 
-  // Inline ticket display
-  private inlineScroller: TicketScroller;
+  // Inline ticket display (vertical multi-column grid, matching Unity GridLayoutGroup)
+  private inlineScroller: TicketGridScroller;
   private lineBtn: ClaimButton;
   private bingoBtn: ClaimButton;
   private lineAlreadyWon = false;
@@ -99,11 +106,18 @@ export class PlayScreen extends Container {
 
     // Buy popup is created later as an HTML overlay (see below)
 
-    // Inline ticket scroller — anchored from TICKET_TOP, fills to near the bottom
+    // Center ball (Unity: large animated ball showing last drawn number / countdown)
+    this.centerBall = new CenterBall();
+    this.centerBall.x = TUBE_COLUMN_WIDTH + (screenWidth - TUBE_COLUMN_WIDTH - CHAT_WIDTH) / 2 - 60;
+    this.centerBall.y = 20;
+    this.addChild(this.centerBall);
+    this.centerBall.showWaiting();
+
+    // Inline ticket scroller — vertical multi-column grid (Unity GridLayoutGroup)
     const scrollerLeft = TUBE_COLUMN_WIDTH;
     const scrollerW = screenWidth - TUBE_COLUMN_WIDTH - CHAT_WIDTH - 20;
     const scrollerH = screenHeight - TICKET_TOP - 62; // Leave 62px for claim buttons
-    this.inlineScroller = new TicketScroller(scrollerW, scrollerH);
+    this.inlineScroller = new TicketGridScroller(scrollerW, scrollerH);
     this.inlineScroller.x = scrollerLeft;
     this.inlineScroller.y = TICKET_TOP;
     this.addChild(this.inlineScroller);
@@ -150,10 +164,9 @@ export class PlayScreen extends Container {
 
     // Game1 buy popup (HTML overlay — matches Unity's Game1TicketPurchasePanel)
     this.buyPopup = new Game1BuyPopup(this.overlayManager);
-    this.buyPopup.setOnBuy(async () => {
-      const result = await socket.armBet({ roomCode, armed: true });
-      this.buyPopup?.showResult(result.ok, result.error?.message);
-      if (result.ok) this.onBuy?.(1);
+    // Delegate buy to controller — no direct socket call from view layer.
+    this.buyPopup.setOnBuy((selections: Array<{ type: string; qty: number }>) => {
+      this.onBuy?.(selections);
     });
 
     // Center top panel with action callbacks
@@ -162,27 +175,17 @@ export class PlayScreen extends Container {
         this.calledNumbers.toggle();
       },
       onPreBuy: () => {
-        // Forhåndskjøp — open buy popup with variant ticket types if available
         const fee = this.lastState?.entryFee || 10;
-        const types = this.lastState?.ticketTypes;
-        if (types && types.length > 0) {
-          this.buyPopup?.showWithTypes(fee, types);
-        } else {
-          this.buyPopup?.show(fee);
-        }
+        const types = this.lastState?.ticketTypes ?? [];
+        this.buyPopup?.showWithTypes(fee, types);
       },
       onSelectLuckyNumber: () => {
         this.onLuckyNumberTap?.();
       },
       onBuyMoreTickets: () => {
-        // Kjøp flere brett — open buy popup with variant types
         const fee = this.lastState?.entryFee || 10;
-        const types = this.lastState?.ticketTypes;
-        if (types && types.length > 0) {
-          this.buyPopup?.showWithTypes(fee, types);
-        } else {
-          this.buyPopup?.show(fee);
-        }
+        const types = this.lastState?.ticketTypes ?? [];
+        this.buyPopup?.showWithTypes(fee, types);
       },
       onCancelTickets: () => {
         this.onCancelTickets?.();
@@ -193,18 +196,35 @@ export class PlayScreen extends Container {
       onOpenMarkerBg: () => {
         this.onOpenMarkerBg?.();
       },
+      onStartGame: () => {
+        this.onStartGame?.();
+      },
     });
 
     // Chat panel (right sidebar)
     this.chatPanel = new ChatPanelV2(this.overlayManager, socket, roomCode);
+
+    // Resize ticket scroller when chat panel is toggled (Unity: slides in/out)
+    this.chatPanel.setOnToggle((collapsed) => {
+      const chatW = collapsed ? 48 : CHAT_WIDTH;
+      const scrollerW = screenWidth - TUBE_COLUMN_WIDTH - chatW - 20;
+      const scrollerH = screenHeight - TICKET_TOP - 62;
+      this.inlineScroller.setViewportSize(Math.max(200, scrollerW), Math.max(100, scrollerH));
+    });
   }
 
   setOnClaim(callback: (type: "LINE" | "BINGO") => void): void {
     this.onClaim = callback;
   }
 
-  setOnBuy(callback: (count: number) => void): void {
+  setOnBuy(callback: (selections: Array<{ type: string; qty: number }>) => void): void {
     this.onBuy = callback;
+  }
+
+  /** Called by the controller after armBet completes to show result in the popup. */
+  showBuyPopupResult(ok: boolean, errorMessage?: string): void {
+    this.buyPopup?.showResult(ok, errorMessage);
+    if (ok) this.buyPopup?.hide();
   }
 
   setOnLuckyNumberTap(callback: () => void): void {
@@ -222,6 +242,11 @@ export class PlayScreen extends Container {
 
   setOnOpenMarkerBg(callback: () => void): void {
     this.onOpenMarkerBg = callback;
+  }
+
+  /** A6: Set the host manual start callback. */
+  setOnStartGame(callback: () => void): void {
+    this.onStartGame = callback;
   }
 
   subscribeChatToBridge(
@@ -263,21 +288,25 @@ export class PlayScreen extends Container {
       this.calledNumbers.setNumbers(state.drawnNumbers);
     }
 
-    // Show countdown in number ring
-    // (Unity: CountdownTimer_Spillorama() with scheduler.millisUntilNextStart)
-    if (state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
+    // Show countdown ONLY when no game is actively running.
+    // When RUNNING (spectator mode), show the drawn ball — not a countdown.
+    if (state.gameStatus !== "RUNNING" && state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
       this.leftInfo.startCountdown(state.millisUntilNextStart);
-    } else {
-      // Show "..." while waiting for scheduler data (Unity: Game_1_Timer_Txt.text = "...")
+      this.centerBall.startCountdown(state.millisUntilNextStart);
+    } else if (state.gameStatus === "RUNNING") {
+      // Spectator: stop any countdown, show last drawn number
       this.leftInfo.stopCountdown();
+      this.centerBall.stopCountdown();
+      if (state.lastDrawnNumber) {
+        this.centerBall.showNumber(state.lastDrawnNumber);
+      }
+    } else {
+      this.leftInfo.stopCountdown();
+      this.centerBall.showWaiting();
     }
 
-    // Show buy popup with variant types if available (Unity auto-opens purchase panel in lobby)
-    if (state.ticketTypes && state.ticketTypes.length > 0) {
-      this.buyPopup?.showWithTypes(state.entryFee || 10, state.ticketTypes);
-    } else {
-      this.buyPopup?.show(state.entryFee || 10);
-    }
+    // Show buy popup — only with backend ticket types (no client fallback)
+    this.buyPopup?.showWithTypes(state.entryFee || 10, state.ticketTypes ?? []);
 
     // Update info panels
     this.updateInfo(state);
@@ -287,6 +316,7 @@ export class PlayScreen extends Container {
   onSpectatorNumberDrawn(number: number, state: GameState): void {
     this.lastState = state;
     this.ballTube.addBall(number);
+    this.centerBall.showNumber(number);
     this.calledNumbers.addNumber(number);
     this.audio.playNumber(number);
     this.updateInfo(state);
@@ -294,11 +324,24 @@ export class PlayScreen extends Container {
 
   /** Update waiting mode state (e.g. new countdown, player count changes). */
   updateWaitingState(state: GameState): void {
+    const prevTypes = this.lastState?.ticketTypes;
     this.lastState = state;
 
     if (this.isWaitingMode) {
-      if (state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
+      // Only show countdown when no game is actively running
+      if (state.gameStatus !== "RUNNING" && state.millisUntilNextStart !== null && state.millisUntilNextStart > 0) {
         this.leftInfo.startCountdown(state.millisUntilNextStart);
+        this.centerBall.startCountdown(state.millisUntilNextStart);
+      } else if (state.gameStatus === "RUNNING") {
+        this.leftInfo.stopCountdown();
+        this.centerBall.stopCountdown();
+      }
+
+      // Show buy popup when ticket types first arrive from backend
+      const hadTypes = prevTypes && prevTypes.length > 0;
+      const hasTypes = state.ticketTypes && state.ticketTypes.length > 0;
+      if (!hadTypes && hasTypes) {
+        this.buyPopup?.showWithTypes(state.entryFee || 10, state.ticketTypes);
       }
     }
 
@@ -322,6 +365,8 @@ export class PlayScreen extends Container {
 
     // Stop countdown and hide buy popup when entering play mode
     this.leftInfo.stopCountdown();
+    this.centerBall.stopCountdown();
+    this.centerBall.setNumber(state.lastDrawnNumber);
     this.buyPopup?.hide();
 
     for (const result of state.patternResults) {
@@ -335,8 +380,17 @@ export class PlayScreen extends Container {
     for (let i = 0; i < state.myTickets.length; i++) {
       const ticket = state.myTickets[i];
       const theme = getTicketThemeByName(ticket.color, i);
+      // Determine grid size from actual ticket data (Databingo60 = 3×5, Bingo75 = 5×5)
+      const ticketRows = ticket.grid?.length ?? 3;
+      const ticketCols = ticket.grid?.[0]?.length ?? 5;
+      const gridSize = (ticketRows === 5 && ticketCols === 5) ? "5x5" : "3x5";
+      // Unity: PrefabBingoGame1LargeTicket5x5 uses larger cell sizes for "large" ticket types
+      const isLargeType = ticket.type?.toLowerCase().includes("large") ?? false;
+      const cellSize = isLargeType ? 52 : 44;
+
       const card = new TicketCard(i, {
-        gridSize: "5x5",
+        gridSize,
+        cellSize,
         cardBg: theme.cardBg,
         headerBg: theme.headerBg,
         headerText: theme.headerText,
@@ -345,6 +399,11 @@ export class PlayScreen extends Container {
         cellColors: theme.cellColors,
       });
       card.loadTicket(ticket);
+
+      // Set ticket price (Unity: each ticket shows price on the card)
+      const ticketType = state.ticketTypes?.find((t) => t.type === ticket.type);
+      const ticketPrice = Math.round((state.entryFee || 10) * (ticketType?.priceMultiplier ?? 1));
+      card.setPrice(ticketPrice);
 
       // Set variant-specific header label (Unity: ticketColor as name for Elvis)
       if (ticket.type === "elvis" && ticket.color) {
@@ -434,8 +493,12 @@ export class PlayScreen extends Container {
     // Ball tube — add animated ball
     this.ballTube.addBall(number);
 
+    // Center ball — show new number with animation
+    this.centerBall.showNumber(number);
+
     // Inline tickets — mark number on all cards
-    this.inlineScroller.markNumberOnAll(number);
+    // Returns true if any ticket had that number (for mark SFX)
+    const anyMatched = this.inlineScroller.markNumberOnAll(number);
     this.inlineScroller.sortBestFirst();
     this.updateClaimButtons(state);
 
@@ -445,8 +508,13 @@ export class PlayScreen extends Container {
     // Called numbers — add to grid
     this.calledNumbers.addNumber(number);
 
-    // Audio
+    // Audio: play number announcement
     this.audio.playNumber(number);
+
+    // Audio: play mark SFX once per draw if any ticket matched
+    if (anyMatched) {
+      this.audio.playSfx("mark");
+    }
 
     // Update info panels
     this.updateInfo(state);
@@ -461,16 +529,20 @@ export class PlayScreen extends Container {
 
   updateInfo(state: GameState): void {
     this.lastState = state;
+    const totalStake = stakeFromState(state);
     this.leftInfo.update(
       state.playerCount,
-      state.entryFee,
+      totalStake,
       state.prizePool,
       state.lastDrawnNumber,
       state.drawCount,
       state.totalDrawCapacity,
+      state.players,
     );
     this.chatPanel.updatePlayerCount(state.playerCount);
     this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool);
+    // A6: Show/hide host manual start button
+    this.centerTop.setCanStartNow(state.canStartNow, state.gameStatus === "RUNNING");
   }
 
   /** Expose inline ticket cards for external operations (e.g. lucky number highlighting). */
@@ -499,8 +571,11 @@ export class PlayScreen extends Container {
       this.bgSprite.height = height;
     }
 
+    // Reposition center ball
+    this.centerBall.x = TUBE_COLUMN_WIDTH + (width - TUBE_COLUMN_WIDTH - CHAT_WIDTH) / 2 - 60;
+
     // BIN-401: Resize ticket scroller to fit new dimensions
-    const chatW = this.chatPanel ? CHAT_WIDTH : 0;
+    const chatW = this.chatPanel?.isCollapsed() ? 48 : CHAT_WIDTH;
     const scrollerW = width - TUBE_COLUMN_WIDTH - chatW - 20;
     const scrollerH = height - TICKET_TOP - 60;
     this.inlineScroller.setViewportSize(Math.max(200, scrollerW), Math.max(100, scrollerH));

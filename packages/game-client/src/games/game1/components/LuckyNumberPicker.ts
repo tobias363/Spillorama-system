@@ -1,7 +1,7 @@
 /**
  * Lucky number picker popup — matches Unity's SelectLuckyNumberPanel.
  *
- * Shows a 75-number grid (1-75) organized by BINGO column colors.
+ * Shows a 60-number grid (1-60) organized by Databingo60 column colors.
  * Player taps a number to select it as their lucky number.
  * Selected number is sent to backend via lucky:set socket event.
  *
@@ -11,13 +11,13 @@
  * - SpilloramaSocketManager.SetLuckyNumber()
  */
 
-/** BINGO column color for a given number. */
+/** Databingo60 column color for a given number (5 cols of 12). */
 function getColumnStyle(n: number): string {
-  if (n <= 15) return "background:linear-gradient(135deg,#4a90d9,#1a5ba8);"; // B - blue
-  if (n <= 30) return "background:linear-gradient(135deg,#e05050,#a01818);"; // I - red
-  if (n <= 45) return "background:linear-gradient(135deg,#7c50c8,#4a1a90);"; // N - purple
-  if (n <= 60) return "background:linear-gradient(135deg,#4caf50,#1b5e20);"; // G - green
-  return "background:linear-gradient(135deg,#f0a020,#c07000);";              // O - orange/yellow
+  if (n <= 12) return "background:linear-gradient(135deg,#4a90d9,#1a5ba8);"; // col 1 - blue
+  if (n <= 24) return "background:linear-gradient(135deg,#e05050,#a01818);"; // col 2 - red
+  if (n <= 36) return "background:linear-gradient(135deg,#7c50c8,#4a1a90);"; // col 3 - purple
+  if (n <= 48) return "background:linear-gradient(135deg,#4caf50,#1b5e20);"; // col 4 - green
+  return "background:linear-gradient(135deg,#f0a020,#c07000);";              // col 5 - orange/yellow
 }
 
 export class LuckyNumberPicker {
@@ -95,14 +95,14 @@ export class LuckyNumberPicker {
     }
     panel.appendChild(colHeaders);
 
-    // Number grid — 5 columns (B/I/N/G/O) × 15 rows
+    // Number grid — 5 columns × 12 rows (Databingo60: 1-12, 13-24, 25-36, 37-48, 49-60)
     const grid = document.createElement("div");
     grid.style.cssText = "display:grid;grid-template-columns:repeat(5,1fr);gap:4px;";
 
-    // Layout: column-first to match B(1-15), I(16-30), N(31-45), G(46-60), O(61-75)
-    for (let row = 0; row < 15; row++) {
+    // Layout: column-first to match Databingo60 columns of 12
+    for (let row = 0; row < 12; row++) {
       for (let col = 0; col < 5; col++) {
-        const num = col * 15 + row + 1;
+        const num = col * 12 + row + 1;
         const btn = document.createElement("button");
         btn.textContent = String(num);
         btn.dataset.num = String(num);

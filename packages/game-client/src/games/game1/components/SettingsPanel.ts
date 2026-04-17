@@ -12,17 +12,22 @@
 const STORAGE_KEY = "spillorama_game1_settings";
 
 export interface Game1Settings {
+  soundEnabled: boolean;
   voiceEnabled: boolean;
   voiceLanguage: "nor-male" | "nor-female" | "english";
   luckyAutoSelect: boolean;
   luckyNumber: number | null;
+  /** Unity: double-announce mode — repeat each drawn number at lower volume. */
+  doubleAnnounce: boolean;
 }
 
 const DEFAULTS: Game1Settings = {
+  soundEnabled: true,
   voiceEnabled: true,
   voiceLanguage: "nor-male",
   luckyAutoSelect: false,
   luckyNumber: null,
+  doubleAnnounce: false,
 };
 
 export function loadSettings(): Game1Settings {
@@ -88,6 +93,12 @@ export class SettingsPanel {
     header.appendChild(closeBtn);
     panel.appendChild(header);
 
+    // Sound on/off (master mute) toggle
+    panel.appendChild(this.createToggle("Lyd", this.settings.soundEnabled, (on) => {
+      this.settings.soundEnabled = on;
+      this.save();
+    }));
+
     // Voice on/off toggle
     panel.appendChild(this.createToggle("Lydannonsering", this.settings.voiceEnabled, (on) => {
       this.settings.voiceEnabled = on;
@@ -107,6 +118,12 @@ export class SettingsPanel {
     // Lucky number auto-select
     panel.appendChild(this.createToggle("Auto-velg heldig tall", this.settings.luckyAutoSelect, (on) => {
       this.settings.luckyAutoSelect = on;
+      this.save();
+    }));
+
+    // Double announce — repeat drawn numbers (Unity: "Gjenta tall")
+    panel.appendChild(this.createToggle("Gjenta tall", this.settings.doubleAnnounce, (on) => {
+      this.settings.doubleAnnounce = on;
       this.save();
     }));
   }

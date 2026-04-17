@@ -19,16 +19,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: apps/backend/package-lock.json
 
-      - name: Install backend dependencies
-        run: npm --prefix backend ci
+      - name: Install apps/backend dependencies
+        run: npm --prefix apps/backend ci
 
-      - name: Type check backend
-        run: npm --prefix backend run check
+      - name: Type check apps/backend
+        run: npm --prefix apps/backend run check
 
-      - name: Build backend
-        run: npm --prefix backend run build
+      - name: Build apps/backend
+        run: npm --prefix apps/backend run build
 
       - name: Run compliance suite (required gate)
-        run: npm --prefix backend run test:compliance
+        run: npm --prefix apps/backend run test:compliance

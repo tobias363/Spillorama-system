@@ -14,9 +14,10 @@ import { LuckyNumberPicker } from "./components/LuckyNumberPicker.js";
 import { LoadingOverlay } from "./components/LoadingOverlay.js";
 import { ToastNotification } from "./components/ToastNotification.js";
 import { PauseOverlay } from "./components/PauseOverlay.js";
-import { SettingsPanel } from "./components/SettingsPanel.js";
+import { SettingsPanel, type Game1Settings } from "./components/SettingsPanel.js";
 import { MarkerBackgroundPanel } from "./components/MarkerBackgroundPanel.js";
 import { GamePlanPanel } from "./components/GamePlanPanel.js";
+import { AudioManager } from "../../audio/AudioManager.js";
 
 type Phase = "LOADING" | "WAITING" | "PLAYING" | "ENDED";
 
@@ -73,6 +74,9 @@ class Game1Controller implements GameController {
     this.toast = new ToastNotification(overlayContainer);
     this.pauseOverlay = new PauseOverlay(overlayContainer);
     this.settingsPanel = new SettingsPanel(overlayContainer);
+    // Wire settings panel to AudioManager
+    this.syncSettingsToAudio(this.settingsPanel.getSettings());
+    this.settingsPanel.setOnChange((settings) => this.syncSettingsToAudio(settings));
     this.markerBgPanel = new MarkerBackgroundPanel(overlayContainer);
     this.gamePlanPanel = new GamePlanPanel(overlayContainer);
 
@@ -100,7 +104,8 @@ class Game1Controller implements GameController {
           this.loader?.show("Kobler til igjen...");
         }
         if (state === "connected" && this.loader?.isShowing()) {
-          this.loader.hide();
+          // Reconnected — resume room to rebuild state from server snapshot
+          this.handleReconnect();
         }
         if (state === "disconnected") {
           telemetry.trackDisconnect("socket");
@@ -148,8 +153,8 @@ class Game1Controller implements GameController {
     this.root.eventMode = "static";
     this.root.on("pointerdown", () => this.deps.audio.unlock(), { once: true });
 
-    // Auto-arm
-    await socket.armBet({ roomCode: this.actualRoomCode, armed: true });
+    // No auto-arm — player must explicitly buy tickets via the popup.
+    // (Unity also requires explicit purchase via Game1TicketPurchasePanel.)
 
     // Hide loader — game is ready (Unity: DisplayLoader(false))
     this.loader.hide();
@@ -210,18 +215,19 @@ class Game1Controller implements GameController {
         const container = this.deps.app.app.canvas.parentElement ?? document.body;
         this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
-        this.playScreen.setOnBuy(() => this.handleBuy());
+        this.playScreen.setOnBuy((selections) => this.handleBuy(selections));
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
         this.playScreen.setOnCancelTickets(() => this.handleCancelTickets());
         this.playScreen.setOnOpenSettings(() => this.settingsPanel?.show());
         this.playScreen.setOnOpenMarkerBg(() => this.markerBgPanel?.show());
+        this.playScreen.setOnStartGame(() => this.handleStartGame());
         this.playScreen.subscribeChatToBridge((listener) =>
           this.deps.bridge.on("chatMessage", listener),
         );
         this.playScreen.enterWaitingMode(state);
         // BIN-419: Show Elvis replace option in waiting mode
-        if (state.gameType === "elvis" && state.myTickets.length > 0) {
-          this.playScreen.showElvisReplace(0, () => this.handleElvisReplace());
+        if (state.gameType === "elvis" && state.myTickets.length > 0 && state.replaceAmount > 0) {
+          this.playScreen.showElvisReplace(state.replaceAmount, () => this.handleElvisReplace());
         }
         this.setScreen(this.playScreen);
         break;
@@ -232,11 +238,12 @@ class Game1Controller implements GameController {
         const container = this.deps.app.app.canvas.parentElement ?? document.body;
         this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
-        this.playScreen.setOnBuy(() => this.handleBuy());
+        this.playScreen.setOnBuy((selections) => this.handleBuy(selections));
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
         this.playScreen.setOnCancelTickets(() => this.handleCancelTickets());
         this.playScreen.setOnOpenSettings(() => this.settingsPanel?.show());
         this.playScreen.setOnOpenMarkerBg(() => this.markerBgPanel?.show());
+        this.playScreen.setOnStartGame(() => this.handleStartGame());
         this.playScreen.subscribeChatToBridge((listener) =>
           this.deps.bridge.on("chatMessage", listener),
         );
@@ -263,6 +270,7 @@ class Game1Controller implements GameController {
   // ── Bridge event handlers ─────────────────────────────────────────────
 
   private onStateChanged(state: GameState): void {
+    console.log("[Game1] stateChanged — phase:", this.phase, "gameStatus:", state.gameStatus, "myTickets:", state.myTickets.length, "myStake:", state.myStake, "isArmed:", state.isArmed);
     if (this.phase === "WAITING" && this.playScreen) {
       this.playScreen.updateWaitingState(state);
     }
@@ -286,11 +294,19 @@ class Game1Controller implements GameController {
     this.gameRoundCount++;
     this.buyMoreDisabled = false;
 
+    // Reset announced numbers for the new round
+    this.deps.audio.resetAnnouncedNumbers();
+
+    // Unity OnGameStart: close lucky number panel, hide delete buttons
+    this.luckyPicker?.hide();
+
+    console.log("[Game1] onGameStarted — myTickets:", state.myTickets.length, "gameStatus:", state.gameStatus, "isArmed:", state.isArmed, "myPlayerId:", state.myPlayerId, "preRoundTickets:", state.preRoundTickets.length);
+
     if (state.myTickets.length > 0) {
+      console.log("[Game1] → PLAYING (has tickets)");
       this.transitionTo("PLAYING", state);
     } else {
-      // Spectator: go to waiting mode so they can see the game in progress
-      // (Unity stays on the same panel and just hides the buy UI)
+      console.log("[Game1] → WAITING (spectator, no tickets)");
       this.transitionTo("WAITING", state);
     }
   }
@@ -298,6 +314,18 @@ class Game1Controller implements GameController {
   private onGameEnded(state: GameState): void {
     // Dismiss any active mini-game overlay so it doesn't block the EndScreen
     this.dismissMiniGame();
+
+    // Unity OnGameFinish: stop blink animations, reset sounds
+    this.deps.audio.resetAnnouncedNumbers();
+    this.deps.audio.stopAll();
+
+    // Refresh player balance (Unity: dispatch balance event for game-bar sync)
+    if (this.myPlayerId) {
+      const me = state.players.find((p) => p.id === this.myPlayerId);
+      if (me && typeof me.balance === "number" && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("spillorama:balanceChanged", { detail: { balance: me.balance } }));
+      }
+    }
 
     if (this.phase === "PLAYING") {
       this.transitionTo("ENDED", state);
@@ -313,7 +341,7 @@ class Game1Controller implements GameController {
     } else {
       this.transitionTo("WAITING", state);
     }
-    this.deps.socket.armBet({ roomCode: this.actualRoomCode, armed: true });
+    // No auto-arm after game end — player chooses in the buy popup.
   }
 
   private buyMoreDisabled = false;
@@ -322,8 +350,8 @@ class Game1Controller implements GameController {
     if (this.phase === "PLAYING" && this.playScreen) {
       this.playScreen.onNumberDrawn(number, drawIndex, state);
 
-      // BIN-451: Disable buy-more after ~80% of draws (Unity: BuyMoreDisableFlagVal)
-      if (!this.buyMoreDisabled && state.drawCount >= Math.floor(state.totalDrawCapacity * 0.8)) {
+      // BIN-451: Disable buy-more using server-authoritative threshold (Unity: BuyMoreDisableFlagVal)
+      if (!this.buyMoreDisabled && state.disableBuyAfterBalls > 0 && state.drawCount >= state.disableBuyAfterBalls) {
         this.buyMoreDisabled = true;
         this.playScreen.disableBuyMore();
       }
@@ -340,7 +368,7 @@ class Game1Controller implements GameController {
     const isMe = result.winnerId === this.myPlayerId;
     if (isMe) {
       this.toast?.win(`Du vant ${result.patternName}! ${result.payoutAmount} kr`);
-      this.deps.audio.playSfx("win");
+      this.deps.audio.playBingoSound();
     } else {
       this.toast?.info(`${result.patternName} vunnet av en annen spiller`);
     }
@@ -354,12 +382,30 @@ class Game1Controller implements GameController {
 
   // ── User actions ──────────────────────────────────────────────────────
 
-  private async handleBuy(): Promise<void> {
-    const result = await this.deps.socket.armBet({ roomCode: this.actualRoomCode, armed: true });
-    if (result.ok) {
-      this.playScreen?.hideBuyPopup();
+  private async handleBuy(selections: Array<{ type: string; qty: number }> = []): Promise<void> {
+    // If selections are provided (new per-type path), send ticketSelections.
+    // Otherwise fall back to flat ticketCount for backward compat.
+    const payload: { roomCode: string; armed: true; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number }> } = {
+      roomCode: this.actualRoomCode,
+      armed: true,
+    };
+    if (selections.length > 0) {
+      payload.ticketSelections = selections;
     } else {
+      payload.ticketCount = 1;
+    }
+    const result = await this.deps.socket.armBet(payload);
+    this.playScreen?.showBuyPopupResult(result.ok, result.error?.message);
+    if (!result.ok) {
       this.showError(result.error?.message || "Kunne ikke kjøpe billetter");
+    }
+  }
+
+  /** A6: Host/admin manual game start — calls game:start on the socket. */
+  private async handleStartGame(): Promise<void> {
+    const result = await this.deps.socket.startGame({ roomCode: this.actualRoomCode });
+    if (!result.ok) {
+      this.toast?.error(result.error?.message || "Kunne ikke starte spillet");
     }
   }
 
@@ -486,6 +532,54 @@ class Game1Controller implements GameController {
     this.miniGameOverlay = null;
   }
 
+  // ── Reconnect handling ────────────────────────────────────────────────
+
+  /**
+   * Resume room after socket reconnect — rebuild state from server snapshot.
+   * Matches Unity's reconnect flow: call room:resume, apply snapshot,
+   * deduplicate draws, and transition to the correct phase.
+   */
+  private async handleReconnect(): Promise<void> {
+    if (!this.actualRoomCode) {
+      this.loader?.hide();
+      return;
+    }
+
+    try {
+      const result = await this.deps.socket.resumeRoom({ roomCode: this.actualRoomCode });
+      if (result.ok && result.data?.snapshot) {
+        this.deps.bridge.applySnapshot(result.data.snapshot);
+        const state = this.deps.bridge.getState();
+
+        // Transition based on current game status
+        if (state.gameStatus === "RUNNING" && state.myTickets.length > 0) {
+          this.transitionTo("PLAYING", state);
+        } else {
+          this.transitionTo("WAITING", state);
+        }
+
+        console.log("[Game1] Reconnected — state restored, phase:", this.phase);
+      } else {
+        console.warn("[Game1] Room resume failed:", result.error?.message);
+        // Fallback: try getRoomState
+        const fallback = await this.deps.socket.getRoomState({ roomCode: this.actualRoomCode });
+        if (fallback.ok && fallback.data?.snapshot) {
+          this.deps.bridge.applySnapshot(fallback.data.snapshot);
+          const state = this.deps.bridge.getState();
+          if (state.gameStatus === "RUNNING" && state.myTickets.length > 0) {
+            this.transitionTo("PLAYING", state);
+          } else {
+            this.transitionTo("WAITING", state);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[Game1] Reconnect error:", err);
+    }
+
+    this.loader?.hide();
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────
 
   private setScreen(screen: Container): void {
@@ -500,6 +594,18 @@ class Game1Controller implements GameController {
     }
     this.playScreen = null;
     this.endScreen = null;
+  }
+
+  /**
+   * Sync SettingsPanel settings to AudioManager.
+   * Called on init and whenever settings change.
+   */
+  private syncSettingsToAudio(settings: Game1Settings): void {
+    const audio = this.deps.audio;
+    audio.setSoundEnabled(settings.soundEnabled);
+    audio.setVoiceEnabled(settings.voiceEnabled);
+    audio.setVoiceLanguage(AudioManager.settingsToVoice(settings.voiceLanguage));
+    audio.setDoubleAnnounce(settings.doubleAnnounce);
   }
 
   private showError(message: string): void {

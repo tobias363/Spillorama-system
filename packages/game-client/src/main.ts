@@ -37,22 +37,6 @@ export function unmountGame(): void {
   unmountGame,
 };
 
-// Dev mode: auto-mount when running standalone via `vite dev`
-if (import.meta.env.DEV) {
-  const container = document.getElementById("game-container");
-  if (container) {
-    const params = new URLSearchParams(window.location.search);
-    const gameParam = params.get("game") ?? "bingo";
-    const gameSlugMap: Record<string, string> = {
-      bingo: "game_1",
-      rocket: "game_2",
-      monster: "game_3",
-    };
-    mountGame(container, {
-      gameSlug: gameSlugMap[gameParam] ?? "game_1",
-      accessToken: "dev-token",
-      hallId: params.get("hall") ?? "notodden",
-      serverUrl: "http://localhost:4000",
-    });
-  }
-}
+// Dev mode: auto-mount is handled by the dev lobby in index.html.
+// The lobby logs in via /api/auth/login, gets a real accessToken,
+// and calls mountGame() with correct hallId and credentials.

@@ -4,8 +4,8 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: npm install && npm --prefix backend install --include=dev && npm run build
-    startCommand: npm --prefix backend run start
+    buildCommand: npm install && npm --prefix apps/backend install --include=dev && npm run build
+    startCommand: npm --prefix apps/backend run start
     envVars:
       - key: NODE_ENV
         value: production

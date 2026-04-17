@@ -1,4 +1,5 @@
 import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
+import type { Player } from "@spillorama/shared-types/game";
 
 /**
  * HTML overlay panel showing player info, number ring, and draw progress.
@@ -93,13 +94,31 @@ export class LeftInfoPanel {
     lastDrawnNumber: number | null,
     drawCount: number,
     totalDrawCapacity: number,
+    players?: Player[],
   ): void {
-    this.playerCountEl.textContent = String(playerCount).padStart(2, "0");
+    // G2/G3: Count unique halls from player data
+    let hallCount = 0;
+    if (players && players.length > 0) {
+      const halls = new Set<string>();
+      for (const p of players) {
+        if (p.hallId) halls.add(p.hallId);
+      }
+      hallCount = halls.size;
+    }
+
+    const countStr = String(playerCount).padStart(2, "0");
+    this.playerCountEl.textContent = hallCount > 1
+      ? `${countStr} (${hallCount} haller)`
+      : countStr;
+
     this.entryFeeEl.textContent = totalStake > 0
       ? `Innsats: ${totalStake} kr`
-      : "Innsats: —";
+      : `Innsats: \u2014`;
     this.prizeEl.textContent = `Gevinst: ${prizePool} kr`;
-    this.numberRingEl.textContent = lastDrawnNumber !== null ? String(lastDrawnNumber) : "--";
+    // Unity: last drawn number is zero-padded 2 digits ("07", "42")
+    this.numberRingEl.textContent = lastDrawnNumber !== null
+      ? String(lastDrawnNumber).padStart(2, "0")
+      : "--";
     this.progressEl.textContent = `${drawCount}/${totalDrawCapacity}`;
   }
 
@@ -137,9 +156,17 @@ export class LeftInfoPanel {
       this.progressEl.textContent = "";
       this.stopCountdown();
     } else {
-      this.numberRingEl.textContent = String(remaining);
-      this.progressEl.textContent = "";
+      const formatted = this.formatCountdown(remaining);
+      this.numberRingEl.textContent = formatted;
+      this.progressEl.textContent = `Neste spill om ${formatted}`;
     }
+  }
+
+  /** Format seconds as MM:SS (e.g. 150 → "02:30", 45 → "00:45"). */
+  private formatCountdown(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
   destroy(): void {

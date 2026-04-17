@@ -112,9 +112,13 @@ export class TicketOverlay extends Container {
     }
 
     for (let i = 0; i < state.myTickets.length; i++) {
-      const theme = getTicketThemeByName(state.myTickets[i].color, i);
+      const ticket = state.myTickets[i];
+      const ticketRows = ticket.grid?.length ?? 3;
+      const ticketCols = ticket.grid?.[0]?.length ?? 5;
+      const gridSize = (ticketRows === 5 && ticketCols === 5) ? "5x5" : "3x5";
+      const theme = getTicketThemeByName(ticket.color, i);
       const card = new TicketCard(i, {
-        gridSize: "5x5",
+        gridSize,
         cardBg: theme.cardBg,
         headerBg: theme.headerBg,
         headerText: theme.headerText,

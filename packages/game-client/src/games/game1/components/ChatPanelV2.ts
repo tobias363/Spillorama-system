@@ -22,6 +22,7 @@ export class ChatPanelV2 {
   private collapsed = false;
   private toggleBtn: HTMLButtonElement;
   private body: HTMLDivElement;
+  private onToggle: ((collapsed: boolean) => void) | null = null;
 
   constructor(overlay: HtmlOverlayManager, socket: SpilloramaSocket, roomCode: string) {
     this.socket = socket;
@@ -36,6 +37,8 @@ export class ChatPanelV2 {
       borderLeft: "1px solid rgba(200,70,70,0.4)",
       backdropFilter: "blur(4px)",
       height: "100%",
+      transition: "width 0.25s ease-in-out",
+      overflow: "hidden",
     });
 
     // Header with toggle
@@ -216,13 +219,39 @@ export class ChatPanelV2 {
     this.inputEl.value = "";
   }
 
+  /** Register a callback fired when the chat panel is collapsed/expanded. */
+  setOnToggle(callback: (collapsed: boolean) => void): void {
+    this.onToggle = callback;
+  }
+
+  isCollapsed(): boolean {
+    return this.collapsed;
+  }
+
   private toggleCollapse(): void {
     this.collapsed = !this.collapsed;
-    this.body.style.display = this.collapsed ? "none" : "flex";
-    this.root.style.width = this.collapsed ? "auto" : "265px";
+
+    if (this.collapsed) {
+      // Collapse: hide body content, shrink width (animated via CSS transition)
+      this.body.style.opacity = "0";
+      this.body.style.transition = "opacity 0.15s ease-out";
+      this.root.style.width = "48px";
+      setTimeout(() => { this.body.style.display = "none"; }, 250);
+    } else {
+      // Expand: show body content, restore width (animated via CSS transition)
+      this.body.style.display = "flex";
+      this.root.style.width = "265px";
+      requestAnimationFrame(() => {
+        this.body.style.opacity = "1";
+        this.body.style.transition = "opacity 0.2s ease-in 0.1s";
+      });
+    }
+
     this.toggleBtn.innerHTML = this.collapsed
       ? `Vis chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 6l1.41 1.41L10.83 12l4.58 4.59L14 18l-6-6z"/></svg>`
       : `Skjul chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>`;
+
+    this.onToggle?.(this.collapsed);
   }
 
   private async loadHistory(): Promise<void> {
