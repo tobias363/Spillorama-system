@@ -1,4 +1,5 @@
 import { Container, Graphics } from "pixi.js";
+import gsap from "gsap";
 import { TicketCard } from "./TicketCard.js";
 import { sortByBestFirst } from "../logic/TicketSorter.js";
 
@@ -124,5 +125,40 @@ export class TicketScroller extends Container {
     this.maskGraphics.rect(0, 0, width, height);
     this.maskGraphics.fill(0xffffff);
     this.clampScroll();
+  }
+
+  /** Animate scroll by one card-width forward. */
+  pageNext(): void {
+    this.scrollByStep(+1);
+  }
+
+  /** Animate scroll by one card-width backward. */
+  pagePrev(): void {
+    this.scrollByStep(-1);
+  }
+
+  /** Returns 1-indexed current page + total page count. */
+  getPageInfo(): { current: number; total: number } {
+    if (this.cards.length === 0) return { current: 0, total: 0 };
+    const step = this.stepWidth();
+    const offset = -this.innerContainer.x;
+    const current = Math.round(offset / step) + 1;
+    const visibleCards = Math.max(1, Math.floor(this.viewportWidth / step));
+    const total = Math.max(1, this.cards.length - visibleCards + 1);
+    return { current: Math.min(current, total), total };
+  }
+
+  private stepWidth(): number {
+    const first = this.cards[0];
+    return first ? first.cardWidth + this.gap : this.viewportWidth;
+  }
+
+  private scrollByStep(direction: -1 | 1): void {
+    if (this.cards.length === 0) return;
+    const step = this.stepWidth();
+    const totalWidth = this.cards.reduce((sum, c) => sum + c.cardWidth + this.gap, -this.gap);
+    const maxScroll = Math.max(0, totalWidth - this.viewportWidth);
+    const target = Math.min(0, Math.max(-maxScroll, this.innerContainer.x - direction * step));
+    gsap.to(this.innerContainer, { x: target, duration: 0.25, ease: "power2.out" });
   }
 }

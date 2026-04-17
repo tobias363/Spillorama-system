@@ -1,4 +1,4 @@
-import { Container, Text } from "pixi.js";
+import { Container, Graphics, Text } from "pixi.js";
 import type { GameState } from "../../../bridge/GameBridge.js";
 import type { PatternWonPayload } from "@spillorama/shared-types/socket-events";
 import type { AudioManager } from "../../../audio/AudioManager.js";
@@ -27,6 +27,9 @@ export class PlayScreen extends Container {
   private bingoBtn: ClaimButton;
   private infoBar: PlayerInfoBar;
   private luckyNumberText: Text;
+  private pageIndicator: Text;
+  private prevBtn: Container;
+  private nextBtn: Container;
   private audio: AudioManager;
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
   private lineAlreadyWon = false;
@@ -108,6 +111,62 @@ export class PlayScreen extends Container {
     this.bingoBtn.y = screenHeight - 65;
     this.bingoBtn.setOnClaim((type) => this.onClaim?.(type));
     this.addChild(this.bingoBtn);
+
+    // Ticket pager — prev/next buttons + page indicator below scroller
+    const pagerY = scrollerY + scrollerHeight + 6;
+    this.prevBtn = this.buildPagerButton("‹");
+    this.prevBtn.x = 20;
+    this.prevBtn.y = pagerY;
+    this.prevBtn.on("pointerdown", () => {
+      this.scroller.pagePrev();
+      setTimeout(() => this.updatePageIndicator(), 270);
+    });
+    this.addChild(this.prevBtn);
+
+    this.nextBtn = this.buildPagerButton("›");
+    this.nextBtn.x = 20 + 36 + 8;
+    this.nextBtn.y = pagerY;
+    this.nextBtn.on("pointerdown", () => {
+      this.scroller.pageNext();
+      setTimeout(() => this.updatePageIndicator(), 270);
+    });
+    this.addChild(this.nextBtn);
+
+    this.pageIndicator = new Text({
+      text: "",
+      style: { fontFamily: "Arial", fontSize: 13, fill: 0xaaaaaa },
+    });
+    this.pageIndicator.x = 20 + (36 + 8) * 2;
+    this.pageIndicator.y = pagerY + 8;
+    this.addChild(this.pageIndicator);
+  }
+
+  private buildPagerButton(glyph: string): Container {
+    const btn = new Container();
+    const bg = new Graphics();
+    bg.roundRect(0, 0, 36, 28, 6);
+    bg.fill(0x2e0000);
+    bg.stroke({ color: 0x790001, width: 1 });
+    btn.addChild(bg);
+    const label = new Text({
+      text: glyph,
+      style: { fontFamily: "Arial", fontSize: 20, fontWeight: "bold", fill: 0xffe83d },
+    });
+    label.anchor.set(0.5);
+    label.x = 18;
+    label.y = 14;
+    btn.addChild(label);
+    btn.eventMode = "static";
+    btn.cursor = "pointer";
+    return btn;
+  }
+
+  private updatePageIndicator(): void {
+    const { current, total } = this.scroller.getPageInfo();
+    this.pageIndicator.text = total > 1 ? `Kort ${current} / ${total}` : "";
+    const show = total > 1;
+    this.prevBtn.visible = show;
+    this.nextBtn.visible = show;
   }
 
   setOnClaim(callback: (type: "LINE" | "BINGO") => void): void {
@@ -150,6 +209,7 @@ export class PlayScreen extends Container {
     }
 
     this.scroller.sortBestFirst();
+    this.updatePageIndicator();
     this.updateClaimButtons(state);
   }
 

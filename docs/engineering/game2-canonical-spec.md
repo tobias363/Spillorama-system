@@ -190,6 +190,7 @@ Referanse: `legacy/unity-backend/Game/Game2/Sockets/game2.js`
 | `Game2BuyBlindTickets` | ❌ Ikke portet | [BIN-511](https://linear.app/bingosystem/issue/BIN-511) |
 | `Game2PlanList` (hall-schedule) | 🟡 Delvis — håndteres via hall_game_schedules, men ikke via eget socket-event | Egen issue hvis nødvendig |
 | `Game2TicketPurchaseData` | 🟡 Delvis — gameVariant i room:update dekker mesteparten | OK |
+| Ticket-paging (prev/next-kort) | ✅ Portet (drag + prev/next-knapper + page-indikator) | — |
 | Chat (`SendGameChat`, `GameChatHistory`) | ✅ Portet (gjenbruker G1 `ChatPanel` + BIN-516 DB-persistens via `chat:history`) | — |
 | Lydfiler / nummerannouncement | ❌ Ikke portet | Egen issue |
 | Auto-arm ved join | ✅ Har (avviker fra G1 som eksplisitt fjernet) | Vurder om dette bør være eksplisitt kjøp som G1 |
