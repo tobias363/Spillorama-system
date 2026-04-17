@@ -231,9 +231,9 @@ Disse AIS-broadcastene må erstattes med `SpilloramaSocketManager`-events i game
 ## 7. Utviklingsregler
 
 1. Hvis sluttbrukeren skal se funksjonen som del av lobby, konto, profil eller Spillvett → bygg den i `/web/`-shellen (HTML/JS), **aldri** i Unity.
-2. Hvis funksjonen er administrativ → bygg den i `frontend/admin/` eller backend-admin.
-3. Hvis funksjonen er del av selve spillopplevelsen (bingo-brett, trekk, chat i spill) → bygges i `Spillorama/` (Unity).
-4. Spillorama-backend (`backend/src/`) er **eneste backend** og source of truth for brukere, saldo, grenser og blokkeringer. AIS-backend fases ut.
+2. Hvis funksjonen er administrativ → bygg den i `apps/admin-web/` eller backend-admin.
+3. Hvis funksjonen er del av selve spillopplevelsen (bingo-brett, trekk, chat i spill) → bygges i `packages/game-client/` (web-native) eller `legacy/unity-client/` (gamle Unity-spill under utfasing).
+4. Spillorama-backend (`apps/backend/src/`) er **eneste backend** og source of truth for brukere, saldo, grenser og blokkeringer. AIS-backend fases ut.
 5. Unity skal **aldri** laste seg selv ved sideinnlasting — kun ved spillstart fra lobbyen.
 
 ---

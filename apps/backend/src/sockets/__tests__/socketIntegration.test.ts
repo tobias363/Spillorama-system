@@ -232,12 +232,13 @@ describe("Socket.IO integration", () => {
     const neededNumbers = [1,2,3,4,5, 13,14,15,16,17, 25,26,27,28, 37,38,39,40,41, 49,50,51,52,53];
     const gridNumbers = new Set(neededNumbers);
     const drawnNumbers: number[] = [];
-    for (let i = 0; i < 60; i++) {
+    // gameSlug "bingo" uses the 75-ball bag — must be able to drain all 75 balls
+    // for the deterministic fixed ticket's 24 grid numbers to be guaranteed drawn.
+    for (let i = 0; i < 75; i++) {
       const drawResult = await alice.emit<AckResponse<{ number: number }>>("draw:next", { roomCode });
       if (!drawResult.ok) break;
       const num = drawResult.data!.number;
       drawnNumbers.push(num);
-      // Mark on alice's ticket if it's a grid number
       if (gridNumbers.has(num)) {
         await alice.emit("ticket:mark", { roomCode, number: num });
       }

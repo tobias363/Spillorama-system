@@ -194,10 +194,23 @@ export async function createTestServer(): Promise<TestServer> {
   const io = new Server(server, { cors: { origin: "*" } });
 
   const walletAdapter = new InMemoryWalletAdapter();
+  // Deterministic draw bag: all 24 numbers from the FixedTicketBingoAdapter grid come
+  // first, then the remaining balls in ascending order. Guarantees the integration
+  // test can mark a full grid and claim BINGO well before the engine auto-ends the
+  // round at maxDrawsPerRound.
+  const FIXED_GRID_NUMBERS = [1,2,3,4,5, 13,14,15,16,17, 25,26,27,28, 37,38,39,40,41, 49,50,51,52,53];
+  const deterministicDrawBag = (size: number): number[] => {
+    const rest: number[] = [];
+    for (let n = 1; n <= size; n += 1) {
+      if (!FIXED_GRID_NUMBERS.includes(n)) rest.push(n);
+    }
+    return [...FIXED_GRID_NUMBERS.filter((n) => n <= size), ...rest];
+  };
   const engine = new BingoEngine(new FixedTicketBingoAdapter(), walletAdapter, {
     minDrawIntervalMs: 0,         // No delay between draws in tests
     minRoundIntervalMs: 0,        // No delay between rounds in tests
-    maxDrawsPerRound: 60,         // Allow drawing all numbers
+    maxDrawsPerRound: 75,         // Allow draining the full 75-ball bag (5×5 bingo)
+    drawBagFactory: deterministicDrawBag,
   });
   const mockPlatform = createMockPlatformService();
   // Relaxed rate limits for integration tests — allow rapid draws

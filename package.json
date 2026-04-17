@@ -4,19 +4,18 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "backend"
+    "apps/backend"
   ],
   "scripts": {
-    "dev": "npm --prefix backend run dev",
+    "dev": "npm --prefix apps/backend run dev",
     "dev:games": "npm -w @spillorama/game-client run dev",
-    "check": "npm --prefix backend run check",
-    "build": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build && npm --prefix backend run build",
+    "check": "npm --prefix apps/backend run check",
+    "build": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build && npm --prefix apps/backend run build",
     "build:types": "npm -w @spillorama/shared-types run build",
     "build:games": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build",
-    "test:compliance": "npm --prefix backend run test:compliance",
+    "test:compliance": "npm --prefix apps/backend run test:compliance",
     "test:games": "npm -w @spillorama/game-client run test",
-    "check:unity": "bash scripts/unity-compile-check.sh",
-    "check:all": "npm run check && npm run build && npm run test:compliance && npm run check:unity",
-    "deploy:backend": "bash scripts/deploy-backend.sh"
+    "check:all": "npm run check && npm run build && npm run test:compliance",
+    "deploy:backend": "bash infra/deploy-backend.sh"
   }
 }

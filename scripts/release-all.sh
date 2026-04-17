@@ -33,7 +33,7 @@ export SYSTEM_RELEASE_COMMIT="$RELEASE_COMMIT"
 
 if is_true "$RUN_BACKEND_CHECK"; then
   echo "[release-all] Kjører backend check..."
-  npm --prefix "$ROOT_DIR/backend" run check
+  npm --prefix "$ROOT_DIR/apps/backend" run check
 fi
 
 if is_true "$RUN_ROOT_CHECK_ALL"; then
@@ -43,12 +43,12 @@ fi
 
 if is_true "$RUN_BACKEND_DEPLOY"; then
   echo "[release-all] Trigger backend deploy..."
-  bash "$ROOT_DIR/scripts/deploy-backend.sh"
+  bash "$ROOT_DIR/infra/deploy-backend.sh"
 fi
 
 if is_true "$RUN_UNITY_BUILD"; then
   echo "[release-all] Kjør Unity WebGL build..."
-  bash "$ROOT_DIR/scripts/unity-webgl-build.sh"
+  bash "$ROOT_DIR/legacy/scripts/unity-webgl-build.sh"
 fi
 
 echo "[release-all] Ferdig."

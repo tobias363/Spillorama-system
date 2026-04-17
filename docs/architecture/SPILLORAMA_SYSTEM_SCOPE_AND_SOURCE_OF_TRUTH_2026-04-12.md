@@ -49,8 +49,8 @@ Hvis funksjonen er ment for sluttbruker i Spillorama, må den være tilgjengelig
 Bruk denne enkle regelen videre:
 
 1. Hvis sluttbruker skal se funksjonen som del av lobby, konto eller Spillvett, bygg den i `/web/`-hosten og knytt den til backend-API-ene.
-2. Hvis funksjonen er administrativ eller backoffice, bygg den i `frontend/admin/` eller backend-admin.
-3. Hvis funksjonen er del av selve spillopplevelsen, kan den bygges i `Spillorama/` og gjengis i Unity.
+2. Hvis funksjonen er administrativ eller backoffice, bygg den i `apps/admin-web/` eller backend-admin.
+3. Hvis funksjonen er del av selve spillopplevelsen, kan den bygges i `packages/game-client/` (web-native) eller `legacy/unity-client/` for gamle Unity-spill.
 
 ## Source of truth for denne leveransen
 
