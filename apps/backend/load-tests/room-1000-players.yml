@@ -1,0 +1,109 @@
+# BIN-508: Artillery Socket.IO load-test — 1000 concurrent players in one room.
+#
+# Acceptance criteria (from BIN-508):
+#   - p99 draw-to-client latency < 500ms
+#   - server CPU < 80%
+#   - 0 dropped events (zero engine.unresponsive or disconnects-before-ramp-down)
+#
+# Target setup:
+#   - Backend reachable at $TARGET (default ws://localhost:4000).
+#   - REDIS_URL set on the backend nodes — cross-node fanout depends on
+#     the BIN-494 adapter. Without Redis the scenario still runs single-node
+#     but results do not reflect production topology.
+#   - ulimit -n 65536 on the runner host — 1000 VUs easily exceed the default
+#     file-descriptor limit; see README.
+#
+# The scenario intentionally exercises the room:update path that BIN-499 slimmed
+# (ticket:mark producing 0 broadcasts) and the claim:submit path that still does
+# full fanout. Regression on either path will show up as inflated p99.
+config:
+  target: "{{ $processEnvironment.TARGET || 'ws://localhost:4000' }}"
+  phases:
+    # Phase 1 — ramp-up: 0 → 1000 VUs over 30 s. Tests connection-handling
+    # capacity and the socket-rate-limiter's per-IP allow list.
+    - name: ramp-up
+      duration: 30
+      arrivalRate: 1
+      rampTo: 34                       # ~34 arrivals/s × 30 s ≈ 1020 VUs
+    # Phase 2 — sustain arming: hold 1000 VUs for 60 s; each joins a room and
+    # arms a single ticket. No draws yet.
+    - name: sustain-arming
+      duration: 60
+      arrivalRate: 0                   # existing VUs keep their scenario alive
+    # Phase 3 — running: 270 s of active draws. The scenario script loops
+    # listening for draw:new events (up to 90 draws = one 75-ball round with
+    # the BIN-520 clamp plus headroom) and marks ~20 drawn numbers per VU.
+    # A BINGO claim fires from the first VU to complete its card.
+    - name: running
+      duration: 270
+      arrivalRate: 0
+    # Phase 4 — ramp-down: give VUs 30 s to disconnect cleanly. Validates
+    # graceful shutdown on the backend.
+    - name: ramp-down
+      duration: 30
+      arrivalRate: 0
+  engines:
+    # Artillery's built-in Socket.IO engine. If upgrading to Artillery 3.x
+    # switch to `@artilleryio/engine-socketio`.
+    socketio-v3:
+      transports: ["websocket"]
+  processor: "./room-1000-players.processor.js"
+  # Latency / ack / failure metrics roll up into the default report. The
+  # custom processor also pushes `latency_draw_to_client_ms` via
+  # `events.emit('histogram', ...)`.
+
+scenarios:
+  - name: "1-player-lifecycle"
+    engine: "socketio-v3"
+    beforeRequest: "seedTokenPerVU"
+    flow:
+      # Emit with ack — the ack callback signals arrival on the server so
+      # Artillery can measure handshake → ack latency per step.
+      - emit:
+          channel: "room:create"
+          data:
+            hallId: "hall-loadtest"
+            accessToken: "{{ token }}"
+          acknowledge:
+            match:
+              json:
+                "$.ok": true
+            capture:
+              json: "$.data.roomCode"
+              as: "roomCode"
+      - emit:
+          channel: "bet:arm"
+          data:
+            roomCode: "{{ roomCode }}"
+            armed: true
+            ticketCount: 1
+            accessToken: "{{ token }}"
+          acknowledge:
+            match:
+              json:
+                "$.ok": true
+      # Running phase: listen for up to 90 draw:new events, mark the drawn
+      # number on our ticket when it's on the grid, and claim BINGO if we
+      # complete the card. Artillery's Socket.IO engine supports `listen`
+      # with a per-event handler in the processor.
+      - function: "drawLoop"
+      # End with explicit disconnect so the server sees a clean close rather
+      # than a ping-timeout.
+      - emit:
+          channel: "disconnect"
+          data: {}
+
+  # Optional 500-VU smoke run for quick CI iteration. Invoke with
+  #   artillery run --config load-tests/room-1000-players.yml \
+  #     --scenario-name 500-player-smoke
+  - name: "500-player-smoke"
+    engine: "socketio-v3"
+    weight: 0                          # disabled by default
+    beforeRequest: "seedTokenPerVU"
+    flow:
+      - emit:
+          channel: "room:create"
+          data: { hallId: "hall-loadtest", accessToken: "{{ token }}" }
+          acknowledge:
+            match: { json: { "$.ok": true } }
+      - think: 1
