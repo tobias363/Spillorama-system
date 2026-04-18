@@ -103,6 +103,13 @@ export interface UpdateHallInput {
   settlementAccount?: string;
   invoiceMethod?: string;
   isActive?: boolean;
+  /**
+   * BIN-540: admin-facing flip for per-hall client engine. Mutation path for
+   * the pilot-cutover (`unity` → `web`) and rollback (`web` → `unity`).
+   * Cache invalidated automatically — next `/api/halls/:slug/client-variant`
+   * call sees the new value.
+   */
+  clientVariant?: HallClientVariant;
 }
 
 /** BIN-503: DB-backed TV-display tokens. Plaintext never stored or read back. */
@@ -884,6 +891,10 @@ export class PlatformService {
     const nextSettlementAccount = update.settlementAccount !== undefined ? (update.settlementAccount?.trim() || null) : (current.settlementAccount ?? null);
     const nextInvoiceMethod = update.invoiceMethod !== undefined ? (update.invoiceMethod?.trim() || null) : (current.invoiceMethod ?? null);
     const nextIsActive = update.isActive !== undefined ? Boolean(update.isActive) : current.isActive;
+    // BIN-540 admin-flip: validate against the constrained set; leave unchanged if undefined.
+    const nextClientVariant = update.clientVariant !== undefined
+      ? this.assertClientVariant(update.clientVariant)
+      : current.clientVariant;
 
     if (nextSlug !== current.slug) {
       const { rows: conflictRows } = await this.pool.query<{ id: string }>(
@@ -905,13 +916,44 @@ export class PlatformService {
            settlement_account = $7,
            invoice_method = $8,
            is_active = $9,
+           client_variant = $10,
            updated_at = now()
        WHERE id = $1
        RETURNING *`,
-      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive]
+      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive, nextClientVariant]
     );
 
+    // BIN-540: invalidate cache on any hall update so the next
+    // `/api/halls/:slug/client-variant` read sees the new value even if
+    // the admin flipped `clientVariant` via this endpoint. Clearing by
+    // both id and slug handles both reference forms.
+    if (update.clientVariant !== undefined || nextSlug !== current.slug) {
+      this.clientVariantCache.delete(current.id);
+      this.clientVariantCache.delete(current.slug);
+      this.clientVariantCache.delete(nextSlug);
+    }
+
     return this.mapHall(rows[0]);
+  }
+
+  /**
+   * BIN-540: narrow `clientVariant` input to the three accepted values
+   * before it reaches the DB (the DB check-constraint is the last line
+   * of defence, but a typo here should surface as INVALID_INPUT, not
+   * INTERNAL_ERROR).
+   */
+  private assertClientVariant(value: unknown): HallClientVariant {
+    if (typeof value !== "string") {
+      throw new DomainError("INVALID_INPUT", "clientVariant må være en string.");
+    }
+    const normalized = value.trim() as HallClientVariant;
+    if (!HALL_CLIENT_VARIANTS.includes(normalized)) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        `clientVariant må være én av: ${HALL_CLIENT_VARIANTS.join(", ")}.`
+      );
+    }
+    return normalized;
   }
 
   // ── BIN-503: TV-display tokens ──────────────────────────────────────────
