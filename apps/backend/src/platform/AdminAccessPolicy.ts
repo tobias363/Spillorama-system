@@ -55,7 +55,15 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    * sentralisert compliance, ikke delegert per hall.
    */
   PLAYER_AML_READ: ["ADMIN", "SUPPORT"],
-  PLAYER_AML_WRITE: ["ADMIN", "SUPPORT"]
+  PLAYER_AML_WRITE: ["ADMIN", "SUPPORT"],
+  /**
+   * BIN-587 B3-security: withdraw-email-allowlist, risk-countries,
+   * blocked-IPs, audit-log-search. ADMIN + SUPPORT. HALL_OPERATOR er
+   * eksplisitt utelatt — sikkerhets-konfig er sentralt.
+   */
+  SECURITY_READ: ["ADMIN", "SUPPORT"],
+  SECURITY_WRITE: ["ADMIN", "SUPPORT"],
+  AUDIT_LOG_READ: ["ADMIN", "SUPPORT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

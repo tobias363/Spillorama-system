@@ -153,6 +153,36 @@ test("BIN-587 B3-aml: assertAdminPermission kaster for HALL_OPERATOR på AML-end
   assert.throws(() => assertAdminPermission("PLAYER", "PLAYER_AML_WRITE"));
 });
 
+// ── BIN-587 B3-security: security admin + audit-search permissions ─────
+
+test("BIN-587 B3-security: SECURITY_READ tillatt for ADMIN + SUPPORT", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "SECURITY_READ"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "SECURITY_READ"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "SECURITY_READ"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "SECURITY_READ"), false);
+});
+
+test("BIN-587 B3-security: SECURITY_WRITE tillatt for ADMIN + SUPPORT", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "SECURITY_WRITE"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "SECURITY_WRITE"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "SECURITY_WRITE"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "SECURITY_WRITE"), false);
+});
+
+test("BIN-587 B3-security: AUDIT_LOG_READ tillatt for ADMIN + SUPPORT", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "AUDIT_LOG_READ"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "AUDIT_LOG_READ"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "AUDIT_LOG_READ"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "AUDIT_LOG_READ"), false);
+});
+
+test("BIN-587 B3-security: assertAdminPermission kaster for HALL_OPERATOR", () => {
+  assert.throws(() => assertAdminPermission("HALL_OPERATOR", "SECURITY_READ"));
+  assert.throws(() => assertAdminPermission("HALL_OPERATOR", "SECURITY_WRITE"));
+  assert.throws(() => assertAdminPermission("HALL_OPERATOR", "AUDIT_LOG_READ"));
+  assert.throws(() => assertAdminPermission("PLAYER", "SECURITY_WRITE"));
+});
+
 // ── BIN-591: hall-scope ─────────────────────────────────────────────────────
 
 test("BIN-591: ADMIN har alltid hall-scope (global)", () => {

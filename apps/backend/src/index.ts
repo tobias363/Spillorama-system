@@ -55,6 +55,8 @@ import { createPlayersRouter } from "./routes/players.js";
 import { createAdminPlayersRouter } from "./routes/adminPlayers.js";
 import { createAdminAmlRouter } from "./routes/adminAml.js";
 import { AmlService } from "./compliance/AmlService.js";
+import { createAdminSecurityRouter } from "./routes/adminSecurity.js";
+import { SecurityService } from "./compliance/SecurityService.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
@@ -238,6 +240,19 @@ const amlService = new AmlService({
   connectionString: platformConnectionString,
   schema: pgSchema,
   paymentRequestService,
+});
+
+// BIN-587 B3-security: sikkerhets-admin (withdraw-emails + risk-countries +
+// blocked-IPs). Blocked-IPs har in-memory cache (5 min TTL) som brukes av
+// HttpRateLimiter som pre-check.
+const securityService = new SecurityService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+// Varm cachen asynkront — ikke blokker server-start; første sjekk
+// venter på init uansett.
+void securityService.warmBlockedIpCache().catch((err) => {
+  console.warn("[BIN-587 B3-security] blocked-IP cache warm-up failed:", err);
 });
 
 // BIN-588/BIN-587 B2.1: SMTP + audit-log. Begge har graceful fallbacks
@@ -429,6 +444,39 @@ const bingoSettingsState = {
   set pendingUpdate(v) { pendingBingoSettingsUpdate = v; },
 };
 
+// BIN-587 B3-security: blocked-IP pre-check — registreres etter rate-
+// limiter men før route-handlers. Fail-open ved DB-feil (se
+// SecurityService.refreshBlockedIpCache). `/health` og `/metrics` er
+// bevisst unntatt så status-probes aldri blokkeres.
+const clientIpFromReq = (req: express.Request): string | null => {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.trim()) {
+    return fwd.split(",")[0]!.trim();
+  }
+  return req.ip ?? null;
+};
+
+app.use(async (req, res, next) => {
+  if (req.path === "/health" || req.path === "/metrics" || req.path.startsWith("/health/")) {
+    next();
+    return;
+  }
+  const ip = clientIpFromReq(req);
+  if (ip) {
+    try {
+      const blocked = await securityService.isIpBlocked(ip);
+      if (blocked) {
+        res.status(403).json({ ok: false, error: { code: "IP_BLOCKED", message: "IP-adressen er blokkert." } });
+        return;
+      }
+    } catch (err) {
+      // Fail-open: logger og lar request passere.
+      console.warn("[BIN-587 B3-security] blocked-IP-sjekk feilet:", err);
+    }
+  }
+  next();
+});
+
 app.use(createAuthRouter({
   platformService,
   walletAdapter,
@@ -454,6 +502,11 @@ app.use(createAdminAmlRouter({
   platformService,
   auditLogService,
   amlService,
+}));
+app.use(createAdminSecurityRouter({
+  platformService,
+  auditLogService,
+  securityService,
 }));
 
 app.use(createAdminRouter({
