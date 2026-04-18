@@ -212,6 +212,28 @@ export class TicketCard extends Container {
     }
   }
 
+  /**
+   * Hide this card's own chrome (background, header, price, to-go counter)
+   * so only the BingoGrid is visible. Used when this card lives inside a
+   * TicketGroup (Elvis/Large/Traffic) where the group owns the chrome.
+   *
+   * Unity equivalent: PrefabBingoGame1LargeTicket5x5 positions 3 bare
+   * mini-tickets inside a parent with its own shared imageBG.
+   */
+  setMiniMode(): void {
+    this.cardBg.visible = false;
+    this.headerBg.visible = false;
+    this.headerText.visible = false;
+    this.priceText.visible = false;
+    this.toGoText.visible = false;
+    // Tighten layout: drop the grid to the top so the card bounds are just
+    // the grid itself (plus a small padding for border-radius continuity).
+    this.grid.x = 0;
+    this.grid.y = 0;
+    this.cardW = this.grid.gridWidth;
+    this.cardH = this.grid.gridHeight;
+  }
+
   // ── Flip animation (Unity: Y-rotation 0→90→0 mapped to scaleX) ─────
 
   /**
@@ -408,20 +430,30 @@ export class TicketCard extends Container {
 
   /**
    * Start blinking the card background between its normal color and
-   * the highlight color.  Unity: 0.5s per color transition, infinite yoyo.
+   * the highlight color.
+   *
+   * Unity reference: BingoTicket.cs:1020-1033 (Blink_On_1_Color path).
+   *   LT.value(imgTicket, Set_Color_Callback, Current_Color, Blink_On_1_Color, 0.5f)
+   *     .setOnComplete(() => LT.value(..., Blink_On_1_Color, Current_Color, 0.5f))
+   *     .setLoopCount(-1)
+   *
+   * Behaviour: 0.5s from base → highlight, 0.5s back, infinite loop.
+   * LeanTween default ease is `linear`, so we use `none`/`linear` in GSAP
+   * for an identical interpolation curve.
    */
   private startBgBlink(): void {
     if (this.bgBlinkTween) return; // already blinking
 
     // GSAP color tween requires an object proxy — we interpolate a 0→1 ratio
-    // and redraw the card background each frame.
+    // and redraw the card background each frame. yoyo+repeat(-1) matches
+    // the Unity up-then-down-then-up loop.
     const proxy = { t: 0 };
     this.bgBlinkTween = gsap.to(proxy, {
       t: 1,
       duration: 0.5,
       yoyo: true,
       repeat: -1,
-      ease: "sine.inOut",
+      ease: "none", // Unity LeanTween.value default = linear
       onUpdate: () => {
         const blended = this.lerpColor(this.cardBgColor, TicketCard.BLINK_ON_1_COLOR, proxy.t);
         this.cardBg.clear();
@@ -441,27 +473,35 @@ export class TicketCard extends Container {
     this.cardBg.fill(this.cardBgColor);
   }
 
-  // ── BINGO pulse animation (Unity: scale 0.85→1.05, 0.25s, 5 reps) ───
+  // ── BINGO pulse animation (Unity: scale 0.85→1.05, 0.25s, 6 reps) ───
 
   /**
    * Play the BINGO celebration animation when a pattern is completed.
-   * Unity: ticket scales 0.85x → 1.05x, 0.25s per phase, 5 repetitions,
-   * then a "BINGO!" overlay text appears.
+   *
+   * Unity reference: BingoTicket.Bingo_Highlight_Anim() at
+   * legacy/unity-client/Assets/_Project/_Scripts/Prefabs/Bingo Tickets/
+   * BingoTicket.cs:1035-1056.
+   *
+   * Unity flow (coroutine):
+   *   Bingo.SetActive(true)                             // overlay visible immediately
+   *   there:
+   *     LT.scale(0.85, 0.25).onComplete(LT.scale(1.05, 0.25))
+   *     yield WaitForSeconds(0.5)                       // scale sequence is 0.5s total
+   *     if (callback < 5) { callback++; goto there; }   // 6 iterations total
+   *
+   * Web implementation: 6 back-to-back iterations of (0.85 @ 0.25s → 1.05 @
+   * 0.25s) via gsap timeline — the 0.5s wait in Unity runs in parallel with
+   * the scale sequence, so there is no gap between iterations.
+   *
+   * Trigger (Unity BingoTicket.cs:766-775): Set_Togo_Txt() checks if local
+   * `count === 0` and only then launches this coroutine. Web equivalent is
+   * `remaining === 0` in updateToGo() above. Text is hardcoded "BINGO!".
    */
   playBingoAnimation(): void {
     this.stopBingoAnimation();
 
-    // Scale pulse timeline
-    this.bingoTimeline = gsap.timeline();
-    for (let i = 0; i < 5; i++) {
-      this.bingoTimeline
-        .to(this.scale, { x: 0.85, y: 0.85, duration: 0.25, ease: "power2.inOut" })
-        .to(this.scale, { x: 1.05, y: 1.05, duration: 0.25, ease: "power2.inOut" });
-    }
-    // Settle back to 1.0 at the end
-    this.bingoTimeline.to(this.scale, { x: 1, y: 1, duration: 0.15, ease: "power2.out" });
-
-    // Show "BINGO!" overlay text on the card
+    // Show "BINGO!" overlay text on the card (Unity: Bingo.SetActive(true)
+    // fires at the very start of the coroutine, before any scale tween).
     if (!this.bingoOverlay) {
       this.bingoOverlay = new Text({
         text: "BINGO!",
@@ -480,8 +520,19 @@ export class TicketCard extends Container {
       this.addChild(this.bingoOverlay);
     }
     this.bingoOverlay.visible = true;
-    this.bingoOverlay.alpha = 0;
-    gsap.to(this.bingoOverlay, { alpha: 1, duration: 0.3, delay: 0.5 });
+    this.bingoOverlay.alpha = 1;
+
+    // Scale pulse timeline: 6 iterations × (0.85 @ 0.25s → 1.05 @ 0.25s).
+    this.bingoTimeline = gsap.timeline();
+    for (let i = 0; i < 6; i++) {
+      this.bingoTimeline
+        .to(this.scale, { x: 0.85, y: 0.85, duration: 0.25, ease: "power2.inOut" })
+        .to(this.scale, { x: 1.05, y: 1.05, duration: 0.25, ease: "power2.inOut" });
+    }
+    // Settle back to 1.0 at the end (defensive: avoids lingering 1.05 scale
+    // if the card later re-renders; Unity's prefab sits in a LayoutGroup that
+    // absorbs this naturally).
+    this.bingoTimeline.to(this.scale, { x: 1, y: 1, duration: 0.15, ease: "power2.out" });
   }
 
   private stopBingoAnimation(): void {

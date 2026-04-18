@@ -1,5 +1,13 @@
 import { Container, Graphics, Text } from "pixi.js";
 import type { TicketCard } from "../../game2/components/TicketCard.js";
+import type { TicketGroup } from "./TicketGroup.js";
+
+/**
+ * Common display-item contract — satisfied by both TicketCard (solo) and
+ * TicketGroup (Elvis/Large/Traffic multi-ticket wrapper). Lets the scroller
+ * treat groups and solo cards uniformly.
+ */
+export type TicketDisplayItem = TicketCard | TicketGroup;
 
 /**
  * Vertical grid scroller for Game 1 tickets.
@@ -20,7 +28,7 @@ import type { TicketCard } from "../../game2/components/TicketCard.js";
 export class TicketGridScroller extends Container {
   private innerContainer: Container;
   private maskGraphics: Graphics;
-  private cards: TicketCard[] = [];
+  private cards: TicketDisplayItem[] = [];
   private viewportWidth: number;
   private viewportHeight: number;
   private readonly gap = 8;
@@ -112,7 +120,7 @@ export class TicketGridScroller extends Container {
     super.destroy(options);
   }
 
-  addCard(card: TicketCard): void {
+  addCard(card: TicketDisplayItem): void {
     this.cards.push(card);
     this.innerContainer.addChild(card);
     this.layoutCards();
@@ -130,7 +138,7 @@ export class TicketGridScroller extends Container {
     this.scrollIndicator.visible = false;
   }
 
-  getCards(): TicketCard[] {
+  getCards(): TicketDisplayItem[] {
     return [...this.cards];
   }
 

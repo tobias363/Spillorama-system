@@ -35,7 +35,7 @@ export class BingoCell extends Container {
   private marked = false;
   private blinking = false;
   private highlighted = false;
-  private blinkTween: gsap.core.Tween | null = null;
+  private blinkTimeline: gsap.core.Timeline | null = null;
   private size: number;
   private isFreeSpace: boolean;
 
@@ -124,9 +124,18 @@ export class BingoCell extends Container {
 
   /**
    * Start one-to-go blink animation.
-   * Matches Unity BingoTicketSingleCellData.Start_NumberBlink():
-   * - Scale punch 1.5x loop
-   * - Optional background color highlight (imgCellOneToGo)
+   * Matches Unity BingoTicketSingleCellData.Start_NumberBlink() (legacy/unity-client/
+   * Assets/_Project/_Scripts/Prefabs/Bingo Tickets/BingoTicketSingleCellData.cs:212):
+   *   LeanTween.scale(txtNumber, Vector3(1.5f,1.5f), 1.0f)
+   *     .setEase(LeanTweenType.punch).setLoopCount(-1)
+   *
+   * LeanTween's "punch" ease is a one-shot swing that ends back at the
+   * starting value (scale 1.0), not a ping-pong — so `yoyo` is WRONG here.
+   * We emulate punch with a 1.0s GSAP tween that ends with `gsap.set` back
+   * to scale 1.0 (mirroring Unity Stop_NumberBlink, which resets localScale
+   * to Vector2.one at line :201), then repeat the timeline infinitely.
+   *
+   * Optional background color highlight: Unity imgCellOneToGo.Open().
    */
   startBlink(oneToGoColor?: number): void {
     if (this.blinking || this.marked) return;
@@ -135,26 +144,31 @@ export class BingoCell extends Container {
     if (oneToGoColor !== undefined) {
       this.drawBg(oneToGoColor);
     }
-    // Unity: LeanTween scale punch 1.5x, 1.0s duration, infinite loop.
-    // Uses elastic ease to mimic LeanTween's "punch" overshoot behaviour.
-    this.blinkTween = gsap.to(this.scale, {
+    // Build a looping timeline: scale → 1.5 with elastic overshoot (punch-like),
+    // then snap back to 1.0 and repeat. 1.0s per iteration (Unity match).
+    this.blinkTimeline = gsap.timeline({ repeat: -1 });
+    this.blinkTimeline.to(this.scale, {
       x: 1.5,
       y: 1.5,
       duration: 1.0,
-      yoyo: true,
-      repeat: -1,
       ease: "elastic.out(1, 0.3)",
+    });
+    this.blinkTimeline.call(() => {
+      // Reset to 1.0 at the end of each punch (Unity Stop_NumberBlink:201).
+      gsap.set(this.scale, { x: 1, y: 1 });
     });
   }
 
   stopBlink(): void {
     if (!this.blinking) return;
     this.blinking = false;
-    if (this.blinkTween) {
-      this.blinkTween.kill();
-      this.blinkTween = null;
+    if (this.blinkTimeline) {
+      this.blinkTimeline.kill();
+      this.blinkTimeline = null;
     }
-    gsap.to(this.scale, { x: 1, y: 1, duration: 0.15 });
+    // Unity Stop_NumberBlink: txtNumber.transform.localScale = Vector2.one
+    // (BingoTicketSingleCellData.cs:201). Hard reset, no animation.
+    gsap.set(this.scale, { x: 1, y: 1 });
   }
 
   setHighlight(on: boolean): void {
