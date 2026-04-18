@@ -132,3 +132,83 @@ describe("CenterTopPanel — Update_Pattern_Amount flash (PR-5 C3)", () => {
     expect(gsap.getTweensOf(span!).length).toBe(0);
   });
 });
+
+/**
+ * BIN-409 (D2) — persistent disable for the "Kjøp flere brett" button.
+ *
+ * Unity parity: `Game1GamePlayPanel.cs:170` `BuyMoreDisableFlagVal`; per-ball
+ * sjekk i `.SocketFlow.cs:109-113, :457-461, :485-489`; server-gitt threshold
+ * i `.SocketFlow.cs:174`.
+ *
+ * Rotårsak for BIN-451-buggen: `showButtonFeedback("buyMore", false)` brukte
+ * en 1.5 s setTimeout som reset knappen — så spillere kunne klikke "Kjøp flere"
+ * igjen etter et par sekunder selv om serveren hadde stengt kjøp. Den nye
+ * `setBuyMoreDisabled(disabled, reason)` er idempotent og holder state til
+ * den eksplisitt reversereres av enableBuyMore ved ny runde.
+ *
+ * Tooltip ("Kjøp er stengt — trekning pågår") er a11y-forbedring over Unity
+ * (PM godkjent Q2 2026-04-18): Unity skjuler bare interactable-state, vi
+ * legger til native `title` for hover-feedback til seende spillere.
+ */
+describe("CenterTopPanel — setBuyMoreDisabled (BIN-409 D2)", () => {
+  let panel: CenterTopPanel;
+  let container: HTMLElement;
+  let overlay: HtmlOverlayManager;
+
+  beforeEach(() => {
+    ({ panel, container, overlay } = makePanel());
+  });
+
+  afterEach(() => {
+    panel.destroy();
+    overlay.destroy();
+    container.remove();
+  });
+
+  function findBuyMoreBtn(): HTMLButtonElement | null {
+    const btns = container.querySelectorAll("button");
+    for (const b of btns) {
+      if (b.textContent === "Kjøp flere brett") return b as HTMLButtonElement;
+    }
+    return null;
+  }
+
+  it("disables button and sets tooltip + opacity + cursor when disabled=true", () => {
+    const btn = findBuyMoreBtn();
+    expect(btn).not.toBeNull();
+    panel.setBuyMoreDisabled(true, "Kjøp er stengt — trekning pågår");
+    expect(btn!.disabled).toBe(true);
+    expect(btn!.title).toBe("Kjøp er stengt — trekning pågår");
+    expect(btn!.style.opacity).toBe("0.4");
+    expect(btn!.style.cursor).toBe("not-allowed");
+  });
+
+  it("re-enables and clears tooltip when disabled=false", () => {
+    const btn = findBuyMoreBtn();
+    expect(btn).not.toBeNull();
+    panel.setBuyMoreDisabled(true, "Kjøp er stengt — trekning pågår");
+    panel.setBuyMoreDisabled(false);
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.title).toBe("");
+    expect(btn!.style.opacity).toBe("1");
+    expect(btn!.style.cursor).toBe("pointer");
+  });
+
+  it("hover (mouseenter) does NOT change background while disabled", () => {
+    const btn = findBuyMoreBtn();
+    expect(btn).not.toBeNull();
+    panel.setBuyMoreDisabled(true, "Kjøp er stengt");
+    const bgBefore = btn!.style.background;
+    btn!.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    // Hover-handler er gated av `!btn.disabled` — bg skal ikke endres.
+    expect(btn!.style.background).toBe(bgBefore);
+  });
+
+  it("uses empty-string reason when reason argument omitted", () => {
+    const btn = findBuyMoreBtn();
+    expect(btn).not.toBeNull();
+    panel.setBuyMoreDisabled(true);
+    expect(btn!.disabled).toBe(true);
+    expect(btn!.title).toBe("");
+  });
+});
