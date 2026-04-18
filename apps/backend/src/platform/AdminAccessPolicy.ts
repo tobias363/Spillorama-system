@@ -39,7 +39,16 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
   PLAYER_KYC_READ: ["ADMIN", "SUPPORT"],
   PLAYER_KYC_MODERATE: ["ADMIN", "SUPPORT"],
   /** PLAYER_KYC_OVERRIDE er destructive-path (forbi adapter-beslutning) — kun ADMIN. */
-  PLAYER_KYC_OVERRIDE: ["ADMIN"]
+  PLAYER_KYC_OVERRIDE: ["ADMIN"],
+  /**
+   * BIN-587 B2.3: player lifecycle — hall-status, soft-delete/restore,
+   * bankid-reverify, bulk-import, export. ADMIN + SUPPORT. HALL_OPERATOR
+   * er eksplisitt utelatt — soft-delete er en sentralisert operasjon
+   * (ikke per-hall), og hall-status-toggling går via ADMIN/SUPPORT som
+   * del av compliance-flyt. Hall-nivå block-listing for problemspillere
+   * håndteres av hall-operator via Spillvett, ikke via lifecycle-flag.
+   */
+  PLAYER_LIFECYCLE_WRITE: ["ADMIN", "SUPPORT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

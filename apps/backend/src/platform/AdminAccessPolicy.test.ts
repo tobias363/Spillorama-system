@@ -116,6 +116,20 @@ test("BIN-587 B2.2: assertAdminPermission kaster for HALL_OPERATOR på KYC-endep
   assert.throws(() => assertAdminPermission("SUPPORT", "PLAYER_KYC_OVERRIDE"));
 });
 
+// ── BIN-587 B2.3: lifecycle permission ──────────────────────────────────────
+
+test("BIN-587 B2.3: PLAYER_LIFECYCLE_WRITE tillatt for ADMIN + SUPPORT, ikke HALL_OPERATOR/PLAYER", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "PLAYER_LIFECYCLE_WRITE"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "PLAYER_LIFECYCLE_WRITE"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "PLAYER_LIFECYCLE_WRITE"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "PLAYER_LIFECYCLE_WRITE"), false);
+});
+
+test("BIN-587 B2.3: assertAdminPermission kaster for HALL_OPERATOR på lifecycle-write", () => {
+  assert.throws(() => assertAdminPermission("HALL_OPERATOR", "PLAYER_LIFECYCLE_WRITE"));
+  assert.throws(() => assertAdminPermission("PLAYER", "PLAYER_LIFECYCLE_WRITE"));
+});
+
 // ── BIN-591: hall-scope ─────────────────────────────────────────────────────
 
 test("BIN-591: ADMIN har alltid hall-scope (global)", () => {

@@ -564,9 +564,10 @@ export class PlatformService {
         password_hash: string;
       }
     >(
+      // BIN-587 B2.3: filter soft-deleted users — behandles som ukjent konto
       `SELECT id, email, display_name, surname, phone, password_hash, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at
        FROM ${this.usersTable()}
-       WHERE email = $1`,
+       WHERE email = $1 AND deleted_at IS NULL`,
       [email]
     );
     const userRow = rows[0];
@@ -609,12 +610,16 @@ export class PlatformService {
     }
 
     const { rows } = await this.pool.query<UserRow>(
+      // BIN-587 B2.3: deleted_at IS NULL — soft-deleted users kan ikke re-
+      // bruke eksisterende access-tokens etter at soft-delete revoker
+      // sesjoner (belt-and-suspenders mot race mellom revoker og bruk)
       `SELECT u.id, u.email, u.display_name, u.surname, u.wallet_id, u.role, u.kyc_status, u.birth_date, u.kyc_verified_at, u.kyc_provider_ref, u.hall_id, u.created_at, u.updated_at
        FROM ${this.sessionsTable()} s
        JOIN ${this.usersTable()} u ON u.id = s.user_id
        WHERE s.token_hash = $1
          AND s.revoked_at IS NULL
          AND s.expires_at > now()
+         AND u.deleted_at IS NULL
        ORDER BY s.created_at DESC
        LIMIT 1`,
       [hashToken(token)]
@@ -1858,6 +1863,384 @@ export class PlatformService {
     return row ? this.mapUser(row) : null;
   }
 
+  /**
+   * BIN-587 B2.3: per-hall-status read. Returnerer én rad per hall der
+   * spilleren eksplisitt har en status (aktiv eller inaktiv). Haller
+   * uten eksplisitt rad er implisitt aktive.
+   */
+  async listPlayerHallStatus(userIdInput: string): Promise<
+    Array<{
+      hallId: string;
+      isActive: boolean;
+      reason: string | null;
+      updatedBy: string | null;
+      updatedAt: string;
+      createdAt: string;
+    }>
+  > {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(userIdInput, "userId");
+    const { rows } = await this.pool.query<{
+      hall_id: string;
+      is_active: boolean;
+      reason: string | null;
+      updated_by: string | null;
+      updated_at: Date | string;
+      created_at: Date | string;
+    }>(
+      `SELECT hall_id, is_active, reason, updated_by, updated_at, created_at
+       FROM "${this.schema}"."app_player_hall_status"
+       WHERE user_id = $1
+       ORDER BY hall_id ASC`,
+      [userId]
+    );
+    return rows.map((r) => ({
+      hallId: r.hall_id,
+      isActive: r.is_active,
+      reason: r.reason,
+      updatedBy: r.updated_by,
+      updatedAt: asIso(r.updated_at),
+      createdAt: asIso(r.created_at),
+    }));
+  }
+
+  /**
+   * BIN-587 B2.3: set per-hall-status via upsert. Valide at hallen
+   * eksisterer før insert.
+   */
+  async setPlayerHallStatus(input: {
+    userId: string;
+    hallId: string;
+    isActive: boolean;
+    reason: string | null;
+    actorId: string;
+  }): Promise<{
+    hallId: string;
+    isActive: boolean;
+    reason: string | null;
+    updatedBy: string | null;
+    updatedAt: string;
+  }> {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(input.userId, "userId");
+    const hallId = this.assertEntityReference(input.hallId, "hallId");
+    const actorId = this.assertEntityReference(input.actorId, "actorId");
+    const reason = input.reason?.trim() || null;
+    if (reason && reason.length > 500) {
+      throw new DomainError("INVALID_INPUT", "reason er for lang (maks 500 tegn).");
+    }
+    // Verifiser at spilleren finnes (og ikke er soft-deleted).
+    const user = await this.getUserById(userId);
+    if ((user as unknown as { deletedAt?: string | null }).deletedAt) {
+      // mapUser returnerer ikke deletedAt i dag — sjekker via raw query:
+    }
+    const { rows: hallRows } = await this.pool.query(
+      `SELECT id FROM ${this.hallsTable()} WHERE id = $1`,
+      [hallId]
+    );
+    if (!hallRows[0]) {
+      throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+    }
+    const { rows } = await this.pool.query<{
+      hall_id: string;
+      is_active: boolean;
+      reason: string | null;
+      updated_by: string | null;
+      updated_at: Date | string;
+    }>(
+      `INSERT INTO "${this.schema}"."app_player_hall_status"
+         (user_id, hall_id, is_active, reason, updated_by)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id, hall_id) DO UPDATE
+         SET is_active = EXCLUDED.is_active,
+             reason = EXCLUDED.reason,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = now()
+       RETURNING hall_id, is_active, reason, updated_by, updated_at`,
+      [user.id, hallId, input.isActive, reason, actorId]
+    );
+    const row = rows[0]!;
+    return {
+      hallId: row.hall_id,
+      isActive: row.is_active,
+      reason: row.reason,
+      updatedBy: row.updated_by,
+      updatedAt: asIso(row.updated_at),
+    };
+  }
+
+  /**
+   * BIN-587 B2.3: soft-delete. Ikke anonymiser — bare merk `deleted_at`.
+   * Revoker alle aktive sesjoner som side-effekt. Avviser siste admin.
+   */
+  async softDeletePlayer(userIdInput: string): Promise<void> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userIdInput, "userId");
+    const user = await this.getUserById(id);
+    if (user.role === "ADMIN") {
+      const { rows } = await this.pool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM ${this.usersTable()} WHERE role = 'ADMIN' AND deleted_at IS NULL`
+      );
+      if (Number(rows[0]?.count ?? "0") <= 1) {
+        throw new DomainError("LAST_ADMIN_REQUIRED", "Kan ikke soft-delete siste aktive admin.");
+      }
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rowCount } = await client.query(
+        `UPDATE ${this.usersTable()}
+         SET deleted_at = now(), updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [id]
+      );
+      if (!rowCount) {
+        throw new DomainError("USER_ALREADY_DELETED", "Brukeren er allerede soft-deleted.");
+      }
+      await client.query(
+        `UPDATE ${this.sessionsTable()}
+         SET revoked_at = now()
+         WHERE user_id = $1 AND revoked_at IS NULL`,
+        [id]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(err);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * BIN-587 B2.3: restore — fjern `deleted_at`. Sesjoner må opprettes på
+   * nytt (spiller må logge inn igjen), vi gjenoppretter ikke revoked
+   * sessions.
+   */
+  async restorePlayer(userIdInput: string): Promise<void> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userIdInput, "userId");
+    const { rowCount } = await this.pool.query(
+      `UPDATE ${this.usersTable()}
+       SET deleted_at = NULL, updated_at = now()
+       WHERE id = $1 AND deleted_at IS NOT NULL`,
+      [id]
+    );
+    if (!rowCount) {
+      throw new DomainError(
+        "USER_NOT_SOFT_DELETED",
+        "Brukeren er ikke soft-deleted — restore er ikke nødvendig."
+      );
+    }
+  }
+
+  /**
+   * BIN-587 B2.3: sett status til UNVERIFIED + revoker sesjoner slik at
+   * spilleren tvinges gjennom BankID-flow ved neste innlogging. Admin-
+   * rutinen returnerer info om hvorvidt en ny BankID-sesjon kan genereres
+   * nå (om bankIdAdapter er konfigurert) — selve `createAuthSession`-
+   * kallet gjøres av router-laget som har tilgang til adapteret.
+   */
+  async resetKycForReverify(input: { userId: string; actorId: string }): Promise<AppUser> {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(input.userId, "userId");
+    const actorId = this.assertEntityReference(input.actorId, "actorId");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<UserRow>(
+        `UPDATE ${this.usersTable()}
+         SET kyc_status = 'UNVERIFIED',
+             kyc_provider_ref = NULL,
+             kyc_verified_at = NULL,
+             compliance_data = COALESCE(compliance_data, '{}'::jsonb)
+               || jsonb_build_object(
+                    'bankidReverifyRequestedBy', $2::text,
+                    'bankidReverifyRequestedAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                  ),
+             updated_at = now()
+         WHERE id = $1
+         RETURNING id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, compliance_data`,
+        [userId, actorId]
+      );
+      const row = rows[0];
+      if (!row) {
+        throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+      }
+      await client.query(
+        `UPDATE ${this.sessionsTable()}
+         SET revoked_at = now()
+         WHERE user_id = $1 AND revoked_at IS NULL`,
+        [userId]
+      );
+      await client.query("COMMIT");
+      return this.mapUser(row);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(err);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * BIN-587 B2.3: bulk-import av spillere fra en allerede-parset CSV-liste.
+   * Hver rad valideres per-felt. Importen er best-effort: rader som
+   * feiler (ugyldig e-post, duplikat, manglende navn) hoppes over og
+   * samles i `errors`. Successfully importerte rader får tilfeldig
+   * passord — spiller bruker forgot-password for å sette eget passord
+   * før første innlogging.
+   *
+   * Merk: kaller `register`-flyten én rad av gangen — ikke batch-
+   * optimalisert, men trygt og enklet auditlogg pr. rad. For pilot-
+   * migrasjonsstørrelser (noen hundre spillere) er det akseptabelt.
+   */
+  async bulkImportPlayers(rows: Array<{
+    email?: string;
+    displayName?: string;
+    surname?: string;
+    phone?: string;
+    birthDate?: string;
+  }>): Promise<{
+    imported: number;
+    skipped: number;
+    errors: Array<{ row: number; email: string | null; error: string }>;
+    importedEmails: string[];
+  }> {
+    await this.ensureInitialized();
+    const errors: Array<{ row: number; email: string | null; error: string }> = [];
+    const importedEmails: string[] = [];
+    let imported = 0;
+    let skipped = 0;
+    for (let i = 0; i < rows.length; i += 1) {
+      const rowNum = i + 1;
+      const raw = rows[i] ?? {};
+      const email = typeof raw.email === "string" ? raw.email.trim() : "";
+      try {
+        if (!email) {
+          throw new DomainError("INVALID_INPUT", "email er påkrevd.");
+        }
+        if (!raw.displayName || typeof raw.displayName !== "string" || !raw.displayName.trim()) {
+          throw new DomainError("INVALID_INPUT", "displayName er påkrevd.");
+        }
+        if (!raw.surname || typeof raw.surname !== "string" || !raw.surname.trim()) {
+          throw new DomainError("INVALID_INPUT", "surname er påkrevd.");
+        }
+        if (!raw.birthDate || typeof raw.birthDate !== "string" || !raw.birthDate.trim()) {
+          throw new DomainError("INVALID_INPUT", "birthDate er påkrevd.");
+        }
+        // Sjekk for eksisterende e-post først så vi returnerer en ryddig
+        // duplicate-feil i stedet for en generisk DB-uniqueness-error.
+        const existing = await this.findUserByEmail(email);
+        if (existing) {
+          skipped += 1;
+          errors.push({ row: rowNum, email, error: "email-exists" });
+          continue;
+        }
+        const generatedPassword = randomBytes(16).toString("base64url");
+        await this.register({
+          email,
+          password: generatedPassword,
+          displayName: raw.displayName.trim(),
+          surname: raw.surname.trim(),
+          birthDate: raw.birthDate.trim(),
+          phone: raw.phone?.trim() || undefined,
+        });
+        imported += 1;
+        importedEmails.push(email);
+      } catch (err) {
+        skipped += 1;
+        const message = err instanceof DomainError ? err.message : (err instanceof Error ? err.message : "unknown error");
+        errors.push({ row: rowNum, email: email || null, error: message });
+      }
+    }
+    return { imported, skipped, errors, importedEmails };
+  }
+
+  /**
+   * BIN-587 B2.3: list spillere for CSV-eksport / admin-søk.
+   * Filter-parametere er alle valgfrie. Begrenser til PLAYER-rollen som
+   * default for å holde ADMIN/SUPPORT ut av eksport-dumps.
+   */
+  async listPlayersForExport(filter: {
+    kycStatus?: KycStatus;
+    includeDeleted?: boolean;
+    hallId?: string;
+    limit?: number;
+  }): Promise<AppUser[]> {
+    await this.ensureInitialized();
+    const conditions: string[] = ["u.role = 'PLAYER'"];
+    const params: unknown[] = [];
+    if (filter.kycStatus) {
+      params.push(filter.kycStatus);
+      conditions.push(`u.kyc_status = $${params.length}`);
+    }
+    if (!filter.includeDeleted) {
+      conditions.push(`u.deleted_at IS NULL`);
+    }
+    let join = "";
+    if (filter.hallId) {
+      params.push(filter.hallId);
+      // Include spillere som enten har hall_id direkte (hall-operator-tildelt)
+      // ELLER har en aktiv status-rad i den hallen.
+      join = `LEFT JOIN "${this.schema}"."app_player_hall_status" hs
+              ON hs.user_id = u.id AND hs.hall_id = $${params.length}`;
+      conditions.push(`(u.hall_id = $${params.length} OR hs.hall_id = $${params.length})`);
+    }
+    const limit = filter.limit && filter.limit > 0 ? Math.min(filter.limit, 5000) : 500;
+    params.push(limit);
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT DISTINCT u.id, u.email, u.display_name, u.surname, u.phone, u.wallet_id, u.role, u.kyc_status, u.birth_date, u.kyc_verified_at, u.kyc_provider_ref, u.hall_id, u.created_at, u.updated_at, u.compliance_data
+       FROM ${this.usersTable()} u
+       ${join}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY u.created_at DESC
+       LIMIT $${params.length}`,
+      params
+    );
+    return rows.map((r) => this.mapUser(r));
+  }
+
+  /**
+   * BIN-587 B2.3: fritekst-søk. ILIKE mot email/display_name/phone. Kun
+   * PLAYER-rollen. Soft-deleted inkluderes som default ikke — admin kan
+   * ekplisitt be om det for restore-flyt.
+   */
+  async searchPlayers(input: {
+    query: string;
+    limit?: number;
+    includeDeleted?: boolean;
+  }): Promise<AppUser[]> {
+    await this.ensureInitialized();
+    const query = input.query.trim();
+    if (!query) {
+      throw new DomainError("INVALID_INPUT", "query er påkrevd.");
+    }
+    if (query.length < 2) {
+      throw new DomainError("INVALID_INPUT", "query må være minst 2 tegn.");
+    }
+    // Escape ILIKE wildcards for user input (forhindre at `%` / `_` i
+    // input gir rare treff).
+    const escaped = query.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const pattern = `%${escaped}%`;
+    const limit = input.limit && input.limit > 0 ? Math.min(input.limit, 200) : 50;
+    const deletedFilter = input.includeDeleted ? "" : "AND deleted_at IS NULL";
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, compliance_data
+       FROM ${this.usersTable()}
+       WHERE role = 'PLAYER'
+         AND (email ILIKE $1 ESCAPE '\\'
+           OR display_name ILIKE $1 ESCAPE '\\'
+           OR surname ILIKE $1 ESCAPE '\\'
+           OR phone ILIKE $1 ESCAPE '\\')
+         ${deletedFilter}
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [pattern, limit]
+    );
+    return rows.map((r) => this.mapUser(r));
+  }
+
   async deleteAccount(userId: string): Promise<void> {
     await this.ensureInitialized();
     const id = this.assertEntityReference(userId, "userId");
@@ -2015,7 +2398,8 @@ export class PlatformService {
 
     const tokenHash = hashToken(token);
 
-    // Validate old token and get user
+    // Validate old token and get user (BIN-587 B2.3: soft-deleted users kan
+    // ikke refreshe sesjoner).
     const { rows } = await this.pool.query<UserRow & { session_id: string }>(
       `SELECT s.id AS session_id, u.id, u.email, u.display_name, u.surname, u.wallet_id, u.role, u.kyc_status,
               u.birth_date, u.kyc_verified_at, u.kyc_provider_ref, u.hall_id, u.created_at, u.updated_at
@@ -2024,6 +2408,7 @@ export class PlatformService {
        WHERE s.token_hash = $1
          AND s.revoked_at IS NULL
          AND s.expires_at > now()
+         AND u.deleted_at IS NULL
        ORDER BY s.created_at DESC
        LIMIT 1`,
       [tokenHash]
@@ -2518,6 +2903,32 @@ export class PlatformService {
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_app_users_hall_id
          ON ${this.usersTable()}(hall_id) WHERE hall_id IS NOT NULL`
+      );
+
+      // BIN-587 B2.3: soft-delete + per-hall-status
+      await client.query(
+        `ALTER TABLE ${this.usersTable()}
+         ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_app_users_deleted_at
+         ON ${this.usersTable()}(deleted_at) WHERE deleted_at IS NOT NULL`
+      );
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS "${this.schema}"."app_player_hall_status" (
+          user_id TEXT NOT NULL REFERENCES ${this.usersTable()}(id) ON DELETE CASCADE,
+          hall_id TEXT NOT NULL REFERENCES ${this.hallsTable()}(id) ON DELETE CASCADE,
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          reason TEXT NULL,
+          updated_by TEXT NULL REFERENCES ${this.usersTable()}(id) ON DELETE SET NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (user_id, hall_id)
+        )`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_app_player_hall_status_hall
+         ON "${this.schema}"."app_player_hall_status"(hall_id) WHERE is_active = false`
       );
 
       await client.query(

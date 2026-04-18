@@ -426,6 +426,7 @@ app.use(createAdminPlayersRouter({
   platformService,
   auditLogService,
   emailService,
+  bankIdAdapter,
   webBaseUrl,
   supportEmail,
 }));
