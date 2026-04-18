@@ -12,6 +12,7 @@ import { TicketOverlay } from "../components/TicketOverlay.js";
 import { CalledNumbersOverlay } from "../components/CalledNumbersOverlay.js";
 import { Game1BuyPopup } from "../components/Game1BuyPopup.js";
 import { TicketGridScroller } from "../components/TicketGridScroller.js";
+import { TicketGroup, type TicketGroupVariant } from "../components/TicketGroup.js";
 import { CenterBall } from "../components/CenterBall.js";
 import { TicketCard } from "../../game2/components/TicketCard.js";
 import { ClaimButton } from "../../game2/components/ClaimButton.js";
@@ -374,23 +375,117 @@ export class PlayScreen extends Container {
       if (result.isWon && result.claimType === "BINGO") this.bingoAlreadyWon = true;
     }
 
-    // Build inline tickets with color from backend (falls back to cycling)
-    // BIN-413/415: Variant-aware grouping — Elvis shows color name, Traffic Light shows R/Y/G
+    // Build inline tickets with color from backend (falls back to cycling).
+    //
+    // BIN-413/415: Variant-aware grouping —
+    //   elvis       → 2 mini-tickets in a TicketGroup (horizontal)
+    //   large       → 3 mini-tickets in a TicketGroup (vertical)
+    //   traffic-*   → 3 mini-tickets in a TicketGroup (vertical, R/Y/G)
+    //   everything else → one TicketCard (as before)
+    //
+    // Unity refs: Game1ViewPurchaseElvisTicket.cs:14-17 (2-stack, shared BG);
+    // PrefabBingoGame1LargeTicket5x5.cs:8 (3-stack, shared imageBG).
+    // Cell-size MUST stay at 44 for Large — Unity prefab
+    // `Prefab - Bingo Game 1 Large Ticket 5x5.prefab:10354` keeps m_CellSize
+    // {44,37} identical to small tickets; Large is a vertical composition,
+    // not a scaled-up single ticket.
     this.inlineScroller.clearCards();
-    for (let i = 0; i < state.myTickets.length; i++) {
-      const ticket = state.myTickets[i];
+
+    const tickets = state.myTickets;
+    let i = 0;
+    while (i < tickets.length) {
+      const ticket = tickets[i];
+      const ticketType = (ticket.type ?? "").toLowerCase();
+
+      // Determine which grouping applies (if any).
+      let groupVariant: TicketGroupVariant | null = null;
+      let groupSize = 1;
+      if (ticketType === "elvis") {
+        groupVariant = "elvis";
+        groupSize = 2;
+      } else if (ticketType === "large") {
+        groupVariant = "large";
+        groupSize = 3;
+      } else if (ticketType.startsWith("traffic-")) {
+        groupVariant = "traffic";
+        groupSize = 3;
+      }
+
+      // Confirm the slice actually has `groupSize` matching tickets in a row.
+      // If backend produced a partial group (edge case), fall back to solo.
+      if (groupVariant !== null) {
+        const slice = tickets.slice(i, i + groupSize);
+        const allMatch = slice.length === groupSize && slice.every((t) => {
+          const tt = (t.type ?? "").toLowerCase();
+          return groupVariant === "traffic"
+            ? tt.startsWith("traffic-")
+            : tt === ticketType;
+        });
+        if (!allMatch) groupVariant = null;
+      }
+
+      if (groupVariant !== null) {
+        const slice = tickets.slice(i, i + groupSize);
+        const miniThemes = slice.map((t, idx) =>
+          getTicketThemeByName(t.color, i + idx),
+        );
+        const sharedTheme = miniThemes[0];
+
+        // Grid size follows the first ticket (all tickets in a group share it).
+        const first = slice[0];
+        const rows = first.grid?.length ?? 3;
+        const cols = first.grid?.[0]?.length ?? 5;
+        const gridSize: "3x5" | "5x5" = rows === 5 && cols === 5 ? "5x5" : "3x5";
+
+        // Group name: Unity uses ticket.color ("Elvis 1", "Large Red") as the
+        // group header; for traffic-light the whole group is just "Trafikklys".
+        const groupName =
+          groupVariant === "traffic"
+            ? "Trafikklys"
+            : first.color ?? groupVariant;
+
+        // Price: sum of each member's price (Unity shows one combined price).
+        const groupPrice = slice.reduce((sum, t) => {
+          const tt = state.ticketTypes?.find((x) => x.type === t.type);
+          return sum + Math.round((state.entryFee || 10) * (tt?.priceMultiplier ?? 1));
+        }, 0);
+
+        const group = new TicketGroup({
+          variant: groupVariant,
+          tickets: slice,
+          groupName,
+          price: groupPrice,
+          sharedTheme,
+          miniThemes,
+          cellSize: 44,
+          gridSize,
+        });
+
+        // Apply existing marks per mini-ticket, mirroring the solo-card flow.
+        for (let k = 0; k < slice.length; k++) {
+          const mini = group.miniTickets[k];
+          if (state.myMarks[i + k]) {
+            mini.markNumbers(state.myMarks[i + k]);
+          } else {
+            for (const n of state.drawnNumbers) mini.markNumber(n);
+          }
+        }
+
+        if (state.myLuckyNumber) group.highlightLuckyNumber(state.myLuckyNumber);
+        this.inlineScroller.addCard(group);
+        i += groupSize;
+        continue;
+      }
+
+      // ── Solo ticket (small / default) ──
       const theme = getTicketThemeByName(ticket.color, i);
-      // Determine grid size from actual ticket data (Databingo60 = 3×5, Bingo75 = 5×5)
       const ticketRows = ticket.grid?.length ?? 3;
       const ticketCols = ticket.grid?.[0]?.length ?? 5;
       const gridSize = (ticketRows === 5 && ticketCols === 5) ? "5x5" : "3x5";
-      // Unity: PrefabBingoGame1LargeTicket5x5 uses larger cell sizes for "large" ticket types
-      const isLargeType = ticket.type?.toLowerCase().includes("large") ?? false;
-      const cellSize = isLargeType ? 52 : 44;
 
       const card = new TicketCard(i, {
         gridSize,
-        cellSize,
+        cellSize: 44, // Unity 44×37 — identical for small and large mini-tickets.
         cardBg: theme.cardBg,
         headerBg: theme.headerBg,
         headerText: theme.headerText,
@@ -401,18 +496,11 @@ export class PlayScreen extends Container {
       card.loadTicket(ticket);
 
       // Set ticket price (Unity: each ticket shows price on the card)
-      const ticketType = state.ticketTypes?.find((t) => t.type === ticket.type);
-      const ticketPrice = Math.round((state.entryFee || 10) * (ticketType?.priceMultiplier ?? 1));
+      const ticketType2 = state.ticketTypes?.find((t) => t.type === ticket.type);
+      const ticketPrice = Math.round((state.entryFee || 10) * (ticketType2?.priceMultiplier ?? 1));
       card.setPrice(ticketPrice);
 
-      // Set variant-specific header label (Unity: ticketColor as name for Elvis)
-      if (ticket.type === "elvis" && ticket.color) {
-        card.setHeaderLabel(ticket.color);
-      } else if (ticket.type?.startsWith("traffic-") && ticket.color) {
-        card.setHeaderLabel(ticket.color);
-      } else {
-        card.setHeaderLabel(`${i + 1} — ${ticket.color ?? "standard"}`);
-      }
+      card.setHeaderLabel(`${i + 1} — ${ticket.color ?? "standard"}`);
 
       if (state.myMarks[i]) {
         card.markNumbers(state.myMarks[i]);
@@ -422,6 +510,7 @@ export class PlayScreen extends Container {
 
       if (state.myLuckyNumber) card.highlightLuckyNumber(state.myLuckyNumber);
       this.inlineScroller.addCard(card);
+      i++;
     }
     this.inlineScroller.sortBestFirst();
     this.updateClaimButtons(state);
@@ -545,8 +634,10 @@ export class PlayScreen extends Container {
     this.centerTop.setCanStartNow(state.canStartNow, state.gameStatus === "RUNNING");
   }
 
-  /** Expose inline ticket cards for external operations (e.g. lucky number highlighting). */
-  getInlineCards(): import("../../game2/components/TicketCard.js").TicketCard[] {
+  /** Expose inline ticket cards (or multi-ticket groups) for external
+   *  operations — e.g. lucky number highlighting. Both TicketCard and
+   *  TicketGroup expose `highlightLuckyNumber(n)`. */
+  getInlineCards(): import("../components/TicketGridScroller.js").TicketDisplayItem[] {
     return this.inlineScroller.getCards();
   }
 
