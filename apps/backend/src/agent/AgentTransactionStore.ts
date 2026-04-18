@@ -15,6 +15,10 @@ export type ActionType =
   | "TICKET_REGISTER"
   | "TICKET_CANCEL"
   | "PRODUCT_SALE"
+  | "MACHINE_CREATE"
+  | "MACHINE_TOPUP"
+  | "MACHINE_CLOSE"
+  | "MACHINE_VOID"
   | "FEE"
   | "OTHER";
 

@@ -63,6 +63,8 @@ tags:
     description: Agent cash-ops (cash-in/out), player lookup + balance, digital/physical ticket sale + cancel, transaction log. BIN-583 B3.2.
   - name: Agent — Settlement
     description: Daglig kasse-oppgjør — control-daily-balance, close-day, PDF-eksport, admin edit. BIN-583 B3.3.
+  - name: Agent — Metronia
+    description: Metronia ekstern-maskin-integrasjon — ticket create/topup/payout/void + rapporter. BIN-583 B3.4.
 
 components:
   securitySchemes:
@@ -781,6 +783,52 @@ components:
         expectedBusinessDate: { type: string, format: date }
         hasPendingPreviousDay: { type: boolean }
         pendingShiftId: { type: [string, "null"] }
+
+    # ── BIN-583 B3.4: machine-ticket-skjema ──────────────────────────────────
+    MachineTicket:
+      type: object
+      required: [id, machineName, ticketNumber, externalTicketId, hallId,
+                 agentUserId, playerUserId, initialAmountCents,
+                 currentBalanceCents, isClosed, uniqueTransaction,
+                 createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        machineName:
+          type: string
+          enum: [METRONIA, OK_BINGO]
+        ticketNumber: { type: string }
+        externalTicketId: { type: string }
+        hallId: { type: string }
+        shiftId: { type: [string, "null"] }
+        agentUserId: { type: string }
+        playerUserId: { type: string }
+        roomId: { type: [string, "null"] }
+        initialAmountCents: { type: integer }
+        totalTopupCents: { type: integer }
+        currentBalanceCents: { type: integer }
+        payoutCents: { type: [integer, "null"] }
+        isClosed: { type: boolean }
+        closedAt: { type: [string, "null"], format: date-time }
+        closedByUserId: { type: [string, "null"] }
+        voidAt: { type: [string, "null"], format: date-time }
+        voidByUserId: { type: [string, "null"] }
+        voidReason: { type: [string, "null"] }
+        uniqueTransaction: { type: string }
+        otherData: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    MetroniaSalesAggregate:
+      type: object
+      required: [totalCreatedNok, totalToppedUpNok, totalPaidOutNok, ticketCount, voidCount]
+      properties:
+        shiftId: { type: [string, "null"] }
+        hallId: { type: string }
+        totalCreatedNok: { type: number }
+        totalToppedUpNok: { type: number }
+        totalPaidOutNok: { type: number }
+        ticketCount: { type: integer }
+        voidCount: { type: integer }
 
 security:
   - BearerAuth: []
@@ -5296,3 +5344,236 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
+
+  # ── BIN-583 B3.4: Agent + Admin Metronia ──────────────────────────────────
+
+  /api/agent/metronia/register-ticket:
+    post:
+      tags: [Agent — Metronia]
+      summary: Opprett ny Metronia-ticket — debit player wallet + Metronia API + DB-rad
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerUserId, amountNok, clientRequestId]
+              properties:
+                playerUserId: { type: string }
+                amountNok: { type: integer, minimum: 1, maximum: 1000 }
+                clientRequestId: { type: string }
+                notes: { type: string }
+      responses:
+        "200":
+          description: Ticket opprettet
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: INVALID_AMOUNT / INSUFFICIENT_BALANCE / PLAYER_NOT_AT_HALL / METRONIA_API_ERROR
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/metronia/topup:
+    post:
+      tags: [Agent — Metronia]
+      summary: Topup eksisterende ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketNumber, amountNok, clientRequestId]
+              properties:
+                ticketNumber: { type: string }
+                amountNok: { type: integer, minimum: 1, maximum: 1000 }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Topup utført
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: MACHINE_TICKET_NOT_FOUND / MACHINE_TICKET_CLOSED / INSUFFICIENT_BALANCE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/metronia/payout:
+    post:
+      tags: [Agent — Metronia]
+      summary: Close ticket via Metronia + credit player wallet med final balance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketNumber, clientRequestId]
+              properties:
+                ticketNumber: { type: string }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Ticket lukket
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: MACHINE_TICKET_NOT_FOUND / MACHINE_TICKET_CLOSED / METRONIA_API_ERROR
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/metronia/void:
+    post:
+      tags: [Agent — Metronia]
+      summary: Void ticket innen 5 min — counter-tx, refunderer initial+topup
+      description: |
+        AGENT kan void-e egen ticket innen 5 min. ADMIN kan force utover
+        vinduet. Refunderer hele initial + topup-beløp uavhengig av
+        Metronia-balance. App_machine_tickets.is_closed=true; void_at
+        og void_reason settes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketNumber, reason]
+              properties:
+                ticketNumber: { type: string }
+                reason: { type: string }
+      responses:
+        "200":
+          description: Ticket voided
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: VOID_REASON_REQUIRED / VOID_WINDOW_EXPIRED / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/metronia/ticket/{ticketNumber}:
+    parameters:
+      - in: path
+        name: ticketNumber
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — Metronia]
+      summary: Hent enkelt Metronia-ticket (AGENT begrenset til egen)
+      responses:
+        "200":
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: MACHINE_TICKET_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/metronia/daily-sales:
+    get:
+      tags: [Agent — Metronia]
+      summary: Aggregat for AGENTs current shift
+      responses:
+        "200":
+          description: Aggregat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MetroniaSalesAggregate" }
+
+  /api/admin/metronia/hall-summary/{hallId}:
+    parameters:
+      - in: path
+        name: hallId
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — Metronia]
+      summary: Per-hall Metronia-aggregat (ADMIN/HALL_OPERATOR/SUPPORT)
+      parameters:
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Hall-summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MetroniaSalesAggregate" }
+
+  /api/admin/metronia/daily-report:
+    get:
+      tags: [Agent — Metronia]
+      summary: Global daglig Metronia-rapport — totals + per-hall (ADMIN/HALL_OPERATOR/SUPPORT)
+      parameters:
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Daily report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totals: { $ref: "#/components/schemas/MetroniaSalesAggregate" }
+                          perHall:
+                            type: array
+                            items: { $ref: "#/components/schemas/MetroniaSalesAggregate" }

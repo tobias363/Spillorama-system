@@ -143,7 +143,17 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    * BIN-583 B3.6: agent-siden av produkt-salg (cart + finalize).
    * AGENT kun på egen shift; ADMIN inkludert for "ADMIN har alle"-invariant.
    */
-  AGENT_PRODUCT_SELL: ["ADMIN", "AGENT"]
+  AGENT_PRODUCT_SELL: ["ADMIN", "AGENT"],
+  /**
+   * BIN-583 B3.4: ekstern-maskin-integrasjon (Metronia + B3.5 OK Bingo).
+   *   - MACHINE_TICKET_WRITE: opprett/topup/close/void via agent-flyt.
+   *     AGENT for egen shift; ADMIN for force + helpdesk.
+   *   - MACHINE_REPORT_READ : rapporter (daily-sales, hall-summary,
+   *     daily-report) tilgjengelig for alle admin-roller + AGENT for
+   *     egen logg.
+   */
+  MACHINE_TICKET_WRITE: ["ADMIN", "AGENT"],
+  MACHINE_REPORT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

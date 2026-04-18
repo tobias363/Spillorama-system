@@ -65,6 +65,12 @@ import { createAdminProductsRouter } from "./routes/adminProducts.js";
 import { createAgentProductsRouter } from "./routes/agentProducts.js";
 import { ProductService } from "./agent/ProductService.js";
 import { AgentProductSaleService } from "./agent/AgentProductSaleService.js";
+import { createAgentMetroniaRouter } from "./routes/agentMetronia.js";
+import { MetroniaTicketService } from "./agent/MetroniaTicketService.js";
+import { PostgresMachineTicketStore } from "./agent/MachineTicketStore.js";
+import { HttpMetroniaApiClient } from "./integration/metronia/HttpMetroniaApiClient.js";
+import { StubMetroniaApiClient } from "./integration/metronia/StubMetroniaApiClient.js";
+import type { MetroniaApiClient } from "./integration/metronia/MetroniaApiClient.js";
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
@@ -687,6 +693,38 @@ app.use(createAgentProductsRouter({
   agentShiftService,
   productService,
   productSaleService: agentProductSaleService,
+}));
+
+// BIN-583 B3.4: Metronia external-machine integration.
+// StubClient default-er når METRONIA_API_URL mangler (lokal-dev/CI uten
+// ekte API). Real HttpClient brukes når env er satt.
+const metroniaApiUrl = (process.env.METRONIA_API_URL ?? "").trim();
+const metroniaClient: MetroniaApiClient = metroniaApiUrl
+  ? new HttpMetroniaApiClient({
+      baseUrl: metroniaApiUrl,
+      apiToken: (process.env.METRONIA_API_TOKEN ?? "").trim(),
+      tlsRejectUnauthorized: (process.env.METRONIA_TLS_REJECT_UNAUTHORIZED ?? "true") !== "false",
+      timeoutMs: Number.parseInt(process.env.METRONIA_TIMEOUT_MS ?? "10000", 10),
+    })
+  : new StubMetroniaApiClient();
+const machineTicketStore = new PostgresMachineTicketStore({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const metroniaTicketService = new MetroniaTicketService({
+  platformService,
+  walletAdapter,
+  agentService,
+  agentShiftService,
+  transactionStore: agentTransactionStore,
+  machineTicketStore,
+  metroniaClient,
+});
+app.use(createAgentMetroniaRouter({
+  platformService,
+  agentService,
+  metroniaTicketService,
+  auditLogService,
 }));
 
 app.use(createAdminRouter({
