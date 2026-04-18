@@ -9,7 +9,7 @@ import { DomainError } from "../game/BingoEngine.js";
 
 const scrypt = promisify(scryptCallback);
 
-export const APP_USER_ROLES = ["ADMIN", "HALL_OPERATOR", "SUPPORT", "PLAYER"] as const;
+export const APP_USER_ROLES = ["ADMIN", "HALL_OPERATOR", "SUPPORT", "PLAYER", "AGENT"] as const;
 export type UserRole = (typeof APP_USER_ROLES)[number];
 export type KycStatus = "UNVERIFIED" | "PENDING" | "VERIFIED" | "REJECTED";
 
@@ -630,6 +630,89 @@ export class PlatformService {
       throw new DomainError("UNAUTHORIZED", "Innlogging er utløpt eller ugyldig.");
     }
     return this.withBalance(this.mapUser(row));
+  }
+
+  /**
+   * BIN-583 B3.1: admin-provisioned user creation.
+   *
+   * Used when an admin/hall-operator opprett-er en AGENT via
+   * /api/admin/agents. Skiller seg fra `register`:
+   *   - Ingen session lages (agenten må logge inn selv)
+   *   - Caller styrer role (må være gyldig UserRole)
+   *   - birthDate er valgfritt (AGENT skal ikke trenge fødselsdato
+   *     slik en spiller gjør — compliance-data er admin-data i stedet)
+   */
+  async createAdminProvisionedUser(input: {
+    email: string;
+    password: string;
+    displayName: string;
+    surname: string;
+    role: UserRole;
+    phone?: string;
+    birthDate?: string;
+  }): Promise<AppUser> {
+    await this.ensureInitialized();
+    const email = normalizeEmail(input.email);
+    const displayName = input.displayName.trim();
+    const surname = input.surname.trim();
+    this.assertEmail(email);
+    this.assertDisplayName(displayName);
+    this.assertSurname(surname);
+    this.assertPassword(input.password);
+    const birthDate = input.birthDate ? this.assertBirthDate(input.birthDate) : null;
+    if (!APP_USER_ROLES.includes(input.role)) {
+      throw new DomainError("INVALID_ROLE", "Ukjent rolle.");
+    }
+    const passwordHash = await this.hashPassword(input.password);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<{ id: string }>(
+        `SELECT id FROM ${this.usersTable()} WHERE email = $1`,
+        [email]
+      );
+      if (existingRows[0]) {
+        throw new DomainError("EMAIL_EXISTS", "E-post er allerede registrert.");
+      }
+      const userId = randomUUID();
+      const walletId = `wallet-user-${userId}`;
+      const phone = input.phone?.trim() || null;
+      const { rows: createdRows } = await client.query<UserRow>(
+        `INSERT INTO ${this.usersTable()}
+          (id, email, display_name, surname, password_hash, wallet_id, role, phone, birth_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date)
+         RETURNING id, email, display_name, surname, compliance_data, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, phone`,
+        [userId, email, displayName, surname, passwordHash, walletId, input.role, phone, birthDate]
+      );
+      await client.query("COMMIT");
+      await this.walletAdapter.ensureAccount(walletId);
+      return this.mapUser(createdRows[0]!);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * BIN-583 B3.1: admin-side password-reset for AGENT (and future roles).
+   * Skiller seg fra brukerens egen change-password — ingen verifikasjon
+   * av gammelt passord, kun admin-RBAC-sjekk hos kaller.
+   */
+  async setUserPassword(userId: string, newPassword: string): Promise<void> {
+    await this.ensureInitialized();
+    this.assertPassword(newPassword);
+    const passwordHash = await this.hashPassword(newPassword);
+    const { rowCount } = await this.pool.query(
+      `UPDATE ${this.usersTable()}
+       SET password_hash = $2, updated_at = now()
+       WHERE id = $1`,
+      [userId, passwordHash]
+    );
+    if (rowCount === 0) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
   }
 
   async listGames(options?: { includeDisabled?: boolean }): Promise<GameDefinition[]> {
@@ -2792,7 +2875,7 @@ export class PlatformService {
           display_name TEXT NOT NULL,
           password_hash TEXT NOT NULL,
           wallet_id TEXT UNIQUE NOT NULL,
-          role TEXT NOT NULL CHECK (role IN ('ADMIN', 'HALL_OPERATOR', 'SUPPORT', 'PLAYER')),
+          role TEXT NOT NULL CHECK (role IN ('ADMIN', 'HALL_OPERATOR', 'SUPPORT', 'PLAYER', 'AGENT')),
           kyc_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
           birth_date DATE NULL,
           kyc_verified_at TIMESTAMPTZ NULL,
@@ -3373,7 +3456,8 @@ export class PlatformService {
         definition.includes("'ADMIN'") &&
         definition.includes("'HALL_OPERATOR'") &&
         definition.includes("'SUPPORT'") &&
-        definition.includes("'PLAYER'");
+        definition.includes("'PLAYER'") &&
+        definition.includes("'AGENT'");
       if (hasAllRoles) {
         return;
       }
@@ -3390,7 +3474,7 @@ export class PlatformService {
     await client.query(
       `ALTER TABLE ${this.usersTable()}
        ADD CONSTRAINT app_users_role_check
-       CHECK (role IN ('ADMIN', 'HALL_OPERATOR', 'SUPPORT', 'PLAYER'))`
+       CHECK (role IN ('ADMIN', 'HALL_OPERATOR', 'SUPPORT', 'PLAYER', 'AGENT'))`
     );
   }
 

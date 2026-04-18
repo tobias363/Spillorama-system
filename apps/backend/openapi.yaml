@@ -53,6 +53,12 @@ tags:
     description: User-role and hall-assignment management. BIN-591.
   - name: Admin — Players
     description: Player KYC-moderation — list pending/rejected, approve, reject, resubmit, override. BIN-587 B2.2.
+  - name: Agent — Auth
+    description: Agent-side auth (login/logout/profile/password/avatar/language). BIN-583 B3.1.
+  - name: Agent — Shift
+    description: Agent shift lifecycle (start/end/current/history). BIN-583 B3.1.
+  - name: Admin — Agents
+    description: Admin CRUD for agent users (list/create/read/update/soft-delete). BIN-583 B3.1.
 
 components:
   securitySchemes:
@@ -587,6 +593,74 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    # ── BIN-583 B3.1: agent-domene ───────────────────────────────────────────
+    AgentHallAssignment:
+      type: object
+      required: [userId, hallId, isPrimary, assignedAt]
+      properties:
+        userId: { type: string }
+        hallId: { type: string }
+        isPrimary: { type: boolean }
+        assignedAt: { type: string, format: date-time }
+        assignedByUserId: { type: [string, "null"] }
+
+    AgentProfile:
+      type: object
+      required: [userId, email, displayName, role, agentStatus, language, halls, createdAt, updatedAt]
+      properties:
+        userId: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        surname: { type: [string, "null"] }
+        phone: { type: [string, "null"] }
+        role:
+          type: string
+          enum: [AGENT]
+        agentStatus:
+          type: string
+          enum: [active, inactive]
+        language:
+          type: string
+          description: ISO-639-1 (nb/nn/en/sv/da). Default nb.
+        avatarFilename: { type: [string, "null"] }
+        parentUserId: { type: [string, "null"] }
+        halls:
+          type: array
+          items: { $ref: "#/components/schemas/AgentHallAssignment" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AgentShift:
+      type: object
+      required: [id, userId, hallId, startedAt, isActive, isLoggedOut]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        hallId: { type: string }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: [string, "null"], format: date-time }
+        isActive: { type: boolean }
+        isLoggedOut: { type: boolean }
+        isDailyBalanceTransferred: { type: boolean }
+        dailyBalance: { type: number }
+        totalCashIn: { type: number }
+        totalCashOut: { type: number }
+        totalCardIn: { type: number }
+        totalCardOut: { type: number }
+        hallCashBalance: { type: number }
+        hallDropsafeBalance: { type: number }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AgentSessionResponse:
+      type: object
+      required: [accessToken, expiresAt, user, agent]
+      properties:
+        accessToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+        user: { $ref: "#/components/schemas/AppUser" }
+        agent: { $ref: "#/components/schemas/AgentProfile" }
 
 security:
   - BearerAuth: []
@@ -3983,3 +4057,479 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  # ── BIN-583 B3.1: Agent-auth ────────────────────────────────────────────────
+
+  /api/agent/auth/login:
+    post:
+      tags: [Agent — Auth]
+      summary: Agent login
+      description: Verifies credentials + role=AGENT + agent_status=active. Creates a session token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Login OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AgentSessionResponse"
+        "400":
+          description: INVALID_CREDENTIALS / FORBIDDEN / ACCOUNT_INACTIVE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/auth/logout:
+    post:
+      tags: [Agent — Auth]
+      summary: Logout — revoke access token
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          loggedOut: { type: boolean, enum: [true] }
+
+  /api/agent/auth/me:
+    get:
+      tags: [Agent — Auth]
+      summary: Get own agent profile
+      responses:
+        "200":
+          description: Agent profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentProfile" }
+        "400":
+          description: UNAUTHORIZED / FORBIDDEN / ACCOUNT_INACTIVE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    put:
+      tags: [Agent — Auth]
+      summary: Update own profile (self-service — displayName/email/phone only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string }
+                email: { type: string, format: email }
+                phone: { type: [string, "null"] }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentProfile" }
+        "400":
+          description: FORBIDDEN (whitelisted fields only) / UNAUTHORIZED
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/auth/change-password:
+    post:
+      tags: [Agent — Auth]
+      summary: Change own password (requires old password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [oldPassword, newPassword]
+              properties:
+                oldPassword: { type: string }
+                newPassword: { type: string }
+      responses:
+        "200":
+          description: Changed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          changed: { type: boolean, enum: [true] }
+        "400":
+          description: INVALID_CREDENTIALS (wrong oldPassword)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/auth/change-avatar:
+    post:
+      tags: [Agent — Auth]
+      summary: Set avatar filename reference
+      description: |
+        B3.1 sets only the filename reference. Actual file upload is handled
+        via a separate admin flow (SFTP/S3). Filename must match `^[\w.-]{1,128}$`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [avatarFilename]
+              properties:
+                avatarFilename: { type: string }
+      responses:
+        "200":
+          description: Avatar set
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentProfile" }
+        "400":
+          description: INVALID_AVATAR_FILENAME
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/auth/update-language:
+    post:
+      tags: [Agent — Auth]
+      summary: Set UI language (whitelisted — nb/nn/en/sv/da)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [language]
+              properties:
+                language: { type: string, enum: [nb, nn, en, sv, da] }
+      responses:
+        "200":
+          description: Language updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentProfile" }
+        "400":
+          description: INVALID_LANGUAGE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  # ── BIN-583 B3.1: Agent-shift ───────────────────────────────────────────────
+
+  /api/agent/shift/start:
+    post:
+      tags: [Agent — Shift]
+      summary: Open a new shift in the given hall
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hallId]
+              properties:
+                hallId: { type: string }
+      responses:
+        "200":
+          description: Shift opened
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentShift" }
+        "400":
+          description: HALL_NOT_ASSIGNED / SHIFT_ALREADY_ACTIVE / ACCOUNT_INACTIVE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/shift/end:
+    post:
+      tags: [Agent — Shift]
+      summary: Close the agent's active shift
+      responses:
+        "200":
+          description: Shift ended
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentShift" }
+        "400":
+          description: NO_ACTIVE_SHIFT / SHIFT_ALREADY_ENDED
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/shift/current:
+    get:
+      tags: [Agent — Shift]
+      summary: Get active shift (null if none)
+      responses:
+        "200":
+          description: Current shift or null
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          shift:
+                            oneOf:
+                              - $ref: "#/components/schemas/AgentShift"
+                              - type: "null"
+
+  /api/agent/shift/history:
+    get:
+      tags: [Agent — Shift]
+      summary: Paginated shift history for the caller
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        "200":
+          description: Paginated list of shifts (DESC on startedAt)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          shifts:
+                            type: array
+                            items: { $ref: "#/components/schemas/AgentShift" }
+                          limit: { type: integer }
+                          offset: { type: integer }
+
+  # ── BIN-583 B3.1: Admin-agents ──────────────────────────────────────────────
+
+  /api/admin/agents:
+    get:
+      tags: [Admin — Agents]
+      summary: List agents (AGENT_READ — ADMIN/HALL_OPERATOR/SUPPORT)
+      description: HALL_OPERATOR is automatically scoped to own hall.
+      parameters:
+        - in: query
+          name: hallId
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string, enum: [active, inactive] }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Paginated agent list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          agents:
+                            type: array
+                            items: { $ref: "#/components/schemas/AgentProfile" }
+                          limit: { type: integer }
+                          offset: { type: integer }
+        "400":
+          description: FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    post:
+      tags: [Admin — Agents]
+      summary: Create an agent (AGENT_WRITE — ADMIN/HALL_OPERATOR)
+      description: HALL_OPERATOR may only assign their own hall.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, displayName, surname]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+                displayName: { type: string }
+                surname: { type: string }
+                phone: { type: string }
+                language: { type: string, enum: [nb, nn, en, sv, da] }
+                parentUserId: { type: [string, "null"] }
+                hallIds:
+                  type: array
+                  items: { type: string }
+                primaryHallId: { type: string }
+      responses:
+        "200":
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentProfile" }
+        "400":
+          description: EMAIL_EXISTS / INVALID_PRIMARY_HALL / FORBIDDEN / INVALID_LANGUAGE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/admin/agents/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Admin — Agents]
+      summary: Get a single agent
+      responses:
+        "200":
+          description: Agent found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentProfile" }
+        "400":
+          description: AGENT_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    put:
+      tags: [Admin — Agents]
+      summary: Update agent (AGENT_WRITE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string }
+                email: { type: string, format: email }
+                phone: { type: [string, "null"] }
+                language: { type: string, enum: [nb, nn, en, sv, da] }
+                avatarFilename: { type: [string, "null"] }
+                agentStatus: { type: string, enum: [active, inactive] }
+                parentUserId: { type: [string, "null"] }
+                hallIds:
+                  type: array
+                  items: { type: string }
+                primaryHallId: { type: string }
+      responses:
+        "200":
+          description: Agent updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentProfile" }
+        "400":
+          description: FORBIDDEN / INVALID_PRIMARY_HALL / AGENT_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    delete:
+      tags: [Admin — Agents]
+      summary: Soft-delete agent (AGENT_DELETE — ADMIN only)
+      description: Blocks delete if agent has an active shift.
+      responses:
+        "200":
+          description: Soft-deleted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          deleted: { type: boolean, enum: [true] }
+        "400":
+          description: AGENT_HAS_ACTIVE_SHIFT / AGENT_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
