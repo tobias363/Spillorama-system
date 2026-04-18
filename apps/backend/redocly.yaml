@@ -1,0 +1,31 @@
+# BIN-605: Redocly config for OpenAPI-spec-validering i CI.
+#
+# Starter fra anbefalt regelset og relaxer 4 warnings som er bevisste
+# policy-valg for denne spec-en, ikke faktiske feil:
+#
+# - operation-operationId: vi bruker ikke operationId; rute-path+method
+#   er stabilt nok som SDK-nøkkel for pilot. Re-vurder hvis vi genererer
+#   klienter fra spec-en.
+# - operation-4xx-response: hver endpoint dokumenterer allerede relevante
+#   4xx-feilkoder på enkeltruter der det trengs (POST med input). GET uten
+#   input returnerer bare 200+403, og vi vil ikke tvinge 4xx-boilerplate
+#   der det ikke er noe å dokumentere.
+# - info-license: backend-spec-en er intern/privat; ingen lisens-header
+#   trengs. Kan legges til hvis vi noensinne publiserer spec-en.
+# - no-server-example.com: regelen fyrer faktisk på `localhost` og andre
+#   URL-er som ikke er "produksjon-aktig". Vi har legitime dev-entries i
+#   servers-listen, så regelen gir støy uten signal. Slått av.
+#
+# Reell fail-gate: `struct` + alle andre `recommended`-regler. Konfig-en
+# slår bare av policy-avvik, ikke spec-integritet.
+#
+# Ny validation-run: `npm run spec:lint --prefix apps/backend`
+
+extends:
+  - recommended
+
+rules:
+  operation-operationId: off
+  operation-4xx-response: off
+  info-license: off
+  no-server-example.com: off
