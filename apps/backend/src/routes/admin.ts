@@ -505,7 +505,11 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         name: typeof req.body?.name === "string" ? req.body.name : undefined,
         region: typeof req.body?.region === "string" ? req.body.region : undefined,
         address: typeof req.body?.address === "string" ? req.body.address : undefined,
-        isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined
+        isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined,
+        // BIN-540 admin-flip for the pilot cutover handle. Validated inside
+        // PlatformService.assertClientVariant; unknown values return
+        // INVALID_INPUT, not INTERNAL_ERROR.
+        clientVariant: typeof req.body?.clientVariant === "string" ? req.body.clientVariant : undefined
       });
       apiSuccess(res, hall);
     } catch (error) {
