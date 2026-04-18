@@ -63,7 +63,31 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    */
   SECURITY_READ: ["ADMIN", "SUPPORT"],
   SECURITY_WRITE: ["ADMIN", "SUPPORT"],
-  AUDIT_LOG_READ: ["ADMIN", "SUPPORT"]
+  AUDIT_LOG_READ: ["ADMIN", "SUPPORT"],
+  /**
+   * BIN-583 B3.1: agent-CRUD (admin/hall-operator-side).
+   *   - AGENT_READ: liste + hent agent-profil. SUPPORT inkludert for
+   *     compliance-innsyn.
+   *   - AGENT_WRITE: opprett + endre agent, tildele haller. HALL_OPERATOR
+   *     kan forvalte agenter i egen hall (hall-scope håndheves separat
+   *     i route via assertUserHallScope).
+   *   - AGENT_DELETE: destruktiv (soft-delete + aktiv-shift-blokk). Kun ADMIN.
+   */
+  AGENT_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  AGENT_WRITE:  ["ADMIN", "HALL_OPERATOR"],
+  AGENT_DELETE: ["ADMIN"],
+  /**
+   * BIN-583 B3.1: agent-shift-state.
+   *   - AGENT_SHIFT_READ: alle admin-roller + agenten selv.
+   *   - AGENT_SHIFT_WRITE: AGENT selv starter/avslutter egen shift;
+   *     ADMIN inkludert for "ADMIN har alle tillatelser"-invariant +
+   *     fremtidige helpdesk-scenarier. Faktisk owner-semantikk
+   *     (shift.userId === caller.id) håndheves i route/service, ikke her.
+   *   - AGENT_SHIFT_FORCE: manuell close av stuck shift — kun ADMIN.
+   */
+  AGENT_SHIFT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  AGENT_SHIFT_WRITE: ["ADMIN", "AGENT"],
+  AGENT_SHIFT_FORCE: ["ADMIN"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

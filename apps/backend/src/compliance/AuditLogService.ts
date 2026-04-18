@@ -32,7 +32,8 @@ export type AuditActorType =
   | "SUPPORT"
   | "PLAYER"
   | "SYSTEM"
-  | "EXTERNAL";
+  | "EXTERNAL"
+  | "AGENT";
 
 export interface AuditLogInput {
   actorId: string | null;

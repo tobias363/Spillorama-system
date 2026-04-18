@@ -72,7 +72,7 @@ test("support can handle player compliance operations but not game/economic muta
 });
 
 test("policy entries only include known roles", () => {
-  const knownRoles: UserRole[] = ["ADMIN", "HALL_OPERATOR", "SUPPORT", "PLAYER"];
+  const knownRoles: UserRole[] = ["ADMIN", "HALL_OPERATOR", "SUPPORT", "PLAYER", "AGENT"];
   for (const permission of Object.keys(ADMIN_ACCESS_POLICY) as AdminPermission[]) {
     for (const role of ADMIN_ACCESS_POLICY[permission]) {
       assert.equal(knownRoles.includes(role), true, `${permission} has unknown role ${role}`);

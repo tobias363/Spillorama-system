@@ -57,6 +57,11 @@ import { createAdminAmlRouter } from "./routes/adminAml.js";
 import { AmlService } from "./compliance/AmlService.js";
 import { createAdminSecurityRouter } from "./routes/adminSecurity.js";
 import { SecurityService } from "./compliance/SecurityService.js";
+import { createAgentRouter } from "./routes/agent.js";
+import { createAdminAgentsRouter } from "./routes/adminAgents.js";
+import { PostgresAgentStore } from "./agent/AgentStore.js";
+import { AgentService } from "./agent/AgentService.js";
+import { AgentShiftService } from "./agent/AgentShiftService.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
@@ -269,6 +274,16 @@ const auditLogStore: AuditLogStore = platformConnectionString
     })
   : new InMemoryAuditLogStore();
 const auditLogService = new AuditLogService(auditLogStore);
+
+// BIN-583 B3.1: agent-domene (auth + shift + admin-CRUD). Bruker samme
+// Postgres-pool som PlatformService slik at ensureInitialized sikrer
+// schema før første spørring.
+const agentStore = new PostgresAgentStore({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const agentService = new AgentService({ platformService, agentStore });
+const agentShiftService = new AgentShiftService({ agentStore, agentService });
 
 const webBaseUrl =
   (process.env.APP_WEB_BASE_URL?.trim() || "http://localhost:5173").replace(/\/+$/, "");
@@ -507,6 +522,20 @@ app.use(createAdminSecurityRouter({
   platformService,
   auditLogService,
   securityService,
+}));
+
+// BIN-583 B3.1: agent auth/shift + admin agent-CRUD.
+app.use(createAgentRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  auditLogService,
+}));
+app.use(createAdminAgentsRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  auditLogService,
 }));
 
 app.use(createAdminRouter({
