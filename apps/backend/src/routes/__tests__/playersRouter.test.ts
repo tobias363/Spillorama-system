@@ -154,6 +154,47 @@ test("BIN-587 B2.1: PUT /api/players/me/profile oppdaterer og logger audit", asy
     assert.equal(event!.actorType, "PLAYER");
     assert.equal(event!.resource, "user");
     assert.deepEqual(event!.details.changed, ["displayName", "phone"]);
+    // BIN-588 wire-up: before/after diff per endret felt.
+    const diff = event!.details.diff as Record<string, { from: unknown; to: unknown }>;
+    assert.deepEqual(diff.displayName, { from: "Alice", to: "Alice A." });
+    assert.deepEqual(diff.phone, { from: null, to: "+4712345678" });
+    assert.ok(!("email" in diff), "email skal ikke være i diff når den ikke er endret");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-587 B2.1: PUT profile med uendrede verdier gir tom diff (ikke noise i audit)", async () => {
+  const ctx = await startServer(makeUser());
+  try {
+    const res = await req(`${ctx.baseUrl}/api/players/me/profile`, "PUT", "alice-token", {
+      displayName: "Alice", // samme verdi som makeUser-default
+    });
+    assert.equal(res.status, 200);
+    const event = await waitForAuditEvent(ctx.spies.auditStore, "player.profile.update");
+    assert.ok(event);
+    assert.deepEqual(event!.details.changed, []);
+    assert.deepEqual(event!.details.diff, {});
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-588 wire-up: PUT profile med e-post-endring maskerer e-posten til domenet i audit", async () => {
+  const ctx = await startServer(makeUser());
+  try {
+    const res = await req(`${ctx.baseUrl}/api/players/me/profile`, "PUT", "alice-token", {
+      email: "alice@newdomain.no",
+    });
+    assert.equal(res.status, 200);
+    const event = await waitForAuditEvent(ctx.spies.auditStore, "player.profile.update");
+    assert.ok(event);
+    const diff = event!.details.diff as Record<string, { from: unknown; to: unknown }>;
+    assert.deepEqual(diff.email, { from: "@test.no", to: "@newdomain.no" });
+    // Kryss-sjekk: ingen klartekst-e-post noe sted i audit-payload.
+    const serialized = JSON.stringify(event!.details);
+    assert.ok(!serialized.includes("alice@test.no"));
+    assert.ok(!serialized.includes("alice@newdomain.no"));
   } finally {
     await ctx.close();
   }
@@ -183,8 +224,8 @@ test("BIN-587 B2.1: DELETE /api/players/me sletter og logger GDPR-audit", async 
     assert.deepEqual(res.json.data, { deleted: true });
     assert.deepEqual(ctx.spies.deletes, ["user-alice"]);
 
-    const event = await waitForAuditEvent(ctx.spies.auditStore, "player.account.delete");
-    assert.ok(event, "forventet audit-event player.account.delete");
+    const event = await waitForAuditEvent(ctx.spies.auditStore, "account.self_delete");
+    assert.ok(event, "forventet audit-event account.self_delete");
     assert.equal(event!.actorType, "PLAYER");
     assert.equal(event!.resourceId, "user-alice");
     assert.equal(event!.details.reason, "gdpr-self-service");

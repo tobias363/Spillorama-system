@@ -3517,7 +3517,7 @@ paths:
       description: |
         Same semantics as `DELETE /api/auth/me` but lives under the player
         resource so the admin roadmap can evolve them independently. Writes
-        a `player.account.delete` audit entry with `reason="gdpr-self-service"`
+        a `account.self_delete` audit entry with `reason="gdpr-self-service"`
         and a **redacted** email-domain marker only — the plaintext email is
         never persisted in the audit trail.
       responses:

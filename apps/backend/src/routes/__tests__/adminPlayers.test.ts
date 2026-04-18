@@ -622,7 +622,7 @@ test("BIN-587 B2.3: PUT hall-status logger audit med { hallId, isActive, reason 
       hallId: "hall-a", isActive: false, reason: "kaoslogg",
     });
     assert.equal(res.status, 200);
-    const event = await waitForAudit(ctx.spies.auditStore, "player.hall_status.set");
+    const event = await waitForAudit(ctx.spies.auditStore, "player.hall_status.update");
     assert.ok(event);
     assert.equal(event!.details.hallId, "hall-a");
     assert.equal(event!.details.isActive, false);

@@ -78,6 +78,28 @@ export function createPlayersRouter(deps: PlayersRouterDeps): express.Router {
       if (typeof body.email === "string") input.email = body.email;
       if (typeof body.phone === "string") input.phone = body.phone;
       const updated = await platformService.updateProfile(user.id, input);
+
+      // BIN-588 wire-up: compute a before/after diff so the audit row
+      // captures what actually changed. E-mail is reduced to its domain
+      // so the audit trail doesn't store PII in clear text (consistent
+      // with the account.self_delete redaction policy and bulk-import
+      // GDPR-posture).
+      const maskEmail = (value: string | undefined | null): string | null => {
+        if (!value) return null;
+        const at = value.indexOf("@");
+        return at > 0 ? value.slice(at) : "[redacted]"; // "@example.no"
+      };
+      const diff: Record<string, { from: unknown; to: unknown }> = {};
+      if (input.displayName !== undefined && input.displayName !== user.displayName) {
+        diff.displayName = { from: user.displayName, to: input.displayName };
+      }
+      if (input.phone !== undefined && input.phone !== (user.phone ?? null)) {
+        diff.phone = { from: user.phone ?? null, to: input.phone };
+      }
+      if (input.email !== undefined && input.email !== user.email) {
+        diff.email = { from: maskEmail(user.email), to: maskEmail(input.email) };
+      }
+
       void auditLogService
         .record({
           actorId: user.id,
@@ -86,7 +108,8 @@ export function createPlayersRouter(deps: PlayersRouterDeps): express.Router {
           resource: "user",
           resourceId: user.id,
           details: {
-            changed: Object.keys(input),
+            changed: Object.keys(diff),
+            diff,
           },
           ipAddress: clientIp(req),
           userAgent: userAgent(req),
@@ -110,7 +133,7 @@ export function createPlayersRouter(deps: PlayersRouterDeps): express.Router {
         .record({
           actorId: user.id,
           actorType: user.role === "PLAYER" ? "PLAYER" : "USER",
-          action: "player.account.delete",
+          action: "account.self_delete",
           resource: "user",
           resourceId: user.id,
           details: {

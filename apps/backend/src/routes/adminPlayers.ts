@@ -542,7 +542,7 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
       fireAudit({
         actorId: actor.id,
         actorType: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
-        action: "player.hall_status.set",
+        action: "player.hall_status.update",
         resource: "user",
         resourceId: userId,
         details: {
