@@ -1,6 +1,9 @@
 import express from "express";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
+import type { AuthTokenService } from "../auth/AuthTokenService.js";
+import type { EmailService } from "../integration/EmailService.js";
+import { DomainError } from "../game/BingoEngine.js";
 import {
   apiSuccess,
   apiFailure,
@@ -10,15 +13,32 @@ import {
   parseLimit,
 } from "../util/httpHelpers.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import { logger as rootLogger } from "../util/logger.js";
+
+const logger = rootLogger.child({ module: "auth-router" });
 
 export interface AuthRouterDeps {
   platformService: PlatformService;
   walletAdapter: WalletAdapter;
   bankIdAdapter: BankIdKycAdapter | null;
+  authTokenService: AuthTokenService;
+  emailService: EmailService;
+  /** Base-URL brukt til å bygge reset-lenker, e.g. "https://app.spillorama.no". */
+  webBaseUrl: string;
+  /** Support-e-post rendret i template-footer. */
+  supportEmail: string;
 }
 
 export function createAuthRouter(deps: AuthRouterDeps): express.Router {
-  const { platformService, walletAdapter, bankIdAdapter } = deps;
+  const {
+    platformService,
+    walletAdapter,
+    bankIdAdapter,
+    authTokenService,
+    emailService,
+    webBaseUrl,
+    supportEmail,
+  } = deps;
   const router = express.Router();
 
   async function getAuthenticatedUser(req: express.Request) {
@@ -197,12 +217,92 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
     }
   });
 
-  // ── Forgot password (stub — always returns success to avoid user enumeration) ──
+  // ── Forgot password + reset (BIN-587 B2.1) ──────────────────────────────
+  //
+  // Alle responser er enumeration-safe: vi returnerer alltid { sent: true }
+  // uansett om e-posten finnes eller ikke. Real-world e-post sendes kun
+  // dersom brukeren finnes og EmailService er konfigurert. Ved stub-e-post
+  // (SMTP ikke konfigurert) logges lenken i warn-level — utvikling/test.
 
-  router.post("/api/auth/forgot-password", async (_req, res) => {
-    // Always return success regardless of whether the email exists.
-    // In production, this would send an email with a reset link.
-    apiSuccess(res, { sent: true });
+  router.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const emailRaw = typeof req.body?.email === "string" ? req.body.email : "";
+      if (!emailRaw.trim()) {
+        throw new DomainError("INVALID_INPUT", "email er påkrevd.");
+      }
+      const user = await platformService.findUserByEmail(emailRaw);
+      if (user) {
+        try {
+          const { token, expiresAt } = await authTokenService.createToken(
+            "password-reset",
+            user.id
+          );
+          const base = webBaseUrl.replace(/\/+$/, "");
+          const resetLink = `${base}/reset-password/${encodeURIComponent(token)}`;
+          const sendResult = await emailService.sendTemplate({
+            to: user.email,
+            template: "reset-password",
+            context: {
+              username: user.displayName,
+              resetLink,
+              expiresInHours: 1,
+              supportEmail,
+            },
+          });
+          if (sendResult.skipped) {
+            logger.warn(
+              { userId: user.id, resetLink, expiresAt },
+              "[BIN-587 B2.1] SMTP disabled — reset-link not sent; logged for dev only"
+            );
+          }
+        } catch (err) {
+          // Ikke la e-post-/token-feil lekke ut via enumeration.
+          logger.error({ err, userId: user.id }, "[BIN-587 B2.1] forgot-password internal error");
+        }
+      }
+      apiSuccess(res, { sent: true });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.get("/api/auth/reset-password/:token", async (req, res) => {
+    try {
+      const token = mustBeNonEmptyString(req.params.token, "token");
+      const { userId } = await authTokenService.validate("password-reset", token);
+      // Returner minimum info — kun at tokenet er gyldig. Brukes av
+      // reset-password-skjema for å vise "sett nytt passord"-form.
+      apiSuccess(res, { valid: true, userId });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.post("/api/auth/reset-password/:token", async (req, res) => {
+    try {
+      const token = mustBeNonEmptyString(req.params.token, "token");
+      const newPassword = mustBeNonEmptyString(req.body?.newPassword, "newPassword");
+      const { userId, tokenId } = await authTokenService.validate("password-reset", token);
+      // Consume først så en mislykket setPassword ikke etterlater tokenet
+      // gjenbrukbart. setPassword revoker sesjoner som side-effekt.
+      await authTokenService.consume("password-reset", tokenId);
+      await platformService.setPassword(userId, newPassword);
+      apiSuccess(res, { reset: true });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.post("/api/auth/verify-email/:token", async (req, res) => {
+    try {
+      const token = mustBeNonEmptyString(req.params.token, "token");
+      const { userId, tokenId } = await authTokenService.validate("email-verify", token);
+      await authTokenService.consume("email-verify", tokenId);
+      await platformService.markEmailVerified(userId);
+      apiSuccess(res, { verified: true });
+    } catch (error) {
+      apiFailure(res, error);
+    }
   });
 
   router.get("/api/kyc/me", async (req, res) => {

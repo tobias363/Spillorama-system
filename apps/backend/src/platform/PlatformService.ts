@@ -1605,6 +1605,79 @@ export class PlatformService {
     );
   }
 
+  /**
+   * BIN-587 B2.1: sett nytt passord uten å kreve currentPassword. Brukes
+   * av reset-password-flow etter at AuthTokenService har validert tokenet.
+   * Revoker alle aktive sesjoner som side-effekt så tyveri via gammel
+   * cookie ikke overlever passord-bytte.
+   */
+  async setPassword(userIdInput: string, newPassword: string): Promise<void> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userIdInput, "userId");
+    this.assertPassword(newPassword);
+    const newHash = await this.hashPassword(newPassword);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rowCount } = await client.query(
+        `UPDATE ${this.usersTable()}
+         SET password_hash = $2, updated_at = now()
+         WHERE id = $1`,
+        [id, newHash]
+      );
+      if (!rowCount) {
+        throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+      }
+      await client.query(
+        `UPDATE ${this.sessionsTable()}
+         SET revoked_at = now()
+         WHERE user_id = $1 AND revoked_at IS NULL`,
+        [id]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(err);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * BIN-587 B2.1: marker brukerens e-post som verifisert. Ingen egen
+   * kolonne finnes — bruker compliance_data.email_verified_at som flagg.
+   */
+  async markEmailVerified(userIdInput: string): Promise<void> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userIdInput, "userId");
+    await this.pool.query(
+      `UPDATE ${this.usersTable()}
+       SET compliance_data = COALESCE(compliance_data, '{}'::jsonb)
+         || jsonb_build_object('emailVerifiedAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
+         updated_at = now()
+       WHERE id = $1`,
+      [id]
+    );
+  }
+
+  /**
+   * BIN-587 B2.1: slå opp bruker på e-post uten å kaste for unknown.
+   * Brukes av forgot-password som må være enumeration-safe.
+   */
+  async findUserByEmail(email: string): Promise<AppUser | null> {
+    await this.ensureInitialized();
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, compliance_data
+       FROM ${this.usersTable()}
+       WHERE email = $1`,
+      [normalized]
+    );
+    const row = rows[0];
+    return row ? this.mapUser(row) : null;
+  }
+
   async deleteAccount(userId: string): Promise<void> {
     await this.ensureInitialized();
     const id = this.assertEntityReference(userId, "userId");

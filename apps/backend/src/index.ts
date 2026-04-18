@@ -18,6 +18,16 @@ import type { GameSnapshot, Player, RoomSnapshot } from "./game/types.js";
 import { PlatformService } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 import { PaymentRequestService } from "./payments/PaymentRequestService.js";
+import { AuthTokenService } from "./auth/AuthTokenService.js";
+import { EmailService } from "./integration/EmailService.js";
+import {
+  AuditLogService,
+  InMemoryAuditLogStore,
+  PostgresAuditLogStore,
+  type AuditLogStore,
+} from "./compliance/AuditLogService.js";
+import { Pool } from "pg";
+import { getPoolTuning } from "./util/pgPool.js";
 import { DrawScheduler } from "./draw-engine/DrawScheduler.js";
 import { SocketRateLimiter } from "./middleware/socketRateLimit.js";
 import { HttpRateLimiter } from "./middleware/httpRateLimit.js";
@@ -41,6 +51,7 @@ import { createAdminRouter } from "./routes/admin.js";
 import { createWalletRouter } from "./routes/wallet.js";
 import { createPaymentsRouter } from "./routes/payments.js";
 import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
+import { createPlayersRouter } from "./routes/players.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
@@ -201,6 +212,31 @@ const paymentRequestService = new PaymentRequestService(walletAdapter, {
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
+
+// BIN-587 B2.1: single-use tokens for password-reset + e-post-verify.
+const authTokenService = new AuthTokenService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-588/BIN-587 B2.1: SMTP + audit-log. Begge har graceful fallbacks
+// (EmailService blir stub uten SMTP_HOST; audit bruker in-memory uten
+// DB-backing). Agent 3 vil wire ADMIN-side audit-kall i påfølgende PR.
+const emailService = new EmailService();
+const auditLogStore: AuditLogStore = platformConnectionString
+  ? new PostgresAuditLogStore({
+      pool: new Pool({
+        connectionString: platformConnectionString,
+        ...getPoolTuning(),
+      }),
+      schema: pgSchema,
+    })
+  : new InMemoryAuditLogStore();
+const auditLogService = new AuditLogService(auditLogStore);
+
+const webBaseUrl =
+  (process.env.APP_WEB_BASE_URL?.trim() || "http://localhost:5173").replace(/\/+$/, "");
+const supportEmail = process.env.APP_SUPPORT_EMAIL?.trim() || "support@spillorama.no";
 
 // ── Shared mutable room state ─────────────────────────────────────────────────
 
@@ -372,7 +408,19 @@ const bingoSettingsState = {
   set pendingUpdate(v) { pendingBingoSettingsUpdate = v; },
 };
 
-app.use(createAuthRouter({ platformService, walletAdapter, bankIdAdapter }));
+app.use(createAuthRouter({
+  platformService,
+  walletAdapter,
+  bankIdAdapter,
+  authTokenService,
+  emailService,
+  webBaseUrl,
+  supportEmail,
+}));
+app.use(createPlayersRouter({
+  platformService,
+  auditLogService,
+}));
 
 app.use(createAdminRouter({
   platformService, engine, io, drawScheduler, bingoSettingsState, responsibleGamingStore,
