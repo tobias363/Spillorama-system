@@ -119,12 +119,10 @@ components:
         surname:
           type: string
         phone:
-          type: string
-          nullable: true
+          type: [string, "null"]
         birthDate:
-          type: string
+          type: [string, "null"]
           format: date
-          nullable: true
         role:
           type: string
         walletId:
@@ -133,9 +131,8 @@ components:
           type: string
           enum: [PENDING, VERIFIED, REJECTED]
         kycVerifiedAt:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
 
     WalletAccount:
       type: object
@@ -179,15 +176,12 @@ components:
         selfExcluded:
           type: boolean
         timedPauseUntil:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
         dailyLossLimit:
-          type: number
-          nullable: true
+          type: [number, "null"]
         monthlyLossLimit:
-          type: number
-          nullable: true
+          type: [number, "null"]
 
     AppGame:
       type: object
@@ -229,12 +223,10 @@ components:
           type: string
           enum: [OPEN, PLAYING, WAITING, ENDED]
         hallId:
-          type: string
-          nullable: true
+          type: [string, "null"]
         nextRoundAt:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
 
     ScheduleSlot:
       type: object
@@ -271,8 +263,7 @@ components:
           type: string
           enum: [PENDING, PAID, FAILED, CANCELLED]
         paymentUrl:
-          type: string
-          nullable: true
+          type: [string, "null"]
         createdAt:
           type: string
           format: date-time
@@ -317,35 +308,27 @@ components:
           minimum: 1
           description: Amount in minor units (øre). `10000` = 100 NOK.
         hallId:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: Hall where the request was submitted. HALL_OPERATOR is scoped to their own hall (BIN-591).
         submittedBy:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: User ID of the actor who submitted the request (terminal staff or the player themselves).
         status:
           $ref: "#/components/schemas/PaymentRequestStatus"
         rejectionReason:
-          type: string
-          nullable: true
+          type: [string, "null"]
         acceptedBy:
-          type: string
-          nullable: true
+          type: [string, "null"]
         acceptedAt:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
         rejectedBy:
-          type: string
-          nullable: true
+          type: [string, "null"]
         rejectedAt:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
         walletTransactionId:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: |
             Set once the request is ACCEPTED. Links to the ledger entry that
             credited (deposit) or debited (withdraw) the player's wallet.
@@ -425,11 +408,9 @@ components:
         displayName:
           type: string
         surname:
-          type: string
-          nullable: true
+          type: [string, "null"]
         phone:
-          type: string
-          nullable: true
+          type: [string, "null"]
         hallId:
           type: string
           description: Primary hall association.
@@ -437,9 +418,8 @@ components:
           type: string
           enum: [PENDING, VERIFIED, REJECTED]
         birthDate:
-          type: string
+          type: [string, "null"]
           format: date
-          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -466,8 +446,7 @@ components:
       required: [hallId]
       properties:
         hallId:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: |
             Target hall-id for HALL_OPERATOR scoping. Pass `null` (or empty string)
             to clear the assignment. Only meaningful for HALL_OPERATOR — other
@@ -498,28 +477,22 @@ components:
         displayName:
           type: string
         surname:
-          type: string
-          nullable: true
+          type: [string, "null"]
         phone:
-          type: string
-          nullable: true
+          type: [string, "null"]
         kycStatus:
           $ref: "#/components/schemas/KycStatus"
         birthDate:
-          type: string
+          type: [string, "null"]
           format: date
-          nullable: true
         kycVerifiedAt:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
         kycProviderRef:
-          type: string
-          nullable: true
+          type: [string, "null"]
           description: Provider-side referanse (BankID-sesjons-id el.l.) hvis tilgjengelig.
         hallId:
-          type: string
-          nullable: true
+          type: [string, "null"]
         createdAt:
           type: string
           format: date-time
@@ -527,9 +500,8 @@ components:
           type: string
           format: date-time
         complianceData:
-          type: object
+          type: [object, "null"]
           additionalProperties: true
-          nullable: true
           description: Fri-formet metadata fra KYC-provider — rå payload for audit.
 
     PlayerDetail:
@@ -593,8 +565,7 @@ components:
         id:
           type: string
         actorId:
-          type: string
-          nullable: true
+          type: [string, "null"]
         actorType:
           $ref: "#/components/schemas/AuditActorType"
         action:
@@ -604,18 +575,15 @@ components:
           type: string
           description: Entity kind, f.eks. `user`.
         resourceId:
-          type: string
-          nullable: true
+          type: [string, "null"]
         details:
           type: object
           additionalProperties: true
           description: Action-spesifikke felt (f.eks. `reason`, `newStatus`, `note`).
         ipAddress:
-          type: string
-          nullable: true
+          type: [string, "null"]
         userAgent:
-          type: string
-          nullable: true
+          type: [string, "null"]
         createdAt:
           type: string
           format: date-time
@@ -906,16 +874,13 @@ paths:
                             type: string
                             enum: [PENDING, VERIFIED, REJECTED]
                           birthDate:
-                            type: string
+                            type: [string, "null"]
                             format: date
-                            nullable: true
                           verifiedAt:
-                            type: string
+                            type: [string, "null"]
                             format: date-time
-                            nullable: true
                           providerReference:
-                            type: string
-                            nullable: true
+                            type: [string, "null"]
 
   /api/kyc/verify:
     post:
@@ -971,8 +936,7 @@ paths:
                           sessionId:
                             type: string
                           authUrl:
-                            type: string
-                            nullable: true
+                            type: [string, "null"]
                           status:
                             type: string
                             enum: [PENDING, NOT_CONFIGURED]
@@ -1052,9 +1016,8 @@ paths:
                               type: string
                               enum: [OPEN, STARTING, CLOSED]
                             nextRoundAt:
-                              type: string
+                              type: [string, "null"]
                               format: date-time
-                              nullable: true
 
   /api/games/{slug}/launch:
     post:
@@ -1093,9 +1056,8 @@ paths:
                           embedUrl:
                             type: string
                           expiresAt:
-                            type: string
+                            type: [string, "null"]
                             format: date-time
-                            nullable: true
 
   /api/halls:
     get:

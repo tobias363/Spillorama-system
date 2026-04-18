@@ -115,7 +115,12 @@ npm run check:all
 
 # Dev-server (backend på port 4000)
 npm run dev
+
+# Lint OpenAPI-spec (BIN-605)
+npm run spec:lint --prefix apps/backend
 ```
+
+**OpenAPI-spec:** `apps/backend/openapi.yaml` (3.1.0) dekker alle HTTP-endepunkter. CI kjører `redocly lint` mot spec-en — brutt struct (ugyldig OpenAPI 3.1) eller dangling `$ref` feiler build. Policy-warnings er toggled via [`apps/backend/redocly.yaml`](apps/backend/redocly.yaml). Kjør lokalt før commit med kommandoen over.
 
 ## Candy i live bingo
 

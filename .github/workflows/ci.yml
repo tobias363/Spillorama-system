@@ -42,6 +42,12 @@ jobs:
       - name: Type check apps/backend
         run: npm --prefix apps/backend run check
 
+      # BIN-605: lint OpenAPI-spec mot Redocly recommended-regelsett.
+      # Feiler CI på struct-errors (brutt OpenAPI 3.1) og brutte $ref.
+      # Policy-warnings er slått av i apps/backend/redocly.yaml.
+      - name: Lint OpenAPI spec
+        run: npm --prefix apps/backend run spec:lint
+
       - name: Run apps/backend tests
         run: npm --prefix apps/backend run test
 
