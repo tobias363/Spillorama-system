@@ -1,0 +1,560 @@
+/**
+ * BIN-586: Manuell deposit/withdraw-kø.
+ *
+ * Port fra legacy:
+ *   - App/Controllers/transactionController.js → acceptDepositRequest / rejectDepositRequest
+ *   - App/Controllers/WithdrawController.js    → acceptWithdrawRequest / rejectWithdrawRequest
+ *
+ * Bruksmønster:
+ *   - Spiller (eller hall-kasse på vegne av spiller) oppretter en pending
+ *     `deposit_request` når de betaler kontant i hall, eller en
+ *     `withdraw_request` når de ber om uttak over terskelverdi.
+ *   - Hall-operator eller admin godkjenner/avslår via admin-UI. Ved
+ *     godkjenning krediterer/debiterer tjenesten wallet via eksisterende
+ *     `WalletAdapter`.
+ *   - Avslag krever en fritekst-grunn (min 1 tegn) og rører ikke wallet.
+ *
+ * Audit: hvert accept/reject logges via pino. TODO BIN-588: sentralisert
+ * audit-log når den porten er ferdig.
+ */
+
+import { randomUUID } from "node:crypto";
+import { Pool, type PoolClient } from "pg";
+import { getPoolTuning } from "../util/pgPool.js";
+import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import { WalletError } from "../adapters/WalletAdapter.js";
+import { DomainError } from "../game/BingoEngine.js";
+import { logger as rootLogger } from "../util/logger.js";
+
+const log = rootLogger.child({ module: "payment-request-service" });
+
+export type PaymentRequestKind = "deposit" | "withdraw";
+export type PaymentRequestStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+
+export interface PaymentRequest {
+  id: string;
+  kind: PaymentRequestKind;
+  userId: string;
+  walletId: string;
+  amountCents: number;
+  hallId: string | null;
+  submittedBy: string | null;
+  status: PaymentRequestStatus;
+  rejectionReason: string | null;
+  acceptedBy: string | null;
+  acceptedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  walletTransactionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePaymentRequestInput {
+  userId: string;
+  walletId: string;
+  amountCents: number;
+  hallId?: string | null;
+  submittedBy?: string | null;
+}
+
+export interface ListPendingOptions {
+  kind?: PaymentRequestKind;
+  status?: PaymentRequestStatus;
+  hallId?: string;
+  limit?: number;
+}
+
+export interface AcceptRequestInput {
+  requestId: string;
+  acceptedBy: string;
+}
+
+export interface RejectRequestInput {
+  requestId: string;
+  rejectedBy: string;
+  reason: string;
+}
+
+export interface PaymentRequestServiceOptions {
+  connectionString: string;
+  schema?: string;
+}
+
+interface PaymentRequestRow {
+  id: string;
+  user_id: string;
+  wallet_id: string;
+  amount_cents: string | number;
+  hall_id: string | null;
+  submitted_by: string | null;
+  status: PaymentRequestStatus;
+  rejection_reason: string | null;
+  accepted_by: string | null;
+  accepted_at: Date | string | null;
+  rejected_by: string | null;
+  rejected_at: Date | string | null;
+  wallet_transaction_id: string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+function assertSchemaName(schema: string): string {
+  const trimmed = schema.trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) {
+    throw new DomainError(
+      "INVALID_CONFIG",
+      "APP_PG_SCHEMA er ugyldig. Bruk kun bokstaver, tall og underscore."
+    );
+  }
+  return trimmed;
+}
+
+function asIso(value: Date | string | null): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
+}
+
+function asIsoRequired(value: Date | string): string {
+  return asIso(value) ?? new Date().toISOString();
+}
+
+function toAmountNumber(value: string | number): number {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new DomainError("PLATFORM_DB_ERROR", "Ugyldig beløp i payment request row.");
+  }
+  return Math.floor(n);
+}
+
+function mapRow(row: PaymentRequestRow, kind: PaymentRequestKind): PaymentRequest {
+  return {
+    id: row.id,
+    kind,
+    userId: row.user_id,
+    walletId: row.wallet_id,
+    amountCents: toAmountNumber(row.amount_cents),
+    hallId: row.hall_id,
+    submittedBy: row.submitted_by,
+    status: row.status,
+    rejectionReason: row.rejection_reason,
+    acceptedBy: row.accepted_by,
+    acceptedAt: asIso(row.accepted_at),
+    rejectedBy: row.rejected_by,
+    rejectedAt: asIso(row.rejected_at),
+    walletTransactionId: row.wallet_transaction_id,
+    createdAt: asIsoRequired(row.created_at),
+    updatedAt: asIsoRequired(row.updated_at),
+  };
+}
+
+function assertPositiveAmountCents(value: number): number {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+    throw new DomainError("INVALID_INPUT", "amountCents må være et positivt heltall.");
+  }
+  return value;
+}
+
+function assertNonEmpty(value: string, fieldName: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new DomainError("INVALID_INPUT", `${fieldName} mangler.`);
+  }
+  return trimmed;
+}
+
+function centsToMajor(amountCents: number): number {
+  return Math.round(amountCents) / 100;
+}
+
+export class PaymentRequestService {
+  private readonly pool: Pool;
+
+  private readonly schema: string;
+
+  private initPromise: Promise<void> | null = null;
+
+  constructor(
+    private readonly walletAdapter: WalletAdapter,
+    options: PaymentRequestServiceOptions
+  ) {
+    if (!options.connectionString.trim()) {
+      throw new DomainError(
+        "INVALID_CONFIG",
+        "Mangler connection string for payment request service."
+      );
+    }
+    this.schema = assertSchemaName(options.schema ?? "public");
+    this.pool = new Pool({
+      connectionString: options.connectionString,
+      ...getPoolTuning(),
+    });
+  }
+
+  /**
+   * Test-hook: lar enhetstester injisere en mock-pool uten å gå via
+   * connectionString. Ikke bruk i prod-kode.
+   * @internal
+   */
+  static forTesting(walletAdapter: WalletAdapter, pool: Pool, schema = "public"): PaymentRequestService {
+    const svc = Object.create(PaymentRequestService.prototype) as PaymentRequestService;
+    (svc as unknown as { walletAdapter: WalletAdapter }).walletAdapter = walletAdapter;
+    (svc as unknown as { pool: Pool }).pool = pool;
+    (svc as unknown as { schema: string }).schema = assertSchemaName(schema);
+    // Allerede initialisert — skipp DDL.
+    (svc as unknown as { initPromise: Promise<void> | null }).initPromise = Promise.resolve();
+    return svc;
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  async createDepositRequest(input: CreatePaymentRequestInput): Promise<PaymentRequest> {
+    return this.createRequest("deposit", input);
+  }
+
+  async createWithdrawRequest(input: CreatePaymentRequestInput): Promise<PaymentRequest> {
+    return this.createRequest("withdraw", input);
+  }
+
+  async listPending(options: ListPendingOptions = {}): Promise<PaymentRequest[]> {
+    await this.ensureInitialized();
+    const status = options.status ?? "PENDING";
+    const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+
+    const kinds: PaymentRequestKind[] =
+      options.kind ? [options.kind] : ["deposit", "withdraw"];
+
+    const results: PaymentRequest[] = [];
+    for (const kind of kinds) {
+      const table = this.tableFor(kind);
+      const params: unknown[] = [status];
+      let sql = `SELECT id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+                        rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+                        wallet_transaction_id, created_at, updated_at
+                 FROM ${table}
+                 WHERE status = $1`;
+      if (options.hallId) {
+        params.push(options.hallId);
+        sql += ` AND hall_id = $${params.length}`;
+      }
+      params.push(limit);
+      sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+      const { rows } = await this.pool.query<PaymentRequestRow>(sql, params);
+      for (const row of rows) {
+        results.push(mapRow(row, kind));
+      }
+    }
+
+    // Blandet kind: sorter på tvers slik at nyeste kommer først.
+    results.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+    return results.slice(0, limit);
+  }
+
+  async getRequest(kind: PaymentRequestKind, requestId: string): Promise<PaymentRequest> {
+    await this.ensureInitialized();
+    const id = assertNonEmpty(requestId, "requestId");
+    const { rows } = await this.pool.query<PaymentRequestRow>(
+      `SELECT id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+              rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+              wallet_transaction_id, created_at, updated_at
+       FROM ${this.tableFor(kind)}
+       WHERE id = $1`,
+      [id]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("PAYMENT_REQUEST_NOT_FOUND", "Payment request finnes ikke.");
+    }
+    return mapRow(row, kind);
+  }
+
+  async acceptDeposit(input: AcceptRequestInput): Promise<PaymentRequest> {
+    return this.acceptRequest("deposit", input);
+  }
+
+  async rejectDeposit(input: RejectRequestInput): Promise<PaymentRequest> {
+    return this.rejectRequest("deposit", input);
+  }
+
+  async acceptWithdraw(input: AcceptRequestInput): Promise<PaymentRequest> {
+    return this.acceptRequest("withdraw", input);
+  }
+
+  async rejectWithdraw(input: RejectRequestInput): Promise<PaymentRequest> {
+    return this.rejectRequest("withdraw", input);
+  }
+
+  // ── Internal ───────────────────────────────────────────────────────────────
+
+  private async createRequest(
+    kind: PaymentRequestKind,
+    input: CreatePaymentRequestInput
+  ): Promise<PaymentRequest> {
+    await this.ensureInitialized();
+    const userId = assertNonEmpty(input.userId, "userId");
+    const walletId = assertNonEmpty(input.walletId, "walletId");
+    const amountCents = assertPositiveAmountCents(input.amountCents);
+    const hallId = input.hallId?.trim() || null;
+    const submittedBy = input.submittedBy?.trim() || null;
+
+    const id = randomUUID();
+    const { rows } = await this.pool.query<PaymentRequestRow>(
+      `INSERT INTO ${this.tableFor(kind)}
+         (id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
+       RETURNING id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+                 rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+                 wallet_transaction_id, created_at, updated_at`,
+      [id, userId, walletId, amountCents, hallId, submittedBy]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("PLATFORM_DB_ERROR", "Kunne ikke opprette payment request.");
+    }
+    const mapped = mapRow(row, kind);
+    log.info(
+      { kind, requestId: mapped.id, userId, hallId, amountCents },
+      "[BIN-586] payment request created"
+    );
+    return mapped;
+  }
+
+  private async acceptRequest(
+    kind: PaymentRequestKind,
+    input: AcceptRequestInput
+  ): Promise<PaymentRequest> {
+    await this.ensureInitialized();
+    const requestId = assertNonEmpty(input.requestId, "requestId");
+    const acceptedBy = assertNonEmpty(input.acceptedBy, "acceptedBy");
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await this.lockPendingRow(client, kind, requestId);
+
+      const amountMajor = centsToMajor(current.amountCents);
+      const reason =
+        kind === "deposit"
+          ? `Manuell innskudd #${current.id}`
+          : `Manuelt uttak #${current.id}`;
+      const idempotencyKey = `payment-request:${kind}:${current.id}`;
+
+      let walletTransactionId: string;
+      try {
+        const tx =
+          kind === "deposit"
+            ? await this.walletAdapter.credit(current.walletId, amountMajor, reason, {
+                idempotencyKey,
+              })
+            : await this.walletAdapter.debit(current.walletId, amountMajor, reason, {
+                idempotencyKey,
+              });
+        walletTransactionId = tx.id;
+      } catch (err) {
+        await client.query("ROLLBACK");
+        if (err instanceof WalletError) {
+          log.warn(
+            { kind, requestId, err: err.message, code: err.code },
+            "[BIN-586] wallet operation failed during accept"
+          );
+          throw new DomainError(err.code, err.message);
+        }
+        throw err;
+      }
+
+      const { rows } = await client.query<PaymentRequestRow>(
+        `UPDATE ${this.tableFor(kind)}
+         SET status = 'ACCEPTED',
+             accepted_by = $2,
+             accepted_at = now(),
+             wallet_transaction_id = $3,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+                   rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+                   wallet_transaction_id, created_at, updated_at`,
+        [requestId, acceptedBy, walletTransactionId]
+      );
+      await client.query("COMMIT");
+      const row = rows[0];
+      if (!row) {
+        throw new DomainError("PLATFORM_DB_ERROR", "Payment request forsvant under accept.");
+      }
+      const mapped = mapRow(row, kind);
+      // TODO (BIN-588): sentralisert audit-log når port er ferdig.
+      log.info(
+        {
+          kind,
+          requestId,
+          acceptedBy,
+          walletId: mapped.walletId,
+          amountCents: mapped.amountCents,
+          walletTransactionId,
+        },
+        "[BIN-586] payment request accepted"
+      );
+      return mapped;
+    } catch (err) {
+      // Fall-back rollback hvis ikke allerede committed/rollbacket.
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore — transaction kan være avsluttet allerede
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async rejectRequest(
+    kind: PaymentRequestKind,
+    input: RejectRequestInput
+  ): Promise<PaymentRequest> {
+    await this.ensureInitialized();
+    const requestId = assertNonEmpty(input.requestId, "requestId");
+    const rejectedBy = assertNonEmpty(input.rejectedBy, "rejectedBy");
+    const reason = assertNonEmpty(input.reason, "reason");
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await this.lockPendingRow(client, kind, requestId);
+
+      const { rows } = await client.query<PaymentRequestRow>(
+        `UPDATE ${this.tableFor(kind)}
+         SET status = 'REJECTED',
+             rejected_by = $2,
+             rejected_at = now(),
+             rejection_reason = $3,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+                   rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+                   wallet_transaction_id, created_at, updated_at`,
+        [requestId, rejectedBy, reason]
+      );
+      await client.query("COMMIT");
+      const row = rows[0];
+      if (!row) {
+        throw new DomainError("PLATFORM_DB_ERROR", "Payment request forsvant under reject.");
+      }
+      const mapped = mapRow(row, kind);
+      // TODO (BIN-588): sentralisert audit-log når port er ferdig.
+      log.info(
+        { kind, requestId, rejectedBy, reason },
+        "[BIN-586] payment request rejected"
+      );
+      return mapped;
+    } catch (err) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async lockPendingRow(
+    client: PoolClient,
+    kind: PaymentRequestKind,
+    requestId: string
+  ): Promise<PaymentRequest> {
+    const { rows } = await client.query<PaymentRequestRow>(
+      `SELECT id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+              rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+              wallet_transaction_id, created_at, updated_at
+       FROM ${this.tableFor(kind)}
+       WHERE id = $1
+       FOR UPDATE`,
+      [requestId]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("PAYMENT_REQUEST_NOT_FOUND", "Payment request finnes ikke.");
+    }
+    if (row.status !== "PENDING") {
+      throw new DomainError(
+        "PAYMENT_REQUEST_NOT_PENDING",
+        `Payment request er allerede ${row.status}.`
+      );
+    }
+    return mapRow(row, kind);
+  }
+
+  private tableFor(kind: PaymentRequestKind): string {
+    const name = kind === "deposit" ? "app_deposit_requests" : "app_withdraw_requests";
+    return `"${this.schema}"."${name}"`;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.initializeSchema();
+    }
+    await this.initPromise;
+  }
+
+  private async initializeSchema(): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
+      for (const table of ["app_deposit_requests", "app_withdraw_requests"] as const) {
+        const qualified = `"${this.schema}"."${table}"`;
+        await client.query(
+          `CREATE TABLE IF NOT EXISTS ${qualified} (
+            id UUID PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            wallet_id TEXT NOT NULL,
+            amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
+            hall_id TEXT NULL,
+            submitted_by TEXT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING'
+              CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED')),
+            rejection_reason TEXT NULL,
+            accepted_by TEXT NULL,
+            accepted_at TIMESTAMPTZ NULL,
+            rejected_by TEXT NULL,
+            rejected_at TIMESTAMPTZ NULL,
+            wallet_transaction_id TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          )`
+        );
+        await client.query(
+          `CREATE INDEX IF NOT EXISTS idx_${table}_status_created_at
+           ON ${qualified} (status, created_at DESC)`
+        );
+        await client.query(
+          `CREATE INDEX IF NOT EXISTS idx_${table}_user_id
+           ON ${qualified} (user_id, created_at DESC)`
+        );
+        await client.query(
+          `CREATE INDEX IF NOT EXISTS idx_${table}_hall_id
+           ON ${qualified} (hall_id, created_at DESC)`
+        );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      if (err instanceof DomainError) {
+        throw err;
+      }
+      throw new DomainError(
+        "PLATFORM_DB_ERROR",
+        "Kunne ikke initialisere payment request-tabeller."
+      );
+    } finally {
+      client.release();
+    }
+  }
+}

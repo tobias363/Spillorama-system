@@ -17,6 +17,7 @@ import { PostgresResponsibleGamingStore } from "./game/PostgresResponsibleGaming
 import type { GameSnapshot, Player, RoomSnapshot } from "./game/types.js";
 import { PlatformService } from "./platform/PlatformService.js";
 import { SwedbankPayService } from "./payments/SwedbankPayService.js";
+import { PaymentRequestService } from "./payments/PaymentRequestService.js";
 import { DrawScheduler } from "./draw-engine/DrawScheduler.js";
 import { SocketRateLimiter } from "./middleware/socketRateLimit.js";
 import { HttpRateLimiter } from "./middleware/httpRateLimit.js";
@@ -39,6 +40,7 @@ import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createWalletRouter } from "./routes/wallet.js";
 import { createPaymentsRouter } from "./routes/payments.js";
+import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
@@ -190,6 +192,13 @@ const swedbankPayService = new SwedbankPayService(walletAdapter, {
   cancelUrl: process.env.SWEDBANK_PAY_CANCEL_URL,
   termsOfServiceUrl: process.env.SWEDBANK_PAY_TERMS_URL,
   requestTimeoutMs: Number(process.env.SWEDBANK_PAY_REQUEST_TIMEOUT_MS ?? "10000"),
+});
+
+// BIN-586: manuell deposit/withdraw-kø (port fra legacy transactionController
+// og WithdrawController). Godkjennings-flyt kjøres av hall-operator/admin.
+const paymentRequestService = new PaymentRequestService(walletAdapter, {
+  connectionString: platformConnectionString,
+  schema: pgSchema,
 });
 
 // ── Shared mutable room state ─────────────────────────────────────────────────
@@ -385,6 +394,7 @@ app.use(createAdminRouter({
 
 app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPayService, emitWalletRoomUpdates }));
 app.use(createPaymentsRouter({ platformService, swedbankPayService, emitWalletRoomUpdates }));
+app.use(createPaymentRequestsRouter({ platformService, paymentRequestService, emitWalletRoomUpdates }));
 app.use(createGameRouter({ platformService, engine, drawScheduler, emitRoomUpdate, buildRoomUpdatePayload, assertUserCanAccessRoom, assertUserCanActAsPlayer }));
 
 // ── Prometheus + health ───────────────────────────────────────────────────────

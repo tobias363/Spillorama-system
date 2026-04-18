@@ -27,7 +27,10 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
   OVERSKUDD_WRITE: ["ADMIN"],
   USER_ROLE_WRITE: ["ADMIN"],
   ROOM_CONTROL_READ: ["ADMIN", "HALL_OPERATOR"],
-  ROOM_CONTROL_WRITE: ["ADMIN", "HALL_OPERATOR"]
+  ROOM_CONTROL_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  /** BIN-586: manuell deposit/withdraw-kø (kontant i hall, uttak over terskel). */
+  PAYMENT_REQUEST_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  PAYMENT_REQUEST_WRITE: ["ADMIN", "HALL_OPERATOR"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
