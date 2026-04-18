@@ -300,6 +300,44 @@ export class CenterTopPanel {
     }, 2000);
   }
 
+  /**
+   * BIN-409/451 (D2): Persistent disabled state for the "Kjøp flere brett"
+   * button once the server-authoritative `disableBuyAfterBalls` threshold is
+   * reached mid-round.
+   *
+   * Unity parity:
+   *   - `Game1GamePlayPanel.cs:170` `BuyMoreDisableFlagVal` (flag satt
+   *     én gang per runde når drawCount krysser threshold).
+   *   - `Game1GamePlayPanel.SocketFlow.cs:174` — serveren styrer `disableBuyAfterBalls`.
+   *   - `Game1GamePlayPanel.SocketFlow.cs:109-113, :457-461, :485-489` — per-ball sjekk.
+   *   - `BingoTemplates.cs:350` `disableBuyAfterBalls` (default threshold).
+   *
+   * Unity setter bare `interactable = false` (ingen tooltip). Vi legger til
+   * native `title`-attributt som en a11y-forbedring (PM godkjent Q2 2026-04-18):
+   * "Kjøp er stengt — trekning pågår". Dette er en funksjonelt nøytral
+   * produkt-forbedring — vanlige screenreadere annonserer disablede knapper,
+   * tooltip gir seende spillere en forklaring ved hover.
+   *
+   * Rotårsak for den originale BIN-451-buggen: `showButtonFeedback("buyMore", false)`
+   * disablet knappen i bare 1.5 s (setTimeout reset) — ikke permanent. Etter 1.5 s
+   * kunne spillere klikke "Kjøp flere" igjen selv om `drawCount >= disableBuyAfterBalls`.
+   * Denne metoden disabler permanent til neste runde (enableBuyMore kalles ved
+   * onGameStarted).
+   */
+  setBuyMoreDisabled(disabled: boolean, reason?: string): void {
+    const btn = this.buyMoreBtn;
+    if (!btn) return;
+    btn.disabled = disabled;
+    btn.style.opacity = disabled ? "0.4" : "1";
+    btn.style.cursor = disabled ? "not-allowed" : "pointer";
+    btn.title = disabled ? (reason ?? "") : "";
+    // Hover-handler leser `btn.disabled` direkte og respekterer derfor state —
+    // enabled-state resetter background (mouseleave allerede nullstiller).
+    if (!disabled) {
+      btn.style.background = "rgba(0,0,0,0.25)";
+    }
+  }
+
   /** Hide cancel button during game (Unity: deleteBtn hidden after game start). */
   setGameRunning(running: boolean): void {
     if (this.cancelBtn) this.cancelBtn.style.display = running ? "none" : "";

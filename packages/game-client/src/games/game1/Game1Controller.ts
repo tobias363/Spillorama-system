@@ -320,6 +320,11 @@ class Game1Controller implements GameController {
           this.deps.bridge.on("chatMessage", listener),
         );
         this.playScreen.enterWaitingMode(state);
+        // BIN-410 (D3): Show upcoming-purchase side panel for preRound arming.
+        // Only in WAITING — SPECTATING/PLAYING hide it (Q4 2026-04-18).
+        this.playScreen.showUpcomingPurchase(state);
+        // BIN-409 (D2): Re-enable Kjøp-flere when entering a new WAITING cycle.
+        this.playScreen.enableBuyMore();
         // BIN-419: Show Elvis replace option in waiting mode
         if (state.gameType === "elvis" && state.myTickets.length > 0 && state.replaceAmount > 0) {
           this.playScreen.showElvisReplace(state.replaceAmount, () => this.handleElvisReplace());
@@ -344,6 +349,13 @@ class Game1Controller implements GameController {
         );
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
+        // BIN-410 (D3): Upcoming-panel skjules under PLAYING (buildTickets
+        // kaller allerede hide, men eksplisitt her for tydelig phase-rensk).
+        this.playScreen.hideUpcomingPurchase();
+        // BIN-409 (D2): Fresh PLAYING-transition — reset buy-more til enabled.
+        // Per-ball sjekk i onNumberDrawn setter den til disabled igjen når
+        // drawCount krysser threshold.
+        this.playScreen.enableBuyMore();
         this.setScreen(this.playScreen);
         break;
       }
@@ -374,6 +386,9 @@ class Game1Controller implements GameController {
         // CenterBall + DrawnBalls + PatternMiniGrid kjører som vanlig.
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
+        // BIN-410 (D3, Q4 2026-04-18): Upcoming-panel skal IKKE vises under
+        // SPECTATING — Unity viser det kun mellom runder.
+        this.playScreen.hideUpcomingPurchase();
         this.setScreen(this.playScreen);
         break;
       }
@@ -425,6 +440,11 @@ class Game1Controller implements GameController {
 
     this.gameRoundCount++;
     this.buyMoreDisabled = false;
+    // BIN-409 (D2): Ny runde — reset buy-more button til enabled state.
+    // Unity parity: `Game1GamePlayPanel.SocketFlow.cs` setter `BuyMoreDisableFlagVal`
+    // false ved OnGameStart. Upcoming-panel skjules også (runde pågår).
+    this.playScreen?.enableBuyMore();
+    this.playScreen?.hideUpcomingPurchase();
 
     // Reset announced numbers for the new round
     this.deps.audio.resetAnnouncedNumbers();
