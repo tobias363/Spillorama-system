@@ -213,6 +213,57 @@ export class TicketCard extends Container {
   }
 
   /**
+   * Hard reset of ALL card + grid animations — used at game-end / scene reset.
+   *
+   * Called by Game1Controller.onGameEnded so that cells that were mid-blink,
+   * cards mid-BINGO-pulse, or cards mid-flip do not keep animating after the
+   * round ends and the UI transitions to the EndScreen / waiting mode.
+   *
+   * Unity reference: BingoTicket.Stop_Blink (legacy/unity-client/Assets/
+   * _Project/_Scripts/Prefabs/Bingo Tickets/BingoTicket.cs:1011-1016) — the
+   * Unity method cancels LeanTween tweens on both `imgTicket` (card bg) and
+   * each cell's `txtNumber`/`imgCellOneToGo`, then calls `Set_Color_Callback`
+   * to restore the original color. No scale animation on reset.
+   *
+   * Game-finish handler: Game1GamePlayPanel.OnGameFinish (legacy/unity-client/
+   * Assets/_Project/_Scripts/Panels/Game/Game1GamePlayPanel.SocketFlow.cs:
+   * 595-616) calls Stop_Blink on every ticket.
+   *
+   * Flip edge case: Unity has no mid-game flip animation, so there is nothing
+   * to cancel at game-end Unity-side. Web-side we cancel the flip-tween and
+   * force the card back to the grid view (no animation).
+   */
+  stopAllAnimations(): void {
+    // 1. Card-level (bg blink, BINGO pulse, flip-auto timer).
+    this.stopCardAnimations();
+
+    // 2. Grid / cells (mark bounce, 1-to-go blink).
+    this.grid.stopAllAnimations();
+
+    // 3. Cancel any in-flight flip tween and snap to grid-view without
+    //    animation (Unity has no flip at game-end — we fully reset).
+    gsap.killTweensOf(this.scale);
+    this.scale.set(1, 1);
+    if (this.isFlipping || this.isFlipped) {
+      // Restore grid-view visibility directly — no tween.
+      this.grid.visible = true;
+      this.toGoText.visible = true;
+      this.headerBg.visible = true;
+      this.headerText.visible = true;
+      this.priceText.visible = true;
+      this.cardBg.visible = true;
+      if (this.detailsOverlay) this.detailsOverlay.visible = false;
+      // Reset pivot / position offset applied by flipToDetails.
+      if (this.pivot.x !== 0) {
+        this.x -= this.pivot.x;
+        this.pivot.x = 0;
+      }
+      this.isFlipping = false;
+      this.isFlipped = false;
+    }
+  }
+
+  /**
    * Hide this card's own chrome (background, header, price, to-go counter)
    * so only the BingoGrid is visible. Used when this card lives inside a
    * TicketGroup (Elvis/Large/Traffic) where the group owns the chrome.

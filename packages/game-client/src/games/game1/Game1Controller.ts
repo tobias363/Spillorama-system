@@ -451,8 +451,25 @@ class Game1Controller implements GameController {
     this.dismissMiniGame();
 
     // Unity OnGameFinish: stop blink animations, reset sounds
+    // (Game1GamePlayPanel.SocketFlow.cs:595-616 iterates Active_BingoTickets
+    //  and calls Stop_Blink on each ticket.)
     this.deps.audio.resetAnnouncedNumbers();
     this.deps.audio.stopAll();
+
+    // Hard-reset every inline ticket's animations (cell blinks, mark bounces,
+    // card BINGO pulse, bg blink, in-flight flip) so nothing keeps animating
+    // after we transition to EndScreen/WAITING. Without this, a 1-to-go cell
+    // that was mid-blink or a card mid-BINGO-pulse at game-end would continue
+    // animating on the EndScreen background.
+    //
+    // Unity refs:
+    //   - Stop_Blink on ticket:  BingoTicket.cs:1011-1016
+    //   - Stop_NumberBlink cell: BingoTicketSingleCellData.cs:195-205
+    if (this.playScreen) {
+      for (const card of this.playScreen.getInlineCards()) {
+        card.stopAllAnimations();
+      }
+    }
 
     // Refresh player balance (Unity: dispatch balance event for game-bar sync)
     if (this.myPlayerId) {

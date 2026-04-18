@@ -294,4 +294,17 @@ export class TicketGroup extends Container {
       mini.stopCardAnimations();
     }
   }
+
+  /**
+   * Hard reset of ALL animations across every mini-ticket — used at game-end.
+   *
+   * Delegates to {@link TicketCard.stopAllAnimations} on each mini, which in
+   * turn hard-resets cell blinks + mark-bounces + flip tweens. See
+   * TicketCard.stopAllAnimations for the Unity reference.
+   */
+  stopAllAnimations(): void {
+    for (const mini of this.miniTickets) {
+      mini.stopAllAnimations();
+    }
+  }
 }
