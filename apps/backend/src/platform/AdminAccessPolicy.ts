@@ -102,7 +102,20 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     marketing-rabatter er sentralt.
    */
   VOUCHER_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  VOUCHER_WRITE: ["ADMIN"]
+  VOUCHER_WRITE: ["ADMIN"],
+  /**
+   * BIN-583 B3.2: agent-transaksjons-operasjoner.
+   *   - AGENT_CASH_WRITE: cash-in/out til spiller-wallet. AGENT kun på
+   *     egen shift; ADMIN inkludert for "ADMIN har alle"-invariant
+   *     (owner-semantikk håndheves i service-laget).
+   *   - AGENT_TICKET_WRITE: registrer digital billett + selg/kansellér
+   *     fysisk billett.
+   *   - AGENT_TX_READ: lese transaksjonslogg. Inkluderer admin-roller
+   *     for overview og AGENT for egen logg.
+   */
+  AGENT_CASH_WRITE:   ["ADMIN", "AGENT"],
+  AGENT_TICKET_WRITE: ["ADMIN", "AGENT"],
+  AGENT_TX_READ:      ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
