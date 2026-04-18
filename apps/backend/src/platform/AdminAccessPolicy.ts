@@ -128,7 +128,22 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    */
   AGENT_SETTLEMENT_WRITE: ["ADMIN", "AGENT"],
   AGENT_SETTLEMENT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
-  AGENT_SETTLEMENT_FORCE: ["ADMIN"]
+  AGENT_SETTLEMENT_FORCE: ["ADMIN"],
+  /**
+   * BIN-583 B3.6: produkt-katalog + hall-assignment (kiosk-salg).
+   *   - PRODUCT_READ: alle admin-roller + AGENT (trenger å liste egne
+   *     hall-produkter for salg).
+   *   - PRODUCT_WRITE: katalog-CRUD + hall-binding — ADMIN + HALL_OPERATOR
+   *     (hall-operatør styrer hvilke produkter som selges i egen hall;
+   *     katalog-opprett er ADMIN-only men bindinger er hall-lokale).
+   */
+  PRODUCT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  PRODUCT_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  /**
+   * BIN-583 B3.6: agent-siden av produkt-salg (cart + finalize).
+   * AGENT kun på egen shift; ADMIN inkludert for "ADMIN har alle"-invariant.
+   */
+  AGENT_PRODUCT_SELL: ["ADMIN", "AGENT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

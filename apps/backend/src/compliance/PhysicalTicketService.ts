@@ -96,6 +96,17 @@ export interface GenerateResult {
   lastUniqueId: string;
 }
 
+export interface PhysicalTicketBatchTransfer {
+  id: string;
+  batchId: string;
+  fromHallId: string;
+  toHallId: string;
+  reason: string;
+  transferredBy: string;
+  transferredAt: string;
+  ticketCountAtTransfer: number;
+}
+
 export interface PhysicalTicketServiceOptions {
   connectionString: string;
   schema?: string;
@@ -698,6 +709,134 @@ export class PhysicalTicketService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * BIN-583 B3.7 Alt B: overfør en hel batch fra en hall til en annen.
+   * Atomisk — rejecter hvis NOEN billett i batchen er SOLD eller VOIDED
+   * (kun UNSOLD kan flyttes). Oppdaterer batch.hall_id + alle
+   * tickets.hall_id + logger i app_physical_ticket_transfers.
+   *
+   * Unique Player-konseptet fra legacy ble droppet som NOT-NEEDED
+   * 2026-04-19 (regulatorisk review) — denne metoden er kun batch-
+   * overflytting av fysiske papirbilletter (edge-case ops-verktøy for
+   * misprinted batches).
+   */
+  async transferBatchToHall(input: {
+    batchId: string;
+    toHallId: string;
+    reason: string;
+    actorUserId: string;
+  }): Promise<PhysicalTicketBatchTransfer> {
+    await this.ensureInitialized();
+    const batchId = input.batchId?.trim();
+    const toHallId = input.toHallId?.trim();
+    const reason = input.reason?.trim();
+    const actorUserId = input.actorUserId?.trim();
+    if (!batchId) throw new DomainError("INVALID_INPUT", "batchId er påkrevd.");
+    if (!toHallId) throw new DomainError("INVALID_INPUT", "toHallId er påkrevd.");
+    if (!reason) throw new DomainError("INVALID_INPUT", "reason er påkrevd.");
+    if (!actorUserId) throw new DomainError("INVALID_INPUT", "actorUserId er påkrevd.");
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: batchRows } = await client.query<{ hall_id: string }>(
+        `SELECT hall_id FROM ${this.batchesTable()} WHERE id = $1 FOR UPDATE`,
+        [batchId]
+      );
+      const batch = batchRows[0];
+      if (!batch) throw new DomainError("NOT_FOUND", "Batch finnes ikke.");
+      const fromHallId = batch.hall_id;
+      if (fromHallId === toHallId) {
+        throw new DomainError("INVALID_INPUT", "Kan ikke overføre til samme hall.");
+      }
+
+      const { rows: statusRows } = await client.query<{ status: PhysicalTicketStatus; count: string }>(
+        `SELECT status, COUNT(*)::text AS count
+         FROM ${this.ticketsTable()} WHERE batch_id = $1 GROUP BY status`,
+        [batchId]
+      );
+      let unsoldCount = 0;
+      for (const r of statusRows) {
+        if (r.status === "SOLD" || r.status === "VOIDED") {
+          throw new DomainError(
+            "BATCH_NOT_TRANSFERABLE",
+            `Batch inneholder billetter med status ${r.status} — kun UNSOLD-batches kan flyttes.`
+          );
+        }
+        if (r.status === "UNSOLD") unsoldCount = Number(r.count);
+      }
+
+      await client.query(
+        `UPDATE ${this.batchesTable()} SET hall_id = $1, updated_at = NOW() WHERE id = $2`,
+        [toHallId, batchId]
+      );
+      await client.query(
+        `UPDATE ${this.ticketsTable()} SET hall_id = $1, updated_at = NOW() WHERE batch_id = $2`,
+        [toHallId, batchId]
+      );
+
+      const transferId = randomUUID();
+      await client.query(
+        `INSERT INTO "${this.schema}"."app_physical_ticket_transfers"
+           (id, batch_id, from_hall_id, to_hall_id, reason, transferred_by, ticket_count_at_transfer)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [transferId, batchId, fromHallId, toHallId, reason, actorUserId, unsoldCount]
+      );
+
+      await client.query("COMMIT");
+
+      return {
+        id: transferId,
+        batchId,
+        fromHallId,
+        toHallId,
+        reason,
+        transferredBy: actorUserId,
+        transferredAt: new Date().toISOString(),
+        ticketCountAtTransfer: unsoldCount,
+      };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      if (err instanceof DomainError) throw err;
+      logger.error({ err, batchId }, "[BIN-583 B3.7] transferBatchToHall failed");
+      throw new DomainError("BATCH_TRANSFER_FAILED", "Kunne ikke overføre batchen.");
+    } finally {
+      client.release();
+    }
+  }
+
+  /** BIN-583 B3.7 Alt B: hent transfer-historikk for en batch. */
+  async listTransfers(batchId: string): Promise<PhysicalTicketBatchTransfer[]> {
+    await this.ensureInitialized();
+    if (!batchId?.trim()) throw new DomainError("INVALID_INPUT", "batchId er påkrevd.");
+    const { rows } = await this.pool.query<{
+      id: string;
+      batch_id: string;
+      from_hall_id: string;
+      to_hall_id: string;
+      reason: string;
+      transferred_by: string;
+      transferred_at: Date | string;
+      ticket_count_at_transfer: number;
+    }>(
+      `SELECT id, batch_id, from_hall_id, to_hall_id, reason, transferred_by, transferred_at,
+              ticket_count_at_transfer
+       FROM "${this.schema}"."app_physical_ticket_transfers"
+       WHERE batch_id = $1 ORDER BY transferred_at DESC`,
+      [batchId]
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      batchId: r.batch_id,
+      fromHallId: r.from_hall_id,
+      toHallId: r.to_hall_id,
+      reason: r.reason,
+      transferredBy: r.transferred_by,
+      transferredAt: asIso(r.transferred_at),
+      ticketCountAtTransfer: Number(r.ticket_count_at_transfer),
+    }));
   }
 
   // ── Private helpers ────────────────────────────────────────────────────

@@ -240,22 +240,22 @@ category,method,path,controller,action,legacy_file,status,note
 4-HALL,GET,/removedGroup,groupHallController,removedGroup,backend.js,TODO,Group-hall-konsept: TODO defer — eier-input før pilot (PM-flag 2026-04-18). Kan markeres NOT-NEEDED ved avgjørelse.
 4-HALL,GET,/getAvailableGroupHalls/:type,groupHallController,getAvailableGroupHalls,backend.js,TODO,Group-hall-konsept: TODO defer — eier-input før pilot (PM-flag 2026-04-18). Kan markeres NOT-NEEDED ved avgjørelse.
 4-HALL,GET,/getAllGroupHalls/,groupHallController,getGroupHallData,backend.js,TODO,Group-hall-konsept: TODO defer — eier-input før pilot (PM-flag 2026-04-18). Kan markeres NOT-NEEDED ved avgjørelse.
-6-ADMIN-OPS,GET,/productList,productManagement,productListPage,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,GET,/products/getProducts,productManagement,getProducts,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,GET,/getProduct/:id,productManagement,getProduct,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,POST,/addProduct,productManagement,addProduct,backend.js,NOT-NEEDED,Shop/product — utenfor scope
-6-ADMIN-OPS,POST,/editProduct,productManagement,editProduct,backend.js,NOT-NEEDED,Shop/product — utenfor scope
-6-ADMIN-OPS,POST,/deleteProduct,productManagement,deleteProduct,backend.js,NOT-NEEDED,Shop/product — utenfor scope
-6-ADMIN-OPS,GET,/getCategories,productManagement,getCategories,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,GET,/categoryList,productManagement,categoryListPage,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,GET,/categoryTable,productManagement,categoryDataTable,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,POST,/addCategory,productManagement,addCategory,backend.js,NOT-NEEDED,Shop/product — utenfor scope
-6-ADMIN-OPS,POST,/editCategory,productManagement,editCategory,backend.js,NOT-NEEDED,Shop/product — utenfor scope
-6-ADMIN-OPS,POST,/deleteCategory,productManagement,deleteCategory,backend.js,NOT-NEEDED,Shop/product — utenfor scope
-6-ADMIN-OPS,GET,/hallProductList,productManagement,hallProductListPage,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,GET,/getHallsandProducts,productManagement,getHallsandProducts,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,GET,/getHallWithProduct/:id,productManagement,getHallWithProduct,backend.js,NOT-NEEDED,Shop/product mgmt utenfor bingo MVP
-6-ADMIN-OPS,POST,/addProductinHall,productManagement,updateProductinHall,backend.js,NOT-NEEDED,Shop/product — utenfor scope
+6-ADMIN-OPS,GET,/productList,productManagement,productListPage,backend.js,NOT-NEEDED,Legacy HTML admin-UI erstattet av React-admin (data via B3.6)
+6-ADMIN-OPS,GET,/products/getProducts,productManagement,getProducts,backend.js,EXISTS,B3.6 GET /api/admin/products (PR-tbd)
+6-ADMIN-OPS,GET,/getProduct/:id,productManagement,getProduct,backend.js,EXISTS,B3.6 GET /api/admin/products/:id (PR-tbd)
+6-ADMIN-OPS,POST,/addProduct,productManagement,addProduct,backend.js,EXISTS,B3.6 POST /api/admin/products (PR-tbd)
+6-ADMIN-OPS,POST,/editProduct,productManagement,editProduct,backend.js,EXISTS,B3.6 PUT /api/admin/products/:id (PR-tbd)
+6-ADMIN-OPS,POST,/deleteProduct,productManagement,deleteProduct,backend.js,EXISTS,B3.6 DELETE /api/admin/products/:id soft-delete (PR-tbd)
+6-ADMIN-OPS,GET,/getCategories,productManagement,getCategories,backend.js,EXISTS,B3.6 GET /api/admin/product-categories (PR-tbd)
+6-ADMIN-OPS,GET,/categoryList,productManagement,categoryListPage,backend.js,NOT-NEEDED,Legacy HTML admin-UI erstattet av React-admin (data via B3.6)
+6-ADMIN-OPS,GET,/categoryTable,productManagement,categoryDataTable,backend.js,NOT-NEEDED,Legacy DataTables-endpoint erstattet av GET /api/admin/product-categories
+6-ADMIN-OPS,POST,/addCategory,productManagement,addCategory,backend.js,EXISTS,B3.6 POST /api/admin/product-categories (PR-tbd)
+6-ADMIN-OPS,POST,/editCategory,productManagement,editCategory,backend.js,EXISTS,B3.6 PUT /api/admin/product-categories/:id (PR-tbd)
+6-ADMIN-OPS,POST,/deleteCategory,productManagement,deleteCategory,backend.js,EXISTS,B3.6 DELETE /api/admin/product-categories/:id (PR-tbd)
+6-ADMIN-OPS,GET,/hallProductList,productManagement,hallProductListPage,backend.js,NOT-NEEDED,Legacy HTML admin-UI erstattet av React-admin (data via B3.6)
+6-ADMIN-OPS,GET,/getHallsandProducts,productManagement,getHallsandProducts,backend.js,EXISTS,B3.6 GET /api/admin/halls/:hallId/products (PR-tbd)
+6-ADMIN-OPS,GET,/getHallWithProduct/:id,productManagement,getHallWithProduct,backend.js,EXISTS,B3.6 GET /api/admin/halls/:hallId/products (PR-tbd)
+6-ADMIN-OPS,POST,/addProductinHall,productManagement,updateProductinHall,backend.js,EXISTS,B3.6 PUT /api/admin/halls/:hallId/products (PR-tbd)
 5-WALLET,GET,/wallet,WalletController,walletView,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
 5-WALLET,GET,/getWallet,WalletController,getWallet,backend.js,EXISTS,/api/admin/wallets/* dekker
 5-WALLET,GET,/viewWallet/:id,WalletController,viewUserWallet,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
@@ -485,9 +485,9 @@ category,method,path,controller,action,legacy_file,status,note
 7-AGENT,GET,/agent/cashout/get,agentcashinoutController,getPhysicalCashoutDetails,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/wof/reward,agentcashinoutController,wofGameReward,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/game/stop-option,agentcashinoutController,agentGameStopOption,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-7-AGENT,GET,/agent/sellProduct,agentcashinoutController,productCartPage,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-7-AGENT,POST,/agent/createCart,agentcashinoutController,createCart,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-7-AGENT,GET,/agent/productCheckout,agentcashinoutController,productCheckoutPage,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
+7-AGENT,GET,/agent/sellProduct,agentcashinoutController,productCartPage,backend.js,EXISTS,B3.6 GET /api/agent/products (JSON-liste erstatter HTML render)
+7-AGENT,POST,/agent/createCart,agentcashinoutController,createCart,backend.js,EXISTS,B3.6 POST /api/agent/products/carts (PR-tbd)
+7-AGENT,GET,/agent/productCheckout,agentcashinoutController,productCheckoutPage,backend.js,EXISTS,B3.6 GET /api/agent/products/carts/:id (JSON-erstatter)
 7-AGENT,POST,/agent/placeOrder,agentcashinoutController,placeOrder,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/cancelOrder,agentcashinoutController,cancelOrder,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/physicalCashOut,agentcashinoutController,physicalCashOutPage,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
@@ -495,7 +495,7 @@ category,method,path,controller,action,legacy_file,status,note
 7-AGENT,GET,/agent/viewWonTickets/:id,agentcashinoutController,viewWonPhysicalTicketPage,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/getPhysicalWinningInGame,agentcashinoutController,getPhysicalWinningInGame,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/reward-all,agentcashinoutController,rewardAll,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-7-AGENT,POST,/agent/sellProduct,agentcashinoutController,sellProductAgent,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
+7-AGENT,POST,/agent/sellProduct,agentcashinoutController,sellProductAgent,backend.js,EXISTS,B3.6 POST /api/agent/products/carts/:id/finalize (PR-tbd)
 7-AGENT,GET,/orderHistory,agentcashinoutController,orderHistoryView,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/getOrderHistory,agentcashinoutController,getOrderHistoryData,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/viewOrder/:cartId,agentcashinoutController,orderDetailsPage,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)

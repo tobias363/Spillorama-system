@@ -61,6 +61,10 @@ import { createAgentRouter } from "./routes/agent.js";
 import { createAdminAgentsRouter } from "./routes/adminAgents.js";
 import { createAgentTransactionsRouter } from "./routes/agentTransactions.js";
 import { createAgentSettlementRouter } from "./routes/agentSettlement.js";
+import { createAdminProductsRouter } from "./routes/adminProducts.js";
+import { createAgentProductsRouter } from "./routes/agentProducts.js";
+import { ProductService } from "./agent/ProductService.js";
+import { AgentProductSaleService } from "./agent/AgentProductSaleService.js";
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
@@ -654,6 +658,35 @@ app.use(createAgentSettlementRouter({
   agentService,
   agentSettlementService,
   auditLogService,
+}));
+
+// BIN-583 B3.6: produkt-katalog + hall-assignment + agent sale-flyt.
+const productService = new ProductService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+const agentProductSaleService = new AgentProductSaleService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+  platformService,
+  walletAdapter,
+  agentService,
+  agentShiftService,
+  agentStore,
+  transactionStore: agentTransactionStore,
+});
+app.use(createAdminProductsRouter({
+  platformService,
+  auditLogService,
+  productService,
+}));
+app.use(createAgentProductsRouter({
+  platformService,
+  auditLogService,
+  agentService,
+  agentShiftService,
+  productService,
+  productSaleService: agentProductSaleService,
 }));
 
 app.use(createAdminRouter({

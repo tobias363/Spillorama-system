@@ -14,6 +14,7 @@ export type ActionType =
   | "TICKET_SALE"
   | "TICKET_REGISTER"
   | "TICKET_CANCEL"
+  | "PRODUCT_SALE"
   | "FEE"
   | "OTHER";
 

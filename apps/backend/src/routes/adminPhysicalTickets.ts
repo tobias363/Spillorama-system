@@ -380,5 +380,60 @@ export function createAdminPhysicalTicketsRouter(
     }
   });
 
+  // ── BIN-583 B3.7 Alt B: batch cross-hall transfer ───────────────────
+
+  router.post("/api/admin/physical-tickets/batches/:id/transfer-hall", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "PHYSICAL_TICKET_WRITE");
+      // Cross-hall-flytt er ADMIN-only (HALL_OPERATOR er scoped til egen hall
+      // og kan ikke flytte batch ut av egen hall på egen autoritet).
+      if (actor.role !== "ADMIN") {
+        throw new DomainError(
+          "FORBIDDEN",
+          "Kun ADMIN kan godkjenne cross-hall-flytt av batch."
+        );
+      }
+      const batchId = mustBeNonEmptyString(req.params.id, "id");
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const toHallId = mustBeNonEmptyString(body.toHallId, "toHallId");
+      const reason = mustBeNonEmptyString(body.reason, "reason");
+      const transfer = await physicalTicketService.transferBatchToHall({
+        batchId,
+        toHallId,
+        reason,
+        actorUserId: actor.id,
+      });
+      fireAudit({
+        actorId: actor.id,
+        actorType: actorTypeFromRole(actor.role),
+        action: "physical_ticket.batch.transfer_hall",
+        resource: "physical_ticket_batch",
+        resourceId: batchId,
+        details: {
+          fromHallId: transfer.fromHallId,
+          toHallId: transfer.toHallId,
+          reason,
+          ticketCountAtTransfer: transfer.ticketCountAtTransfer,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+      apiSuccess(res, transfer);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.get("/api/admin/physical-tickets/batches/:id/transfers", async (req, res) => {
+    try {
+      await requirePermission(req, "PHYSICAL_TICKET_WRITE");
+      const batchId = mustBeNonEmptyString(req.params.id, "id");
+      const transfers = await physicalTicketService.listTransfers(batchId);
+      apiSuccess(res, { batchId, transfers, count: transfers.length });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   return router;
 }
