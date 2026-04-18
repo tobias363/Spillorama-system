@@ -62,6 +62,8 @@ import { createAdminAgentsRouter } from "./routes/adminAgents.js";
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
+import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.js";
+import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
@@ -258,6 +260,13 @@ const securityService = new SecurityService({
 // venter på init uansett.
 void securityService.warmBlockedIpCache().catch((err) => {
   console.warn("[BIN-587 B3-security] blocked-IP cache warm-up failed:", err);
+});
+
+// BIN-587 B4a: physical papirbillett-admin. Agent-POS-salget (BIN-583)
+// oppdaterer samme tabell via agent-endepunkt.
+const physicalTicketService = new PhysicalTicketService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
 });
 
 // BIN-588/BIN-587 B2.1: SMTP + audit-log. Begge har graceful fallbacks
@@ -522,6 +531,11 @@ app.use(createAdminSecurityRouter({
   platformService,
   auditLogService,
   securityService,
+}));
+app.use(createAdminPhysicalTicketsRouter({
+  platformService,
+  auditLogService,
+  physicalTicketService,
 }));
 
 // BIN-583 B3.1: agent auth/shift + admin agent-CRUD.

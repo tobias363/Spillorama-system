@@ -87,7 +87,13 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    */
   AGENT_SHIFT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
   AGENT_SHIFT_WRITE: ["ADMIN", "AGENT"],
-  AGENT_SHIFT_FORCE: ["ADMIN"]
+  AGENT_SHIFT_FORCE: ["ADMIN"],
+  /**
+   * BIN-587 B4a: fysiske papirbilletter. ADMIN + HALL_OPERATOR fordi
+   * papirbillett-administrasjon er hall-lokalt. SUPPORT er bevisst
+   * utelatt — er ikke hall-operativ rolle.
+   */
+  PHYSICAL_TICKET_WRITE: ["ADMIN", "HALL_OPERATOR"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

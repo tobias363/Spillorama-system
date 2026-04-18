@@ -183,6 +183,20 @@ test("BIN-587 B3-security: assertAdminPermission kaster for HALL_OPERATOR", () =
   assert.throws(() => assertAdminPermission("PLAYER", "SECURITY_WRITE"));
 });
 
+// ── BIN-587 B4a: physical-ticket permission ─────────────────────────────
+
+test("BIN-587 B4a: PHYSICAL_TICKET_WRITE tillatt for ADMIN + HALL_OPERATOR, ikke SUPPORT/PLAYER", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "PHYSICAL_TICKET_WRITE"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "PHYSICAL_TICKET_WRITE"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "PHYSICAL_TICKET_WRITE"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "PHYSICAL_TICKET_WRITE"), false);
+});
+
+test("BIN-587 B4a: assertAdminPermission kaster for SUPPORT/PLAYER på physical-ticket", () => {
+  assert.throws(() => assertAdminPermission("SUPPORT", "PHYSICAL_TICKET_WRITE"));
+  assert.throws(() => assertAdminPermission("PLAYER", "PHYSICAL_TICKET_WRITE"));
+});
+
 // ── BIN-591: hall-scope ─────────────────────────────────────────────────────
 
 test("BIN-591: ADMIN har alltid hall-scope (global)", () => {
