@@ -115,7 +115,20 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    */
   AGENT_CASH_WRITE:   ["ADMIN", "AGENT"],
   AGENT_TICKET_WRITE: ["ADMIN", "AGENT"],
-  AGENT_TX_READ:      ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"]
+  AGENT_TX_READ:      ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  /**
+   * BIN-583 B3.3: daglig kasse-oppgjør.
+   *   - AGENT_SETTLEMENT_WRITE: control-daily-balance + close-day. AGENT
+   *     for egen shift; ADMIN inkludert for "ADMIN har alle"-invariant.
+   *     Owner-sjekk i service-laget.
+   *   - AGENT_SETTLEMENT_READ: lese settlements. Alle admin-roller +
+   *     AGENT (egen historikk).
+   *   - AGENT_SETTLEMENT_FORCE: force-close utover diff-threshold eller
+   *     edit-settlement post-close — kun ADMIN.
+   */
+  AGENT_SETTLEMENT_WRITE: ["ADMIN", "AGENT"],
+  AGENT_SETTLEMENT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  AGENT_SETTLEMENT_FORCE: ["ADMIN"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

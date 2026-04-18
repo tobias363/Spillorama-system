@@ -60,11 +60,15 @@ import { SecurityService } from "./compliance/SecurityService.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createAdminAgentsRouter } from "./routes/adminAgents.js";
 import { createAgentTransactionsRouter } from "./routes/agentTransactions.js";
+import { createAgentSettlementRouter } from "./routes/agentSettlement.js";
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
 import { AgentTransactionService } from "./agent/AgentTransactionService.js";
 import { PostgresAgentTransactionStore } from "./agent/AgentTransactionStore.js";
+import { AgentSettlementService } from "./agent/AgentSettlementService.js";
+import { PostgresAgentSettlementStore } from "./agent/AgentSettlementStore.js";
+import { PostgresHallCashLedger } from "./agent/HallCashLedger.js";
 import { NotImplementedTicketPurchasePort } from "./agent/ports/TicketPurchasePort.js";
 import { PostgresPhysicalTicketReadPort } from "./agent/ports/PhysicalTicketReadPort.js";
 import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.js";
@@ -624,6 +628,31 @@ app.use(createAgentTransactionsRouter({
   platformService,
   agentService,
   agentTransactionService,
+  auditLogService,
+}));
+
+// BIN-583 B3.3: agent + admin daily-cash-settlement (close-day, edit, PDF).
+const agentSettlementStore = new PostgresAgentSettlementStore({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const hallCashLedger = new PostgresHallCashLedger({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const agentSettlementService = new AgentSettlementService({
+  platformService,
+  agentService,
+  agentShiftService,
+  agentStore,
+  transactionStore: agentTransactionStore,
+  settlementStore: agentSettlementStore,
+  hallCashLedger,
+});
+app.use(createAgentSettlementRouter({
+  platformService,
+  agentService,
+  agentSettlementService,
   auditLogService,
 }));
 

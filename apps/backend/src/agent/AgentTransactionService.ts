@@ -532,6 +532,14 @@ export class AgentTransactionService {
         "Du må åpne en shift før du kan utføre transaksjoner."
       );
     }
+    // BIN-583 B3.3: shift-settlement freeze. Når close-day har skjedd
+    // er shiften regnskapsmessig lukket — ingen nye transaksjoner.
+    if (shift.settledAt) {
+      throw new DomainError(
+        "SHIFT_SETTLED",
+        "Shiften er avsluttet med daglig oppgjør. Åpne ny shift for nye transaksjoner."
+      );
+    }
     return shift;
   }
 

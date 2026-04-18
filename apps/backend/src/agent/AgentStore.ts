@@ -72,6 +72,10 @@ export interface AgentShift {
   settlement: Record<string, unknown>;
   previousSettlement: Record<string, unknown>;
 
+  // BIN-583 B3.3: settlement freeze-flag.
+  settledAt: string | null;
+  settledByUserId: string | null;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -128,6 +132,19 @@ export interface AgentStore {
    * called inside the same DB transaction as the transaction-row insert.
    */
   applyShiftCashDelta(shiftId: string, delta: ShiftCashDelta): Promise<AgentShift>;
+
+  /**
+   * BIN-583 B3.3: skriv control_daily_balance JSONB med agent's reported
+   * sjekk. Kan kalles flere ganger — overskriver sist kjøring.
+   */
+  setShiftControlDailyBalance(shiftId: string, payload: Record<string, unknown>): Promise<AgentShift>;
+
+  /**
+   * BIN-583 B3.3: marker shift som settled (close-day fullført). Etter
+   * dette nekter AgentTransactionService alle mutation-paths med
+   * SHIFT_SETTLED. Idempotent feiler hvis allerede settled.
+   */
+  markShiftSettled(shiftId: string, settledByUserId: string): Promise<AgentShift>;
 }
 
 export interface ShiftCashDelta {
@@ -186,6 +203,8 @@ interface ShiftRow {
   control_daily_balance: unknown;
   settlement: unknown;
   previous_settlement: unknown;
+  settled_at: Date | string | null;
+  settled_by_user_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -570,6 +589,41 @@ export class PostgresAgentStore implements AgentStore {
     return this.mapShift(rows[0]);
   }
 
+  async setShiftControlDailyBalance(shiftId: string, payload: Record<string, unknown>): Promise<AgentShift> {
+    const { rows } = await this.pool.query<ShiftRow>(
+      `UPDATE ${this.shifts()}
+       SET control_daily_balance = $2::jsonb, updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [shiftId, JSON.stringify(payload)]
+    );
+    if (!rows[0]) throw new Error("[BIN-583] shift not found");
+    return this.mapShift(rows[0]);
+  }
+
+  async markShiftSettled(shiftId: string, settledByUserId: string): Promise<AgentShift> {
+    const { rows } = await this.pool.query<ShiftRow>(
+      `UPDATE ${this.shifts()}
+       SET settled_at = now(),
+           settled_by_user_id = $2,
+           is_active = false,
+           is_logged_out = true,
+           is_daily_balance_transferred = true,
+           ended_at = COALESCE(ended_at, now()),
+           updated_at = now()
+       WHERE id = $1 AND settled_at IS NULL
+       RETURNING *`,
+      [shiftId, settledByUserId]
+    );
+    if (!rows[0]) {
+      // Either shift not found or already settled — caller-distinguishes via getShiftById.
+      const existing = await this.getShiftById(shiftId);
+      if (!existing) throw new Error("[BIN-583] shift not found");
+      throw new Error("[BIN-583] shift already settled");
+    }
+    return this.mapShift(rows[0]);
+  }
+
   private mapProfile(row: AgentRow, halls: AgentHallAssignment[]): AgentProfile {
     return {
       userId: row.id,
@@ -621,6 +675,8 @@ export class PostgresAgentStore implements AgentStore {
       controlDailyBalance: asJsonObject(row.control_daily_balance),
       settlement: asJsonObject(row.settlement),
       previousSettlement: asJsonObject(row.previous_settlement),
+      settledAt: row.settled_at ? asIso(row.settled_at) : null,
+      settledByUserId: row.settled_by_user_id,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
@@ -827,6 +883,8 @@ export class InMemoryAgentStore implements AgentStore {
       controlDailyBalance: {},
       settlement: {},
       previousSettlement: {},
+      settledAt: null,
+      settledByUserId: null,
       createdAt: now,
       updatedAt: now
     };
@@ -883,6 +941,29 @@ export class InMemoryAgentStore implements AgentStore {
     if (delta.dailyBalance) s.dailyBalance += delta.dailyBalance;
     if (delta.sellingByCustomerNumber) s.sellingByCustomerNumber += delta.sellingByCustomerNumber;
     s.updatedAt = new Date().toISOString();
+    return { ...s };
+  }
+
+  async setShiftControlDailyBalance(shiftId: string, payload: Record<string, unknown>): Promise<AgentShift> {
+    const s = this.shifts.get(shiftId);
+    if (!s) throw new Error("[BIN-583] shift not found");
+    s.controlDailyBalance = { ...payload };
+    s.updatedAt = new Date().toISOString();
+    return { ...s };
+  }
+
+  async markShiftSettled(shiftId: string, settledByUserId: string): Promise<AgentShift> {
+    const s = this.shifts.get(shiftId);
+    if (!s) throw new Error("[BIN-583] shift not found");
+    if (s.settledAt) throw new Error("[BIN-583] shift already settled");
+    const now = new Date().toISOString();
+    s.settledAt = now;
+    s.settledByUserId = settledByUserId;
+    s.isActive = false;
+    s.isLoggedOut = true;
+    s.isDailyBalanceTransferred = true;
+    s.endedAt = s.endedAt ?? now;
+    s.updatedAt = now;
     return { ...s };
   }
 

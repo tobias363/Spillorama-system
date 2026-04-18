@@ -61,6 +61,8 @@ tags:
     description: Admin CRUD for agent users (list/create/read/update/soft-delete). BIN-583 B3.1.
   - name: Agent — Transactions
     description: Agent cash-ops (cash-in/out), player lookup + balance, digital/physical ticket sale + cancel, transaction log. BIN-583 B3.2.
+  - name: Agent — Settlement
+    description: Daglig kasse-oppgjør — control-daily-balance, close-day, PDF-eksport, admin edit. BIN-583 B3.3.
 
 components:
   securitySchemes:
@@ -726,6 +728,59 @@ components:
         walletBalance: { type: number }
         displayName: { type: string }
         email: { type: string, format: email }
+
+    # ── BIN-583 B3.3: settlement-skjema ──────────────────────────────────────
+    AgentSettlement:
+      type: object
+      required: [id, shiftId, agentUserId, hallId, businessDate,
+                 dailyBalanceAtEnd, reportedCashCount, dailyBalanceDifference,
+                 closedByUserId, isForced, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        shiftId: { type: string }
+        agentUserId: { type: string }
+        hallId: { type: string }
+        businessDate: { type: string, format: date }
+        dailyBalanceAtStart: { type: number }
+        dailyBalanceAtEnd: { type: number }
+        reportedCashCount: { type: number }
+        dailyBalanceDifference: { type: number }
+        settlementToDropSafe: { type: number }
+        withdrawFromTotalBalance: { type: number }
+        totalDropSafe: { type: number }
+        shiftCashInTotal: { type: number }
+        shiftCashOutTotal: { type: number }
+        shiftCardInTotal: { type: number }
+        shiftCardOutTotal: { type: number }
+        settlementNote: { type: [string, "null"] }
+        closedByUserId: { type: string }
+        isForced: { type: boolean }
+        editedByUserId: { type: [string, "null"] }
+        editedAt: { type: [string, "null"], format: date-time }
+        editReason: { type: [string, "null"] }
+        otherData: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ControlDailyBalanceResult:
+      type: object
+      required: [shiftDailyBalance, reportedDailyBalance, diff, diffPct, severity]
+      properties:
+        shiftDailyBalance: { type: number }
+        reportedDailyBalance: { type: number }
+        diff: { type: number }
+        diffPct: { type: number }
+        severity:
+          type: string
+          enum: [OK, NOTE_REQUIRED, FORCE_REQUIRED]
+
+    SettlementDateInfo:
+      type: object
+      required: [expectedBusinessDate, hasPendingPreviousDay]
+      properties:
+        expectedBusinessDate: { type: string, format: date }
+        hasPendingPreviousDay: { type: boolean }
+        pendingShiftId: { type: [string, "null"] }
 
 security:
   - BearerAuth: []
@@ -4973,6 +5028,271 @@ paths:
                       data: { $ref: "#/components/schemas/AgentTransaction" }
         "400":
           description: TRANSACTION_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  # ── BIN-583 B3.3: Agent + Admin Settlement ────────────────────────────────
+
+  /api/agent/shift/control-daily-balance:
+    post:
+      tags: [Agent — Settlement]
+      summary: Pre-close kontrollsjekk av kontant-saldo (kan kalles flere ganger)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reportedDailyBalance, reportedTotalCashBalance]
+              properties:
+                reportedDailyBalance: { type: number }
+                reportedTotalCashBalance: { type: number }
+                notes: { type: string }
+      responses:
+        "200":
+          description: Diff + severity
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ControlDailyBalanceResult" }
+        "400":
+          description: NO_ACTIVE_SHIFT / SHIFT_SETTLED / INVALID_INPUT / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/shift/close-day:
+    post:
+      tags: [Agent — Settlement]
+      summary: Fullfør oppgjør — opprett settlement, mark shift settled, transferer daily-balance til hall.cash
+      description: |
+        Diff-håndtering:
+        - |diff| ≤ 500 NOK og ≤ 5 % → OK uten note
+        - 500 < |diff| ≤ 1000 (eller 5 < |%| ≤ 10) → note required
+        - |diff| > 1000 (eller > 10 %) → ADMIN + isForceRequested + note required
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reportedCashCount]
+              properties:
+                reportedCashCount: { type: number, minimum: 0 }
+                settlementToDropSafe: { type: number }
+                withdrawFromTotalBalance: { type: number }
+                totalDropSafe: { type: number }
+                settlementNote: { type: string }
+                isForceRequested: { type: boolean }
+                otherData: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Settlement opprettet
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentSettlement" }
+        "400":
+          description: NO_ACTIVE_SHIFT / SHIFT_SETTLED / DIFF_NOTE_REQUIRED / ADMIN_FORCE_REQUIRED
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/shift/settlement-date:
+    get:
+      tags: [Agent — Settlement]
+      summary: Forventet business-date + pending-previous-day-sjekk
+      responses:
+        "200":
+          description: Date info
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SettlementDateInfo" }
+
+  /api/agent/shift/{shiftId}/settlement:
+    parameters:
+      - in: path
+        name: shiftId
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — Settlement]
+      summary: Hent settlement for en shift (AGENT begrenset til egne)
+      responses:
+        "200":
+          description: Settlement
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentSettlement" }
+        "400":
+          description: SETTLEMENT_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/shift/{shiftId}/settlement.pdf:
+    parameters:
+      - in: path
+        name: shiftId
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — Settlement]
+      summary: Last ned settlement-PDF
+      responses:
+        "200":
+          description: PDF binary
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: SETTLEMENT_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/admin/shifts/settlements:
+    get:
+      tags: [Agent — Settlement]
+      summary: Paginert liste av settlements (ADMIN/HALL_OPERATOR/SUPPORT)
+      parameters:
+        - in: query
+          name: hallId
+          schema: { type: string }
+        - in: query
+          name: agentUserId
+          schema: { type: string }
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Paginert liste
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          settlements:
+                            type: array
+                            items: { $ref: "#/components/schemas/AgentSettlement" }
+                          limit: { type: integer }
+                          offset: { type: integer }
+
+  /api/admin/shifts/{shiftId}/settlement:
+    parameters:
+      - in: path
+        name: shiftId
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — Settlement]
+      summary: Admin-detail av settlement for shift
+      responses:
+        "200":
+          description: Settlement
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentSettlement" }
+        "400":
+          description: SETTLEMENT_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+    put:
+      tags: [Agent — Settlement]
+      summary: ADMIN editer settlement (kun ADMIN — krever reason)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+                reportedCashCount: { type: number }
+                settlementToDropSafe: { type: number }
+                withdrawFromTotalBalance: { type: number }
+                totalDropSafe: { type: number }
+                settlementNote: { type: [string, "null"] }
+                otherData: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Settlement oppdatert
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentSettlement" }
+        "400":
+          description: FORBIDDEN / EDIT_REASON_REQUIRED / SETTLEMENT_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/admin/shifts/{shiftId}/settlement.pdf:
+    parameters:
+      - in: path
+        name: shiftId
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — Settlement]
+      summary: Admin-PDF-eksport av settlement
+      responses:
+        "200":
+          description: PDF binary
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: SETTLEMENT_NOT_FOUND / FORBIDDEN
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }

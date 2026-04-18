@@ -72,12 +72,31 @@ export interface ListFilter {
   since?: string;
 }
 
+export interface ShiftAggregate {
+  cashIn: number;
+  cashOut: number;
+  cardIn: number;
+  cardOut: number;
+  walletIn: number;
+  walletOut: number;
+  ticketSaleCount: number;
+  ticketCancelCount: number;
+}
+
 export interface AgentTransactionStore {
   insert(input: InsertAgentTransactionInput, client?: PoolClient): Promise<AgentTransaction>;
   getById(id: string): Promise<AgentTransaction | null>;
   list(filter: ListFilter): Promise<AgentTransaction[]>;
   findSaleByTicketUniqueId(ticketUniqueId: string): Promise<AgentTransaction | null>;
   findCancelForTx(relatedTxId: string): Promise<AgentTransaction | null>;
+
+  /**
+   * BIN-583 B3.3: aggregér transaksjoner per shift for settlement-rapport.
+   * Counter-rader (TICKET_CANCEL med related_tx_id) trekkes fra de
+   * tilsvarende sale-radene slik at netto-totalsummene matcher faktisk
+   * cash-flow.
+   */
+  aggregateByShift(shiftId: string): Promise<ShiftAggregate>;
 }
 
 // ── Postgres implementation ─────────────────────────────────────────────────
@@ -233,6 +252,11 @@ export class PostgresAgentTransactionStore implements AgentTransactionStore {
     return rows[0] ? this.map(rows[0]) : null;
   }
 
+  async aggregateByShift(shiftId: string): Promise<ShiftAggregate> {
+    const all = await this.list({ shiftId, limit: 500 });
+    return aggregateRows(all);
+  }
+
   private map(row: Row): AgentTransaction {
     return {
       id: row.id,
@@ -329,4 +353,36 @@ export class InMemoryAgentTransactionStore implements AgentTransactionStore {
     );
     return r ? { ...r } : null;
   }
+
+  async aggregateByShift(shiftId: string): Promise<ShiftAggregate> {
+    return aggregateRows(this.rows.filter((r) => r.shiftId === shiftId));
+  }
+}
+
+// ── Aggregat-helper (delt mellom Postgres + InMemory) ──────────────────────
+
+export function aggregateRows(rows: AgentTransaction[]): ShiftAggregate {
+  const agg: ShiftAggregate = {
+    cashIn: 0, cashOut: 0,
+    cardIn: 0, cardOut: 0,
+    walletIn: 0, walletOut: 0,
+    ticketSaleCount: 0, ticketCancelCount: 0,
+  };
+  for (const r of rows) {
+    const isCredit = r.walletDirection === "CREDIT";
+    const isDebit = r.walletDirection === "DEBIT";
+    if (r.paymentMethod === "CASH") {
+      if (isCredit) agg.cashIn += r.amount;
+      if (isDebit) agg.cashOut += r.amount;
+    } else if (r.paymentMethod === "CARD") {
+      if (isCredit) agg.cardIn += r.amount;
+      if (isDebit) agg.cardOut += r.amount;
+    } else if (r.paymentMethod === "WALLET") {
+      if (isCredit) agg.walletIn += r.amount;
+      if (isDebit) agg.walletOut += r.amount;
+    }
+    if (r.actionType === "TICKET_SALE") agg.ticketSaleCount++;
+    if (r.actionType === "TICKET_CANCEL") agg.ticketCancelCount++;
+  }
+  return agg;
 }
