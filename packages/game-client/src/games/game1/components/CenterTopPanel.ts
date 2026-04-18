@@ -1,3 +1,4 @@
+import gsap from "gsap";
 import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
 import type { PatternDefinition, PatternResult } from "@spillorama/shared-types/game";
 import { PatternMiniGrid } from "./PatternMiniGrid.js";
@@ -160,6 +161,15 @@ export class CenterTopPanel {
   }
 
   private patternGrids: PatternMiniGrid[] = [];
+  /**
+   * Previous payout amount per patternId — used to detect payout changes
+   * and trigger the flash animation on the `txtAmount` span. Mirrors
+   * Unity's `PrefabBingoGame1Pattern.Update_Pattern_Amount` (PrefabBingoGame1Pattern.cs:107-110)
+   * which writes `txtAmount.text = $"{amount} kr"`. Unity only updates text,
+   * but product-side wants an animated flash to signal the change to
+   * players — we add that here (PR-5 C3).
+   */
+  private lastAmountByPatternId = new Map<string, number>();
 
   updatePatterns(patterns: PatternDefinition[], patternResults: PatternResult[], prizePool = 0): void {
     // Destroy old pattern grids
@@ -172,6 +182,8 @@ export class CenterTopPanel {
     for (let i = 0; i < patternResults.length; i++) {
       if (patternResults[i]?.isWon) currentPatternIdx = i + 1;
     }
+
+    const seenIds = new Set<string>();
 
     for (let i = 0; i < patterns.length; i++) {
       const pattern = patterns[i];
@@ -203,22 +215,68 @@ export class CenterTopPanel {
       else if (/^Row \d/.test(pattern.name)) displayName = pattern.name.replace("Row", "Rad");
 
       span.textContent = `${displayName} – ${prize} kr`;
+      let activeColor = "#ddd";
       if (won) {
         // Unity: ActiveColour (green highlight for won patterns)
-        span.style.color = "#4caf50";
+        activeColor = "#4caf50";
+        span.style.color = activeColor;
         span.style.fontWeight = "700";
         span.textContent = `\u2714 ${displayName} – ${prize} kr`;
       } else if (i === currentPatternIdx) {
         // Current active pattern — bright yellow
-        span.style.color = "#ffe83d";
+        activeColor = "#ffe83d";
+        span.style.color = activeColor;
         span.style.fontWeight = "700";
       } else {
         // Unity: DeActiveColour (muted gray for pending patterns)
-        span.style.color = "#888";
+        activeColor = "#888";
+        span.style.color = activeColor;
       }
       row.appendChild(span);
       this.prizeRowsEl.appendChild(row);
+
+      // PR-5 C3: flash when the payout amount for this pattern changes.
+      // Unity PrefabBingoGame1Pattern.Update_Pattern_Amount only sets text —
+      // we add a GSAP scale + colour pulse so players notice mid-round payout
+      // updates (e.g. when a partial win re-distributes the pool).
+      seenIds.add(pattern.id);
+      const prev = this.lastAmountByPatternId.get(pattern.id);
+      if (prev !== undefined && prev !== prize && !won) {
+        this.flashAmount(span, activeColor);
+      }
+      this.lastAmountByPatternId.set(pattern.id, prize);
     }
+
+    // Prune memory of patterns that disappeared (new round, pattern list changed)
+    for (const id of Array.from(this.lastAmountByPatternId.keys())) {
+      if (!seenIds.has(id)) this.lastAmountByPatternId.delete(id);
+    }
+  }
+
+  /**
+   * GSAP flash on a pattern row: quick scale pulse + yellow colour flash
+   * back to the row's baseline colour. Matches Unity spec: scale 1.0 → 1.2
+   * (0.15s) + colour #ffe83d → baseline (0.4s).
+   */
+  private flashAmount(span: HTMLSpanElement, baselineColor: string): void {
+    gsap.killTweensOf(span);
+    gsap.fromTo(
+      span,
+      { scale: 1 },
+      {
+        scale: 1.2,
+        duration: 0.15,
+        ease: "power2.out",
+        yoyo: true,
+        repeat: 1,
+        transformOrigin: "left center",
+      },
+    );
+    gsap.fromTo(
+      span,
+      { color: "#ffe83d" },
+      { color: baselineColor, duration: 0.4, ease: "power2.out" },
+    );
   }
 
   /** Show brief confirmation feedback on a button after action completes. */
