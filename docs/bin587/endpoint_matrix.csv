@@ -1,0 +1,557 @@
+category,method,path,controller,action,status,new_backend_equiv_or_note
+1-AUTH,GET,/transactionsPaymet,Auth,transactionsPaymet,TODO,
+1-AUTH,GET,/admin,Auth,login,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/admin,Auth,postLogin,EXISTS,/api/auth/login + /api/admin/auth/login
+1-AUTH,GET,/forgot-password,Auth,forgotPassword,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/forgot-password,Auth,forgotPasswordSendMail,EXISTS,/api/auth/forgot-password
+1-AUTH,GET,/reset-password/:token,Auth,resetPassword,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/reset-password/:token,Auth,postResetPassword,EXISTS,/api/auth/forgot-password
+1-AUTH,GET,/logout,Auth,logout,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,GET,/register,Auth,register,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,GET,/profile,Auth,profile,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/profile/update,Auth,profileUpdate,TODO,Review Auth action
+1-AUTH,POST,/profile/changePwd,Auth,changePassword,EXISTS,/api/auth/change-password
+1-AUTH,POST,/profile/changeAvatar,Auth,changeAvatar,TODO,Avatar upload not in new backend — low priority
+1-AUTH,POST,/profile/changeSmsUsrPwd,Auth,changeSmsUsrPwd,MANGLER,SMS user pwd change missing
+1-AUTH,POST,/profile/updateLanguage,Auth,updateLanguage,TODO,Language setting not in new backend — low priority
+1-AUTH,GET,/agent/profile,Auth,agentProfile,TODO,
+1-AUTH,POST,/profile/agent/update,Auth,agentProfileUpdate,TODO,Review Auth action
+1-AUTH,POST,/profile/agent/changePwd,Auth,agentChangePassword,EXISTS,/api/auth/change-password
+1-AUTH,POST,/profile/agent/changeAvatar,Auth,agentChangeAvatar,TODO,Avatar upload not in new backend — low priority
+1-AUTH,POST,/profile/agent/updateLanguage,Auth,agentUpdateLanguage,TODO,Language setting not in new backend — low priority
+6-ADMIN-OPS,GET,/dashboard,Dashboard,home,NOT-NEEDED,HTML index page
+6-ADMIN-OPS,GET,/dashboardChart/getMonthlyPlayedGameChart,Dashboard,getMonthlyPlayedGameChart,MANGLER,Dashboard chart data not ported
+6-ADMIN-OPS,GET,/dashboardChart/getGameUsageChart,Dashboard,getGameUsageChart,MANGLER,Dashboard chart data not ported
+6-ADMIN-OPS,GET,/dashboard/gameHistory,Dashboard,gameHistory,TODO,
+6-ADMIN-OPS,GET,/dashboard/getTopPlayers/:id,Dashboard,getTopPlayers,MANGLER,Dashboard chart data not ported
+6-ADMIN-OPS,GET,/dashboard/ongoingGames/:gameType,Dashboard,ongoingGames,TODO,
+7-AGENT,GET,/agent,AgentController,agent,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/getAgent,AgentController,getAgent,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/addAgent,AgentController,addAgent,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/addAgent,AgentController,addAgentPostData,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/getAgentDelete,AgentController,getAgentDelete,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agentEdit/:id/,AgentController,editAgent,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agentEdit/:id,AgentController,editAgentPostData,AGENT-DOMENE,BIN-583
+1-AUTH,GET,/adminUser,AdminController,admin,TODO,
+1-AUTH,GET,/admin/getAdmin,AdminController,getAdmin,TODO,
+1-AUTH,GET,/addAdmin,AdminController,addAdmin,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/addAdmin,AdminController,addAdminPostData,MANGLER,Admin user mgmt missing
+1-AUTH,POST,/admin/getAdminDelete,AdminController,getAdminDelete,MANGLER,Admin user mgmt missing
+1-AUTH,GET,/adminEdit/:id/,AdminController,editAdmin,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/adminEdit/:id,AdminController,editAdminPostData,MANGLER,Admin user mgmt missing
+1-AUTH,GET,/editRole/:id,AdminController,editRole,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/adminRoleUpdate/:id,AdminController,updateRole,MANGLER,Admin user mgmt missing
+5-WALLET,GET,/agent/cashinout,CashInOutController,cashInOutPage,TODO,
+5-WALLET,GET,/sold-tickets,CashInOutController,soldTickets,TODO,
+5-WALLET,GET,/sold-tickets/get,CashInOutController,getSoldTickets,MANGLER,Sold-tickets / cashinout views missing
+2-PLAYER,GET,/loyalty,LoyaltyController,loyalty,NOT-NEEDED,HTML index page
+2-PLAYER,GET,/loyalty/getLoyalty,LoyaltyController,getLoyalty,TODO,
+2-PLAYER,GET,/addLoyalty,LoyaltyController,addLoyalty,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,POST,/addLoyalty,LoyaltyController,addLoyaltyPostData,MANGLER,Loyalty admin missing
+2-PLAYER,POST,/loyalty/getLoyaltyDelete,LoyaltyController,loyaltyDelete,MANGLER,Loyalty admin missing
+2-PLAYER,GET,/loyaltyEdit/:id/,LoyaltyController,editLoyalty,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,POST,/loyaltyEdit/:id,LoyaltyController,editLoyaltyPostData,MANGLER,Loyalty admin missing
+2-PLAYER,GET,/loyaltyManagement,LoyaltyController,loyaltyManagement,TODO,
+2-PLAYER,GET,/loyalty/getPlayerLoyalty,LoyaltyController,getPlayerLoyalty,TODO,
+2-PLAYER,GET,/viewLoyaltyPlayer/:id,LoyaltyController,viewLoyaltyPlayer,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/getPatternMenu,patternController,viewPatternMenu,MANGLER,Pattern admin missing
+3-GAMEPLAY,GET,/patternGameDetailList/:id,patternController,viewGamePatternList,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/getPatternDetailList,patternController,getPatternDetailList,MANGLER,Pattern management admin missing
+3-GAMEPLAY,GET,/addPattern/:id,patternController,addPattern,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/addPattern/:typeId/:type/:slug,patternController,addPatternPostData,MANGLER,Pattern admin missing
+3-GAMEPLAY,GET,/patternEdit/:typeId/:id,patternController,editPattern,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/patternEdit/:typeId/:id,patternController,editPatternPostData,MANGLER,Pattern admin missing
+3-GAMEPLAY,POST,/getPatternDelete,patternController,getPatternDelete,MANGLER,Pattern admin missing
+3-GAMEPLAY,GET,/viewPattern/:typeId/:id,patternController,viewPatternDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/checkForPatternName,patternController,checkForPatternName,MANGLER,Pattern admin missing
+3-GAMEPLAY,GET,/gameType,GameController,gameType,TODO,
+3-GAMEPLAY,GET,/gameType/getGameType,GameController,getGameType,TODO,
+3-GAMEPLAY,GET,/addGameType,GameController,addGameType,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/addGameType,GameController,addGameTypePostData,MANGLER,Game admin CRUD missing
+3-GAMEPLAY,GET,/editGameType/:id,GameController,editGameType,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/editGameType/:id,GameController,editGameTypePostData,MANGLER,Game admin CRUD missing
+3-GAMEPLAY,POST,/gameType/deleteGameType,GameController,deleteGameType,TODO,Review game action
+3-GAMEPLAY,GET,/viewGameType/:id,GameController,viewGameType,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/subGame,subGameController,subGame1,NOT-NEEDED,HTML index page
+3-GAMEPLAY,GET,/subGames/getSubGameList,subGameController,subGame1List,MANGLER,Subgame admin missing (if subgames are still used)
+3-GAMEPLAY,GET,/addSubGame,subGameController,addSubGame,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/addSubGameData,subGameController,addSubGamePostData,MANGLER,Subgame admin missing
+3-GAMEPLAY,GET,/subGameEdit/:id,subGameController,editSubGame,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/subGameEdit/:id,subGameController,editSubGamePostData,MANGLER,Subgame admin missing
+3-GAMEPLAY,POST,/subGames/getSubGameDelete,subGameController,getSubGameDelete,MANGLER,Subgame admin missing
+3-GAMEPLAY,GET,/viewSubGame/:id,subGameController,viewSubGame,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/checkForGameName,subGameController,checkForGameName,MANGLER,Subgame admin missing
+3-GAMEPLAY,GET,/background,OtherController,background,TODO,
+3-GAMEPLAY,GET,/otherModules/getBackground,OtherController,getBackground,NOT-NEEDED,Background/theme content — post-pilot
+3-GAMEPLAY,GET,/addBackground,OtherController,addBackground,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/addBackground,OtherController,addBackgroundPostData,NOT-NEEDED,Background/theme content mgmt — post-pilot
+3-GAMEPLAY,GET,/editBackground/:id,OtherController,editBackground,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/editBackground/:id,OtherController,editBackgroundPostData,NOT-NEEDED,Background/theme content mgmt — post-pilot
+3-GAMEPLAY,POST,/background/deleteBackground,OtherController,deleteBackground,NOT-NEEDED,Background/theme content mgmt — post-pilot
+3-GAMEPLAY,GET,/viewBackground/:id,OtherController,viewBackground,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/theme,OtherController,theme,TODO,
+3-GAMEPLAY,POST,/themeEdit,OtherController,themeEdit,NOT-NEEDED,Background/theme content mgmt — post-pilot
+3-GAMEPLAY,GET,/miniGames,OtherController,miniGames,TODO,
+3-GAMEPLAY,GET,/gameManagement,GameController,viweGameManagement,TODO,
+3-GAMEPLAY,GET,/gameManagementDetailList/:id,GameController,viweGameManagementDetail,TODO,
+3-GAMEPLAY,GET,/getGameManagementDetailList,GameController,getGameManagementDetailList,TODO,
+3-GAMEPLAY,GET,/addGameManagement/:id,GameController,addGameManagement,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/addGameManagement/:typeId/:type/:slug,GameController,addGameManagementPostData,MANGLER,Game admin CRUD missing
+3-GAMEPLAY,POST,/patternGame,GameController,patternGame,MANGLER,Pattern-game binding missing
+3-GAMEPLAY,GET,/gameManagementEdit/:typeId/:id,GameController,editGameManagement,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/gameManagementEdit/:typeId/:id,GameController,editGameManagementPostData,MANGLER,Game admin CRUD missing
+3-GAMEPLAY,POST,/getGameManagementDelete,GameController,getGameManagementDelete,MANGLER,Game/ticket admin delete missing
+6-ADMIN-OPS,GET,/gameHistory/game1/:gameId/:grpId/:hallname,ReportsController,game1History,TODO,
+6-ADMIN-OPS,GET,/gameHistory/game2/:gameId/:grpId/:hallname,ReportsController,game2History,TODO,
+6-ADMIN-OPS,GET,/gameHistory/game3/:gameId/:grpId/:hallname,ReportsController,game3History,TODO,
+3-GAMEPLAY,GET,/viewGameDetails/:typeId/:id,GameController,viewGameDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/viewGameTickets/:typeId/:id,GameController,viewGameTickets,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/getTicketTable/:typeId/:id,GameController,getTicketTable,TODO,
+3-GAMEPLAY,GET,/viewGameManagement/:typeId/:id,GameController,viewGameManagementDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/viewsubGamesManagement/:typeId/:id,GameController,viewsubGamesManagement,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/viewsubGamesManagementDetails,GameController,viewsubGamesManagementDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/getGroupHallData,GameController,getGroupHallData,TODO,
+3-GAMEPLAY,POST,/repeatGame/:typeId,GameController,repeatGame,EXISTS,Covered by /api/admin/rooms/:code/start|end + sockets
+3-GAMEPLAY,POST,/stopGame/:typeId,GameController,stopGame,EXISTS,Covered by /api/admin/rooms/:code/start|end + sockets
+3-GAMEPLAY,POST,/startGame,GameController,startGame,EXISTS,Covered by /api/admin/rooms/:code/start|end + sockets
+3-GAMEPLAY,GET,/viewGameHistory/:id/:gameName,GameController,viewGameHistory,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/viewPhysicalGameHistory/:id/:gameName,GameController,viewPhysicalGameHistory,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/viewTicket/:id/:ticketId,GameController,viewTicket,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/editTicket/:id/:gameId,GameController,editTicket,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/closeDayGameManagement/:typeId/:id/:gameType,GameController,closeDayGameManagement,TODO,
+3-GAMEPLAY,POST,/closeDayAdd,GameController,closeDayAdd,MANGLER,Close-day schedule admin missing
+3-GAMEPLAY,GET,/getCloseDayData,GameController,getCloseDayData,TODO,
+3-GAMEPLAY,POST,/deleteCloseDay,GameController,deleteCloseDay,MANGLER,Close-day schedule admin missing
+3-GAMEPLAY,POST,/updateCloseDay,GameController,updateCloseDay,MANGLER,Close-day schedule admin missing
+3-GAMEPLAY,POST,/game/auto-stop,GameController,autoStopOnOff,MANGLER,Auto-stop toggle not explicit
+3-GAMEPLAY,GET,/savedGameList,GameController,savedGameList,TODO,
+3-GAMEPLAY,GET,/savedGameDetailList/:id,GameController,savedGameDetailList,TODO,
+3-GAMEPLAY,GET,/getSavedGameDetailList,GameController,getSavedGameDetailList,TODO,
+3-GAMEPLAY,POST,/addSavedGameManagement/:typeId/:type,GameController,addSavedGameManagement,MANGLER,Saved-game templates missing
+3-GAMEPLAY,GET,/savedGameManagementEdit/:typeId/:id,GameController,editSaveGameManagement,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/savedGameManagementEdit/:typeId/:id,GameController,editSaveGameManagementPostData,MANGLER,Game admin CRUD missing
+3-GAMEPLAY,GET,/viewSaveGameManagement/:id,GameController,viewSaveGameManagementDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/getSaveGameDelete,GameController,getSaveGameManagementDelete,MANGLER,Game/ticket admin delete missing
+6-ADMIN-OPS,GET,/reportGame1,ReportsController,reportGame1,TODO,
+6-ADMIN-OPS,GET,/reportGame1/getReportGame1,ReportsController,getReportGame1,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame1/game1Subgames/:id,ReportsController,reportGame1SubGames,TODO,
+6-ADMIN-OPS,GET,/reportGame1/getGame1Subgames,ReportsController,getGame1Subgames,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame2,ReportsController,reportGame2,TODO,
+6-ADMIN-OPS,GET,/reportGame2/getReportGame2,ReportsController,getReportGame2,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame3,ReportsController,reportGame3,TODO,
+6-ADMIN-OPS,GET,/reportGame3/getReportGame3,ReportsController,getReportGame3,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame4,ReportsController,reportGame4,TODO,
+6-ADMIN-OPS,GET,/reportGame4/getReportGame4,ReportsController,getReportGame4,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+6-ADMIN-OPS,GET,/uniqueGameReport,ReportsController,uniqueIdReport,TODO,
+6-ADMIN-OPS,GET,/reportUnique/uniqueGameTicketReport,ReportsController,uniqueGameTicketReport,TODO,
+6-ADMIN-OPS,GET,/physicalTicketReport,ReportsController,physicalTicketReport,TODO,
+6-ADMIN-OPS,GET,/reportPhysical/physicalTicketReport,ReportsController,physicalGameTicketReport,TODO,
+6-ADMIN-OPS,GET,/hallSpecificReport,ReportsController,hallSpecificReportPage,TODO,
+6-ADMIN-OPS,GET,/getHallReports,ReportsController,getHallSpecificReport,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+6-ADMIN-OPS,GET,/getHallOrderReports,ReportsController,getHallSpecificOrderReport,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame5,ReportsController,reportGame5,TODO,
+6-ADMIN-OPS,GET,/reportGame5/getReportGame5,ReportsController,getReportGame5,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+6-ADMIN-OPS,GET,/totalRevenueReport,ReportsController,totalRevenueReport,TODO,
+6-ADMIN-OPS,GET,/totalRevenueReport/getData,ReportsController,getTotalRevenueReport,MANGLER,Report data endpoint — needs port to /api/admin/reports/*
+5-WALLET,GET,/payoutPlayer,payoutController,viweGameManagementPayoutPlayer,TODO,
+5-WALLET,GET,/PayoutGameManagementDetailListPlayer/:id,payoutController,PayoutGameManagementDetailListPlayer,TODO,
+5-WALLET,GET,/payoutPlayerGetGameManagementDetailList,payoutController,payoutPlayerGetGameManagementDetailList,MANGLER,Payout per-player/per-ticket views missing
+5-WALLET,GET,/viewPlayerPayout/:id/:gameId/:type,payoutController,viewPlayerPayout,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,GET,/payoutTickets,payoutController,viweGameManagementPayoutTickets,TODO,
+5-WALLET,GET,/PayoutGameManagementDetailListTickets/:id,payoutController,PayoutGameManagementDetailListTickets,TODO,
+5-WALLET,GET,/payoutTicketsGetGameManagementDetailList,payoutController,payoutTicketsGetGameManagementDetailList,MANGLER,Payout per-player/per-ticket views missing
+5-WALLET,GET,/viewTicketPayout/:gameId/:type,payoutController,viewTicketPayout,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+6-ADMIN-OPS,GET,/riskCountry,riskCountryController,riskCountry,NOT-NEEDED,HTML index page
+6-ADMIN-OPS,GET,/getRiskCountry,riskCountryController,getRiskCountry,TODO,
+6-ADMIN-OPS,GET,/getCountryList,riskCountryController,getCountryList,TODO,
+6-ADMIN-OPS,POST,/addRiskCountry,riskCountryController,addRiskCountry,MANGLER,Risk country admin missing
+6-ADMIN-OPS,POST,/deleteRiskCountry,riskCountryController,deleteRiskCountry,MANGLER,Risk country admin missing
+6-ADMIN-OPS,GET,/redFlagCategory,redFlagCategoryController,redFlagCategory,NOT-NEEDED,HTML index page
+6-ADMIN-OPS,GET,/getRedFlagCategory/:id,redFlagCategoryController,getRedFlagCategory,MANGLER,Red-flag AML admin missing
+6-ADMIN-OPS,GET,/getPlayersRedFlagList,redFlagCategoryController,getPlayersRedFlagList,MANGLER,Red-flag AML admin missing
+6-ADMIN-OPS,GET,/viewUserTransaction,redFlagCategoryController,viewUserTransaction,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+6-ADMIN-OPS,GET,/getUserTransactionHeader/:id,redFlagCategoryController,getUserTransactionHeader,MANGLER,Red-flag AML admin missing
+6-ADMIN-OPS,GET,/getUserTransactionList,redFlagCategoryController,getUserTransactionList,MANGLER,Red-flag AML admin missing
+5-WALLET,GET,/transactions,transactionController,depositTransaction,TODO,
+5-WALLET,GET,/getTransactions,transactionController,getDepositTransaction,MANGLER,Deposit request/history queue missing
+5-WALLET,GET,/deposit/requests,transactionController,depositRequsests,TODO,
+5-WALLET,GET,/deposit/requests/get,transactionController,getDepositRequests,MANGLER,Deposit request/history queue missing
+5-WALLET,POST,/deposit/requests/accept,transactionController,acceptDepositRequest,MANGLER,Deposit request approve/reject queue missing (PILOT-CRITICAL)
+5-WALLET,POST,/deposit/requests/reject,transactionController,rejectDepositRequest,MANGLER,Deposit request approve/reject queue missing (PILOT-CRITICAL)
+5-WALLET,GET,/deposit/history,transactionController,depositHistory,TODO,
+5-WALLET,GET,/deposit/history/get,transactionController,getDepositHistory,MANGLER,Deposit request/history queue missing
+3-GAMEPLAY,GET,/wheelOfFortune,otherGameController,wheelOfFortune,TODO,
+3-GAMEPLAY,POST,/editWheelOfFortune,otherGameController,editWheelOfFortune,MANGLER,"Minigame config missing (WoF, Treasure, Mystery, ColorDraft)"
+3-GAMEPLAY,GET,/treasureChest,otherGameController,treasureChest,TODO,
+3-GAMEPLAY,POST,/treasureChestEdit,otherGameController,editTreasureChestPostData,MANGLER,"Minigame config missing (WoF, Treasure, Mystery, ColorDraft)"
+3-GAMEPLAY,GET,/mystery,otherGameController,mystery,TODO,
+3-GAMEPLAY,POST,/mysteryEdit,otherGameController,editMysteryPostData,MANGLER,"Minigame config missing (WoF, Treasure, Mystery, ColorDraft)"
+1-AUTH,GET,/user,UserController,users,NOT-NEEDED,HTML index page
+1-AUTH,GET,/user/getUser,UserController,getUser,TODO,
+1-AUTH,GET,/addUser,UserController,addUser,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/addUser,UserController,addUserPostData,MANGLER,Admin-user CRUD missing (partial via /api/admin/bootstrap)
+1-AUTH,POST,/user/getUserDelete,UserController,getUserDelete,MANGLER,Admin-user CRUD missing (partial via /api/admin/bootstrap)
+1-AUTH,GET,/userEdit/:id/,UserController,editUser,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/userEdit/:id,UserController,editUserPostData,MANGLER,Admin-user CRUD missing (partial via /api/admin/bootstrap)
+3-GAMEPLAY,GET,/cms,cmsController,cmsView,NOT-NEEDED,HTML index page
+3-GAMEPLAY,GET,/faq,cmsController,faqView,TODO,
+3-GAMEPLAY,GET,/getFAQ,cmsController,getFAQ,MANGLER,"CMS (FAQ, ToS, etc.) not ported — may not be needed"
+3-GAMEPLAY,GET,/addFAQ,cmsController,addFAQ,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/addFAQ,cmsController,addFAQPostData,NOT-NEEDED,"CMS content edit — post-pilot, may be handled via Notion"
+3-GAMEPLAY,GET,/faqEdit/:id,cmsController,editFAQ,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/faqEdit/:id,cmsController,editFAQPostData,NOT-NEEDED,"CMS content edit — post-pilot, may be handled via Notion"
+3-GAMEPLAY,POST,/faq/getFAQDelete,cmsController,getFAQDelete,NOT-NEEDED,"CMS content edit — post-pilot, may be handled via Notion"
+3-GAMEPLAY,GET,/TermsofService,cmsController,TermsofServiceView,TODO,
+3-GAMEPLAY,POST,/termEdit,cmsController,editTermPostData,NOT-NEEDED,"CMS content edit — post-pilot, may be handled via Notion"
+3-GAMEPLAY,GET,/terms-of-service,cmsController,termsofService,TODO,
+3-GAMEPLAY,GET,/Support,cmsController,SupportView,TODO,
+3-GAMEPLAY,POST,/supportEdit,cmsController,editSupportPostData,NOT-NEEDED,"CMS content edit — post-pilot, may be handled via Notion"
+3-GAMEPLAY,GET,/Aboutus,cmsController,AboutusView,TODO,
+3-GAMEPLAY,POST,/aboutusEdit,cmsController,editAboutPostData,NOT-NEEDED,"CMS content edit — post-pilot, may be handled via Notion"
+3-GAMEPLAY,GET,/ResponsibleGameing,cmsController,ResponsibleGameingView,TODO,
+3-GAMEPLAY,POST,/resposibleGameingEdit,cmsController,editResposibleGameingPostData,NOT-NEEDED,"CMS content edit — post-pilot, may be handled via Notion"
+3-GAMEPLAY,GET,/LinksofOtherAgencies,cmsController,LinksofOtherAgenciesView,TODO,
+3-GAMEPLAY,POST,/linksOfOtherAgenciesEdit,cmsController,editLinksofOtherAgenciesPostData,NOT-NEEDED,"CMS content edit — post-pilot, may be handled via Notion"
+4-HALL,GET,/hall,hallController,hallView,NOT-NEEDED,HTML index page
+4-HALL,GET,/hallAccountReport,hallController,hallAccountReportsView,TODO,
+4-HALL,GET,/hallAccountReportTable/:id,hallController,hallAccountReportTableView,TODO,
+4-HALL,GET,/getHallAccountReport,hallController,gethallAccountReportData,MANGLER,Hall settlement/account report missing
+4-HALL,GET,/getHall,hallController,getHall,EXISTS,/api/admin/halls covers base
+4-HALL,GET,/addHall,hallController,addHall,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/addHall,hallController,addHallPostData,EXISTS,/api/admin/halls CRUD covers
+4-HALL,GET,/hallEdit/:id,hallController,editHall,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/hallEdit/:id,hallController,editHallPostData,EXISTS,/api/admin/halls CRUD covers
+4-HALL,POST,/hall/getHallDelete,hallController,getHallDelete,EXISTS,/api/admin/halls CRUD covers
+4-HALL,POST,/transferPlayersToHall,hallController,transferPlayersToHall,MANGLER,Transfer-players-to-hall missing
+4-HALL,GET,/getHalls,hallController,getAllHalls,EXISTS,/api/admin/halls covers base
+4-HALL,POST,/hall/report/saveData,hallController,saveHallReportData,MANGLER,Hall cash balance + report save missing
+4-HALL,POST,/hall/set-cash-amount,hallController,setHallCashBalance,TODO,Review hall action
+4-HALL,POST,/hall/check-hall-number,hallController,checkHallNumber,MANGLER,Hall validation helpers missing
+4-HALL,POST,/hall/check-ip-address,hallController,checkIpAddress,MANGLER,Hall validation helpers missing
+4-HALL,GET,/groupHall,groupHallController,groupHallView,NOT-NEEDED,HTML index page
+4-HALL,GET,/getGroupHall,groupHallController,getGroupHall,MANGLER,Group-hall concept not in new backend
+4-HALL,GET,/addGroupHall,groupHallController,addGroupHall,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/addGroupHall,groupHallController,addGroupHallPostData,MANGLER,Group-hall concept not in new backend
+4-HALL,GET,/groupHallEdit/:id,groupHallController,editGroupHall,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/groupHallEdit/:id,groupHallController,editGroupHallPostData,MANGLER,Group-hall concept not in new backend
+4-HALL,POST,/groupHallEdit/:id,groupHallController,editGroupHallPostData,MANGLER,Group-hall concept not in new backend
+4-HALL,GET,/groupHallView/:id,groupHallController,groupHallDataView,TODO,
+4-HALL,POST,/groupHall/getGroupHallDelete,groupHallController,getGroupHallDelete,MANGLER,Group-hall concept not in new backend
+4-HALL,GET,/removedGroup,groupHallController,removedGroup,TODO,
+4-HALL,GET,/getAvailableGroupHalls/:type,groupHallController,getAvailableGroupHalls,MANGLER,Group-hall concept not in new backend
+4-HALL,GET,/getAllGroupHalls/,groupHallController,getGroupHallData,MANGLER,Group-hall concept not in new backend
+6-ADMIN-OPS,GET,/productList,productManagement,productListPage,TODO,
+6-ADMIN-OPS,GET,/products/getProducts,productManagement,getProducts,NOT-NEEDED,Shop/product mgmt out of scope for bingo MVP
+6-ADMIN-OPS,GET,/getProduct/:id,productManagement,getProduct,NOT-NEEDED,Shop/product mgmt out of scope for bingo MVP
+6-ADMIN-OPS,POST,/addProduct,productManagement,addProduct,NOT-NEEDED,Shop/product — out of scope
+6-ADMIN-OPS,POST,/editProduct,productManagement,editProduct,NOT-NEEDED,Shop/product — out of scope
+6-ADMIN-OPS,POST,/deleteProduct,productManagement,deleteProduct,NOT-NEEDED,Shop/product — out of scope
+6-ADMIN-OPS,GET,/getCategories,productManagement,getCategories,NOT-NEEDED,Shop/product mgmt out of scope for bingo MVP
+6-ADMIN-OPS,GET,/categoryList,productManagement,categoryListPage,TODO,
+6-ADMIN-OPS,GET,/categoryTable,productManagement,categoryDataTable,TODO,
+6-ADMIN-OPS,POST,/addCategory,productManagement,addCategory,NOT-NEEDED,Shop/product — out of scope
+6-ADMIN-OPS,POST,/editCategory,productManagement,editCategory,NOT-NEEDED,Shop/product — out of scope
+6-ADMIN-OPS,POST,/deleteCategory,productManagement,deleteCategory,NOT-NEEDED,Shop/product — out of scope
+6-ADMIN-OPS,GET,/hallProductList,productManagement,hallProductListPage,TODO,
+6-ADMIN-OPS,GET,/getHallsandProducts,productManagement,getHallsandProducts,NOT-NEEDED,Shop/product mgmt out of scope for bingo MVP
+6-ADMIN-OPS,GET,/getHallWithProduct/:id,productManagement,getHallWithProduct,NOT-NEEDED,Shop/product mgmt out of scope for bingo MVP
+6-ADMIN-OPS,POST,/addProductinHall,productManagement,updateProductinHall,NOT-NEEDED,Shop/product — out of scope
+5-WALLET,GET,/wallet,WalletController,walletView,NOT-NEEDED,HTML index page
+5-WALLET,GET,/getWallet,WalletController,getWallet,EXISTS,/api/admin/wallets/... covers
+5-WALLET,GET,/viewWallet/:id,WalletController,viewUserWallet,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,GET,/leaderboard,leaderboardController,leaderboardView,NOT-NEEDED,HTML index page
+2-PLAYER,GET,/leaderboard/getLeaderboard,leaderboardController,getLeaderboard,EXISTS,/api/leaderboard covers view; admin CRUD missing
+2-PLAYER,GET,/addLeaderboard,leaderboardController,addLeaderboard,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,POST,/addLeaderboard,leaderboardController,addLeaderboardPostData,MANGLER,Leaderboard admin CRUD missing
+2-PLAYER,GET,/leaderboardEdit/:id,leaderboardController,editLeaderboard,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,POST,/leaderboardEdit/:id,leaderboardController,editLeaderboardPostData,MANGLER,Leaderboard admin CRUD missing
+2-PLAYER,POST,/leaderboard/getLeaderboardDelete,leaderboardController,getLeaderboardDelete,MANGLER,Leaderboard admin CRUD missing
+5-WALLET,GET,/voucher,VoucherController,voucherView,NOT-NEEDED,HTML index page
+5-WALLET,GET,/voucher/getVoucher,VoucherController,getVoucher,MANGLER,Voucher admin missing
+5-WALLET,GET,/addVoucher,VoucherController,addVoucher,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,POST,/addVoucher,VoucherController,addVoucherPostData,MANGLER,Voucher admin missing
+5-WALLET,GET,/voucherEdit/:id,VoucherController,editVoucher,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,POST,/voucherEdit/:id,VoucherController,editVoucherPostData,MANGLER,Voucher admin missing
+5-WALLET,POST,/voucher/getVoucherDelete,VoucherController,getVoucherDelete,MANGLER,Voucher admin missing
+5-WALLET,GET,/viewVoucher/:id,VoucherController,viewVoucher,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,GET,/withdrawAmt,WithdrawController,withdrawAmt,TODO,
+5-WALLET,GET,/withdrawAmount/getAllTXN,WithdrawController,getAllTXN,MANGLER,Withdraw request queue/history endpoints missing
+5-WALLET,POST,/withdrawAmount/chipsAction,WithdrawController,chipsAction,MANGLER,Withdraw request approve/reject queue missing (PILOT-CRITICAL)
+5-WALLET,POST,/withdrawAmount/getPlayerDelete,WithdrawController,getDelete,MANGLER,Withdraw admin action missing
+5-WALLET,GET,/withdrawAmtHistory,WithdrawController,withdrawAmtHistory,TODO,
+5-WALLET,GET,/withdrawAmtHistory/getAllTXNHistory,WithdrawController,getAllTXNHistory,MANGLER,Withdraw request queue/history endpoints missing
+5-WALLET,GET,/withdraw/requests/hall,WithdrawController,withdrawRequestInHall,TODO,
+5-WALLET,GET,/withdraw/requests/bank,WithdrawController,withdrawRequestInBank,TODO,
+5-WALLET,GET,/withdraw/requests/hall/get,WithdrawController,getWithdrawRequest,MANGLER,Withdraw request queue/history endpoints missing
+5-WALLET,POST,/withdraw/requests/accept,WithdrawController,acceptWithdrawRequest,MANGLER,Withdraw request approve/reject queue missing (PILOT-CRITICAL)
+5-WALLET,POST,/withdraw/requests/reject,WithdrawController,rejectWithdrawRequest,MANGLER,Withdraw request approve/reject queue missing (PILOT-CRITICAL)
+5-WALLET,GET,/withdraw/history/hall,WithdrawController,withdrawHistoryHall,TODO,
+5-WALLET,GET,/withdraw/history/hall/get,WithdrawController,getWithdrawHistoryHall,MANGLER,Withdraw request queue/history endpoints missing
+5-WALLET,GET,/withdraw/history/bank,WithdrawController,withdrawHistoryBank,TODO,
+5-WALLET,GET,/withdraw/history/bank/get,WithdrawController,getWithdrawHistoryBank,MANGLER,Withdraw request queue/history endpoints missing
+5-WALLET,GET,/withdraw/list/emails,WithdrawController,withdrawEmails,TODO,
+5-WALLET,GET,/withdraw/add/emails,WithdrawController,addWithdrawEmails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,POST,/withdraw/add/emails,WithdrawController,addWithdrawEmailsPost,MANGLER,Withdraw email allowlist missing
+5-WALLET,GET,/withdraw/get/emails,WithdrawController,getwithdrawEmails,MANGLER,Withdraw request queue/history endpoints missing
+5-WALLET,GET,/withdraw/edit/emails/:id,WithdrawController,editWithdrawEmails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,POST,/withdraw/edit/emails/:id,WithdrawController,editWithdrawEmailsPost,MANGLER,Withdraw email allowlist missing
+5-WALLET,POST,/withdraw/delete/emails/,WithdrawController,deleteWithdrawEmails,MANGLER,Withdraw email allowlist missing
+5-WALLET,POST,/withdraw/email/checkUnique/:emailId?,WithdrawController,checkForUniqueEmailId,MANGLER,Withdraw email allowlist missing
+1-AUTH,GET,/role,rollController,view,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,GET,/role/getRole,rollController,getRole,MANGLER,Role CRUD missing — partial via /api/admin/users/:id/role
+1-AUTH,GET,/add,rollController,add,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/saveRole,rollController,save,MANGLER,Role CRUD missing — permissions model uses fixed roles in new backend
+1-AUTH,GET,/edit/:id,rollController,edit,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/updateRole/:id,rollController,update,MANGLER,Role CRUD missing — permissions model uses fixed roles in new backend
+1-AUTH,GET,/delete/:id,rollController,delete,TODO,
+2-PLAYER,GET,/player,PlayerController,player,NOT-NEEDED,HTML index page
+2-PLAYER,GET,/player/getPlayer,PlayerController,getPlayer,MANGLER,Player admin data endpoint missing
+2-PLAYER,GET,/viewPlayer/:id,PlayerController,viewPlayerDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,GET,/playerEdit/:id/,PlayerController,editPlayer,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,POST,/playerEdit/:id,PlayerController,editPlayerPostData,MANGLER,Admin edit player profile missing
+2-PLAYER,POST,/changePwd/:id,PlayerController,changePwd,MANGLER,Admin change player password missing
+2-PLAYER,POST,/player/hallStatus,PlayerController,hallStatus,MANGLER,Player per-hall status toggle missing
+2-PLAYER,POST,/player/getPlayerDelete,PlayerController,getPlayerDelete,MANGLER,Player activate/soft-delete missing
+2-PLAYER,POST,/player/playerSoftDelete,PlayerController,playerSoftDelete,MANGLER,Player activate/soft-delete missing
+2-PLAYER,POST,/player/active,PlayerController,active,MANGLER,Player activate/soft-delete missing
+2-PLAYER,GET,/playerGameManagementDetailList/:id,PlayerController,viwePlayerGameManagementDetail,TODO,
+2-PLAYER,GET,/playerGetGameManagementDetailList,PlayerController,playerGetGameManagementDetailList,MANGLER,Player admin data endpoint missing
+5-WALLET,GET,/playerTransactions/:id,transactionController,playerTransactions,TODO,
+5-WALLET,GET,/getPlayerTransactions,transactionController,getPlayerTransactions,MANGLER,Transaction history endpoints missing
+5-WALLET,GET,/playerGameHistory/:id,transactionController,playerGameHistory,TODO,
+5-WALLET,GET,/getPlayerGameHistory,transactionController,getPlayerGameHistory,MANGLER,Transaction history endpoints missing
+2-PLAYER,POST,/player/block-rules/delete,PlayerController,deleteBlockRule,MANGLER,Player block rules missing
+2-PLAYER,GET,/pendingRequests,PlayerController,pendingRequests,TODO,
+2-PLAYER,GET,/pendingRequests/getPendingPlayer,PlayerController,getPendingPlayer,MANGLER,Player pending/rejected queue missing in new admin
+2-PLAYER,GET,/pendingRequests/viewPendingPlayer/:id,PlayerController,viewPendingRequestDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,POST,/pendingRequests/approvePendingPlayer,PlayerController,approvePendingRequest,MANGLER,Pending-registration approval flow missing
+2-PLAYER,POST,/pendingRequests/rejectPendingPlayer,PlayerController,rejectPendingRequest,MANGLER,Pending-registration approval flow missing
+2-PLAYER,POST,/pendingRequests/forwardRequest,PlayerController,forwardToAdmin,MANGLER,Pending-registration approval flow missing
+2-PLAYER,GET,/rejectedRequests,PlayerController,rejectedRequests,TODO,
+2-PLAYER,GET,/player/getRejected,PlayerController,getRejectedPlayer,MANGLER,Player pending/rejected queue missing in new admin
+2-PLAYER,GET,/viewRejectedPlayer/:id,PlayerController,viewRejectedPlayerDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+2-PLAYER,POST,/player/deleteRejected,PlayerController,deleteRejected,MANGLER,Pending-registration approval flow missing
+2-PLAYER,POST,/player/approveRejected,PlayerController,approveRejected,MANGLER,Pending-registration approval flow missing
+2-PLAYER,GET,/player/getGroupHalls,PlayerController,getGroupHalls,MANGLER,Player admin data endpoint missing
+2-PLAYER,GET,/player/getHalls,PlayerController,getHalls,MANGLER,Player admin data endpoint missing
+2-PLAYER,GET,/player/getAgents,PlayerController,getAgents,MANGLER,Player admin data endpoint missing
+2-PLAYER,POST,/player/import,PlayerController,importPlayers,MANGLER,Bulk player import missing (needed for pilot migration)
+2-PLAYER,POST,/player/import/confirm,PlayerController,confirmImportPlayers,MANGLER,Bulk player import missing (needed for pilot migration)
+6-ADMIN-OPS,POST,/settings/add,SettingsController,settingsAdd,EXISTS,/api/admin/settings/* partial
+6-ADMIN-OPS,GET,/settings,SettingsController,settings,NOT-NEEDED,HTML index page
+6-ADMIN-OPS,POST,/settings/update,SettingsController,settingsUpdate,EXISTS,/api/admin/settings/* partial
+6-ADMIN-OPS,GET,/maintenance,SettingsController,maintenance,TODO,
+6-ADMIN-OPS,GET,/maintenance/edit/:id,SettingsController,editMaintenance,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+6-ADMIN-OPS,POST,/maintenance/edit/:id,SettingsController,updateMaintenance,MANGLER,Maintenance mode + restart missing
+6-ADMIN-OPS,POST,/maintenance/restartServer,SettingsController,restartServer,MANGLER,Maintenance mode + restart missing
+6-ADMIN-OPS,POST,/settings/addScreenSaverData,SettingsController,addScreenSaverData,MANGLER,Screen saver config missing
+6-ADMIN-OPS,GET,/system/systemInformation,SettingsController,systemInformation,TODO,
+6-ADMIN-OPS,POST,/system/editSystemInformation,SettingsController,editSystemInformation,MANGLER,System info edit missing
+6-ADMIN-OPS,POST,/maintenance/DailyReports,SettingsController,DailyReports,EXISTS,/api/admin/reports/daily/run
+6-ADMIN-OPS,POST,/maintenance/DailyReportsWithMaintenance,SettingsController,DailyReportsWithMaintanace,EXISTS,/api/admin/reports/daily/run
+6-ADMIN-OPS,GET,/blockedIp,SecurityController,blockedIp,TODO,
+6-ADMIN-OPS,GET,/blockedIp/getBlockedIp,SecurityController,getBlockedIp,TODO,
+6-ADMIN-OPS,GET,/blockedIp/add,SecurityController,addblockedIp,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+6-ADMIN-OPS,POST,/blockedIp/add,SecurityController,addblockedIpPostData,MANGLER,Blocked-IP admin missing
+6-ADMIN-OPS,POST,/blockedIp/delete,SecurityController,deleteBlockedIp,MANGLER,Blocked-IP admin missing
+6-ADMIN-OPS,GET,/blockedIp/edit/:id/,SecurityController,editBlockedIp,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+6-ADMIN-OPS,POST,/blockedIp/edit/:id,SecurityController,editBlockedIpPostData,MANGLER,Blocked-IP admin missing
+3-GAMEPLAY,GET,/physical/csvImport,GameController,csvImport,TODO,
+2-PLAYER,POST,/player/reverify-bankid,PlayerController,reverifyBankid,MANGLER,BankID reverify missing
+5-WALLET,GET,/physicalTicketManagement,UniqueIdController,physicalTicketManagement,TODO,
+5-WALLET,GET,/physical/ticketList,UniqueIdController,getPhysicalTicketList,MANGLER,Unique-ID management missing
+3-GAMEPLAY,POST,/gameMenu/getGameMenu,GameController,viweGameMenu,TODO,Review game action
+3-GAMEPLAY,GET,/gameDetailList/:id,GameController,viweGameDetail,TODO,
+3-GAMEPLAY,GET,/getGameDetailList,GameController,getGameDetailList,TODO,
+3-GAMEPLAY,GET,/addGame/:id,GameController,addGame,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/addGame/:typeId/:type/:slug,GameController,addGamePostData,MANGLER,Game admin CRUD missing
+3-GAMEPLAY,GET,/gameEdit/:typeId/:id,GameController,editGame,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,POST,/gameEdit/:typeId/:id,GameController,editGamePostData,MANGLER,Game admin CRUD missing
+3-GAMEPLAY,POST,/getGameDelete,GameController,getGameDelete,TODO,Review game action
+3-GAMEPLAY,GET,/viewGame/:typeId/:id,GameController,viewGameDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,GET,/agentRole,rollController,agentRole,TODO,
+1-AUTH,POST,/role/getAgentRole,rollController,getAgentRole,MANGLER,Role CRUD missing — permissions model uses fixed roles in new backend
+1-AUTH,GET,/role/agentRoleAdd,rollController,agentRoleAdd,TODO,
+1-AUTH,POST,/role/saveAgentRole,rollController,saveAgentRole,MANGLER,Role CRUD missing — permissions model uses fixed roles in new backend
+1-AUTH,GET,/role/editAgentRole/:id,rollController,editAgentRole,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/role/updateAgentRole/:id,rollController,updateAgentRole,MANGLER,Role CRUD missing — permissions model uses fixed roles in new backend
+1-AUTH,GET,/agentRole/delete/:id,rollController,agentRoleDelete,TODO,
+2-PLAYER,GET,/player/transactions/:id,PlayerController,playerTransactionsClient,TODO,
+2-PLAYER,GET,/player/depositMoney,PlayerController,depositMoneyClient,TODO,
+6-ADMIN-OPS,POST,/popup_modal,Dashboard,allModal,MANGLER,Dashboard action missing
+5-WALLET,POST,/generateTicket,UniqueIdController,generateTicket,MANGLER,Unique-ID admin missing
+5-WALLET,POST,/generateEditTicket,UniqueIdController,generateEditTicket,MANGLER,Unique-ID admin missing
+5-WALLET,GET,/uniqueId,UniqueIdController,uniqueId,NOT-NEEDED,HTML index page
+5-WALLET,POST,/addUniqueId,UniqueIdController,addUniqueId,MANGLER,Unique-ID admin missing
+5-WALLET,GET,/uniqueIdList,UniqueIdController,uniqueIdList,MANGLER,Unique-ID management missing
+5-WALLET,GET,/unique/getUniqueId,UniqueIdController,getUniqueList,MANGLER,Unique-ID management missing
+5-WALLET,GET,/viewUniqueDetails/:id,UniqueIdController,viewUniqueDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,GET,/unique/viewSpaceficTicketDetails,UniqueIdController,viewSpaceficTicketDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,POST,/unique/depositWithdraw,UniqueIdController,depositWithdraw,AGENT-DOMENE,BIN-583 (agent unique-id terminal)
+5-WALLET,POST,/checkUniqueId,UniqueIdController,checkUniqueId,MANGLER,Unique-ID admin missing
+5-WALLET,POST,/unique/withdrawAccess,UniqueIdController,withdrawAccess,AGENT-DOMENE,BIN-583 (agent unique-id terminal)
+1-AUTH,POST,/validateGameView,Auth,validateGameView,EXISTS,Likely covered by ext-wallet auth
+5-WALLET,GET,/unique/transactions/:id,UniqueIdController,transactions,TODO,
+5-WALLET,GET,/unique/get/transactions/,UniqueIdController,getTransactions,MANGLER,Unique-ID management missing
+4-HALL,GET,/schedules,scheduleController,schedules,TODO,
+4-HALL,GET,/getSchedules,scheduleController,getSchedules,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,GET,/createSchedule,scheduleController,createSchedule,TODO,
+4-HALL,POST,/createSchedule,scheduleController,createSchedulePostData,EXISTS,Base schedule covered by /api/admin/halls/:id/schedule
+4-HALL,GET,/editSchedule/:id,scheduleController,editSchedule,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/editSchedule/:id,scheduleController,editSchedulePostData,EXISTS,Base schedule covered by /api/admin/halls/:id/schedule
+4-HALL,POST,/deleteSchedule,scheduleController,deleteSchedule,EXISTS,Base schedule covered by /api/admin/halls/:id/schedule
+4-HALL,GET,/viewSchedule/:id,scheduleController,viewSchedule,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/api/saveSubGame,scheduleController,saveSubGame,MANGLER,Stored subgame in schedule missing
+4-HALL,GET,/schedules/getStoredSubGame,scheduleController,getStoredSubGame,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,GET,/schedules/getStoredSubGameData,scheduleController,getStoredSubGameData,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,GET,/schedules/getStoredSubGames,scheduleController,getStoredSubGames,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,POST,/api/saveSubGames,scheduleController,saveSubGames,MANGLER,Stored subgame in schedule missing
+4-HALL,GET,/schedules/checkStoreSubGameName,scheduleController,checkStoreSubGameName,TODO,
+4-HALL,GET,/createDailySchedule/:id,scheduleController,createDailySchedule,TODO,
+4-HALL,POST,/createDailySchedule,scheduleController,createDailySchedulePostData,MANGLER,Daily/special schedule admin partial
+4-HALL,GET,/schedule/getAvailableGroupHalls/:type,scheduleController,getAvailableGroupHalls,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,GET,/editDailySchedule/:id,scheduleController,editDailySchedule,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/editDailySchedule/:id,scheduleController,editDailySchedulePostData,MANGLER,Daily/special schedule admin partial
+4-HALL,GET,/viewDailySchedule/:id,scheduleController,viewDailySchedule,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/deleteDailySchedule,scheduleController,deleteDailySchedule,MANGLER,Daily/special schedule admin partial
+4-HALL,POST,/saveDailySchedule,scheduleController,saveDailySchedulePostData,MANGLER,Daily/special schedule admin partial
+4-HALL,GET,/schedule/getHalls,scheduleController,getScheduleHalls,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,GET,/createSpecialSchedule/:id,scheduleController,createSpecailSchedule,TODO,
+4-HALL,POST,/createDailySpecialSchedule,scheduleController,createDailySpecialSchedulePostData,MANGLER,Daily/special schedule admin partial
+4-HALL,POST,/schedule/getMasterHallData,scheduleController,getMasterHallData,EXISTS,Base schedule covered by /api/admin/halls/:id/schedule
+4-HALL,GET,/viewSavedDailySchedule/:id,scheduleController,viewSavedDailySchedule,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,GET,/editSavedDailySchedule/:id,scheduleController,editSavedDailySchedule,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/deleteSavedDailySchedule,scheduleController,deleteSavedDailySchedule,MANGLER,Daily/special schedule admin partial
+4-HALL,GET,/viewDailySchduleDetails/:id,scheduleController,viewDailySchduleDetails,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,GET,/getCurrentSubgames/:id,scheduleController,getCurrentSubgames,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,GET,/edit-subgame/:id,scheduleController,editSubgame,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/edit-subgame/:id,scheduleController,editSubgamePostData,MANGLER,Stored subgame in schedule missing
+4-HALL,GET,/view-subgame/:id,scheduleController,viewSubgame,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,GET,/getGameAgents,scheduleController,getGameAgents,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,POST,/agentReady,scheduleController,agentReady,EXISTS,Base schedule covered by /api/admin/halls/:id/schedule
+4-HALL,POST,/startManualGame,scheduleController,startManualGame,EXISTS,Base schedule covered by /api/admin/halls/:id/schedule
+4-HALL,POST,/stopGame1,scheduleController,stopGame1,EXISTS,Base schedule covered by /api/admin/halls/:id/schedule
+4-HALL,GET,/viewGameHistory/:id/,scheduleController,viewGameHistory,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,GET,/viewPhysicalGameHistory/:id/,scheduleController,viewPhysicalGameHistory,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+4-HALL,POST,/addManualWinning/,scheduleController,addWinningManual,EXISTS,Base schedule covered by /api/admin/halls/:id/schedule
+2-PLAYER,POST,/player/register,PlayerController,registerPlayer,MANGLER,Player admin action missing
+4-HALL,GET,/schedule/getAvailableGroupHallsBasedSlots/:type,scheduleController,getAvailableGroupHallsBasedSlots,EXISTS,/api/admin/halls/:id/schedule covers base
+4-HALL,GET,/schedule/getSchedulesBySlot,scheduleController,getSchedulesBySlot,EXISTS,/api/admin/halls/:id/schedule covers base
+5-WALLET,GET,/addPhysicalTickets,physicalTicketsController,addPhysicalTickets,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+5-WALLET,POST,/addPhysicalTickets,physicalTicketsController,addPhysicalTicketsPost,MANGLER,Physical ticket admin missing
+5-WALLET,GET,/getPhysicalTickets,physicalTicketsController,getPhysicalTickets,MANGLER,Physical ticket inventory/sales missing
+5-WALLET,POST,/deletePhysicalTicket,physicalTicketsController,deletePhysicalTicket,MANGLER,Physical ticket admin missing
+5-WALLET,GET,/getLastRegisteredId,physicalTicketsController,getLastRegisteredId,MANGLER,Physical ticket inventory/sales missing
+5-WALLET,GET,/getEditRegisteredId,physicalTicketsController,getEditRegisteredId,MANGLER,Physical ticket inventory/sales missing
+5-WALLET,POST,/editPhysicalTickets,physicalTicketsController,editPhysicalTicketsPost,MANGLER,Physical ticket admin missing
+5-WALLET,POST,/addGamePhysicalTickets,physicalTicketsController,addGamePhysicalTicketsPost,MANGLER,Physical ticket admin missing
+5-WALLET,GET,/getSellPhysicalTickets/:gameId,physicalTicketsController,getSellPhysicalTickets,MANGLER,Physical ticket inventory/sales missing
+5-WALLET,POST,/deleteSellPhysicalTicket,physicalTicketsController,deleteSellPhysicalTicket,MANGLER,Physical ticket admin missing
+5-WALLET,POST,/deleteAllSellPhysicalTicket,physicalTicketsController,deleteAllSellPhysicalTicket,MANGLER,Physical ticket admin missing
+5-WALLET,GET,/hall/getAgent,physicalTicketsController,getHallAgents,MANGLER,Physical ticket inventory/sales missing
+5-WALLET,POST,/purchasePhysicalTickets,physicalTicketsController,purchasePhysicalTickets,MANGLER,Physical ticket admin missing
+3-GAMEPLAY,GET,/colorDraft,otherGameController,colorDraft,TODO,
+3-GAMEPLAY,POST,/colorDraftEdit,otherGameController,editColordraftPostData,MANGLER,"Minigame config missing (WoF, Treasure, Mystery, ColorDraft)"
+2-PLAYER,GET,/payment/iframe/:checkoutId,PlayerController,verifoneIframe,TODO,
+2-PLAYER,GET,/payment/deposit/response,PlayerController,verifonePaymentResponse,TODO,
+2-PLAYER,POST,/payment/webhook,PlayerController,notification,MANGLER,Player admin action missing
+2-PLAYER,POST,/payment/goback,PlayerController,goBacktoAppFromVerifone,MANGLER,Player admin action missing
+2-PLAYER,GET,/payment/iframe/:checkoutId,PlayerController,swedbankpayIframe,TODO,
+2-PLAYER,GET,/payment/deposit/response,PlayerController,swedbankpayPaymentResponse,TODO,
+2-PLAYER,POST,/payment/webhook,PlayerController,swedbankpayNotification,MANGLER,Player admin action missing
+2-PLAYER,POST,/payment/goback,PlayerController,goBacktoAppFromSwedbankpay,MANGLER,Player admin action missing
+7-AGENT,POST,/agent/dailybalance/add,agentcashinoutController,addDailyBalance,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/dailybalance/get,agentcashinoutController,getDailyBalance,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/register-user/add,agentcashinoutController,registerUserAddBalanceView,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/register-user/withdraw,agentcashinoutController,registerUserWithdrawBalanceView,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/player/check-validity,agentcashinoutController,checkForValidAgentPlayer,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/register-user/balance/get,agentcashinoutController,getRegisterUserBalance,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/register-user/balance/update,agentcashinoutController,updateRegisterUserBalance,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/player/check-validity-balance,agentcashinoutController,checkForValidAgentBalancePlayer,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/control-daily-balance,agentcashinoutController,controlDailyBalance,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/settlement,agentcashinoutController,settlement,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/settlement/get-date,agentcashinoutController,getSettlementDate,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/unique-id/add,agentcashinoutController,uniqueIdAddBalanceView,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/unique-id/withdraw,agentcashinoutController,uniqueIdWithdrawBalanceView,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/unique-id/check-validity,agentcashinoutController,checkForValidUniqueId,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/unique-id/balance/get,agentcashinoutController,getUniqueIdBalance,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/unique-id/balance/update,agentcashinoutController,updateUniqueIdBalance,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/game/status/pause,agentcashinoutController,agentGameStatusForPause,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/game/get-my-group-halls,agentcashinoutController,getAgentsGroupHalls,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/game/stop,agentcashinoutController,agentGameStop,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/game/status/start,agentcashinoutController,agentGameStatusForStart,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/game/start,agentcashinoutController,agentGameStart,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/cashout/view,agentcashinoutController,viewCashoutDetails,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/cashout/get,agentcashinoutController,getPhysicalCashoutDetails,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/wof/reward,agentcashinoutController,wofGameReward,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/game/stop-option,agentcashinoutController,agentGameStopOption,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/sellProduct,agentcashinoutController,productCartPage,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/createCart,agentcashinoutController,createCart,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/productCheckout,agentcashinoutController,productCheckoutPage,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/placeOrder,agentcashinoutController,placeOrder,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/cancelOrder,agentcashinoutController,cancelOrder,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/physicalCashOut,agentcashinoutController,physicalCashOutPage,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/getGamesInHall,agentcashinoutController,getGamesInHall,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/viewWonTickets/:id,agentcashinoutController,viewWonPhysicalTicketPage,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/getPhysicalWinningInGame,agentcashinoutController,getPhysicalWinningInGame,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/reward-all,agentcashinoutController,rewardAll,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/sellProduct,agentcashinoutController,sellProductAgent,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/orderHistory,agentcashinoutController,orderHistoryView,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/getOrderHistory,agentcashinoutController,getOrderHistoryData,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/viewOrder/:cartId,agentcashinoutController,orderDetailsPage,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/game/check-bingo,agentcashinoutController,agentGameCheckBingo,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/game/physical/cash-out,agentcashinoutController,agentphysicalTicketCashout,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/game/physical/add-to-wallet,agentcashinoutController,agentphysicalTicketAddToWallet,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/game/completed,agentcashinoutController,getAgentCompletedGames,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/physical/sell/:gameId,agentcashinoutController,sellagentTicketView,AGENT-DOMENE,BIN-583
+5-WALLET,POST,/agent/physical/sell,physicalTicketsController,addPhysicalTicketsPost,MANGLER,Physical ticket admin missing
+7-AGENT,GET,/agent/game/hall-status,agentcashinoutController,getGameHallStatus,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/game/update-hall-status,agentcashinoutController,updateGameHallStatus,AGENT-DOMENE,BIN-583
+2-PLAYER,POST,/updatePlayerLanguageIfnotexist,PlayerController,updatePlayerLanguageIfnotexist,MANGLER,Player admin action missing
+7-AGENT,GET,/agent/upcoming-game/get,agentcashinoutController,getUpcomingGames,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/upcoming-game/stop,agentcashinoutController,stopUpcomingGame,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/upcoming-game/resume,agentcashinoutController,resumeUpcomingGame,AGENT-DOMENE,BIN-583
+7-AGENT,GET,/agent/upcoming-game/check-resume-eligibility,agentcashinoutController,checkResumeAligibility,AGENT-DOMENE,BIN-583
+4-HALL,GET,/report/settlement/:id,hallController,individualSettlementView,TODO,
+4-HALL,GET,/report/settlement,hallController,getIndividualSettlement,MANGLER,Hall settlement/account report missing
+7-AGENT,POST,/agent/settlement/edit,agentcashinoutController,editSettlement,AGENT-DOMENE,BIN-583
+4-HALL,GET,/tv/:id,scheduleController,redirectToTVScreen,TODO,
+7-AGENT,POST,/agent/metronia/check-connect,machineApiController,checkConnectMetronia,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/metronia/create-ticket,machineApiController,createTicketMetronia,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/metronia/get-balance,machineApiController,getBalanceMetronia,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/metronia/add-balance,machineApiController,addBalanceMetronia,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/metronia/close-ticket,machineApiController,closeTicketMetronia,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/metronia/close-all-tickets,machineApiController,closeAllTicketMetronia,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/create-ticket,machineApiController,createTicketOfMachines,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/add-balance,machineApiController,addBalanceToMachineTickets,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/get-balance,machineApiController,getBalanceOfMachineTickets,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/close-ticket,machineApiController,closeTicketOfMachine,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/close-all-tickets,machineApiController,closeAllTicketOfMachine,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/okbingo/close-all-tickets,machineApiController,closeAllTicketOfOKBingo,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/get-numbers-today,machineApiController,getNumbersOfToday,AGENT-DOMENE,BIN-583
+7-AGENT,POST,/agent/okbingo/open-day,machineApiController,openDayOkBingo,AGENT-DOMENE,BIN-583
+2-PLAYER,GET,/player/bankid/redirect,PlayerController,verifyPlayerBankId,TODO,
+2-PLAYER,GET,/player/bankId/iframe/:id,PlayerController,bankIdIframe,TODO,
+2-PLAYER,POST,/player/bankid/goback,PlayerController,goBacktoAppFromBankId,MANGLER,Player admin action missing
+2-PLAYER,POST,/player/profile/image/update,PlayerController,updateProfileImages,MANGLER,Player admin action missing
+2-PLAYER,POST,/player/verify/update,PlayerController,verifyPlayer,MANGLER,Player admin action missing
+2-PLAYER,POST,/player/approved/update-flag,PlayerController,updateIfPlayerAlreadyApproved,MANGLER,Pending-registration approval flow missing
+2-PLAYER,GET,/players/track-spending,PlayerController,trackSpendingView,TODO,
+2-PLAYER,GET,/players/track-spending/get,PlayerController,getTrackSpendingData,MANGLER,Player pending/rejected queue missing in new admin
+2-PLAYER,GET,/players/track-spending/transactions/:id,PlayerController,trackSpendingTxView,TODO,
+2-PLAYER,GET,/players/track-spending/transactions/get/:id,PlayerController,getTrackSpendingTxData,MANGLER,Player pending/rejected queue missing in new admin
+3-GAMEPLAY,POST,/game1/purchaseTickets,GameController,purchaseTickets,TODO,Review game action
+3-GAMEPLAY,GET,/sms-advertisement,advertisementController,view,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+3-GAMEPLAY,GET,/sms-advertisement/search-players,advertisementController,searchPlayers,TODO,
+3-GAMEPLAY,POST,/sms-advertisement/send-sms-notification,advertisementController,sendSmsNotification,MANGLER,SMS advertisement missing
+5-WALLET,GET,/notifications/count/hall/:hallId,transactionController,getNotificationsCount,EXISTS,/api/notifications covers
+5-WALLET,POST,/api/games/candy/launch,Integration,candyLaunch,EXISTS,Candy launch + ext-wallet present
+5-WALLET,GET,/api/ext-wallet/balance,Integration,extWalletBalance,TODO,
+5-WALLET,POST,/api/ext-wallet/debit,Integration,extWalletDebit,EXISTS,Candy launch + ext-wallet present
+5-WALLET,POST,/api/ext-wallet/credit,Integration,extWalletCredit,EXISTS,Candy launch + ext-wallet present
+5-WALLET,GET,/api/ext-wallet/diag,Integration,extWalletDiag,TODO,
+1-AUTH,GET,/Payment,Frontend,paymentPage,TODO,
+1-AUTH,GET,/resetPassword/:token,Frontend,resetPassword,NOT-NEEDED,HTML render (legacy admin UI) — replaced by React admin
+1-AUTH,POST,/resetPassword/:token,Frontend,postResetPassword,EXISTS,Reset-password covered by /api/auth/forgot-password
+1-AUTH,GET,/player/reset-password/:token,Frontend,playerResetPassword,TODO,
+1-AUTH,POST,/player/reset-password/:token,Frontend,postPlayerResetPassword,EXISTS,Reset-password covered by /api/auth/forgot-password
