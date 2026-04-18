@@ -62,6 +62,14 @@ export interface ListPendingOptions {
   kind?: PaymentRequestKind;
   status?: PaymentRequestStatus;
   hallId?: string;
+  /** BIN-587 B3-aml: filter til én spiller (for AML transaksjons-review). */
+  userId?: string;
+  /** BIN-587 B3-aml: ISO-date (inclusive). */
+  createdFrom?: string;
+  /** BIN-587 B3-aml: ISO-date (inclusive). */
+  createdTo?: string;
+  /** BIN-587 B3-aml: minimum beløp i cents (for terskel-review). */
+  minAmountCents?: number;
   limit?: number;
 }
 
@@ -242,6 +250,23 @@ export class PaymentRequestService {
       if (options.hallId) {
         params.push(options.hallId);
         sql += ` AND hall_id = $${params.length}`;
+      }
+      // BIN-587 B3-aml filters
+      if (options.userId) {
+        params.push(options.userId);
+        sql += ` AND user_id = $${params.length}`;
+      }
+      if (options.createdFrom) {
+        params.push(options.createdFrom);
+        sql += ` AND created_at >= $${params.length}::timestamptz`;
+      }
+      if (options.createdTo) {
+        params.push(options.createdTo);
+        sql += ` AND created_at <= $${params.length}::timestamptz`;
+      }
+      if (options.minAmountCents && options.minAmountCents > 0) {
+        params.push(options.minAmountCents);
+        sql += ` AND amount_cents >= $${params.length}`;
       }
       params.push(limit);
       sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;

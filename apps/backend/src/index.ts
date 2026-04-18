@@ -53,6 +53,8 @@ import { createPaymentsRouter } from "./routes/payments.js";
 import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
 import { createPlayersRouter } from "./routes/players.js";
 import { createAdminPlayersRouter } from "./routes/adminPlayers.js";
+import { createAdminAmlRouter } from "./routes/adminAml.js";
+import { AmlService } from "./compliance/AmlService.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
@@ -228,6 +230,14 @@ const paymentRequestService = new PaymentRequestService(walletAdapter, {
 const authTokenService = new AuthTokenService({
   connectionString: platformConnectionString,
   schema: pgSchema,
+});
+
+// BIN-587 B3-aml: AML red-flag service. Bruker PaymentRequestService
+// for transaksjons-spørringer ved transaction-review.
+const amlService = new AmlService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+  paymentRequestService,
 });
 
 // BIN-588/BIN-587 B2.1: SMTP + audit-log. Begge har graceful fallbacks
@@ -439,6 +449,11 @@ app.use(createAdminPlayersRouter({
   bankIdAdapter,
   webBaseUrl,
   supportEmail,
+}));
+app.use(createAdminAmlRouter({
+  platformService,
+  auditLogService,
+  amlService,
 }));
 
 app.use(createAdminRouter({

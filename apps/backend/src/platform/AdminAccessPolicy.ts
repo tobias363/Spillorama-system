@@ -48,7 +48,14 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    * del av compliance-flyt. Hall-nivå block-listing for problemspillere
    * håndteres av hall-operator via Spillvett, ikke via lifecycle-flag.
    */
-  PLAYER_LIFECYCLE_WRITE: ["ADMIN", "SUPPORT"]
+  PLAYER_LIFECYCLE_WRITE: ["ADMIN", "SUPPORT"],
+  /**
+   * BIN-587 B3-aml: AML red-flag review + transaksjons-gjennomgang.
+   * ADMIN + SUPPORT. HALL_OPERATOR er eksplisitt utelatt — AML er
+   * sentralisert compliance, ikke delegert per hall.
+   */
+  PLAYER_AML_READ: ["ADMIN", "SUPPORT"],
+  PLAYER_AML_WRITE: ["ADMIN", "SUPPORT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
