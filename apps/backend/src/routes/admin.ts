@@ -1663,6 +1663,152 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
     }
   });
 
+  // ── BIN-587 B3.1: reports v2 + dashboard historical ─────────────────────
+
+  // GET /api/admin/reports/revenue?startDate&endDate&hallId&gameType&channel
+  // Kompakt totals-summary — erstatter legacy /totalRevenueReport/getData.
+  router.get("/api/admin/reports/revenue", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const hallIdInput = typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      // BIN-591: HALL_OPERATOR tvinges til sin egen hall
+      const hallId = resolveHallScopeFilter(adminUser, hallIdInput);
+      const gameType = parseOptionalLedgerGameType(req.query.gameType);
+      const channel = parseOptionalLedgerChannel(req.query.channel);
+      const summary = engine.generateRevenueSummary({ startDate, endDate, hallId, gameType, channel });
+      apiSuccess(res, summary);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // GET /api/admin/reports/halls/:hallId/summary?startDate&endDate
+  // Hall-spesifikk aggregat. HALL_OPERATOR får tilgang kun til egen hall.
+  router.get("/api/admin/reports/halls/:hallId/summary", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+      assertUserHallScope(adminUser, hallId); // BIN-591
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const gameType = parseOptionalLedgerGameType(req.query.gameType);
+      const channel = parseOptionalLedgerChannel(req.query.channel);
+      const report = engine.generateRangeReport({ startDate, endDate, hallId, gameType, channel });
+      apiSuccess(res, report);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // GET /api/admin/reports/games/:gameSlug/drill-down?startDate&endDate&hallId
+  // Per-game drill-down (erstatter 5× legacy /reportGameN/getReportGameN).
+  // gameSlug maps to LedgerGameType via parseOptionalLedgerGameType.
+  router.get("/api/admin/reports/games/:gameSlug/drill-down", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const gameSlugRaw = mustBeNonEmptyString(req.params.gameSlug, "gameSlug");
+      const gameType = parseOptionalLedgerGameType(gameSlugRaw);
+      if (!gameType) {
+        throw new DomainError("INVALID_INPUT", "Ukjent game-slug.");
+      }
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const hallIdInput = typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      const hallId = resolveHallScopeFilter(adminUser, hallIdInput);
+      const stats = engine.generateGameStatistics({ startDate, endDate, hallId });
+      // Filter per game-type — generateGameStatistics returnerer rows for alle
+      // gameTypes i range; vi snevrer inn her.
+      const filtered = {
+        ...stats,
+        rows: stats.rows.filter((r) => r.gameType === gameType),
+      };
+      apiSuccess(res, filtered);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // GET /api/admin/reports/games/:gameSlug/sessions?startDate&endDate&hallId&limit
+  router.get("/api/admin/reports/games/:gameSlug/sessions", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const gameSlugRaw = mustBeNonEmptyString(req.params.gameSlug, "gameSlug");
+      const gameType = parseOptionalLedgerGameType(gameSlugRaw);
+      if (!gameType) {
+        throw new DomainError("INVALID_INPUT", "Ukjent game-slug.");
+      }
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const hallIdInput = typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      const hallId = resolveHallScopeFilter(adminUser, hallIdInput);
+      const limit = parseLimit(req.query.limit, 200);
+      const report = engine.generateGameSessions({ startDate, endDate, hallId, gameType, limit });
+      apiSuccess(res, report);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // GET /api/admin/dashboard/time-series?startDate&endDate&granularity=day|month
+  router.get("/api/admin/dashboard/time-series", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const granularityRaw = typeof req.query.granularity === "string" ? req.query.granularity.trim() : "day";
+      if (granularityRaw !== "day" && granularityRaw !== "month") {
+        throw new DomainError("INVALID_INPUT", "granularity må være 'day' eller 'month'.");
+      }
+      const hallIdInput = typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      const hallId = resolveHallScopeFilter(adminUser, hallIdInput);
+      const gameType = parseOptionalLedgerGameType(req.query.gameType);
+      const channel = parseOptionalLedgerChannel(req.query.channel);
+      const report = engine.generateTimeSeries({
+        startDate, endDate, granularity: granularityRaw as "day" | "month", hallId, gameType, channel,
+      });
+      apiSuccess(res, report);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // GET /api/admin/dashboard/top-players?startDate&endDate&hallId&limit
+  router.get("/api/admin/dashboard/top-players", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const hallIdInput = typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      const hallId = resolveHallScopeFilter(adminUser, hallIdInput);
+      const gameType = parseOptionalLedgerGameType(req.query.gameType);
+      const limit = parseLimit(req.query.limit, 20);
+      const report = engine.generateTopPlayers({ startDate, endDate, hallId, gameType, limit });
+      apiSuccess(res, report);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // GET /api/admin/dashboard/game-history?startDate&endDate&gameType&hallId&limit
+  // Tilsvarer legacy /dashboard/gameHistory — list av fullførte spilleøkter.
+  router.get("/api/admin/dashboard/game-history", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "DAILY_REPORT_READ");
+      const startDate = mustBeNonEmptyString(req.query.startDate, "startDate");
+      const endDate = mustBeNonEmptyString(req.query.endDate, "endDate");
+      const hallIdInput = typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      const hallId = resolveHallScopeFilter(adminUser, hallIdInput);
+      const gameType = parseOptionalLedgerGameType(req.query.gameType);
+      const limit = parseLimit(req.query.limit, 200);
+      const report = engine.generateGameSessions({ startDate, endDate, hallId, gameType, limit });
+      apiSuccess(res, report);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   // ── Overskudd ─────────────────────────────────────────────────────────────
 
   router.post("/api/admin/overskudd/distributions", async (req, res) => {

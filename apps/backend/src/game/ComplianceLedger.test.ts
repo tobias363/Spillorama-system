@@ -497,3 +497,175 @@ test("BIN-517 generateGameStatistics filters by hallId", () => {
   assert.equal(filtered.totals.totalStakes, 30);
 });
 
+
+// ── BIN-587 B3.1: revenue + time-series + top-players + game-sessions ─────
+
+test("BIN-587 B3.1: generateRevenueSummary returnerer totals med round/player/hall-teller", () => {
+  const { ledger } = makeLedger();
+  pushInternalEntries(ledger, [
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 10)).toISOString(), createdAtMs: dayMs("2026-04-14", 10),
+      hallId: "hall-1", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 100, currency: "NOK",
+      gameId: "g-1", playerId: "p-1" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 20)).toISOString(), createdAtMs: dayMs("2026-04-14", 20),
+      hallId: "hall-1", gameType: "DATABINGO", channel: "INTERNET", eventType: "PRIZE", amount: 60, currency: "NOK",
+      gameId: "g-1" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-15", 5)).toISOString(), createdAtMs: dayMs("2026-04-15", 5),
+      hallId: "hall-2", gameType: "DATABINGO", channel: "HALL", eventType: "STAKE", amount: 50, currency: "NOK",
+      gameId: "g-2", playerId: "p-2" },
+  ]);
+  const summary = ledger.generateRevenueSummary({ startDate: "2026-04-14", endDate: "2026-04-15" });
+  assert.equal(summary.totalStakes, 150);
+  assert.equal(summary.totalPrizes, 60);
+  assert.equal(summary.net, 90);
+  assert.equal(summary.roundCount, 2);
+  assert.equal(summary.uniquePlayerCount, 2);
+  assert.equal(summary.uniqueHallCount, 2);
+});
+
+test("BIN-587 B3.1: generateRevenueSummary hallId filter", () => {
+  const { ledger } = makeLedger();
+  pushInternalEntries(ledger, [
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 10)).toISOString(), createdAtMs: dayMs("2026-04-14", 10),
+      hallId: "hall-1", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 100, currency: "NOK",
+      gameId: "g-1", playerId: "p-1" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 20)).toISOString(), createdAtMs: dayMs("2026-04-14", 20),
+      hallId: "hall-2", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 200, currency: "NOK",
+      gameId: "g-2", playerId: "p-2" },
+  ]);
+  const only1 = ledger.generateRevenueSummary({ startDate: "2026-04-14", endDate: "2026-04-14", hallId: "hall-1" });
+  assert.equal(only1.totalStakes, 100);
+  assert.equal(only1.uniqueHallCount, 1);
+});
+
+test("BIN-587 B3.1: generateTimeSeries day-granularity inkluderer null-aktivitet-dager", () => {
+  const { ledger } = makeLedger();
+  pushInternalEntries(ledger, [
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 10)).toISOString(), createdAtMs: dayMs("2026-04-14", 10),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 100, currency: "NOK",
+      gameId: "g-1", playerId: "p-1" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-16", 5)).toISOString(), createdAtMs: dayMs("2026-04-16", 5),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "PRIZE", amount: 40, currency: "NOK",
+      gameId: "g-2" },
+  ]);
+  const ts = ledger.generateTimeSeries({ startDate: "2026-04-14", endDate: "2026-04-16" });
+  assert.equal(ts.granularity, "day");
+  assert.equal(ts.points.length, 3);
+  assert.equal(ts.points[0].date, "2026-04-14");
+  assert.equal(ts.points[0].stakes, 100);
+  assert.equal(ts.points[1].date, "2026-04-15");
+  assert.equal(ts.points[1].stakes, 0);
+  assert.equal(ts.points[1].playerCount, 0);
+  assert.equal(ts.points[2].date, "2026-04-16");
+  assert.equal(ts.points[2].prizes, 40);
+});
+
+test("BIN-587 B3.1: generateTimeSeries month-granularity bucker per YYYY-MM", () => {
+  const { ledger } = makeLedger();
+  pushInternalEntries(ledger, [
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-03-10", 0)).toISOString(), createdAtMs: dayMs("2026-03-10", 0),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 100, currency: "NOK",
+      gameId: "g-mar", playerId: "p-1" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-03-20", 0)).toISOString(), createdAtMs: dayMs("2026-03-20", 0),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 50, currency: "NOK",
+      gameId: "g-mar2", playerId: "p-2" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-05", 0)).toISOString(), createdAtMs: dayMs("2026-04-05", 0),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 200, currency: "NOK",
+      gameId: "g-apr", playerId: "p-3" },
+  ]);
+  const ts = ledger.generateTimeSeries({ startDate: "2026-03-01", endDate: "2026-04-30", granularity: "month" });
+  assert.equal(ts.granularity, "month");
+  assert.equal(ts.points.length, 2);
+  assert.equal(ts.points[0].date, "2026-03");
+  assert.equal(ts.points[0].stakes, 150);
+  assert.equal(ts.points[0].playerCount, 2);
+  assert.equal(ts.points[1].date, "2026-04");
+  assert.equal(ts.points[1].stakes, 200);
+});
+
+test("BIN-587 B3.1: generateTimeSeries rejects invalid granularity", () => {
+  const { ledger } = makeLedger();
+  assert.throws(
+    () => ledger.generateTimeSeries({ startDate: "2026-04-14", endDate: "2026-04-16", granularity: "week" as unknown as "day" }),
+    /granularity må være/,
+  );
+});
+
+test("BIN-587 B3.1: generateTopPlayers sorterer etter totalStakes descending + begrenser til limit", () => {
+  const { ledger } = makeLedger();
+  pushInternalEntries(ledger, [
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 10)).toISOString(), createdAtMs: dayMs("2026-04-14", 10),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 50, currency: "NOK",
+      gameId: "g-1", playerId: "p-low" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 20)).toISOString(), createdAtMs: dayMs("2026-04-14", 20),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 500, currency: "NOK",
+      gameId: "g-1", playerId: "p-high" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 30)).toISOString(), createdAtMs: dayMs("2026-04-14", 30),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 200, currency: "NOK",
+      gameId: "g-2", playerId: "p-mid" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 40)).toISOString(), createdAtMs: dayMs("2026-04-14", 40),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "PRIZE", amount: 300, currency: "NOK",
+      gameId: "g-1", playerId: "p-high" },
+  ]);
+  const report = ledger.generateTopPlayers({ startDate: "2026-04-14", endDate: "2026-04-14", limit: 2 });
+  assert.equal(report.rows.length, 2);
+  assert.equal(report.rows[0].playerId, "p-high");
+  assert.equal(report.rows[0].totalStakes, 500);
+  assert.equal(report.rows[0].totalPrizes, 300);
+  assert.equal(report.rows[0].net, 200);
+  assert.equal(report.rows[1].playerId, "p-mid");
+  assert.equal(report.limit, 2);
+});
+
+test("BIN-587 B3.1: generateTopPlayers ignorerer entries uten playerId", () => {
+  const { ledger } = makeLedger();
+  pushInternalEntries(ledger, [
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 10)).toISOString(), createdAtMs: dayMs("2026-04-14", 10),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 100, currency: "NOK",
+      gameId: "g-1" /* no playerId */ },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 20)).toISOString(), createdAtMs: dayMs("2026-04-14", 20),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 50, currency: "NOK",
+      gameId: "g-1", playerId: "p-known" },
+  ]);
+  const report = ledger.generateTopPlayers({ startDate: "2026-04-14", endDate: "2026-04-14" });
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].playerId, "p-known");
+});
+
+test("BIN-587 B3.1: generateGameSessions grupperer per gameId + sorterer på lastEventAt desc", () => {
+  const { ledger } = makeLedger();
+  pushInternalEntries(ledger, [
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 100)).toISOString(), createdAtMs: dayMs("2026-04-14", 100),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 100, currency: "NOK",
+      gameId: "g-early", playerId: "p-1" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 200)).toISOString(), createdAtMs: dayMs("2026-04-14", 200),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "PRIZE", amount: 60, currency: "NOK",
+      gameId: "g-early" },
+    { id: randomUUID(), createdAt: new Date(dayMs("2026-04-14", 500)).toISOString(), createdAtMs: dayMs("2026-04-14", 500),
+      hallId: "h", gameType: "DATABINGO", channel: "INTERNET", eventType: "STAKE", amount: 200, currency: "NOK",
+      gameId: "g-late", playerId: "p-2" },
+  ]);
+  const report = ledger.generateGameSessions({ startDate: "2026-04-14", endDate: "2026-04-14" });
+  assert.equal(report.rows.length, 2);
+  // Sorted by lastEventAt desc
+  assert.equal(report.rows[0].gameId, "g-late");
+  assert.equal(report.rows[1].gameId, "g-early");
+  assert.equal(report.rows[1].totalStakes, 100);
+  assert.equal(report.rows[1].totalPrizes, 60);
+  assert.equal(report.rows[1].net, 40);
+  assert.equal(report.rows[1].playerCount, 1);
+});
+
+test("BIN-587 B3.1: generateGameSessions respects limit", () => {
+  const { ledger } = makeLedger();
+  const entries = Array.from({ length: 5 }, (_, i) => ({
+    id: randomUUID(),
+    createdAt: new Date(dayMs("2026-04-14", i * 10)).toISOString(),
+    createdAtMs: dayMs("2026-04-14", i * 10),
+    hallId: "h", gameType: "DATABINGO" as const, channel: "INTERNET" as const,
+    eventType: "STAKE" as const, amount: 10, currency: "NOK" as const,
+    gameId: `g-${i}`, playerId: `p-${i}`,
+  }));
+  pushInternalEntries(ledger, entries);
+  const report = ledger.generateGameSessions({ startDate: "2026-04-14", endDate: "2026-04-14", limit: 3 });
+  assert.equal(report.rows.length, 3);
+});

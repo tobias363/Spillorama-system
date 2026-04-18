@@ -97,6 +97,83 @@ export interface GameStatisticsRow {
   averagePrizePerRound: number;
 }
 
+/**
+ * BIN-587 B3.1: time-series point for dashboard charts. `date` is
+ * YYYY-MM-DD for day-granularity, YYYY-MM for month-granularity.
+ */
+export interface TimeSeriesPoint {
+  date: string;
+  stakes: number;
+  prizes: number;
+  net: number;
+  gameCount: number;
+  playerCount: number;
+}
+
+export type TimeSeriesGranularity = "day" | "month";
+
+export interface TimeSeriesReport {
+  startDate: string;
+  endDate: string;
+  granularity: TimeSeriesGranularity;
+  generatedAt: string;
+  points: TimeSeriesPoint[];
+}
+
+/** BIN-587 B3.1: top spillere etter stake over en periode. */
+export interface TopPlayerRow {
+  playerId: string;
+  totalStakes: number;
+  totalPrizes: number;
+  net: number;
+  gameCount: number;
+}
+
+export interface TopPlayersReport {
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  limit: number;
+  rows: TopPlayerRow[];
+}
+
+/**
+ * BIN-587 B3.1: kompakt revenue-oppsummering for en periode. Like
+ * `RangeComplianceReport.totals`, men med ekstra count-felt og uten
+ * per-dag-brekking.
+ */
+export interface RevenueSummary {
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  totalStakes: number;
+  totalPrizes: number;
+  net: number;
+  roundCount: number;
+  uniquePlayerCount: number;
+  uniqueHallCount: number;
+}
+
+/** BIN-587 B3.1: én fullført spilleøkt med aggregater. */
+export interface GameSessionRow {
+  gameId: string;
+  hallId: string;
+  gameType: LedgerGameType;
+  firstEventAt: string;
+  lastEventAt: string;
+  totalStakes: number;
+  totalPrizes: number;
+  net: number;
+  playerCount: number;
+}
+
+export interface GameSessionsReport {
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  rows: GameSessionRow[];
+}
+
 export interface GameStatisticsReport {
   startDate: string;
   endDate: string;
@@ -579,6 +656,328 @@ export class ComplianceLedger {
       generatedAt: new Date().toISOString(),
       rows,
       totals,
+    };
+  }
+
+  // ── BIN-587 B3.1: dashboard + revenue + drill-down ──────────────────────
+
+  /**
+   * BIN-587 B3.1: kompakt revenue-oppsummering. Lik
+   * `generateRangeReport().totals`, men uten per-dag-brekking og med
+   * round/player/hall-teller. Brukes av dashboard KPI-boks og
+   * `/api/admin/reports/revenue`.
+   */
+  generateRevenueSummary(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    channel?: LedgerChannel;
+  }): RevenueSummary {
+    const startDate = this.assertDateKey(input.startDate, "startDate");
+    const endDate = this.assertDateKey(input.endDate, "endDate");
+    const startRange = this.dayRangeMs(startDate);
+    const endRange = this.dayRangeMs(endDate);
+    if (startRange.startMs > endRange.startMs) {
+      throw new DomainError("INVALID_INPUT", "startDate må være ≤ endDate.");
+    }
+    const hallFilter = input.hallId?.trim() || undefined;
+    let totalStakes = 0;
+    let totalPrizes = 0;
+    const gameIds = new Set<string>();
+    const playerIds = new Set<string>();
+    const hallIds = new Set<string>();
+    for (const entry of this.complianceLedger) {
+      if (entry.createdAtMs < startRange.startMs || entry.createdAtMs > endRange.endMs) continue;
+      if (hallFilter && entry.hallId !== hallFilter) continue;
+      if (input.gameType && entry.gameType !== input.gameType) continue;
+      if (input.channel && entry.channel !== input.channel) continue;
+      hallIds.add(entry.hallId);
+      if (entry.gameId) gameIds.add(entry.gameId);
+      if (entry.eventType === "STAKE") {
+        totalStakes += entry.amount;
+        if (entry.playerId) playerIds.add(entry.playerId);
+      } else if (entry.eventType === "PRIZE" || entry.eventType === "EXTRA_PRIZE") {
+        totalPrizes += entry.amount;
+      }
+    }
+    return {
+      startDate,
+      endDate,
+      generatedAt: new Date().toISOString(),
+      totalStakes: roundCurrency(totalStakes),
+      totalPrizes: roundCurrency(totalPrizes),
+      net: roundCurrency(totalStakes - totalPrizes),
+      roundCount: gameIds.size,
+      uniquePlayerCount: playerIds.size,
+      uniqueHallCount: hallIds.size,
+    };
+  }
+
+  /**
+   * BIN-587 B3.1: time-series for dashboard-charts. Bucket-size er
+   * `day` (YYYY-MM-DD) eller `month` (YYYY-MM). Returnerer point per
+   * bucket i hele intervallet — også buckets uten aktivitet (zeros),
+   * så UI kan tegne kontinuerlige linjer.
+   */
+  generateTimeSeries(input: {
+    startDate: string;
+    endDate: string;
+    granularity?: TimeSeriesGranularity;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    channel?: LedgerChannel;
+  }): TimeSeriesReport {
+    const startDate = this.assertDateKey(input.startDate, "startDate");
+    const endDate = this.assertDateKey(input.endDate, "endDate");
+    const startRange = this.dayRangeMs(startDate);
+    const endRange = this.dayRangeMs(endDate);
+    if (startRange.startMs > endRange.startMs) {
+      throw new DomainError("INVALID_INPUT", "startDate må være ≤ endDate.");
+    }
+    const granularity: TimeSeriesGranularity = input.granularity ?? "day";
+    if (granularity !== "day" && granularity !== "month") {
+      throw new DomainError("INVALID_INPUT", "granularity må være 'day' eller 'month'.");
+    }
+    // Cap: 366 dager for day, 60 måneder for month — beskytter mot enorme responses.
+    const MAX_DAYS = 366;
+    const MAX_MONTHS = 60;
+    const hallFilter = input.hallId?.trim() || undefined;
+
+    interface Bucket {
+      gameIds: Set<string>;
+      playerIds: Set<string>;
+      stakes: number;
+      prizes: number;
+    }
+    const buckets = new Map<string, Bucket>();
+    const bucketKey = (ms: number): string => {
+      const iso = this.dateKeyFromMs(ms);
+      return granularity === "day" ? iso : iso.slice(0, 7);
+    };
+
+    // Pre-seed buckets for hele intervallet så vi får null-aktivitet-points også.
+    if (granularity === "day") {
+      let cursor = startRange.startMs;
+      let count = 0;
+      while (cursor <= endRange.startMs) {
+        count += 1;
+        if (count > MAX_DAYS) {
+          throw new DomainError("INVALID_INPUT", `Datointervall for stort (maks ${MAX_DAYS} dager).`);
+        }
+        buckets.set(bucketKey(cursor), {
+          gameIds: new Set(), playerIds: new Set(), stakes: 0, prizes: 0,
+        });
+        cursor += 24 * 60 * 60 * 1000;
+      }
+    } else {
+      // month
+      const startYm = startDate.slice(0, 7);
+      const endYm = endDate.slice(0, 7);
+      const [sy, sm] = startYm.split("-").map((v) => Number(v));
+      const [ey, em] = endYm.split("-").map((v) => Number(v));
+      let y = sy!;
+      let m = sm!;
+      let count = 0;
+      while (y < ey! || (y === ey! && m <= em!)) {
+        count += 1;
+        if (count > MAX_MONTHS) {
+          throw new DomainError("INVALID_INPUT", `Månedsintervall for stort (maks ${MAX_MONTHS} måneder).`);
+        }
+        const ym = `${y.toString().padStart(4, "0")}-${m.toString().padStart(2, "0")}`;
+        buckets.set(ym, { gameIds: new Set(), playerIds: new Set(), stakes: 0, prizes: 0 });
+        m += 1;
+        if (m > 12) { m = 1; y += 1; }
+      }
+    }
+
+    for (const entry of this.complianceLedger) {
+      if (entry.createdAtMs < startRange.startMs || entry.createdAtMs > endRange.endMs) continue;
+      if (hallFilter && entry.hallId !== hallFilter) continue;
+      if (input.gameType && entry.gameType !== input.gameType) continue;
+      if (input.channel && entry.channel !== input.channel) continue;
+      const key = bucketKey(entry.createdAtMs);
+      const bucket = buckets.get(key);
+      if (!bucket) continue; // utenfor seeded range (burde ikke skje)
+      if (entry.gameId) bucket.gameIds.add(entry.gameId);
+      if (entry.eventType === "STAKE") {
+        bucket.stakes += entry.amount;
+        if (entry.playerId) bucket.playerIds.add(entry.playerId);
+      } else if (entry.eventType === "PRIZE" || entry.eventType === "EXTRA_PRIZE") {
+        bucket.prizes += entry.amount;
+      }
+    }
+
+    const points: TimeSeriesPoint[] = [...buckets.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, b]) => ({
+        date,
+        stakes: roundCurrency(b.stakes),
+        prizes: roundCurrency(b.prizes),
+        net: roundCurrency(b.stakes - b.prizes),
+        gameCount: b.gameIds.size,
+        playerCount: b.playerIds.size,
+      }));
+
+    return {
+      startDate,
+      endDate,
+      granularity,
+      generatedAt: new Date().toISOString(),
+      points,
+    };
+  }
+
+  /**
+   * BIN-587 B3.1: top N spillere etter stake over en periode. Ikke
+   * personidentifiserende i seg selv — returnerer kun playerId +
+   * aggregater; kall-stedet må join mot bruker-tabellen for e-post/navn
+   * hvis ønsket.
+   */
+  generateTopPlayers(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    limit?: number;
+  }): TopPlayersReport {
+    const startDate = this.assertDateKey(input.startDate, "startDate");
+    const endDate = this.assertDateKey(input.endDate, "endDate");
+    const startRange = this.dayRangeMs(startDate);
+    const endRange = this.dayRangeMs(endDate);
+    if (startRange.startMs > endRange.startMs) {
+      throw new DomainError("INVALID_INPUT", "startDate må være ≤ endDate.");
+    }
+    const limit =
+      input.limit && input.limit > 0 ? Math.min(Math.floor(input.limit), 200) : 20;
+    const hallFilter = input.hallId?.trim() || undefined;
+
+    interface Bucket {
+      totalStakes: number;
+      totalPrizes: number;
+      gameIds: Set<string>;
+    }
+    const byPlayer = new Map<string, Bucket>();
+    for (const entry of this.complianceLedger) {
+      if (!entry.playerId) continue;
+      if (entry.createdAtMs < startRange.startMs || entry.createdAtMs > endRange.endMs) continue;
+      if (hallFilter && entry.hallId !== hallFilter) continue;
+      if (input.gameType && entry.gameType !== input.gameType) continue;
+      let bucket = byPlayer.get(entry.playerId);
+      if (!bucket) {
+        bucket = { totalStakes: 0, totalPrizes: 0, gameIds: new Set() };
+        byPlayer.set(entry.playerId, bucket);
+      }
+      if (entry.gameId) bucket.gameIds.add(entry.gameId);
+      if (entry.eventType === "STAKE") {
+        bucket.totalStakes += entry.amount;
+      } else if (entry.eventType === "PRIZE" || entry.eventType === "EXTRA_PRIZE") {
+        bucket.totalPrizes += entry.amount;
+      }
+    }
+
+    const rows: TopPlayerRow[] = [...byPlayer.entries()]
+      .map(([playerId, b]) => ({
+        playerId,
+        totalStakes: roundCurrency(b.totalStakes),
+        totalPrizes: roundCurrency(b.totalPrizes),
+        net: roundCurrency(b.totalStakes - b.totalPrizes),
+        gameCount: b.gameIds.size,
+      }))
+      .sort((a, b) => b.totalStakes - a.totalStakes)
+      .slice(0, limit);
+
+    return {
+      startDate,
+      endDate,
+      generatedAt: new Date().toISOString(),
+      limit,
+      rows,
+    };
+  }
+
+  /**
+   * BIN-587 B3.1: list fullførte spilleøkter (distinct gameIds) innenfor
+   * et intervall med aggregater. Brukes av dashboard game-history og
+   * per-game sessions-view. Begrenser til maks 1000 rader — callere som
+   * trenger mer må snevre inn intervall/filter.
+   */
+  generateGameSessions(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    limit?: number;
+  }): GameSessionsReport {
+    const startDate = this.assertDateKey(input.startDate, "startDate");
+    const endDate = this.assertDateKey(input.endDate, "endDate");
+    const startRange = this.dayRangeMs(startDate);
+    const endRange = this.dayRangeMs(endDate);
+    if (startRange.startMs > endRange.startMs) {
+      throw new DomainError("INVALID_INPUT", "startDate må være ≤ endDate.");
+    }
+    const limit =
+      input.limit && input.limit > 0 ? Math.min(Math.floor(input.limit), 1000) : 200;
+    const hallFilter = input.hallId?.trim() || undefined;
+
+    interface SessionBucket {
+      gameId: string;
+      hallId: string;
+      gameType: LedgerGameType;
+      firstMs: number;
+      lastMs: number;
+      totalStakes: number;
+      totalPrizes: number;
+      playerIds: Set<string>;
+    }
+    const byGame = new Map<string, SessionBucket>();
+    for (const entry of this.complianceLedger) {
+      if (!entry.gameId) continue;
+      if (entry.createdAtMs < startRange.startMs || entry.createdAtMs > endRange.endMs) continue;
+      if (hallFilter && entry.hallId !== hallFilter) continue;
+      if (input.gameType && entry.gameType !== input.gameType) continue;
+      let bucket = byGame.get(entry.gameId);
+      if (!bucket) {
+        bucket = {
+          gameId: entry.gameId,
+          hallId: entry.hallId,
+          gameType: entry.gameType,
+          firstMs: entry.createdAtMs,
+          lastMs: entry.createdAtMs,
+          totalStakes: 0,
+          totalPrizes: 0,
+          playerIds: new Set(),
+        };
+        byGame.set(entry.gameId, bucket);
+      }
+      if (entry.createdAtMs < bucket.firstMs) bucket.firstMs = entry.createdAtMs;
+      if (entry.createdAtMs > bucket.lastMs) bucket.lastMs = entry.createdAtMs;
+      if (entry.eventType === "STAKE") {
+        bucket.totalStakes += entry.amount;
+        if (entry.playerId) bucket.playerIds.add(entry.playerId);
+      } else if (entry.eventType === "PRIZE" || entry.eventType === "EXTRA_PRIZE") {
+        bucket.totalPrizes += entry.amount;
+      }
+    }
+    const rows: GameSessionRow[] = [...byGame.values()]
+      .sort((a, b) => b.lastMs - a.lastMs)
+      .slice(0, limit)
+      .map((b) => ({
+        gameId: b.gameId,
+        hallId: b.hallId,
+        gameType: b.gameType,
+        firstEventAt: new Date(b.firstMs).toISOString(),
+        lastEventAt: new Date(b.lastMs).toISOString(),
+        totalStakes: roundCurrency(b.totalStakes),
+        totalPrizes: roundCurrency(b.totalPrizes),
+        net: roundCurrency(b.totalStakes - b.totalPrizes),
+        playerCount: b.playerIds.size,
+      }));
+    return {
+      startDate,
+      endDate,
+      generatedAt: new Date().toISOString(),
+      rows,
     };
   }
 

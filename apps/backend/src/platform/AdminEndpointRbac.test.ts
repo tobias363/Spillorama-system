@@ -76,6 +76,42 @@ const ENDPOINT_POLICY_CASES: EndpointPolicyCase[] = [
     endpoint: "GET /api/admin/game-settings/change-log",
     permission: "GAME_SETTINGS_CHANGELOG_READ",
     allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  // BIN-587 B3.1: reports v2 + dashboard historical
+  {
+    endpoint: "GET /api/admin/reports/revenue",
+    permission: "DAILY_REPORT_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    endpoint: "GET /api/admin/reports/halls/:hallId/summary",
+    permission: "DAILY_REPORT_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    endpoint: "GET /api/admin/reports/games/:gameSlug/drill-down",
+    permission: "DAILY_REPORT_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    endpoint: "GET /api/admin/reports/games/:gameSlug/sessions",
+    permission: "DAILY_REPORT_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    endpoint: "GET /api/admin/dashboard/time-series",
+    permission: "DAILY_REPORT_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    endpoint: "GET /api/admin/dashboard/top-players",
+    permission: "DAILY_REPORT_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    endpoint: "GET /api/admin/dashboard/game-history",
+    permission: "DAILY_REPORT_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
   }
 ];
 

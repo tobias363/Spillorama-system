@@ -48,7 +48,7 @@ import type { PrizeGameType, PrizePolicySnapshot, PrizePolicyVersion, ExtraPrize
 import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
 import type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
 import { ComplianceLedger } from "./ComplianceLedger.js";
-import type { LedgerGameType, LedgerChannel, LedgerEventType, ComplianceLedgerEntry, DailyComplianceReport, DailyComplianceReportRow, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionTransfer, OverskuddDistributionBatch } from "./ComplianceLedger.js";
+import type { LedgerGameType, LedgerChannel, LedgerEventType, ComplianceLedgerEntry, DailyComplianceReport, DailyComplianceReportRow, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionTransfer, OverskuddDistributionBatch, RevenueSummary, TimeSeriesReport, TimeSeriesGranularity, TopPlayersReport, GameSessionsReport } from "./ComplianceLedger.js";
 
 export type {
   LossLimits,
@@ -1837,6 +1837,49 @@ export class BingoEngine {
     hallId?: string;
   }): GameStatisticsReport {
     return this.ledger.generateGameStatistics(input);
+  }
+
+  // ── BIN-587 B3.1: dashboard + revenue + drill-down ──────────────────────
+
+  generateRevenueSummary(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    channel?: LedgerChannel;
+  }): RevenueSummary {
+    return this.ledger.generateRevenueSummary(input);
+  }
+
+  generateTimeSeries(input: {
+    startDate: string;
+    endDate: string;
+    granularity?: TimeSeriesGranularity;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    channel?: LedgerChannel;
+  }): TimeSeriesReport {
+    return this.ledger.generateTimeSeries(input);
+  }
+
+  generateTopPlayers(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    limit?: number;
+  }): TopPlayersReport {
+    return this.ledger.generateTopPlayers(input);
+  }
+
+  generateGameSessions(input: {
+    startDate: string;
+    endDate: string;
+    hallId?: string;
+    gameType?: LedgerGameType;
+    limit?: number;
+  }): GameSessionsReport {
+    return this.ledger.generateGameSessions(input);
   }
 
   async createOverskuddDistributionBatch(input: {
