@@ -32,6 +32,12 @@ export interface AdminDisplayDeps {
    * hall env-var pair (placeholder in index.ts; full RBAC in BIN-503).
    */
   validateDisplayToken: (token: string) => Promise<{ hallId: string }>;
+  /**
+   * BIN-585 PR D: screensaver config returned by `admin-display:screensaver`.
+   * Static per environment — comes from env vars with sane defaults.
+   * Matches legacy `Sys.Setting.{screenSaver, screenSaverTime, imageTime}`.
+   */
+  screensaverConfig: { enabled: boolean; timeoutMs: number; imageRotationMs: number };
 }
 
 interface DisplaySocketData {
@@ -65,7 +71,7 @@ interface DisplayStateSnapshot {
 }
 
 export function createAdminDisplayHandlers(deps: AdminDisplayDeps) {
-  const { engine, platformService, io, validateDisplayToken } = deps;
+  const { engine, platformService, io, validateDisplayToken, screensaverConfig } = deps;
 
   function ackSuccess<T>(callback: ((response: AckResponse<T>) => void) | undefined, data: T): void {
     if (typeof callback === "function") callback({ ok: true, data });
@@ -164,6 +170,20 @@ export function createAdminDisplayHandlers(deps: AdminDisplayDeps) {
         const message = err instanceof Error ? err.message : "ukjent feil";
         ackFailure(callback, "STATE_FAILED", message);
       }
+    });
+
+    // ── admin-display:screensaver (BIN-585 PR D) ──────────────────────
+    // Legacy parity with `ScreenSaver` (common.js:549 → PlayerController
+    // returns Sys.Setting.{screenSaver, screenSaverTime, imageTime}). The
+    // new backend has no Sys.Setting table; config comes from env vars
+    // (HALL_SCREENSAVER_* in envConfig.ts) with sane pilot defaults. No
+    // auth — the hall-display TV calls this before admin-display:login to
+    // know how long to wait before dimming.
+    socket.on("admin-display:screensaver", (
+      _payload: unknown,
+      callback?: (response: AckResponse<{ enabled: boolean; timeoutMs: number; imageRotationMs: number }>) => void,
+    ) => {
+      ackSuccess(callback, { ...screensaverConfig });
     });
   };
 }

@@ -57,6 +57,8 @@ export interface BingoRuntimeConfig {
   pgSsl: boolean;
   pgSchema: string;
   sessionTtlHours: number;
+  // BIN-585 PR D: hall-display screensaver config
+  screensaverConfig: { enabled: boolean; timeoutMs: number; imageRotationMs: number };
 }
 
 export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
@@ -146,6 +148,14 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const pgSchema = process.env.APP_PG_SCHEMA?.trim() || process.env.WALLET_PG_SCHEMA?.trim() || "public";
   const sessionTtlHours = parsePositiveIntEnv(process.env.AUTH_SESSION_TTL_HOURS, 24 * 7);
 
+  // BIN-585 PR D: hall-display screensaver config (legacy Sys.Setting
+  // replacement). Pilot defaults: 5 min idle timeout, 10 s image rotation.
+  const screensaverConfig = {
+    enabled: parseBooleanEnv(process.env.HALL_SCREENSAVER_ENABLED, true),
+    timeoutMs: Math.max(0, parsePositiveIntEnv(process.env.HALL_SCREENSAVER_TIMEOUT_MS, 5 * 60 * 1000)),
+    imageRotationMs: parsePositiveIntEnv(process.env.HALL_SCREENSAVER_IMAGE_ROTATION_MS, 10 * 1000),
+  };
+
   return {
     bingoMinRoundIntervalMs, bingoDailyLossLimit, bingoMonthlyLossLimit, bingoPlaySessionLimitMs,
     bingoPauseDurationMs, bingoSelfExclusionMinMs, bingoMaxDrawsPerRound,
@@ -158,6 +168,6 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
-    pgSsl, pgSchema, sessionTtlHours,
+    pgSsl, pgSchema, sessionTtlHours, screensaverConfig,
   };
 }

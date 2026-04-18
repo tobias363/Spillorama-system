@@ -532,6 +532,7 @@ const registerGameEvents = createGameEventHandlers({
 // tokens may be seeded outside the admin flow. Tokens are never logged.
 const registerAdminDisplayEvents = createAdminDisplayHandlers({
   engine, platformService, io,
+  screensaverConfig: cfg.screensaverConfig,
   validateDisplayToken: async (token) => {
     const colon = token.indexOf(":");
     if (colon <= 0) throw new Error("token format ugyldig (forventer <hallSlug>:<secret>)");
@@ -566,7 +567,7 @@ const registerAdminDisplayEvents = createAdminDisplayHandlers({
 // existing JWT access-token path; the handler itself checks
 // ROOM_CONTROL_WRITE per event.
 const registerAdminHallEvents = createAdminHallHandlers({
-  engine, platformService, io, emitRoomUpdate,
+  engine, platformService, io, emitRoomUpdate, walletAdapter,
 });
 
 io.on("connection", (socket: Socket) => {

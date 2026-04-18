@@ -13,6 +13,9 @@ export {
   ClaimSubmitPayloadSchema,
   TicketReplacePayloadSchema,
   TicketSwapPayloadSchema,
+  AdminHallBalancePayloadSchema,
+  AdminHallBalanceResponseSchema,
+  AdminDisplayScreensaverResponseSchema,
   MiniGameTypeSchema,
   MiniGamePlayResultSchema,
   MiniGameActivatedPayloadSchema,
@@ -37,6 +40,9 @@ import type {
   ClaimSubmitPayload as ClaimSubmitPayloadT,
   TicketReplacePayload as TicketReplacePayloadT,
   TicketSwapPayload as TicketSwapPayloadT,
+  AdminHallBalancePayload as AdminHallBalancePayloadT,
+  AdminHallBalanceResponse as AdminHallBalanceResponseT,
+  AdminDisplayScreensaverResponse as AdminDisplayScreensaverResponseT,
   MiniGamePlayResult as MiniGamePlayResultT,
   MiniGameActivatedPayload as MiniGameActivatedPayloadT,
   BetArmPayload as BetArmPayloadT,
@@ -66,6 +72,10 @@ export const SocketEvents = {
   TICKET_REPLACE: "ticket:replace",
   /** BIN-585: free pre-round ticket swap (Game 5 / Spillorama). Legacy alias: SwapTicket. */
   TICKET_SWAP: "ticket:swap",
+  /** BIN-585 PR D: hall operator live balance view. Legacy alias: getHallBalance. */
+  ADMIN_HALL_BALANCE: "admin:hall-balance",
+  /** BIN-585 PR D: hall-display screensaver config. Legacy alias: ScreenSaver. */
+  ADMIN_DISPLAY_SCREENSAVER: "admin-display:screensaver",
   CLAIM_SUBMIT: "claim:submit",
   LUCKY_SET: "lucky:set",
   CHAT_SEND: "chat:send",
@@ -158,6 +168,20 @@ export type TicketReplacePayload = TicketReplacePayloadT;
  * (Spillorama) by gameSlug so paid games continue to use ticket:replace.
  */
 export type TicketSwapPayload = TicketSwapPayloadT;
+
+/**
+ * BIN-585 PR D: payload and response for `admin:hall-balance`. Replaces
+ * legacy `getHallBalance`. Returns the current balance of each house
+ * account for the hall (typically DATABINGO × {HALL, INTERNET}).
+ */
+export type AdminHallBalancePayload = AdminHallBalancePayloadT;
+export type AdminHallBalanceResponse = AdminHallBalanceResponseT;
+
+/**
+ * BIN-585 PR D: response for `admin-display:screensaver`. Replaces
+ * legacy `ScreenSaver`. Returns static screensaver config (from env).
+ */
+export type AdminDisplayScreensaverResponse = AdminDisplayScreensaverResponseT;
 
 export interface LuckyNumberPayload extends RoomActionPayload {
   luckyNumber: number;

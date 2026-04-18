@@ -194,6 +194,42 @@ export const TicketSwapPayloadSchema = z.object({
 export type TicketSwapPayload = z.infer<typeof TicketSwapPayloadSchema>;
 
 /**
+ * BIN-585 PR D: admin:hall-balance — hall operator live view of the
+ * house account balance(s) for a hall. Replaces legacy getHallBalance.
+ * Requires admin auth via admin:login and ROOM_CONTROL_READ.
+ */
+export const AdminHallBalancePayloadSchema = z.object({
+  accessToken: z.string().optional(),
+  hallId: z.string().min(1),
+});
+export type AdminHallBalancePayload = z.infer<typeof AdminHallBalancePayloadSchema>;
+
+export const AdminHallBalanceResponseSchema = z.object({
+  hallId: z.string(),
+  accounts: z.array(z.object({
+    gameType: z.string(),
+    channel: z.string(),
+    accountId: z.string(),
+    balance: z.number(),
+  })),
+  totalBalance: z.number(),
+  at: z.number().int(),
+});
+export type AdminHallBalanceResponse = z.infer<typeof AdminHallBalanceResponseSchema>;
+
+/**
+ * BIN-585 PR D: admin-display:screensaver — returns screensaver config
+ * for the hall-display TV. Replaces legacy ScreenSaver (common.js:549).
+ * Read-only and auth-free; the config is static per environment.
+ */
+export const AdminDisplayScreensaverResponseSchema = z.object({
+  enabled: z.boolean(),
+  timeoutMs: z.number().int().nonnegative(),
+  imageRotationMs: z.number().int().positive(),
+});
+export type AdminDisplayScreensaverResponse = z.infer<typeof AdminDisplayScreensaverResponseSchema>;
+
+/**
  * BIN-505/506: MiniGamePlayResult — sent as the ack payload from
  * `minigame:play`. The 4-way rotation (wheel → chest → mystery → colorDraft)
  * uses this shape for all variants.

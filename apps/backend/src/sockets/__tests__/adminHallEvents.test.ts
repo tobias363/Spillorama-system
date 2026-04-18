@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createAdminHallHandlers } from "../adminHallEvents.js";
 import type { BingoEngine } from "../../game/BingoEngine.js";
-import type { PlatformService } from "../../platform/PlatformService.js";
+import type { PlatformService, HallDefinition } from "../../platform/PlatformService.js";
+import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
 import type { Server } from "socket.io";
 
 interface AckResponse<T> {
@@ -105,14 +106,40 @@ function makeEngineStub(rooms: FakeRoom[]) {
   } as unknown as BingoEngine & { __rooms: FakeRoom[]; __calls: typeof calls };
 }
 
-function makePlatformStub(opts: { users: Record<string, { id: string; email: string; displayName: string; role: "ADMIN" | "HALL_OPERATOR" | "SUPPORT" | "PLAYER" }> }) {
+function makePlatformStub(opts: {
+  users: Record<string, { id: string; email: string; displayName: string; role: "ADMIN" | "HALL_OPERATOR" | "SUPPORT" | "PLAYER" }>;
+  knownHallIds?: string[];
+}) {
+  const knownHallIds = new Set(opts.knownHallIds ?? ["hall-a", "hall-b"]);
   return {
     getUserFromAccessToken: async (token: string) => {
       const u = opts.users[token];
       if (!u) throw new Error("invalid access token");
       return { ...u, walletId: `w-${u.id}`, kycStatus: "VERIFIED" as const, createdAt: "", updatedAt: "", balance: 0 };
     },
+    getHall: async (hallId: string): Promise<HallDefinition> => {
+      if (!knownHallIds.has(hallId)) throw new Error(`unknown hall ${hallId}`);
+      return {
+        id: hallId, slug: hallId, name: `Hall ${hallId}`, region: "test", address: "test",
+        isActive: true, clientVariant: "unity" as const,
+        createdAt: "", updatedAt: "",
+      } as HallDefinition;
+    },
   } as unknown as PlatformService;
+}
+
+function makeWalletStub(balancesByAccountId: Record<string, number>) {
+  return {
+    getBalance: async (accountId: string): Promise<number> => {
+      const balance = balancesByAccountId[accountId];
+      if (balance === undefined) {
+        const err = new Error("ACCOUNT_NOT_FOUND");
+        (err as unknown as { code: string }).code = "ACCOUNT_NOT_FOUND";
+        throw err;
+      }
+      return balance;
+    },
+  } as unknown as WalletAdapter;
 }
 
 // ── Shared wiring ──────────────────────────────────────────────────────────
@@ -120,6 +147,8 @@ function makePlatformStub(opts: { users: Record<string, { id: string; email: str
 function setup(opts: {
   rooms?: FakeRoom[];
   users?: Parameters<typeof makePlatformStub>[0]["users"];
+  walletBalances?: Record<string, number>;
+  knownHallIds?: string[];
 } = {}) {
   const rooms = opts.rooms ?? [{ code: "ROOM-A", hallId: "hall-a", gameStatus: "RUNNING" as const }];
   const users = opts.users ?? {
@@ -128,13 +157,15 @@ function setup(opts: {
     "player-token": { id: "u-pl", email: "pl@x.no", displayName: "Player", role: "PLAYER" as const },
   };
   const engine = makeEngineStub(rooms);
-  const platform = makePlatformStub({ users });
+  const platform = makePlatformStub({ users, knownHallIds: opts.knownHallIds });
+  const walletAdapter = makeWalletStub(opts.walletBalances ?? {});
   const io = new FakeIo();
   const emitRoomUpdateCalls: string[] = [];
   const register = createAdminHallHandlers({
     engine,
     platformService: platform,
     io: io as unknown as Server,
+    walletAdapter,
     emitRoomUpdate: async (code) => {
       emitRoomUpdateCalls.push(code);
       return { roomCode: code } as unknown as Awaited<ReturnType<Parameters<typeof createAdminHallHandlers>[0]["emitRoomUpdate"]>>;
@@ -259,4 +290,83 @@ test("admin:force-end defaults reason to FORCE_END_ADMIN when omitted", async ()
   await sock.fire("admin:force-end", { roomCode: "ROOM-A" });
   const calls = (engine as unknown as { __calls: { endGame: Array<{ reason?: string }> } }).__calls;
   assert.equal(calls.endGame[0].reason, "FORCE_END_ADMIN");
+});
+
+// ── BIN-585 PR D: admin:hall-balance ───────────────────────────────────
+
+type HallBalanceData = {
+  hallId: string;
+  accounts: Array<{ gameType: string; channel: string; accountId: string; balance: number }>;
+  totalBalance: number;
+  at: number;
+};
+
+test("BIN-585: admin:hall-balance requires admin:login first", async () => {
+  const { sock } = setup();
+  const r = await sock.fire<HallBalanceData>("admin:hall-balance", { hallId: "hall-a" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "NOT_AUTHENTICATED");
+});
+
+test("BIN-585: admin:hall-balance rejects invalid payload (no hallId)", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire<HallBalanceData>("admin:hall-balance", {});
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "INVALID_INPUT");
+});
+
+test("BIN-585: admin:hall-balance rejects PLAYER role (FORBIDDEN)", async () => {
+  const { sock } = setup();
+  await sock.fire("admin:login", { accessToken: "player-token" });
+  const r = await sock.fire<HallBalanceData>("admin:hall-balance", { hallId: "hall-a" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "FORBIDDEN");
+});
+
+test("BIN-585: admin:hall-balance rejects HALL_NOT_FOUND for unknown hall", async () => {
+  const { sock } = setup({ knownHallIds: ["hall-a"] });
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire<HallBalanceData>("admin:hall-balance", { hallId: "ghost-hall" });
+  assert.equal(r.ok, false);
+  assert.equal(r.error?.code, "HALL_NOT_FOUND");
+});
+
+test("BIN-585: admin:hall-balance returns balance per (gameType, channel) + total", async () => {
+  // Populate both DATABINGO channels; verify sum and account-id format.
+  const { sock } = setup({
+    knownHallIds: ["hall-a"],
+    walletBalances: {
+      "house-hall-a-databingo-hall": 1234.5,
+      "house-hall-a-databingo-internet": 10000,
+    },
+  });
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire<HallBalanceData>("admin:hall-balance", { hallId: "hall-a" });
+  assert.equal(r.ok, true, `admin:hall-balance failed: ${r.error?.message}`);
+  assert.equal(r.data!.hallId, "hall-a");
+  assert.equal(r.data!.totalBalance, 11234.5);
+  assert.equal(r.data!.accounts.length, 2);
+  const hall = r.data!.accounts.find((a) => a.channel === "HALL");
+  const internet = r.data!.accounts.find((a) => a.channel === "INTERNET");
+  assert.equal(hall?.accountId, "house-hall-a-databingo-hall");
+  assert.equal(hall?.balance, 1234.5);
+  assert.equal(internet?.accountId, "house-hall-a-databingo-internet");
+  assert.equal(internet?.balance, 10000);
+  assert.ok(r.data!.at > 0, "at should be a positive timestamp");
+});
+
+test("BIN-585: admin:hall-balance treats un-funded house account as zero balance", async () => {
+  // Only one channel seeded; the other triggers ACCOUNT_NOT_FOUND and
+  // should surface as balance=0 rather than bubbling the error up.
+  const { sock } = setup({
+    knownHallIds: ["hall-a"],
+    walletBalances: { "house-hall-a-databingo-internet": 500 },
+  });
+  await sock.fire("admin:login", { accessToken: "admin-token" });
+  const r = await sock.fire<HallBalanceData>("admin:hall-balance", { hallId: "hall-a" });
+  assert.equal(r.ok, true);
+  assert.equal(r.data!.totalBalance, 500);
+  const hall = r.data!.accounts.find((a) => a.channel === "HALL");
+  assert.equal(hall?.balance, 0, "missing account must be reported as zero");
 });

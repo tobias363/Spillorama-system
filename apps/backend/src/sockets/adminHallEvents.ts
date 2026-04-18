@@ -38,7 +38,9 @@ import type { BingoEngine } from "../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { RoomSnapshot } from "../game/types.js";
 import type { RoomUpdatePayload } from "../util/roomHelpers.js";
+import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { canAccessAdminPermission } from "../platform/AdminAccessPolicy.js";
+import { AdminHallBalancePayloadSchema } from "@spillorama/shared-types/socket-events";
 
 export interface AdminHallDeps {
   engine: BingoEngine;
@@ -46,6 +48,24 @@ export interface AdminHallDeps {
   io: Server;
   /** Re-used from index.ts so the same room:update payload shape is broadcast. */
   emitRoomUpdate: (roomCode: string) => Promise<RoomUpdatePayload>;
+  /** BIN-585 PR D: wired through for `admin:hall-balance`. */
+  walletAdapter: WalletAdapter;
+}
+
+/**
+ * BIN-585 PR D: the (gameType, channel) pairs we query for a hall balance.
+ * Mirrors `ComplianceLedger.makeHouseAccountId`. DATABINGO is the primary
+ * domain; MAIN_GAME is legacy wording and not populated in new backend.
+ * If we later onboard a new game type, add the pair here.
+ */
+const HALL_BALANCE_ACCOUNT_PAIRS: ReadonlyArray<{ gameType: "DATABINGO"; channel: "HALL" | "INTERNET" }> = [
+  { gameType: "DATABINGO", channel: "HALL" },
+  { gameType: "DATABINGO", channel: "INTERNET" },
+];
+
+/** Mirror of `ComplianceLedger.makeHouseAccountId`. */
+function makeHouseAccountId(hallId: string, gameType: string, channel: string): string {
+  return `house-${hallId.trim()}-${gameType.toLowerCase()}-${channel.toLowerCase()}`;
 }
 
 interface AdminSocketData {
@@ -88,7 +108,7 @@ export interface AdminHallEventBroadcast {
 }
 
 export function createAdminHallHandlers(deps: AdminHallDeps) {
-  const { engine, platformService, io, emitRoomUpdate } = deps;
+  const { engine, platformService, io, emitRoomUpdate, walletAdapter } = deps;
 
   function ackSuccess<T>(cb: ((r: AckResponse<T>) => void) | undefined, data: T): void {
     if (typeof cb === "function") cb({ ok: true, data });
@@ -292,6 +312,79 @@ export function createAdminHallHandlers(deps: AdminHallDeps) {
       } catch (err) {
         const message = err instanceof Error ? err.message : "ukjent feil";
         const code = (err as { code?: string }).code ?? "FORCE_END_FAILED";
+        ackFailure(callback, code, message);
+      }
+    });
+
+    // ── admin:hall-balance (BIN-585 PR D) ──────────────────────────────
+    // Legacy parity with `getHallBalance` (legacy admnEvents.js:47). The
+    // legacy handler joined a shift/agent table to break out cash-in /
+    // cash-out / daily-balance; the new backend has no shift table (agent
+    // domain → BIN-583), so we return the current house-account balance
+    // per (gameType, channel) for the hall. That's the minimum an
+    // operator needs for "how much money is held for this hall". When
+    // agent/shift tables land, extend this response — not a new event.
+    socket.on("admin:hall-balance", async (
+      payload: unknown,
+      callback?: (r: AckResponse<{
+        hallId: string;
+        accounts: Array<{ gameType: string; channel: string; accountId: string; balance: number }>;
+        totalBalance: number;
+        at: number;
+      }>) => void,
+    ) => {
+      try {
+        const parsed = AdminHallBalancePayloadSchema.safeParse(payload);
+        if (!parsed.success) {
+          const first = parsed.error.issues[0];
+          const field = first?.path.join(".") || "payload";
+          ackFailure(callback, "INVALID_INPUT", `admin:hall-balance payload invalid (${field}: ${first?.message ?? "unknown"}).`);
+          return;
+        }
+        const admin = (socket.data as AdminSocketData).adminUser;
+        if (!admin) {
+          ackFailure(callback, "NOT_AUTHENTICATED", "Kjør admin:login først.");
+          return;
+        }
+        if (!canAccessAdminPermission(admin.role, "ROOM_CONTROL_READ")) {
+          ackFailure(callback, "FORBIDDEN", "Mangler rettigheten ROOM_CONTROL_READ.");
+          return;
+        }
+        const hallId = parsed.data.hallId.trim();
+        // Verify the hall exists — avoids returning zero-balance for a typo.
+        try {
+          await platformService.getHall(hallId);
+        } catch {
+          ackFailure(callback, "HALL_NOT_FOUND", `Hallen "${hallId}" finnes ikke.`);
+          return;
+        }
+
+        const accounts = await Promise.all(
+          HALL_BALANCE_ACCOUNT_PAIRS.map(async ({ gameType, channel }) => {
+            const accountId = makeHouseAccountId(hallId, gameType, channel);
+            // getBalance throws ACCOUNT_NOT_FOUND for an un-funded account;
+            // treat that as zero so the response stays symmetric across
+            // halls regardless of which channels have seen activity.
+            let balance = 0;
+            try {
+              balance = await walletAdapter.getBalance(accountId);
+            } catch {
+              balance = 0;
+            }
+            return { gameType, channel, accountId, balance };
+          }),
+        );
+        const totalBalance = accounts.reduce((sum, a) => sum + a.balance, 0);
+
+        console.info("[BIN-585] admin:hall-balance", {
+          adminUserId: admin.id,
+          hallId,
+          totalBalance,
+        });
+        ackSuccess(callback, { hallId, accounts, totalBalance, at: Date.now() });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "ukjent feil";
+        const code = (err as { code?: string }).code ?? "HALL_BALANCE_FAILED";
         ackFailure(callback, code, message);
       }
     });

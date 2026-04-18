@@ -3,7 +3,7 @@
 **Kilde:** [Linear BIN-585](https://linear.app/bingosystem/issue/BIN-585)
 **Parent epic:** BIN-581 Backend legacy-paritet
 **Dato:** 2026-04-18
-**Sist oppdatert:** 2026-04-18 — PR A (#176, SwapTicket) + PR B (Game2BuyBlindTickets / SelectWofAuto / SelectRouletteAuto, alias-bare)
+**Sist oppdatert:** 2026-04-18 — PR A (#176, SwapTicket) + PR B (#178, 3 alias) + PR D (admin:hall-balance, admin-display:screensaver, 3 verifikasjoner)
 
 ## Formål
 
@@ -26,11 +26,13 @@ Audit ([`BACKEND_PARITY_AUDIT_2026-04-18.md`](./BACKEND_PARITY_AUDIT_2026-04-18.
 | Legacy events (med duplikater på tvers av filer) | 151 forekomster |
 | Ny events (client→server, aktive) | 26 |
 | Ny events (server→client emit)    | ~10 |
-| **OK** (mappet eller konsolidert) | 74 |
-| **MANGLER** (må portes — PR D)    | 2 |
-| **DELVIS** (payload-verifisering gjenstår — PR D) | 3 |
+| **OK** (mappet eller konsolidert) | 79 |
+| **MANGLER** (må portes)           | 0 |
+| **DELVIS** (payload-verifisering gjenstår) | 0 |
 | **NOT-NEEDED** (eksplisitt droppet / dekket av HTTP / deprecated) | 14 |
 | **TODO** (eier-avklaring kreves)  | 0 (alle avklart) |
+
+🏁 **BIN-585 socket-paritet: fullført** pluss én lav-prio follow-up ([BIN-594](https://linear.app/bingosystem/issue/BIN-594): variant_config-refactor for `ticket:swap`-gate).
 
 ### Status-definisjoner
 
@@ -158,7 +160,7 @@ Audit ([`BACKEND_PARITY_AUDIT_2026-04-18.md`](./BACKEND_PARITY_AUDIT_2026-04-18.
 | `Localaccess` | common.js:508 | — | — | NOT-NEEDED | Legacy admin-debug |
 | `disconnect` | common.js:522 | `disconnect` | gameEvents.ts:922 | OK | Direkte |
 | `createBotPlayers` | common.js:539 | — | — | TODO | Dev/test-only? Avklar om tilgjengelig i staging |
-| `ScreenSaver` | common.js:549 | — | — | **MANGLER** | Hall-display idle-state; lite brukt, lav prio — **PR D** |
+| `ScreenSaver` | common.js:549 | `admin-display:screensaver` | adminDisplayEvents.ts | OK | ✅ PR D: ny handler. Config fra env (`HALL_SCREENSAVER_*` i envConfig.ts) erstatter legacy `Sys.Setting.{screenSaver, screenSaverTime, imageTime}`. Unity alias `ScreenSaver` mapper direkte. |
 | `CheckPlayerBreakTime` | common.js:565 | `GET /api/wallet/break-status` | routes/wallet.ts | OK | HTTP-port (Spillvett) |
 | `verifyByBankId` | common.js:575 | `POST /api/auth/bankid` | routes/auth.ts | OK | HTTP-port |
 | `PlayerSettings` | common.js:584 | `GET/PATCH /api/players/me/settings` | routes/players.ts | OK | HTTP-port |
@@ -248,7 +250,7 @@ Game 4 er vedtatt deprecated (se BIN-496). **Alle** events her = **NOT-NEEDED**.
 | `isGameAvailbaleForVerifiedPlayer` | game5.js:5 | `room:state` | gameEvents.ts:490 | OK | Konsolidert — `currentGame.status` gir samme svar |
 | `Game5Data` | game5.js:14 | `room:state` | gameEvents.ts:490 | OK | Konsolidert |
 | `SwapTicket` | game5.js:23 | `ticket:swap` | gameEvents.ts:720 | OK | ✅ PR A ([#176](https://github.com/tobias363/Spillorama-system/pull/176)): ny handler + Unity alias. Gratis swap, gated på `gameSlug === "spillorama"` (se BIN-594 for follow-up) |
-| `Game5Play` | game5.js:32 | `bet:arm` + `draw:next` | gameEvents.ts | DELVIS | Slot-rulett-fysikk ikke implementert i engine; antagelig holder konsoliderte events, men **avklar om client trenger Game5Play-spesifikk payload** |
+| `Game5Play` | game5.js:32 | `bet:arm` + `game:start` (host-initiated) | gameEvents.ts:515,564 | OK | ✅ PR D verifikasjon: legacy var per-spiller "ready to play"; ny arch splitter til `bet:arm` (spiller-kvittering) + host-initiert `game:start`. Semantisk 1:2-mapping, men samme end-state. Slot-rulett-prize-mekanikk dekkes av `jackpot:spin` (se SelectRouletteAuto-rad). |
 | `checkForWinners` | game5.js:41 | `claim:submit` | gameEvents.ts:719 | OK | Konsolidert |
 | `LeftRoom` | game5.js:50 | `disconnect` | gameEvents.ts:922 | OK | Auto-håndtert |
 | `WheelOfFortuneData` | game5.js:59 | `minigame:play` / `jackpot:spin` | gameEvents.ts:840,829 | OK | Konsolidert |
@@ -264,11 +266,11 @@ Game 4 er vedtatt deprecated (se BIN-496). **Alle** events her = **NOT-NEEDED**.
 | `joinRoom` | admnEvents.js:17 | `admin:login` + `admin-display:subscribe` | adminHall/DisplayEvents | OK | Konsolidert |
 | `getNextGame` | admnEvents.js:29 | `admin-display:state` / `room:state` | adminDisplayEvents.ts:153 | OK | Konsolidert |
 | `getOngoingGame` | admnEvents.js:38 | `room:state` | gameEvents.ts:490 | OK | Konsolidert |
-| **`getHallBalance`** | admnEvents.js:47 | — | — | **MANGLER** | Hall-saldo live via socket. **PR D** (hvis ikke agent-scope → BIN-583) |
+| `getHallBalance` | admnEvents.js:47 | `admin:hall-balance` | adminHallEvents.ts | OK | ✅ PR D: ny handler. Returnerer walletAdapter house-account saldo per (gameType, channel) — ikke shift/cashIn/cashOut breakdown (det hører til BIN-583 agent-domene). Unity alias `getHallBalance` mapper direkte. |
 | `onHallReady` | admnEvents.js:56 | `admin:room-ready` | adminHallEvents.ts:164 | OK | Konsolidert |
 | `getWithdrawPenddingRequest` | admnEvents.js:65 | `GET /api/admin/withdrawals/pending` | routes/admin.ts | OK | HTTP-port |
-| `gameCountDownTimeUpdate` | admnEvents.js:75 | `admin-display:state` | adminDisplayEvents.ts:153 | DELVIS | Verifiser payload-paritet |
-| `secondToDisplaySingleBallUpdate` | admnEvents.js:85 | `admin-display:state` | adminDisplayEvents.ts:153 | DELVIS | Verifiser payload-paritet |
+| `gameCountDownTimeUpdate` | admnEvents.js:75 | `PUT /api/admin/settings/games/:slug` (HTTP) | routes/admin.ts:400 | OK | ✅ PR D verifikasjon: admin setter `autoRoundStartIntervalMs` via bingoSettings HTTP-endpoint. Samme effekt som legacy (pre-round countdown før auto-start). Krever `ROOM_CONTROL_WRITE`. |
+| `secondToDisplaySingleBallUpdate` | admnEvents.js:85 | `PUT /api/admin/settings/games/:slug` (HTTP) | routes/admin.ts:400 | OK (med begrensning) | ✅ PR D verifikasjon: feltet `autoDrawIntervalMs` eksisterer, men er **låst til `fixedAutoDrawIntervalMs`** i bingoSettings.ts:75 — regulatorisk beslutning for å hindre hall-operator i å speede opp trekninger (Spillevett). Forsøk på å endre returnerer `INVALID_INPUT`. Bevisst funksjonell forskjell fra legacy. |
 | `checkTransferHallAccess` | admnEvents.js:95 | — | — | NOT-NEEDED | Agent-overføring → BIN-583 |
 | `transferHallAccess` | admnEvents.js:103 | — | — | NOT-NEEDED | Agent-overføring → BIN-583 |
 | `approveTransferHallAccess` | admnEvents.js:113 | — | — | NOT-NEEDED | Agent-overføring → BIN-583 |
@@ -302,23 +304,24 @@ Alle events her er eldre varianter av `game1.js` (f.eks. `CancelGameTickets` →
 
 ---
 
-## 3. Konsoliderte MANGLER-liste (reell porting-kø)
+## 3. Konsoliderte porting-resultat (alle events lukket)
 
-Events som må portes (status = MANGLER):
-
-| # | Event | Legacy ref | Foreslått ny event | PR | Status |
+| # | Event | Legacy ref | Ny event / kanal | PR | Status |
 |--:|---|---|---|---|---|
 | 1 | `SwapTicket` | game5.js:23 | `ticket:swap` | PR A | ✅ Merget ([#176](https://github.com/tobias363/Spillorama-system/pull/176)) |
-| 2 | `Game2BuyBlindTickets` | game2.js:51 | `bet:arm` (alias-bare) | PR B | 🟡 Åpen (alias-dispatch) |
-| 3 | `SelectWofAuto` | game5.js:77 | `minigame:play` (alias-bare) | PR B | 🟡 Åpen (alias-dispatch) |
-| 4 | `SelectRouletteAuto` | game5.js:86 | `jackpot:spin` (alias-bare) | PR B | 🟡 Åpen (alias-dispatch) |
-| 5 | `DeletePlayerAccount` | common.js:136 | `DELETE /api/players/me` (HTTP) | BIN-587 (agent 1) | ⏸ Omallokert til HTTP-scope per TODO #4 — ikke socket |
-| 6 | `getHallBalance` | admnEvents.js:47 | `admin:hall-balance` (på adminHallEvents) | PR D | ⏳ Planlagt |
-| 7 | `ScreenSaver` | common.js:549 | `hall:screensaver` (display emit) | PR D | ⏳ Planlagt |
+| 2 | `Game2BuyBlindTickets` | game2.js:51 | `bet:arm` (alias) | PR B | ✅ Merget ([#178](https://github.com/tobias363/Spillorama-system/pull/178)) |
+| 3 | `SelectWofAuto` | game5.js:77 | `minigame:play` (alias) | PR B | ✅ Merget ([#178](https://github.com/tobias363/Spillorama-system/pull/178)) |
+| 4 | `SelectRouletteAuto` | game5.js:86 | `jackpot:spin` (alias) | PR B | ✅ Merget ([#178](https://github.com/tobias363/Spillorama-system/pull/178)) |
+| 5 | `DeletePlayerAccount` | common.js:136 | `DELETE /api/players/me` (HTTP) | BIN-587 | ⏸ Omallokert til HTTP-scope per TODO #4 |
+| 6 | `getHallBalance` | admnEvents.js:47 | `admin:hall-balance` | PR D | 🟡 Åpen |
+| 7 | `ScreenSaver` | common.js:549 | `admin-display:screensaver` | PR D | 🟡 Åpen |
+| 8 | `Game5Play` (verifikasjon) | game5.js:32 | `bet:arm` + `game:start` | PR D | 🟡 Åpen |
+| 9 | `gameCountDownTimeUpdate` (verifikasjon) | admnEvents.js:75 | `PUT /api/admin/settings/games/:slug` | PR D | 🟡 Åpen |
+| 10 | `secondToDisplaySingleBallUpdate` (verifikasjon) | admnEvents.js:85 | `PUT /api/admin/settings/games/:slug` (låst verdi) | PR D | 🟡 Åpen |
 
-**Reell porting-gjeld etter PR A/B:** 2 events (`getHallBalance`, `ScreenSaver`) + 3 payload-verifikasjoner (`Game5Play`, `gameCountDownTimeUpdate`, `secondToDisplaySingleBallUpdate`). PR D lukker disse.
+**Reell porting-gjeld etter PR D-merge:** 0. Audit-tallet "~40 reelt manglende" var inflatert — mesteparten var enten konsolidert i generiske events, dekket av HTTP, NOT-NEEDED (Game4 / voucher / push / agent), eller 1:1-aliaser mot eksisterende handlers.
 
-Audit-tallet "~40 reelt manglende" inkluderte events vi her har klassifisert som NOT-NEEDED (Game4, voucher, push → BIN-584, agent → BIN-583). Verifisering av eksisterende kanoniske events viste at alle tre PR B-events var allerede dekket semantisk — krevde ikke ny server-kode, bare alias.
+Én lav-prio follow-up: [BIN-594](https://linear.app/bingosystem/issue/BIN-594) — flytt `ticket:swap` gate fra hardkodet `gameSlug` til variant_config JSONB (venter på BIN-587 config-admin).
 
 ## 4. TODO-liste (eier-avklart 2026-04-18)
 
@@ -349,11 +352,13 @@ Audit-tallet "~40 reelt manglende" inkluderte events vi her har klassifisert som
 - **PR C — Player account** ⏸ Omallokert
   - `DeletePlayerAccount` → `DELETE /api/players/me` (HTTP). Håndteres av agent 1 i BIN-587.
 
-- **PR D — Hall-operator** ⏳ Planlagt
-  - `getHallBalance` → `admin:hall-balance` (ny handler i adminHallEvents.ts)
-  - `ScreenSaver` → `hall:screensaver` (display emit)
-  - Verifiser `gameCountDownTimeUpdate`, `secondToDisplaySingleBallUpdate` payload-paritet
-  - Verifiser `Game5Play` payload-paritet
+- **PR D — Hall-operator + verifikasjoner** 🟡 Åpen
+  - `getHallBalance` → `admin:hall-balance` (ny handler i adminHallEvents.ts, returnerer per-(gameType, channel) house-account saldo)
+  - `ScreenSaver` → `admin-display:screensaver` (ny handler i adminDisplayEvents.ts, config fra env `HALL_SCREENSAVER_*`)
+  - Zod-schemas for begge + Unity alias
+  - `Game5Play`: verifisert DELVIS → OK (1:2-split mot `bet:arm` + `game:start`, slot-prize via `jackpot:spin`)
+  - `gameCountDownTimeUpdate`: verifisert DELVIS → OK (via `PUT /api/admin/settings/games/:slug`, `autoRoundStartIntervalMs`)
+  - `secondToDisplaySingleBallUpdate`: verifisert DELVIS → OK-med-begrensning (feltet finnes, men `autoDrawIntervalMs` låst til `fixedAutoDrawIntervalMs` av regulatoriske grunner — bevisst funksjonell forskjell)
 
 Hver PR inkluderer:
 1. Handler i `apps/backend/src/sockets/`

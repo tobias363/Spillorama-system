@@ -43,7 +43,22 @@ const LEGACY_EVENT_ALIASES: Record<string, string> = {
   // (hardere anti-replay). Legacy: GameProcess.js:1137
   SelectRouletteAuto: "jackpot:spin",
 
-  // BIN-585 PR D legger til: getHallBalance, ScreenSaver.
+  // BIN-585 PR D — hall-operator events (nye handlers i ny backend).
+  //
+  // getHallBalance: legacy leste shift/agent-tabeller (ikke portert,
+  // hører til BIN-583 agent-domene) og returnerte daily/cashIn/cashOut
+  // breakdown. Ny `admin:hall-balance` returnerer walletAdapter
+  // house-account saldo per (gameType, channel) — tilsvarer "hallens
+  // penger holdt av system" uten agent-terminal-state.
+  // Legacy: legacy/unity-backend/Game/AdminEvents/AdminController/AdminController.js:116
+  getHallBalance: "admin:hall-balance",
+
+  // ScreenSaver: hall-display idle-config. Legacy returnerte globale
+  // Sys.Setting-feltene {screenSaver, screenSaverTime, imageTime}. Ny
+  // `admin-display:screensaver` returnerer samme form, men config kommer
+  // fra env (HALL_SCREENSAVER_* i envConfig.ts) med pilot-defaults.
+  // Legacy: legacy/unity-backend/Game/Common/Sockets/common.js:549
+  ScreenSaver: "admin-display:screensaver",
 };
 
 export function registerLegacyEventAliases(socket: Socket): void {

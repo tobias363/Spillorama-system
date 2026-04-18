@@ -110,6 +110,7 @@ test("BIN-498 login: rejects missing token", async () => {
     engine: makeEngineStub([]),
     platformService: makePlatformStub([]),
     io: io as unknown as Server,
+    screensaverConfig: { enabled: true, timeoutMs: 300000, imageRotationMs: 10000 },
     validateDisplayToken: async () => ({ hallId: "hall-1" }),
   });
   const sock = new FakeSocket();
@@ -125,6 +126,7 @@ test("BIN-498 login: rejects invalid token", async () => {
     engine: makeEngineStub([]),
     platformService: makePlatformStub([]),
     io: io as unknown as Server,
+    screensaverConfig: { enabled: true, timeoutMs: 300000, imageRotationMs: 10000 },
     validateDisplayToken: async () => { throw new Error("token mismatch"); },
   });
   const sock = new FakeSocket();
@@ -140,6 +142,7 @@ test("BIN-498 login → subscribe: socket joins display + active room", async ()
   const platform = makePlatformStub([{ id: "hall-A", name: "Hall A", tvUrl: "https://promo.example/hall-a" }]);
   const register = createAdminDisplayHandlers({
     engine, platformService: platform, io: io as unknown as Server,
+    screensaverConfig: { enabled: true, timeoutMs: 300000, imageRotationMs: 10000 },
     validateDisplayToken: async () => ({ hallId: "hall-A" }),
   });
   const sock = new FakeSocket();
@@ -166,6 +169,7 @@ test("BIN-498 subscribe: rejects when not logged in", async () => {
     engine: makeEngineStub([]),
     platformService: makePlatformStub([{ id: "hall-1", name: "Hall 1" }]),
     io: io as unknown as Server,
+    screensaverConfig: { enabled: true, timeoutMs: 300000, imageRotationMs: 10000 },
     validateDisplayToken: async () => ({ hallId: "hall-1" }),
   });
   const sock = new FakeSocket();
@@ -187,6 +191,7 @@ test("BIN-498 hall-isolation: a socket logged in for hall-A never joins hall-B's
   ]);
   const register = createAdminDisplayHandlers({
     engine, platformService: platform, io: io as unknown as Server,
+    screensaverConfig: { enabled: true, timeoutMs: 300000, imageRotationMs: 10000 },
     validateDisplayToken: async () => ({ hallId: "hall-A" }), // bound to A
   });
   const sock = new FakeSocket();
@@ -201,12 +206,71 @@ test("BIN-498 hall-isolation: a socket logged in for hall-A never joins hall-B's
   assert.ok(!sock.joined.has("ROOM-B"), "must NOT join other hall's game room");
 });
 
+test("BIN-585: admin-display:screensaver returns configured values without requiring login", async () => {
+  // Hall-display TV fetches this before admin-display:login to know how
+  // long to wait before dimming — so no auth gate.
+  const io = new FakeIo();
+  const register = createAdminDisplayHandlers({
+    engine: makeEngineStub([]),
+    platformService: makePlatformStub([]),
+    io: io as unknown as Server,
+    screensaverConfig: { enabled: true, timeoutMs: 123456, imageRotationMs: 7890 },
+    validateDisplayToken: async () => ({ hallId: "hall-1" }),
+  });
+  const sock = new FakeSocket();
+  register(sock as unknown as Parameters<typeof register>[0]);
+  const r = await sock.fire<{ enabled: boolean; timeoutMs: number; imageRotationMs: number }>(
+    "admin-display:screensaver", {},
+  );
+  assert.equal(r.ok, true, `admin-display:screensaver failed: ${r.error?.message}`);
+  assert.equal(r.data?.enabled, true);
+  assert.equal(r.data?.timeoutMs, 123456);
+  assert.equal(r.data?.imageRotationMs, 7890);
+});
+
+test("BIN-585: admin-display:screensaver reflects disabled config", async () => {
+  const io = new FakeIo();
+  const register = createAdminDisplayHandlers({
+    engine: makeEngineStub([]),
+    platformService: makePlatformStub([]),
+    io: io as unknown as Server,
+    screensaverConfig: { enabled: false, timeoutMs: 0, imageRotationMs: 10000 },
+    validateDisplayToken: async () => ({ hallId: "hall-1" }),
+  });
+  const sock = new FakeSocket();
+  register(sock as unknown as Parameters<typeof register>[0]);
+  const r = await sock.fire<{ enabled: boolean; timeoutMs: number }>(
+    "admin-display:screensaver", {},
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.data?.enabled, false);
+});
+
+test("BIN-585: legacy ScreenSaver alias dispatches to admin-display:screensaver via alias-map", async () => {
+  // The alias is registered in legacyEventAliases.ts — here we verify the
+  // canonical handler exists on the socket, which is what the alias
+  // re-dispatch looks up via socket.listeners("admin-display:screensaver").
+  const io = new FakeIo();
+  const register = createAdminDisplayHandlers({
+    engine: makeEngineStub([]),
+    platformService: makePlatformStub([]),
+    io: io as unknown as Server,
+    screensaverConfig: { enabled: true, timeoutMs: 300000, imageRotationMs: 10000 },
+    validateDisplayToken: async () => ({ hallId: "hall-1" }),
+  });
+  const sock = new FakeSocket();
+  register(sock as unknown as Parameters<typeof register>[0]);
+  const r = await sock.fire<{ enabled: boolean }>("admin-display:screensaver", {});
+  assert.ok(r.ok, "canonical handler must exist for alias to dispatch to");
+});
+
 test("BIN-498 state: returns fresh snapshot on demand", async () => {
   const io = new FakeIo();
   const engine = makeEngineStub([{ code: "ROOM-X", hallId: "hall-X", gameStatus: "RUNNING" }]);
   const platform = makePlatformStub([{ id: "hall-X", name: "Hall X", tvUrl: null }]);
   const register = createAdminDisplayHandlers({
     engine, platformService: platform, io: io as unknown as Server,
+    screensaverConfig: { enabled: true, timeoutMs: 300000, imageRotationMs: 10000 },
     validateDisplayToken: async () => ({ hallId: "hall-X" }),
   });
   const sock = new FakeSocket();
