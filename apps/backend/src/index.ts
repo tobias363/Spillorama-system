@@ -72,6 +72,8 @@ import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
 import { createAdminUniqueIdsAndPayoutsRouter } from "./routes/adminUniqueIdsAndPayouts.js";
+import { createAdminUsersRouter } from "./routes/adminUsers.js";
+import { createAdminPlayerActivityRouter } from "./routes/adminPlayerActivity.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
@@ -570,6 +572,19 @@ app.use(createAdminUniqueIdsAndPayoutsRouter({
   platformService,
   auditLogService,
   physicalTicketService,
+  engine,
+}));
+app.use(createAdminUsersRouter({
+  platformService,
+  auditLogService,
+  authTokenService,
+  emailService,
+  webBaseUrl,
+  supportEmail,
+}));
+app.use(createAdminPlayerActivityRouter({
+  platformService,
+  walletAdapter,
   engine,
 }));
 

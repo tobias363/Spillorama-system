@@ -1833,6 +1833,159 @@ export class PlatformService {
   }
 
   /**
+   * BIN-587 B6: list admin-brukere (ADMIN | SUPPORT | HALL_OPERATOR).
+   * PLAYER ekskluderes — spillere håndteres via listUsersByKycStatus
+   * og player-search-endepunktene.
+   */
+  async listAdminUsers(options?: {
+    role?: UserRole;
+    includeDeleted?: boolean;
+    limit?: number;
+  }): Promise<AppUser[]> {
+    await this.ensureInitialized();
+    const limit = options?.limit && options.limit > 0 ? Math.min(options.limit, 500) : 100;
+    const conditions: string[] = ["role IN ('ADMIN', 'SUPPORT', 'HALL_OPERATOR')"];
+    const params: unknown[] = [];
+    if (options?.role) {
+      if (options.role === "PLAYER") {
+        throw new DomainError("INVALID_INPUT", "PLAYER er ikke en admin-rolle.");
+      }
+      params.push(options.role);
+      conditions.push(`role = $${params.length}`);
+    }
+    if (!options?.includeDeleted) {
+      conditions.push("deleted_at IS NULL");
+    }
+    params.push(limit);
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, compliance_data
+       FROM ${this.usersTable()}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY created_at DESC
+       LIMIT $${params.length}`,
+      params
+    );
+    return rows.map((r) => this.mapUser(r));
+  }
+
+  /**
+   * BIN-587 B6: opprett admin-bruker (ADMIN/SUPPORT/HALL_OPERATOR).
+   * Setter KYC VERIFIED automatisk (admin-brukere trenger ikke KYC-flow
+   * som spillere). Auto-genererer wallet for konsistens med
+   * app_users-skjema, men wallet vil ikke brukes.
+   */
+  async createAdminUser(input: {
+    email: string;
+    password: string;
+    displayName: string;
+    surname: string;
+    role: UserRole;
+    phone?: string;
+    hallId?: string | null;
+  }): Promise<AppUser> {
+    await this.ensureInitialized();
+    if (input.role === "PLAYER") {
+      throw new DomainError("INVALID_INPUT", "Bruk /api/auth/register for spiller-opprettelse.");
+    }
+    const role = this.assertUserRole(input.role);
+    const email = normalizeEmail(input.email);
+    const displayName = input.displayName.trim();
+    const surname = input.surname.trim();
+    this.assertEmail(email);
+    this.assertDisplayName(displayName);
+    this.assertSurname(surname);
+    this.assertPassword(input.password);
+    const phone = input.phone?.trim() || null;
+    const hallId = input.hallId?.trim() || null;
+    if (role === "HALL_OPERATOR" && hallId !== null) {
+      const { rows: hallRows } = await this.pool.query(
+        `SELECT id FROM ${this.hallsTable()} WHERE id = $1`,
+        [hallId]
+      );
+      if (!hallRows[0]) throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+    }
+    const passwordHash = await this.hashPassword(input.password);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<{ id: string }>(
+        `SELECT id FROM ${this.usersTable()} WHERE email = $1`,
+        [email]
+      );
+      if (existingRows[0]) {
+        throw new DomainError("EMAIL_EXISTS", "E-post er allerede registrert.");
+      }
+      const userId = randomUUID();
+      const walletId = `wallet-admin-${userId}`;
+      const { rows } = await client.query<UserRow>(
+        `INSERT INTO ${this.usersTable()}
+          (id, email, display_name, surname, password_hash, wallet_id, role, phone, hall_id, kyc_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'VERIFIED')
+         RETURNING id, email, display_name, surname, compliance_data, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, phone`,
+        [userId, email, displayName, surname, passwordHash, walletId, role, phone, hallId]
+      );
+      await client.query("COMMIT");
+      return this.mapUser(rows[0]!);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(err);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * BIN-587 B6: soft-delete admin-bruker. Setter deleted_at + revoker
+   * sesjoner. Samme guard som softDeletePlayer: siste ADMIN kan ikke
+   * slettes. Ulikt softDeletePlayer fordi vi ikke aksepterer PLAYER her.
+   */
+  async softDeleteAdminUser(userIdInput: string): Promise<void> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userIdInput, "userId");
+    const user = await this.getUserById(id);
+    if (user.role === "PLAYER") {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "Bruk /api/admin/players/:id/soft-delete for spiller-sletting."
+      );
+    }
+    if (user.role === "ADMIN") {
+      const { rows } = await this.pool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM ${this.usersTable()}
+         WHERE role = 'ADMIN' AND deleted_at IS NULL`
+      );
+      if (Number(rows[0]?.count ?? "0") <= 1) {
+        throw new DomainError("LAST_ADMIN_REQUIRED", "Kan ikke soft-delete siste aktive admin.");
+      }
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rowCount } = await client.query(
+        `UPDATE ${this.usersTable()}
+         SET deleted_at = now(), updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [id]
+      );
+      if (!rowCount) {
+        throw new DomainError("USER_ALREADY_DELETED", "Brukeren er allerede soft-deleted.");
+      }
+      await client.query(
+        `UPDATE ${this.sessionsTable()}
+         SET revoked_at = now()
+         WHERE user_id = $1 AND revoked_at IS NULL`,
+        [id]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(err);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * BIN-587 B2.2: admin approve av KYC. Setter VERIFIED og stempler
    * providerRef = "admin-override:<actorId>" så historikken er synlig.
    */
