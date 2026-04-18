@@ -3,7 +3,7 @@
 **Kilde:** [Linear BIN-585](https://linear.app/bingosystem/issue/BIN-585)
 **Parent epic:** BIN-581 Backend legacy-paritet
 **Dato:** 2026-04-18
-**Sist oppdatert:** Første versjon — PR #1 (matrise, ingen kode-endringer)
+**Sist oppdatert:** 2026-04-18 — PR A (#176, SwapTicket) + PR B (Game2BuyBlindTickets / SelectWofAuto / SelectRouletteAuto, alias-bare)
 
 ## Formål
 
@@ -26,10 +26,11 @@ Audit ([`BACKEND_PARITY_AUDIT_2026-04-18.md`](./BACKEND_PARITY_AUDIT_2026-04-18.
 | Legacy events (med duplikater på tvers av filer) | 151 forekomster |
 | Ny events (client→server, aktive) | 26 |
 | Ny events (server→client emit)    | ~10 |
-| **OK** (mappet eller konsolidert) | 70 |
-| **MANGLER** (må portes)           | 15 |
-| **NOT-NEEDED** (eksplisitt droppet / dekket av HTTP / deprecated) | 13 |
-| **TODO** (eier-avklaring kreves)  | 4 |
+| **OK** (mappet eller konsolidert) | 74 |
+| **MANGLER** (må portes — PR D)    | 2 |
+| **DELVIS** (payload-verifisering gjenstår — PR D) | 3 |
+| **NOT-NEEDED** (eksplisitt droppet / dekket av HTTP / deprecated) | 14 |
+| **TODO** (eier-avklaring kreves)  | 0 (alle avklart) |
 
 ### Status-definisjoner
 
@@ -120,7 +121,7 @@ Audit ([`BACKEND_PARITY_AUDIT_2026-04-18.md`](./BACKEND_PARITY_AUDIT_2026-04-18.
 | `AvailableGames` | common.js:106 | `GET /api/games` | routes | OK | HTTP-port |
 | `ReconnectPlayer` | common.js:116 | `room:resume` | gameEvents.ts:453 | OK | Konsolidert |
 | `CheckRunningGame` | common.js:126 | `room:state` | gameEvents.ts:490 | OK | Konsolidert (via `currentGame.status`) |
-| **`DeletePlayerAccount`** | common.js:136 | — | — | **MANGLER** | GDPR-right; **PR C** |
+| `DeletePlayerAccount` | common.js:136 | `DELETE /api/players/me` | routes/players.ts (BIN-587) | NOT-NEEDED | Socket-variant droppet per TODO #4. GDPR-sletting flyttet til HTTP i BIN-587 (agent 1). |
 | `SetLimit` | common.js:147 | `POST /api/wallet/limits` | routes/wallet.ts | OK | HTTP-port (Spillvett) |
 | `PlayerNotifications` | common.js:157 | — | — | NOT-NEEDED | Push → BIN-584 |
 | `TransactionHistory` | common.js:167 | `GET /api/wallet/transactions` | routes/wallet.ts | OK | HTTP-port |
@@ -205,7 +206,7 @@ Audit ([`BACKEND_PARITY_AUDIT_2026-04-18.md`](./BACKEND_PARITY_AUDIT_2026-04-18.
 | `Game2Room` | game2.js:7 | `room:create` / `room:join` | gameEvents.ts:344,396 | OK | Konsolidert |
 | `Game2PlanList` | game2.js:29 | `room:state` | gameEvents.ts:490 | OK | Konsolidert |
 | `Game2TicketPurchaseData` | game2.js:40 | `room:state` + `bet:arm` | gameEvents.ts | OK | Konsolidert |
-| **`Game2BuyBlindTickets`** | game2.js:51 | — | — | **MANGLER** | Blind-ticket (billett uten sjekk før trekning). **PR B** |
+| `Game2BuyBlindTickets` | game2.js:51 | `bet:arm` (uten `ticketSelections`) | gameEvents.ts:515 | OK | ✅ PR B (#TBD): alias-bare — `bet:arm` uten selections gir server-generert random ticket-batch, samme semantikk som legacy "blind" |
 | `Game2BuyTickets` | game2.js:62 | `bet:arm` | gameEvents.ts:515 | OK | Konsolidert |
 | `CancelGameTickets` | game2.js:73 | `bet:arm` (armed=false) | gameEvents.ts:515 | OK | Konsolidert |
 | `LeftRocketRoom` | game2.js:135 | `disconnect` | gameEvents.ts:922 | OK | Auto-håndtert |
@@ -246,14 +247,14 @@ Game 4 er vedtatt deprecated (se BIN-496). **Alle** events her = **NOT-NEEDED**.
 |---|---|---|---|---|---|
 | `isGameAvailbaleForVerifiedPlayer` | game5.js:5 | `room:state` | gameEvents.ts:490 | OK | Konsolidert — `currentGame.status` gir samme svar |
 | `Game5Data` | game5.js:14 | `room:state` | gameEvents.ts:490 | OK | Konsolidert |
-| **`SwapTicket`** | game5.js:23 | — | — | **MANGLER** | Bytte billett pre-round (forskjellig fra `ticket:replace` som er pay-to-swap). **PR A** |
+| `SwapTicket` | game5.js:23 | `ticket:swap` | gameEvents.ts:720 | OK | ✅ PR A ([#176](https://github.com/tobias363/Spillorama-system/pull/176)): ny handler + Unity alias. Gratis swap, gated på `gameSlug === "spillorama"` (se BIN-594 for follow-up) |
 | `Game5Play` | game5.js:32 | `bet:arm` + `draw:next` | gameEvents.ts | DELVIS | Slot-rulett-fysikk ikke implementert i engine; antagelig holder konsoliderte events, men **avklar om client trenger Game5Play-spesifikk payload** |
 | `checkForWinners` | game5.js:41 | `claim:submit` | gameEvents.ts:719 | OK | Konsolidert |
 | `LeftRoom` | game5.js:50 | `disconnect` | gameEvents.ts:922 | OK | Auto-håndtert |
 | `WheelOfFortuneData` | game5.js:59 | `minigame:play` / `jackpot:spin` | gameEvents.ts:840,829 | OK | Konsolidert |
 | `PlayWheelOfFortune` | game5.js:68 | `jackpot:spin` | gameEvents.ts:829 | OK | Konsolidert (G5 jackpot) |
-| `SelectWofAuto` | game5.js:77 | — | — | **MANGLER** | Auto-velg WoF-resultat. **PR B** |
-| **`SelectRouletteAuto`** | game5.js:86 | — | — | **MANGLER** | Auto-velg rulett. **PR B** |
+| `SelectWofAuto` | game5.js:77 | `minigame:play` (uten `selectedIndex`) | gameEvents.ts:840 | OK | ✅ PR B (#TBD): alias-bare — `engine.playMiniGame` velger alltid segment server-autoritativt (`Math.random()`); `selectedIndex` er kosmetisk |
+| `SelectRouletteAuto` | game5.js:86 | `jackpot:spin` | gameEvents.ts:829 | OK | ✅ PR B (#TBD): alias-bare — `engine.spinJackpot` tracker `playedSpins`/`totalSpins`/`isComplete` server-side (hardere anti-replay enn legacys client-claimed `spinCount`) |
 
 ### 2.7 Game/AdminEvents/Sockets/admnEvents.js
 
@@ -305,53 +306,54 @@ Alle events her er eldre varianter av `game1.js` (f.eks. `CancelGameTickets` →
 
 Events som må portes (status = MANGLER):
 
-| # | Event | Legacy ref | Foreslått ny event | PR | Begrunnelse |
+| # | Event | Legacy ref | Foreslått ny event | PR | Status |
 |--:|---|---|---|---|---|
-| 1 | `SwapTicket` | game5.js:23 | `ticket:swap` (eller utvid `ticket:replace`) | **PR A** | Game5 pre-round bytte uten betaling (replaceAmount=0) |
-| 2 | `Game2BuyBlindTickets` | game2.js:51 | `bet:arm` variant m/blind-flag | **PR B** | Game2 blind-kjøp |
-| 3 | `SelectRouletteAuto` | game5.js:86 | `minigame:play` variant | **PR B** | Game5 rulett auto-valg |
-| 4 | `SelectWofAuto` | game5.js:77 | `minigame:play` variant | **PR B** | Game5 WoF auto-valg |
-| 5 | `DeletePlayerAccount` | common.js:136 | `account:delete` (socket) eller `DELETE /api/players/me` (HTTP) | **PR C** | GDPR-right. **Avklar**: HTTP passer bedre arkitektonisk |
-| 6 | `getHallBalance` | admnEvents.js:47 | `admin:hall-balance` (på adminHallEvents) | **PR D** | Hall-operator live-saldo |
-| 7 | `ScreenSaver` | common.js:549 | `hall:screensaver` (display emit) | **PR D** | Hall-display idle |
+| 1 | `SwapTicket` | game5.js:23 | `ticket:swap` | PR A | ✅ Merget ([#176](https://github.com/tobias363/Spillorama-system/pull/176)) |
+| 2 | `Game2BuyBlindTickets` | game2.js:51 | `bet:arm` (alias-bare) | PR B | 🟡 Åpen (alias-dispatch) |
+| 3 | `SelectWofAuto` | game5.js:77 | `minigame:play` (alias-bare) | PR B | 🟡 Åpen (alias-dispatch) |
+| 4 | `SelectRouletteAuto` | game5.js:86 | `jackpot:spin` (alias-bare) | PR B | 🟡 Åpen (alias-dispatch) |
+| 5 | `DeletePlayerAccount` | common.js:136 | `DELETE /api/players/me` (HTTP) | BIN-587 (agent 1) | ⏸ Omallokert til HTTP-scope per TODO #4 — ikke socket |
+| 6 | `getHallBalance` | admnEvents.js:47 | `admin:hall-balance` (på adminHallEvents) | PR D | ⏳ Planlagt |
+| 7 | `ScreenSaver` | common.js:549 | `hall:screensaver` (display emit) | PR D | ⏳ Planlagt |
 
-**Totalt MANGLER: 7 eksplisitte + 3 DELVIS-verifikasjoner** (Game5Play, gameCountDownTimeUpdate, secondToDisplaySingleBallUpdate payload-paritet).
+**Reell porting-gjeld etter PR A/B:** 2 events (`getHallBalance`, `ScreenSaver`) + 3 payload-verifikasjoner (`Game5Play`, `gameCountDownTimeUpdate`, `secondToDisplaySingleBallUpdate`). PR D lukker disse.
 
-Audit-tallet "~40 reelt manglende" inkluderte events vi her har klassifisert som NOT-NEEDED (Game4, voucher, push → BIN-584, agent → BIN-583). Netto real-porting-gjeld = **7–10 events**.
+Audit-tallet "~40 reelt manglende" inkluderte events vi her har klassifisert som NOT-NEEDED (Game4, voucher, push → BIN-584, agent → BIN-583). Verifisering av eksisterende kanoniske events viste at alle tre PR B-events var allerede dekket semantisk — krevde ikke ny server-kode, bare alias.
 
-## 4. Konsoliderte TODO-liste (eier-avklaring)
+## 4. TODO-liste (eier-avklart 2026-04-18)
 
-| # | Spørsmål | Hvorfor | Foreslått default |
-|--:|---|---|---|
-| 1 | Skal Unity-bridge beholde legacy event-navn (`Game1Room`, `PurchaseGame1Tickets` osv.) som aliaser i en overgangsperiode? | Legacy Unity-klient bruker gamle navn. Shell-klient (web) bruker nye. | JA — legg alias i bridge-lag i `apps/backend/src/sockets/legacyBridge.ts`. |
-| 2 | Er G2/G3 `VoucherList`/`RedeemVoucher` faktisk død, eller har vi aktive vouchers i prod? | Audit sier droppet, men common.js:313–323 er fortsatt aktiv i legacy. | Eier sjekker. Default: NOT-NEEDED (drop) |
-| 3 | Skal `FAQ`/`Terms`/`Support`/`Aboutus` eksponeres via socket eller kun via HTTP CMS-API? | Unity-klient bruker socket i dag. | HTTP-only; Unity-klient tar wrap-kall. |
-| 4 | `DeletePlayerAccount` — socket eller HTTP? | GDPR-right; ytelse irrelevant. | `DELETE /api/players/me` (HTTP). |
-| 5 | `createBotPlayers` — kun dev/staging, eller prod-tool? | common.js:539 er åpen i legacy. | Dev-only; ikke portes. |
+| # | Spørsmål | Avgjørelse |
+|--:|---|---|
+| 1 | Unity-bridge aliaser for legacy event-navn? | ✅ **JA** — alias-map i [`apps/backend/src/sockets/legacyEventAliases.ts`](../../apps/backend/src/sockets/legacyEventAliases.ts). Bevar nye event-navn som kanoniske. Unity er fortsatt fallback-klient (`client_variant="unity-fallback"` per BIN-540). |
+| 2 | G2/G3 `VoucherList`/`RedeemVoucher` status? | ✅ **NOT-NEEDED** — deprecated sammen med G4 per BIN-496. |
+| 3 | `FAQ`/`Terms`/`Support`/`Aboutus` socket eller HTTP? | ✅ **HTTP-only** — `/api/content/*`. Socket-varianter NOT-NEEDED. |
+| 4 | `DeletePlayerAccount` — socket eller HTTP? | ✅ **HTTP** — `DELETE /api/players/me` i BIN-587-scope. NOT-NEEDED i socket-matrisen. |
+| 5 | `createBotPlayers` — dev eller prod? | ✅ **NOT-NEEDED** — dev/test-only, skal ikke i prod. |
 
 ---
 
-## 5. Foreslått porting-plan (PR-sekvens)
+## 5. Porting-plan (PR-sekvens)
 
-Etter review av denne matrisen:
+- **PR A — Ticket-events** ✅ Merget ([#176](https://github.com/tobias363/Spillorama-system/pull/176))
+  - `SwapTicket` → `ticket:swap` (ny handler, gratis swap, Spillorama-gated)
+  - Zod wire-contract: `TicketSwapPayloadSchema`
+  - `apps/backend/src/sockets/legacyEventAliases.ts` (ny fil) — Unity-bridge alias
+  - Follow-up: [BIN-594](https://linear.app/bingosystem/issue/BIN-594) (flytt gate til variant-config JSONB)
 
-- **PR A — Ticket-events** (BIN-585.1)
-  - Port `SwapTicket` → `ticket:swap` (eller utvid `ticket:replace` med `gratis=true` flag)
-  - Zod wire-contract i `packages/shared-types/`
-  - Unity-bridge alias
+- **PR B — Game-spesifikke auto-events** 🟡 Åpen
+  - `Game2BuyBlindTickets` → `bet:arm` (alias-bare)
+  - `SelectWofAuto` → `minigame:play` (alias-bare)
+  - `SelectRouletteAuto` → `jackpot:spin` (alias-bare)
+  - Ingen nye handlers — verifisert at eksisterende kanoniske events dekker semantikken fullstendig (se commits i [bin-585-game-auto-events](https://github.com/tobias363/Spillorama-system/tree/bin-585-game-auto-events))
 
-- **PR B — Game-spesifikke auto-events** (BIN-585.2)
-  - `Game2BuyBlindTickets` → `bet:arm` variant
-  - `SelectRouletteAuto`, `SelectWofAuto` → `minigame:play` variant
-  - Verifiser `Game5Play` payload-paritet
+- **PR C — Player account** ⏸ Omallokert
+  - `DeletePlayerAccount` → `DELETE /api/players/me` (HTTP). Håndteres av agent 1 i BIN-587.
 
-- **PR C — Player account** (BIN-585.3)
-  - `DeletePlayerAccount` → `DELETE /api/players/me` (HTTP, ikke socket) **eller** `account:delete` socket-event (avhenger av TODO #4)
-
-- **PR D — Hall-operator** (BIN-585.4)
-  - `getHallBalance` → `admin:hall-balance`
-  - `ScreenSaver` → `hall:screensaver`
+- **PR D — Hall-operator** ⏳ Planlagt
+  - `getHallBalance` → `admin:hall-balance` (ny handler i adminHallEvents.ts)
+  - `ScreenSaver` → `hall:screensaver` (display emit)
   - Verifiser `gameCountDownTimeUpdate`, `secondToDisplaySingleBallUpdate` payload-paritet
+  - Verifiser `Game5Play` payload-paritet
 
 Hver PR inkluderer:
 1. Handler i `apps/backend/src/sockets/`

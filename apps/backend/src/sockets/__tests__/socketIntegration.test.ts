@@ -321,6 +321,79 @@ describe("Socket.IO integration", () => {
     assert.equal(result.data!.ticketId, original.id);
   });
 
+  // ── 2d. BIN-585 PR B: alias-bare events ──────────────────────────────────
+
+  test("BIN-585: legacy Game2BuyBlindTickets alias dispatches to bet:arm", async () => {
+    // Blind purchase = server plukker `ticketCount` tilfeldige billetter.
+    // `bet:arm` uten `ticketSelections` gir samme semantikk: server
+    // genererer billettene ved `game:start`. Alias-testen verifiserer at
+    // dispatchen skjer (arm-state blir satt).
+    const alice = await server.connectClient("token-alice");
+    const r1 = await alice.emit<AckResponse<{ roomCode: string; playerId: string }>>(
+      "room:create", { hallId: "hall-test" },
+    );
+    const roomCode = r1.data!.roomCode;
+    const playerId = r1.data!.playerId;
+
+    const result = await alice.emit<AckResponse<{ armed: boolean }>>(
+      "Game2BuyBlindTickets", { roomCode, playerId, armed: true, ticketCount: 3 },
+    );
+    assert.ok(result.ok, `legacy Game2BuyBlindTickets alias failed: ${result.error?.message}`);
+    assert.equal(result.data!.armed, true, "alias must leave the player in armed state");
+    const armedIds = server.roomState.getArmedPlayerIds(roomCode);
+    assert.ok(armedIds.includes(playerId), "canonical bet:arm path must have marked the player armed");
+  });
+
+  test("BIN-585: legacy SelectWofAuto alias dispatches to minigame:play", async () => {
+    // `minigame:play` kaster NO_MINIGAME når ingen mini-game er aktiv
+    // (krever BINGO-win for å aktiveres). Alias-testen trenger ikke fullt
+    // spill-flyt — det holder å verifisere at samme canonical-feilkode
+    // propageres gjennom alias-dispatchen.
+    const alice = await server.connectClient("token-alice");
+    const r1 = await alice.emit<AckResponse<{ roomCode: string }>>(
+      "room:create", { hallId: "hall-test", gameSlug: "bingo" },
+    );
+    const roomCode = r1.data!.roomCode;
+
+    const viaAlias = await alice.emit<AckResponse>(
+      "SelectWofAuto", { roomCode },
+    );
+    const viaCanonical = await alice.emit<AckResponse>(
+      "minigame:play", { roomCode },
+    );
+    assert.equal(viaAlias.ok, false);
+    assert.equal(viaCanonical.ok, false);
+    assert.equal(
+      viaAlias.error?.code, viaCanonical.error?.code,
+      "alias must surface the canonical handler's error code",
+    );
+    assert.equal(viaAlias.error?.code, "NO_MINIGAME");
+  });
+
+  test("BIN-585: legacy SelectRouletteAuto alias dispatches to jackpot:spin", async () => {
+    // Tilsvarende SelectWofAuto: `jackpot:spin` kaster NO_JACKPOT uten
+    // aktiv jackpot. Sjekk at alias og canonical gir samme feilkode.
+    const alice = await server.connectClient("token-alice");
+    const r1 = await alice.emit<AckResponse<{ roomCode: string }>>(
+      "room:create", { hallId: "hall-test", gameSlug: "spillorama" },
+    );
+    const roomCode = r1.data!.roomCode;
+
+    const viaAlias = await alice.emit<AckResponse>(
+      "SelectRouletteAuto", { roomCode },
+    );
+    const viaCanonical = await alice.emit<AckResponse>(
+      "jackpot:spin", { roomCode },
+    );
+    assert.equal(viaAlias.ok, false);
+    assert.equal(viaCanonical.ok, false);
+    assert.equal(
+      viaAlias.error?.code, viaCanonical.error?.code,
+      "alias must surface the canonical handler's error code",
+    );
+    assert.equal(viaAlias.error?.code, "NO_JACKPOT");
+  });
+
   // ── 3. ticket:mark ────────────────────────────────────────────────────────
 
   test("ticket:mark acknowledges ok", async () => {

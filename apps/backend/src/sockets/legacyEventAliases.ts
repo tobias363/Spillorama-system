@@ -16,9 +16,34 @@ import type { Socket } from "socket.io";
  * - Fjernes når Unity slås av permanent.
  */
 const LEGACY_EVENT_ALIASES: Record<string, string> = {
-  // BIN-585 PR A
+  // BIN-585 PR A — Game 5 pre-round free swap.
   SwapTicket: "ticket:swap",
-  // BIN-585 PR B, D og videre legger til flere her.
+
+  // BIN-585 PR B — events konseptuelt dekket av eksisterende kanoniske
+  // handlers. Ingen ny server-kode; bare navnebro for Unity fallback-klient.
+  //
+  // Game2BuyBlindTickets: "blind" ticket purchase = server plukker
+  // tilfeldige billetter fra pool. `bet:arm` uten `ticketSelections` gir
+  // akkurat samme semantikk (server genererer `ticketCount` billetter).
+  // Legacy ref: legacy/unity-backend/Game/Game2/Controllers/GameController.js:528
+  Game2BuyBlindTickets: "bet:arm",
+
+  // SelectWofAuto: Game 5 Wheel of Fortune auto-spin (server plukker segment
+  // via tilfeldig distribusjon). `minigame:play` kaller
+  // `engine.playMiniGame` som alltid velger segment server-autoritativt;
+  // `selectedIndex`-parameteret er kosmetisk (ignorert for wheel/mystery/
+  // colorDraft — bare treasureChest leser det som ren UI-hint).
+  // Legacy ref: legacy/unity-backend/Game/Game5/Controllers/GameProcess.js:894
+  SelectWofAuto: "minigame:play",
+
+  // SelectRouletteAuto: Game 5 multi-spin roulette (kalles N ganger etter
+  // WoF awarder N spinn). `jackpot:spin` har samme multi-spin-state-
+  // tracking: playedSpins/totalSpins/isComplete/spinHistory, og avviser
+  // dobbel-spinn via state i stedet for client-claimed `spinCount`
+  // (hardere anti-replay). Legacy: GameProcess.js:1137
+  SelectRouletteAuto: "jackpot:spin",
+
+  // BIN-585 PR D legger til: getHallBalance, ScreenSaver.
 };
 
 export function registerLegacyEventAliases(socket: Socket): void {
