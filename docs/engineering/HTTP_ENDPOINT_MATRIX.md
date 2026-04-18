@@ -38,11 +38,11 @@ Audit [`BACKEND_PARITY_AUDIT_2026-04-18.md`](./BACKEND_PARITY_AUDIT_2026-04-18.m
 | Status | Antall | Andel |
 |---|---:|---:|
 | Total legacy endpoints | **559** | 100% |
-| EXISTS (portert eller dekket) | **184** | 33% |
+| EXISTS (portert eller dekket) | **190** | 34% |
 | MANGLER | **0** | 0% |
-| NOT-NEEDED (legacy admin-UI + droppet + PM-beslutning) | 268 | 48% |
+| NOT-NEEDED (legacy admin-UI + droppet + PM-beslutning) | 272 | 49% |
 | DEFER (post-pilot polish → BIN-609) | 8 | 1% |
-| AGENT-DOMENE (BIN-583, resterende ikke-porterte) | 86 | 15% |
+| AGENT-DOMENE (BIN-583, resterende ikke-porterte) | 76 | 14% |
 | TODO (eier-avklaring) | 13 | 2% |
 
 ### Per kategori

@@ -71,6 +71,10 @@ import { PostgresMachineTicketStore } from "./agent/MachineTicketStore.js";
 import { HttpMetroniaApiClient } from "./integration/metronia/HttpMetroniaApiClient.js";
 import { StubMetroniaApiClient } from "./integration/metronia/StubMetroniaApiClient.js";
 import type { MetroniaApiClient } from "./integration/metronia/MetroniaApiClient.js";
+import { createAgentOpenDayRouter } from "./routes/agentOpenDay.js";
+import { createAdminHallReportsRouter } from "./routes/adminHallReports.js";
+import { AgentOpenDayService } from "./agent/AgentOpenDayService.js";
+import { HallAccountReportService } from "./compliance/HallAccountReportService.js";
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
@@ -725,6 +729,33 @@ app.use(createAgentMetroniaRouter({
   agentService,
   metroniaTicketService,
   auditLogService,
+}));
+
+// BIN-583 B3.8: agent open-day + admin hall-account-reports.
+const agentOpenDayService = new AgentOpenDayService({
+  agentService,
+  agentShiftService,
+  agentStore,
+  hallCashLedger,
+  settlementStore: agentSettlementStore,
+});
+const hallAccountReportService = new HallAccountReportService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+  engine,
+});
+app.use(createAgentOpenDayRouter({
+  platformService,
+  auditLogService,
+  agentService,
+  agentShiftService,
+  openDayService: agentOpenDayService,
+  reportService: hallAccountReportService,
+}));
+app.use(createAdminHallReportsRouter({
+  platformService,
+  auditLogService,
+  reportService: hallAccountReportService,
 }));
 
 app.use(createAdminRouter({

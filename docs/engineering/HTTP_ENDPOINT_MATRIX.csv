@@ -213,9 +213,9 @@ category,method,path,controller,action,legacy_file,status,note
 3-GAMEPLAY,GET,/LinksofOtherAgencies,cmsController,LinksofOtherAgenciesView,backend.js,NOT-NEEDED,Static content (FAQ/ToS/Support/About/RG/Links) — håndteres via statiske sider / Notion
 3-GAMEPLAY,POST,/linksOfOtherAgenciesEdit,cmsController,editLinksofOtherAgenciesPostData,backend.js,NOT-NEEDED,CMS content-edit — håndteres via static pages / Notion
 4-HALL,GET,/hall,hallController,hallView,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
-7-AGENT,GET,/hallAccountReport,hallController,hallAccountReportsView,backend.js,AGENT-DOMENE,BIN-583 — hall-kasse/settlement er hall-operator-arbeidsflyt
-7-AGENT,GET,/hallAccountReportTable/:id,hallController,hallAccountReportTableView,backend.js,AGENT-DOMENE,BIN-583 — hall-kasse/settlement er hall-operator-arbeidsflyt
-7-AGENT,GET,/getHallAccountReport,hallController,gethallAccountReportData,backend.js,AGENT-DOMENE,BIN-583 — hall-settlement er hall-operator-arbeidsflyt
+7-AGENT,GET,/hallAccountReport,hallController,hallAccountReportsView,backend.js,NOT-NEEDED,Legacy HTML page erstattet av React-admin (data via B3.8)
+7-AGENT,GET,/hallAccountReportTable/:id,hallController,hallAccountReportTableView,backend.js,NOT-NEEDED,Legacy DataTables HTML page erstattet av React-admin
+7-AGENT,GET,/getHallAccountReport,hallController,gethallAccountReportData,backend.js,EXISTS,B3.8 GET /api/admin/reports/halls/:hallId/daily
 4-HALL,GET,/getHall,hallController,getHall,backend.js,EXISTS,/api/admin/halls dekker base
 4-HALL,GET,/addHall,hallController,addHall,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 4-HALL,POST,/addHall,hallController,addHallPostData,backend.js,EXISTS,/api/admin/halls CRUD dekker
@@ -224,7 +224,7 @@ category,method,path,controller,action,legacy_file,status,note
 4-HALL,POST,/hall/getHallDelete,hallController,getHallDelete,backend.js,EXISTS,/api/admin/halls CRUD dekker
 4-HALL,POST,/transferPlayersToHall,hallController,transferPlayersToHall,backend.js,DEFER,Post-pilot (PM 2026-04-19) — cross-hall player-flytt ikke pilot-kritisk; BIN-609
 4-HALL,GET,/getHalls,hallController,getAllHalls,backend.js,EXISTS,/api/admin/halls dekker base
-7-AGENT,POST,/hall/report/saveData,hallController,saveHallReportData,backend.js,AGENT-DOMENE,BIN-583 — hall-kasse-balanse
+7-AGENT,POST,/hall/report/saveData,hallController,saveHallReportData,backend.js,EXISTS,B3.8 POST /api/admin/reports/halls/:hallId/account/manual-entry
 4-HALL,POST,/hall/set-cash-amount,hallController,setHallCashBalance,backend.js,TODO,Review hall-action
 4-HALL,POST,/hall/check-hall-number,hallController,checkHallNumber,backend.js,NOT-NEEDED,Valideringshelpere — kan gjøres i frontend
 4-HALL,POST,/hall/check-ip-address,hallController,checkIpAddress,backend.js,NOT-NEEDED,Valideringshelpere — kan gjøres i frontend
@@ -460,8 +460,8 @@ category,method,path,controller,action,legacy_file,status,note
 2-PLAYER,GET,/payment/deposit/response,PlayerController,swedbankpayPaymentResponse,backend.js,NOT-NEEDED,Legacy mobile-app payment iframe/return — ny stack bruker /api/payments/swedbank/confirm
 2-PLAYER,POST,/payment/webhook,PlayerController,swedbankpayNotification,backend.js,EXISTS,/api/payments/webhook/swedbankpay (BIN-586)
 2-PLAYER,POST,/payment/goback,PlayerController,goBacktoAppFromSwedbankpay,backend.js,NOT-NEEDED,Mobile app deep-link — ikke i ny stack
-7-AGENT,POST,/agent/dailybalance/add,agentcashinoutController,addDailyBalance,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-7-AGENT,GET,/agent/dailybalance/get,agentcashinoutController,getDailyBalance,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
+7-AGENT,POST,/agent/dailybalance/add,agentcashinoutController,addDailyBalance,backend.js,EXISTS,B3.8 POST /api/agent/shift/open-day
+7-AGENT,GET,/agent/dailybalance/get,agentcashinoutController,getDailyBalance,backend.js,EXISTS,B3.8 GET /api/agent/shift/daily-balance
 7-AGENT,GET,/agent/register-user/add,agentcashinoutController,registerUserAddBalanceView,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/register-user/withdraw,agentcashinoutController,registerUserWithdrawBalanceView,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/player/check-validity,agentcashinoutController,checkForValidAgentPlayer,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
@@ -481,8 +481,8 @@ category,method,path,controller,action,legacy_file,status,note
 7-AGENT,POST,/agent/game/stop,agentcashinoutController,agentGameStop,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/game/status/start,agentcashinoutController,agentGameStatusForStart,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/game/start,agentcashinoutController,agentGameStart,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-7-AGENT,GET,/agent/cashout/view,agentcashinoutController,viewCashoutDetails,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-7-AGENT,GET,/agent/cashout/get,agentcashinoutController,getPhysicalCashoutDetails,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
+7-AGENT,GET,/agent/cashout/view,agentcashinoutController,viewCashoutDetails,backend.js,NOT-NEEDED,Legacy HTML cashout-render erstattet av React-admin (data via B3.8)
+7-AGENT,GET,/agent/cashout/get,agentcashinoutController,getPhysicalCashoutDetails,backend.js,EXISTS,B3.8 GET /api/agent/shift/physical-cashouts + admin-variant
 7-AGENT,POST,/agent/wof/reward,agentcashinoutController,wofGameReward,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/game/stop-option,agentcashinoutController,agentGameStopOption,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/sellProduct,agentcashinoutController,productCartPage,backend.js,EXISTS,B3.6 GET /api/agent/products (JSON-liste erstatter HTML render)
@@ -512,8 +512,8 @@ category,method,path,controller,action,legacy_file,status,note
 7-AGENT,POST,/agent/upcoming-game/stop,agentcashinoutController,stopUpcomingGame,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/upcoming-game/resume,agentcashinoutController,resumeUpcomingGame,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/upcoming-game/check-resume-eligibility,agentcashinoutController,checkResumeAligibility,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-7-AGENT,GET,/report/settlement/:id,hallController,individualSettlementView,backend.js,AGENT-DOMENE,BIN-583 — hall-kasse/settlement er hall-operator-arbeidsflyt
-7-AGENT,GET,/report/settlement,hallController,getIndividualSettlement,backend.js,AGENT-DOMENE,BIN-583 — hall-settlement er hall-operator-arbeidsflyt
+7-AGENT,GET,/report/settlement/:id,hallController,individualSettlementView,backend.js,NOT-NEEDED,HTML render erstattet av React-admin (data via B3.3 PDF + B3.8)
+7-AGENT,GET,/report/settlement,hallController,getIndividualSettlement,backend.js,EXISTS,B3.3 GET /api/admin/shifts/:shiftId/settlement (PR #205)
 7-AGENT,POST,/agent/settlement/edit,agentcashinoutController,editSettlement,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 4-HALL,GET,/tv/:id,scheduleController,redirectToTVScreen,backend.js,NOT-NEEDED,Legacy admin schedule-side — erstattet av /api/admin/halls/:id/schedule
 7-AGENT,POST,/agent/metronia/check-connect,machineApiController,checkConnectMetronia,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
