@@ -171,6 +171,44 @@ export class BingoCell extends Container {
     gsap.set(this.scale, { x: 1, y: 1 });
   }
 
+  /**
+   * Hard reset of ALL cell animations — used at game-end / scene reset.
+   *
+   * Unlike {@link stopBlink} (which only stops the one-to-go pulse and is
+   * called during active play when the 1-to-go state goes away), this kills
+   * every tween targeting the cell scale, including residual mark() scale
+   * bounces (BingoCell.cs: 0.12s yoyo scale at mark() line 108) that would
+   * otherwise continue animating after a PLAYING → ENDED / WAITING
+   * transition.
+   *
+   * Unity reference: BingoTicketSingleCellData.Stop_NumberBlink (legacy/
+   * unity-client/Assets/_Project/_Scripts/Prefabs/Bingo Tickets/
+   * BingoTicketSingleCellData.cs:195-205) — the Unity coroutine cancels
+   * LeanTween on both the number-text and the cell background and snaps
+   * localScale back to Vector2.one with no tween.
+   */
+  stopAllAnimations(): void {
+    // Kill any tween currently targeting this cell's scale (mark bounce,
+    // blink-in-progress, etc.).
+    gsap.killTweensOf(this.scale);
+    // Kill the blink timeline explicitly (it wraps sub-tweens that
+    // killTweensOf(this.scale) already covers, but clearing the handle
+    // and the flag keeps state consistent for subsequent startBlink calls).
+    if (this.blinkTimeline) {
+      this.blinkTimeline.kill();
+      this.blinkTimeline = null;
+    }
+    this.blinking = false;
+    // Hard reset — NOT via tween (Unity sets localScale = Vector2.one).
+    this.scale.set(1, 1);
+    // Reset bg to default color (Unity: imgCellOneToGo.Close() resets the
+    // one-to-go highlight). Only do this if the cell isn't currently marked —
+    // a marked cell keeps its marker circle visible, not the bg highlight.
+    if (!this.marked && !this.highlighted) {
+      this.drawBg(this.isFreeSpace ? this.colors.bgFree : this.colors.bgDefault);
+    }
+  }
+
   setHighlight(on: boolean): void {
     this.highlighted = on;
     if (on) {
