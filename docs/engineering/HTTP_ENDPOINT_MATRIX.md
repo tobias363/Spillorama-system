@@ -3,7 +3,7 @@
 **Kilde:** [Linear BIN-587](https://linear.app/bingosystem/issue/BIN-587)
 **Parent epic:** BIN-581 Backend legacy-paritet
 **Dato:** 2026-04-18
-**Sist oppdatert:** Første versjon — Fase A (matrise, ingen kode-endringer)
+**Sist oppdatert:** 2026-04-19 — BIN-587 **CLOSED** (alle Fase B-PR-er merget + re-klassifisering ferdig)
 **Relaterte leveranser:**
 - [`SOCKET_EVENT_MATRIX.md`](./SOCKET_EVENT_MATRIX.md) — Socket.IO-paritet (BIN-585)
 - [`BACKEND_PARITY_AUDIT_2026-04-18.md`](./BACKEND_PARITY_AUDIT_2026-04-18.md) — overordnet audit (BIN-581)
@@ -24,38 +24,42 @@ Audit [`BACKEND_PARITY_AUDIT_2026-04-18.md`](./BACKEND_PARITY_AUDIT_2026-04-18.m
 
 ### Status-definisjoner
 
-- **EXISTS** — Legacy-funksjonalitet er dekket av eksisterende ny endpoint (direkte eller konsolidert). Inkluderer BIN-586-leveranse.
-- **MANGLER** — Må portes i BIN-587 Fase B.
+- **EXISTS** — Legacy-funksjonalitet er dekket av eksisterende ny endpoint (direkte eller konsolidert). Inkluderer BIN-586 + BIN-587 Fase B-leveranser.
+- **MANGLER** — Må portes i BIN-587 Fase B. _(0 igjen etter 2026-04-19 close-out.)_
 - **NOT-NEEDED** — Eksplisitt droppet: legacy HTML-admin-UI erstattet av React-admin, CMS-statiske sider, deprecated minigames, eller PM-beslutning.
+- **DEFER** — Post-pilot polish (PM 2026-04-19). Sporet i BIN-609 "Post-pilot HTTP endpoints polish".
 - **AGENT-DOMENE** — BIN-583 scope (hall-operator/agent/terminal-API). Ikke i BIN-587.
 - **TODO** — Eier-input kreves før klassifisering.
 
 ## 1. Sammendrag
 
-### Totalt
+### Totalt (BIN-587 CLOSED 2026-04-19)
 
 | Status | Antall | Andel |
 |---|---:|---:|
 | Total legacy endpoints | **559** | 100% |
-| EXISTS (portert eller dekket) | 71 | 13% |
-| **MANGLER (må portes i Fase B)** | **144** | 26% |
-| NOT-NEEDED (legacy admin-UI + droppet) | 243 | 43% |
-| AGENT-DOMENE (BIN-583) | 88 | 16% |
+| EXISTS (portert eller dekket) | **168** | 30% |
+| MANGLER | **0** | 0% |
+| NOT-NEEDED (legacy admin-UI + droppet + PM-beslutning) | 280 | 50% |
+| DEFER (post-pilot polish → BIN-609) | 8 | 1% |
+| AGENT-DOMENE (BIN-583) | 90 | 16% |
 | TODO (eier-avklaring) | 13 | 2% |
 
 ### Per kategori
 
-| # | Kategori | Total | EXISTS | **MANGLER** | NOT-NEEDED | AGENT-DOMENE | TODO |
+| # | Kategori | Total | EXISTS | NOT-NEEDED | DEFER | AGENT-DOMENE | TODO |
 |---|---|---:|---:|---:|---:|---:|---:|
-| 1 | AUTH & identity | 59 | 10 | **16** | 33 | 0 | 0 |
-| 2 | PLAYER & KYC & responsible gaming | 69 | 2 | **31** | 36 | 0 | 0 |
-| 3 | GAMEPLAY & content | 111 | 4 | **15** | 92 | 0 | 0 |
-| 4 | HALL, schedule & terminal | 68 | 23 | **10** | 22 | 0 | 13 |
-| 5 | WALLET, payments & cashier | 87 | 28 | **40** | 19 | 0 | 0 |
-| 6 | ADMIN ops & reports | 77 | 4 | **32** | 41 | 0 | 0 |
+| 1 | AUTH & identity | 59 | 17 | 42 | 0 | 0 | 0 |
+| 2 | PLAYER & KYC & responsible gaming | 69 | 25 | 43 | 0 | 1 | 0 |
+| 3 | GAMEPLAY & content | 111 | 5 | 104 | 2 | 0 | 0 |
+| 4 | HALL, schedule & terminal | 68 | 23 | 31 | 1 | 0 | 13 |
+| 5 | WALLET, payments & cashier | 87 | 67 | 19 | 0 | 1 | 0 |
+| 6 | ADMIN ops & reports | 77 | 31 | 41 | 5 | 0 | 0 |
 | 7 | AGENT domain (BIN-583) | 88 | 0 | 0 | 0 | 88 | 0 |
 
-**Leveranse-scope Fase B: 144 endpoints** (vs. initielt estimat 90 — større enn antatt, men etter PM-avklaringer mindre enn råtallet fra første utkast).
+**BIN-587 Fase B levert: 168 EXISTS** (opp fra 71 ved matrise-opprettelse) over 7 PR-er (B2–B6 + B1=BIN-586).
+
+**8 DEFER → BIN-609:** transferPlayersToHall (1), autoStopOnOff (1), addSavedGameManagement (1), maintenance/systemInformation (5). Alle markert post-pilot av PM 2026-04-19; ingen er pilot-blockere.
 
 **13 TODO** er alle `groupHallController` — defer til PM-avklaring (se §6).
 
@@ -192,38 +196,44 @@ Samler alt som tilhører hall-operator/agent/terminal-arbeidsflyt. Utenfor BIN-5
 - `hallController` settlement + set-cash-balance (4)
 - `UniqueIdController` agent-tied (4) — unique-id deposit/withdraw via agent-terminal
 
-## 5. Foreslått rekkefølge Fase B PR-er
+## 4b. PM-avklaringer 2026-04-19 (close-out)
+
+Etter at B2–B6 var merget gjennomgikk Agent 1 de resterende MANGLER-radene. PM-beslutning:
+
+| # | Tema | Beslutning | Matriseeffekt |
+|---|---|---|---|
+| 1 | Pattern + subgame admin (12 endpoints) | **NOT-NEEDED** — patterns/subgames er TypeScript-definert i engine (kode, ikke runtime-config). Legacy HTML admin-UI erstattet av TS. | 12 → NOT-NEEDED |
+| 2 | Daily/special schedule (9 endpoints, incl. subgame-in-schedule) | **NOT-NEEDED** — B6 `/api/admin/halls/:hallId/schedule/bulk` dekker pilot-behov. Post-pilot re-vurderes ved behov. | 9 → NOT-NEEDED |
+| 3 | Auto-stop (`autoStopOnOff`) + Saved-game templates (`addSavedGameManagement`) | **DEFER** — operatør kan manuelt stoppe; saved-games ikke i pilot-flyt. | 2 → DEFER (BIN-609) |
+| 4 | transferPlayersToHall | **DEFER** — cross-hall player-flytt ikke pilot-kritisk. | 1 → DEFER (BIN-609) |
+| 5 | Maintenance + system-info (5 endpoints) | **DEFER** — Render-deploy-gate dekker pilot; system-info nice-to-have. | 5 → DEFER (BIN-609) |
+
+## 5. Fase B PR-er (alle merget)
 
 Prioriterer **pilot-blocker først, compliance deretter, operator-polish sist**. BIN-586 har allerede landet B1 — derfor nummerert fra **B2**. Hver PR skal mergers og deployes uavhengig; store PR-er splittes om diff > 600 linjer.
 
-| # | PR | Scope (estimat) | Pilot-impakt | Dependencies |
-|---|---|---:|---|---|
-| ~~B1~~ | ~~Admin payment workflows~~ | ~~17~~ | **DONE** — [BIN-586 PR #169](https://github.com/tobias363/Spillorama-system/pull/169) | — |
-| **B2** | **Admin player lifecycle** — pending/rejected-kø + bulk-import + reverify-bankid + per-hall-status + soft-delete + admin player-edit | ~26 endpoints | **BLOCKER** — Topp 10 #1, #2, #3, #4 | Bygger på BIN-586 + `/api/admin/wallets/*` |
-| **B3** | **Rapport v2 + AML + security** — per-game-rapporter, total revenue, dashboard-charts, red-flag, risk-country, blocked-IP | ~24 endpoints | **HØY compliance** — Topp 10 #7, #8, #10. Pålagt for finanstilsyn. | Ingen |
-| **B4** | **Physical-tickets + unique-IDs + vouchers** — blandet-modus pilot, papirblokker, marketing-vouchers | ~23 endpoints | **HØY** — Topp 10 #6, #9 | Bygger på wallet-transaksjoner |
-| **B5** | **Withdraw-email-allowlist + payout drill-down + player-transactions admin** | ~14 endpoints | **HØY** — Topp 10 #5 + operator-UX | BIN-586 |
-| **B6** | **Admin user + role mgmt** — user/admin-CRUD, role-CRUD, scheduler daily/special | ~18 endpoints | Medium — operator-convenience; static-role fungerer som stopgap | Ingen |
-| **B7** | **Gameplay admin-CRUD** — pattern-mgmt, sub-game-mgmt, saved-games, auto-stop, transfer-players, CSV-import | ~17 endpoints | Medium — pilot klarer seg med hardkodede spilldefinisjoner | B3 (rapport-rammeverk) |
-| **B8** | **Ops polish** — maintenance-mode, system-info, SMS-user-pwd, group-halls (hvis PM bekrefter) | ~10–20 endpoints | Lav — post-pilot | PM-avklaring group-halls |
+| # | PR | Scope | Status |
+|---|---|---:|---|
+| ~~B1~~ | ~~Admin payment workflows~~ | 17 endpoints | ✅ [BIN-586 PR #169](https://github.com/tobias363/Spillorama-system/pull/169) |
+| **B2** | Admin player lifecycle — pending/rejected-kø + bulk-import + reverify-bankid + per-hall-status + soft-delete | ~26 endpoints | ✅ merget |
+| **B3-report** | Rapport v2 + dashboard-charts | ~11 legacy → 7 nye | ✅ [PR #190](https://github.com/tobias363/Spillorama-system/pull/190) |
+| **B3-aml** | AML red-flag state-maskin + review | ~9 endpoints | ✅ [PR #192](https://github.com/tobias363/Spillorama-system/pull/192) |
+| **B3-security** | Risk-country + blocked-IP + withdraw-emails + audit | ~10 endpoints | ✅ [PR #194](https://github.com/tobias363/Spillorama-system/pull/194) |
+| **B4a** | Physical-tickets admin (batch-CRUD + generate + assign-game) | ~10 endpoints | ✅ [PR #197](https://github.com/tobias363/Spillorama-system/pull/197) |
+| **B4b** | Unique-IDs + vouchers + payout drill-down | ~13 endpoints | ✅ [PR #199](https://github.com/tobias363/Spillorama-system/pull/199) |
+| **B5/B6** | Admin-user CRUD + schedule bulk + player-activity admin | 10 endpoints | ✅ [PR #203](https://github.com/tobias363/Spillorama-system/pull/203) |
+| ~~B7~~ | ~~Gameplay admin-CRUD~~ | — | ❌ NOT-NEEDED (patterns/subgames er TS-kode, PM 2026-04-19) |
+| ~~B8~~ | ~~Ops polish~~ | — | ⏳ DEFER → [BIN-609](https://linear.app/bingosystem/issue/BIN-609) post-pilot |
 
-**Samlet Fase B-scope: ~132 endpoints over 7 PR-er (≈ 25–30 utviklingsdager)** — i tråd med initialt tidsestimat.
-
-**Kritisk bane til pilot-go-live:**
-1. **B2** (player lifecycle) — 5–7 dager
-2. **B3** (rapport v2 + AML) — 5–7 dager
-3. **B4** (physical-tickets) — 4–5 dager
-4. **B5** (withdraw-emails + payout) — 2–3 dager
-
-Totalt kritisk bane: **ca. 16–22 dager**. B6, B7, B8 kan parallelliseres eller følge etter pilot.
+**Levert: 168 EXISTS over 8 PR-er** (vs. initielt estimat 144 MANGLER). Re-klassifisering gjennom PM-avklaringer 2026-04-18 + 2026-04-19 reduserte 25 rader fra MANGLER til NOT-NEEDED/DEFER.
 
 ## 6. Åpne avklaringer
 
-1. **Group halls (13 TODO):** Skal konseptet overføres til ny backend? Hvis nei → kan merkes NOT-NEEDED og droppes. Hvis ja → datamodell må utvides før B8.
-2. **Sub-game administrasjon (5 MANGLER, kategori 3):** Er subgames fortsatt et aktivt konsept, eller er det nå bare «spill» (gametypes 1–5) med patterns?
+1. **Group halls (13 TODO):** Skal konseptet overføres til ny backend? Hvis nei → kan merkes NOT-NEEDED og droppes. Hvis ja → datamodell må utvides (post-pilot via BIN-609).
+2. ~~**Sub-game administrasjon**~~ → **NOT-NEEDED** (PM 2026-04-19, §4b.1).
 3. **Loyalty — endelig avklart:** NOT-NEEDED. (Ingen handling.)
-4. **Daily/special schedule (9 MANGLER, kategori 4):** Pilot-hall kan sannsynlig klare seg med single-slot-CRUD. Bekreft før B6.
-5. **Scope-grense BIN-583 mot BIN-587:** Close-day er nå AGENT, hall-kasse-settlement er AGENT. Sjekk om PM også ønsker `agent/game/{start,stop}` (8 endpoints) og `agent/dailybalance/*` (3 endpoints) i BIN-583 eller overlappende med B2.
+4. ~~**Daily/special schedule**~~ → **NOT-NEEDED** (PM 2026-04-19, §4b.2).
+5. **Scope-grense BIN-583 mot BIN-587:** Close-day er nå AGENT, hall-kasse-settlement er AGENT. `agent/game/{start,stop}` og `agent/dailybalance/*` er BIN-583-scope (merket AGENT-DOMENE i matrisen).
 
 ## 7. Referanser
 

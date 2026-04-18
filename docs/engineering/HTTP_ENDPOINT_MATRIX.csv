@@ -12,7 +12,7 @@ category,method,path,controller,action,legacy_file,status,note
 1-AUTH,POST,/profile/update,Auth,profileUpdate,backend.js,EXISTS,PUT /api/auth/me
 1-AUTH,POST,/profile/changePwd,Auth,changePassword,backend.js,EXISTS,/api/auth/change-password
 1-AUTH,POST,/profile/changeAvatar,Auth,changeAvatar,backend.js,NOT-NEEDED,Avatar-upload ikke i scope for pilot
-1-AUTH,POST,/profile/changeSmsUsrPwd,Auth,changeSmsUsrPwd,backend.js,MANGLER,SMS-bruker-pwd endring mangler
+1-AUTH,POST,/profile/changeSmsUsrPwd,Auth,changeSmsUsrPwd,backend.js,NOT-NEEDED,SMS ikke pilot-kritisk (PM 2026-04-18) — ingen SMS-provider
 1-AUTH,POST,/profile/updateLanguage,Auth,updateLanguage,backend.js,NOT-NEEDED,Lokalisering ikke i scope for pilot
 1-AUTH,GET,/agent/profile,Auth,agentProfile,backend.js,NOT-NEEDED,Legacy HTML page — erstattet av /api/auth/* + React
 1-AUTH,POST,/profile/agent/update,Auth,agentProfileUpdate,backend.js,EXISTS,PUT /api/auth/me
@@ -20,11 +20,11 @@ category,method,path,controller,action,legacy_file,status,note
 1-AUTH,POST,/profile/agent/changeAvatar,Auth,agentChangeAvatar,backend.js,NOT-NEEDED,Avatar-upload ikke i scope for pilot
 1-AUTH,POST,/profile/agent/updateLanguage,Auth,agentUpdateLanguage,backend.js,NOT-NEEDED,Lokalisering ikke i scope for pilot
 6-ADMIN-OPS,GET,/dashboard,Dashboard,home,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
-6-ADMIN-OPS,GET,/dashboardChart/getMonthlyPlayedGameChart,Dashboard,getMonthlyPlayedGameChart,backend.js,MANGLER,Dashboard chart data ikke portert
-6-ADMIN-OPS,GET,/dashboardChart/getGameUsageChart,Dashboard,getGameUsageChart,backend.js,MANGLER,Dashboard chart data ikke portert
-6-ADMIN-OPS,GET,/dashboard/gameHistory,Dashboard,gameHistory,backend.js,MANGLER,Dashboard chart-data mangler
-6-ADMIN-OPS,GET,/dashboard/getTopPlayers/:id,Dashboard,getTopPlayers,backend.js,MANGLER,Dashboard chart data ikke portert
-6-ADMIN-OPS,GET,/dashboard/ongoingGames/:gameType,Dashboard,ongoingGames,backend.js,MANGLER,Dashboard chart-data mangler
+6-ADMIN-OPS,GET,/dashboardChart/getMonthlyPlayedGameChart,Dashboard,getMonthlyPlayedGameChart,backend.js,EXISTS,B3-report /api/admin/dashboard/* (PR #190)
+6-ADMIN-OPS,GET,/dashboardChart/getGameUsageChart,Dashboard,getGameUsageChart,backend.js,EXISTS,B3-report /api/admin/dashboard/* (PR #190)
+6-ADMIN-OPS,GET,/dashboard/gameHistory,Dashboard,gameHistory,backend.js,EXISTS,B3-report /api/admin/dashboard/* (PR #190)
+6-ADMIN-OPS,GET,/dashboard/getTopPlayers/:id,Dashboard,getTopPlayers,backend.js,EXISTS,B3-report /api/admin/dashboard/* (PR #190)
+6-ADMIN-OPS,GET,/dashboard/ongoingGames/:gameType,Dashboard,ongoingGames,backend.js,EXISTS,B3-report /api/admin/dashboard/* (PR #190)
 7-AGENT,GET,/agent,AgentController,agent,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/getAgent,AgentController,getAgent,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/addAgent,AgentController,addAgent,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
@@ -35,12 +35,12 @@ category,method,path,controller,action,legacy_file,status,note
 1-AUTH,GET,/adminUser,AdminController,admin,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 1-AUTH,GET,/admin/getAdmin,AdminController,getAdmin,backend.js,NOT-NEEDED,Legacy admin HTML user-side — erstattet av React-admin
 1-AUTH,GET,/addAdmin,AdminController,addAdmin,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,POST,/addAdmin,AdminController,addAdminPostData,backend.js,MANGLER,Admin user-mgmt mangler
-1-AUTH,POST,/admin/getAdminDelete,AdminController,getAdminDelete,backend.js,MANGLER,Admin user-mgmt mangler
+1-AUTH,POST,/addAdmin,AdminController,addAdminPostData,backend.js,EXISTS,B6 /api/admin/users CRUD (PR #203)
+1-AUTH,POST,/admin/getAdminDelete,AdminController,getAdminDelete,backend.js,EXISTS,B6 /api/admin/users CRUD (PR #203)
 1-AUTH,GET,/adminEdit/:id/,AdminController,editAdmin,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,POST,/adminEdit/:id,AdminController,editAdminPostData,backend.js,MANGLER,Admin user-mgmt mangler
+1-AUTH,POST,/adminEdit/:id,AdminController,editAdminPostData,backend.js,EXISTS,B6 /api/admin/users CRUD (PR #203)
 1-AUTH,GET,/editRole/:id,AdminController,editRole,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,POST,/adminRoleUpdate/:id,AdminController,updateRole,backend.js,MANGLER,Admin user-mgmt mangler
+1-AUTH,POST,/adminRoleUpdate/:id,AdminController,updateRole,backend.js,EXISTS,B6 /api/admin/users CRUD (PR #203)
 5-WALLET,GET,/agent/cashinout,CashInOutController,cashInOutPage,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 7-AGENT,GET,/sold-tickets,CashInOutController,soldTickets,backend.js,AGENT-DOMENE,BIN-583 — cashinout er hall-operator-arbeidsflyt
 7-AGENT,GET,/sold-tickets/get,CashInOutController,getSoldTickets,backend.js,AGENT-DOMENE,BIN-583 — sold-tickets / cashinout er hall-operator-arbeidsflyt
@@ -54,16 +54,16 @@ category,method,path,controller,action,legacy_file,status,note
 2-PLAYER,GET,/loyaltyManagement,LoyaltyController,loyaltyManagement,backend.js,NOT-NEEDED,"Loyalty droppet i legacy (""not using points money"", Boot/Server.js:585). PM bekreftet ikke i scope."
 2-PLAYER,GET,/loyalty/getPlayerLoyalty,LoyaltyController,getPlayerLoyalty,backend.js,NOT-NEEDED,"Loyalty droppet i legacy (""not using points money"", Boot/Server.js:585). PM bekreftet ikke i scope."
 2-PLAYER,GET,/viewLoyaltyPlayer/:id,LoyaltyController,viewLoyaltyPlayer,backend.js,NOT-NEEDED,"Loyalty droppet i legacy (""not using points money"", Boot/Server.js:585). PM bekreftet ikke i scope."
-3-GAMEPLAY,POST,/getPatternMenu,patternController,viewPatternMenu,backend.js,MANGLER,Pattern admin mangler
+3-GAMEPLAY,POST,/getPatternMenu,patternController,viewPatternMenu,backend.js,NOT-NEEDED,Patterns er TypeScript-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/patternGameDetailList/:id,patternController,viewGamePatternList,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-3-GAMEPLAY,GET,/getPatternDetailList,patternController,getPatternDetailList,backend.js,MANGLER,Pattern mgmt admin mangler
+3-GAMEPLAY,GET,/getPatternDetailList,patternController,getPatternDetailList,backend.js,NOT-NEEDED,Patterns er TypeScript-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/addPattern/:id,patternController,addPattern,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-3-GAMEPLAY,POST,/addPattern/:typeId/:type/:slug,patternController,addPatternPostData,backend.js,MANGLER,Pattern admin mangler
+3-GAMEPLAY,POST,/addPattern/:typeId/:type/:slug,patternController,addPatternPostData,backend.js,NOT-NEEDED,Patterns er TypeScript-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/patternEdit/:typeId/:id,patternController,editPattern,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-3-GAMEPLAY,POST,/patternEdit/:typeId/:id,patternController,editPatternPostData,backend.js,MANGLER,Pattern admin mangler
-3-GAMEPLAY,POST,/getPatternDelete,patternController,getPatternDelete,backend.js,MANGLER,Pattern admin mangler
+3-GAMEPLAY,POST,/patternEdit/:typeId/:id,patternController,editPatternPostData,backend.js,NOT-NEEDED,Patterns er TypeScript-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
+3-GAMEPLAY,POST,/getPatternDelete,patternController,getPatternDelete,backend.js,NOT-NEEDED,Patterns er TypeScript-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/viewPattern/:typeId/:id,patternController,viewPatternDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-3-GAMEPLAY,POST,/checkForPatternName,patternController,checkForPatternName,backend.js,MANGLER,Pattern admin mangler
+3-GAMEPLAY,POST,/checkForPatternName,patternController,checkForPatternName,backend.js,NOT-NEEDED,Patterns er TypeScript-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/gameType,GameController,gameType,backend.js,NOT-NEEDED,Legacy admin-UI-side — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,GET,/gameType/getGameType,GameController,getGameType,backend.js,NOT-NEEDED,Legacy admin-game-management UI — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,GET,/addGameType,GameController,addGameType,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
@@ -73,14 +73,14 @@ category,method,path,controller,action,legacy_file,status,note
 3-GAMEPLAY,POST,/gameType/deleteGameType,GameController,deleteGameType,backend.js,NOT-NEEDED,Legacy admin-game-delete — erstattet av settings-catalog
 3-GAMEPLAY,GET,/viewGameType/:id,GameController,viewGameType,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 3-GAMEPLAY,GET,/subGame,subGameController,subGame1,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
-3-GAMEPLAY,GET,/subGames/getSubGameList,subGameController,subGame1List,backend.js,MANGLER,Subgame admin mangler
+3-GAMEPLAY,GET,/subGames/getSubGameList,subGameController,subGame1List,backend.js,NOT-NEEDED,Subgames TS-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/addSubGame,subGameController,addSubGame,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-3-GAMEPLAY,POST,/addSubGameData,subGameController,addSubGamePostData,backend.js,MANGLER,Subgame admin mangler
+3-GAMEPLAY,POST,/addSubGameData,subGameController,addSubGamePostData,backend.js,NOT-NEEDED,Subgames TS-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/subGameEdit/:id,subGameController,editSubGame,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-3-GAMEPLAY,POST,/subGameEdit/:id,subGameController,editSubGamePostData,backend.js,MANGLER,Subgame admin mangler
-3-GAMEPLAY,POST,/subGames/getSubGameDelete,subGameController,getSubGameDelete,backend.js,MANGLER,Subgame admin mangler
+3-GAMEPLAY,POST,/subGameEdit/:id,subGameController,editSubGamePostData,backend.js,NOT-NEEDED,Subgames TS-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
+3-GAMEPLAY,POST,/subGames/getSubGameDelete,subGameController,getSubGameDelete,backend.js,NOT-NEEDED,Subgames TS-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/viewSubGame/:id,subGameController,viewSubGame,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-3-GAMEPLAY,POST,/checkForGameName,subGameController,checkForGameName,backend.js,MANGLER,Subgame admin mangler
+3-GAMEPLAY,POST,/checkForGameName,subGameController,checkForGameName,backend.js,NOT-NEEDED,Subgames TS-definert i engine (PM 2026-04-19) — legacy HTML admin-UI erstattet
 3-GAMEPLAY,GET,/background,OtherController,background,backend.js,NOT-NEEDED,Background/theme content — post-pilot
 3-GAMEPLAY,GET,/otherModules/getBackground,OtherController,getBackground,backend.js,NOT-NEEDED,Background/theme content — post-pilot
 3-GAMEPLAY,GET,/addBackground,OtherController,addBackground,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
@@ -97,7 +97,7 @@ category,method,path,controller,action,legacy_file,status,note
 3-GAMEPLAY,GET,/getGameManagementDetailList,GameController,getGameManagementDetailList,backend.js,NOT-NEEDED,Legacy admin-game-management UI — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,GET,/addGameManagement/:id,GameController,addGameManagement,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 3-GAMEPLAY,POST,/addGameManagement/:typeId/:type/:slug,GameController,addGameManagementPostData,backend.js,NOT-NEEDED,Legacy admin-game-CRUD — erstattet av /api/admin/games + settings-catalog
-3-GAMEPLAY,POST,/patternGame,GameController,patternGame,backend.js,MANGLER,Pattern-game binding mangler
+3-GAMEPLAY,POST,/patternGame,GameController,patternGame,backend.js,NOT-NEEDED,Del av pattern-admin droppet (PM 2026-04-19) — patterns er TS-kode
 3-GAMEPLAY,GET,/gameManagementEdit/:typeId/:id,GameController,editGameManagement,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 3-GAMEPLAY,POST,/gameManagementEdit/:typeId/:id,GameController,editGameManagementPostData,backend.js,NOT-NEEDED,Legacy admin-game-CRUD — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,POST,/getGameManagementDelete,GameController,getGameManagementDelete,backend.js,NOT-NEEDED,Legacy admin-game-delete — erstattet av settings-catalog
@@ -123,55 +123,55 @@ category,method,path,controller,action,legacy_file,status,note
 7-AGENT,GET,/getCloseDayData,GameController,getCloseDayData,backend.js,AGENT-DOMENE,BIN-583 — close-day er hall-operator-arbeidsflyt (PM-beslutning 2026-04-18)
 7-AGENT,POST,/deleteCloseDay,GameController,deleteCloseDay,backend.js,AGENT-DOMENE,BIN-583 — close-day er hall-operator-arbeidsflyt (PM-beslutning 2026-04-18)
 7-AGENT,POST,/updateCloseDay,GameController,updateCloseDay,backend.js,AGENT-DOMENE,BIN-583 — close-day er hall-operator-arbeidsflyt (PM-beslutning 2026-04-18)
-3-GAMEPLAY,POST,/game/auto-stop,GameController,autoStopOnOff,backend.js,MANGLER,Auto-stop toggle ikke eksplisitt
+3-GAMEPLAY,POST,/game/auto-stop,GameController,autoStopOnOff,backend.js,DEFER,Post-pilot (PM 2026-04-19) — operatør stopper manuelt; BIN-609
 3-GAMEPLAY,GET,/savedGameList,GameController,savedGameList,backend.js,NOT-NEEDED,Legacy admin-UI-side — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,GET,/savedGameDetailList/:id,GameController,savedGameDetailList,backend.js,NOT-NEEDED,Legacy admin-UI-side — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,GET,/getSavedGameDetailList,GameController,getSavedGameDetailList,backend.js,NOT-NEEDED,Legacy admin-game-management UI — erstattet av /api/admin/games + settings-catalog
-3-GAMEPLAY,POST,/addSavedGameManagement/:typeId/:type,GameController,addSavedGameManagement,backend.js,MANGLER,Saved-game templates mangler
+3-GAMEPLAY,POST,/addSavedGameManagement/:typeId/:type,GameController,addSavedGameManagement,backend.js,DEFER,Post-pilot (PM 2026-04-19) — ikke brukt i pilot-flyt; BIN-609
 3-GAMEPLAY,GET,/savedGameManagementEdit/:typeId/:id,GameController,editSaveGameManagement,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 3-GAMEPLAY,POST,/savedGameManagementEdit/:typeId/:id,GameController,editSaveGameManagementPostData,backend.js,NOT-NEEDED,Legacy admin-game-CRUD — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,GET,/viewSaveGameManagement/:id,GameController,viewSaveGameManagementDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 3-GAMEPLAY,POST,/getSaveGameDelete,GameController,getSaveGameManagementDelete,backend.js,NOT-NEEDED,Legacy admin-game-delete — erstattet av settings-catalog
 6-ADMIN-OPS,GET,/reportGame1,ReportsController,reportGame1,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
-6-ADMIN-OPS,GET,/reportGame1/getReportGame1,ReportsController,getReportGame1,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame1/getReportGame1,ReportsController,getReportGame1,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
 6-ADMIN-OPS,GET,/reportGame1/game1Subgames/:id,ReportsController,reportGame1SubGames,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av /api/admin/reports/games
-6-ADMIN-OPS,GET,/reportGame1/getGame1Subgames,ReportsController,getGame1Subgames,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame1/getGame1Subgames,ReportsController,getGame1Subgames,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
 6-ADMIN-OPS,GET,/reportGame2,ReportsController,reportGame2,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
-6-ADMIN-OPS,GET,/reportGame2/getReportGame2,ReportsController,getReportGame2,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame2/getReportGame2,ReportsController,getReportGame2,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
 6-ADMIN-OPS,GET,/reportGame3,ReportsController,reportGame3,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
-6-ADMIN-OPS,GET,/reportGame3/getReportGame3,ReportsController,getReportGame3,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame3/getReportGame3,ReportsController,getReportGame3,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
 6-ADMIN-OPS,GET,/reportGame4,ReportsController,reportGame4,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
-6-ADMIN-OPS,GET,/reportGame4/getReportGame4,ReportsController,getReportGame4,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame4/getReportGame4,ReportsController,getReportGame4,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
 6-ADMIN-OPS,GET,/uniqueGameReport,ReportsController,uniqueIdReport,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
 6-ADMIN-OPS,GET,/reportUnique/uniqueGameTicketReport,ReportsController,uniqueGameTicketReport,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
 6-ADMIN-OPS,GET,/physicalTicketReport,ReportsController,physicalTicketReport,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
-6-ADMIN-OPS,GET,/reportPhysical/physicalTicketReport,ReportsController,physicalGameTicketReport,backend.js,MANGLER,Physical-ticket rapport data-endpoint mangler
+6-ADMIN-OPS,GET,/reportPhysical/physicalTicketReport,ReportsController,physicalGameTicketReport,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
 6-ADMIN-OPS,GET,/hallSpecificReport,ReportsController,hallSpecificReportPage,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
-6-ADMIN-OPS,GET,/getHallReports,ReportsController,getHallSpecificReport,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
-6-ADMIN-OPS,GET,/getHallOrderReports,ReportsController,getHallSpecificOrderReport,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
+6-ADMIN-OPS,GET,/getHallReports,ReportsController,getHallSpecificReport,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
+6-ADMIN-OPS,GET,/getHallOrderReports,ReportsController,getHallSpecificOrderReport,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
 6-ADMIN-OPS,GET,/reportGame5,ReportsController,reportGame5,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
-6-ADMIN-OPS,GET,/reportGame5/getReportGame5,ReportsController,getReportGame5,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
+6-ADMIN-OPS,GET,/reportGame5/getReportGame5,ReportsController,getReportGame5,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
 6-ADMIN-OPS,GET,/totalRevenueReport,ReportsController,totalRevenueReport,backend.js,NOT-NEEDED,Legacy admin HTML rapport-side — erstattet av React-admin på /api/admin/reports/*
-6-ADMIN-OPS,GET,/totalRevenueReport/getData,ReportsController,getTotalRevenueReport,backend.js,MANGLER,Rapport-data mangler — portes til /api/admin/reports/*
-5-WALLET,GET,/payoutPlayer,payoutController,viweGameManagementPayoutPlayer,backend.js,MANGLER,Payout per-spiller/per-billett-view mangler (ikke dekket av /api/admin/payout-audit)
-5-WALLET,GET,/PayoutGameManagementDetailListPlayer/:id,payoutController,PayoutGameManagementDetailListPlayer,backend.js,MANGLER,Payout per-spiller/per-billett-detail-liste mangler
-5-WALLET,GET,/payoutPlayerGetGameManagementDetailList,payoutController,payoutPlayerGetGameManagementDetailList,backend.js,MANGLER,Payout per-spiller/per-billett-view mangler (ikke dekket av /api/admin/payout-audit)
+6-ADMIN-OPS,GET,/totalRevenueReport/getData,ReportsController,getTotalRevenueReport,backend.js,EXISTS,B3-report /api/admin/reports/* (PR #190)
+5-WALLET,GET,/payoutPlayer,payoutController,viweGameManagementPayoutPlayer,backend.js,EXISTS,B4b /api/admin/payout-audit drill-down (PR #199)
+5-WALLET,GET,/PayoutGameManagementDetailListPlayer/:id,payoutController,PayoutGameManagementDetailListPlayer,backend.js,EXISTS,B4b /api/admin/payout-audit drill-down (PR #199)
+5-WALLET,GET,/payoutPlayerGetGameManagementDetailList,payoutController,payoutPlayerGetGameManagementDetailList,backend.js,EXISTS,B4b /api/admin/payout-audit drill-down (PR #199)
 5-WALLET,GET,/viewPlayerPayout/:id/:gameId/:type,payoutController,viewPlayerPayout,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-5-WALLET,GET,/payoutTickets,payoutController,viweGameManagementPayoutTickets,backend.js,MANGLER,Payout per-spiller/per-billett-view mangler (ikke dekket av /api/admin/payout-audit)
-5-WALLET,GET,/PayoutGameManagementDetailListTickets/:id,payoutController,PayoutGameManagementDetailListTickets,backend.js,MANGLER,Payout per-spiller/per-billett-detail-liste mangler
-5-WALLET,GET,/payoutTicketsGetGameManagementDetailList,payoutController,payoutTicketsGetGameManagementDetailList,backend.js,MANGLER,Payout per-spiller/per-billett-view mangler (ikke dekket av /api/admin/payout-audit)
+5-WALLET,GET,/payoutTickets,payoutController,viweGameManagementPayoutTickets,backend.js,EXISTS,B4b /api/admin/payout-audit drill-down (PR #199)
+5-WALLET,GET,/PayoutGameManagementDetailListTickets/:id,payoutController,PayoutGameManagementDetailListTickets,backend.js,EXISTS,B4b /api/admin/payout-audit drill-down (PR #199)
+5-WALLET,GET,/payoutTicketsGetGameManagementDetailList,payoutController,payoutTicketsGetGameManagementDetailList,backend.js,EXISTS,B4b /api/admin/payout-audit drill-down (PR #199)
 5-WALLET,GET,/viewTicketPayout/:gameId/:type,payoutController,viewTicketPayout,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 6-ADMIN-OPS,GET,/riskCountry,riskCountryController,riskCountry,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
-6-ADMIN-OPS,GET,/getRiskCountry,riskCountryController,getRiskCountry,backend.js,MANGLER,Risk-country data-endpoint mangler
+6-ADMIN-OPS,GET,/getRiskCountry,riskCountryController,getRiskCountry,backend.js,EXISTS,B3-security /api/admin/security/risk-countries (PR #194)
 6-ADMIN-OPS,GET,/getCountryList,riskCountryController,getCountryList,backend.js,NOT-NEEDED,Country-list datatable-kilde — portes i AML-PR
-6-ADMIN-OPS,POST,/addRiskCountry,riskCountryController,addRiskCountry,backend.js,MANGLER,Risk-country admin mangler
-6-ADMIN-OPS,POST,/deleteRiskCountry,riskCountryController,deleteRiskCountry,backend.js,MANGLER,Risk-country admin mangler
+6-ADMIN-OPS,POST,/addRiskCountry,riskCountryController,addRiskCountry,backend.js,EXISTS,B3-security /api/admin/security/risk-countries (PR #194)
+6-ADMIN-OPS,POST,/deleteRiskCountry,riskCountryController,deleteRiskCountry,backend.js,EXISTS,B3-security /api/admin/security/risk-countries (PR #194)
 6-ADMIN-OPS,GET,/redFlagCategory,redFlagCategoryController,redFlagCategory,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
-6-ADMIN-OPS,GET,/getRedFlagCategory/:id,redFlagCategoryController,getRedFlagCategory,backend.js,MANGLER,Red-flag AML admin mangler
-6-ADMIN-OPS,GET,/getPlayersRedFlagList,redFlagCategoryController,getPlayersRedFlagList,backend.js,MANGLER,Red-flag AML admin mangler
+6-ADMIN-OPS,GET,/getRedFlagCategory/:id,redFlagCategoryController,getRedFlagCategory,backend.js,EXISTS,B3-aml /api/admin/aml/red-flags (PR #192)
+6-ADMIN-OPS,GET,/getPlayersRedFlagList,redFlagCategoryController,getPlayersRedFlagList,backend.js,EXISTS,B3-aml /api/admin/aml/red-flags (PR #192)
 6-ADMIN-OPS,GET,/viewUserTransaction,redFlagCategoryController,viewUserTransaction,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-6-ADMIN-OPS,GET,/getUserTransactionHeader/:id,redFlagCategoryController,getUserTransactionHeader,backend.js,MANGLER,Red-flag AML admin mangler
-6-ADMIN-OPS,GET,/getUserTransactionList,redFlagCategoryController,getUserTransactionList,backend.js,MANGLER,Red-flag AML admin mangler
+6-ADMIN-OPS,GET,/getUserTransactionHeader/:id,redFlagCategoryController,getUserTransactionHeader,backend.js,EXISTS,B3-aml /api/admin/aml/red-flags (PR #192)
+6-ADMIN-OPS,GET,/getUserTransactionList,redFlagCategoryController,getUserTransactionList,backend.js,EXISTS,B3-aml /api/admin/aml/red-flags (PR #192)
 5-WALLET,GET,/transactions,transactionController,depositTransaction,backend.js,EXISTS,DONE — BIN-586 (PR #169): GET /api/admin/payments/requests
 5-WALLET,GET,/getTransactions,transactionController,getDepositTransaction,backend.js,EXISTS,DONE — BIN-586 (PR #169): GET /api/admin/payments/requests
 5-WALLET,GET,/deposit/requests,transactionController,depositRequsests,backend.js,EXISTS,DONE — BIN-586 (PR #169): GET /api/admin/payments/requests?type=DEPOSIT
@@ -189,10 +189,10 @@ category,method,path,controller,action,legacy_file,status,note
 1-AUTH,GET,/user,UserController,users,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
 1-AUTH,GET,/user/getUser,UserController,getUser,backend.js,NOT-NEEDED,Legacy admin HTML user-side — erstattet av React-admin
 1-AUTH,GET,/addUser,UserController,addUser,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,POST,/addUser,UserController,addUserPostData,backend.js,MANGLER,Admin-user CRUD mangler (partial via /api/admin/bootstrap)
-1-AUTH,POST,/user/getUserDelete,UserController,getUserDelete,backend.js,MANGLER,Admin-user CRUD mangler (partial via /api/admin/bootstrap)
+1-AUTH,POST,/addUser,UserController,addUserPostData,backend.js,EXISTS,B6 /api/admin/users CRUD (PR #203)
+1-AUTH,POST,/user/getUserDelete,UserController,getUserDelete,backend.js,EXISTS,B6 /api/admin/users CRUD (PR #203)
 1-AUTH,GET,/userEdit/:id/,UserController,editUser,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,POST,/userEdit/:id,UserController,editUserPostData,backend.js,MANGLER,Admin-user CRUD mangler (partial via /api/admin/bootstrap)
+1-AUTH,POST,/userEdit/:id,UserController,editUserPostData,backend.js,EXISTS,B6 /api/admin/users CRUD (PR #203)
 3-GAMEPLAY,GET,/cms,cmsController,cmsView,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
 3-GAMEPLAY,GET,/faq,cmsController,faqView,backend.js,NOT-NEEDED,Static content (FAQ/ToS/Support/About/RG/Links) — håndteres via statiske sider / Notion
 3-GAMEPLAY,GET,/getFAQ,cmsController,getFAQ,backend.js,NOT-NEEDED,CMS (FAQ/ToS/Support/About) — håndteres via static pages / Notion
@@ -222,7 +222,7 @@ category,method,path,controller,action,legacy_file,status,note
 4-HALL,GET,/hallEdit/:id,hallController,editHall,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 4-HALL,POST,/hallEdit/:id,hallController,editHallPostData,backend.js,EXISTS,/api/admin/halls CRUD dekker
 4-HALL,POST,/hall/getHallDelete,hallController,getHallDelete,backend.js,EXISTS,/api/admin/halls CRUD dekker
-4-HALL,POST,/transferPlayersToHall,hallController,transferPlayersToHall,backend.js,MANGLER,Transfer-players-to-hall mangler
+4-HALL,POST,/transferPlayersToHall,hallController,transferPlayersToHall,backend.js,DEFER,Post-pilot (PM 2026-04-19) — cross-hall player-flytt ikke pilot-kritisk; BIN-609
 4-HALL,GET,/getHalls,hallController,getAllHalls,backend.js,EXISTS,/api/admin/halls dekker base
 7-AGENT,POST,/hall/report/saveData,hallController,saveHallReportData,backend.js,AGENT-DOMENE,BIN-583 — hall-kasse-balanse
 4-HALL,POST,/hall/set-cash-amount,hallController,setHallCashBalance,backend.js,TODO,Review hall-action
@@ -262,22 +262,22 @@ category,method,path,controller,action,legacy_file,status,note
 2-PLAYER,GET,/leaderboard,leaderboardController,leaderboardView,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
 2-PLAYER,GET,/leaderboard/getLeaderboard,leaderboardController,getLeaderboard,backend.js,EXISTS,/api/leaderboard dekker view; admin CRUD mangler separat
 2-PLAYER,GET,/addLeaderboard,leaderboardController,addLeaderboard,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-2-PLAYER,POST,/addLeaderboard,leaderboardController,addLeaderboardPostData,backend.js,MANGLER,Leaderboard admin CRUD mangler
+2-PLAYER,POST,/addLeaderboard,leaderboardController,addLeaderboardPostData,backend.js,NOT-NEEDED,Leaderboard ikke pilot-scope; TS-definert hvis aktivert post-pilot
 2-PLAYER,GET,/leaderboardEdit/:id,leaderboardController,editLeaderboard,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-2-PLAYER,POST,/leaderboardEdit/:id,leaderboardController,editLeaderboardPostData,backend.js,MANGLER,Leaderboard admin CRUD mangler
-2-PLAYER,POST,/leaderboard/getLeaderboardDelete,leaderboardController,getLeaderboardDelete,backend.js,MANGLER,Leaderboard admin CRUD mangler
+2-PLAYER,POST,/leaderboardEdit/:id,leaderboardController,editLeaderboardPostData,backend.js,NOT-NEEDED,Leaderboard ikke pilot-scope; TS-definert hvis aktivert post-pilot
+2-PLAYER,POST,/leaderboard/getLeaderboardDelete,leaderboardController,getLeaderboardDelete,backend.js,NOT-NEEDED,Leaderboard ikke pilot-scope; TS-definert hvis aktivert post-pilot
 5-WALLET,GET,/voucher,VoucherController,voucherView,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
-5-WALLET,GET,/voucher/getVoucher,VoucherController,getVoucher,backend.js,MANGLER,Voucher admin mangler
+5-WALLET,GET,/voucher/getVoucher,VoucherController,getVoucher,backend.js,EXISTS,B4b /api/admin/vouchers CRUD (PR #199)
 5-WALLET,GET,/addVoucher,VoucherController,addVoucher,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-5-WALLET,POST,/addVoucher,VoucherController,addVoucherPostData,backend.js,MANGLER,Voucher admin mangler
+5-WALLET,POST,/addVoucher,VoucherController,addVoucherPostData,backend.js,EXISTS,B4b /api/admin/vouchers CRUD (PR #199)
 5-WALLET,GET,/voucherEdit/:id,VoucherController,editVoucher,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-5-WALLET,POST,/voucherEdit/:id,VoucherController,editVoucherPostData,backend.js,MANGLER,Voucher admin mangler
-5-WALLET,POST,/voucher/getVoucherDelete,VoucherController,getVoucherDelete,backend.js,MANGLER,Voucher admin mangler
+5-WALLET,POST,/voucherEdit/:id,VoucherController,editVoucherPostData,backend.js,EXISTS,B4b /api/admin/vouchers CRUD (PR #199)
+5-WALLET,POST,/voucher/getVoucherDelete,VoucherController,getVoucherDelete,backend.js,EXISTS,B4b /api/admin/vouchers CRUD (PR #199)
 5-WALLET,GET,/viewVoucher/:id,VoucherController,viewVoucher,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 5-WALLET,GET,/withdrawAmt,WithdrawController,withdrawAmt,backend.js,NOT-NEEDED,HTML index-side for admin-UI — erstattet av React-admin
 5-WALLET,GET,/withdrawAmount/getAllTXN,WithdrawController,getAllTXN,backend.js,EXISTS,DONE — BIN-586 (PR #169): GET /api/admin/payments/requests
 7-AGENT,POST,/withdrawAmount/chipsAction,WithdrawController,chipsAction,backend.js,AGENT-DOMENE,BIN-583 — hall-kasse chips-håndtering
-5-WALLET,POST,/withdrawAmount/getPlayerDelete,WithdrawController,getDelete,backend.js,MANGLER,Withdraw admin-action mangler
+5-WALLET,POST,/withdrawAmount/getPlayerDelete,WithdrawController,getDelete,backend.js,EXISTS,B5 /api/admin/security/withdraw-emails (PR #194)
 5-WALLET,GET,/withdrawAmtHistory,WithdrawController,withdrawAmtHistory,backend.js,NOT-NEEDED,HTML index-side for admin-UI — erstattet av React-admin
 5-WALLET,GET,/withdrawAmtHistory/getAllTXNHistory,WithdrawController,getAllTXNHistory,backend.js,EXISTS,DONE — BIN-586 (PR #169): GET /api/admin/payments/requests
 5-WALLET,GET,/withdraw/requests/hall,WithdrawController,withdrawRequestInHall,backend.js,EXISTS,DONE — BIN-586 (PR #169): GET /api/admin/payments/requests?type=WITHDRAW
@@ -291,75 +291,75 @@ category,method,path,controller,action,legacy_file,status,note
 5-WALLET,GET,/withdraw/history/bank/get,WithdrawController,getWithdrawHistoryBank,backend.js,EXISTS,DONE — BIN-586 (PR #169): GET /api/admin/payments/requests?status=ACCEPTED&type=WITHDRAW
 5-WALLET,GET,/withdraw/list/emails,WithdrawController,withdrawEmails,backend.js,NOT-NEEDED,HTML edit/add-side — erstattet av React-admin
 5-WALLET,GET,/withdraw/add/emails,WithdrawController,addWithdrawEmails,backend.js,NOT-NEEDED,HTML edit/add-side — erstattet av React-admin
-5-WALLET,POST,/withdraw/add/emails,WithdrawController,addWithdrawEmailsPost,backend.js,MANGLER,Withdraw email-allowlist (bank-kanal notifikasjoner) — ikke dekket av BIN-586
-5-WALLET,GET,/withdraw/get/emails,WithdrawController,getwithdrawEmails,backend.js,MANGLER,Withdraw email-list read — ikke dekket av BIN-586
+5-WALLET,POST,/withdraw/add/emails,WithdrawController,addWithdrawEmailsPost,backend.js,EXISTS,B5 /api/admin/security/withdraw-emails (PR #194)
+5-WALLET,GET,/withdraw/get/emails,WithdrawController,getwithdrawEmails,backend.js,EXISTS,B5 /api/admin/security/withdraw-emails (PR #194)
 5-WALLET,GET,/withdraw/edit/emails/:id,WithdrawController,editWithdrawEmails,backend.js,NOT-NEEDED,HTML edit/add-side — erstattet av React-admin
-5-WALLET,POST,/withdraw/edit/emails/:id,WithdrawController,editWithdrawEmailsPost,backend.js,MANGLER,Withdraw email-allowlist (bank-kanal notifikasjoner) — ikke dekket av BIN-586
-5-WALLET,POST,/withdraw/delete/emails/,WithdrawController,deleteWithdrawEmails,backend.js,MANGLER,Withdraw email-allowlist (bank-kanal notifikasjoner) — ikke dekket av BIN-586
-5-WALLET,POST,/withdraw/email/checkUnique/:emailId?,WithdrawController,checkForUniqueEmailId,backend.js,MANGLER,Withdraw email uniqueness check
+5-WALLET,POST,/withdraw/edit/emails/:id,WithdrawController,editWithdrawEmailsPost,backend.js,EXISTS,B5 /api/admin/security/withdraw-emails (PR #194)
+5-WALLET,POST,/withdraw/delete/emails/,WithdrawController,deleteWithdrawEmails,backend.js,EXISTS,B5 /api/admin/security/withdraw-emails (PR #194)
+5-WALLET,POST,/withdraw/email/checkUnique/:emailId?,WithdrawController,checkForUniqueEmailId,backend.js,EXISTS,B5 /api/admin/security/withdraw-emails (PR #194)
 1-AUTH,GET,/role,rollController,view,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,GET,/role/getRole,rollController,getRole,backend.js,MANGLER,Role CRUD mangler — partial via /api/admin/users/:id/role
+1-AUTH,GET,/role/getRole,rollController,getRole,backend.js,NOT-NEEDED,Role-permissions er TS const i AdminAccessPolicy — ingen runtime-CRUD
 1-AUTH,GET,/add,rollController,add,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,POST,/saveRole,rollController,save,backend.js,MANGLER,Role CRUD mangler — permissions-modell er fast i ny backend
+1-AUTH,POST,/saveRole,rollController,save,backend.js,NOT-NEEDED,Role-permissions er TS const i AdminAccessPolicy — ingen runtime-CRUD
 1-AUTH,GET,/edit/:id,rollController,edit,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,POST,/updateRole/:id,rollController,update,backend.js,MANGLER,Role CRUD mangler — permissions-modell er fast i ny backend
-1-AUTH,GET,/delete/:id,rollController,delete,backend.js,MANGLER,Role delete mangler (partial via /api/admin/users/:id/role)
+1-AUTH,POST,/updateRole/:id,rollController,update,backend.js,NOT-NEEDED,Role-permissions er TS const i AdminAccessPolicy — ingen runtime-CRUD
+1-AUTH,GET,/delete/:id,rollController,delete,backend.js,NOT-NEEDED,Role-permissions er TS const i AdminAccessPolicy — ingen runtime-CRUD
 2-PLAYER,GET,/player,PlayerController,player,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
-2-PLAYER,GET,/player/getPlayer,PlayerController,getPlayer,backend.js,MANGLER,Player admin data-endpoint mangler
+2-PLAYER,GET,/player/getPlayer,PlayerController,getPlayer,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/search + /:id
 2-PLAYER,GET,/viewPlayer/:id,PlayerController,viewPlayerDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 2-PLAYER,GET,/playerEdit/:id/,PlayerController,editPlayer,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-2-PLAYER,POST,/playerEdit/:id,PlayerController,editPlayerPostData,backend.js,MANGLER,Admin player-profil-edit mangler
-2-PLAYER,POST,/changePwd/:id,PlayerController,changePwd,backend.js,MANGLER,Admin player password-endring mangler
-2-PLAYER,POST,/player/hallStatus,PlayerController,hallStatus,backend.js,MANGLER,Player activate/soft-delete/per-hall-status mangler
-2-PLAYER,POST,/player/getPlayerDelete,PlayerController,getPlayerDelete,backend.js,MANGLER,Player activate/soft-delete/per-hall-status mangler
-2-PLAYER,POST,/player/playerSoftDelete,PlayerController,playerSoftDelete,backend.js,MANGLER,Player activate/soft-delete/per-hall-status mangler
-2-PLAYER,POST,/player/active,PlayerController,active,backend.js,MANGLER,Player activate/soft-delete/per-hall-status mangler
+2-PLAYER,POST,/playerEdit/:id,PlayerController,editPlayerPostData,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/kyc-status + hall-status
+2-PLAYER,POST,/changePwd/:id,PlayerController,changePwd,backend.js,NOT-NEEDED,Admin bruker /api/auth/forgot-password + reset-token-flyt (PR #194)
+2-PLAYER,POST,/player/hallStatus,PlayerController,hallStatus,backend.js,EXISTS,B2 admin player lifecycle PR — GET+PUT /api/admin/players/:id/hall-status
+2-PLAYER,POST,/player/getPlayerDelete,PlayerController,getPlayerDelete,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/soft-delete
+2-PLAYER,POST,/player/playerSoftDelete,PlayerController,playerSoftDelete,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/soft-delete
+2-PLAYER,POST,/player/active,PlayerController,active,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/restore
 2-PLAYER,GET,/playerGameManagementDetailList/:id,PlayerController,viwePlayerGameManagementDetail,backend.js,NOT-NEEDED,Legacy admin HTML-side — erstattet av React-admin
 2-PLAYER,GET,/playerGetGameManagementDetailList,PlayerController,playerGetGameManagementDetailList,backend.js,NOT-NEEDED,Legacy admin HTML-side — erstattet av React-admin
 5-WALLET,GET,/playerTransactions/:id,transactionController,playerTransactions,backend.js,EXISTS,DONE — BIN-586: /api/admin/payments/requests
-5-WALLET,GET,/getPlayerTransactions,transactionController,getPlayerTransactions,backend.js,MANGLER,Player transaksjons-liste admin-view mangler
+5-WALLET,GET,/getPlayerTransactions,transactionController,getPlayerTransactions,backend.js,EXISTS,B5-rest /api/admin/players/:id/transactions + /game-history (PR #203)
 5-WALLET,GET,/playerGameHistory/:id,transactionController,playerGameHistory,backend.js,EXISTS,DONE — BIN-586: /api/admin/payments/requests
-5-WALLET,GET,/getPlayerGameHistory,transactionController,getPlayerGameHistory,backend.js,MANGLER,Player game-history admin-view mangler
-2-PLAYER,POST,/player/block-rules/delete,PlayerController,deleteBlockRule,backend.js,MANGLER,Player block-rules mangler
+5-WALLET,GET,/getPlayerGameHistory,transactionController,getPlayerGameHistory,backend.js,EXISTS,B5-rest /api/admin/players/:id/transactions + /game-history (PR #203)
+2-PLAYER,POST,/player/block-rules/delete,PlayerController,deleteBlockRule,backend.js,EXISTS,Spillvett block-rules via /api/admin/spillvett (BIN-591)
 2-PLAYER,GET,/pendingRequests,PlayerController,pendingRequests,backend.js,NOT-NEEDED,Legacy admin HTML-side — erstattet av React-admin
-2-PLAYER,GET,/pendingRequests/getPendingPlayer,PlayerController,getPendingPlayer,backend.js,MANGLER,Player pending/rejected-kø mangler (KYC-moderasjon)
+2-PLAYER,GET,/pendingRequests/getPendingPlayer,PlayerController,getPendingPlayer,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/pending
 2-PLAYER,GET,/pendingRequests/viewPendingPlayer/:id,PlayerController,viewPendingRequestDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-2-PLAYER,POST,/pendingRequests/approvePendingPlayer,PlayerController,approvePendingRequest,backend.js,MANGLER,Pending-registrering approval-flow mangler
-2-PLAYER,POST,/pendingRequests/rejectPendingPlayer,PlayerController,rejectPendingRequest,backend.js,MANGLER,Pending-registrering approval-flow mangler
-2-PLAYER,POST,/pendingRequests/forwardRequest,PlayerController,forwardToAdmin,backend.js,MANGLER,Pending-registrering approval-flow mangler
+2-PLAYER,POST,/pendingRequests/approvePendingPlayer,PlayerController,approvePendingRequest,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/approve
+2-PLAYER,POST,/pendingRequests/rejectPendingPlayer,PlayerController,rejectPendingRequest,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/reject
+2-PLAYER,POST,/pendingRequests/forwardRequest,PlayerController,forwardToAdmin,backend.js,NOT-NEEDED,Intern HALL_OPERATOR→ADMIN escalation-flyt droppet — alle operatør-lookups går direkte via /api/admin/players/*
 2-PLAYER,GET,/rejectedRequests,PlayerController,rejectedRequests,backend.js,NOT-NEEDED,Legacy admin HTML-side — erstattet av React-admin
-2-PLAYER,GET,/player/getRejected,PlayerController,getRejectedPlayer,backend.js,MANGLER,Player pending/rejected-kø mangler (KYC-moderasjon)
+2-PLAYER,GET,/player/getRejected,PlayerController,getRejectedPlayer,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/rejected
 2-PLAYER,GET,/viewRejectedPlayer/:id,PlayerController,viewRejectedPlayerDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-2-PLAYER,POST,/player/deleteRejected,PlayerController,deleteRejected,backend.js,MANGLER,Pending-registrering approval-flow mangler
-2-PLAYER,POST,/player/approveRejected,PlayerController,approveRejected,backend.js,MANGLER,Pending-registrering approval-flow mangler
-2-PLAYER,GET,/player/getGroupHalls,PlayerController,getGroupHalls,backend.js,MANGLER,Player admin data-endpoint mangler
-2-PLAYER,GET,/player/getHalls,PlayerController,getHalls,backend.js,MANGLER,Player admin data-endpoint mangler
-2-PLAYER,GET,/player/getAgents,PlayerController,getAgents,backend.js,MANGLER,Player admin data-endpoint mangler
-2-PLAYER,POST,/player/import,PlayerController,importPlayers,backend.js,MANGLER,Bulk player-import mangler (pilotmigrasjon)
-2-PLAYER,POST,/player/import/confirm,PlayerController,confirmImportPlayers,backend.js,MANGLER,Bulk player-import mangler (pilotmigrasjon)
+2-PLAYER,POST,/player/deleteRejected,PlayerController,deleteRejected,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/soft-delete
+2-PLAYER,POST,/player/approveRejected,PlayerController,approveRejected,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/resubmit + approve
+2-PLAYER,GET,/player/getGroupHalls,PlayerController,getGroupHalls,backend.js,NOT-NEEDED,Group-halls TODO defer (matrix-avklaring §6.1); ikke pilot-scope
+2-PLAYER,GET,/player/getHalls,PlayerController,getHalls,backend.js,EXISTS,/api/admin/halls (public hall-katalog)
+2-PLAYER,GET,/player/getAgents,PlayerController,getAgents,backend.js,AGENT-DOMENE,BIN-583 agent-mgmt
+2-PLAYER,POST,/player/import,PlayerController,importPlayers,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/bulk-import
+2-PLAYER,POST,/player/import/confirm,PlayerController,confirmImportPlayers,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/bulk-import
 6-ADMIN-OPS,POST,/settings/add,SettingsController,settingsAdd,backend.js,EXISTS,/api/admin/settings/* partial
 6-ADMIN-OPS,GET,/settings,SettingsController,settings,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
 6-ADMIN-OPS,POST,/settings/update,SettingsController,settingsUpdate,backend.js,EXISTS,/api/admin/settings/* partial
-6-ADMIN-OPS,GET,/maintenance,SettingsController,maintenance,backend.js,MANGLER,Ops-settings action mangler
+6-ADMIN-OPS,GET,/maintenance,SettingsController,maintenance,backend.js,DEFER,Post-pilot (PM 2026-04-19) — Render-deploy-gate dekker pilot; BIN-609
 6-ADMIN-OPS,GET,/maintenance/edit/:id,SettingsController,editMaintenance,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-6-ADMIN-OPS,POST,/maintenance/edit/:id,SettingsController,updateMaintenance,backend.js,MANGLER,Maintenance-mode + restart mangler
-6-ADMIN-OPS,POST,/maintenance/restartServer,SettingsController,restartServer,backend.js,MANGLER,Maintenance-mode + restart mangler
+6-ADMIN-OPS,POST,/maintenance/edit/:id,SettingsController,updateMaintenance,backend.js,DEFER,Post-pilot (PM 2026-04-19) — Render-deploy-gate dekker pilot; BIN-609
+6-ADMIN-OPS,POST,/maintenance/restartServer,SettingsController,restartServer,backend.js,DEFER,Post-pilot (PM 2026-04-19) — Render-deploy-gate dekker pilot; BIN-609
 6-ADMIN-OPS,POST,/settings/addScreenSaverData,SettingsController,addScreenSaverData,backend.js,NOT-NEEDED,Screen saver terminal-spesifikk — post-pilot
-6-ADMIN-OPS,GET,/system/systemInformation,SettingsController,systemInformation,backend.js,MANGLER,Ops-settings action mangler
-6-ADMIN-OPS,POST,/system/editSystemInformation,SettingsController,editSystemInformation,backend.js,MANGLER,System-info edit mangler
+6-ADMIN-OPS,GET,/system/systemInformation,SettingsController,systemInformation,backend.js,DEFER,Post-pilot (PM 2026-04-19) — nice-to-have; BIN-609
+6-ADMIN-OPS,POST,/system/editSystemInformation,SettingsController,editSystemInformation,backend.js,DEFER,Post-pilot (PM 2026-04-19) — nice-to-have; BIN-609
 6-ADMIN-OPS,POST,/maintenance/DailyReports,SettingsController,DailyReports,backend.js,EXISTS,/api/admin/reports/daily/run
 6-ADMIN-OPS,POST,/maintenance/DailyReportsWithMaintenance,SettingsController,DailyReportsWithMaintanace,backend.js,EXISTS,/api/admin/reports/daily/run
-6-ADMIN-OPS,GET,/blockedIp,SecurityController,blockedIp,backend.js,MANGLER,Blocked-IP admin data endpoint mangler
-6-ADMIN-OPS,GET,/blockedIp/getBlockedIp,SecurityController,getBlockedIp,backend.js,MANGLER,Blocked-IP admin data endpoint mangler
+6-ADMIN-OPS,GET,/blockedIp,SecurityController,blockedIp,backend.js,EXISTS,B3-security /api/admin/security/blocked-ips (PR #194)
+6-ADMIN-OPS,GET,/blockedIp/getBlockedIp,SecurityController,getBlockedIp,backend.js,EXISTS,B3-security /api/admin/security/blocked-ips (PR #194)
 6-ADMIN-OPS,GET,/blockedIp/add,SecurityController,addblockedIp,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-6-ADMIN-OPS,POST,/blockedIp/add,SecurityController,addblockedIpPostData,backend.js,MANGLER,Blocked-IP admin mangler
-6-ADMIN-OPS,POST,/blockedIp/delete,SecurityController,deleteBlockedIp,backend.js,MANGLER,Blocked-IP admin mangler
+6-ADMIN-OPS,POST,/blockedIp/add,SecurityController,addblockedIpPostData,backend.js,EXISTS,B3-security /api/admin/security/blocked-ips (PR #194)
+6-ADMIN-OPS,POST,/blockedIp/delete,SecurityController,deleteBlockedIp,backend.js,EXISTS,B3-security /api/admin/security/blocked-ips (PR #194)
 6-ADMIN-OPS,GET,/blockedIp/edit/:id/,SecurityController,editBlockedIp,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-6-ADMIN-OPS,POST,/blockedIp/edit/:id,SecurityController,editBlockedIpPostData,backend.js,MANGLER,Blocked-IP admin mangler
-3-GAMEPLAY,GET,/physical/csvImport,GameController,csvImport,backend.js,MANGLER,Physical ticket CSV-import — del av physical-ticket MANGLER
-2-PLAYER,POST,/player/reverify-bankid,PlayerController,reverifyBankid,backend.js,MANGLER,BankID reverify mangler
-5-WALLET,GET,/physicalTicketManagement,UniqueIdController,physicalTicketManagement,backend.js,MANGLER,Physical-ticket / unique-id admin data-endpoint mangler
-5-WALLET,GET,/physical/ticketList,UniqueIdController,getPhysicalTicketList,backend.js,MANGLER,Unique-ID mgmt mangler
+6-ADMIN-OPS,POST,/blockedIp/edit/:id,SecurityController,editBlockedIpPostData,backend.js,EXISTS,B3-security /api/admin/security/blocked-ips (PR #194)
+3-GAMEPLAY,GET,/physical/csvImport,GameController,csvImport,backend.js,EXISTS,Erstattet av B4a /api/admin/physical-tickets/batches (bulk-generate)
+2-PLAYER,POST,/player/reverify-bankid,PlayerController,reverifyBankid,backend.js,EXISTS,B2 admin player lifecycle PR — /api/admin/players/:id/bankid-reverify
+5-WALLET,GET,/physicalTicketManagement,UniqueIdController,physicalTicketManagement,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
+5-WALLET,GET,/physical/ticketList,UniqueIdController,getPhysicalTicketList,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
 3-GAMEPLAY,POST,/gameMenu/getGameMenu,GameController,viweGameMenu,backend.js,NOT-NEEDED,Legacy admin-UI-side — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,GET,/gameDetailList/:id,GameController,viweGameDetail,backend.js,NOT-NEEDED,Legacy admin-UI-side — erstattet av /api/admin/games + settings-catalog
 3-GAMEPLAY,GET,/getGameDetailList,GameController,getGameDetailList,backend.js,NOT-NEEDED,Legacy admin-game-management UI — erstattet av /api/admin/games + settings-catalog
@@ -370,29 +370,29 @@ category,method,path,controller,action,legacy_file,status,note
 3-GAMEPLAY,POST,/getGameDelete,GameController,getGameDelete,backend.js,NOT-NEEDED,Legacy admin-game-delete — erstattet av settings-catalog
 3-GAMEPLAY,GET,/viewGame/:typeId/:id,GameController,viewGameDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 1-AUTH,GET,/agentRole,rollController,agentRole,backend.js,NOT-NEEDED,Legacy admin HTML agent-role-side — erstattet av React-admin
-1-AUTH,POST,/role/getAgentRole,rollController,getAgentRole,backend.js,MANGLER,Role CRUD mangler — permissions-modell er fast i ny backend
+1-AUTH,POST,/role/getAgentRole,rollController,getAgentRole,backend.js,NOT-NEEDED,Role-permissions er TS const i AdminAccessPolicy — ingen runtime-CRUD
 1-AUTH,GET,/role/agentRoleAdd,rollController,agentRoleAdd,backend.js,NOT-NEEDED,Legacy admin HTML agent-role-side — erstattet av React-admin
-1-AUTH,POST,/role/saveAgentRole,rollController,saveAgentRole,backend.js,MANGLER,Role CRUD mangler — permissions-modell er fast i ny backend
+1-AUTH,POST,/role/saveAgentRole,rollController,saveAgentRole,backend.js,NOT-NEEDED,Role-permissions er TS const i AdminAccessPolicy — ingen runtime-CRUD
 1-AUTH,GET,/role/editAgentRole/:id,rollController,editAgentRole,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-1-AUTH,POST,/role/updateAgentRole/:id,rollController,updateAgentRole,backend.js,MANGLER,Role CRUD mangler — permissions-modell er fast i ny backend
-1-AUTH,GET,/agentRole/delete/:id,rollController,agentRoleDelete,backend.js,MANGLER,Role delete mangler (partial via /api/admin/users/:id/role)
+1-AUTH,POST,/role/updateAgentRole/:id,rollController,updateAgentRole,backend.js,NOT-NEEDED,Role-permissions er TS const i AdminAccessPolicy — ingen runtime-CRUD
+1-AUTH,GET,/agentRole/delete/:id,rollController,agentRoleDelete,backend.js,NOT-NEEDED,Role-permissions er TS const i AdminAccessPolicy — ingen runtime-CRUD
 2-PLAYER,GET,/player/transactions/:id,PlayerController,playerTransactionsClient,backend.js,NOT-NEEDED,Player-klient transaksjons-view — dekkes av /api/wallet/me/transactions
 2-PLAYER,GET,/player/depositMoney,PlayerController,depositMoneyClient,backend.js,NOT-NEEDED,Legacy mobile-app payment iframe/return — ny stack bruker /api/payments/swedbank/confirm
 6-ADMIN-OPS,POST,/popup_modal,Dashboard,allModal,backend.js,NOT-NEEDED,"Popup-modal — UI-state, ikke API"
-5-WALLET,POST,/generateTicket,UniqueIdController,generateTicket,backend.js,MANGLER,Unique-ID admin mangler
-5-WALLET,POST,/generateEditTicket,UniqueIdController,generateEditTicket,backend.js,MANGLER,Unique-ID admin mangler
+5-WALLET,POST,/generateTicket,UniqueIdController,generateTicket,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
+5-WALLET,POST,/generateEditTicket,UniqueIdController,generateEditTicket,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
 5-WALLET,GET,/uniqueId,UniqueIdController,uniqueId,backend.js,NOT-NEEDED,HTML index-side — erstattet av React-admin
-5-WALLET,POST,/addUniqueId,UniqueIdController,addUniqueId,backend.js,MANGLER,Unique-ID admin mangler
-5-WALLET,GET,/uniqueIdList,UniqueIdController,uniqueIdList,backend.js,MANGLER,Physical-ticket / unique-id admin data-endpoint mangler
-5-WALLET,GET,/unique/getUniqueId,UniqueIdController,getUniqueList,backend.js,MANGLER,Unique-ID mgmt mangler
+5-WALLET,POST,/addUniqueId,UniqueIdController,addUniqueId,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
+5-WALLET,GET,/uniqueIdList,UniqueIdController,uniqueIdList,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
+5-WALLET,GET,/unique/getUniqueId,UniqueIdController,getUniqueList,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
 5-WALLET,GET,/viewUniqueDetails/:id,UniqueIdController,viewUniqueDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 5-WALLET,GET,/unique/viewSpaceficTicketDetails,UniqueIdController,viewSpaceficTicketDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 7-AGENT,POST,/unique/depositWithdraw,UniqueIdController,depositWithdraw,backend.js,AGENT-DOMENE,BIN-583 (agent unique-id terminal)
-5-WALLET,POST,/checkUniqueId,UniqueIdController,checkUniqueId,backend.js,MANGLER,Unique-ID admin mangler
+5-WALLET,POST,/checkUniqueId,UniqueIdController,checkUniqueId,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
 7-AGENT,POST,/unique/withdrawAccess,UniqueIdController,withdrawAccess,backend.js,AGENT-DOMENE,BIN-583 (agent unique-id terminal)
 1-AUTH,POST,/validateGameView,Auth,validateGameView,backend.js,EXISTS,ext-wallet auth dekker
 5-WALLET,GET,/unique/transactions/:id,UniqueIdController,transactions,backend.js,NOT-NEEDED,Legacy admin HTML unique-id-side — portes som MANGLER under physical-tickets (MANGLER-listen)
-5-WALLET,GET,/unique/get/transactions/,UniqueIdController,getTransactions,backend.js,MANGLER,Unique-ID mgmt mangler
+5-WALLET,GET,/unique/get/transactions/,UniqueIdController,getTransactions,backend.js,EXISTS,B4b /api/admin/unique-ids (PR #199)
 4-HALL,GET,/schedules,scheduleController,schedules,backend.js,NOT-NEEDED,Legacy admin schedule-side — erstattet av /api/admin/halls/:id/schedule
 4-HALL,GET,/getSchedules,scheduleController,getSchedules,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 4-HALL,GET,/createSchedule,scheduleController,createSchedule,backend.js,NOT-NEEDED,Legacy admin schedule-side — erstattet av /api/admin/halls/:id/schedule
@@ -401,31 +401,31 @@ category,method,path,controller,action,legacy_file,status,note
 4-HALL,POST,/editSchedule/:id,scheduleController,editSchedulePostData,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker
 4-HALL,POST,/deleteSchedule,scheduleController,deleteSchedule,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker
 4-HALL,GET,/viewSchedule/:id,scheduleController,viewSchedule,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-4-HALL,POST,/api/saveSubGame,scheduleController,saveSubGame,backend.js,MANGLER,Stored subgame i schedule mangler
+4-HALL,POST,/api/saveSubGame,scheduleController,saveSubGame,backend.js,NOT-NEEDED,Subgames TS-definert (PM 2026-04-19) — ingen runtime-CRUD
 4-HALL,GET,/schedules/getStoredSubGame,scheduleController,getStoredSubGame,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 4-HALL,GET,/schedules/getStoredSubGameData,scheduleController,getStoredSubGameData,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 4-HALL,GET,/schedules/getStoredSubGames,scheduleController,getStoredSubGames,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
-4-HALL,POST,/api/saveSubGames,scheduleController,saveSubGames,backend.js,MANGLER,Stored subgame i schedule mangler
+4-HALL,POST,/api/saveSubGames,scheduleController,saveSubGames,backend.js,NOT-NEEDED,Subgames TS-definert (PM 2026-04-19) — ingen runtime-CRUD
 4-HALL,GET,/schedules/checkStoreSubGameName,scheduleController,checkStoreSubGameName,backend.js,NOT-NEEDED,Valideringshelper — frontend-sidig
 4-HALL,GET,/createDailySchedule/:id,scheduleController,createDailySchedule,backend.js,NOT-NEEDED,Legacy admin schedule-side — erstattet av /api/admin/halls/:id/schedule
-4-HALL,POST,/createDailySchedule,scheduleController,createDailySchedulePostData,backend.js,MANGLER,Daily/special-schedule admin partial
+4-HALL,POST,/createDailySchedule,scheduleController,createDailySchedulePostData,backend.js,NOT-NEEDED,B6 /schedule/bulk dekker pilot-behov (PM 2026-04-19); daily/special post-pilot hvis etterspurt
 4-HALL,GET,/schedule/getAvailableGroupHalls/:type,scheduleController,getAvailableGroupHalls,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 4-HALL,GET,/editDailySchedule/:id,scheduleController,editDailySchedule,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-4-HALL,POST,/editDailySchedule/:id,scheduleController,editDailySchedulePostData,backend.js,MANGLER,Daily/special-schedule admin partial
+4-HALL,POST,/editDailySchedule/:id,scheduleController,editDailySchedulePostData,backend.js,NOT-NEEDED,B6 /schedule/bulk dekker pilot-behov (PM 2026-04-19); daily/special post-pilot hvis etterspurt
 4-HALL,GET,/viewDailySchedule/:id,scheduleController,viewDailySchedule,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-4-HALL,POST,/deleteDailySchedule,scheduleController,deleteDailySchedule,backend.js,MANGLER,Daily/special-schedule admin partial
-4-HALL,POST,/saveDailySchedule,scheduleController,saveDailySchedulePostData,backend.js,MANGLER,Daily/special-schedule admin partial
+4-HALL,POST,/deleteDailySchedule,scheduleController,deleteDailySchedule,backend.js,NOT-NEEDED,B6 /schedule/bulk dekker pilot-behov (PM 2026-04-19); daily/special post-pilot hvis etterspurt
+4-HALL,POST,/saveDailySchedule,scheduleController,saveDailySchedulePostData,backend.js,NOT-NEEDED,B6 /schedule/bulk dekker pilot-behov (PM 2026-04-19); daily/special post-pilot hvis etterspurt
 4-HALL,GET,/schedule/getHalls,scheduleController,getScheduleHalls,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 4-HALL,GET,/createSpecialSchedule/:id,scheduleController,createSpecailSchedule,backend.js,NOT-NEEDED,Legacy admin schedule-side — erstattet av /api/admin/halls/:id/schedule
-4-HALL,POST,/createDailySpecialSchedule,scheduleController,createDailySpecialSchedulePostData,backend.js,MANGLER,Daily/special-schedule admin partial
+4-HALL,POST,/createDailySpecialSchedule,scheduleController,createDailySpecialSchedulePostData,backend.js,NOT-NEEDED,B6 /schedule/bulk dekker pilot-behov (PM 2026-04-19); daily/special post-pilot hvis etterspurt
 4-HALL,POST,/schedule/getMasterHallData,scheduleController,getMasterHallData,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker
 4-HALL,GET,/viewSavedDailySchedule/:id,scheduleController,viewSavedDailySchedule,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 4-HALL,GET,/editSavedDailySchedule/:id,scheduleController,editSavedDailySchedule,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-4-HALL,POST,/deleteSavedDailySchedule,scheduleController,deleteSavedDailySchedule,backend.js,MANGLER,Daily/special-schedule admin partial
+4-HALL,POST,/deleteSavedDailySchedule,scheduleController,deleteSavedDailySchedule,backend.js,NOT-NEEDED,B6 /schedule/bulk dekker pilot-behov (PM 2026-04-19); daily/special post-pilot hvis etterspurt
 4-HALL,GET,/viewDailySchduleDetails/:id,scheduleController,viewDailySchduleDetails,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 4-HALL,GET,/getCurrentSubgames/:id,scheduleController,getCurrentSubgames,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 4-HALL,GET,/edit-subgame/:id,scheduleController,editSubgame,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-4-HALL,POST,/edit-subgame/:id,scheduleController,editSubgamePostData,backend.js,MANGLER,Stored subgame i schedule mangler
+4-HALL,POST,/edit-subgame/:id,scheduleController,editSubgamePostData,backend.js,NOT-NEEDED,Subgames TS-definert (PM 2026-04-19) — ingen runtime-CRUD
 4-HALL,GET,/view-subgame/:id,scheduleController,viewSubgame,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 4-HALL,GET,/getGameAgents,scheduleController,getGameAgents,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 4-HALL,POST,/agentReady,scheduleController,agentReady,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker
@@ -434,31 +434,31 @@ category,method,path,controller,action,legacy_file,status,note
 4-HALL,GET,/viewGameHistory/:id/,scheduleController,viewGameHistory,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 4-HALL,GET,/viewPhysicalGameHistory/:id/,scheduleController,viewPhysicalGameHistory,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
 4-HALL,POST,/addManualWinning/,scheduleController,addWinningManual,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker
-2-PLAYER,POST,/player/register,PlayerController,registerPlayer,backend.js,MANGLER,Player admin-action mangler
+2-PLAYER,POST,/player/register,PlayerController,registerPlayer,backend.js,EXISTS,/api/auth/register (public)
 4-HALL,GET,/schedule/getAvailableGroupHallsBasedSlots/:type,scheduleController,getAvailableGroupHallsBasedSlots,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 4-HALL,GET,/schedule/getSchedulesBySlot,scheduleController,getSchedulesBySlot,backend.js,EXISTS,/api/admin/halls/:id/schedule dekker base
 5-WALLET,GET,/addPhysicalTickets,physicalTicketsController,addPhysicalTickets,backend.js,NOT-NEEDED,HTML render (legacy admin UI) — erstattet av React-admin
-5-WALLET,POST,/addPhysicalTickets,physicalTicketsController,addPhysicalTicketsPost,backend.js,MANGLER,Physical ticket admin mangler
-5-WALLET,GET,/getPhysicalTickets,physicalTicketsController,getPhysicalTickets,backend.js,MANGLER,Physical-ticket inventory/salg mangler
-5-WALLET,POST,/deletePhysicalTicket,physicalTicketsController,deletePhysicalTicket,backend.js,MANGLER,Physical ticket admin mangler
-5-WALLET,GET,/getLastRegisteredId,physicalTicketsController,getLastRegisteredId,backend.js,MANGLER,Physical-ticket inventory/salg mangler
-5-WALLET,GET,/getEditRegisteredId,physicalTicketsController,getEditRegisteredId,backend.js,MANGLER,Physical-ticket inventory/salg mangler
-5-WALLET,POST,/editPhysicalTickets,physicalTicketsController,editPhysicalTicketsPost,backend.js,MANGLER,Physical ticket admin mangler
-5-WALLET,POST,/addGamePhysicalTickets,physicalTicketsController,addGamePhysicalTicketsPost,backend.js,MANGLER,Physical ticket admin mangler
-5-WALLET,GET,/getSellPhysicalTickets/:gameId,physicalTicketsController,getSellPhysicalTickets,backend.js,MANGLER,Physical-ticket inventory/salg mangler
-5-WALLET,POST,/deleteSellPhysicalTicket,physicalTicketsController,deleteSellPhysicalTicket,backend.js,MANGLER,Physical ticket admin mangler
-5-WALLET,POST,/deleteAllSellPhysicalTicket,physicalTicketsController,deleteAllSellPhysicalTicket,backend.js,MANGLER,Physical ticket admin mangler
-5-WALLET,GET,/hall/getAgent,physicalTicketsController,getHallAgents,backend.js,MANGLER,Physical-ticket inventory/salg mangler
-5-WALLET,POST,/purchasePhysicalTickets,physicalTicketsController,purchasePhysicalTickets,backend.js,MANGLER,Physical ticket admin mangler
+5-WALLET,POST,/addPhysicalTickets,physicalTicketsController,addPhysicalTicketsPost,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,GET,/getPhysicalTickets,physicalTicketsController,getPhysicalTickets,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,POST,/deletePhysicalTicket,physicalTicketsController,deletePhysicalTicket,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,GET,/getLastRegisteredId,physicalTicketsController,getLastRegisteredId,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,GET,/getEditRegisteredId,physicalTicketsController,getEditRegisteredId,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,POST,/editPhysicalTickets,physicalTicketsController,editPhysicalTicketsPost,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,POST,/addGamePhysicalTickets,physicalTicketsController,addGamePhysicalTicketsPost,backend.js,EXISTS,B4a /api/admin/physical-tickets/batches/:id/assign-game (PR #197)
+5-WALLET,GET,/getSellPhysicalTickets/:gameId,physicalTicketsController,getSellPhysicalTickets,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,POST,/deleteSellPhysicalTicket,physicalTicketsController,deleteSellPhysicalTicket,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,POST,/deleteAllSellPhysicalTicket,physicalTicketsController,deleteAllSellPhysicalTicket,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,GET,/hall/getAgent,physicalTicketsController,getHallAgents,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
+5-WALLET,POST,/purchasePhysicalTickets,physicalTicketsController,purchasePhysicalTickets,backend.js,EXISTS,B4a /api/admin/physical-tickets/* (PR #197)
 3-GAMEPLAY,GET,/colorDraft,otherGameController,colorDraft,backend.js,NOT-NEEDED,Minigames (WoF/Treasure/Mystery/ColorDraft) dekkes av game-engine config i apps/backend/src/game (PM-beslutning 2026-04-18)
 3-GAMEPLAY,POST,/colorDraftEdit,otherGameController,editColordraftPostData,backend.js,NOT-NEEDED,Minigames (WoF/Treasure/Mystery/ColorDraft) dekkes av game-engine config i apps/backend/src/game (PM-beslutning 2026-04-18)
 2-PLAYER,GET,/payment/iframe/:checkoutId,PlayerController,verifoneIframe,backend.js,NOT-NEEDED,Legacy mobile-app payment iframe/return — ny stack bruker /api/payments/swedbank/confirm
 2-PLAYER,GET,/payment/deposit/response,PlayerController,verifonePaymentResponse,backend.js,NOT-NEEDED,Legacy mobile-app payment iframe/return — ny stack bruker /api/payments/swedbank/confirm
-2-PLAYER,POST,/payment/webhook,PlayerController,notification,backend.js,MANGLER,Player admin-action mangler
+2-PLAYER,POST,/payment/webhook,PlayerController,notification,backend.js,EXISTS,/api/payments/webhook/swedbankpay (BIN-586)
 2-PLAYER,POST,/payment/goback,PlayerController,goBacktoAppFromVerifone,backend.js,NOT-NEEDED,Mobile app deep-link — ikke i ny stack
 2-PLAYER,GET,/payment/iframe/:checkoutId,PlayerController,swedbankpayIframe,backend.js,NOT-NEEDED,Legacy mobile-app payment iframe/return — ny stack bruker /api/payments/swedbank/confirm
 2-PLAYER,GET,/payment/deposit/response,PlayerController,swedbankpayPaymentResponse,backend.js,NOT-NEEDED,Legacy mobile-app payment iframe/return — ny stack bruker /api/payments/swedbank/confirm
-2-PLAYER,POST,/payment/webhook,PlayerController,swedbankpayNotification,backend.js,MANGLER,Player admin-action mangler
+2-PLAYER,POST,/payment/webhook,PlayerController,swedbankpayNotification,backend.js,EXISTS,/api/payments/webhook/swedbankpay (BIN-586)
 2-PLAYER,POST,/payment/goback,PlayerController,goBacktoAppFromSwedbankpay,backend.js,NOT-NEEDED,Mobile app deep-link — ikke i ny stack
 7-AGENT,POST,/agent/dailybalance/add,agentcashinoutController,addDailyBalance,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/dailybalance/get,agentcashinoutController,getDailyBalance,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
@@ -504,7 +504,7 @@ category,method,path,controller,action,legacy_file,status,note
 7-AGENT,POST,/agent/game/physical/add-to-wallet,agentcashinoutController,agentphysicalTicketAddToWallet,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/game/completed,agentcashinoutController,getAgentCompletedGames,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,GET,/agent/physical/sell/:gameId,agentcashinoutController,sellagentTicketView,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
-5-WALLET,POST,/agent/physical/sell,physicalTicketsController,addPhysicalTicketsPost,backend.js,MANGLER,Physical ticket admin mangler
+5-WALLET,POST,/agent/physical/sell,physicalTicketsController,addPhysicalTicketsPost,backend.js,AGENT-DOMENE,BIN-583 agent cash-ops (PR #200)
 7-AGENT,GET,/agent/game/hall-status,agentcashinoutController,getGameHallStatus,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 7-AGENT,POST,/agent/game/update-hall-status,agentcashinoutController,updateGameHallStatus,backend.js,AGENT-DOMENE,BIN-583 (agent-domene)
 2-PLAYER,POST,/updatePlayerLanguageIfnotexist,PlayerController,updatePlayerLanguageIfnotexist,backend.js,NOT-NEEDED,Lokalisering utenfor scope
@@ -534,12 +534,12 @@ category,method,path,controller,action,legacy_file,status,note
 2-PLAYER,GET,/player/bankId/iframe/:id,PlayerController,bankIdIframe,backend.js,NOT-NEEDED,Legacy mobile-app payment iframe/return — ny stack bruker /api/payments/swedbank/confirm
 2-PLAYER,POST,/player/bankid/goback,PlayerController,goBacktoAppFromBankId,backend.js,NOT-NEEDED,Mobile app deep-link — ikke i ny stack
 2-PLAYER,POST,/player/profile/image/update,PlayerController,updateProfileImages,backend.js,NOT-NEEDED,Profile-image utenfor scope
-2-PLAYER,POST,/player/verify/update,PlayerController,verifyPlayer,backend.js,MANGLER,Player admin-action mangler
-2-PLAYER,POST,/player/approved/update-flag,PlayerController,updateIfPlayerAlreadyApproved,backend.js,MANGLER,Pending-registrering approval-flow mangler
+2-PLAYER,POST,/player/verify/update,PlayerController,verifyPlayer,backend.js,EXISTS,BankID-verify-flyt /api/auth/bankid/* (B2)
+2-PLAYER,POST,/player/approved/update-flag,PlayerController,updateIfPlayerAlreadyApproved,backend.js,NOT-NEEDED,Legacy idempotens-helper — erstattet av /kyc-status PUT som er idempotent
 2-PLAYER,GET,/players/track-spending,PlayerController,trackSpendingView,backend.js,NOT-NEEDED,Legacy HTML track-spending-side — erstattet av /api/wallet/me/transactions + React
-2-PLAYER,GET,/players/track-spending/get,PlayerController,getTrackSpendingData,backend.js,MANGLER,Player pending/rejected-kø mangler (KYC-moderasjon)
+2-PLAYER,GET,/players/track-spending/get,PlayerController,getTrackSpendingData,backend.js,EXISTS,B5-rest /api/admin/players/:id/game-history (PR #203)
 2-PLAYER,GET,/players/track-spending/transactions/:id,PlayerController,trackSpendingTxView,backend.js,NOT-NEEDED,Legacy HTML track-spending-side — erstattet av /api/wallet/me/transactions + React
-2-PLAYER,GET,/players/track-spending/transactions/get/:id,PlayerController,getTrackSpendingTxData,backend.js,MANGLER,Player pending/rejected-kø mangler (KYC-moderasjon)
+2-PLAYER,GET,/players/track-spending/transactions/get/:id,PlayerController,getTrackSpendingTxData,backend.js,EXISTS,B5-rest /api/admin/players/:id/transactions (PR #203)
 3-GAMEPLAY,POST,/game1/purchaseTickets,GameController,purchaseTickets,backend.js,EXISTS,Erstattet av socket bet:arm + /api/admin/rooms room-ready
 3-GAMEPLAY,GET,/sms-advertisement,advertisementController,view,backend.js,NOT-NEEDED,SMS-advarsler ikke pilot-kritiske; ingen SMS-provider i ny stack (PM-beslutning 2026-04-18)
 3-GAMEPLAY,GET,/sms-advertisement/search-players,advertisementController,searchPlayers,backend.js,NOT-NEEDED,SMS-advarsler ikke pilot-kritiske; ingen SMS-provider i ny stack (PM-beslutning 2026-04-18)
