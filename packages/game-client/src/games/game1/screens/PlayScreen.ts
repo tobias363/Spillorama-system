@@ -11,6 +11,7 @@ import { ChatPanelV2 } from "../components/ChatPanelV2.js";
 import { TicketOverlay } from "../components/TicketOverlay.js";
 import { CalledNumbersOverlay } from "../components/CalledNumbersOverlay.js";
 import { Game1BuyPopup } from "../components/Game1BuyPopup.js";
+import { UpcomingPurchase } from "../components/UpcomingPurchase.js";
 import { TicketGridScroller } from "../components/TicketGridScroller.js";
 import { TicketGroup, type TicketGroupVariant } from "../components/TicketGroup.js";
 import { CenterBall } from "../components/CenterBall.js";
@@ -60,8 +61,13 @@ export class PlayScreen extends Container {
   // CenterBall (Unity-matching animated bingo ball in center area)
   private centerBall: CenterBall;
 
-  // Buy popup (Unity-matching ticket purchase)
+  // Buy popup (Unity-matching ticket purchase) — only shown for explicit
+  // "Forhåndskjøp" / "Kjøp flere brett" button clicks (Q1 2026-04-18).
   private buyPopup: Game1BuyPopup | null = null;
+
+  // BIN-410 (D3): Inline upcoming-purchase side panel. Takes over auto-display
+  // in WAITING-state (replaces earlier auto-opened Game1BuyPopup).
+  private upcomingPurchase: UpcomingPurchase | null = null;
 
   // Callbacks (set by controller)
   private onLuckyNumberTap: (() => void) | null = null;
@@ -164,10 +170,22 @@ export class PlayScreen extends Container {
     this.calledNumbers = new CalledNumbersOverlay(this.overlayManager);
 
     // Game1 buy popup (HTML overlay — matches Unity's Game1TicketPurchasePanel)
+    // BIN-410 (D3, Q1 2026-04-18): popup is now only shown on explicit
+    // "Forhåndskjøp" / "Kjøp flere brett" button clicks. UpcomingPurchase-panelet
+    // tar over auto-display mellom runder (matcher Unity).
     this.buyPopup = new Game1BuyPopup(this.overlayManager);
     // Delegate buy to controller — no direct socket call from view layer.
     this.buyPopup.setOnBuy((selections: Array<{ type: string; qty: number }>) => {
       this.onBuy?.(selections);
+    });
+
+    // BIN-410 (D3): Upcoming-purchase inline panel. Auto-vises av controlleren
+    // ved WAITING-transition og skjules ved PLAYING/SPECTATING/RUNNING/D2-trigger.
+    this.upcomingPurchase = new UpcomingPurchase({
+      overlay: this.overlayManager,
+      onArm: (selections) => {
+        this.onBuy?.(selections);
+      },
     });
 
     // Center top panel with action callbacks
@@ -310,14 +328,11 @@ export class PlayScreen extends Container {
       this.centerBall.showWaiting();
     }
 
-    // Show buy popup — only with backend ticket types (no client fallback)
-    // Unity: Game1PurchaseTicket.cs:69 — pass myTickets.length så 30-grensen
-    // respekterer allerede-kjøpte brett fra server.
-    this.buyPopup?.showWithTypes(
-      state.entryFee || 10,
-      state.ticketTypes ?? [],
-      state.myTickets?.length ?? 0,
-    );
+    // BIN-410 (D3, Q1 2026-04-18): Auto-åpning av buyPopup er FJERNET.
+    // UpcomingPurchase-panelet tar over (matcher Unity — Unity viser aldri
+    // modal popup automatisk ved WAITING, bare upcoming-games rad).
+    // Popup vises kun ved eksplisitt "Forhåndskjøp"/"Kjøp flere"-klikk.
+    // Controlleren kaller showUpcomingPurchase(state) ved WAITING-transition.
 
     // Update info panels
     this.updateInfo(state);
@@ -348,15 +363,24 @@ export class PlayScreen extends Container {
         this.centerBall.stopCountdown();
       }
 
-      // Show buy popup when ticket types first arrive from backend
+      // BIN-410 (D3, Q1): Auto-visning av Game1BuyPopup er fjernet.
+      // UpcomingPurchase-panelet oppdateres i stedet når ticket-types kommer
+      // inn fra backend — refresh in-place bevarer eventuelle +/- valg.
       const hadTypes = prevTypes && prevTypes.length > 0;
       const hasTypes = state.ticketTypes && state.ticketTypes.length > 0;
-      if (!hadTypes && hasTypes) {
-        this.buyPopup?.showWithTypes(
-          state.entryFee || 10,
-          state.ticketTypes,
-          state.myTickets?.length ?? 0,
-        );
+      if (hasTypes && this.upcomingPurchase?.isShowing()) {
+        this.upcomingPurchase.update({
+          entryFee: state.entryFee || 10,
+          ticketTypes: state.ticketTypes,
+          alreadyPurchased: state.myTickets?.length ?? 0,
+        });
+      } else if (!hadTypes && hasTypes) {
+        // Types just arrived — show the panel.
+        this.upcomingPurchase?.show({
+          entryFee: state.entryFee || 10,
+          ticketTypes: state.ticketTypes,
+          alreadyPurchased: state.myTickets?.length ?? 0,
+        });
       }
     }
 
@@ -366,6 +390,29 @@ export class PlayScreen extends Container {
   /** Hide buy popup (called after successful purchase). */
   hideBuyPopup(): void {
     this.buyPopup?.hide();
+  }
+
+  /**
+   * BIN-410 (D3): Show the upcoming-purchase side panel for preRound arming.
+   * Called by controller when transitioning to WAITING. Not shown during
+   * PLAYING/SPECTATING/RUNNING (Q4 avgjørelse).
+   */
+  showUpcomingPurchase(state: GameState): void {
+    if (!state.ticketTypes || state.ticketTypes.length === 0) return;
+    this.upcomingPurchase?.show({
+      entryFee: state.entryFee || 10,
+      ticketTypes: state.ticketTypes,
+      alreadyPurchased: state.myTickets?.length ?? 0,
+      gameName: state.gameType,
+    });
+  }
+
+  /**
+   * BIN-410 (D3): Hide the upcoming-purchase panel. Called on PLAYING/SPECTATING
+   * transitions, on D2-threshold disableBuyMore, and on game-finish reset.
+   */
+  hideUpcomingPurchase(): void {
+    this.upcomingPurchase?.hide();
   }
 
   // ── Play mode ──
@@ -383,6 +430,8 @@ export class PlayScreen extends Container {
     this.centerBall.stopCountdown();
     this.centerBall.setNumber(state.lastDrawnNumber);
     this.buyPopup?.hide();
+    // BIN-410 (D3): Upcoming-panel skal aldri være synlig under PLAYING/SPECTATING.
+    this.upcomingPurchase?.hide();
 
     for (const result of state.patternResults) {
       if (result.isWon && result.claimType === "LINE") this.lineAlreadyWon = true;
@@ -585,9 +634,28 @@ export class PlayScreen extends Container {
     this.overlayManager.getRoot().appendChild(bar);
   }
 
-  /** BIN-451: Disable buy-more button (Unity: buyMoreTicket.interactable = false after N balls). */
+  /**
+   * BIN-451/409 (D2): Persistently disable the "Kjøp flere brett" button
+   * once the server-authoritative threshold (`disableBuyAfterBalls`) is reached.
+   *
+   * Unity: `buyMoreTicket.interactable = false` after N balls — see
+   * `Game1GamePlayPanel.cs:170` (`BuyMoreDisableFlagVal`) and per-ball sjekk i
+   * `Game1GamePlayPanel.SocketFlow.cs:109-113, :457-461, :485-489`.
+   *
+   * Også skjuler UpcomingPurchase-panelet (D3, Q3) — preRound-kjøp skal ikke
+   * være åpent når kjøp er stengt for inneværende runde.
+   */
   disableBuyMore(): void {
-    this.centerTop.showButtonFeedback("buyMore", false);
+    this.centerTop.setBuyMoreDisabled(true, "Kjøp er stengt — trekning pågår");
+    this.hideUpcomingPurchase();
+  }
+
+  /**
+   * BIN-409 (D2): Re-enable the "Kjøp flere brett" button when a new round
+   * begins (Unity: flag resettes ved OnGameStart i `Game1GamePlayPanel.SocketFlow.cs`).
+   */
+  enableBuyMore(): void {
+    this.centerTop.setBuyMoreDisabled(false);
   }
 
   onNumberDrawn(number: number, _drawIndex: number, state: GameState): void {
@@ -689,6 +757,7 @@ export class PlayScreen extends Container {
   destroy(): void {
     this.leftInfo.stopCountdown();
     this.buyPopup?.destroy();
+    this.upcomingPurchase?.destroy();
     this.calledNumbers.destroy();
     this.overlayManager.destroy();
     super.destroy({ children: true });
