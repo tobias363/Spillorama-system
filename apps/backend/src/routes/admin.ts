@@ -42,6 +42,38 @@ import { buildBingoSettingsDefinition, buildDefaultGameSettingsDefinition } from
 import type { DrawScheduler } from "../draw-engine/DrawScheduler.js";
 import type { RoomSnapshot } from "../game/types.js";
 import type { RoomUpdatePayload } from "../util/roomHelpers.js";
+import type { AuditLogService, AuditActorType } from "../compliance/AuditLogService.js";
+import type { EmailService } from "../integration/EmailService.js";
+
+// ── BIN-588 wire-up helpers ───────────────────────────────────────────────────
+
+function clientIp(req: express.Request): string | null {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.trim()) {
+    return fwd.split(",")[0]!.trim();
+  }
+  return req.ip ?? null;
+}
+
+function userAgent(req: express.Request): string | null {
+  const ua = req.headers["user-agent"];
+  return typeof ua === "string" && ua.trim() ? ua : null;
+}
+
+function mapRoleToActorType(role: UserRole): AuditActorType {
+  switch (role) {
+    case "ADMIN":
+      return "ADMIN";
+    case "HALL_OPERATOR":
+      return "HALL_OPERATOR";
+    case "SUPPORT":
+      return "SUPPORT";
+    case "PLAYER":
+      return "PLAYER";
+    default:
+      return "USER";
+  }
+}
 
 // ── Types copied from index.ts ────────────────────────────────────────────────
 
@@ -111,6 +143,11 @@ export interface AdminRouterDeps {
   roomConfiguredEntryFeeByRoom: Map<string, number>;
   getPrimaryRoomForHall: (hallId: string) => { code: string; hallId: string; gameStatus: string; playerCount: number } | null;
   resolveBingoHallGameConfigForRoom: (roomCode: string) => Promise<{ hallId: string; maxTicketsPerPlayer: number }>;
+  // BIN-588 wire-up: compliance audit + transactional mail. Both are
+  // injected so tests can pass fakes and prod can pass the real store.
+  auditLogService: AuditLogService;
+  emailService: EmailService;
+  supportEmail?: string;
 }
 
 export function createAdminRouter(deps: AdminRouterDeps): express.Router {
@@ -148,9 +185,40 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
     roomConfiguredEntryFeeByRoom,
     getPrimaryRoomForHall,
     resolveBingoHallGameConfigForRoom,
+    auditLogService,
+    emailService,
+    supportEmail,
   } = deps;
 
   const router = express.Router();
+
+  // BIN-588 wire-up: compact fire-and-forget audit helper used by every
+  // admin endpoint that mutates state. Errors never propagate — the
+  // store already logs via pino — so a DB outage in the audit pipeline
+  // cannot block an admin operation.
+  function auditAdmin(
+    req: express.Request,
+    actor: { id: string; role: UserRole },
+    action: string,
+    resource: string,
+    resourceId: string | null,
+    details?: Record<string, unknown>,
+  ): void {
+    void auditLogService
+      .record({
+        actorId: actor.id,
+        actorType: mapRoleToActorType(actor.role),
+        action,
+        resource,
+        resourceId,
+        details: details ?? {},
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      })
+      .catch((err) => {
+        void err;
+      });
+  }
 
   async function getAuthenticatedUser(req: express.Request): Promise<PublicAppUser> {
     const accessToken = getAccessTokenFromRequest(req);
@@ -356,10 +424,36 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.put("/api/admin/users/:userId/role", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "USER_ROLE_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "USER_ROLE_WRITE");
       const userId = mustBeNonEmptyString(req.params.userId, "userId");
       const role = parseUserRoleInput(req.body?.role);
+      const previous = await platformService.getUserById(userId).catch(() => null);
+      const previousRole = previous?.role ?? null;
       const updated = await platformService.updateUserRole(userId, role);
+      auditAdmin(req, adminUser, "user.role.change", "user", userId, {
+        previousRole,
+        newRole: role,
+      });
+      // Notify the affected user. Fire-and-forget — an SMTP glitch must
+      // not block the role change itself.
+      if (previous?.email && previousRole !== role) {
+        const changedAt = new Date().toISOString();
+        void emailService
+          .sendTemplate({
+            to: previous.email,
+            template: "role-changed",
+            context: {
+              username: previous.displayName || previous.email,
+              previousRole: previousRole ?? "Ukjent",
+              newRole: role,
+              changedAt,
+              supportEmail: supportEmail ?? "",
+            },
+          })
+          .catch((err) => {
+            void err;
+          });
+      }
       apiSuccess(res, updated);
     } catch (error) {
       apiFailure(res, error);
@@ -372,7 +466,7 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
    */
   router.put("/api/admin/users/:userId/hall", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "USER_ROLE_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "USER_ROLE_WRITE");
       const userId = mustBeNonEmptyString(req.params.userId, "userId");
       const rawHallId = req.body?.hallId;
       const hallId =
@@ -384,6 +478,7 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
                 throw new DomainError("INVALID_INPUT", "hallId må være en streng eller null.");
               })();
       const updated = await platformService.updateUserHallAssignment(userId, hallId);
+      auditAdmin(req, adminUser, "user.hall.assign", "user", userId, { hallId });
       apiSuccess(res, updated);
     } catch (error) {
       apiFailure(res, error);
@@ -442,6 +537,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
             ? new Date(effectiveFromMs).toISOString()
             : new Date().toISOString()
       });
+      auditAdmin(req, adminUser, "game.settings.update", "game", slug, {
+        effectiveFromMs: effectiveFromMs ?? null,
+        changedKeys: Object.keys(settings ?? {}),
+      });
       apiSuccess(res, buildAdminGameSettingsResponse(updated));
     } catch (error) {
       apiFailure(res, error);
@@ -487,6 +586,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         source: "ADMIN_GAME_CATALOG_WRITE",
         effectiveFrom: new Date().toISOString()
       });
+      auditAdmin(req, adminUser, "game.update", "game", slug, {
+        fields: Object.keys(req.body ?? {}),
+        settingsChanged: rawSettings !== undefined,
+      });
       apiSuccess(res, updated);
     } catch (error) {
       apiFailure(res, error);
@@ -508,13 +611,17 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.post("/api/admin/halls", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "HALL_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "HALL_WRITE");
       const hall = await platformService.createHall({
         slug: mustBeNonEmptyString(req.body?.slug, "slug"),
         name: mustBeNonEmptyString(req.body?.name, "name"),
         region: typeof req.body?.region === "string" ? req.body.region : undefined,
         address: typeof req.body?.address === "string" ? req.body.address : undefined,
         isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined
+      });
+      auditAdmin(req, adminUser, "hall.create", "hall", hall.id, {
+        slug: hall.slug,
+        name: hall.name,
       });
       apiSuccess(res, hall);
     } catch (error) {
@@ -524,7 +631,7 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.put("/api/admin/halls/:hallId", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "HALL_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "HALL_WRITE");
       const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
       const hall = await platformService.updateHall(hallId, {
         slug: typeof req.body?.slug === "string" ? req.body.slug : undefined,
@@ -536,6 +643,9 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         // PlatformService.assertClientVariant; unknown values return
         // INVALID_INPUT, not INTERNAL_ERROR.
         clientVariant: typeof req.body?.clientVariant === "string" ? req.body.clientVariant : undefined
+      });
+      auditAdmin(req, adminUser, "hall.update", "hall", hallId, {
+        fields: Object.keys(req.body ?? {}),
       });
       apiSuccess(res, hall);
     } catch (error) {
@@ -568,6 +678,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         label,
         createdByUserId: adminUser.id,
       });
+      auditAdmin(req, adminUser, "hall.display_token.create", "hall", hallId, {
+        tokenId: (token as { id?: string }).id ?? null,
+        label: label ?? null,
+      });
       apiSuccess(res, token);
     } catch (error) {
       apiFailure(res, error);
@@ -576,10 +690,11 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.delete("/api/admin/halls/:hallId/display-tokens/:tokenId", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "HALL_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "HALL_WRITE");
       const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
       const tokenId = mustBeNonEmptyString(req.params.tokenId, "tokenId");
       await platformService.revokeHallDisplayToken(tokenId, hallId);
+      auditAdmin(req, adminUser, "hall.display_token.revoke", "hall", hallId, { tokenId });
       apiSuccess(res, { ok: true });
     } catch (error) {
       apiFailure(res, error);
@@ -619,6 +734,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         displayName,
         isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined
       });
+      auditAdmin(req, adminUser, "terminal.create", "terminal", terminal.id, {
+        hallId,
+        terminalCode,
+      });
       apiSuccess(res, terminal);
     } catch (error) {
       apiFailure(res, error);
@@ -636,6 +755,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         displayName: typeof req.body?.displayName === "string" ? req.body.displayName : undefined,
         isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined,
         lastSeenAt: typeof req.body?.lastSeenAt === "string" ? req.body.lastSeenAt : undefined
+      });
+      auditAdmin(req, adminUser, "terminal.update", "terminal", terminalId, {
+        hallId: existing.hallId,
+        fields: Object.keys(req.body ?? {}),
       });
       apiSuccess(res, terminal);
     } catch (error) {
@@ -674,6 +797,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         isEnabled: typeof req.body?.isEnabled === "boolean" ? req.body.isEnabled : undefined,
         maxTicketsPerPlayer: maxTicketsPerPlayer !== undefined ? Number(maxTicketsPerPlayer) : undefined,
         minRoundIntervalMs: minRoundIntervalMs !== undefined ? Number(minRoundIntervalMs) : undefined
+      });
+      auditAdmin(req, adminUser, "hall.game_config.update", "hall", hallId, {
+        gameSlug,
+        fields: Object.keys(req.body ?? {}),
       });
       apiSuccess(res, config);
     } catch (error) {
@@ -874,6 +1001,7 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         roomCode: enforceSingleRoomPerHall ? "BINGO1" : undefined
       });
       const snapshot = await emitRoomUpdate(roomCode);
+      auditAdmin(req, adminUser, "room.create", "room", roomCode, { hallId });
       apiSuccess(res, {
         roomCode,
         playerId,
@@ -887,10 +1015,11 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
   router.delete("/api/admin/rooms/:roomCode", async (req, res) => {
     try {
       const adminUser = await requireAdminPermissionUser(req, "ROOM_CONTROL_WRITE");
-      const { roomCode } = requireRoomHallScope(adminUser, req.params.roomCode); // BIN-591
+      const { roomCode, hallId } = requireRoomHallScope(adminUser, req.params.roomCode); // BIN-591
       engine.destroyRoom(roomCode);
       drawScheduler.releaseRoom(roomCode);
       roomConfiguredEntryFeeByRoom.delete(roomCode);
+      auditAdmin(req, adminUser, "room.delete", "room", roomCode, { hallId });
       apiSuccess(res, { deleted: roomCode });
     } catch (error) {
       apiFailure(res, error);
@@ -1070,7 +1199,7 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.put("/api/admin/wallets/:walletId/loss-limits", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
       const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
       const hallId = mustBeNonEmptyString(req.body?.hallId, "hallId");
       const dailyLossLimit = parseOptionalNonNegativeNumber(req.body?.dailyLossLimit, "dailyLossLimit");
@@ -1084,6 +1213,11 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         daily: dailyLossLimit,
         monthly: monthlyLossLimit
       });
+      auditAdmin(req, adminUser, "wallet.loss_limits.update", "wallet", walletId, {
+        hallId,
+        dailyLossLimit: dailyLossLimit ?? null,
+        monthlyLossLimit: monthlyLossLimit ?? null,
+      });
       apiSuccess(res, compliance);
     } catch (error) {
       apiFailure(res, error);
@@ -1092,12 +1226,15 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.post("/api/admin/wallets/:walletId/timed-pause", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
       const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
       const durationMinutes = parseOptionalPositiveInteger(req.body?.durationMinutes, "durationMinutes");
       const compliance = await engine.setTimedPause({
         walletId,
         durationMinutes: durationMinutes ?? 15
+      });
+      auditAdmin(req, adminUser, "wallet.timed_pause.set", "wallet", walletId, {
+        durationMinutes: durationMinutes ?? 15,
       });
       apiSuccess(res, compliance);
     } catch (error) {
@@ -1107,9 +1244,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.delete("/api/admin/wallets/:walletId/timed-pause", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
       const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
       const compliance = await engine.clearTimedPause(walletId);
+      auditAdmin(req, adminUser, "wallet.timed_pause.clear", "wallet", walletId);
       apiSuccess(res, compliance);
     } catch (error) {
       apiFailure(res, error);
@@ -1118,9 +1256,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.post("/api/admin/wallets/:walletId/self-exclusion", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
       const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
       const compliance = await engine.setSelfExclusion(walletId);
+      auditAdmin(req, adminUser, "wallet.self_exclusion.set", "wallet", walletId);
       apiSuccess(res, compliance);
     } catch (error) {
       apiFailure(res, error);
@@ -1129,9 +1268,10 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.delete("/api/admin/wallets/:walletId/self-exclusion", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "WALLET_COMPLIANCE_WRITE");
       const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
       const compliance = await engine.clearSelfExclusion(walletId);
+      auditAdmin(req, adminUser, "wallet.self_exclusion.clear", "wallet", walletId);
       apiSuccess(res, compliance);
     } catch (error) {
       apiFailure(res, error);
@@ -1172,11 +1312,13 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.put("/api/admin/prize-policy", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "PRIZE_POLICY_WRITE");
+      const adminUser = await requireAdminPermissionUser(req, "PRIZE_POLICY_WRITE");
+      const hallId = typeof req.body?.hallId === "string" ? req.body.hallId : undefined;
+      const linkId = typeof req.body?.linkId === "string" ? req.body.linkId : undefined;
       const policy = await engine.upsertPrizePolicy({
         gameType: "DATABINGO",
-        hallId: typeof req.body?.hallId === "string" ? req.body.hallId : undefined,
-        linkId: typeof req.body?.linkId === "string" ? req.body.linkId : undefined,
+        hallId,
+        linkId,
         effectiveFrom: mustBeNonEmptyString(req.body?.effectiveFrom, "effectiveFrom"),
         singlePrizeCap:
           req.body?.singlePrizeCap === undefined
@@ -1187,6 +1329,12 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
             ? undefined
             : parseOptionalNonNegativeNumber(req.body?.dailyExtraPrizeCap, "dailyExtraPrizeCap")
       });
+      auditAdmin(req, adminUser, "prize_policy.update", "prize_policy", linkId ?? hallId ?? "global", {
+        hallId: hallId ?? null,
+        linkId: linkId ?? null,
+        effectiveFrom: req.body?.effectiveFrom,
+        fields: Object.keys(req.body ?? {}),
+      });
       apiSuccess(res, policy);
     } catch (error) {
       apiFailure(res, error);
@@ -1195,7 +1343,7 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
 
   router.post("/api/admin/wallets/:walletId/extra-prize", async (req, res) => {
     try {
-      await requireAdminPermissionUser(req, "EXTRA_PRIZE_AWARD");
+      const adminUser = await requireAdminPermissionUser(req, "EXTRA_PRIZE_AWARD");
       const walletId = mustBeNonEmptyString(req.params.walletId, "walletId");
       const hallId = mustBeNonEmptyString(req.body?.hallId, "hallId");
       const amount = mustBePositiveAmount(req.body?.amount);
@@ -1209,6 +1357,12 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         reason
       });
       await emitWalletRoomUpdates([walletId]);
+      auditAdmin(req, adminUser, "wallet.extra_prize.award", "wallet", walletId, {
+        hallId,
+        amount,
+        linkId: linkId ?? null,
+        reason: reason ?? null,
+      });
       apiSuccess(res, result);
     } catch (error) {
       apiFailure(res, error);

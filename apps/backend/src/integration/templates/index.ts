@@ -21,11 +21,17 @@ import {
   BANKID_EXPIRY_SUBJECT,
   BANKID_EXPIRY_TEXT,
 } from "./bankid-expiry-reminder.js";
+import {
+  ROLE_CHANGED_HTML,
+  ROLE_CHANGED_SUBJECT,
+  ROLE_CHANGED_TEXT,
+} from "./role-changed.js";
 
 export type TemplateKey =
   | "verify-email"
   | "reset-password"
-  | "bankid-expiry-reminder";
+  | "bankid-expiry-reminder"
+  | "role-changed";
 
 export interface EmailTemplate {
   subject: string;
@@ -48,6 +54,11 @@ export const EMAIL_TEMPLATES: Record<TemplateKey, EmailTemplate> = {
     subject: BANKID_EXPIRY_SUBJECT,
     html: BANKID_EXPIRY_HTML,
     text: BANKID_EXPIRY_TEXT,
+  },
+  "role-changed": {
+    subject: ROLE_CHANGED_SUBJECT,
+    html: ROLE_CHANGED_HTML,
+    text: ROLE_CHANGED_TEXT,
   },
 };
 
