@@ -715,6 +715,68 @@ export class PlatformService {
     }
   }
 
+  /**
+   * BIN-583 B3.2: sjekk at en spiller har ACTIVE-registrering i angitt hall.
+   *
+   * Kjernepremiss for agent-cash-ops: agenten kan kun transakte for
+   * spillere som er godkjent i hallen. Matcher legacy `approvedHalls: {
+   * $elemMatch: { id: hallId } }`-regelen.
+   */
+  async isPlayerActiveInHall(userId: string, hallId: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const { rows } = await this.pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM "${this.schema}"."app_hall_registrations"
+         WHERE user_id = $1 AND hall_id = $2 AND status = 'ACTIVE'
+       ) AS exists`,
+      [userId, hallId]
+    );
+    return Boolean(rows[0]?.exists);
+  }
+
+  /**
+   * BIN-583 B3.2: paginert player-søk for agent-kassa.
+   *
+   * Matcher legacy checkForValidAgentPlayer — søker på customerNumber
+   * (som parses som tall hvis mulig), display_name, phone. Begrenset
+   * til spillere som er ACTIVE i angitt hall.
+   */
+  async searchPlayersInHall(input: {
+    query: string;
+    hallId: string;
+    limit?: number;
+  }): Promise<AppUser[]> {
+    await this.ensureInitialized();
+    const query = input.query.trim();
+    if (!query) {
+      throw new DomainError("INVALID_INPUT", "query er påkrevd.");
+    }
+    if (query.length < 2) {
+      throw new DomainError("INVALID_INPUT", "query må være minst 2 tegn.");
+    }
+    const escaped = query.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const pattern = `${escaped}%`; // Prefix-match (matcher legacy "starts with")
+    const limit = input.limit && input.limit > 0 ? Math.min(input.limit, 50) : 20;
+    const { rows } = await this.pool.query<UserRow>(
+      `SELECT u.id, u.email, u.display_name, u.surname, u.phone, u.wallet_id, u.role,
+              u.kyc_status, u.birth_date, u.kyc_verified_at, u.kyc_provider_ref,
+              u.hall_id, u.created_at, u.updated_at, u.compliance_data
+       FROM ${this.usersTable()} u
+       JOIN "${this.schema}"."app_hall_registrations" r ON r.user_id = u.id
+       WHERE u.role = 'PLAYER'
+         AND u.deleted_at IS NULL
+         AND r.hall_id = $2
+         AND r.status = 'ACTIVE'
+         AND (u.display_name ILIKE $1 ESCAPE '\\'
+           OR u.email ILIKE $1 ESCAPE '\\'
+           OR u.phone ILIKE $1 ESCAPE '\\')
+       ORDER BY u.display_name ASC
+       LIMIT $3`,
+      [pattern, input.hallId, limit]
+    );
+    return rows.map((r) => this.mapUser(r));
+  }
+
   async listGames(options?: { includeDisabled?: boolean }): Promise<GameDefinition[]> {
     await this.ensureInitialized();
     const includeDisabled = options?.includeDisabled ?? false;

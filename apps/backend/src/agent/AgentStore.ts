@@ -121,6 +121,22 @@ export interface AgentStore {
   getShiftById(shiftId: string): Promise<AgentShift | null>;
   listShiftsForUser(userId: string, limit?: number, offset?: number): Promise<AgentShift[]>;
   listActiveShiftsForHall(hallId: string): Promise<AgentShift[]>;
+
+  /**
+   * BIN-583 B3.2: atomic mutation of shift cash-columns during cash-ops.
+   * Deltas are signed (cash-in is positive, cash-out is negative). Must be
+   * called inside the same DB transaction as the transaction-row insert.
+   */
+  applyShiftCashDelta(shiftId: string, delta: ShiftCashDelta): Promise<AgentShift>;
+}
+
+export interface ShiftCashDelta {
+  totalCashIn?: number;
+  totalCashOut?: number;
+  totalCardIn?: number;
+  totalCardOut?: number;
+  dailyBalance?: number;
+  sellingByCustomerNumber?: number;
 }
 
 // ── Postgres implementation ─────────────────────────────────────────────────
@@ -522,6 +538,38 @@ export class PostgresAgentStore implements AgentStore {
     return rows.map((r) => this.mapShift(r));
   }
 
+  async applyShiftCashDelta(shiftId: string, delta: ShiftCashDelta): Promise<AgentShift> {
+    // Bygg UPDATE-setning dynamisk basert på hvilke felter som er med.
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    function addDelta(col: string, value: number | undefined): void {
+      if (value === undefined || value === 0) return;
+      params.push(value);
+      sets.push(`${col} = ${col} + $${params.length}`);
+    }
+    addDelta("total_cash_in", delta.totalCashIn);
+    addDelta("total_cash_out", delta.totalCashOut);
+    addDelta("total_card_in", delta.totalCardIn);
+    addDelta("total_card_out", delta.totalCardOut);
+    addDelta("daily_balance", delta.dailyBalance);
+    addDelta("selling_by_customer_number", delta.sellingByCustomerNumber);
+    if (sets.length === 0) {
+      const existing = await this.getShiftById(shiftId);
+      if (!existing) throw new Error("[BIN-583] shift not found");
+      return existing;
+    }
+    params.push(shiftId);
+    const { rows } = await this.pool.query<ShiftRow>(
+      `UPDATE ${this.shifts()}
+       SET ${sets.join(", ")}, updated_at = now()
+       WHERE id = $${params.length}
+       RETURNING *`,
+      params
+    );
+    if (!rows[0]) throw new Error("[BIN-583] shift not found");
+    return this.mapShift(rows[0]);
+  }
+
   private mapProfile(row: AgentRow, halls: AgentHallAssignment[]): AgentProfile {
     return {
       userId: row.id,
@@ -823,6 +871,19 @@ export class InMemoryAgentStore implements AgentStore {
       .filter((s) => s.hallId === hallId && s.isActive)
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
       .map((s) => ({ ...s }));
+  }
+
+  async applyShiftCashDelta(shiftId: string, delta: ShiftCashDelta): Promise<AgentShift> {
+    const s = this.shifts.get(shiftId);
+    if (!s) throw new Error("[BIN-583] shift not found");
+    if (delta.totalCashIn) s.totalCashIn += delta.totalCashIn;
+    if (delta.totalCashOut) s.totalCashOut += delta.totalCashOut;
+    if (delta.totalCardIn) s.totalCardIn += delta.totalCardIn;
+    if (delta.totalCardOut) s.totalCardOut += delta.totalCardOut;
+    if (delta.dailyBalance) s.dailyBalance += delta.dailyBalance;
+    if (delta.sellingByCustomerNumber) s.sellingByCustomerNumber += delta.sellingByCustomerNumber;
+    s.updatedAt = new Date().toISOString();
+    return { ...s };
   }
 
   private toProfile(row: MemAgentRow): AgentProfile {

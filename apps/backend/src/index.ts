@@ -59,9 +59,14 @@ import { createAdminSecurityRouter } from "./routes/adminSecurity.js";
 import { SecurityService } from "./compliance/SecurityService.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createAdminAgentsRouter } from "./routes/adminAgents.js";
+import { createAgentTransactionsRouter } from "./routes/agentTransactions.js";
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
+import { AgentTransactionService } from "./agent/AgentTransactionService.js";
+import { PostgresAgentTransactionStore } from "./agent/AgentTransactionStore.js";
+import { NotImplementedTicketPurchasePort } from "./agent/ports/TicketPurchasePort.js";
+import { PostgresPhysicalTicketReadPort } from "./agent/ports/PhysicalTicketReadPort.js";
 import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.js";
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
@@ -302,6 +307,16 @@ const agentStore = new PostgresAgentStore({
 });
 const agentService = new AgentService({ platformService, agentStore });
 const agentShiftService = new AgentShiftService({ agentStore, agentService });
+
+// BIN-583 B3.2: agent cash-ops + ticket sale + transaction-log.
+// PhysicalTicketService er instansiert litt senere (linje ~267); vi
+// wirer opp AgentTransactionService etter at physicalTicketService er
+// klar — forward-referanse via closure i route-wiring.
+const agentTransactionStore = new PostgresAgentTransactionStore({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const ticketPurchasePort = new NotImplementedTicketPurchasePort();
 
 const webBaseUrl =
   (process.env.APP_WEB_BASE_URL?.trim() || "http://localhost:5173").replace(/\/+$/, "");
@@ -569,6 +584,31 @@ app.use(createAdminAgentsRouter({
   platformService,
   agentService,
   agentShiftService,
+  auditLogService,
+}));
+
+// BIN-583 B3.2: agent cash-ops + ticket sale + transaction log.
+// PhysicalTicketService (B4a) instansieres over — vi bygger opp
+// transaction-servicen her slik at alle dependencies er klare.
+const physicalTicketReadPort = new PostgresPhysicalTicketReadPort({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const agentTransactionService = new AgentTransactionService({
+  platformService,
+  walletAdapter,
+  physicalTicketService,
+  physicalTicketReadPort,
+  ticketPurchasePort,
+  agentService,
+  agentShiftService,
+  agentStore,
+  transactionStore: agentTransactionStore,
+});
+app.use(createAgentTransactionsRouter({
+  platformService,
+  agentService,
+  agentTransactionService,
   auditLogService,
 }));
 

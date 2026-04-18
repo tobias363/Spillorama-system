@@ -59,6 +59,8 @@ tags:
     description: Agent shift lifecycle (start/end/current/history). BIN-583 B3.1.
   - name: Admin — Agents
     description: Admin CRUD for agent users (list/create/read/update/soft-delete). BIN-583 B3.1.
+  - name: Agent — Transactions
+    description: Agent cash-ops (cash-in/out), player lookup + balance, digital/physical ticket sale + cancel, transaction log. BIN-583 B3.2.
 
 components:
   securitySchemes:
@@ -661,6 +663,69 @@ components:
         expiresAt: { type: string, format: date-time }
         user: { $ref: "#/components/schemas/AppUser" }
         agent: { $ref: "#/components/schemas/AgentProfile" }
+
+    # ── BIN-583 B3.2: agent-transaksjon-skjema ───────────────────────────────
+    AgentTransaction:
+      type: object
+      required: [id, shiftId, agentUserId, playerUserId, hallId, actionType,
+                 walletDirection, paymentMethod, amount, previousBalance,
+                 afterBalance, createdAt]
+      properties:
+        id: { type: string }
+        shiftId: { type: string }
+        agentUserId: { type: string }
+        playerUserId: { type: string }
+        hallId: { type: string }
+        actionType:
+          type: string
+          enum: [CASH_IN, CASH_OUT, TICKET_SALE, TICKET_REGISTER, TICKET_CANCEL, FEE, OTHER]
+        walletDirection:
+          type: string
+          enum: [CREDIT, DEBIT]
+        paymentMethod:
+          type: string
+          enum: [CASH, CARD, WALLET]
+        amount: { type: number }
+        previousBalance: { type: number }
+        afterBalance: { type: number }
+        walletTxId: { type: [string, "null"] }
+        ticketUniqueId: { type: [string, "null"] }
+        externalReference: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        otherData: { type: object, additionalProperties: true }
+        relatedTxId: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+
+    PhysicalTicketInventory:
+      type: object
+      required: [uniqueId, batchId, hallId, status, priceCents]
+      properties:
+        uniqueId: { type: string }
+        batchId: { type: string }
+        hallId: { type: string }
+        status:
+          type: string
+          enum: [UNSOLD, SOLD, VOIDED]
+        priceCents: { type: integer }
+        assignedGameId: { type: [string, "null"] }
+
+    PlayerLookupResult:
+      type: object
+      required: [id, email, displayName]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        phone: { type: [string, "null"] }
+
+    PlayerBalanceSnapshot:
+      type: object
+      required: [playerUserId, walletBalance, displayName, email]
+      properties:
+        playerUserId: { type: string }
+        walletBalance: { type: number }
+        displayName: { type: string }
+        email: { type: string, format: email }
 
 security:
   - BearerAuth: []
@@ -4530,6 +4595,384 @@ paths:
                           deleted: { type: boolean, enum: [true] }
         "400":
           description: AGENT_HAS_ACTIVE_SHIFT / AGENT_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  # ── BIN-583 B3.2: Agent-transactions ────────────────────────────────────────
+
+  /api/agent/players/lookup:
+    post:
+      tags: [Agent — Transactions]
+      summary: Search players in the agent's active-shift hall (prefix-match)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string, minLength: 2 }
+      responses:
+        "200":
+          description: Matching players (max 20)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          players:
+                            type: array
+                            items: { $ref: "#/components/schemas/PlayerLookupResult" }
+        "400":
+          description: INVALID_INPUT / FORBIDDEN / NO_ACTIVE_SHIFT
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/players/{id}/balance:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — Transactions]
+      summary: Read a player's wallet balance (requires PLAYER_NOT_AT_HALL-check)
+      responses:
+        "200":
+          description: Balance snapshot
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PlayerBalanceSnapshot" }
+        "400":
+          description: PLAYER_NOT_AT_HALL / NO_ACTIVE_SHIFT / USER_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/players/{id}/cash-in:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Agent — Transactions]
+      summary: Credit player wallet (CASH increments shift.daily_balance, CARD doesn't)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, paymentMethod, clientRequestId]
+              properties:
+                amount: { type: number, exclusiveMinimum: 0 }
+                paymentMethod: { type: string, enum: [CASH, CARD] }
+                clientRequestId: { type: string }
+                notes: { type: string }
+                externalReference: { type: string }
+      responses:
+        "200":
+          description: Cash-in recorded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentTransaction" }
+        "400":
+          description: INVALID_INPUT / PLAYER_NOT_AT_HALL / NO_ACTIVE_SHIFT
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/players/{id}/cash-out:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Agent — Transactions]
+      summary: Debit player wallet (CASH requires sufficient shift.daily_balance)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, paymentMethod, clientRequestId]
+              properties:
+                amount: { type: number, exclusiveMinimum: 0 }
+                paymentMethod: { type: string, enum: [CASH, CARD] }
+                clientRequestId: { type: string }
+                notes: { type: string }
+                externalReference: { type: string }
+      responses:
+        "200":
+          description: Cash-out recorded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentTransaction" }
+        "400":
+          description: INSUFFICIENT_BALANCE / INSUFFICIENT_DAILY_BALANCE / PLAYER_NOT_AT_HALL
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/tickets/register:
+    post:
+      tags: [Agent — Transactions]
+      summary: Register digital ticket for player (STUB — NOT_IMPLEMENTED until G2/G3 web-native)
+      description: |
+        Endpoint er live men port-stub returnerer alltid NOT_IMPLEMENTED.
+        Reelle impl kommer i BIN-608 når G2/G3 portes fra Unity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerUserId, gameId, ticketCount, pricePerTicketCents, clientRequestId]
+              properties:
+                playerUserId: { type: string }
+                gameId: { type: string }
+                ticketCount: { type: integer, minimum: 1 }
+                pricePerTicketCents: { type: integer, minimum: 1 }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Future — transaction record when BIN-608 implementerer real port.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentTransaction" }
+        "400":
+          description: NOT_IMPLEMENTED (inntil BIN-608 lander)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/physical/inventory:
+    get:
+      tags: [Agent — Transactions]
+      summary: List unsold physical tickets in the agent's hall
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        "200":
+          description: Inventory
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          tickets:
+                            type: array
+                            items: { $ref: "#/components/schemas/PhysicalTicketInventory" }
+                          limit: { type: integer }
+                          offset: { type: integer }
+
+  /api/agent/physical/sell:
+    post:
+      tags: [Agent — Transactions]
+      summary: Sell a physical ticket at the POS (marks ticket SOLD via PhysicalTicketService)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerUserId, ticketUniqueId, paymentMethod, clientRequestId]
+              properties:
+                playerUserId: { type: string }
+                ticketUniqueId: { type: string }
+                paymentMethod: { type: string, enum: [CASH, CARD, WALLET] }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Sale recorded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentTransaction" }
+        "400":
+          description: PHYSICAL_TICKET_NOT_FOUND / PHYSICAL_TICKET_NOT_SELLABLE / PHYSICAL_TICKET_WRONG_HALL / INSUFFICIENT_BALANCE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/physical/sell/cancel:
+    post:
+      tags: [Agent — Transactions]
+      summary: Cancel a physical ticket sale within 10 minutes (counter-transaction, ticket status stays SOLD)
+      description: |
+        Oppretter counter-transaction med related_tx_id som peker på
+        originalen. Ticket-status på app_physical_tickets endres IKKE —
+        fysisk billett er allerede overlevert. 10-min vindu for agent;
+        ADMIN kan force-cancel utover vinduet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [originalTxId]
+              properties:
+                originalTxId: { type: string }
+                reason: { type: string }
+      responses:
+        "200":
+          description: Counter-transaction recorded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentTransaction" }
+        "400":
+          description: TRANSACTION_NOT_FOUND / CANCEL_WINDOW_EXPIRED / ALREADY_CANCELLED / FORBIDDEN / WRONG_SHIFT / NOT_CANCELLABLE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/transactions/today:
+    get:
+      tags: [Agent — Transactions]
+      summary: List agent's transactions for current shift (shift-based, not wall-clock)
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Transactions for current shift
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          transactions:
+                            type: array
+                            items: { $ref: "#/components/schemas/AgentTransaction" }
+                          limit: { type: integer }
+                          offset: { type: integer }
+
+  /api/agent/transactions:
+    get:
+      tags: [Agent — Transactions]
+      summary: Paginated transaction history (AGENT sees only own; admin roles see all with filters)
+      parameters:
+        - in: query
+          name: agentUserId
+          schema: { type: string }
+          description: Filter by agent (admin-only; AGENT kallsted override-r til selv)
+        - in: query
+          name: playerUserId
+          schema: { type: string }
+        - in: query
+          name: shiftId
+          schema: { type: string }
+        - in: query
+          name: actionType
+          schema:
+            type: string
+            enum: [CASH_IN, CASH_OUT, TICKET_SALE, TICKET_REGISTER, TICKET_CANCEL, FEE, OTHER]
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          transactions:
+                            type: array
+                            items: { $ref: "#/components/schemas/AgentTransaction" }
+                          limit: { type: integer }
+                          offset: { type: integer }
+
+  /api/agent/transactions/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — Transactions]
+      summary: Get a single transaction (AGENT only sees own transactions)
+      responses:
+        "200":
+          description: Transaction detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AgentTransaction" }
+        "400":
+          description: TRANSACTION_NOT_FOUND / FORBIDDEN
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
