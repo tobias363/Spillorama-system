@@ -439,6 +439,9 @@ app.use(createAdminRouter({
   roomConfiguredEntryFeeByRoom: roomState.roomConfiguredEntryFeeByRoom,
   getPrimaryRoomForHall: (hallId) => getPrimaryRoomForHall(hallId, engine.listRoomSummaries()),
   resolveBingoHallGameConfigForRoom,
+  auditLogService,
+  emailService,
+  supportEmail,
 }));
 
 app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPayService, emitWalletRoomUpdates }));
