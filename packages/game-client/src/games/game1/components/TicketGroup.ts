@@ -68,6 +68,7 @@ export class TicketGroup extends Container {
   private cardW = 0;
   private cardH = 0;
   private sharedBgColor: number;
+  private sharedBgAlpha: number;
 
   // Layout constants (shared across variants).
   private static readonly OUTER_PAD = 8;
@@ -79,7 +80,15 @@ export class TicketGroup extends Container {
   constructor(options: TicketGroupOptions) {
     super();
     this.variant = options.variant;
-    this.sharedBgColor = options.sharedTheme.cardBg;
+    // BIN-608: The shared outer container BG maps to Unity's Large_BG_Color
+    // (Game1ViewPurchaseElvisTicket.cs:23 Large_BG, extracted via
+    // TicketColorManager struct at TicketColorManager.cs:9), NOT the inner
+    // cardBg (Block / per-mini card). Using cardBg here caused the wrong
+    // swatch behind Elvis/Large/Traffic groups; largeBg + largeBgAlpha is
+    // the correct surface — and alpha=0 means Unity intentionally draws no
+    // outer container at all.
+    this.sharedBgColor = options.sharedTheme.largeBg;
+    this.sharedBgAlpha = options.sharedTheme.largeBgAlpha ?? 1;
 
     const cellSize = options.cellSize ?? 44;
     const gridSize = options.gridSize ?? "3x5";
@@ -208,9 +217,15 @@ export class TicketGroup extends Container {
 
   private paintChrome(headerBgColor: number): void {
     // Shared outer BG (Unity: Ticket_BG / imageBG colored via Large_BG_Color).
+    // BIN-608: Unity themes with largeBgAlpha === 0 (Small Yellow, Small
+    // White, Large White) render NO outer container at all — the cells sit
+    // directly on the scene background. Skipping the fill in that case gives
+    // an identical visual match.
     this.cardBg.clear();
-    this.cardBg.roundRect(0, 0, this.cardW, this.cardH, TicketGroup.BORDER_RADIUS);
-    this.cardBg.fill(this.sharedBgColor);
+    if (this.sharedBgAlpha > 0) {
+      this.cardBg.roundRect(0, 0, this.cardW, this.cardH, TicketGroup.BORDER_RADIUS);
+      this.cardBg.fill({ color: this.sharedBgColor, alpha: this.sharedBgAlpha });
+    }
 
     // Header bar.
     this.headerBg.clear();
