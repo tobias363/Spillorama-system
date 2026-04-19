@@ -85,6 +85,7 @@ export class PlayScreen extends Container {
   private bingoAlreadyWon = false;
   private lastState: GameState | null = null;
   private isWaitingMode = false;
+  private pauseAwareBridge: { getState(): { isPaused: boolean } } | null = null;
 
   constructor(
     screenWidth: number,
@@ -93,11 +94,20 @@ export class PlayScreen extends Container {
     socket: SpilloramaSocket,
     roomCode: string,
     container: HTMLElement,
+    /**
+     * BIN-420 G23: pause-aware bridge. Passed through to CenterBall and
+     * LeftInfoPanel so their countdown setIntervals honour `state.isPaused`
+     * (matches Unity `Game1GamePlayPanel.SocketFlow.cs:672-696`).
+     * Optional to keep existing tests that construct PlayScreen without a
+     * bridge compatible.
+     */
+    bridge?: { getState(): { isPaused: boolean } },
   ) {
     super();
     this.audio = audio;
     this.screenW = screenWidth;
     this.screenH = screenHeight;
+    this.pauseAwareBridge = bridge ?? null;
 
     // Background image
     this.loadBackground(screenWidth, screenHeight);
@@ -114,7 +124,7 @@ export class PlayScreen extends Container {
     // Buy popup is created later as an HTML overlay (see below)
 
     // Center ball (Unity: large animated ball showing last drawn number / countdown)
-    this.centerBall = new CenterBall();
+    this.centerBall = new CenterBall(bridge);
     this.centerBall.x = TUBE_COLUMN_WIDTH + (screenWidth - TUBE_COLUMN_WIDTH - CHAT_WIDTH) / 2 - 60;
     this.centerBall.y = 20;
     this.addChild(this.centerBall);
@@ -164,7 +174,7 @@ export class PlayScreen extends Container {
     root.appendChild(tubeSpacer);
 
     // Left info panel
-    this.leftInfo = new LeftInfoPanel(this.overlayManager);
+    this.leftInfo = new LeftInfoPanel(this.overlayManager, this.pauseAwareBridge ?? undefined);
 
     // Called numbers overlay (fullscreen grid of drawn balls)
     this.calledNumbers = new CalledNumbersOverlay(this.overlayManager);
@@ -761,6 +771,22 @@ export class PlayScreen extends Container {
     this.calledNumbers.destroy();
     this.overlayManager.destroy();
     super.destroy({ children: true });
+  }
+
+  /**
+   * BIN-420 G26 (Gap #2): Revert a claim button from pending/submitted back to
+   * a clickable "ready" state after a server NACK. Called from Game1Controller
+   * when `submitClaim` returns `ok:false`. Also unsets the already-won flag so
+   * auto-claim can retry on the next number draw.
+   */
+  resetClaimButton(type: "LINE" | "BINGO"): void {
+    if (type === "LINE") {
+      this.lineAlreadyWon = false;
+      this.lineBtn.setState("ready");
+    } else {
+      this.bingoAlreadyWon = false;
+      this.bingoBtn.setState("ready");
+    }
   }
 
   private updateClaimButtons(state: GameState): void {

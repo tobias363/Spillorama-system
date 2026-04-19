@@ -3,6 +3,11 @@ import gsap from "gsap";
 
 const BALL_SIZE = 120;
 
+/** Bridge-state shape used for pause-awareness. */
+interface PauseAwareBridge {
+  getState(): { isPaused: boolean };
+}
+
 /**
  * Large animated bingo ball displayed in the center of the play area.
  *
@@ -12,6 +17,13 @@ const BALL_SIZE = 120;
  *
  * Also supports countdown mode: displays seconds remaining before
  * the next game starts, ticking down each second.
+ *
+ * Unity parity for pause-hook:
+ *   - `Game1GamePlayPanel.SocketFlow.cs:672-696` — when server emits pause,
+ *     the scheduler countdown freezes. Client mirrors by not ticking down
+ *     the local display. When the server resumes, it sends a fresh
+ *     `millisUntilNextStart` — the controller re-calls `startCountdown`
+ *     with the new deadline.
  */
 export class CenterBall extends Container {
   private ballSprite: Sprite | null = null;
@@ -20,9 +32,12 @@ export class CenterBall extends Container {
   private idleTween: gsap.core.Tween | null = null;
   private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private countdownDeadline = 0;
+  private countdownRemainingMs = 0;
+  private bridge: PauseAwareBridge | null = null;
 
-  constructor() {
+  constructor(bridge?: PauseAwareBridge) {
     super();
+    this.bridge = bridge ?? null;
 
     // Number text (created first, positioned after sprite loads)
     this.numberText = new Text({
@@ -118,6 +133,7 @@ export class CenterBall extends Container {
     }
 
     this.countdownDeadline = Date.now() + millisUntilStart;
+    this.countdownRemainingMs = millisUntilStart;
     this.updateCountdownDisplay();
 
     this.countdownInterval = setInterval(() => {
@@ -125,10 +141,24 @@ export class CenterBall extends Container {
         this.stopCountdown();
         return;
       }
+      // BIN-420 G23: while the server-authoritative state is paused, do not
+      // tick the countdown down. Push the deadline forward by the interval so
+      // the remaining time is preserved until resume (server sends a fresh
+      // millisUntilNextStart on resume which triggers a re-call anyway — this
+      // keeps the display frozen in the gap between pause and resume events).
+      if (this.bridge?.getState().isPaused) {
+        this.countdownDeadline += 250;
+        return;
+      }
       this.updateCountdownDisplay();
     }, 250);
 
     this.startIdleFloat();
+  }
+
+  /** Test/controller-facing: swap bridge after construction. */
+  setBridge(bridge: PauseAwareBridge): void {
+    this.bridge = bridge;
   }
 
   /** Show waiting text with no countdown (e.g. "waiting for tickets"). */
