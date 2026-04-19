@@ -5,9 +5,12 @@
 -- hall-begrenset. En HALL_OPERATOR med NULL hall_id har ingen
 -- write-tilgang til hall-scoped ressurser (fail closed).
 --
--- Up
+-- Up migration
+-- BIN-657: IF NOT EXISTS — this migration was partially applied to dev DB
+-- during earlier failed migrate attempts (column + FK added but migration
+-- not recorded in pgmigrations). Idempotency makes re-running safe.
 ALTER TABLE app_users
-  ADD COLUMN hall_id TEXT NULL REFERENCES app_halls(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS hall_id TEXT NULL REFERENCES app_halls(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_app_users_hall_id
   ON app_users(hall_id) WHERE hall_id IS NOT NULL;

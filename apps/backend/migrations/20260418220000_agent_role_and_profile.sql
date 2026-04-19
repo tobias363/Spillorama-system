@@ -9,7 +9,7 @@
 -- CRUD, prize policy); AGENT is the operator-on-the-floor persona. Kept
 -- distinct per RBAC principle — two personas, two roles.
 --
--- Up
+-- Up migration
 
 -- Drop existing CHECK so we can widen it. PlatformService.initializeSchema
 -- also self-heals this constraint via ensureUserRoleConstraint() at

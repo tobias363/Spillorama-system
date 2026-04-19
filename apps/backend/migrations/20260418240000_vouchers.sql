@@ -16,7 +16,7 @@
 -- valid_from/valid_to:
 --   ISO timestamps, NULL = ingen begrensning
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_vouchers (
   id              TEXT PRIMARY KEY,

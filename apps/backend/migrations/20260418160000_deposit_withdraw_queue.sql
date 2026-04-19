@@ -8,10 +8,15 @@
 -- `app_deposit_requests` og `app_withdraw_requests` har identisk struktur
 -- for enkelhets skyld — eneste forskjellen er semantisk (credit vs debit).
 --
--- Up
+-- Up migration
 
+-- BIN-657: id declared as TEXT (not UUID) to keep id-type consistent with
+-- the rest of the schema (app_halls.id, app_users.id, hall_game_schedules.id
+-- all TEXT). Future FKs pointing to this table's id will be TEXT — avoids
+-- the cross-type FK rejection that hit BIN-657 in the first place. Code
+-- generates ids via `randomUUID()` which TEXT accepts.
 CREATE TABLE IF NOT EXISTS app_deposit_requests (
-  id UUID PRIMARY KEY,
+  id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
   wallet_id TEXT NOT NULL,
   amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
@@ -30,7 +35,8 @@ CREATE TABLE IF NOT EXISTS app_deposit_requests (
 );
 
 CREATE TABLE IF NOT EXISTS app_withdraw_requests (
-  id UUID PRIMARY KEY,
+  -- BIN-657: TEXT for same reason as app_deposit_requests.id above.
+  id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
   wallet_id TEXT NOT NULL,
   amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),

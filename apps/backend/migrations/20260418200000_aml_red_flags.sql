@@ -9,7 +9,7 @@
 --      eller inaktiveres. opened_by kan være null for automatiske
 --      flagginger; reviewed_by settes først ved review.
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_aml_rules (
   id                     TEXT PRIMARY KEY,

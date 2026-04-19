@@ -11,7 +11,7 @@
 --   - started_at defaults to now(); ended_at NULL while is_active.
 --   - (hall_id, user_id) composite must be in app_agent_halls before start.
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_agent_shifts (
   id                            TEXT PRIMARY KEY,

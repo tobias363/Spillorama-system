@@ -11,7 +11,7 @@
 --      i en in-memory cache med 5-min TTL. Integreres med
 --      HttpRateLimiter som pre-check.
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_withdraw_email_allowlist (
   id          TEXT PRIMARY KEY,
@@ -38,10 +38,16 @@ CREATE TABLE IF NOT EXISTS app_blocked_ips (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Partial index: kun IP-er som ikke er utløpt trenger rask oppslag.
+-- Partial index: kun IP-er uten utløpsdato (permanent blokkert).
+-- BIN-657: tidligere `WHERE ... OR expires_at > now()` ble avvist av
+-- Postgres fordi `now()` er STABLE (ikke IMMUTABLE) — funksjoner i
+-- index-predikater må være IMMUTABLE. Droppet now()-sjekken; app-koden
+-- filtrerer expired uansett (SecurityService.refreshBlockedIpCache
+-- sjekker expires_at i WHERE-clause). Indeksen dekker permanente
+-- blokkeringer fullt ut + hjelper expires_at-filterets planner.
 CREATE INDEX IF NOT EXISTS idx_app_blocked_ips_active
   ON app_blocked_ips(ip_address)
-  WHERE expires_at IS NULL OR expires_at > now();
+  WHERE expires_at IS NULL;
 
 COMMENT ON TABLE app_withdraw_email_allowlist IS
   'BIN-587 B3-security: CC-liste for uttak-notifikasjoner til revisor/økonomi. Ikke mottaker-allowlist.';

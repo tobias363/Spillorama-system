@@ -8,7 +8,7 @@
 -- Default 0 — hall starter uten kontanter; balance bygges opp av
 -- daily settlements.
 --
--- Up
+-- Up migration
 
 ALTER TABLE app_halls
   ADD COLUMN IF NOT EXISTS cash_balance NUMERIC(14, 2) NOT NULL DEFAULT 0;

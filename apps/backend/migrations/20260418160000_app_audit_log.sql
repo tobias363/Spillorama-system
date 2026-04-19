@@ -11,7 +11,7 @@
 -- of PII before insert — see AuditLogService). Wide enough to absorb
 -- every future audit-worthy event without another schema change.
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_audit_log (
   id            BIGSERIAL PRIMARY KEY,
@@ -50,7 +50,7 @@ COMMENT ON COLUMN app_audit_log.action IS
 COMMENT ON COLUMN app_audit_log.details IS
   'Structured context for the event. Must be PII-redacted before insert.';
 
--- Down
+-- Down migration
 
 DROP INDEX IF EXISTS idx_app_audit_log_action_created;
 DROP INDEX IF EXISTS idx_app_audit_log_resource_created;

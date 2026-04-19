@@ -11,7 +11,7 @@
 --                      to cut one hall back after a pilot incident without
 --                      touching the web-clients already loaded elsewhere.
 --
--- Up
+-- Up migration
 ALTER TABLE app_halls
   ADD COLUMN client_variant VARCHAR(16) NOT NULL DEFAULT 'unity'
   CHECK (client_variant IN ('unity', 'web', 'unity-fallback'));

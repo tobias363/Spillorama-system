@@ -14,7 +14,7 @@
 -- HALL_OPERATOR fortsatt bruker `app_users.hall_id` (1:1). Denne
 -- tabellen er kun for AGENT-rollen.
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_agent_halls (
   user_id             TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,

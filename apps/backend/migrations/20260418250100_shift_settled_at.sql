@@ -8,7 +8,7 @@
 -- re-login)" fra "shift settled (lukket regnskapsmessig, frozen)". Begge
 -- gir is_active=false; bare settled_at gir freeze.
 --
--- Up
+-- Up migration
 
 ALTER TABLE app_agent_shifts
   ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ NULL;

@@ -8,13 +8,17 @@
 -- Each hall can have multiple active tokens (e.g. one per TV-kiosk) so
 -- the ops team can rotate one kiosk's token without kicking the others.
 --
--- Up
+-- Up migration
+-- BIN-657: id/hall_id/created_by declared as TEXT (not UUID) to match the
+-- canonical id type for app_halls (TEXT PK) and app_users (TEXT PK). Cross-
+-- type foreign keys are rejected by Postgres ("cannot be implemented").
+-- Code uses `randomUUID()` for id generation — TEXT accepts UUID strings.
 CREATE TABLE IF NOT EXISTS app_hall_display_tokens (
-  id            UUID PRIMARY KEY,
-  hall_id       UUID NOT NULL REFERENCES app_halls(id) ON DELETE CASCADE,
+  id            TEXT PRIMARY KEY,
+  hall_id       TEXT NOT NULL REFERENCES app_halls(id) ON DELETE CASCADE,
   label         TEXT NOT NULL DEFAULT '',
   token_hash    TEXT NOT NULL UNIQUE,
-  created_by    UUID REFERENCES app_users(id) ON DELETE SET NULL,
+  created_by    TEXT REFERENCES app_users(id) ON DELETE SET NULL,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   revoked_at    TIMESTAMPTZ,
   last_used_at  TIMESTAMPTZ

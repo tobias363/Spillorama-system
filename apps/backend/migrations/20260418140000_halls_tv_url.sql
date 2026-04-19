@@ -4,7 +4,7 @@
 -- hall's TV-display when no live game is running. Nullable — most halls
 -- start without an embed.
 --
--- Up
+-- Up migration
 ALTER TABLE app_halls
   ADD COLUMN tv_url TEXT;
 

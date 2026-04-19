@@ -20,7 +20,7 @@
 -- aldri. B4a's app_physical_tickets.status forblir 'SOLD' (fysisk
 -- billett ble overlevert — cancel er kun en regnskaps-korreksjon).
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_agent_transactions (
   id                  TEXT PRIMARY KEY,

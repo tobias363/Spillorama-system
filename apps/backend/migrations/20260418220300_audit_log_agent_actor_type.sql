@@ -9,7 +9,7 @@
 -- One-line ALTER — less scope-vekst than spreading TODO-comments +
 -- coordinating with compliance owner on a follow-up PR.
 --
--- Up
+-- Up migration
 
 ALTER TABLE app_audit_log
   DROP CONSTRAINT IF EXISTS app_audit_log_actor_type_check;

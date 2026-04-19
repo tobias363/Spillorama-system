@@ -6,7 +6,7 @@
 -- audit, and player_name is denormalized so a deleted player's old chat
 -- still shows authorship.
 --
--- Up
+-- Up migration
 CREATE TABLE IF NOT EXISTS app_chat_messages (
   id           BIGSERIAL PRIMARY KEY,
   hall_id      TEXT NOT NULL,

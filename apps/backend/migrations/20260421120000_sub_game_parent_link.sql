@@ -7,8 +7,12 @@
 -- Flat self-referencing structure matches legacy semantics (parentGameId + subGames[]) but keeps
 -- the existing single-table query path intact — parent rows have parent_schedule_id IS NULL.
 
+-- BIN-657: parent_schedule_id declared as TEXT (not UUID) to match the
+-- self-referenced hall_game_schedules.id which is TEXT PRIMARY KEY in the
+-- initial schema (20260413000001_initial_schema.sql:189). Cross-type FKs
+-- are rejected by Postgres.
 ALTER TABLE hall_game_schedules
-  ADD COLUMN parent_schedule_id UUID REFERENCES hall_game_schedules(id) ON DELETE CASCADE,
+  ADD COLUMN parent_schedule_id TEXT REFERENCES hall_game_schedules(id) ON DELETE CASCADE,
   ADD COLUMN sub_game_sequence INTEGER,
   ADD COLUMN sub_game_number TEXT;
 

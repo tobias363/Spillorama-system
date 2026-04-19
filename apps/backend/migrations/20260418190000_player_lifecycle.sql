@@ -10,7 +10,7 @@
 --      tilgang i andre haller. Er-ikke-tilgjengelig-i-X er ikke det
 --      samme som self-exclusion (som er på loss-limits/wallet-siden).
 --
--- Up
+-- Up migration
 
 ALTER TABLE app_users
   ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL;

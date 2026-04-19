@@ -9,7 +9,7 @@
 -- Franco, Otium, Rekvisita, SellProduct, Bilag, Bank, Annet) lagres i
 -- other_data JSONB — populated av B3.4/B3.5 når de porteres.
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_agent_settlements (
   id                              TEXT PRIMARY KEY,

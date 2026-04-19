@@ -14,7 +14,7 @@
 -- på WHERE used_at IS NULL gir rask oppslag av aktive tokener ved
 -- revoke-ved-ny-utstedelse.
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_password_reset_tokens (
   id          TEXT PRIMARY KEY,

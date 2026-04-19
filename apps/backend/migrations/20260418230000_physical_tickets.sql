@@ -10,7 +10,7 @@
 --   price_cents". sold_by peker til agenten som solgte (oppdateres av
 --   BIN-583 agent-POS-endepunkt; admin-siden eier skjemaet).
 --
--- Up
+-- Up migration
 
 CREATE TABLE IF NOT EXISTS app_physical_ticket_batches (
   id                    TEXT PRIMARY KEY,
