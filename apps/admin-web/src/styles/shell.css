@@ -1,0 +1,25 @@
+/* Legacy skin — AdminLTE 2 + bootstrap 3.3.7 + font-awesome + ionicons.
+   Loaded from /admin/legacy-skin/ (copied 1:1 from legacy/unity-backend/public/). */
+@import "/legacy-skin/css/bootstrap.min.css";
+@import "/legacy-skin/css/font-awesome.min.css";
+@import "/legacy-skin/css/ionicons.min.css";
+@import "/legacy-skin/css/AdminLTE.min.css";
+@import "/legacy-skin/css/skins/skin-blue.min.css";
+@import "/legacy-skin/iCheck/square/blue.css";
+
+/* Source Sans Pro (used by AdminLTE) */
+@import url("https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,600,700,300italic,400italic,600italic");
+
+/* Maintenance-mode navbar override — matches legacy header.html:186-192 */
+.navbar.hedarModeColor {
+  background-color: #ff2105 !important;
+}
+
+#app[data-state="loading"]::before {
+  content: "…";
+  display: block;
+  text-align: center;
+  padding: 80px 0;
+  color: #888;
+  font-size: 32px;
+}

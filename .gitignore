@@ -63,3 +63,7 @@ unity-vendor-bundles/
 
 # Legacy AIS backend recovery dumps
 legacy/unity-backend/recovery-backups/
+
+# BIN-614 admin-web
+apps/admin-web/node_modules/
+apps/admin-web/dist/

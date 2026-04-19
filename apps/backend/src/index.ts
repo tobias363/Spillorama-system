@@ -3,6 +3,7 @@ import cors from "cors";
 import express from "express";
 import http from "node:http";
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Server, type Socket } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
@@ -109,7 +110,17 @@ import { registerLegacyEventAliases } from "./sockets/legacyEventAliases.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
-const adminWebDir = path.resolve(__dirname, "../../admin-web");
+// BIN-614: Admin web shell is a Vite SPA. `dist/` is produced by
+// `npm --prefix apps/admin-web run build`. We serve from `dist/` if it exists,
+// otherwise fall back to the pre-Vite flat `apps/admin-web/` layout so local
+// dev without a build still boots. Legacy v1 (old flat shell) lives in
+// `public/legacy-v1/` (copied by Vite) or the repo `legacy-v1/` fallback.
+const adminWebDistDir = path.resolve(__dirname, "../../admin-web/dist");
+const adminWebLegacyDir = path.resolve(__dirname, "../../admin-web");
+const adminWebDir = fs.existsSync(adminWebDistDir) ? adminWebDistDir : adminWebLegacyDir;
+if (adminWebDir === adminWebLegacyDir) {
+  console.warn("[BIN-614] admin-web/dist not found — serving pre-build fallback. Run `npm --prefix apps/admin-web run build`.");
+}
 const publicDir = path.resolve(__dirname, "../public");
 const adminFrontendFile = path.resolve(adminWebDir, "index.html");
 const projectDir = path.resolve(__dirname, "../..");
@@ -1043,7 +1054,12 @@ app.get("/api/room-gap/:code", (req, res) => {
 // ── Fallback routes ───────────────────────────────────────────────────────────
 
 app.get("*", (_req, res) => {
-  if (_req.path === "/admin" || _req.path === "/admin/") { res.sendFile(adminFrontendFile); return; }
+  // BIN-614: SPA deep-link fallback — every `/admin/*` that isn't a static
+  // asset (those are handled by express.static above) boots the shell.
+  if (_req.path === "/admin" || _req.path === "/admin/" || _req.path.startsWith("/admin/")) {
+    res.sendFile(adminFrontendFile);
+    return;
+  }
   res.sendFile(path.join(publicDir, "web/index.html"));
 });
 
