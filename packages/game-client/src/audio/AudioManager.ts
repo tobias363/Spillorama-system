@@ -165,7 +165,11 @@ export class AudioManager {
    */
   playNumber(number: number): void {
     if (!this.soundEnabled || !this.voiceEnabled) return;
-    if (number < 1 || number > 60) return;
+    // BIN-619 Bug 7: Guard was `> 60` — but Bingo75 draws 1..75. Previously
+    // 61–75 were silently unannounced even though the visual ball rendered.
+    // Audio assets for 61–75 were imported from Unity
+    // `_Project/Sounds/{2. English, 3. Norwegian Female, 4. Norwegian Male}/`.
+    if (number < 1 || number > 75) return;
 
     // Prevent duplicate announcement in same round
     if (this.announcedNumbers.has(number)) return;
