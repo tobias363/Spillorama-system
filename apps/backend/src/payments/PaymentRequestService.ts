@@ -30,6 +30,12 @@ const log = rootLogger.child({ module: "payment-request-service" });
 
 export type PaymentRequestKind = "deposit" | "withdraw";
 export type PaymentRequestStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+/**
+ * BIN-646 (PR-B4): skiller bank-overføring fra hall-kontant-utbetaling på
+ * withdraw-requests. NULL for legacy-rows (ukjent destinasjon) eller for
+ * deposit-kind.
+ */
+export type PaymentRequestDestinationType = "bank" | "hall";
 
 export interface PaymentRequest {
   id: string;
@@ -46,6 +52,8 @@ export interface PaymentRequest {
   rejectedBy: string | null;
   rejectedAt: string | null;
   walletTransactionId: string | null;
+  /** BIN-646 (PR-B4): kun relevant for kind=withdraw, null ellers. */
+  destinationType: PaymentRequestDestinationType | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -56,11 +64,19 @@ export interface CreatePaymentRequestInput {
   amountCents: number;
   hallId?: string | null;
   submittedBy?: string | null;
+  /** BIN-646: kun brukt for kind=withdraw. */
+  destinationType?: PaymentRequestDestinationType | null;
 }
 
 export interface ListPendingOptions {
   kind?: PaymentRequestKind;
   status?: PaymentRequestStatus;
+  /**
+   * BIN-646 (PR-B4): alternativ til `status` — tillat flere statuser
+   * (f.eks. historikk-visning som viser ACCEPTED + REJECTED). Når både
+   * `status` og `statuses` er satt, brukes `statuses`.
+   */
+  statuses?: PaymentRequestStatus[];
   hallId?: string;
   /** BIN-587 B3-aml: filter til én spiller (for AML transaksjons-review). */
   userId?: string;
@@ -70,6 +86,8 @@ export interface ListPendingOptions {
   createdTo?: string;
   /** BIN-587 B3-aml: minimum beløp i cents (for terskel-review). */
   minAmountCents?: number;
+  /** BIN-646 (PR-B4): bank/hall-filter for withdraw-kø. */
+  destinationType?: PaymentRequestDestinationType;
   limit?: number;
 }
 
@@ -103,6 +121,8 @@ interface PaymentRequestRow {
   rejected_by: string | null;
   rejected_at: Date | string | null;
   wallet_transaction_id: string | null;
+  /** BIN-646: bare kolonne på withdraw-tabellen — undefined når kind=deposit. */
+  destination_type?: PaymentRequestDestinationType | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -157,9 +177,32 @@ function mapRow(row: PaymentRequestRow, kind: PaymentRequestKind): PaymentReques
     rejectedBy: row.rejected_by,
     rejectedAt: asIso(row.rejected_at),
     walletTransactionId: row.wallet_transaction_id,
+    // BIN-646 (PR-B4): bank/hall kun på withdraw-tabell.
+    destinationType:
+      kind === "withdraw" ? (row.destination_type ?? null) : null,
     createdAt: asIsoRequired(row.created_at),
     updatedAt: asIsoRequired(row.updated_at),
   };
+}
+
+function parseDestinationType(
+  value: unknown,
+  fieldName = "destinationType"
+): PaymentRequestDestinationType {
+  if (typeof value !== "string") {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${fieldName} må være 'bank' eller 'hall'.`
+    );
+  }
+  const raw = value.trim().toLowerCase();
+  if (raw !== "bank" && raw !== "hall") {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${fieldName} må være 'bank' eller 'hall'.`
+    );
+  }
+  return raw;
 }
 
 function assertPositiveAmountCents(value: number): number {
@@ -232,7 +275,11 @@ export class PaymentRequestService {
 
   async listPending(options: ListPendingOptions = {}): Promise<PaymentRequest[]> {
     await this.ensureInitialized();
-    const status = options.status ?? "PENDING";
+    // BIN-646 (PR-B4): støtt multi-status (historikk viser accepted+rejected).
+    const statuses =
+      options.statuses && options.statuses.length
+        ? Array.from(new Set(options.statuses))
+        : [options.status ?? "PENDING"];
     const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
 
     const kinds: PaymentRequestKind[] =
@@ -241,15 +288,21 @@ export class PaymentRequestService {
     const results: PaymentRequest[] = [];
     for (const kind of kinds) {
       const table = this.tableFor(kind);
-      const params: unknown[] = [status];
+      const destCol = kind === "withdraw" ? ", destination_type" : "";
+      const params: unknown[] = [statuses];
       let sql = `SELECT id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
                         rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
-                        wallet_transaction_id, created_at, updated_at
+                        wallet_transaction_id${destCol}, created_at, updated_at
                  FROM ${table}
-                 WHERE status = $1`;
+                 WHERE status = ANY($1::text[])`;
       if (options.hallId) {
         params.push(options.hallId);
         sql += ` AND hall_id = $${params.length}`;
+      }
+      // BIN-646 (PR-B4): bank/hall-filter på withdraw-kø.
+      if (kind === "withdraw" && options.destinationType) {
+        params.push(options.destinationType);
+        sql += ` AND destination_type = $${params.length}`;
       }
       // BIN-587 B3-aml filters
       if (options.userId) {
@@ -284,10 +337,11 @@ export class PaymentRequestService {
   async getRequest(kind: PaymentRequestKind, requestId: string): Promise<PaymentRequest> {
     await this.ensureInitialized();
     const id = assertNonEmpty(requestId, "requestId");
+    const destCol = kind === "withdraw" ? ", destination_type" : "";
     const { rows } = await this.pool.query<PaymentRequestRow>(
       `SELECT id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
               rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
-              wallet_transaction_id, created_at, updated_at
+              wallet_transaction_id${destCol}, created_at, updated_at
        FROM ${this.tableFor(kind)}
        WHERE id = $1`,
       [id]
@@ -327,24 +381,46 @@ export class PaymentRequestService {
     const amountCents = assertPositiveAmountCents(input.amountCents);
     const hallId = input.hallId?.trim() || null;
     const submittedBy = input.submittedBy?.trim() || null;
+    // BIN-646 (PR-B4): bank/hall for withdraw. Deposit ignorerer feltet.
+    const destinationType: PaymentRequestDestinationType | null =
+      kind === "withdraw" && input.destinationType
+        ? (input.destinationType === "bank" || input.destinationType === "hall"
+            ? input.destinationType
+            : null)
+        : null;
 
     const id = randomUUID();
-    const { rows } = await this.pool.query<PaymentRequestRow>(
-      `INSERT INTO ${this.tableFor(kind)}
-         (id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
-       RETURNING id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
-                 rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
-                 wallet_transaction_id, created_at, updated_at`,
-      [id, userId, walletId, amountCents, hallId, submittedBy]
-    );
+    let rows: PaymentRequestRow[];
+    if (kind === "withdraw") {
+      const res = await this.pool.query<PaymentRequestRow>(
+        `INSERT INTO ${this.tableFor(kind)}
+           (id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status, destination_type)
+         VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7)
+         RETURNING id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+                   rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+                   wallet_transaction_id, destination_type, created_at, updated_at`,
+        [id, userId, walletId, amountCents, hallId, submittedBy, destinationType]
+      );
+      rows = res.rows;
+    } else {
+      const res = await this.pool.query<PaymentRequestRow>(
+        `INSERT INTO ${this.tableFor(kind)}
+           (id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
+         RETURNING id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
+                   rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
+                   wallet_transaction_id, created_at, updated_at`,
+        [id, userId, walletId, amountCents, hallId, submittedBy]
+      );
+      rows = res.rows;
+    }
     const row = rows[0];
     if (!row) {
       throw new DomainError("PLATFORM_DB_ERROR", "Kunne ikke opprette payment request.");
     }
     const mapped = mapRow(row, kind);
     log.info(
-      { kind, requestId: mapped.id, userId, hallId, amountCents },
+      { kind, requestId: mapped.id, userId, hallId, amountCents, destinationType },
       "[BIN-586] payment request created"
     );
     return mapped;
@@ -393,6 +469,7 @@ export class PaymentRequestService {
         throw err;
       }
 
+      const destCol = kind === "withdraw" ? ", destination_type" : "";
       const { rows } = await client.query<PaymentRequestRow>(
         `UPDATE ${this.tableFor(kind)}
          SET status = 'ACCEPTED',
@@ -403,7 +480,7 @@ export class PaymentRequestService {
          WHERE id = $1
          RETURNING id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
                    rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
-                   wallet_transaction_id, created_at, updated_at`,
+                   wallet_transaction_id${destCol}, created_at, updated_at`,
         [requestId, acceptedBy, walletTransactionId]
       );
       await client.query("COMMIT");
@@ -452,6 +529,7 @@ export class PaymentRequestService {
       await client.query("BEGIN");
       await this.lockPendingRow(client, kind, requestId);
 
+      const destCol = kind === "withdraw" ? ", destination_type" : "";
       const { rows } = await client.query<PaymentRequestRow>(
         `UPDATE ${this.tableFor(kind)}
          SET status = 'REJECTED',
@@ -462,7 +540,7 @@ export class PaymentRequestService {
          WHERE id = $1
          RETURNING id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
                    rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
-                   wallet_transaction_id, created_at, updated_at`,
+                   wallet_transaction_id${destCol}, created_at, updated_at`,
         [requestId, rejectedBy, reason]
       );
       await client.query("COMMIT");
@@ -494,10 +572,11 @@ export class PaymentRequestService {
     kind: PaymentRequestKind,
     requestId: string
   ): Promise<PaymentRequest> {
+    const destCol = kind === "withdraw" ? ", destination_type" : "";
     const { rows } = await client.query<PaymentRequestRow>(
       `SELECT id, user_id, wallet_id, amount_cents, hall_id, submitted_by, status,
               rejection_reason, accepted_by, accepted_at, rejected_by, rejected_at,
-              wallet_transaction_id, created_at, updated_at
+              wallet_transaction_id${destCol}, created_at, updated_at
        FROM ${this.tableFor(kind)}
        WHERE id = $1
        FOR UPDATE`,
@@ -535,6 +614,11 @@ export class PaymentRequestService {
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
       for (const table of ["app_deposit_requests", "app_withdraw_requests"] as const) {
         const qualified = `"${this.schema}"."${table}"`;
+        // BIN-646 (PR-B4): destination_type kun på withdraw.
+        const extraCol =
+          table === "app_withdraw_requests"
+            ? `destination_type TEXT NULL CHECK (destination_type IS NULL OR destination_type IN ('bank', 'hall')),`
+            : "";
         await client.query(
           `CREATE TABLE IF NOT EXISTS ${qualified} (
             id UUID PRIMARY KEY,
@@ -551,6 +635,7 @@ export class PaymentRequestService {
             rejected_by TEXT NULL,
             rejected_at TIMESTAMPTZ NULL,
             wallet_transaction_id TEXT NULL,
+            ${extraCol}
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
           )`

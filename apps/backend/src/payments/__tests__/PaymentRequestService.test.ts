@@ -31,6 +31,7 @@ interface Row {
   rejected_by: string | null;
   rejected_at: Date | null;
   wallet_transaction_id: string | null;
+  destination_type: "bank" | "hall" | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -72,13 +73,15 @@ function runQuery(
   }
 
   if (upper.startsWith("INSERT")) {
-    const [id, userId, walletId, amount, hallId, submittedBy] = params as [
+    // BIN-646: withdraw har 7 params (+destinationType), deposit har 6.
+    const [id, userId, walletId, amount, hallId, submittedBy, destinationType] = params as [
       string,
       string,
       string,
       number,
       string | null,
       string | null,
+      ("bank" | "hall" | null) | undefined,
     ];
     const row: Row = {
       id,
@@ -94,6 +97,7 @@ function runQuery(
       rejected_by: null,
       rejected_at: null,
       wallet_transaction_id: null,
+      destination_type: destinationType ?? null,
       created_at: new Date(),
       updated_at: new Date(),
     };
@@ -105,18 +109,24 @@ function runQuery(
   if (upper.startsWith("SELECT")) {
     const table = detectTable(sql);
     const map = store[table];
-    const requestId = params[0] as string;
     // `FOR UPDATE` and single-row lookup both use WHERE id = $1.
     if (sql.includes("WHERE id = $1")) {
+      const requestId = params[0] as string;
       const row = map.get(requestId);
       return { rows: row ? [cloneRow(row)] : [] };
     }
-    // listPending: WHERE status = $1 [AND hall_id = $2] ORDER BY created_at DESC LIMIT $N
-    const status = params[0] as string;
-    const hallIdFilter = sql.includes("hall_id = $2") ? (params[1] as string) : undefined;
+    // BIN-646 (PR-B4): listPending bruker nå `status = ANY($1::text[])` med
+    // statuser-array, og dynamiske filtre på hall_id / destination_type / user_id.
+    const statusArr = params[0] as string[] | string;
+    const statuses = Array.isArray(statusArr) ? statusArr : [statusArr];
+    const hallMatch = sql.match(/hall_id = \$(\d+)/);
+    const hallIdFilter = hallMatch ? (params[Number(hallMatch[1]) - 1] as string) : undefined;
+    const destMatch = sql.match(/destination_type = \$(\d+)/);
+    const destFilter = destMatch ? (params[Number(destMatch[1]) - 1] as string) : undefined;
     const all = Array.from(map.values())
-      .filter((r) => r.status === status)
+      .filter((r) => statuses.includes(r.status))
       .filter((r) => (hallIdFilter ? r.hall_id === hallIdFilter : true))
+      .filter((r) => (destFilter ? r.destination_type === destFilter : true))
       .sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
     return { rows: all.map(cloneRow) };
   }

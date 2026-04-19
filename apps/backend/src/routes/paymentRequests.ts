@@ -21,6 +21,7 @@ import type {
   PaymentRequestService,
   PaymentRequestKind,
   PaymentRequestStatus,
+  PaymentRequestDestinationType,
 } from "../payments/PaymentRequestService.js";
 import {
   ADMIN_ACCESS_POLICY as _ADMIN_ACCESS_POLICY,
@@ -77,6 +78,50 @@ function parseStatus(value: unknown): PaymentRequestStatus | undefined {
   throw new DomainError(
     "INVALID_INPUT",
     "status må være PENDING, ACCEPTED eller REJECTED."
+  );
+}
+
+/**
+ * BIN-646 (PR-B4): parse CSV-liste av statuser (f.eks. "ACCEPTED,REJECTED"
+ * for historikk-visning). Returnerer unik liste eller undefined hvis tom.
+ */
+function parseStatuses(value: unknown): PaymentRequestStatus[] | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new DomainError("INVALID_INPUT", "statuses må være en streng (CSV).");
+  }
+  const parts = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (parts.length === 0) return undefined;
+  const parsed: PaymentRequestStatus[] = [];
+  for (const part of parts) {
+    const s = parseStatus(part);
+    if (s && !parsed.includes(s)) parsed.push(s);
+  }
+  return parsed.length ? parsed : undefined;
+}
+
+function parseDestinationType(
+  value: unknown
+): PaymentRequestDestinationType | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new DomainError(
+      "INVALID_INPUT",
+      "destinationType må være 'bank' eller 'hall'."
+    );
+  }
+  const raw = value.trim().toLowerCase();
+  if (raw === "bank" || raw === "hall") return raw;
+  throw new DomainError(
+    "INVALID_INPUT",
+    "destinationType må være 'bank' eller 'hall'."
   );
 }
 
@@ -145,7 +190,10 @@ export function createPaymentRequestsRouter(
       const adminUser = await requireAdminPermissionUser(req, "PAYMENT_REQUEST_READ");
       const typeRaw = typeof req.query.type === "string" ? req.query.type : undefined;
       const kind = typeRaw ? parseKind(typeRaw, "type") : undefined;
+      // BIN-646 (PR-B4): støtt både `status` (single) og `statuses` (CSV).
+      const statuses = parseStatuses(req.query.statuses);
       const status = parseStatus(req.query.status);
+      const destinationType = parseDestinationType(req.query.destinationType);
       const hallIdRaw = typeof req.query.hallId === "string" ? req.query.hallId.trim() : "";
       const hallIdInput = hallIdRaw.length ? hallIdRaw : undefined;
       // BIN-591: HALL_OPERATOR tvinges til sin egen hall
@@ -161,6 +209,8 @@ export function createPaymentRequestsRouter(
       const requests = await paymentRequestService.listPending({
         kind,
         status,
+        statuses,
+        destinationType,
         hallId,
         limit,
       });
@@ -277,12 +327,15 @@ export function createPaymentRequestsRouter(
       }
       const amountCents = parsePositiveAmountCents(req.body.amountCents);
       const hallId = parseOptionalHallId(req.body.hallId);
+      // BIN-646 (PR-B4): bank/hall-valg på uttaksforespørsel.
+      const destinationType = parseDestinationType(req.body.destinationType);
       const request = await paymentRequestService.createWithdrawRequest({
         userId: user.id,
         walletId: user.walletId,
         amountCents,
         hallId,
         submittedBy: user.id,
+        destinationType,
       });
       apiSuccess(res, { request });
     } catch (error) {

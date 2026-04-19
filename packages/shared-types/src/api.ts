@@ -86,3 +86,51 @@ export interface PlayerComplianceSnapshot {
   dailyLoss: number;
   monthlyLoss: number;
 }
+
+// ── Payment requests (deposit/withdraw queue) ──────────────────────────────
+// BIN-646 (PR-B4): typekontrakter for /api/admin/payments/requests*.
+
+export type PaymentRequestKind = "deposit" | "withdraw";
+export type PaymentRequestStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+/** BIN-646: bank = overføring til kontonummer, hall = kontant i hall. */
+export type PaymentRequestDestinationType = "bank" | "hall";
+
+export interface PaymentRequest {
+  id: string;
+  kind: PaymentRequestKind;
+  userId: string;
+  walletId: string;
+  amountCents: number;
+  hallId: string | null;
+  submittedBy: string | null;
+  status: PaymentRequestStatus;
+  rejectionReason: string | null;
+  acceptedBy: string | null;
+  acceptedAt: string | null;
+  rejectedBy: string | null;
+  rejectedAt: string | null;
+  walletTransactionId: string | null;
+  /** Kun relevant for kind=withdraw. null for deposit eller legacy-rows. */
+  destinationType: PaymentRequestDestinationType | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListPaymentRequestsResponse {
+  requests: PaymentRequest[];
+}
+
+export interface AcceptPaymentRequestBody {
+  type: PaymentRequestKind;
+  /**
+   * BIN-653: foreslått felt for Cash/Card ved deposit-accept. Backend
+   * aksepterer ikke feltet ennå (ignoreres), men frontend kan sende det for
+   * forward-kompatibilitet.
+   */
+  paymentType?: "cash" | "card";
+}
+
+export interface RejectPaymentRequestBody {
+  type: PaymentRequestKind;
+  reason: string;
+}
