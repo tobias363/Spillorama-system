@@ -84,6 +84,15 @@ export const routes: RouteDef[] = [
 
   { path: "/agent/cashinout", titleKey: "cash_in_out", roles: ["agent"] },
   { path: "/agent/physicalCashOut", titleKey: "physical_cash_out", roles: ["agent"] },
+  // PR-B1: cash-inout sub-pages. Exact matches only — use query string for
+  // row-scoped deep-links (e.g. `#/agent/sellPhysicalTickets?gameId=X`).
+  { path: "/agent/sellPhysicalTickets", titleKey: "register_sold_ticket", roles: ["agent"] },
+  { path: "/agent/sellProduct", titleKey: "sell_products", roles: ["agent"] },
+  { path: "/agent/unique-id/add", titleKey: "add_money_unique_id", roles: ["agent"] },
+  { path: "/agent/unique-id/withdraw", titleKey: "withdraw_money_unique_id", roles: ["agent"] },
+  { path: "/agent/register-user/add", titleKey: "add_money_register_user", roles: ["agent"] },
+  { path: "/agent/register-user/withdraw", titleKey: "withdraw_money_register_user", roles: ["agent"] },
+  { path: "/agent/cashout-details", titleKey: "cashout_details", roles: ["agent"] },
 
   { path: "/live/dashboard", titleKey: "spillorama_live_dashboard" },
   { path: "/live/game-settings", titleKey: "spillorama_game_settings" },

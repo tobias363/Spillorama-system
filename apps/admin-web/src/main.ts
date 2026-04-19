@@ -8,6 +8,7 @@ import { mountLayout, renderLayoutChrome, type LayoutRefs } from "./shell/Layout
 import { renderPlaceholder, renderUnknown } from "./pages/Placeholder.js";
 import { renderLoginPage } from "./pages/login/LoginPage.js";
 import { mountLegacySection, isLegacySectionRoute } from "./pages/legacy-sections/LegacySectionMount.js";
+import { isCashInOutRoute, mountCashInOutRoute } from "./pages/cash-inout/index.js";
 
 const MAINTENANCE_MODE = false;
 
@@ -44,6 +45,13 @@ function mountShell(_root: HTMLElement, session: Session): void {
     container: refs.contentHost,
     renderer: (container, route) => renderPage(container, route),
     onUnknown: (path, container) => {
+      // Strip query string for cash-inout routes that carry params
+      // (e.g. `/agent/sellPhysicalTickets?gameId=X`).
+      const bare = path.split("?")[0] ?? path;
+      if (isCashInOutRoute(bare)) {
+        mountCashInOutRoute(container, bare);
+        return;
+      }
       renderUnknown(container, path);
     },
     onChange: (route, path) => {
@@ -84,6 +92,12 @@ function mountShell(_root: HTMLElement, session: Session): void {
 function renderPage(container: HTMLElement, route: RouteDef): void | Promise<void> {
   if (isLegacySectionRoute(route.path)) {
     mountLegacySection(container, route.path);
+    return;
+  }
+  if (isCashInOutRoute(route.path)) {
+    mountCashInOutRoute(container, route.path);
+    container.setAttribute("data-route", route.path);
+    container.setAttribute("data-title", t(route.titleKey));
     return;
   }
   renderPlaceholder(container, route);
