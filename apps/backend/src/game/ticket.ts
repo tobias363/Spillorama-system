@@ -54,6 +54,22 @@ export const BINGO75_SLUGS: ReadonlySet<string> = new Set(["bingo", "game_1"]);
 /** BIN-615 / PR-C2: Game slugs that use 3×3 1..21 tickets (Rocket/Tallspill). */
 export const GAME2_SLUGS: ReadonlySet<string> = new Set(["game_2", "rocket", "tallspill"]);
 
+/**
+ * BIN-615 / PR-C3: Game slugs that use 5×5 1..75 tickets **without** free centre
+ * (Mønsterbingo / Game 3).
+ *
+ * Legacy ref: `Helper/bingo.js:1014-1031` — `data.slug == 'game_3'` produces a
+ * flat array of 25 unique numbers per BINGO column (no free space). The slug
+ * `monsterbingo` is the canonical Norwegian name; `mønsterbingo` (with ø) is
+ * accepted as an alias because the admin UI may surface the native spelling.
+ * Legacy uses `slug: 'game_3'` (see gamehelper/game3.js:109).
+ */
+export const GAME3_SLUGS: ReadonlySet<string> = new Set([
+  "monsterbingo",
+  "mønsterbingo",
+  "game_3",
+]);
+
 /** True if a room/game with this slug should use the 75-ball / 5x5 format. */
 export function uses75Ball(gameSlug: string | null | undefined): boolean {
   return BINGO75_SLUGS.has(gameSlug ?? "");
@@ -65,14 +81,27 @@ export function uses3x3Ticket(gameSlug: string | null | undefined): boolean {
 }
 
 /**
+ * BIN-615 / PR-C3: True if a room/game with this slug should use the 5×5 1..75
+ * format **without** free centre cell (Game 3 / Mønsterbingo). Distinct from
+ * `uses75Ball` because Game 1 has a free centre and Game 3 does not.
+ */
+export function uses5x5NoCenterTicket(gameSlug: string | null | undefined): boolean {
+  return GAME3_SLUGS.has(gameSlug ?? "");
+}
+
+/**
  * Generate a single ticket for the given game slug.
  *
  * - 75-ball games (Game 1 / "bingo"): 5x5 grid with free centre cell.
  * - Game 2 (Rocket/Tallspill): 3×3 grid with 9 unique picks from 1..21.
+ * - Game 3 (Mønsterbingo): 5x5 grid with 25 unique picks from 1..75, **no free centre**.
  * - All other games: 3x5 Databingo60 grid (no free cell).
  *
  * Use this everywhere a ticket is created so the format stays consistent
- * with `uses75Ball` / `uses3x3Ticket` and the engine's draw-bag selection.
+ * with `uses75Ball` / `uses3x3Ticket` / `uses5x5NoCenterTicket` and the
+ * engine's draw-bag selection. Game 3 is checked **before** Game 1 (75-ball)
+ * because both use the 5×5 / 1-75 shape; the GAME3_SLUGS set is disjoint
+ * from BINGO75_SLUGS so the router ordering does not affect existing slugs.
  */
 export function generateTicketForGame(
   gameSlug: string | null | undefined,
@@ -80,6 +109,7 @@ export function generateTicketForGame(
   type?: string,
 ): Ticket {
   if (uses3x3Ticket(gameSlug)) return generate3x3Ticket(color, type);
+  if (uses5x5NoCenterTicket(gameSlug)) return generate5x5NoCenterTicket(color, type);
   if (uses75Ball(gameSlug)) return generateBingo75Ticket(color, type);
   return generateDatabingo60Ticket();
 }
@@ -130,6 +160,43 @@ export function generate3x3Ticket(color?: string, type?: string): Ticket {
     [picks[3], picks[4], picks[5]],
     [picks[6], picks[7], picks[8]],
   ];
+  const ticket: Ticket = { grid };
+  if (color) ticket.color = color;
+  if (type) ticket.type = type;
+  return ticket;
+}
+
+/**
+ * BIN-615 / PR-C3: Game 3 (Mønsterbingo) ticket — 5×5 grid of 25 unique numbers
+ * in BINGO column ranges (B:1-15, I:16-30, N:31-45, G:46-60, O:61-75). **No
+ * free centre cell** — the (2,2) position holds a normal N-column number.
+ *
+ * Legacy ref: `Helper/bingo.js:1014-1031` (`data.slug == 'game_3'`) — 25 picks,
+ * one per column-row, no zero-filled free space. This is the key ticket-shape
+ * difference vs. Game 1 (75-ball with free centre at grid[2][2]).
+ *
+ * Winner predicate: `PatternMatcher` (25-bit bitmask) — there is no dedicated
+ * helper like `hasFullBingo`, because Game 3 matches against admin-defined
+ * patterns (Row 1-4, Coverall, custom shapes) rather than row/column lines.
+ */
+export function generate5x5NoCenterTicket(color?: string, type?: string): Ticket {
+  const columns = [
+    pickUniqueInRange(1, 15, 5),   // B
+    pickUniqueInRange(16, 30, 5),  // I
+    pickUniqueInRange(31, 45, 5),  // N — **no free centre** in Game 3
+    pickUniqueInRange(46, 60, 5),  // G
+    pickUniqueInRange(61, 75, 5),  // O
+  ];
+
+  const grid: number[][] = [];
+  for (let row = 0; row < 5; row += 1) {
+    const rowValues: number[] = [];
+    for (let col = 0; col < 5; col += 1) {
+      rowValues.push(columns[col][row]);
+    }
+    grid.push(rowValues);
+  }
+
   const ticket: Ticket = { grid };
   if (color) ticket.color = color;
   if (type) ticket.type = type;
