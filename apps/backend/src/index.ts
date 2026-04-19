@@ -100,6 +100,8 @@ import { createAdminDailySchedulesRouter } from "./routes/adminDailySchedules.js
 import { DailyScheduleService } from "./admin/DailyScheduleService.js";
 import { createAdminPatternsRouter } from "./routes/adminPatterns.js";
 import { PatternService } from "./admin/PatternService.js";
+import { createAdminHallGroupsRouter } from "./routes/adminHallGroups.js";
+import { HallGroupService } from "./admin/HallGroupService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
@@ -355,6 +357,17 @@ const dailyScheduleService = new DailyScheduleService({
 // mask-feltet direkte, så admin-katalog og engine deler samme 25-bit-
 // representasjon (shared-types PatternMask).
 const patternService = new PatternService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-665: HallGroup CRUD (cross-hall spill-grupper for Game 2 + Game 3).
+// Lukker BIN-617 dashboard-widget + aktiverer PR-A5 groupHall-placeholder
+// (4 sider). Legacy Mongo-schema GroupHall normalisert til
+// app_hall_groups + app_hall_group_members. Reference-checker mot
+// app_daily_schedules (BIN-626) håndhever at hard-delete blokkeres når
+// gruppen er i bruk i en plan.
+const hallGroupService = new HallGroupService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -679,6 +692,13 @@ app.use(createAdminPatternsRouter({
   platformService,
   auditLogService,
   patternService,
+}));
+// BIN-665: HallGroup CRUD. 5 endepunkter — list/detail/create/patch/delete.
+// Lukker BIN-617 dashboard-widget + aktiverer PR-A5 groupHall-placeholder.
+app.use(createAdminHallGroupsRouter({
+  platformService,
+  auditLogService,
+  hallGroupService,
 }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
