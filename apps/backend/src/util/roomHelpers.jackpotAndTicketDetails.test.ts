@@ -38,6 +38,7 @@ function baseSnapshot(): RoomSnapshot {
     code: "ROOM1",
     hallId: "hall-oslo",
     hostPlayerId: "p1",
+    gameSlug: "bingo",
     createdAt: new Date("2026-04-18T14:00:00Z").toISOString(),
     players: [
       { id: "p1", name: "Ada", walletId: "w1", balance: 500 },

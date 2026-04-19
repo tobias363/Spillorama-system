@@ -140,7 +140,8 @@ export function buildRoomUpdatePayload(
     getArmedPlayerTicketCounts: (roomCode: string) => Record<string, number>;
     getArmedPlayerSelections?: (roomCode: string) => Record<string, Array<{ type: string; qty: number }>>;
     getRoomConfiguredEntryFee: (roomCode: string) => number;
-    getOrCreateDisplayTickets: (roomCode: string, playerId: string, count: number, gameSlug?: string) => Ticket[];
+    /** BIN-672: gameSlug is REQUIRED — see roomState.getOrCreateDisplayTickets doc. */
+    getOrCreateDisplayTickets: (roomCode: string, playerId: string, count: number, gameSlug: string) => Ticket[];
     getLuckyNumbers: (roomCode: string) => Record<string, number>;
     /** BIN-443: Variant config for client purchase UI. */
     getVariantConfig?: (roomCode: string) => { gameType: string; config: GameVariantConfig } | null;

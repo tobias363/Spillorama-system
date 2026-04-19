@@ -337,7 +337,7 @@ test("BIN-526 pengeflyt (bingo): checkpoint → rebuild → restore preserves st
   const game = preSnapshot.currentGame;
   assert.ok(game, "pre-snapshot must include currentGame");
   const players = preSnapshot.players;
-  recoveredEngine.restoreRoomFromSnapshot(roomCode, preSnapshot.hallId, preSnapshot.hostPlayerId, players, game);
+  recoveredEngine.restoreRoomFromSnapshot(roomCode, preSnapshot.hallId, preSnapshot.hostPlayerId, players, game, preSnapshot.gameSlug);
 
   const postSnapshot = recoveredEngine.getRoomSnapshot(roomCode);
   assert.equal(

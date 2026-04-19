@@ -107,7 +107,11 @@ export class RoomStateManager {
 
   // ── Display tickets ────────────────────────────────────────────────────────
 
-  getOrCreateDisplayTickets(roomCode: string, playerId: string, count: number, gameSlug?: string): Ticket[] {
+  // BIN-672: gameSlug is REQUIRED. Passing undefined used to silently
+  // generate 3×5 Databingo60 tickets instead of Bingo75 5×5 — root cause
+  // of BIN-619/BIN-671 bug. Now the callers must pass it explicitly;
+  // generateTicketForGame throws on unknown slugs (see commit 5).
+  getOrCreateDisplayTickets(roomCode: string, playerId: string, count: number, gameSlug: string): Ticket[] {
     const key = `${roomCode}:${playerId}`;
     const cached = this.displayTicketCache.get(key);
     if (cached && cached.length === count) return cached;
@@ -127,7 +131,8 @@ export class RoomStateManager {
    * The caller is responsible for verifying game-state and debiting the
    * player's wallet — this method only mutates the display cache.
    */
-  replaceDisplayTicket(roomCode: string, playerId: string, ticketId: string, gameSlug?: string): Ticket | null {
+  // BIN-672: gameSlug required — same reasoning as getOrCreateDisplayTickets.
+  replaceDisplayTicket(roomCode: string, playerId: string, ticketId: string, gameSlug: string): Ticket | null {
     const key = `${roomCode}:${playerId}`;
     const cached = this.displayTicketCache.get(key);
     if (!cached) return null;

@@ -175,7 +175,9 @@ export interface RoomState {
   code: string;
   hallId: string;
   hostPlayerId: string;
-  gameSlug?: string;
+  // BIN-672: required. Every room knows its game slug — input is defaulted
+  // to "bingo" in BingoEngine.createRoom if the caller didn't pass one.
+  gameSlug: string;
   players: Map<string, Player>;
   currentGame?: GameState;
   gameHistory: GameSnapshot[];
@@ -228,7 +230,12 @@ export interface RoomSnapshot {
   code: string;
   hallId: string;
   hostPlayerId: string;
-  gameSlug?: string;
+  /**
+   * BIN-672: required, not optional. Canonical slug for ticket format and
+   * drawbag selection. Flows from `RoomState.gameSlug` which is set at
+   * room creation (defaulted to "bingo" if caller omitted).
+   */
+  gameSlug: string;
   createdAt: string;
   players: Player[];
   currentGame?: GameSnapshot;
@@ -239,7 +246,8 @@ export interface RoomSummary {
   code: string;
   hallId: string;
   hostPlayerId: string;
-  gameSlug?: string;
+  /** BIN-672: required — see RoomSnapshot.gameSlug. */
+  gameSlug: string;
   playerCount: number;
   createdAt: string;
   gameStatus: GameStatus | "NONE";

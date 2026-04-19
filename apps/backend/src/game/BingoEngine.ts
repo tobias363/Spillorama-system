@@ -415,7 +415,10 @@ export class BingoEngine {
       code,
       hallId,
       hostPlayerId: playerId,
-      gameSlug: input.gameSlug?.trim() || undefined,
+      // BIN-672: gameSlug is REQUIRED on RoomState. Default to "bingo" when
+      // caller omitted — matches game_sessions.game_slug DB default and
+      // reflects that this platform only ships Bingo right now.
+      gameSlug: input.gameSlug?.trim() || "bingo",
       createdAt: new Date().toISOString(),
       players: new Map([[playerId, player]]),
       gameHistory: []
@@ -2463,7 +2466,11 @@ export class BingoEngine {
     hostPlayerId: string,
     players: Player[],
     snapshot: GameSnapshot,
-    gameSlug?: string
+    // BIN-672: required — caller MUST pass a gameSlug from the
+    // persisted game_sessions.game_slug column. No fallback here; an
+    // unknown slug should fail loud (will be thrown by the ticket-gen
+    // chain when display-tickets are requested).
+    gameSlug: string
   ): void {
     const code = roomCode.trim().toUpperCase();
     if (this.rooms.has(code)) {
