@@ -221,7 +221,7 @@ CREATE INDEX IF NOT EXISTS idx_hall_schedule_log_hall_id
 -- Seed default games (idempotent)
 INSERT INTO app_games (slug, title, description, route, is_enabled, sort_order, settings_json)
 VALUES
-  ('bingo',        'Bingo',        '75-kulsbingo med flere spillvarianter',   '/bingo',        true, 1, '{"gameNumber":1}'::jsonb),
+  ('bingo',        'Bingo',        '75-kulsbingo med flere spillvarianter',   '/bingo',        true, 1, '{"gameNumber":1,"clientEngine":"web"}'::jsonb),
   ('rocket',       'Rocket',       'Tallspill med 3x3 brett og Lucky Number', '/rocket',       true, 2, '{"gameNumber":2}'::jsonb),
   ('monsterbingo', 'Mønsterbingo', 'Bingo med mønstergevinster',              '/monsterbingo', true, 3, '{"gameNumber":3}'::jsonb),
   -- temabingo (game 4): deaktivert per BIN-496. Beholdes i seed for historisk
