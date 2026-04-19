@@ -97,6 +97,8 @@ export const routes: RouteDef[] = [
   { path: "/withdraw/list/emails", titleKey: "add_email_account", module: "Withdraw Management" },
 
   { path: "/leaderboard", titleKey: "leaderboard_management" },
+  // PR-B6 (BIN-664) — Leaderboard tier add (PLACEHOLDER until BIN-668 ships).
+  { path: "/addLeaderboard", titleKey: "add_leaderboard_tier", module: "Leaderboard Management" },
   { path: "/voucher", titleKey: "voucher_management" },
   { path: "/loyaltyManagement", titleKey: "players_loyalty_management", module: "Loyalty Management" },
   { path: "/loyalty", titleKey: "loyalty_type", module: "Loyalty Management" },
