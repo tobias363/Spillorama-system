@@ -344,6 +344,7 @@ describe("uses75Ball", () => {
 
   test("returns false for other game slugs", () => {
     assert.equal(uses75Ball("rocket"), false);
+    assert.equal(uses75Ball("game_2"), false);
     assert.equal(uses75Ball("monsterbingo"), false);
     assert.equal(uses75Ball("temabingo"), false);
     assert.equal(uses75Ball("spillorama"), false);
@@ -388,8 +389,19 @@ describe("generateTicketForGame", () => {
     }
   });
 
-  test("Other games → 3x5 Databingo60 grid (no free cell)", () => {
+  test("Game 2 (rocket) → 3x3 grid with numbers in 1..21", () => {
     const ticket = generateTicketForGame("rocket");
+    assert.equal(ticket.grid.length, 3);
+    assert.equal(ticket.grid[0].length, 3);
+    for (const row of ticket.grid) {
+      for (const n of row) {
+        assert.ok(n >= 1 && n <= 21, `number ${n} outside 1-21`);
+      }
+    }
+  });
+
+  test("Other games → 3x5 Databingo60 grid (no free cell)", () => {
+    const ticket = generateTicketForGame("databingo");
     assert.equal(ticket.grid.length, 3);
     assert.equal(ticket.grid[0].length, 5);
     for (const row of ticket.grid) {
@@ -402,6 +414,7 @@ describe("generateTicketForGame", () => {
   test("Undefined slug → 3x5 Databingo60 (defensive default)", () => {
     const ticket = generateTicketForGame(undefined);
     assert.equal(ticket.grid.length, 3);
+    assert.equal(ticket.grid[0].length, 5);
   });
 
   test("color and type metadata pass through for 75-ball tickets", () => {

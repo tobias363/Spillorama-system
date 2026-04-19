@@ -40,8 +40,14 @@ describe("LocalBingoSystemAdapter.createTicket", () => {
     assert.equal(ticket.grid[2][2], 0);
   });
 
-  test("Other games → 3x5 Databingo60 ticket", async () => {
+  test("Game 2 (rocket) → 3x3 1..21 ticket", async () => {
     const ticket = await adapter.createTicket(input("rocket"));
+    assert.equal(ticket.grid.length, 3);
+    assert.equal(ticket.grid[0].length, 3);
+  });
+
+  test("Other games → 3x5 Databingo60 ticket", async () => {
+    const ticket = await adapter.createTicket(input("databingo"));
     assert.equal(ticket.grid.length, 3);
     assert.equal(ticket.grid[0].length, 5);
   });
@@ -49,5 +55,6 @@ describe("LocalBingoSystemAdapter.createTicket", () => {
   test("Undefined slug → 3x5 (defensive default)", async () => {
     const ticket = await adapter.createTicket(input(undefined));
     assert.equal(ticket.grid.length, 3);
+    assert.equal(ticket.grid[0].length, 5);
   });
 });
