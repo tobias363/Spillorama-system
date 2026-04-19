@@ -14,6 +14,9 @@ import { renderGameTypeTestPage } from "./gameType/GameTypeTestPage.js";
 import { renderSubGameListPage } from "./subGame/SubGameListPage.js";
 import { renderSubGameAddPage, renderSubGameEditPage } from "./subGame/SubGameAddEditPage.js";
 import { renderSubGameViewPage } from "./subGame/SubGameViewPage.js";
+import { renderPatternListPage } from "./patternManagement/PatternListPage.js";
+import { renderPatternAddPage, renderPatternEditPage } from "./patternManagement/PatternAddPage.js";
+import { renderPatternViewPage } from "./patternManagement/PatternViewPage.js";
 
 /** Static routes that resolve via routes.ts directly (no params). */
 const STATIC_GAMES_ROUTES = new Set<string>([
@@ -23,7 +26,7 @@ const STATIC_GAMES_ROUTES = new Set<string>([
   // subGame — bolk 2 (PR-A3)
   "/subGame",
   "/subGame/add",
-  // patternManagement — bolk 3
+  // patternManagement — bolk 3 uses typeId-scoped dynamic routes only; no static.
   // gameManagement — bolk 4
   // savedGameList — bolk 5
   // dailySchedule — bolk 6
@@ -43,9 +46,12 @@ export function isGamesRoute(path: string): boolean {
     /^\/gameType\/view\/[^/]+$/.test(bare) ||
     /^\/gameType\/edit\/[^/]+$/.test(bare) ||
     /^\/subGame\/view\/[^/]+$/.test(bare) ||
-    /^\/subGame\/edit\/[^/]+$/.test(bare)
+    /^\/subGame\/edit\/[^/]+$/.test(bare) ||
+    /^\/patternManagement\/[^/]+$/.test(bare) ||
+    /^\/patternManagement\/[^/]+\/add$/.test(bare) ||
+    /^\/patternManagement\/[^/]+\/edit\/[^/]+$/.test(bare) ||
+    /^\/patternManagement\/[^/]+\/view\/[^/]+$/.test(bare)
     // Extended per bolk:
-    //   /patternManagement/:typeId + /add + /view/:id
     //   /gameManagement/:typeId/(list|add|view|...)
     //   /savedGameList/:typeId/(add|view|edit)
     //   /dailySchedule/(create|special|scheduleGame|subgame)/:typeId?/:id?
@@ -104,6 +110,42 @@ export function mountGamesRoute(container: HTMLElement, path: string): void {
   const subEditMatch = /^\/subGame\/edit\/([^/]+)$/.exec(bare);
   if (subEditMatch && subEditMatch[1]) {
     void renderSubGameEditPage(container, decodeURIComponent(subEditMatch[1]));
+    return;
+  }
+
+  // Dynamic: /patternManagement/:typeId/add
+  const patternAddMatch = /^\/patternManagement\/([^/]+)\/add$/.exec(bare);
+  if (patternAddMatch && patternAddMatch[1]) {
+    void renderPatternAddPage(container, decodeURIComponent(patternAddMatch[1]));
+    return;
+  }
+
+  // Dynamic: /patternManagement/:typeId/edit/:id
+  const patternEditMatch = /^\/patternManagement\/([^/]+)\/edit\/([^/]+)$/.exec(bare);
+  if (patternEditMatch && patternEditMatch[1] && patternEditMatch[2]) {
+    void renderPatternEditPage(
+      container,
+      decodeURIComponent(patternEditMatch[1]),
+      decodeURIComponent(patternEditMatch[2])
+    );
+    return;
+  }
+
+  // Dynamic: /patternManagement/:typeId/view/:id
+  const patternViewMatch = /^\/patternManagement\/([^/]+)\/view\/([^/]+)$/.exec(bare);
+  if (patternViewMatch && patternViewMatch[1] && patternViewMatch[2]) {
+    void renderPatternViewPage(
+      container,
+      decodeURIComponent(patternViewMatch[1]),
+      decodeURIComponent(patternViewMatch[2])
+    );
+    return;
+  }
+
+  // Dynamic: /patternManagement/:typeId (list) — must be after /add, /edit, /view
+  const patternListMatch = /^\/patternManagement\/([^/]+)$/.exec(bare);
+  if (patternListMatch && patternListMatch[1]) {
+    void renderPatternListPage(container, decodeURIComponent(patternListMatch[1]));
     return;
   }
 
