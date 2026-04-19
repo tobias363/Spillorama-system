@@ -11,7 +11,7 @@ const dummyPlayer: Player = {
   balance: 1000,
 };
 
-function input(gameSlug: string | undefined, color?: string, type?: string) {
+function input(gameSlug: string, color?: string, type?: string) {
   return {
     roomCode: "BINGO1",
     gameId: "g1",
@@ -52,9 +52,9 @@ describe("LocalBingoSystemAdapter.createTicket", () => {
     assert.equal(ticket.grid[0].length, 5);
   });
 
-  test("Undefined slug → 3x5 (defensive default)", async () => {
-    const ticket = await adapter.createTicket(input(undefined));
-    assert.equal(ticket.grid.length, 3);
-    assert.equal(ticket.grid[0].length, 5);
-  });
+  // BIN-672: Removed "Undefined slug → 3x5 (defensive default)" test.
+  // The old defensive fallback was the root cause of BIN-619/BIN-671 —
+  // a missing gameSlug anywhere silently produced 3×5 tickets in a
+  // Bingo75 game. generateTicketForGame now throws DomainError on
+  // unknown slugs (see BIN-672 commit 6 tests).
 });

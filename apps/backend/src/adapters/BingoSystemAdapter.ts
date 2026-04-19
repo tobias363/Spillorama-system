@@ -3,7 +3,8 @@ import type { Player, Ticket, ClaimType, ClaimRecord, GameSnapshot, RecoverableG
 export interface CreateTicketInput {
   roomCode: string;
   gameId: string;
-  gameSlug?: string;
+  /** BIN-672: required — drives ticket format selection. */
+  gameSlug: string;
   player: Player;
   ticketIndex: number;
   ticketsPerPlayer: number;

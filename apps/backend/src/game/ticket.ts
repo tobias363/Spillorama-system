@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import type { Ticket } from "./types.js";
+import { DomainError } from "./BingoEngine.js";
 
 const BOARD_ROWS = 3;
 const BOARD_COLS = 5;
@@ -70,6 +71,24 @@ export const GAME3_SLUGS: ReadonlySet<string> = new Set([
   "game_3",
 ]);
 
+/**
+ * BIN-672: Game slugs that explicitly want the 3×5 Databingo60 format.
+ * Previously this was the SILENT fallback for any unknown slug — which
+ * caused the BIN-619/BIN-671 regression where a missing-gameSlug chain
+ * produced 3×5 tickets in a Bingo75 game. Now the fallback throws; only
+ * explicit slugs in this set get 3×5.
+ */
+export const DATABINGO60_SLUGS: ReadonlySet<string> = new Set([
+  "databingo",
+  "databingo60",
+  "bingo60",
+]);
+
+/** True if a room/game with this slug should use the 3×5 Databingo60 format. */
+export function usesDatabingo60(gameSlug: string | null | undefined): boolean {
+  return DATABINGO60_SLUGS.has(gameSlug ?? "");
+}
+
 /** True if a room/game with this slug should use the 75-ball / 5x5 format. */
 export function uses75Ball(gameSlug: string | null | undefined): boolean {
   return BINGO75_SLUGS.has(gameSlug ?? "");
@@ -95,23 +114,40 @@ export function uses5x5NoCenterTicket(gameSlug: string | null | undefined): bool
  * - 75-ball games (Game 1 / "bingo"): 5x5 grid with free centre cell.
  * - Game 2 (Rocket/Tallspill): 3×3 grid with 9 unique picks from 1..21.
  * - Game 3 (Mønsterbingo): 5x5 grid with 25 unique picks from 1..75, **no free centre**.
- * - All other games: 3x5 Databingo60 grid (no free cell).
+ * - Databingo60: 3x5 grid (explicit opt-in via `databingo` slug).
+ *
+ * BIN-672: Previously any unknown slug silently fell through to
+ * `generateDatabingo60Ticket()` (3×5 Databingo60). That was the root
+ * cause of BIN-619/BIN-671 — a missing gameSlug anywhere in the chain
+ * quietly produced 3×5 tickets in a Bingo75 game.
+ *
+ * Now: unknown slugs throw `DomainError("UNKNOWN_GAME_SLUG", ...)`.
+ * Fail-loud is the final defense after TypeScript (commit 4) and DB
+ * defaults (commit 1-3). If you hit this error, the caller chain has
+ * a gap — fix the caller, don't catch the error.
  *
  * Use this everywhere a ticket is created so the format stays consistent
- * with `uses75Ball` / `uses3x3Ticket` / `uses5x5NoCenterTicket` and the
- * engine's draw-bag selection. Game 3 is checked **before** Game 1 (75-ball)
- * because both use the 5×5 / 1-75 shape; the GAME3_SLUGS set is disjoint
- * from BINGO75_SLUGS so the router ordering does not affect existing slugs.
+ * with `uses75Ball` / `uses3x3Ticket` / `uses5x5NoCenterTicket` /
+ * `usesDatabingo60` and the engine's draw-bag selection. Game 3 is
+ * checked **before** Game 1 (75-ball) because both use the 5×5 / 1-75
+ * shape; the GAME3_SLUGS set is disjoint from BINGO75_SLUGS so the
+ * router ordering does not affect existing slugs.
  */
 export function generateTicketForGame(
-  gameSlug: string | null | undefined,
+  gameSlug: string,
   color?: string,
   type?: string,
 ): Ticket {
   if (uses3x3Ticket(gameSlug)) return generate3x3Ticket(color, type);
   if (uses5x5NoCenterTicket(gameSlug)) return generate5x5NoCenterTicket(color, type);
   if (uses75Ball(gameSlug)) return generateBingo75Ticket(color, type);
-  return generateDatabingo60Ticket();
+  if (usesDatabingo60(gameSlug)) return generateDatabingo60Ticket();
+  throw new DomainError(
+    "UNKNOWN_GAME_SLUG",
+    `Kan ikke generere ticket — ukjent gameSlug "${gameSlug}". ` +
+      `Kjente slugs: ${[...BINGO75_SLUGS, ...GAME2_SLUGS, ...GAME3_SLUGS, ...DATABINGO60_SLUGS].join(", ")}. ` +
+      `Sjekk at caller-kjeden passerer gameSlug fra RoomState.gameSlug (BIN-672).`,
+  );
 }
 
 export function generateBingo75Ticket(color?: string, type?: string): Ticket {
