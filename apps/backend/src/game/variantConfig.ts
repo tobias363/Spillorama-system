@@ -44,6 +44,23 @@ export interface PatternConfig {
   design: number;
   /** For design 0: 25-element bitmask (1=fill, 0=empty). */
   patternDataList?: number[];
+  /**
+   * BIN-615 / PR-C3b: G3 — pattern deactivates after this many balls drawn
+   * without a winner. Absent for G1/G2 patterns and for Full House / Coverall
+   * (those ignore threshold).
+   * Legacy ref: `gamehelper/game3.js:738` (`obj.ballNumber >= count`).
+   */
+  ballNumberThreshold?: number;
+  /**
+   * BIN-615 / PR-C3b: G3 — fixed-kr prize amount when pattern wins. Used when
+   * `winningType === "fixed"`. Legacy field name: prize1.
+   */
+  prize1?: number;
+  /**
+   * BIN-615 / PR-C3b: G3 — prize-calculation variant. "percent" = prizePercent
+   * of pool (default). "fixed" = prize1 is a fixed kr amount.
+   */
+  winningType?: "percent" | "fixed";
 }
 
 // ── Full variant config ───────────────────────────────────────────────────────
@@ -167,6 +184,38 @@ export const DEFAULT_GAME2_CONFIG: GameVariantConfig = {
   },
 };
 
+/**
+ * BIN-615 / PR-C3b: Game 3 (Mønsterbingo) default variant config.
+ *
+ * - 5×5 1..75 tickets (no free centre) — see `generate5x5NoCenterTicket`
+ * - maxBallValue=75, drawBagSize=75 (Helper/bingo.js:1014-1031, gamehelper/game3.js:663)
+ * - patternEvalMode="auto-claim-on-draw" — Game3Engine auto-claims per draw
+ * - Patterns: Row 1-4 (10% each) + Full House / Coverall (60%). Real halls
+ *   override this with admin-defined patterns including custom 25-bit masks.
+ * - No `jackpotNumberTable` — distinguishes G3 from G2 in the guard path.
+ *
+ * Legacy ref: gamehelper/game3.js:663-708 (`createGameData`), Helper/bingo.js:
+ * 1197-1356 (per-ticket pattern pre-compute).
+ */
+export const DEFAULT_GAME3_CONFIG: GameVariantConfig = {
+  ticketTypes: [
+    ...DEFAULT_TICKET_COLORS.map((name) => ({
+      name, type: "small", priceMultiplier: 1, ticketCount: 1,
+    })),
+    { name: "Large Yellow", type: "large", priceMultiplier: 3, ticketCount: 3 },
+  ],
+  patterns: [
+    { name: "Row 1", claimType: "LINE" as const, prizePercent: 10, design: 1, ballNumberThreshold: 15 },
+    { name: "Row 2", claimType: "LINE" as const, prizePercent: 10, design: 2, ballNumberThreshold: 25 },
+    { name: "Row 3", claimType: "LINE" as const, prizePercent: 10, design: 3, ballNumberThreshold: 40 },
+    { name: "Row 4", claimType: "LINE" as const, prizePercent: 10, design: 4, ballNumberThreshold: 55 },
+    { name: "Full House", claimType: "BINGO" as const, prizePercent: 60, design: 0 },
+  ],
+  maxBallValue: 75,
+  drawBagSize: 75,
+  patternEvalMode: "auto-claim-on-draw",
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Get default variant config for a game_type. */
@@ -179,6 +228,11 @@ export function getDefaultVariantConfig(gameType: string): GameVariantConfig {
     case "rocket":
     case "tallspill":
       return DEFAULT_GAME2_CONFIG;
+    // BIN-615 / PR-C3b: Game 3 Mønsterbingo — 5×5 no-centre + 1..75 drawbag
+    case "game_3":
+    case "monsterbingo":
+    case "mønsterbingo":
+      return DEFAULT_GAME3_CONFIG;
     default: return DEFAULT_STANDARD_CONFIG;
   }
 }
@@ -230,6 +284,11 @@ export function patternConfigToDefinitions(patterns: PatternConfig[]): PatternDe
       design: p.design,
     };
     if (p.patternDataList) def.patternDataList = [...p.patternDataList];
+    // BIN-615 / PR-C3b: propagate G3 pattern metadata into PatternDefinition so
+    // Game3Engine.buildCycler() can read it without re-resolving the variantConfig.
+    if (typeof p.ballNumberThreshold === "number") def.ballNumberThreshold = p.ballNumberThreshold;
+    if (typeof p.prize1 === "number") def.prize1 = p.prize1;
+    if (p.winningType === "percent" || p.winningType === "fixed") def.winningType = p.winningType;
     return def;
   });
 }
