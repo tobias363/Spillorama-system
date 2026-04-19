@@ -95,6 +95,12 @@ export class PlayScreen extends Container {
   private lastState: GameState | null = null;
   private isWaitingMode = false;
   private pauseAwareBridge: { getState(): { isPaused: boolean } } | null = null;
+  /**
+   * BIN-619: cache for `renderPreRoundTickets` diff-check. `null` = invalid
+   * (force rebuild next call). Set back to `null` from `buildTickets` and
+   * `enterWaitingMode` since those replace scroller content.
+   */
+  private lastPreRoundCount: number | null = null;
 
   constructor(
     screenWidth: number,
@@ -217,7 +223,11 @@ export class PlayScreen extends Container {
         const types = this.lastState?.ticketTypes ?? [];
         // Unity: Game1PurchaseTicket.cs:69 — fratrekk allerede-kjøpte brett
         // fra 30-grensen før plus-knappene evalueres.
-        const alreadyPurchased = this.lastState?.myTickets?.length ?? 0;
+        // BIN-619: Purchases always arm for the NEXT round (per owner
+        // 2026-04-19: "bonger kjøpt under RUNNING blir aktive neste runde").
+        // Hard-cap is per-round, so count against `preRoundTickets` — the
+        // queue for the next round — not current-round `myTickets`.
+        const alreadyPurchased = this.lastState?.preRoundTickets?.length ?? 0;
         this.buyPopup?.showWithTypes(fee, types, alreadyPurchased);
       },
       onSelectLuckyNumber: () => {
@@ -226,7 +236,8 @@ export class PlayScreen extends Container {
       onBuyMoreTickets: () => {
         const fee = this.lastState?.entryFee || 10;
         const types = this.lastState?.ticketTypes ?? [];
-        const alreadyPurchased = this.lastState?.myTickets?.length ?? 0;
+        // BIN-619: Same reasoning as onPreBuy — count against preRoundTickets.
+        const alreadyPurchased = this.lastState?.preRoundTickets?.length ?? 0;
         this.buyPopup?.showWithTypes(fee, types, alreadyPurchased);
       },
       onCancelTickets: () => {
@@ -336,6 +347,9 @@ export class PlayScreen extends Container {
     this.isWaitingMode = true;
     this.lastState = state;
     this.centerTop.setGameRunning(false);
+    // BIN-619: Invalidate pre-round cache — `clearCards()` below empties the
+    // scroller, so next `renderPreRoundTickets` must rebuild from scratch.
+    this.lastPreRoundCount = null;
 
     // Reset from previous game — clear ball tube and called numbers
     // (Unity: bingoBallPanelManager.Reset() + withdrawNumberHistoryPanel.Close())
@@ -376,6 +390,11 @@ export class PlayScreen extends Container {
     // Popup vises kun ved eksplisitt "Forhåndskjøp"/"Kjøp flere"-klikk.
     // Controlleren kaller showUpcomingPurchase(state) ved WAITING-transition.
 
+    // BIN-619: Render pre-round tickets if already armed (e.g. landing in
+    // WAITING with purchases made before reload). Empty preRoundTickets is
+    // a no-op after the cache check.
+    this.renderPreRoundTickets(state);
+
     // Update info panels
     this.updateInfo(state);
   }
@@ -408,22 +427,29 @@ export class PlayScreen extends Container {
       // BIN-410 (D3, Q1): Auto-visning av Game1BuyPopup er fjernet.
       // UpcomingPurchase-panelet oppdateres i stedet når ticket-types kommer
       // inn fra backend — refresh in-place bevarer eventuelle +/- valg.
+      // BIN-619: `alreadyPurchased` i WAITING må leses fra `preRoundTickets`
+      // — `myTickets` er tom mellom runder (blir fylt først ved PLAYING).
       const hadTypes = prevTypes && prevTypes.length > 0;
       const hasTypes = state.ticketTypes && state.ticketTypes.length > 0;
+      const preRoundCount = state.preRoundTickets?.length ?? 0;
       if (hasTypes && this.upcomingPurchase?.isShowing()) {
         this.upcomingPurchase.update({
           entryFee: state.entryFee || 10,
           ticketTypes: state.ticketTypes,
-          alreadyPurchased: state.myTickets?.length ?? 0,
+          alreadyPurchased: preRoundCount,
         });
       } else if (!hadTypes && hasTypes) {
         // Types just arrived — show the panel.
         this.upcomingPurchase?.show({
           entryFee: state.entryFee || 10,
           ticketTypes: state.ticketTypes,
-          alreadyPurchased: state.myTickets?.length ?? 0,
+          alreadyPurchased: preRoundCount,
         });
       }
+
+      // BIN-619: Re-render pre-round tickets when count changes (cache diff-
+      // check inside ensures no work if count identical).
+      this.renderPreRoundTickets(state);
     }
 
     this.updateInfo(state);
@@ -441,10 +467,12 @@ export class PlayScreen extends Container {
    */
   showUpcomingPurchase(state: GameState): void {
     if (!state.ticketTypes || state.ticketTypes.length === 0) return;
+    // BIN-619: Called from WAITING-transition — between-rounds purchases
+    // live in `preRoundTickets`, not `myTickets`.
     this.upcomingPurchase?.show({
       entryFee: state.entryFee || 10,
       ticketTypes: state.ticketTypes,
-      alreadyPurchased: state.myTickets?.length ?? 0,
+      alreadyPurchased: state.preRoundTickets?.length ?? 0,
       gameName: state.gameType,
     });
   }
@@ -466,6 +494,9 @@ export class PlayScreen extends Container {
     this.centerTop.setGameRunning(true);
     this.lineAlreadyWon = false;
     this.bingoAlreadyWon = false;
+    // BIN-619: buildTickets replaces scroller content from `myTickets` — any
+    // pre-round render cached earlier is now stale.
+    this.lastPreRoundCount = null;
 
     // Stop countdown and hide buy popup when entering play mode
     this.leftInfo.stopCountdown();
@@ -480,23 +511,77 @@ export class PlayScreen extends Container {
       if (result.isWon && result.claimType === "BINGO") this.bingoAlreadyWon = true;
     }
 
-    // Build inline tickets with color from backend (falls back to cycling).
-    //
-    // BIN-413/415: Variant-aware grouping —
-    //   elvis       → 2 mini-tickets in a TicketGroup (horizontal)
-    //   large       → 3 mini-tickets in a TicketGroup (vertical)
-    //   traffic-*   → 3 mini-tickets in a TicketGroup (vertical, R/Y/G)
-    //   everything else → one TicketCard (as before)
-    //
-    // Unity refs: Game1ViewPurchaseElvisTicket.cs:14-17 (2-stack, shared BG);
-    // PrefabBingoGame1LargeTicket5x5.cs:8 (3-stack, shared imageBG).
-    // Cell-size MUST stay at 44 for Large — Unity prefab
-    // `Prefab - Bingo Game 1 Large Ticket 5x5.prefab:10354` keeps m_CellSize
-    // {44,37} identical to small tickets; Large is a vertical composition,
-    // not a scaled-up single ticket.
     this.inlineScroller.clearCards();
+    this._renderTicketsIntoScroller(state.myTickets, state, { markActive: true });
+    this.inlineScroller.sortBestFirst();
+    this.updateClaimButtons(state);
 
-    const tickets = state.myTickets;
+    // Also build tickets in the overlay (for zoomed view)
+    this.ticketOverlay.buildTickets(state);
+
+    // Load existing drawn balls
+    if (state.drawnNumbers.length > 0) {
+      this.ballTube.loadBalls(state.drawnNumbers);
+      this.calledNumbers.setNumbers(state.drawnNumbers);
+    }
+
+    // Update patterns in center panel
+    this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool);
+  }
+
+  /**
+   * BIN-619: Render pre-round tickets into the scroller.
+   *
+   * Called from WAITING (pre-round buy flow) and SPECTATING (mid-round buy
+   * flow — tickets bought during an active draw arm for the NEXT round and
+   * must not be marked by current draws). Unity reference:
+   * `Game1GamePlayPanel.SocketFlow.cs` treats preRoundTickets as inactive
+   * for current-round mark/claim.
+   *
+   * Caches count to avoid rebuilding on every stateChange (SPECTATING sees
+   * one stateChange per drawn number). buildTickets/enterWaitingMode
+   * invalidate the cache so the next call always rebuilds.
+   */
+  renderPreRoundTickets(state: GameState): void {
+    this.lastState = state;
+    const tickets = state.preRoundTickets ?? [];
+    if (this.lastPreRoundCount === tickets.length) return;
+
+    this.inlineScroller.clearCards();
+    if (tickets.length > 0) {
+      this._renderTicketsIntoScroller(tickets, state, { markActive: false });
+      this.inlineScroller.sortBestFirst();
+    }
+    this.lastPreRoundCount = tickets.length;
+  }
+
+  /**
+   * BIN-619: Shared ticket-card/group rendering loop — extracted from
+   * `buildTickets` so `renderPreRoundTickets` can reuse it. Caller is
+   * responsible for `clearCards()` and `sortBestFirst()` around this.
+   *
+   * `markActive` controls whether drawn numbers / saved myMarks are applied
+   * to each ticket. Pre-round tickets pass `false` — they aren't active in
+   * the current round (owner confirmation 2026-04-19).
+   *
+   * BIN-413/415: Variant-aware grouping —
+   *   elvis       → 2 mini-tickets in a TicketGroup (horizontal)
+   *   large       → 3 mini-tickets in a TicketGroup (vertical)
+   *   traffic-*   → 3 mini-tickets in a TicketGroup (vertical, R/Y/G)
+   *   everything else → one TicketCard (as before)
+   *
+   * Unity refs: Game1ViewPurchaseElvisTicket.cs:14-17 (2-stack, shared BG);
+   * PrefabBingoGame1LargeTicket5x5.cs:8 (3-stack, shared imageBG).
+   * Cell-size MUST stay at 44 for Large — Unity prefab
+   * `Prefab - Bingo Game 1 Large Ticket 5x5.prefab:10354` keeps m_CellSize
+   * {44,37} identical to small tickets; Large is a vertical composition,
+   * not a scaled-up single ticket.
+   */
+  private _renderTicketsIntoScroller(
+    tickets: GameState["myTickets"],
+    state: GameState,
+    opts: { markActive: boolean },
+  ): void {
     let i = 0;
     while (i < tickets.length) {
       const ticket = tickets[i];
@@ -567,12 +652,16 @@ export class PlayScreen extends Container {
         });
 
         // Apply existing marks per mini-ticket, mirroring the solo-card flow.
-        for (let k = 0; k < slice.length; k++) {
-          const mini = group.miniTickets[k];
-          if (state.myMarks[i + k]) {
-            mini.markNumbers(state.myMarks[i + k]);
-          } else {
-            for (const n of state.drawnNumbers) mini.markNumber(n);
+        // BIN-619: Pre-round tickets are inactive in the current round —
+        // skip mark application (`opts.markActive === false`).
+        if (opts.markActive) {
+          for (let k = 0; k < slice.length; k++) {
+            const mini = group.miniTickets[k];
+            if (state.myMarks[i + k]) {
+              mini.markNumbers(state.myMarks[i + k]);
+            } else {
+              for (const n of state.drawnNumbers) mini.markNumber(n);
+            }
           }
         }
 
@@ -607,30 +696,20 @@ export class PlayScreen extends Container {
 
       card.setHeaderLabel(`${i + 1} — ${ticket.color ?? "standard"}`);
 
-      if (state.myMarks[i]) {
-        card.markNumbers(state.myMarks[i]);
-      } else {
-        for (const n of state.drawnNumbers) card.markNumber(n);
+      // BIN-619: Pre-round tickets are inactive in the current round —
+      // skip mark application (`opts.markActive === false`).
+      if (opts.markActive) {
+        if (state.myMarks[i]) {
+          card.markNumbers(state.myMarks[i]);
+        } else {
+          for (const n of state.drawnNumbers) card.markNumber(n);
+        }
       }
 
       if (state.myLuckyNumber) card.highlightLuckyNumber(state.myLuckyNumber);
       this.inlineScroller.addCard(card);
       i++;
     }
-    this.inlineScroller.sortBestFirst();
-    this.updateClaimButtons(state);
-
-    // Also build tickets in the overlay (for zoomed view)
-    this.ticketOverlay.buildTickets(state);
-
-    // Load existing drawn balls
-    if (state.drawnNumbers.length > 0) {
-      this.ballTube.loadBalls(state.drawnNumbers);
-      this.calledNumbers.setNumbers(state.drawnNumbers);
-    }
-
-    // Update patterns in center panel
-    this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool);
   }
 
   /**
