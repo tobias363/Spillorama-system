@@ -27,6 +27,3 @@ CREATE INDEX IF NOT EXISTS idx_hall_manual_adjustments_hall_date
   ON app_hall_manual_adjustments (hall_id, business_date DESC);
 CREATE INDEX IF NOT EXISTS idx_hall_manual_adjustments_created
   ON app_hall_manual_adjustments (created_at DESC);
-
--- Down
--- DROP TABLE IF EXISTS app_hall_manual_adjustments;

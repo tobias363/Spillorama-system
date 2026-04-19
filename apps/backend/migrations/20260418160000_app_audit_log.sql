@@ -49,11 +49,3 @@ COMMENT ON COLUMN app_audit_log.action IS
   'Stable verb in dotted notation, e.g. "user.role.change", "deposit.complete", "auth.login".';
 COMMENT ON COLUMN app_audit_log.details IS
   'Structured context for the event. Must be PII-redacted before insert.';
-
--- Down migration
-
-DROP INDEX IF EXISTS idx_app_audit_log_action_created;
-DROP INDEX IF EXISTS idx_app_audit_log_resource_created;
-DROP INDEX IF EXISTS idx_app_audit_log_actor_created;
-DROP INDEX IF EXISTS idx_app_audit_log_created_at;
-DROP TABLE IF EXISTS app_audit_log;

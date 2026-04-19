@@ -108,15 +108,3 @@ DROP TRIGGER IF EXISTS trg_app_regulatory_ledger_no_truncate ON app_regulatory_l
 CREATE TRIGGER trg_app_regulatory_ledger_no_truncate
   BEFORE TRUNCATE ON app_regulatory_ledger
   FOR EACH STATEMENT EXECUTE FUNCTION app_regulatory_ledger_block_mutation();
-
--- Down Migration
-
-DROP TRIGGER IF EXISTS trg_app_regulatory_ledger_no_truncate ON app_regulatory_ledger;
-DROP TRIGGER IF EXISTS trg_app_regulatory_ledger_no_delete ON app_regulatory_ledger;
-DROP TRIGGER IF EXISTS trg_app_regulatory_ledger_no_update ON app_regulatory_ledger;
-DROP FUNCTION IF EXISTS app_regulatory_ledger_block_mutation();
-DROP INDEX IF EXISTS idx_app_regulatory_ledger_sequence;
-DROP INDEX IF EXISTS idx_app_regulatory_ledger_session;
-DROP INDEX IF EXISTS idx_app_regulatory_ledger_user;
-DROP INDEX IF EXISTS idx_app_regulatory_ledger_daily;
-DROP TABLE IF EXISTS app_regulatory_ledger;

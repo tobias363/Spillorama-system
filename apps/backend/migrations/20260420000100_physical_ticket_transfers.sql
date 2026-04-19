@@ -25,6 +25,3 @@ CREATE TABLE IF NOT EXISTS app_physical_ticket_transfers (
 
 CREATE INDEX IF NOT EXISTS idx_physical_ticket_transfers_batch
   ON app_physical_ticket_transfers (batch_id, transferred_at DESC);
-
--- Down
--- DROP TABLE IF EXISTS app_physical_ticket_transfers;

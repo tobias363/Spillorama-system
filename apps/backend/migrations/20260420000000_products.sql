@@ -111,11 +111,3 @@ CREATE INDEX IF NOT EXISTS idx_product_sales_hall
   ON app_product_sales (hall_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_product_sales_player
   ON app_product_sales (player_user_id) WHERE player_user_id IS NOT NULL;
-
--- Down
--- DROP TABLE IF EXISTS app_product_sales;
--- DROP TABLE IF EXISTS app_product_cart_items;
--- DROP TABLE IF EXISTS app_product_carts;
--- DROP TABLE IF EXISTS app_hall_products;
--- DROP TABLE IF EXISTS app_products;
--- DROP TABLE IF EXISTS app_product_categories;

@@ -48,9 +48,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_app_static_tickets_hall_serial_color
 CREATE INDEX IF NOT EXISTS idx_app_static_tickets_hall_color_unpurchased
   ON app_static_tickets (hall_id, ticket_color)
   WHERE is_purchased = false;
-
--- Down Migration
-
-DROP INDEX IF EXISTS idx_app_static_tickets_hall_color_unpurchased;
-DROP INDEX IF EXISTS idx_app_static_tickets_hall_serial_color;
-DROP TABLE IF EXISTS app_static_tickets;

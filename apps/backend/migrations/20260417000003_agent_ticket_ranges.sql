@@ -61,10 +61,3 @@ CREATE INDEX IF NOT EXISTS idx_app_agent_ticket_ranges_agent_open
 -- JSONB GIN-indeks: raske `serials ?| $2::text[]` spørringer for overlapp-sjekk.
 CREATE INDEX IF NOT EXISTS idx_app_agent_ticket_ranges_serials_gin
   ON app_agent_ticket_ranges USING GIN (serials);
-
--- Down Migration
-
-DROP INDEX IF EXISTS idx_app_agent_ticket_ranges_serials_gin;
-DROP INDEX IF EXISTS idx_app_agent_ticket_ranges_agent_open;
-DROP INDEX IF EXISTS idx_app_agent_ticket_ranges_hall_color_open;
-DROP TABLE IF EXISTS app_agent_ticket_ranges;

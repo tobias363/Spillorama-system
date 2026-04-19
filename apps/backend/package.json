@@ -11,9 +11,8 @@
     "check": "tsc --noEmit",
     "test": "LOG_LEVEL=warn tsx --test 'src/**/*.test.ts'",
     "test:compliance": "tsx --test 'src/compliance/**/*.test.ts'",
-    "migrate": "node-pg-migrate -d APP_PG_CONNECTION_STRING -m migrations up",
-    "migrate:down": "node-pg-migrate -d APP_PG_CONNECTION_STRING -m migrations down 0",
-    "migrate:create": "node-pg-migrate -d APP_PG_CONNECTION_STRING -m migrations create",
+    "migrate": "node-pg-migrate -d APP_PG_CONNECTION_STRING -m migrations --ignore-pattern '.*\\.md$|^\\..*' up",
+    "migrate:create": "node-pg-migrate -d APP_PG_CONNECTION_STRING -m migrations --ignore-pattern '.*\\.md$|^\\..*' create",
     "seed:test-users": "tsx scripts/seed-test-users-hall.ts",
     "spec:lint": "redocly lint openapi.yaml"
   },

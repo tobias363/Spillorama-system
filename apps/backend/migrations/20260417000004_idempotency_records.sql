@@ -29,7 +29,3 @@ COMMENT ON COLUMN app_idempotency_records.response_body IS 'JSONB-kopi av den f�
 
 -- TTL-cleanup skjer senere (Blokk 4-noe). For nå akkumulerer vi — volumet
 -- er lavt (antall papir-bong-salg per dag per hall).
-
--- Down Migration
-
-DROP TABLE IF EXISTS app_idempotency_records;

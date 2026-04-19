@@ -30,9 +30,3 @@ COMMENT ON COLUMN game_sessions.draw_session_id IS
 CREATE INDEX IF NOT EXISTS idx_game_sessions_draw_session_id
   ON game_sessions (draw_session_id)
   WHERE draw_session_id IS NOT NULL;
-
--- Down Migration
-
--- Ingen datadød — dropping index + column er trygt.
-DROP INDEX IF EXISTS idx_game_sessions_draw_session_id;
-ALTER TABLE IF EXISTS game_sessions DROP COLUMN IF EXISTS draw_session_id;

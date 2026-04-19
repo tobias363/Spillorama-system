@@ -45,9 +45,3 @@ CREATE INDEX IF NOT EXISTS idx_app_draw_session_tickets_user_session
 -- All tickets for a session (audit + Blokk 3.4 claim lookup).
 CREATE INDEX IF NOT EXISTS idx_app_draw_session_tickets_session
   ON app_draw_session_tickets (draw_session_id);
-
--- Down Migration
-
-DROP INDEX IF EXISTS idx_app_draw_session_tickets_session;
-DROP INDEX IF EXISTS idx_app_draw_session_tickets_user_session;
-DROP TABLE IF EXISTS app_draw_session_tickets;

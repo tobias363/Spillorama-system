@@ -34,9 +34,3 @@ ALTER TABLE app_users
     (role = 'HALL_OPERATOR' AND hall_id IS NOT NULL)
     OR role <> 'HALL_OPERATOR'
   );
-
--- Down Migration
-
-ALTER TABLE app_users DROP CONSTRAINT IF EXISTS chk_app_users_hall_operator_has_hall;
-DROP INDEX IF EXISTS idx_app_users_hall_id;
-ALTER TABLE app_users DROP COLUMN IF EXISTS hall_id;

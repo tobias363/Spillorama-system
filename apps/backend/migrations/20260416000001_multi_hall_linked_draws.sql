@@ -140,21 +140,3 @@ COMMENT ON COLUMN app_draw_session_events.event_hash    IS 'sha256_hex(event_typ
 -- unique — this prevents forks/gaps AND serves as the index for tail reads.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_app_draw_session_events_session_chain
   ON app_draw_session_events (draw_session_id, chain_index);
-
--- Down Migration
-
-DROP INDEX IF EXISTS idx_app_draw_session_events_session_chain;
-DROP TABLE IF EXISTS app_draw_session_events;
-
-DROP INDEX IF EXISTS idx_app_draw_session_halls_hall_id;
-DROP TABLE IF EXISTS app_draw_session_halls;
-
-DROP INDEX IF EXISTS idx_app_draw_sessions_coordinator_hall;
-DROP INDEX IF EXISTS idx_app_draw_sessions_hall_group_created;
-DROP INDEX IF EXISTS idx_app_draw_sessions_one_active_per_group;
-DROP TABLE IF EXISTS app_draw_sessions;
-
-DROP INDEX IF EXISTS idx_app_halls_hall_group_id;
-ALTER TABLE app_halls DROP COLUMN IF EXISTS hall_group_id;
-
-DROP TABLE IF EXISTS app_hall_groups;
