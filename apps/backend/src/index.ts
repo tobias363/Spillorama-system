@@ -94,6 +94,8 @@ import { NotImplementedTicketPurchasePort } from "./agent/ports/TicketPurchasePo
 import { PostgresPhysicalTicketReadPort } from "./agent/ports/PhysicalTicketReadPort.js";
 import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.js";
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
+import { createAdminGameManagementRouter } from "./routes/adminGameManagement.js";
+import { GameManagementService } from "./admin/GameManagementService.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
 import { createAdminUniqueIdsAndPayoutsRouter } from "./routes/adminUniqueIdsAndPayouts.js";
@@ -326,6 +328,12 @@ const physicalTicketService = new PhysicalTicketService({
 
 // BIN-587 B4b: voucher admin-CRUD (redemption-flow i G2/G3 er follow-up).
 const voucherService = new VoucherService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-622: Game Management (admin-katalog av spill-varianter).
+const gameManagementService = new GameManagementService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -628,6 +636,11 @@ app.use(createAdminVouchersRouter({
   platformService,
   auditLogService,
   voucherService,
+}));
+app.use(createAdminGameManagementRouter({
+  platformService,
+  auditLogService,
+  gameManagementService,
 }));
 app.use(createAdminUniqueIdsAndPayoutsRouter({
   platformService,

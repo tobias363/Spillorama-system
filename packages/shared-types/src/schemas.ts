@@ -350,3 +350,71 @@ export const ChatMessageSchema = z.object({
   createdAt: IsoDateString,
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+// ── BIN-622: GameManagement CRUD wire schemas ───────────────────────────────
+// Admin-router eier validering mot eksisterende DomainError-flyt, men vi
+// eksporterer zod-skjemaene så admin-UI kan dele runtime-kontrakten (samme
+// mønster som PlayerSchema/TicketSchema over). Felter speiler migration
+// `20260419000000_game_management.sql` + GameManagementRow i admin-web.
+
+const GameManagementStatus = z.enum(["active", "running", "closed", "inactive"]);
+const GameManagementTicketType = z.enum(["Large", "Small"]);
+
+export const GameManagementRowSchema = z.object({
+  id: z.string().min(1),
+  gameTypeId: z.string().min(1),
+  parentId: z.string().nullable().optional(),
+  name: z.string().min(1).max(200),
+  ticketType: GameManagementTicketType.nullable(),
+  /** Ticket price in smallest currency unit (øre). */
+  ticketPrice: z.number().int().nonnegative(),
+  startDate: IsoDateString,
+  endDate: IsoDateString.nullable().optional(),
+  status: GameManagementStatus,
+  totalSold: z.number().int().nonnegative(),
+  totalEarning: z.number().int().nonnegative(),
+  config: z.record(z.string(), z.unknown()),
+  repeatedFromId: z.string().nullable().optional(),
+  createdBy: z.string().nullable().optional(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type GameManagementRow = z.infer<typeof GameManagementRowSchema>;
+
+export const CreateGameManagementSchema = z.object({
+  gameTypeId: z.string().min(1).max(200),
+  parentId: z.string().min(1).max(200).nullable().optional(),
+  name: z.string().min(1).max(200),
+  ticketType: GameManagementTicketType.nullable().optional(),
+  ticketPrice: z.number().int().nonnegative().optional(),
+  startDate: IsoDateString,
+  endDate: IsoDateString.nullable().optional(),
+  status: GameManagementStatus.optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+});
+export type CreateGameManagementInput = z.infer<typeof CreateGameManagementSchema>;
+
+export const UpdateGameManagementSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  ticketType: GameManagementTicketType.nullable().optional(),
+  ticketPrice: z.number().int().nonnegative().optional(),
+  startDate: IsoDateString.optional(),
+  endDate: IsoDateString.nullable().optional(),
+  status: GameManagementStatus.optional(),
+  parentId: z.string().min(1).max(200).nullable().optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+  totalSold: z.number().int().nonnegative().optional(),
+  totalEarning: z.number().int().nonnegative().optional(),
+}).refine((v) => Object.keys(v).length > 0, {
+  message: "Ingen endringer oppgitt.",
+});
+export type UpdateGameManagementInput = z.infer<typeof UpdateGameManagementSchema>;
+
+export const RepeatGameManagementSchema = z.object({
+  startDate: IsoDateString,
+  endDate: IsoDateString.nullable().optional(),
+  /** Optional name override — if null, service appends "(repeat)" to source. */
+  name: z.string().min(1).max(200).nullable().optional(),
+});
+export type RepeatGameManagementInput = z.infer<typeof RepeatGameManagementSchema>;
+

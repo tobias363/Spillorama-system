@@ -153,7 +153,19 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     egen logg.
    */
   MACHINE_TICKET_WRITE: ["ADMIN", "AGENT"],
-  MACHINE_REPORT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"]
+  MACHINE_REPORT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  /**
+   * BIN-622: Game Management (admin-katalog av spill-varianter).
+   *   - GAME_MGMT_READ : liste + detalj + tickets-view. Alle admin-roller
+   *     (HALL_OPERATOR ser samme liste; hall-scope håndheves i service-lag
+   *     via config_json.hallIds når BIN-621 lander).
+   *   - GAME_MGMT_WRITE: opprett/oppdatér/slett/repeat. ADMIN + HALL_OPERATOR
+   *     (hall-operator styrer hall-lokale varianter; cross-hall er ADMIN-
+   *     domain men scope-sjekken er løftet ut av første versjon siden
+   *     hall-binding fortsatt lever i config_json).
+   */
+  GAME_MGMT_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  GAME_MGMT_WRITE: ["ADMIN", "HALL_OPERATOR"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
