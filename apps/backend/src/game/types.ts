@@ -55,6 +55,18 @@ export interface Ticket {
   color?: string;
   /** Ticket type code for variant logic: "small", "large", "elvis", "traffic-red", etc. */
   type?: string;
+  /**
+   * G15 (BIN-431): ticket-detail fields rendered on flip.
+   * Mirrors Unity BingoTicket.cs:374-399 — ticketNumber, hallName, supplierName,
+   * ticketPrice, plus a web-only boughtAt timestamp. Populated in
+   * buildRoomUpdatePayload (display-only; not persisted by BingoEngine).
+   * All optional / non-breaking — clients falls back to placeholders.
+   */
+  ticketNumber?: string;
+  hallName?: string;
+  supplierName?: string;
+  price?: number;
+  boughtAt?: string;
 }
 
 export interface ClaimRecord {

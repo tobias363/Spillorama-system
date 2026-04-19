@@ -29,6 +29,12 @@ export const TicketSchema = z.object({
   id: z.string().optional(),
   color: z.string().optional(),
   type: z.string().optional(),
+  /** G15 (BIN-431): ticket-detail fields rendered on flip. All optional/non-breaking. */
+  ticketNumber: z.string().optional(),
+  hallName: z.string().optional(),
+  supplierName: z.string().optional(),
+  price: z.number().optional(),
+  boughtAt: z.string().optional(),
 });
 
 export const PatternDefinitionSchema = z.object({
@@ -132,6 +138,19 @@ const GameVariantSchema = z.object({
   gameType: z.string(),
   ticketTypes: z.array(TicketTypeInfoSchema),
   replaceAmount: z.number().optional(),
+  /**
+   * F3 (BIN-431): Jackpot header info. Mirrors variantConfig.jackpot
+   * (apps/backend/src/game/variantConfig.ts:59-66). Unity reference:
+   * Game1GamePlayPanel.SocketFlow.cs:518-520 — renders
+   * `{drawThreshold} Jackpot : {prize} kr` when isDisplay=true.
+   */
+  jackpot: z
+    .object({
+      drawThreshold: z.number().int(),
+      prize: z.number(),
+      isDisplay: z.boolean(),
+    })
+    .optional(),
 });
 
 /**

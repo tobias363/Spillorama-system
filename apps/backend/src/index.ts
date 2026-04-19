@@ -357,6 +357,17 @@ function getRoomConfiguredEntryFee(roomCode: string): number {
   return roomState.getRoomConfiguredEntryFee(roomCode, runtimeBingoSettings.autoRoundEntryFee);
 }
 
+/**
+ * G15 (BIN-431): In-memory hall-name cache for sync lookup in
+ * buildRoomUpdatePayload. Populated lazily whenever a hall is resolved
+ * (room create/join, admin flows). Falls back to hallId when missing.
+ */
+const hallNameCache = new Map<string, string>();
+
+function getHallNameSync(hallId: string): string | null {
+  return hallNameCache.get(hallId) ?? null;
+}
+
 function buildRoomUpdatePayload(snapshot: RoomSnapshot, nowMs = Date.now()): RoomUpdatePayload {
   return buildRoomUpdatePayloadHelper(snapshot, nowMs, {
     runtimeBingoSettings, drawScheduler, bingoMaxDrawsPerRound, schedulerTickMs,
@@ -367,6 +378,9 @@ function buildRoomUpdatePayload(snapshot: RoomSnapshot, nowMs = Date.now()): Roo
     getOrCreateDisplayTickets: (code, id, count) => roomState.getOrCreateDisplayTickets(code, id, count),
     getLuckyNumbers: (code) => roomState.getLuckyNumbers(code),
     getVariantConfig: (code) => roomState.getVariantConfig(code),
+    // G15 (BIN-431): hall-name + supplier for ticket-detail flip.
+    getHallName: getHallNameSync,
+    supplierName: "Spillorama",
   });
 }
 
@@ -391,6 +405,8 @@ async function emitWalletRoomUpdates(walletIds: string[]): Promise<void> {
 
 async function requireActiveHallIdFromInput(input: unknown): Promise<string> {
   const hall = await platformService.requireActiveHall(mustBeNonEmptyString(input, "hallId"));
+  // G15 (BIN-431): populate the hall-name cache for sync ticket enrichment.
+  hallNameCache.set(hall.id, hall.name);
   return hall.id;
 }
 

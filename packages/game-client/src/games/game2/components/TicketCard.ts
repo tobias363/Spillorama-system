@@ -288,13 +288,26 @@ export class TicketCard extends Container {
   // ── Flip animation (Unity: Y-rotation 0→90→0 mapped to scaleX) ─────
 
   /**
-   * Flip the card to show details (ticket number, price, type).
+   * Flip the card to show details (ticket number, hall, supplier, price,
+   * bought-at). 5-row layout mirrors Unity BingoTicket.cs:374-399 (SetData) —
+   * txtTicketNumber, txtHallName, txtSupplierName, txtTicketPrice plus a web-
+   * only bought-at timestamp.
+   *
    * GSAP animation: scaleX 1→0 (0.25s), swap content, scaleX 0→1 (0.25s).
    * Auto-flips back after 3.0s.
    */
   flipToDetails(): void {
     if (this.isFlipping || this.isFlipped) return;
     this.isFlipping = true;
+
+    // Resolve detail strings with graceful fallback when the backend hasn't
+    // populated a field (G15 optional shared-types fields).
+    const t = this.ticket;
+    const ticketNumStr = t?.ticketNumber ?? String(this.ticketIndex + 1);
+    const hallStr = t?.hallName ?? "";
+    const supplierStr = t?.supplierName ?? "";
+    const priceStr = typeof t?.price === "number" ? `${Math.round(t.price)} kr` : this.priceText.text;
+    const boughtStr = t?.boughtAt ? formatBoughtAt(t.boughtAt) : "";
 
     // Build details overlay if it doesn't exist yet
     if (!this.detailsOverlay) {
@@ -307,14 +320,19 @@ export class TicketCard extends Container {
       this.detailsOverlay.addChild(bg);
 
       const centerX = this.cardW / 2;
-      const centerY = this.cardH / 2;
+      // Row layout: 5 rows stacked centrally. Dynamic row-height so the text
+      // always fits inside `cardH` no matter the grid size (Unity anchors
+      // rows proportionally; we approximate with even vertical spacing).
+      const rowCount = 5;
+      const rowGap = Math.max(14, Math.floor((this.cardH - 20) / (rowCount + 1)));
+      const startY = Math.max(12, (this.cardH - rowGap * (rowCount - 1)) / 2);
 
-      // Ticket number
+      // Row 1: "Bong #123" (ticket number)
       const numText = new Text({
-        text: `Bong #${this.ticketIndex + 1}`,
+        text: `Bong #${ticketNumStr}`,
         style: {
           fontFamily: "Arial, Helvetica, sans-serif",
-          fontSize: 20,
+          fontSize: 15,
           fontWeight: "bold",
           fill: this.headerTextColor,
           align: "center",
@@ -322,15 +340,45 @@ export class TicketCard extends Container {
       });
       numText.anchor.set(0.5);
       numText.x = centerX;
-      numText.y = centerY - 30;
+      numText.y = startY;
       this.detailsOverlay.addChild(numText);
 
-      // Price
-      const priceInfo = new Text({
-        text: this.priceText.text,
+      // Row 2: hall name
+      const hallInfo = new Text({
+        text: hallStr,
         style: {
           fontFamily: "Arial, Helvetica, sans-serif",
-          fontSize: 16,
+          fontSize: 12,
+          fill: 0x444444,
+          align: "center",
+        },
+      });
+      hallInfo.anchor.set(0.5);
+      hallInfo.x = centerX;
+      hallInfo.y = startY + rowGap;
+      this.detailsOverlay.addChild(hallInfo);
+
+      // Row 3: supplier/operator
+      const supplierInfo = new Text({
+        text: supplierStr,
+        style: {
+          fontFamily: "Arial, Helvetica, sans-serif",
+          fontSize: 12,
+          fill: 0x444444,
+          align: "center",
+        },
+      });
+      supplierInfo.anchor.set(0.5);
+      supplierInfo.x = centerX;
+      supplierInfo.y = startY + rowGap * 2;
+      this.detailsOverlay.addChild(supplierInfo);
+
+      // Row 4: price
+      const priceInfo = new Text({
+        text: priceStr,
+        style: {
+          fontFamily: "Arial, Helvetica, sans-serif",
+          fontSize: 14,
           fontWeight: "bold",
           fill: 0x2a9d8f,
           align: "center",
@@ -338,37 +386,38 @@ export class TicketCard extends Container {
       });
       priceInfo.anchor.set(0.5);
       priceInfo.x = centerX;
-      priceInfo.y = centerY;
+      priceInfo.y = startY + rowGap * 3;
       this.detailsOverlay.addChild(priceInfo);
 
-      // Type/color name (from header text)
-      const typeInfo = new Text({
-        text: this.headerText.text,
+      // Row 5: bought-at time (HH:mm)
+      const boughtInfo = new Text({
+        text: boughtStr,
         style: {
           fontFamily: "Arial, Helvetica, sans-serif",
-          fontSize: 14,
-          fill: 0xcccccc,
+          fontSize: 11,
+          fill: 0x666666,
           align: "center",
         },
       });
-      typeInfo.anchor.set(0.5);
-      typeInfo.x = centerX;
-      typeInfo.y = centerY + 28;
-      this.detailsOverlay.addChild(typeInfo);
+      boughtInfo.anchor.set(0.5);
+      boughtInfo.x = centerX;
+      boughtInfo.y = startY + rowGap * 4;
+      this.detailsOverlay.addChild(boughtInfo);
 
       this.detailsOverlay.visible = false;
       this.addChild(this.detailsOverlay);
     }
 
-    // Update details text to current values
+    // Update details text to current values (tickets can change between flips).
     const detailTexts = this.detailsOverlay.children.filter(
       (c): c is Text => c instanceof Text,
     );
-    if (detailTexts.length >= 2) {
-      detailTexts[1].text = this.priceText.text;
-    }
-    if (detailTexts.length >= 3) {
-      detailTexts[2].text = this.headerText.text;
+    if (detailTexts.length >= 5) {
+      detailTexts[0].text = `Bong #${ticketNumStr}`;
+      detailTexts[1].text = hallStr;
+      detailTexts[2].text = supplierStr;
+      detailTexts[3].text = priceStr;
+      detailTexts[4].text = boughtStr;
     }
 
     // Animate: scale X to 0, swap, scale X back to 1
@@ -608,4 +657,16 @@ export class TicketCard extends Container {
     const bl = Math.round(ab + (bb - ab) * t);
     return (r << 16) | (g << 8) | bl;
   }
+}
+
+/**
+ * G15: format an ISO-8601 timestamp as "HH:mm" in the local timezone.
+ * Falls back to the raw string if the Date parse fails (defensive).
+ */
+function formatBoughtAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
 }

@@ -58,6 +58,22 @@ export interface Ticket {
   color?: string;
   /** Ticket type code for variant logic: "small", "large", "elvis", "traffic-red", etc. */
   type?: string;
+  /**
+   * G15 (BIN-431): Ticket-detail fields rendered on flip.
+   * Mirrors Unity BingoTicket.cs:374-399 (SetData) — txtTicketNumber, txtHallName,
+   * txtSupplierName, txtTicketPrice, plus boughtAt timestamp.
+   * All optional/non-breaking; the client falls back to placeholders if absent.
+   */
+  /** Human-readable ticket number (e.g. "42"). Unity: gameTicketData.ticketNumber. */
+  ticketNumber?: string;
+  /** Hall where the ticket was bought (e.g. "Oslo Sentrum"). Unity: Player_Hall_Name. */
+  hallName?: string;
+  /** Supplier/operator brand (e.g. "Spillorama"). Unity: gameTicketData.supplierName. */
+  supplierName?: string;
+  /** Price paid for this ticket (kroner, whole numbers). */
+  price?: number;
+  /** ISO-8601 timestamp when the ticket was bought/armed. */
+  boughtAt?: string;
 }
 
 // ── Claims ──────────────────────────────────────────────────────────────────

@@ -115,6 +115,16 @@ export type RoomUpdatePayload = RoomSnapshot & {
     gameType: string;
     ticketTypes: TicketTypeConfig[];
     replaceAmount?: number;
+    /**
+     * F3 (BIN-431): Jackpot header info. Propagated from variant config;
+     * client shows `{drawThreshold} Jackpot : {prize} kr` when isDisplay=true.
+     * Unity: Game1GamePlayPanel.SocketFlow.cs:518-520.
+     */
+    jackpot?: {
+      drawThreshold: number;
+      prize: number;
+      isDisplay: boolean;
+    };
   };
 };
 
@@ -134,6 +144,17 @@ export function buildRoomUpdatePayload(
     getLuckyNumbers: (roomCode: string) => Record<string, number>;
     /** BIN-443: Variant config for client purchase UI. */
     getVariantConfig?: (roomCode: string) => { gameType: string; config: GameVariantConfig } | null;
+    /**
+     * G15 (BIN-431): sync hall-name lookup for ticket-detail enrichment.
+     * Backed by an in-memory cache populated at room-create/join. Falls back
+     * to hallId when the cache misses.
+     */
+    getHallName?: (hallId: string) => string | null;
+    /**
+     * G15 (BIN-431): supplier/operator brand name stamped onto tickets.
+     * Optional — defaults to "Spillorama" when not provided.
+     */
+    supplierName?: string;
   }
 ): RoomUpdatePayload {
   const { getOrCreateDisplayTickets, getLuckyNumbers, runtimeBingoSettings } = opts;
@@ -161,7 +182,45 @@ export function buildRoomUpdatePayload(
     gameType: effectiveGameType,
     ticketTypes: effectiveConfig.ticketTypes,
     replaceAmount: effectiveConfig.replaceAmount,
+    // F3 (BIN-431): Propagate jackpot info from variant config → client HeaderBar.
+    jackpot: effectiveConfig.jackpot,
   };
+
+  // ── G15 (BIN-431): Enrich tickets with detail fields for flip-to-details ───
+  // Unity BingoTicket.cs:374-399 displays ticketNumber, hallName, supplierName,
+  // price on tap/flip. Fields are all optional/non-breaking — we populate them
+  // here (display-only; not persisted to the adapter) so every emitted tickets
+  // payload carries them without touching BingoEngine's ticket-creation flow.
+  const hallName = opts.getHallName?.(snapshot.hallId) ?? snapshot.hallId;
+  const supplierName = opts.supplierName ?? "Spillorama";
+  const boughtAtIso = new Date(nowMs).toISOString();
+  const currentEntryFee = snapshot.currentGame?.entryFee ?? opts.getRoomConfiguredEntryFee(snapshot.code);
+
+  function enrichTicketList(list: Ticket[], fee: number): Ticket[] {
+    return list.map((t, idx) => {
+      const tt = effectiveConfig.ticketTypes.find((x: TicketTypeConfig) => x.type === t.type);
+      const price = roundCurrency(fee * (tt?.priceMultiplier ?? 1));
+      return {
+        ...t,
+        ticketNumber: t.ticketNumber ?? t.id ?? String(idx + 1),
+        hallName: t.hallName ?? hallName,
+        supplierName: t.supplierName ?? supplierName,
+        price: t.price ?? price,
+        boughtAt: t.boughtAt ?? boughtAtIso,
+      };
+    });
+  }
+
+  // Enrich in-game tickets (per player)
+  const enrichedGameTickets: Record<string, Ticket[]> = {};
+  for (const [pid, list] of Object.entries(gameTickets)) {
+    enrichedGameTickets[pid] = enrichTicketList(list, currentEntryFee);
+  }
+  // Enrich pre-round tickets (per player)
+  const enrichedPreRound: Record<string, Ticket[]> = {};
+  for (const [pid, list] of Object.entries(preRoundTickets)) {
+    enrichedPreRound[pid] = enrichTicketList(list, opts.getRoomConfiguredEntryFee(snapshot.code));
+  }
 
   // ── Server-authoritative stake per player ──────────────────────────────────
   // Calculated here so the client never has to derive monetary amounts itself.
@@ -209,9 +268,15 @@ export function buildRoomUpdatePayload(
     }
   }
 
+  // G15 (BIN-431): swap in the enriched ticket maps so both the live game
+  // snapshot and the pre-round display list carry detail fields on the wire.
+  const outSnapshot = snapshot.currentGame
+    ? { ...snapshot, currentGame: { ...snapshot.currentGame, tickets: enrichedGameTickets } }
+    : snapshot;
+
   return {
-    ...snapshot,
-    preRoundTickets,
+    ...outSnapshot,
+    preRoundTickets: enrichedPreRound,
     armedPlayerIds,
     playerStakes,
     luckyNumbers: getLuckyNumbers(snapshot.code),
