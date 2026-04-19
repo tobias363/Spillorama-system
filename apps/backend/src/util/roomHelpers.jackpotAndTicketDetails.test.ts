@@ -144,7 +144,11 @@ test("G15: falls back to hallId when getHallName returns null", () => {
 
 test("G15: pre-round display tickets are enriched too", () => {
   const snap = baseSnapshot();
+  // BIN-686: pre-round tickets now only generate for ARMED players.
+  // Arm p1 with 1 ticket so the preRound entry exists and we can verify
+  // enrichment (hallName, supplierName, price, boughtAt).
   const payload = buildRoomUpdatePayload(snap, Date.now(), buildOpts({
+    getArmedPlayerTicketCounts: () => ({ p1: 1 }),
     getOrCreateDisplayTickets: () => [
       { grid: [[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15]], id: "tkt-0", type: "small" },
     ],

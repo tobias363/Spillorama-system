@@ -160,18 +160,37 @@ export function buildRoomUpdatePayload(
 ): RoomUpdatePayload {
   const { getOrCreateDisplayTickets, getLuckyNumbers, runtimeBingoSettings } = opts;
 
-  // Generate display tickets for players who are in the room but didn't
-  // get game tickets (not armed). This ensures their boards always show
-  // numbers — just without marking.
-  // For armed players, use their chosen ticket count.
+  // BIN-686: Generate pre-round display tickets ONLY for armed players.
+  //
+  // Previously this loop fell back to `ticketsPerPlayer` for unarmed
+  // players — so every player in the room got 4 auto-generated "preview"
+  // tickets whether they'd bought anything or not. Users saw "Kjøpt: 4"
+  // + an "Avbestill bonger" button on first login, before any purchase.
+  //
+  // New behavior: unarmed players get an empty preRoundTickets entry (or
+  // none at all). The scroll area is empty until they explicitly arm
+  // pre-round tickets via Forhåndskjøp → +/- → Kjøp. Armed players still
+  // get their chosen ticket count rendered for UX continuity (they see
+  // the brett they paid for).
+  //
+  // Also skips the entry entirely (not even an empty array) for unarmed
+  // players — keeps the wire-payload lean.
   const preRoundTickets: Record<string, Ticket[]> = {};
   const gameTickets = snapshot.currentGame?.tickets ?? {};
-  const ticketsPerPlayer = runtimeBingoSettings.autoRoundTicketsPerPlayer;
   const armedTicketCounts = opts.getArmedPlayerTicketCounts(snapshot.code);
   for (const player of snapshot.players) {
     if (gameTickets[player.id] && gameTickets[player.id].length > 0) continue;
-    const playerTicketCount = armedTicketCounts[player.id] ?? ticketsPerPlayer;
-    preRoundTickets[player.id] = getOrCreateDisplayTickets(snapshot.code, player.id, playerTicketCount, snapshot.gameSlug);
+    const armedCount = armedTicketCounts[player.id];
+    if (armedCount === undefined || armedCount <= 0) {
+      // Not armed — no preview tickets. Scroll area stays empty.
+      continue;
+    }
+    preRoundTickets[player.id] = getOrCreateDisplayTickets(
+      snapshot.code,
+      player.id,
+      armedCount,
+      snapshot.gameSlug,
+    );
   }
 
   // BIN-443: Include variant info so client can show correct purchase UI.
