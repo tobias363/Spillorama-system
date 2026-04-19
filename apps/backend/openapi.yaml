@@ -65,6 +65,8 @@ tags:
     description: Daglig kasse-oppgjør — control-daily-balance, close-day, PDF-eksport, admin edit. BIN-583 B3.3.
   - name: Agent — Metronia
     description: Metronia ekstern-maskin-integrasjon — ticket create/topup/payout/void + rapporter. BIN-583 B3.4.
+  - name: Agent — OK Bingo
+    description: OK Bingo ekstern-maskin-integrasjon (SQL Server polling) — ticket create/topup/payout/void + open-day + rapporter. BIN-583 B3.5.
 
 components:
   securitySchemes:
@@ -5553,6 +5555,266 @@ paths:
     get:
       tags: [Agent — Metronia]
       summary: Global daglig Metronia-rapport — totals + per-hall (ADMIN/HALL_OPERATOR/SUPPORT)
+      parameters:
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Daily report
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totals: { $ref: "#/components/schemas/MetroniaSalesAggregate" }
+                          perHall:
+                            type: array
+                            items: { $ref: "#/components/schemas/MetroniaSalesAggregate" }
+
+  # ── BIN-583 B3.5: Agent + Admin OK Bingo ──────────────────────────────────
+
+  /api/agent/okbingo/register-ticket:
+    post:
+      tags: [Agent — OK Bingo]
+      summary: Opprett ny OK Bingo-ticket — debit player wallet + SQL Server RPC + DB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerUserId, amountNok, clientRequestId]
+              properties:
+                playerUserId: { type: string }
+                amountNok: { type: integer, minimum: 1, maximum: 1000 }
+                roomId: { type: integer, description: "Override default 247." }
+                clientRequestId: { type: string }
+                notes: { type: string }
+      responses:
+        "200":
+          description: Ticket opprettet
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: INVALID_AMOUNT / INSUFFICIENT_BALANCE / PLAYER_NOT_AT_HALL / OKBINGO_API_ERROR / OKBINGO_TIMEOUT
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/okbingo/topup:
+    post:
+      tags: [Agent — OK Bingo]
+      summary: Topup eksisterende ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketNumber, amountNok, clientRequestId]
+              properties:
+                ticketNumber: { type: string }
+                amountNok: { type: integer, minimum: 1, maximum: 1000 }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Topup utført
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: MACHINE_TICKET_NOT_FOUND / MACHINE_TICKET_CLOSED / INSUFFICIENT_BALANCE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/okbingo/payout:
+    post:
+      tags: [Agent — OK Bingo]
+      summary: Close ticket via SQL Server RPC + credit player wallet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketNumber, clientRequestId]
+              properties:
+                ticketNumber: { type: string }
+                clientRequestId: { type: string }
+      responses:
+        "200":
+          description: Ticket lukket
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: MACHINE_TICKET_NOT_FOUND / MACHINE_TICKET_CLOSED / OKBINGO_API_ERROR
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/okbingo/void:
+    post:
+      tags: [Agent — OK Bingo]
+      summary: Void ticket innen 5 min — counter-tx, refunderer initial+topup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketNumber, reason]
+              properties:
+                ticketNumber: { type: string }
+                reason: { type: string }
+      responses:
+        "200":
+          description: Ticket voided
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: VOID_REASON_REQUIRED / VOID_WINDOW_EXPIRED / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/okbingo/open-day:
+    post:
+      tags: [Agent — OK Bingo]
+      summary: OK-Bingo-spesifikk dagsstart-signal til hardware
+      description: |
+        Sender ComandID=11 til OK Bingo-maskinen via SQL Server. Krever
+        aktiv shift. Logges som agent.okbingo.open-day audit-event.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roomId: { type: integer, description: "Override default 247." }
+      responses:
+        "200":
+          description: Day opened
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [opened, roomId]
+                        properties:
+                          opened: { type: boolean, enum: [true] }
+                          roomId: { type: integer }
+
+  /api/agent/okbingo/ticket/{ticketNumber}:
+    parameters:
+      - in: path
+        name: ticketNumber
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — OK Bingo]
+      summary: Hent enkelt OK Bingo-ticket (AGENT begrenset til egen)
+      responses:
+        "200":
+          description: Ticket
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MachineTicket" }
+        "400":
+          description: MACHINE_TICKET_NOT_FOUND / FORBIDDEN
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
+  /api/agent/okbingo/daily-sales:
+    get:
+      tags: [Agent — OK Bingo]
+      summary: Aggregat for AGENTs current shift (kun OK_BINGO-tx)
+      responses:
+        "200":
+          description: Aggregat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MetroniaSalesAggregate" }
+
+  /api/admin/okbingo/hall-summary/{hallId}:
+    parameters:
+      - in: path
+        name: hallId
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Agent — OK Bingo]
+      summary: Per-hall OK Bingo-aggregat (ADMIN/HALL_OPERATOR/SUPPORT)
+      parameters:
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Hall-summary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/MetroniaSalesAggregate" }
+
+  /api/admin/okbingo/daily-report:
+    get:
+      tags: [Agent — OK Bingo]
+      summary: Global daglig OK Bingo-rapport — totals + per-hall
       parameters:
         - in: query
           name: fromDate

@@ -75,6 +75,11 @@ import { createAgentOpenDayRouter } from "./routes/agentOpenDay.js";
 import { createAdminHallReportsRouter } from "./routes/adminHallReports.js";
 import { AgentOpenDayService } from "./agent/AgentOpenDayService.js";
 import { HallAccountReportService } from "./compliance/HallAccountReportService.js";
+import { createAgentOkBingoRouter } from "./routes/agentOkBingo.js";
+import { OkBingoTicketService } from "./agent/OkBingoTicketService.js";
+import { SqlServerOkBingoApiClient } from "./integration/okbingo/SqlServerOkBingoApiClient.js";
+import { StubOkBingoApiClient } from "./integration/okbingo/StubOkBingoApiClient.js";
+import type { OkBingoApiClient } from "./integration/okbingo/OkBingoApiClient.js";
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
@@ -756,6 +761,35 @@ app.use(createAdminHallReportsRouter({
   platformService,
   auditLogService,
   reportService: hallAccountReportService,
+}));
+
+// BIN-583 B3.5: OK Bingo external-machine integration.
+// Real impl bruker SQL Server polling-protokoll (COM3-tabell).
+// Stub default-er når OKBINGO_SQL_CONNECTION mangler — lokal-dev/CI.
+const okbingoSqlConnection = (process.env.OKBINGO_SQL_CONNECTION ?? "").trim();
+const okBingoClient: OkBingoApiClient = okbingoSqlConnection
+  ? new SqlServerOkBingoApiClient({
+      connectionString: okbingoSqlConnection,
+      defaultBingoId: Number.parseInt(process.env.OKBINGO_BINGO_ID ?? "247", 10),
+      pollIntervalMs: Number.parseInt(process.env.OKBINGO_POLL_INTERVAL_MS ?? "1000", 10),
+      pollMaxAttempts: Number.parseInt(process.env.OKBINGO_POLL_MAX_ATTEMPTS ?? "10", 10),
+    })
+  : new StubOkBingoApiClient();
+const okBingoTicketService = new OkBingoTicketService({
+  platformService,
+  walletAdapter,
+  agentService,
+  agentShiftService,
+  transactionStore: agentTransactionStore,
+  machineTicketStore,
+  okBingoClient,
+  defaultRoomId: Number.parseInt(process.env.OKBINGO_BINGO_ID ?? "247", 10),
+});
+app.use(createAgentOkBingoRouter({
+  platformService,
+  agentService,
+  okBingoTicketService,
+  auditLogService,
 }));
 
 app.use(createAdminRouter({
