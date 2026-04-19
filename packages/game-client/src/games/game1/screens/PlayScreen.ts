@@ -1,9 +1,11 @@
 import { Container, Sprite, Assets } from "pixi.js";
+import gsap from "gsap";
 import type { GameState } from "../../../bridge/GameBridge.js";
 import type { PatternWonPayload, ChatMessage } from "@spillorama/shared-types/socket-events";
 import type { AudioManager } from "../../../audio/AudioManager.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 import { BallTube } from "../components/BallTube.js";
+import { HeaderBar } from "../components/HeaderBar.js";
 import { HtmlOverlayManager } from "../components/HtmlOverlayManager.js";
 import { LeftInfoPanel } from "../components/LeftInfoPanel.js";
 import { CenterTopPanel } from "../components/CenterTopPanel.js";
@@ -51,6 +53,13 @@ export class PlayScreen extends Container {
   private leftInfo: LeftInfoPanel;
   private centerTop: CenterTopPanel;
   private chatPanel: ChatPanelV2;
+  /**
+   * F3 (BIN-431): Jackpot header overlay — matches Unity PanelRowDetails
+   * jackpot row. Animated -80px when chat opens (G17).
+   */
+  private headerBar: HeaderBar;
+  /** G17: Active GSAP tween on the headerBar offset — cancelled on re-toggle. */
+  private headerShiftTween: gsap.core.Tween | null = null;
   private audio: AudioManager;
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
   private onBuy: ((selections: Array<{ type: string; qty: number }>) => void) | null = null;
@@ -237,12 +246,35 @@ export class PlayScreen extends Container {
     // Chat panel (right sidebar)
     this.chatPanel = new ChatPanelV2(this.overlayManager, socket, roomCode);
 
+    // F3 (BIN-431): Jackpot header bar — placed last so it stacks on top.
+    this.headerBar = new HeaderBar(this.overlayManager);
+
     // Resize ticket scroller when chat panel is toggled (Unity: slides in/out)
+    // G17 (BIN-431): also shift the jackpot header -80px to match Unity
+    // `Panel_Game_Header` slide (Game1GamePlayPanel.ChatLayout.cs:51-70, :112-125).
+    // The ticket-area reflow is driven by the flex layout already — Unity's
+    // 370px scroller-offset tween is the Unity anchor-point equivalent; in the
+    // web port the ticket scroller is sized explicitly via setViewportSize, so
+    // the 370px is expressed as `scrollerW -= (CHAT_WIDTH - 48)` which happens
+    // naturally. No extra port needed (documented in PR-body).
     this.chatPanel.setOnToggle((collapsed) => {
       const chatW = collapsed ? 48 : CHAT_WIDTH;
       const scrollerW = screenWidth - TUBE_COLUMN_WIDTH - chatW - 20;
       const scrollerH = screenHeight - TICKET_TOP - 62;
       this.inlineScroller.setViewportSize(Math.max(200, scrollerW), Math.max(100, scrollerH));
+
+      // G17: animate header -80px when chat opens (collapsed=false), restore
+      // to 0 when chat collapses. Unity direction: open = left (-80); the web
+      // chat is on the RIGHT so "open" corresponds to `collapsed=false`.
+      const targetOffset = collapsed ? 0 : -80;
+      this.headerShiftTween?.kill();
+      const proxy = { x: this.headerBar.currentOffsetX };
+      this.headerShiftTween = gsap.to(proxy, {
+        x: targetOffset,
+        duration: 0.25,
+        ease: "none", // Unity LeanTween default = linear
+        onUpdate: () => this.headerBar.setOffsetX(proxy.x),
+      });
     });
   }
 
@@ -724,6 +756,8 @@ export class PlayScreen extends Container {
     this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool);
     // A6: Show/hide host manual start button
     this.centerTop.setCanStartNow(state.canStartNow, state.gameStatus === "RUNNING");
+    // F3 (BIN-431): Push jackpot info to the header bar (hidden when absent).
+    this.headerBar.update(state.jackpot);
   }
 
   /** Expose inline ticket cards (or multi-ticket groups) for external
@@ -769,6 +803,9 @@ export class PlayScreen extends Container {
     this.buyPopup?.destroy();
     this.upcomingPurchase?.destroy();
     this.calledNumbers.destroy();
+    this.headerShiftTween?.kill();
+    this.headerShiftTween = null;
+    this.headerBar.destroy();
     this.overlayManager.destroy();
     super.destroy({ children: true });
   }
