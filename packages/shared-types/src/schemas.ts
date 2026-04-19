@@ -863,3 +863,79 @@ export const PatternDynamicMenuResponseSchema = z.object({
   count: z.number().int().nonnegative(),
 });
 export type PatternDynamicMenuResponse = z.infer<typeof PatternDynamicMenuResponseSchema>;
+
+// ── BIN-665: HallGroup CRUD wire schemas ────────────────────────────────────
+// Admin-CRUD for hall-grupper (cross-hall spill). GroupHall = navngitt
+// gruppering av haller som Game 2 + Game 3 bruker for sammenkoblede draws
+// mot flere fysiske haller. Legacy Mongo-schema `GroupHall` er normalisert
+// til to tabeller: `app_hall_groups` + `app_hall_group_members`.
+//
+// Felter speiler migration `20260424000000_hall_groups.sql`. HallGroupRow
+// i apps/admin-web/.../GroupHallState.ts (PR-A5) skal canonicaliseres hit.
+
+const HallGroupStatus = z.enum(["active", "inactive"]);
+
+/** Medlems-hall representert som minimal oppsummering (id + navn). */
+export const HallGroupMemberSchema = z.object({
+  hallId: z.string().min(1),
+  hallName: z.string().min(1),
+  hallStatus: z.string().min(1),
+  addedAt: IsoDateString,
+});
+export type HallGroupMember = z.infer<typeof HallGroupMemberSchema>;
+
+export const HallGroupRowSchema = z.object({
+  id: z.string().min(1),
+  /** Legacy-format (GH_<timestamp>). Nullable for nye rader. */
+  legacyGroupHallId: z.string().nullable(),
+  name: z.string().min(1).max(200),
+  status: HallGroupStatus,
+  /** TV-skjerm-ID (numerisk) — brukes av hall-TV-streaming. */
+  tvId: z.number().int().nullable(),
+  /** Produkt-ids knyttet til gruppen. Bevart som streng-array. */
+  productIds: z.array(z.string().min(1)),
+  /** Medlems-haller (denormalisert for admin-UI). */
+  members: z.array(HallGroupMemberSchema),
+  /** Ekstra fri-form felter (legacy-kompatibilitet). */
+  extra: z.record(z.string(), z.unknown()),
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type HallGroupRow = z.infer<typeof HallGroupRowSchema>;
+
+export const CreateHallGroupSchema = z.object({
+  name: z.string().min(1).max(200),
+  /** Liste av hall-ids som skal være medlem av gruppen. Kan være tom. */
+  hallIds: z.array(z.string().min(1)).default([]),
+  status: HallGroupStatus.optional(),
+  tvId: z.number().int().nullable().optional(),
+  productIds: z.array(z.string().min(1)).optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+export type CreateHallGroupInput = z.infer<typeof CreateHallGroupSchema>;
+
+export const UpdateHallGroupSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    /** Erstatter hele medlemsskaps-listen hvis satt. */
+    hallIds: z.array(z.string().min(1)).optional(),
+    status: HallGroupStatus.optional(),
+    tvId: z.number().int().nullable().optional(),
+    productIds: z.array(z.string().min(1)).optional(),
+    extra: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateHallGroupInput = z.infer<typeof UpdateHallGroupSchema>;
+
+/**
+ * List-respons med både rader og total-antall. Gjenspeiler hvordan
+ * BIN-622/626/627 rapporterer liste-endpoints.
+ */
+export const HallGroupListResponseSchema = z.object({
+  groups: z.array(HallGroupRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type HallGroupListResponse = z.infer<typeof HallGroupListResponseSchema>;

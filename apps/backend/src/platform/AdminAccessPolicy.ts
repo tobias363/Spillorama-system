@@ -199,7 +199,20 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     SUPPORT er bevisst utelatt — kompeliance-rolle, ikke drift.
    */
   PATTERN_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  PATTERN_WRITE: ["ADMIN", "HALL_OPERATOR"]
+  PATTERN_WRITE: ["ADMIN", "HALL_OPERATOR"],
+  /**
+   * BIN-665: HallGroup CRUD (cross-hall spill-grupper for Game 2 + Game 3).
+   *   - HALL_GROUP_READ : liste + detalj. Alle admin-roller.
+   *     Hall-grupper er globalt admin-domain — ikke hall-scope-bundet (en
+   *     gruppe spenner per definisjon over flere haller). HALL_OPERATOR
+   *     ser samme liste; medlemsskaps-operasjoner over egen hall håndheves
+   *     i route-laget når Agent A kobler frontend.
+   *   - HALL_GROUP_WRITE: opprett/oppdatér/slett. ADMIN + HALL_OPERATOR.
+   *     SUPPORT er bevisst utelatt — compliance-rolle, ikke drift. Samme
+   *     mønster som HALL_WRITE / PATTERN_WRITE.
+   */
+  HALL_GROUP_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  HALL_GROUP_WRITE: ["ADMIN", "HALL_OPERATOR"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
