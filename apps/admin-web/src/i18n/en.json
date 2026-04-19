@@ -1934,5 +1934,22 @@
   "game_ticket_list": "Ticket list per game",
   "unique_id_scope_dropped_title": "Unique Player cards dropped",
   "unique_id_scope_dropped_body": "Anonymous Unique Player cards (9-digit random ID without player linkage) are out of scope for the pilot. See BIN-583 for history.",
-  "hall_scope_required": "Select a hall to load batches"
+  "hall_scope_required": "Select a hall to load batches",
+  "name": "Name",
+  "system": "System",
+  "type": "Type",
+  "accept_deposit_request": "Accept deposit request",
+  "accept_withdraw_request": "Accept withdraw request",
+  "reject_deposit_request": "Reject deposit request",
+  "reject_withdraw_request": "Reject withdraw request",
+  "withdraw_email_exists": "Email address already exists in allowlist",
+  "deposit_transaction_history": "Deposit transaction log",
+  "deposit_transaction_placeholder_body": "This page is a placeholder for a generic transaction log. Use \"Deposit history\" for completed deposits. See BIN-655 for the planned wallet-ledger endpoint.",
+  "wallet_list": "Wallets",
+  "balance": "Balance",
+  "wallet_transactions": "Wallet transactions",
+  "back_to_wallets": "Back to wallet list",
+  "previous_balance": "Previous balance",
+  "after_balance": "New balance",
+  "nickname": "Nickname"
 }

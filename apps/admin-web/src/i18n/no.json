@@ -1927,5 +1927,22 @@
   "game_ticket_list": "Billettliste pr spill",
   "unique_id_scope_dropped_title": "Unique Player-kort droppet",
   "unique_id_scope_dropped_body": "Anonyme Unique Player-kort (9-siffer random ID uten spiller-tilknytning) er utenfor scope for pilot-lansering. Se BIN-583 for historikk.",
-  "hall_scope_required": "Velg hall for å laste batcher"
+  "hall_scope_required": "Velg hall for å laste batcher",
+  "name": "Navn",
+  "system": "System",
+  "type": "Type",
+  "accept_deposit_request": "Godkjenn innskuddsforespørsel",
+  "accept_withdraw_request": "Godkjenn uttaksforespørsel",
+  "reject_deposit_request": "Avvis innskuddsforespørsel",
+  "reject_withdraw_request": "Avvis uttaksforespørsel",
+  "withdraw_email_exists": "E-postadressen finnes allerede i listen",
+  "deposit_transaction_history": "Innskudds-transaksjonslogg",
+  "deposit_transaction_placeholder_body": "Denne siden er en plassholder for generisk transaksjonslogg. Bruk \"Innskuddshistorikk\" for å se fullførte innskudd. Se BIN-655 for planlagt wallet-ledger-endpoint.",
+  "wallet_list": "Lommeboker",
+  "balance": "Saldo",
+  "wallet_transactions": "Lommebok-transaksjoner",
+  "back_to_wallets": "Tilbake til lommebok-listen",
+  "previous_balance": "Tidligere saldo",
+  "after_balance": "Ny saldo",
+  "nickname": "Kallenavn"
 }
