@@ -96,6 +96,8 @@ import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createAdminGameManagementRouter } from "./routes/adminGameManagement.js";
 import { GameManagementService } from "./admin/GameManagementService.js";
+import { createAdminDailySchedulesRouter } from "./routes/adminDailySchedules.js";
+import { DailyScheduleService } from "./admin/DailyScheduleService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
@@ -335,6 +337,13 @@ const voucherService = new VoucherService({
 
 // BIN-622: Game Management (admin-katalog av spill-varianter).
 const gameManagementService = new GameManagementService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-626: DailySchedule (daglig spill-plan per hall, kobler GameManagement
+// til hall + tidspunkt + subgames).
+const dailyScheduleService = new DailyScheduleService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -641,6 +650,15 @@ app.use(createAdminVouchersRouter({
 app.use(createAdminGameManagementRouter({
   platformService,
   auditLogService,
+  gameManagementService,
+}));
+// BIN-626: DailySchedule CRUD + special + subgame-details. Embedded
+// GameManagement-referansen i /:id/details bruker samme service som over,
+// så admin-UI kan rendre slotType/price uten separat round-trip.
+app.use(createAdminDailySchedulesRouter({
+  platformService,
+  auditLogService,
+  dailyScheduleService,
   gameManagementService,
 }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-

@@ -590,3 +590,147 @@ export const TrackSpendingFailClosedResponseSchema = z.object({
 });
 export type TrackSpendingFailClosedResponse = z.infer<typeof TrackSpendingFailClosedResponseSchema>;
 
+// ── BIN-626: DailySchedule CRUD wire schemas ────────────────────────────────
+// Admin-router eier validering mot DomainError-flyt, men vi eksporterer zod-
+// skjemaene så admin-UI kan dele runtime-kontrakten (samme mønster som
+// GameManagementRowSchema over). Felter speiler migration
+// `20260422000000_daily_schedules.sql` + apps/admin-web/.../DailyScheduleState.ts.
+
+const DailyScheduleStatus = z.enum(["active", "running", "finish", "inactive"]);
+const DailyScheduleDay = z.enum([
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+]);
+
+/** "HH:MM" eller tom streng. */
+const HhMmOrEmpty = z.string().regex(/^$|^[0-9]{2}:[0-9]{2}$/, {
+  message: "time må være 'HH:MM' eller tom.",
+});
+
+/** Weekday bitmask mon=1..sun=64. 0 = bruk `day`-feltet. */
+const WeekDayMask = z.number().int().min(0).max(127);
+
+export const DailyScheduleHallIdsSchema = z.object({
+  masterHallId: z.string().min(1).nullable().optional(),
+  hallIds: z.array(z.string().min(1)).optional(),
+  groupHallIds: z.array(z.string().min(1)).optional(),
+});
+export type DailyScheduleHallIds = z.infer<typeof DailyScheduleHallIdsSchema>;
+
+/**
+ * Sub-game-slot i en plan. Fri-form felter i `extra` siden subgame-
+ * normalisering er BIN-621/627. Eksplisitte felter dekker det admin-UI
+ * faktisk leser (index, ticketPrice, prizePool, patternId, status).
+ */
+export const DailyScheduleSubgameSlotSchema = z.object({
+  subGameId: z.string().min(1).nullable().optional(),
+  index: z.number().int().nonnegative().optional(),
+  ticketPrice: z.number().int().nonnegative().optional(),
+  prizePool: z.number().int().nonnegative().optional(),
+  patternId: z.string().min(1).nullable().optional(),
+  status: z.string().optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+export type DailyScheduleSubgameSlot = z.infer<typeof DailyScheduleSubgameSlotSchema>;
+
+export const DailyScheduleRowSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(200),
+  gameManagementId: z.string().min(1).nullable(),
+  hallId: z.string().min(1).nullable(),
+  hallIds: DailyScheduleHallIdsSchema,
+  weekDays: WeekDayMask,
+  day: DailyScheduleDay.nullable(),
+  startDate: IsoDateString,
+  endDate: IsoDateString.nullable(),
+  startTime: HhMmOrEmpty,
+  endTime: HhMmOrEmpty,
+  status: DailyScheduleStatus,
+  stopGame: z.boolean(),
+  specialGame: z.boolean(),
+  isSavedGame: z.boolean(),
+  isAdminSavedGame: z.boolean(),
+  innsatsenSales: z.number().int().nonnegative(),
+  subgames: z.array(DailyScheduleSubgameSlotSchema),
+  otherData: z.record(z.string(), z.unknown()),
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type DailyScheduleRow = z.infer<typeof DailyScheduleRowSchema>;
+
+export const CreateDailyScheduleSchema = z.object({
+  name: z.string().min(1).max(200),
+  gameManagementId: z.string().min(1).max(200).nullable().optional(),
+  hallId: z.string().min(1).max(200).nullable().optional(),
+  hallIds: DailyScheduleHallIdsSchema.optional(),
+  weekDays: WeekDayMask.optional(),
+  day: DailyScheduleDay.nullable().optional(),
+  startDate: IsoDateString,
+  endDate: IsoDateString.nullable().optional(),
+  startTime: HhMmOrEmpty.optional(),
+  endTime: HhMmOrEmpty.optional(),
+  status: DailyScheduleStatus.optional(),
+  stopGame: z.boolean().optional(),
+  specialGame: z.boolean().optional(),
+  isSavedGame: z.boolean().optional(),
+  isAdminSavedGame: z.boolean().optional(),
+  subgames: z.array(DailyScheduleSubgameSlotSchema).optional(),
+  otherData: z.record(z.string(), z.unknown()).optional(),
+});
+export type CreateDailyScheduleInput = z.infer<typeof CreateDailyScheduleSchema>;
+
+/**
+ * Special-schedule — alias for create() med specialGame=true og typisk
+ * hallIds-multi-hall-oppsett. Service normaliserer felter.
+ */
+export const CreateSpecialDailyScheduleSchema = CreateDailyScheduleSchema.extend({
+  specialGame: z.literal(true).optional(),
+});
+export type CreateSpecialDailyScheduleInput = z.infer<typeof CreateSpecialDailyScheduleSchema>;
+
+export const UpdateDailyScheduleSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  gameManagementId: z.string().min(1).max(200).nullable().optional(),
+  hallId: z.string().min(1).max(200).nullable().optional(),
+  hallIds: DailyScheduleHallIdsSchema.optional(),
+  weekDays: WeekDayMask.optional(),
+  day: DailyScheduleDay.nullable().optional(),
+  startDate: IsoDateString.optional(),
+  endDate: IsoDateString.nullable().optional(),
+  startTime: HhMmOrEmpty.optional(),
+  endTime: HhMmOrEmpty.optional(),
+  status: DailyScheduleStatus.optional(),
+  stopGame: z.boolean().optional(),
+  specialGame: z.boolean().optional(),
+  isSavedGame: z.boolean().optional(),
+  isAdminSavedGame: z.boolean().optional(),
+  innsatsenSales: z.number().int().nonnegative().optional(),
+  subgames: z.array(DailyScheduleSubgameSlotSchema).optional(),
+  otherData: z.record(z.string(), z.unknown()).optional(),
+}).refine((v) => Object.keys(v).length > 0, {
+  message: "Ingen endringer oppgitt.",
+});
+export type UpdateDailyScheduleInput = z.infer<typeof UpdateDailyScheduleSchema>;
+
+/** Detail-response: samme som row + embedded subgame-aggregat for viewSubgame. */
+export const DailyScheduleDetailsResponseSchema = z.object({
+  schedule: DailyScheduleRowSchema,
+  subgames: z.array(DailyScheduleSubgameSlotSchema),
+  /** Referanse til GameManagement-rad (name + status) for enkel rendering. */
+  gameManagement: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      status: z.enum(["active", "running", "closed", "inactive"]),
+      ticketType: z.enum(["Large", "Small"]).nullable(),
+      ticketPrice: z.number().int().nonnegative(),
+    })
+    .nullable(),
+});
+export type DailyScheduleDetailsResponse = z.infer<typeof DailyScheduleDetailsResponseSchema>;

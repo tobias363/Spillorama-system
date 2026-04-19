@@ -177,7 +177,18 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     trenger fullstendig oversikt ved kundesamtaler.
    * Ingen WRITE-variant: dette er et rent aggregat-endepunkt, ingen mutasjon.
    */
-  TRACK_SPENDING_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  TRACK_SPENDING_READ: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  /**
+   * BIN-626: DailySchedule (daglig spill-plan per hall).
+   *   - SCHEDULE_READ : liste + detalj + subgame-details. Alle admin-roller.
+   *     Hall-scope (HALL_OPERATOR ser kun egen hall) håndheves i route via
+   *     resolveHallScopeFilter / assertUserHallScope.
+   *   - SCHEDULE_WRITE: opprett/oppdatér/slett + special-schedule. ADMIN +
+   *     HALL_OPERATOR (hall-operator styrer egen hall's plan). SUPPORT er
+   *     bevisst utelatt — compliance-rolle, ikke drift.
+   */
+  SCHEDULE_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  SCHEDULE_WRITE: ["ADMIN", "HALL_OPERATOR"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
