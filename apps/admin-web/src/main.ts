@@ -27,6 +27,7 @@ import { isSecurityRoute, mountSecurityRoute } from "./pages/security/index.js";
 import { isRiskCountryRoute, mountRiskCountryRoute } from "./pages/riskCountry/index.js";
 import { isLeaderboardRoute, mountLeaderboardRoute } from "./pages/leaderboard/index.js";
 import { isAdminUsersRoute, mountAdminUsersRoute } from "./pages/adminUsers/index.js";
+import { isRoleRoute, mountRoleRoute } from "./pages/role/index.js";
 import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPage.js";
 
 const MAINTENANCE_MODE = false;
@@ -144,6 +145,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isAdminUsersRoute(bare)) {
         mountAdminUsersRoute(container, bare);
+        return;
+      }
+      if (isRoleRoute(bare)) {
+        mountRoleRoute(container, bare);
         return;
       }
       renderUnknown(container, path);
@@ -282,6 +287,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (isAdminUsersRoute(route.path)) {
     mountAdminUsersRoute(container, route.path);
+    return;
+  }
+  if (isRoleRoute(route.path)) {
+    mountRoleRoute(container, route.path);
     return;
   }
   renderPlaceholder(container, route);
