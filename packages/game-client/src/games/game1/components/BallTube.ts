@@ -257,6 +257,16 @@ export class BallTube extends Container {
     // Pivot at centre so scale animates around the ball's middle, not its
     // top-left corner — needed for the 1.15 ↔ 0.85 transition to read as a
     // breathing punch in place rather than a slide.
+    //
+    // BIN-619 Bug 6 A — INTENTIONAL UNITY DEVIATION:
+    // Unity's `BingoBallPanelManager.cs` uses RectTransform pivot (0.5, 0)
+    // (bottom-centre) in vertical mode, which makes the 1.15 scale grow
+    // the ball UPWARD from its slot bottom. PM-beslutning 2026-04-19
+    // (Tobias): Unity 1:1 gjelder KUN funksjonell logikk (tickets, scoring,
+    // timings, state-maskiner) — visuelle valg er web-team sin beslutning.
+    // Center-pivot gir roligere scale-animasjon uten posisjonsshift, så vi
+    // beholder det bevisst. Ikke «fiks» dette til Unity-pivot uten ny
+    // PM-avklaring.
     ball.pivot.set(r, r);
 
     const shadow = new Graphics();
