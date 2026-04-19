@@ -10,8 +10,15 @@ export const routes: RouteDef[] = [
   { path: "/admin", titleKey: "dashboard" },
 
   { path: "/player", titleKey: "approved_players", module: "Players Management" },
+  { path: "/players/view", titleKey: "player_details", module: "Players Management" },
+  { path: "/players/approved", titleKey: "approved_players_table", module: "Players Management" },
+  { path: "/players/approved/view", titleKey: "player_details", module: "Players Management" },
   { path: "/pendingRequests", titleKey: "pending_requests", module: "Players Management" },
+  { path: "/pending/view", titleKey: "pending_requests", module: "Players Management" },
   { path: "/rejectedRequests", titleKey: "reject_requests", module: "Players Management" },
+  { path: "/rejected/view", titleKey: "reject_requests", module: "Players Management" },
+  { path: "/bankid/verify", titleKey: "bankid_verify_page_title", module: "Players Management" },
+  { path: "/bankid/response", titleKey: "bankid_response_page_title", module: "Players Management" },
   { path: "/players/track-spending", titleKey: "tracking_player_spending", module: "Tracking Player Spending" },
 
   { path: "/gameType", titleKey: "game_type", module: "Game Type" },

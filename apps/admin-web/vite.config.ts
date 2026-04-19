@@ -17,6 +17,17 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
+    // CSP in dev: allows BankID iframe-embed for future creds (BIN-631).
+    // Production must mirror this via Render config or reverse-proxy headers.
+    headers: {
+      "Content-Security-Policy":
+        "default-src 'self'; " +
+        "frame-src 'self' https://*.bankid.no https://*.bankid.com; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: https:; " +
+        "connect-src 'self' ws: wss: http://localhost:3000 https://*.bankid.no https://*.bankid.com;",
+    },
     proxy: {
       "/api": "http://localhost:3000",
       "/socket.io": {

@@ -9,6 +9,11 @@ import { renderPlaceholder, renderUnknown } from "./pages/Placeholder.js";
 import { renderLoginPage } from "./pages/login/LoginPage.js";
 import { mountLegacySection, isLegacySectionRoute } from "./pages/legacy-sections/LegacySectionMount.js";
 import { isCashInOutRoute, mountCashInOutRoute } from "./pages/cash-inout/index.js";
+import { isPlayerRoute, mountPlayerRoute } from "./pages/players/index.js";
+import { isPendingRoute, mountPendingRoute } from "./pages/pending/index.js";
+import { isRejectedRoute, mountRejectedRoute } from "./pages/rejected/index.js";
+import { isBankIdRoute, mountBankIdRoute } from "./pages/bankid/index.js";
+import { isTrackSpendingRoute, mountTrackSpendingRoute } from "./pages/track-spending/index.js";
 import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPage.js";
 
 const MAINTENANCE_MODE = false;
@@ -47,11 +52,31 @@ function mountShell(_root: HTMLElement, session: Session): void {
     renderer: (container, route) => renderPage(container, route, session),
     onUnknown: (path, container) => {
       unmountDashboard();
-      // Strip query string for cash-inout routes that carry params
-      // (e.g. `/agent/sellPhysicalTickets?gameId=X`).
+      // Strip query string for routes that carry params
+      // (e.g. `/players/view?id=X` or `/bankid/verify?sessionId=Y`).
       const bare = path.split("?")[0] ?? path;
       if (isCashInOutRoute(bare)) {
         mountCashInOutRoute(container, bare);
+        return;
+      }
+      if (isPlayerRoute(bare)) {
+        mountPlayerRoute(container, bare);
+        return;
+      }
+      if (isPendingRoute(bare)) {
+        mountPendingRoute(container, bare);
+        return;
+      }
+      if (isRejectedRoute(bare)) {
+        mountRejectedRoute(container, bare);
+        return;
+      }
+      if (isBankIdRoute(bare)) {
+        mountBankIdRoute(container, bare);
+        return;
+      }
+      if (isTrackSpendingRoute(bare)) {
+        mountTrackSpendingRoute(container, bare);
         return;
       }
       renderUnknown(container, path);
@@ -108,6 +133,26 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
     mountCashInOutRoute(container, route.path);
     container.setAttribute("data-route", route.path);
     container.setAttribute("data-title", t(route.titleKey));
+    return;
+  }
+  if (isPlayerRoute(route.path)) {
+    mountPlayerRoute(container, route.path);
+    return;
+  }
+  if (isPendingRoute(route.path)) {
+    mountPendingRoute(container, route.path);
+    return;
+  }
+  if (isRejectedRoute(route.path)) {
+    mountRejectedRoute(container, route.path);
+    return;
+  }
+  if (isBankIdRoute(route.path)) {
+    mountBankIdRoute(container, route.path);
+    return;
+  }
+  if (isTrackSpendingRoute(route.path)) {
+    mountTrackSpendingRoute(container, route.path);
     return;
   }
   renderPlaceholder(container, route);
