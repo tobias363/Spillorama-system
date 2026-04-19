@@ -1982,5 +1982,16 @@
   "physical_tickets_sold": "Physical tickets sold",
   "player_id": "Player ID",
   "payout_cross_game_aggregate_pending": "Cross-game aggregation is a planned follow-up (BIN-659). Look up one player/game at a time for now.",
-  "payout_ticket_detail_backend_pending": "Full per-ticket detail is a planned follow-up. See /payoutTickets for per-game aggregate."
+  "payout_ticket_detail_backend_pending": "Full per-ticket detail is a planned follow-up. See /payoutTickets for per-game aggregate.",
+  "security_management": "Security Management",
+  "blocked_ip": "Blocked IP",
+  "blocked_ip_table": "Blocked IP Table",
+  "add_blocked_ip": "Add Blocked IP",
+  "edit_blocked_ip": "Edit Blocked IP",
+  "expires_at": "Expires at",
+  "please_select_place": "Please select a place",
+  "add_leaderboard_tier": "Add Leaderboard Tier",
+  "edit_leaderboard_tier": "Edit Leaderboard Tier",
+  "leaderboard_backend_pending": "Leaderboard tier CRUD backend is not implemented yet. Tracked as BIN-668 (Leaderboard tier CRUD backend, P3). Frontend is read-only placeholder until backend merges.",
+  "select_country_placeholder": "-- select country --"
 }

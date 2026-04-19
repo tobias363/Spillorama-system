@@ -1975,5 +1975,16 @@
   "physical_tickets_sold": "Fysiske billetter solgt",
   "player_id": "Spiller-ID",
   "payout_cross_game_aggregate_pending": "Aggregat på tvers av alle spill er planlagt (BIN-659-oppfølging). Slå opp én spiller/spill om gangen for nå.",
-  "payout_ticket_detail_backend_pending": "Full billettdetalj per-ticketId er en planlagt oppfølging. Se listen på /payoutTickets for aggregat per spill."
+  "payout_ticket_detail_backend_pending": "Full billettdetalj per-ticketId er en planlagt oppfølging. Se listen på /payoutTickets for aggregat per spill.",
+  "security_management": "Sikkerhet",
+  "blocked_ip": "Blokkert IP",
+  "blocked_ip_table": "Liste over blokkerte IP-er",
+  "add_blocked_ip": "Legg til blokkert IP",
+  "edit_blocked_ip": "Rediger blokkert IP",
+  "expires_at": "Utløper",
+  "please_select_place": "Velg plass",
+  "add_leaderboard_tier": "Legg til leaderboard-nivå",
+  "edit_leaderboard_tier": "Rediger leaderboard-nivå",
+  "leaderboard_backend_pending": "Backend for leaderboard tier-konfig er ikke implementert ennå. Spores som BIN-668 (Leaderboard tier CRUD backend, P3). Frontend er kun lesende placeholder inntil backend mergers.",
+  "select_country_placeholder": "-- velg land --"
 }
