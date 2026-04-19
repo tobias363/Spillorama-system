@@ -1057,7 +1057,7 @@ describe("Socket.IO integration", () => {
     assert.ok(config.bingoPlaySessionLimitMs > 0, "play session limit must be positive");
     assert.ok(config.bingoPauseDurationMs > 0, "pause duration must be positive");
     assert.ok(config.bingoSelfExclusionMinMs >= 365 * 24 * 60 * 60 * 1000, "self-exclusion must be >= 1 year");
-    assert.ok(config.bingoMaxDrawsPerRound >= 1 && config.bingoMaxDrawsPerRound <= 60, "max draws must be 1-60");
+    assert.ok(config.bingoMaxDrawsPerRound >= 1 && config.bingoMaxDrawsPerRound <= 75, "max draws must be 1-75 (Game 1 uses 75 balls)");
 
     // Scheduler settings
     assert.ok(typeof config.runtimeBingoSettings === "object", "scheduler settings must be an object");
