@@ -124,9 +124,11 @@ export class LeftInfoPanel {
       ? `${countStr} (${hallCount} haller)`
       : countStr;
 
-    this.entryFeeEl.textContent = totalStake > 0
-      ? `Innsats: ${totalStake} kr`
-      : `Innsats: \u2014`;
+    // BIN-686 Bug 2: previously showed "Innsats: —" (em-dash) when stake
+    // was 0, which users read as missing/broken. Always show kroner — the
+    // 0-case is legitimate UX (bruker har ingen innsats enda) and the
+    // dash was a leftover from a placeholder phase.
+    this.entryFeeEl.textContent = `Innsats: ${totalStake} kr`;
     this.prizeEl.textContent = `Gevinst: ${prizePool} kr`;
     // Unity: last drawn number is zero-padded 2 digits ("07", "42")
     this.numberRingEl.textContent = lastDrawnNumber !== null
