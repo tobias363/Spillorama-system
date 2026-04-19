@@ -389,6 +389,10 @@ class Game1Controller implements GameController {
         // BIN-410 (D3, Q4 2026-04-18): Upcoming-panel skal IKKE vises under
         // SPECTATING — Unity viser det kun mellom runder.
         this.playScreen.hideUpcomingPurchase();
+        // BIN-619 (2026-04-19): Spectator mid-round buy — tickets armed for
+        // NEXT round render immediately in the scroller, but without marks
+        // (owner: "selvfølgelig ikke disse bongene aktive i den trekningen").
+        this.playScreen.renderPreRoundTickets(state);
         this.setScreen(this.playScreen);
         break;
       }
@@ -421,8 +425,12 @@ class Game1Controller implements GameController {
     // patterns, playerStakes). Hvis spilleren armer preRoundTickets mens de
     // er SPECTATING, forblir fasen — overgang til PLAYING skjer først ved
     // onGameStarted for neste runde.
+    // BIN-619: Spectator-mid-round buy → re-render pre-round tickets when
+    // count changes. PlayScreen caches the count so unchanged states are
+    // a no-op (SPECTATING sees one stateChanged per drawn number).
     if (this.phase === "SPECTATING" && this.playScreen) {
       this.playScreen.updateInfo(state);
+      this.playScreen.renderPreRoundTickets(state);
     }
 
     // BIN-460: Show/hide pause overlay based on game state

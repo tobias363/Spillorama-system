@@ -34,6 +34,37 @@ const SCALE_TIME = 0.25;       // Unity bingoBallScaleAnimationTime
 type Ball = Container & { ballNumber: number };
 
 /**
+ * BIN-619 Bug 6: Unity-parity movement time. Port of
+ * `BingoBallPanelManager.cs:249 GetAnimationTime`.
+ *
+ * The move animation accelerates as the tube fills — at an empty tube a
+ * new ball slides in over 0.5s, but once the tube is full the shift is
+ * only ~0.17s so rapid draws don't feel sluggish.
+ *
+ * Unity formula (verbatim):
+ *   if (activeBingoBalls == bingoBallShowcaseCount)
+ *       return ((bingoBallLimit - activeBingoBalls + 1) * 0.5) / bingoBallLimit;
+ *   else
+ *       return ((bingoBallLimit - activeBingoBalls) * 0.5) / bingoBallLimit;
+ *
+ * Where `bingoBallLimit = bingoBallShowcaseCount + 1` (one transit slot).
+ *
+ * `activeBefore` is the count BEFORE the new ball was added — matches
+ * Unity's `activeBingoBalls` at the time `GetAnimationTime()` is called
+ * (Unity increments the counter only after the move animation kicks off).
+ *
+ * Exported so it can be unit-tested without touching Pixi.
+ */
+export function getMoveAnimationTime(activeBefore: number, showcaseCount: number): number {
+  const limit = showcaseCount + 1;
+  if (activeBefore === showcaseCount) {
+    // Overflow branch — oldest ball evicts off the bottom.
+    return ((limit - activeBefore + 1) * MOVE_TIME) / limit;
+  }
+  return ((limit - activeBefore) * MOVE_TIME) / limit;
+}
+
+/**
  * Maps bingo number to Bingo75 column color (B-I-N-G-O):
  *   B (1-15)  = blue
  *   I (16-30) = red
@@ -103,9 +134,13 @@ export class BallTube extends Container {
    * Add a single new ball with the Unity-parity animation:
    *   1. Previous highlighted ball (if any) shrinks 1.15→0.85 over SCALE_TIME
    *   2. New ball spawns above the tube at HIGHLIGHT_SCALE
-   *   3. New ball slides down to the top slot over MOVE_TIME (linear lerp)
-   *   4. Older balls shift down one slot over MOVE_TIME
+   *   3. New ball slides down to the top slot over moveTime (linear lerp)
+   *   4. Older balls shift down one slot over moveTime
    *   5. If the tube was full, the oldest ball animates off the bottom
+   *
+   * BIN-619 Bug 6: `moveTime` is now DYNAMIC (was fixed 0.5s) — matches
+   * Unity `GetAnimationTime`: accelerates from 0.5s (empty tube) down to
+   * ~0.17s (full tube) so rapid draws don't feel sluggish.
    */
   addBall(number: number): void {
     // 1. Existing highlight ball goes back to normal size.
@@ -127,6 +162,10 @@ export class BallTube extends Container {
     ball.y = -BALL_SIZE; // spawn above tube — slides down into top slot
     this.ballContainer.addChild(ball);
 
+    // BIN-619 Bug 6: compute move-time BEFORE unshift — Unity calls
+    // GetAnimationTime while activeBingoBalls is still the pre-add count.
+    const moveTime = getMoveAnimationTime(this.balls.length, this.showcaseCount);
+
     // Insert at front (newest first).
     this.balls.unshift(ball);
 
@@ -139,14 +178,15 @@ export class BallTube extends Container {
       target.x = this.centerX();
       const targetY = this.slotY(i);
       gsap.killTweensOf(target);
-      gsap.to(target, { y: targetY, duration: MOVE_TIME, ease: "none" });
+      gsap.to(target, { y: targetY, duration: moveTime, ease: "none" });
     }
 
     // Drop the oldest ball after the slide finishes — it has been pushed
-    // below the tube and is no longer visible.
+    // below the tube and is no longer visible. Delay matches the dynamic
+    // move-time so cleanup happens right after the tween resolves.
     if (overflow) {
       const evicted = this.balls.pop()!;
-      gsap.delayedCall(MOVE_TIME, () => {
+      gsap.delayedCall(moveTime, () => {
         if (evicted.destroyed) return;
         gsap.killTweensOf(evicted);
         gsap.killTweensOf(evicted.scale);
