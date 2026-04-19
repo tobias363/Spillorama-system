@@ -12,6 +12,7 @@ import { MysteryGameOverlay } from "./components/MysteryGameOverlay.js";
 import { ColorDraftOverlay } from "./components/ColorDraftOverlay.js";
 import { LuckyNumberPicker } from "./components/LuckyNumberPicker.js";
 import { LoadingOverlay } from "../../components/LoadingOverlay.js";
+import { preloadGameAssets } from "../../core/preloadGameAssets.js";
 import { ToastNotification } from "./components/ToastNotification.js";
 import { PauseOverlay } from "./components/PauseOverlay.js";
 import { SettingsPanel, type Game1Settings } from "./components/SettingsPanel.js";
@@ -82,7 +83,9 @@ class Game1Controller implements GameController {
     // UI overlays (Unity: DisplayLoader, UtilityMessagePanel)
     const overlayContainer = app.app.canvas.parentElement ?? document.body;
     this.loader = new LoadingOverlay(overlayContainer);
-    this.loader.show("Kobler til...");
+    // BIN-673: typed state-machine drives all loader messages. 5-sec stuck
+    // threshold triggers the "Last siden på nytt" reload button.
+    this.loader.setState("CONNECTING");
     this.toast = new ToastNotification(overlayContainer);
     this.pauseOverlay = new PauseOverlay(overlayContainer);
     this.settingsPanel = new SettingsPanel(overlayContainer);
@@ -113,7 +116,7 @@ class Game1Controller implements GameController {
       socket.on("connectionStateChanged", (state) => {
         if (state === "reconnecting") {
           telemetry.trackReconnect();
-          this.loader?.show("Kobler til igjen...");
+          this.loader?.setState("RECONNECTING");
         }
         if (state === "connected" && this.loader?.isShowing()) {
           // Reconnected — resume room to rebuild state from server snapshot
@@ -121,13 +124,19 @@ class Game1Controller implements GameController {
         }
         if (state === "disconnected") {
           telemetry.trackDisconnect("socket");
-          this.loader?.show("Frakoblet — prøver igjen...");
+          this.loader?.setState("DISCONNECTED");
         }
       }),
     );
 
+    // BIN-673: Pre-warm Pixi asset cache before joining the room. On slow
+    // networks users get explicit "Laster spill..." feedback; on fast
+    // networks this resolves near-instantly because assets are small.
+    this.loader.setState("LOADING_ASSETS");
+    await preloadGameAssets("bingo");
+
     // Join or create room
-    this.loader.show("Joiner rom...");
+    this.loader.setState("JOINING_ROOM");
     const joinResult = await socket.createRoom({
       hallId: this.deps.hallId,
       gameSlug: "bingo",
@@ -179,7 +188,7 @@ class Game1Controller implements GameController {
     await this.waitForSyncReady();
 
     // Hide loader — game is ready (Unity: DisplayLoader(false))
-    this.loader.hide();
+    this.loader.setState("READY");
 
     // Transition based on state
     const state = bridge.getState();
@@ -215,7 +224,7 @@ class Game1Controller implements GameController {
     const isRunningAtEntry = state.gameStatus === "RUNNING";
 
     if (isRunningAtEntry) {
-      this.loader?.show("Syncer...");
+      this.loader?.setState("SYNCING");
     }
 
     // Audio-assets: AudioManager.preloadSfx() returnerer void men bruker Howler's
@@ -738,17 +747,41 @@ class Game1Controller implements GameController {
    */
   private async handleReconnect(): Promise<void> {
     if (!this.actualRoomCode) {
-      this.loader?.hide();
+      this.loader?.setState("READY");
       return;
     }
 
+    // BIN-673 + BIN-682: show RESYNCING while we fetch + apply a fresh
+    // snapshot from the server. Without this, the loader stayed on
+    // "Kobler til igjen..." until the socket reconnected, then dismissed
+    // immediately — but `applySnapshot` runs AFTER dismiss, so the UI
+    // briefly showed stale state. With RESYNCING we keep the overlay up
+    // through the full fetch → apply → re-render cycle.
+    this.loader?.setState("RESYNCING");
+
     try {
       const result = await this.deps.socket.resumeRoom({ roomCode: this.actualRoomCode });
-      if (result.ok && result.data?.snapshot) {
-        this.deps.bridge.applySnapshot(result.data.snapshot);
+      let snapshot = result.ok ? result.data?.snapshot : null;
+
+      // Fallback: if resumeRoom didn't return a snapshot, try getRoomState.
+      // This covers the case where the room was recovered from checkpoint
+      // but the user's session state is out of sync.
+      if (!snapshot) {
+        if (!result.ok) {
+          console.warn("[Game1] Room resume failed, trying getRoomState:", result.error?.message);
+        }
+        const fallback = await this.deps.socket.getRoomState({ roomCode: this.actualRoomCode });
+        snapshot = fallback.ok ? fallback.data?.snapshot ?? null : null;
+      }
+
+      if (snapshot) {
+        this.deps.bridge.applySnapshot(snapshot);
         const state = this.deps.bridge.getState();
 
-        // Transition based on current game status (BIN-507: RUNNING + 0 tickets → SPECTATING)
+        // Transition based on current game status (BIN-507: RUNNING + 0
+        // tickets → SPECTATING). transitionTo rebuilds PlayScreen which
+        // reads the freshly-applied snapshot — ensures ball-count, tickets,
+        // and draws match server state post-reconnect.
         if (state.gameStatus === "RUNNING") {
           if (state.myTickets.length > 0) {
             this.transitionTo("PLAYING", state);
@@ -759,30 +792,24 @@ class Game1Controller implements GameController {
           this.transitionTo("WAITING", state);
         }
 
+        // State fully rebuilt — dismiss overlay.
+        this.loader?.setState("READY");
         console.log("[Game1] Reconnected — state restored, phase:", this.phase);
       } else {
-        console.warn("[Game1] Room resume failed:", result.error?.message);
-        // Fallback: try getRoomState
-        const fallback = await this.deps.socket.getRoomState({ roomCode: this.actualRoomCode });
-        if (fallback.ok && fallback.data?.snapshot) {
-          this.deps.bridge.applySnapshot(fallback.data.snapshot);
-          const state = this.deps.bridge.getState();
-          if (state.gameStatus === "RUNNING") {
-            if (state.myTickets.length > 0) {
-              this.transitionTo("PLAYING", state);
-            } else {
-              this.transitionTo("SPECTATING", state);
-            }
-          } else {
-            this.transitionTo("WAITING", state);
-          }
-        }
+        // Both paths failed — leave overlay in RESYNCING state. The
+        // stuck-timer (5s) will surface the "Last siden på nytt" button
+        // so the user isn't trapped.
+        console.error("[Game1] Both resumeRoom and getRoomState failed — user must reload");
       }
     } catch (err) {
       console.error("[Game1] Reconnect error:", err);
+      // Overlay stays in RESYNCING — stuck-timer shows reload button.
     }
 
-    this.loader?.hide();
+    // BIN-673: Do NOT unconditionally hide the loader here. The success
+    // path already called setState("READY"); the failure paths deliberately
+    // leave the overlay up so the stuck-timer can show "Last siden på nytt".
+    // Dismissing here would strand the user with stale UI + no signal.
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
