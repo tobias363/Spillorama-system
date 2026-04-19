@@ -426,7 +426,7 @@ function buildRoomUpdatePayload(snapshot: RoomSnapshot, nowMs = Date.now()): Roo
     getArmedPlayerTicketCounts: (code) => roomState.getArmedPlayerTicketCounts(code),
     getArmedPlayerSelections: (code) => roomState.getArmedPlayerSelections(code),
     getRoomConfiguredEntryFee,
-    getOrCreateDisplayTickets: (code, id, count) => roomState.getOrCreateDisplayTickets(code, id, count),
+    getOrCreateDisplayTickets: (code, id, count, gameSlug) => roomState.getOrCreateDisplayTickets(code, id, count, gameSlug),
     getLuckyNumbers: (code) => roomState.getLuckyNumbers(code),
     getVariantConfig: (code) => roomState.getVariantConfig(code),
     // G15 (BIN-431): hall-name + supplier for ticket-detail flip.
@@ -1185,7 +1185,13 @@ const PORT = Number(process.env.PORT ?? 4000);
           const snapshot = checkpointData?.snapshot as GameSnapshot | null;
           const players = (Array.isArray(checkpointData?.players) ? checkpointData.players : []) as Player[];
           if (snapshot && Array.isArray(snapshot.drawBag)) {
-            engine.restoreRoomFromSnapshot(game.roomCode, game.hallId ?? "", players[0]?.id ?? "recovered", players, snapshot);
+            // BIN-5x5-regression: game_sessions table does not persist gameSlug,
+            // so checkpoint-recovery loses it. Without gameSlug, preRound
+            // display-tickets fall through to 3×5 Databingo60 instead of
+            // Bingo75's 5×5. Stop-gap: hardcode "bingo" since this codebase
+            // only ships the bingo game right now. Proper fix (add game_slug
+            // column to game_sessions + propagate) tracked separately.
+            engine.restoreRoomFromSnapshot(game.roomCode, game.hallId ?? "", players[0]?.id ?? "recovered", players, snapshot, "bingo");
             restored++;
           } else {
             console.warn(`[BIN-245] No snapshot for game ${game.gameId} in room ${game.roomCode} — marking ENDED`);
