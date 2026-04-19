@@ -6,7 +6,7 @@ import { Router } from "./router/Router.js";
 import { findRoute, type RouteDef } from "./router/routes.js";
 import { mountLayout, renderLayoutChrome, type LayoutRefs } from "./shell/Layout.js";
 import { renderPlaceholder, renderUnknown } from "./pages/Placeholder.js";
-import { renderLoginPage } from "./pages/login/LoginPage.js";
+import { mountPreAuthRoute, parsePreAuthRoute } from "./pages/login/index.js";
 import { mountLegacySection, isLegacySectionRoute } from "./pages/legacy-sections/LegacySectionMount.js";
 import { isCashInOutRoute, mountCashInOutRoute } from "./pages/cash-inout/index.js";
 import { isPlayerRoute, mountPlayerRoute } from "./pages/players/index.js";
@@ -59,11 +59,35 @@ async function bootstrap(): Promise<void> {
 }
 
 function showLogin(root: HTMLElement): void {
-  renderLoginPage(root, () => {
+  const onAuthenticated = (): void => {
     const session = getSession();
     if (session) mountShell(root, session);
-  });
+  };
+
+  // PR-B7 (BIN-675): pre-auth dispatcher. When unauthenticated and the hash
+  // points at /register, /forgot-password or /reset-password/:token, mount
+  // the matching page instead of LoginPage. Re-dispatch on hashchange so
+  // clicking e.g. "Tilbake til login" from ForgotPasswordPage updates the
+  // view without a full reload.
+  const render = (): void => {
+    mountPreAuthRoute(root, window.location.hash, { onAuthenticated });
+  };
+  render();
+
+  const onHashChange = (): void => {
+    // Only re-render while still unauthenticated — once mountShell takes
+    // over, it owns the hash listener (via Router) and we want to unbind.
+    if (getSession()) {
+      window.removeEventListener("hashchange", onHashChange);
+      return;
+    }
+    render();
+  };
+  window.addEventListener("hashchange", onHashChange);
 }
+
+// Named export so tests can verify dispatcher wiring without bootstrapping.
+export { parsePreAuthRoute };
 
 function mountShell(_root: HTMLElement, session: Session): void {
   const refs = mountLayout("#app");
