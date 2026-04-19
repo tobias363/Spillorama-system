@@ -747,7 +747,8 @@ export class BingoEngine {
     for (const player of eligiblePlayers) {
       await this.compliance.startPlaySession(player.walletId, nowMs);
     }
-    // BIN-159: Checkpoint at game start — captures initial state for crash recovery
+    // BIN-159: Checkpoint at game start — captures initial state for crash recovery.
+    // BIN-672: Pass gameSlug so the session row knows which ticket format applies.
     if (this.bingoAdapter.onCheckpoint) {
       try {
         await this.bingoAdapter.onCheckpoint({
@@ -756,7 +757,8 @@ export class BingoEngine {
           reason: "BUY_IN",
           snapshot: this.serializeGameForRecovery(game),
           players: [...room.players.values()],
-          hallId: room.hallId
+          hallId: room.hallId,
+          gameSlug: room.gameSlug,
         });
       } catch (err) {
         logger.error({ err, gameId }, "CRITICAL: Checkpoint failed after game start");
