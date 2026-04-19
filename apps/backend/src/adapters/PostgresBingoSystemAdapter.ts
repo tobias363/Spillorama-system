@@ -68,13 +68,16 @@ export class PostgresBingoSystemAdapter implements BingoSystemAdapter {
   async onCheckpoint(input: CheckpointInput): Promise<void> {
     await this.ensureInitialized();
 
-    // Upsert game session (created on BUY_IN, updated on subsequent checkpoints)
+    // Upsert game session (created on BUY_IN, updated on subsequent checkpoints).
+    // BIN-672: persist game_slug so crash-recovery can restore the correct
+    // ticket format. The column has DEFAULT 'bingo' for safety, but we always
+    // pass the actual slug when available.
     if (input.reason === "BUY_IN") {
       await this.pool.query(
-        `INSERT INTO ${this.sessionsTable()} (game_id, room_code, hall_id, status, started_at)
-         VALUES ($1, $2, $3, 'RUNNING', now())
+        `INSERT INTO ${this.sessionsTable()} (game_id, room_code, hall_id, status, started_at, game_slug)
+         VALUES ($1, $2, $3, 'RUNNING', now(), $4)
          ON CONFLICT (game_id) DO NOTHING`,
-        [input.gameId, input.roomCode, input.hallId ?? null]
+        [input.gameId, input.roomCode, input.hallId ?? null, input.gameSlug ?? "bingo"]
       );
     }
 
@@ -106,16 +109,24 @@ export class PostgresBingoSystemAdapter implements BingoSystemAdapter {
     }
   }
 
-  /** Find games that were RUNNING when the server crashed. */
-  async findIncompleteGames(): Promise<Array<{ gameId: string; roomCode: string; hallId: string | null; startedAt: string }>> {
+  /**
+   * Find games that were RUNNING when the server crashed.
+   *
+   * BIN-672: Returns `gameSlug` so crash-recovery can hand it to
+   * `restoreRoomFromSnapshot` — eliminates the 3×5 fallback that happened
+   * when recovery lost the slug (see PR #246 stop-gap). `game_slug` column
+   * is NOT NULL with DEFAULT 'bingo', so callers can trust it's always set.
+   */
+  async findIncompleteGames(): Promise<Array<{ gameId: string; roomCode: string; hallId: string | null; startedAt: string; gameSlug: string }>> {
     await this.ensureInitialized();
     const { rows } = await this.pool.query<{
       game_id: string;
       room_code: string;
       hall_id: string | null;
       started_at: Date | string;
+      game_slug: string;
     }>(
-      `SELECT game_id, room_code, hall_id, started_at
+      `SELECT game_id, room_code, hall_id, started_at, game_slug
        FROM ${this.sessionsTable()}
        WHERE status = 'RUNNING'
        ORDER BY started_at DESC`
@@ -124,7 +135,8 @@ export class PostgresBingoSystemAdapter implements BingoSystemAdapter {
       gameId: row.game_id,
       roomCode: row.room_code,
       hallId: row.hall_id,
-      startedAt: row.started_at instanceof Date ? row.started_at.toISOString() : String(row.started_at)
+      startedAt: row.started_at instanceof Date ? row.started_at.toISOString() : String(row.started_at),
+      gameSlug: row.game_slug,
     }));
   }
 

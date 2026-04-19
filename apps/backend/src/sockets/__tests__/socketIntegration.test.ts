@@ -149,7 +149,7 @@ describe("Socket.IO integration", () => {
     // Test-server's simplified buildRoomUpdatePayload does not populate
     // preRoundTickets (see testServer.ts comment). Read directly from the
     // RoomStateManager that the handler operates on — same source of truth.
-    const originalTickets = server.roomState.getOrCreateDisplayTickets(roomCode, playerId, 2);
+    const originalTickets = server.roomState.getOrCreateDisplayTickets(roomCode, playerId, 2, "bingo");
     assert.equal(originalTickets.length, 2, "expected 2 pre-round tickets");
     const ticketToReplace = originalTickets[0];
     const keptTicket = originalTickets[1];
@@ -166,7 +166,7 @@ describe("Socket.IO integration", () => {
     assert.equal(replaceResult.data!.debitedAmount, 5);
 
     // Re-read from the cache (same Map the handler mutated).
-    const newTickets = server.roomState.getOrCreateDisplayTickets(roomCode, playerId, 2);
+    const newTickets = server.roomState.getOrCreateDisplayTickets(roomCode, playerId, 2, "bingo");
     assert.equal(newTickets.length, 2, "still 2 tickets after replace");
     const replacedTicket = newTickets.find((t) => t.id === ticketToReplace.id);
     assert.ok(replacedTicket, "replacement has the same stable id");
@@ -902,10 +902,11 @@ describe("Socket.IO integration", () => {
     await bob.emit("bet:arm", { roomCode, armed: true });
     await alice.emit("game:start", { roomCode, entryFee: 10, ticketsPerPlayer: 1 });
 
-    // Draw all numbers until the engine refuses
+    // Draw all numbers until the engine refuses. BIN-672: default is now
+    // 75-ball bingo (was 60-ball databingo), so loop up to 76.
     let drawCount = 0;
     let lastError: string | undefined;
-    for (let i = 0; i < 61; i++) {
+    for (let i = 0; i < 76; i++) {
       const drawResult = await alice.emit<AckResponse<{ number: number }>>("draw:next", { roomCode });
       if (!drawResult.ok) {
         lastError = drawResult.error?.code;

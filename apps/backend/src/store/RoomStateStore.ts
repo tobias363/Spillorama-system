@@ -38,6 +38,12 @@ export interface SerializedRoomState {
   code: string;
   hallId: string;
   hostPlayerId: string;
+  /**
+   * BIN-672: optional here so pre-BIN-672 snapshots in Redis stay readable
+   * during rolling deploy. `deserializeRoom` defaults missing values to
+   * "bingo" for backward compatibility.
+   */
+  gameSlug?: string;
   players: Record<string, Player>;
   currentGame?: SerializedGameState;
   gameHistory: GameSnapshot[];
@@ -51,6 +57,7 @@ export function serializeRoom(room: RoomState): SerializedRoomState {
     code: room.code,
     hallId: room.hallId,
     hostPlayerId: room.hostPlayerId,
+    gameSlug: room.gameSlug,
     players: Object.fromEntries(room.players),
     currentGame: room.currentGame ? serializeGame(room.currentGame) : undefined,
     gameHistory: room.gameHistory,
@@ -63,6 +70,9 @@ export function deserializeRoom(data: SerializedRoomState): RoomState {
     code: data.code,
     hallId: data.hallId,
     hostPlayerId: data.hostPlayerId,
+    // BIN-672: fall back to "bingo" for pre-BIN-672 snapshots (missing field)
+    // — matches DB default for game_sessions.game_slug.
+    gameSlug: data.gameSlug ?? "bingo",
     players: new Map(Object.entries(data.players)),
     currentGame: data.currentGame ? deserializeGame(data.currentGame) : undefined,
     gameHistory: data.gameHistory,

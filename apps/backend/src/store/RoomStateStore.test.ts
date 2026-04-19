@@ -12,6 +12,7 @@ function makeRoom(code = "TEST01"): RoomState {
     code,
     hallId: "hall-1",
     hostPlayerId: "p1",
+    gameSlug: "bingo",
     players: new Map([["p1", { id: "p1", name: "Alice", walletId: "w1", balance: 100 }]]),
     currentGame: {
       id: "game-1",

@@ -237,7 +237,8 @@ export interface GameEventsDeps {
   disarmAllPlayers: (roomCode: string) => void;
   clearDisplayTicketCache: (roomCode: string) => void;
   /** BIN-509: swap one pre-round ticket in place; returns null if ticketId is unknown. */
-  replaceDisplayTicket?: (roomCode: string, playerId: string, ticketId: string, gameSlug?: string) => Ticket | null;
+  /** BIN-672: gameSlug required — see roomState.replaceDisplayTicket doc. */
+  replaceDisplayTicket?: (roomCode: string, playerId: string, ticketId: string, gameSlug: string) => Ticket | null;
   /**
    * BIN-516: optional chat persistence. When provided, chat:send writes through
    * to the store and chat:history reads from it (falls back to in-memory cache

@@ -415,7 +415,10 @@ export class BingoEngine {
       code,
       hallId,
       hostPlayerId: playerId,
-      gameSlug: input.gameSlug?.trim() || undefined,
+      // BIN-672: gameSlug is REQUIRED on RoomState. Default to "bingo" when
+      // caller omitted — matches game_sessions.game_slug DB default and
+      // reflects that this platform only ships Bingo right now.
+      gameSlug: input.gameSlug?.trim() || "bingo",
       createdAt: new Date().toISOString(),
       players: new Map([[playerId, player]]),
       gameHistory: []
@@ -747,7 +750,8 @@ export class BingoEngine {
     for (const player of eligiblePlayers) {
       await this.compliance.startPlaySession(player.walletId, nowMs);
     }
-    // BIN-159: Checkpoint at game start — captures initial state for crash recovery
+    // BIN-159: Checkpoint at game start — captures initial state for crash recovery.
+    // BIN-672: Pass gameSlug so the session row knows which ticket format applies.
     if (this.bingoAdapter.onCheckpoint) {
       try {
         await this.bingoAdapter.onCheckpoint({
@@ -756,7 +760,8 @@ export class BingoEngine {
           reason: "BUY_IN",
           snapshot: this.serializeGameForRecovery(game),
           players: [...room.players.values()],
-          hallId: room.hallId
+          hallId: room.hallId,
+          gameSlug: room.gameSlug,
         });
       } catch (err) {
         logger.error({ err, gameId }, "CRITICAL: Checkpoint failed after game start");
@@ -2461,7 +2466,11 @@ export class BingoEngine {
     hostPlayerId: string,
     players: Player[],
     snapshot: GameSnapshot,
-    gameSlug?: string
+    // BIN-672: required — caller MUST pass a gameSlug from the
+    // persisted game_sessions.game_slug column. No fallback here; an
+    // unknown slug should fail loud (will be thrown by the ticket-gen
+    // chain when display-tickets are requested).
+    gameSlug: string
   ): void {
     const code = roomCode.trim().toUpperCase();
     if (this.rooms.has(code)) {

@@ -414,11 +414,9 @@ describe("generateTicketForGame", () => {
     }
   });
 
-  test("Undefined slug → 3x5 Databingo60 (defensive default)", () => {
-    const ticket = generateTicketForGame(undefined);
-    assert.equal(ticket.grid.length, 3);
-    assert.equal(ticket.grid[0].length, 5);
-  });
+  // BIN-672: Removed "Undefined slug → 3x5 (defensive default)" test —
+  // fallback was root cause of BIN-619/BIN-671. generateTicketForGame
+  // now throws; explicit throw-tests live in ticket.bin672.test.ts.
 
   test("color and type metadata pass through for 75-ball tickets", () => {
     const ticket = generateTicketForGame("bingo", "Small Yellow", "small");

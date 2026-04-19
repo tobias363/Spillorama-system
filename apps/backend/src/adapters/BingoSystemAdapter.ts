@@ -3,7 +3,8 @@ import type { Player, Ticket, ClaimType, ClaimRecord, GameSnapshot, RecoverableG
 export interface CreateTicketInput {
   roomCode: string;
   gameId: string;
-  gameSlug?: string;
+  /** BIN-672: required — drives ticket format selection. */
+  gameSlug: string;
   player: Player;
   ticketIndex: number;
   ticketsPerPlayer: number;
@@ -61,6 +62,14 @@ export interface CheckpointInput {
   players?: Player[];
   /** BIN-159: Hall ID for the room. */
   hallId?: string;
+  /**
+   * BIN-672: Game slug (e.g. "bingo", "game_2") for this room. Persisted to
+   * game_sessions on BUY_IN so crash-recovery can restore the correct
+   * ticket-format + drawbag config without guessing. Optional here because
+   * the field is only written on the initial BUY_IN checkpoint; subsequent
+   * DRAW/PAYOUT/GAME_END checkpoints don't need it.
+   */
+  gameSlug?: string;
 }
 
 export interface BingoSystemAdapter {

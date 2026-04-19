@@ -1655,7 +1655,9 @@ test("KRITISK-5/6: checkpoint captures RecoverableGameSnapshot with drawBag and 
   const buyInSnap = buyInCheckpoint!.snapshot as Record<string, unknown>;
   assert.ok(Array.isArray(buyInSnap.drawBag), "BUY_IN snapshot should contain drawBag array");
   assert.ok(typeof buyInSnap.structuredMarks === "object", "BUY_IN snapshot should contain structuredMarks");
-  assert.equal((buyInSnap.drawBag as number[]).length, 60, "drawBag should have 60 balls at start");
+  // BIN-672: default gameSlug is now "bingo" (75-ball). Pre-BIN-672 tests
+  // relied on the implicit 60-ball fallback for rooms that didn't pass a slug.
+  assert.equal((buyInSnap.drawBag as number[]).length, 75, "drawBag should have 75 balls at start (bingo default)");
 
   // Draw a number and mark it
   const { number: drawn } = await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
@@ -1672,7 +1674,7 @@ test("KRITISK-5/6: checkpoint captures RecoverableGameSnapshot with drawBag and 
   assert.ok(drawCheckpoint, "DRAW checkpoint should exist after draw");
   const drawSnap = drawCheckpoint!.snapshot as Record<string, unknown>;
   assert.ok(Array.isArray(drawSnap.drawBag), "DRAW snapshot should contain drawBag");
-  assert.equal((drawSnap.drawBag as number[]).length, 59, "drawBag should have 59 balls after 1 draw");
+  assert.equal((drawSnap.drawBag as number[]).length, 74, "drawBag should have 74 balls after 1 draw (bingo default)");
   assert.ok(Array.isArray(drawSnap.drawnNumbers), "DRAW snapshot should contain drawnNumbers");
   assert.equal((drawSnap.drawnNumbers as number[]).length, 1);
   assert.ok(drawCheckpoint!.players, "DRAW checkpoint should include players");
