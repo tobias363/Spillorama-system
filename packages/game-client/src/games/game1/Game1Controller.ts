@@ -308,7 +308,7 @@ class Game1Controller implements GameController {
         // Show PlayScreen in waiting mode — countdown + buy popup, no separate lobby
         this.lastMiniGamePrize = 0;
         const container = this.deps.app.app.canvas.parentElement ?? document.body;
-        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container);
+        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container, this.deps.bridge);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
         this.playScreen.setOnBuy((selections) => this.handleBuy(selections));
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
@@ -336,7 +336,7 @@ class Game1Controller implements GameController {
       case "PLAYING": {
         this.lastMiniGamePrize = 0;
         const container = this.deps.app.app.canvas.parentElement ?? document.body;
-        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container);
+        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container, this.deps.bridge);
         this.playScreen.setOnClaim((type) => this.handleClaim(type));
         this.playScreen.setOnBuy((selections) => this.handleBuy(selections));
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
@@ -367,7 +367,7 @@ class Game1Controller implements GameController {
         // Mark/claim er server-guardet mot spillere uten billetter.
         this.lastMiniGamePrize = 0;
         const container = this.deps.app.app.canvas.parentElement ?? document.body;
-        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container);
+        this.playScreen = new PlayScreen(w, h, this.deps.audio, this.deps.socket, this.actualRoomCode, container, this.deps.bridge);
         // Mark/claim-handlers beholdes for konsistens — server returnerer feil
         // hvis spectator prøver. Klient-UI viser ikke mark-knapper når
         // myTickets er tom (PlayScreen renderer tom ticket-list).
@@ -583,8 +583,23 @@ class Game1Controller implements GameController {
   }
 
   private async handleClaim(type: "LINE" | "BINGO"): Promise<void> {
+    // BIN-420 G26 Gap #3: Spectators have no tickets — submitting a claim is
+    // a no-op server-side, but we surface a user-visible message instead of a
+    // silent return so behaviour matches Unity's claim-denied feedback.
+    if (this.phase === "SPECTATING") {
+      this.toast?.info("Tilskuere kan ikke gjøre claims");
+      return;
+    }
+
     const result = await this.deps.socket.submitClaim({ roomCode: this.actualRoomCode, type });
-    if (!result.ok) console.error("[Game1] Claim failed:", result.error);
+    if (!result.ok) {
+      // Gap #1: promote server error to a visible toast instead of silent console log.
+      // Gap #2: revert the claim button from "Sendt..." back to "ready" so the
+      //         user can retry (Unity: claim-denied → button re-enabled).
+      this.toast?.error(result.error?.message ?? `Ugyldig ${type === "LINE" ? "rekke" : "bingo"}-claim`);
+      this.playScreen?.resetClaimButton(type);
+      console.error("[Game1] Claim failed:", result.error);
+    }
   }
 
   /** Unity: Cancel/delete tickets = disarm player (bet:arm false). */
@@ -650,7 +665,8 @@ class Game1Controller implements GameController {
     const h = this.deps.app.app.screen.height;
 
     if (data.type === "wheelOfFortune") {
-      const overlay = new WheelOverlay(w, h);
+      // BIN-420 G21: pass bridge so auto-spin and rotation freeze on pause.
+      const overlay = new WheelOverlay(w, h, this.deps.bridge);
       overlay.setOnPlay(() => this.handleMiniGamePlay());
       overlay.setOnDismiss(() => this.dismissMiniGame());
       this.miniGameOverlay = overlay;
@@ -671,8 +687,8 @@ class Game1Controller implements GameController {
       this.root.addChild(overlay);
       overlay.show(data);
     } else {
-      // Default: TreasureChest
-      const overlay = new TreasureChestOverlay(w, h);
+      // Default: TreasureChest — bridge for pause-aware auto-select timer.
+      const overlay = new TreasureChestOverlay(w, h, this.deps.bridge);
       overlay.setOnPlay((idx) => this.handleMiniGamePlay(idx));
       overlay.setOnDismiss(() => this.dismissMiniGame());
       this.miniGameOverlay = overlay;

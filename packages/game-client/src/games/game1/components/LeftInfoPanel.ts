@@ -1,6 +1,11 @@
 import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
 import type { Player } from "@spillorama/shared-types/game";
 
+/** Bridge-state shape used for pause-awareness. */
+interface PauseAwareBridge {
+  getState(): { isPaused: boolean };
+}
+
 /**
  * HTML overlay panel showing player info, number ring, and draw progress.
  *
@@ -10,6 +15,12 @@ import type { Player } from "@spillorama/shared-types/game";
  *
  * The number ring also supports countdown mode, displaying seconds
  * remaining before the next game starts.
+ *
+ * Pause-hook (BIN-420 G23): the `setInterval` that drives the countdown
+ * display honours `state.isPaused`. While paused, the deadline is pushed
+ * forward by the tick interval so the remaining-seconds readout stays frozen
+ * — matching Unity's `Game1GamePlayPanel.SocketFlow.cs:672-696` pause
+ * behaviour where scheduler updates are suspended.
  */
 export class LeftInfoPanel {
   private root: HTMLDivElement;
@@ -20,8 +31,10 @@ export class LeftInfoPanel {
   private progressEl: HTMLDivElement;
   private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private countdownDeadline = 0;
+  private bridge: PauseAwareBridge | null = null;
 
-  constructor(overlay: HtmlOverlayManager) {
+  constructor(overlay: HtmlOverlayManager, bridge?: PauseAwareBridge) {
+    this.bridge = bridge ?? null;
     this.root = overlay.createElement("left-panel", {
       flexShrink: "0",
       alignSelf: "flex-start",
@@ -138,8 +151,18 @@ export class LeftInfoPanel {
     this.updateCountdownDisplay();
 
     this.countdownInterval = setInterval(() => {
+      // BIN-420 G23: respect server-authoritative pause — freeze display.
+      if (this.bridge?.getState().isPaused) {
+        this.countdownDeadline += 250;
+        return;
+      }
       this.updateCountdownDisplay();
     }, 250);
+  }
+
+  /** Late-wire bridge (tests use this; controller passes in constructor). */
+  setBridge(bridge: PauseAwareBridge): void {
+    this.bridge = bridge;
   }
 
   stopCountdown(): void {

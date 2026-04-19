@@ -10,10 +10,26 @@ const CHEST_COLORS = {
   winner: 0xffe83d,
 };
 
+/** Auto-back delay after reveal, in seconds (Unity `TreasureChestPanel.cs:611`). */
+const AUTO_BACK_SECONDS = 12;
+const AUTO_SELECT_SECONDS = 10;
+
+/** Bridge-state shape we actually read. */
+interface PauseAwareBridge {
+  getState(): { isPaused: boolean };
+}
+
 /**
  * Treasure Chest mini-game overlay for Game 1 (Classic Bingo).
  * Shows N chests — player picks one. Outcome is server-determined.
  * After reveal, all chests open showing prizes.
+ *
+ * Unity parity:
+ *   - `TreasureChestPanel.cs:107` — auto-select after countdown.
+ *   - `TreasureChestPanel.cs:541-542` — `OrderBy(Guid.NewGuid())` shuffle of prizes
+ *     (client-side, cosmetic only — server still picks the winner).
+ *   - `TreasureChestPanel.cs:611` — 12 s auto-back after reveal.
+ *   - `TreasureChestPanel.cs:633,643` — pause-hook on countdowns.
  */
 export class TreasureChestOverlay extends Container {
   private backdrop: Graphics;
@@ -27,10 +43,12 @@ export class TreasureChestOverlay extends Container {
   private onPlay: ((selectedIndex: number) => void) | null = null;
   private onDismiss: (() => void) | null = null;
   private autoSelectTimer: ReturnType<typeof setInterval> | null = null;
-  private autoSelectCountdown = 10;
+  private autoSelectCountdown = AUTO_SELECT_SECONDS;
+  private bridge: PauseAwareBridge | null;
 
-  constructor(private screenWidth: number, private screenHeight: number) {
+  constructor(private screenWidth: number, private screenHeight: number, bridge?: PauseAwareBridge) {
     super();
+    this.bridge = bridge ?? null;
 
     // Semi-transparent backdrop
     this.backdrop = new Graphics();
@@ -109,7 +127,11 @@ export class TreasureChestOverlay extends Container {
   }
 
   show(data: MiniGameActivatedPayload): void {
-    this.prizeList = data.prizeList;
+    // Unity parity: TreasureChestPanel.cs:541-542 shuffles the prize list
+    // client-side before assigning each chest a label (`OrderBy(Guid.NewGuid())`).
+    // The server still determines the winning index — this is cosmetic only so
+    // players don't see the same chest order every round.
+    this.prizeList = shufflePrizes(data.prizeList);
     this.isRevealing = false;
     this.resultText.visible = false;
     const subtitle = this.getChildByName("subtitle") as Text | null;
@@ -117,10 +139,12 @@ export class TreasureChestOverlay extends Container {
     this.buildChests();
     this.visible = true;
 
-    // Auto-select countdown (10 seconds)
-    this.autoSelectCountdown = 10;
+    // Auto-select countdown (10 s). Respects server-authoritative pause —
+    // Unity: TreasureChestPanel.cs:633 freezes countdowns while room is paused.
+    this.autoSelectCountdown = AUTO_SELECT_SECONDS;
     this.timerText.text = `Auto-valg om ${this.autoSelectCountdown}s`;
     this.autoSelectTimer = setInterval(() => {
+      if (this.bridge?.getState().isPaused) return; // Pause-hook
       this.autoSelectCountdown -= 1;
       if (this.autoSelectCountdown <= 0) {
         this.clearAutoTimer();
@@ -155,8 +179,8 @@ export class TreasureChestOverlay extends Container {
       this.resultText.visible = true;
     });
 
-    // Auto-dismiss after 5 seconds
-    gsap.delayedCall(5, () => {
+    // Auto-back after 12 s — Unity parity (TreasureChestPanel.cs:611).
+    gsap.delayedCall(AUTO_BACK_SECONDS, () => {
       this.visible = false;
       this.onDismiss?.();
     });
@@ -300,3 +324,21 @@ export class TreasureChestOverlay extends Container {
     });
   }
 }
+
+/**
+ * Fisher–Yates shuffle, emulating Unity's `prizes.OrderBy(_ => Guid.NewGuid())`.
+ * Pure function + isolated to a helper so tests can assert determinism across
+ * fixed seeds (Math.random is stubbed in test).
+ */
+export function shufflePrizes(prizes: number[]): number[] {
+  const out = prizes.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** Exposed for tests. */
+export const __TreasureChest_AUTO_BACK_SECONDS__ = AUTO_BACK_SECONDS;
+
