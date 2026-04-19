@@ -2,6 +2,17 @@ import { Container, Graphics, Text } from "pixi.js";
 import gsap from "gsap";
 
 export type ClaimType = "LINE" | "BINGO";
+/**
+ * Claim button lifecycle:
+ *   hidden    — nothing to claim yet
+ *   ready     — pattern complete; pulsing, clickable
+ *   submitted — click → awaiting server ack (disabled, "Sendt...")
+ *   pending   — alias retained for clarity in tests and Gap #2 rationale.
+ *
+ * On server NACK the controller calls `reset()` or `setState("ready")` so the
+ * user can retry. On server ACK → button stays submitted and is hidden when
+ * the round transitions (matches Unity behaviour).
+ */
 type ClaimState = "hidden" | "ready" | "submitted";
 
 /**
