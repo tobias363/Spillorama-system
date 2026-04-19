@@ -264,25 +264,40 @@ export class TicketCard extends Container {
   }
 
   /**
-   * Hide this card's own chrome (background, header, price, to-go counter)
-   * so only the BingoGrid is visible. Used when this card lives inside a
-   * TicketGroup (Elvis/Large/Traffic) where the group owns the chrome.
+   * Hide this card's own header/price/to-go chrome so only the BingoGrid +
+   * per-mini background remain visible. Used when this card lives inside a
+   * TicketGroup (Elvis/Large/Traffic) where the group owns the outer chrome.
    *
-   * Unity equivalent: PrefabBingoGame1LargeTicket5x5 positions 3 bare
-   * mini-tickets inside a parent with its own shared imageBG.
+   * Unity equivalent: PrefabBingoGame1LargeTicket5x5.Set_Ticket_Color
+   * (legacy/unity-client/Assets/_Project/_Scripts/Prefabs/Bingo Tickets/
+   * PrefabBingoGame1LargeTicket5x5.cs:18) sets
+   *   Mini_Tickets[i].imgTicket.color = color.BG_Color
+   * for EACH mini — i.e. every mini keeps its own per-theme BG image.
+   * That per-mini BG is exactly what the 1-to-go blink animates
+   * (BingoTicket.cs:1020-1033, `imgTicket.color` tween), so we MUST keep
+   * `cardBg` visible here — previously hiding it made the blink invisible
+   * when tickets were grouped (G5 bug).
    */
   setMiniMode(): void {
-    this.cardBg.visible = false;
+    // Keep cardBg visible so per-mini bg-blink is rendered (Unity: imgTicket
+    // is always visible inside a Large/Elvis/Traffic group).
+    this.cardBg.visible = true;
     this.headerBg.visible = false;
     this.headerText.visible = false;
     this.priceText.visible = false;
     this.toGoText.visible = false;
     // Tighten layout: drop the grid to the top so the card bounds are just
-    // the grid itself (plus a small padding for border-radius continuity).
+    // the grid itself.
     this.grid.x = 0;
     this.grid.y = 0;
     this.cardW = this.grid.gridWidth;
     this.cardH = this.grid.gridHeight;
+    // Re-draw cardBg at the new (smaller) mini bounds so it sits exactly
+    // under the grid. Uses the theme-provided cardBgColor from the
+    // constructor — Unity's BG_Color per-mini.
+    this.cardBg.clear();
+    this.cardBg.roundRect(0, 0, this.cardW, this.cardH, 6);
+    this.cardBg.fill(this.cardBgColor);
   }
 
   // ── Flip animation (Unity: Y-rotation 0→90→0 mapped to scaleX) ─────
