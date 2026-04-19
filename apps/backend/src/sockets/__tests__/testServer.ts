@@ -9,6 +9,7 @@ import express from "express";
 import { Server, type Socket } from "socket.io";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
 import { BingoEngine } from "../../game/BingoEngine.js";
+import { Game3Engine } from "../../game/Game3Engine.js";
 import type { BingoSystemAdapter, CreateTicketInput } from "../../adapters/BingoSystemAdapter.js";
 import {
   type CreateWalletAccountInput,
@@ -193,7 +194,16 @@ const DEFAULT_BINGO_SETTINGS = {
   autoDrawIntervalMs: 2000,
 };
 
-export async function createTestServer(): Promise<TestServer> {
+export interface CreateTestServerOptions {
+  /** When true, use Game3Engine instead of BingoEngine (for G3 integration tests). */
+  useGame3Engine?: boolean;
+  /** Override BingoSystemAdapter (for G3 5×5 tickets). Defaults to FixedTicketBingoAdapter. */
+  bingoAdapter?: BingoSystemAdapter;
+  /** Override drawBagFactory (for G3 tests that need deterministic 1..75 draws). */
+  drawBagFactory?: (size: number) => number[];
+}
+
+export async function createTestServer(opts: CreateTestServerOptions = {}): Promise<TestServer> {
   const app = express();
   const server = http.createServer(app);
   const io = new Server(server, { cors: { origin: "*" } });
@@ -204,18 +214,23 @@ export async function createTestServer(): Promise<TestServer> {
   // test can mark a full grid and claim BINGO well before the engine auto-ends the
   // round at maxDrawsPerRound.
   const FIXED_GRID_NUMBERS = [1,2,3,4,5, 13,14,15,16,17, 25,26,27,28, 37,38,39,40,41, 49,50,51,52,53];
-  const deterministicDrawBag = (size: number): number[] => {
+  const deterministicDrawBag = opts.drawBagFactory ?? ((size: number): number[] => {
     const rest: number[] = [];
     for (let n = 1; n <= size; n += 1) {
       if (!FIXED_GRID_NUMBERS.includes(n)) rest.push(n);
     }
     return [...FIXED_GRID_NUMBERS.filter((n) => n <= size), ...rest];
-  };
-  const engine = new BingoEngine(new FixedTicketBingoAdapter(), walletAdapter, {
+  });
+  const bingoAdapter = opts.bingoAdapter ?? new FixedTicketBingoAdapter();
+  const EngineClass = opts.useGame3Engine ? Game3Engine : BingoEngine;
+  const engine = new EngineClass(bingoAdapter, walletAdapter, {
     minDrawIntervalMs: 0,         // No delay between draws in tests
     minRoundIntervalMs: 0,        // No delay between rounds in tests
     maxDrawsPerRound: 75,         // Allow draining the full 75-ball bag (5×5 bingo)
     drawBagFactory: deterministicDrawBag,
+    // Relaxed loss limits so G3 round payouts don't trip Spillvett.
+    dailyLossLimit: 1_000_000,
+    monthlyLossLimit: 10_000_000,
   });
   const mockPlatform = createMockPlatformService();
   // Relaxed rate limits for integration tests — allow rapid draws

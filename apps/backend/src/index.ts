@@ -14,7 +14,7 @@ import { PostgresBingoSystemAdapter } from "./adapters/PostgresBingoSystemAdapte
 import { LocalKycAdapter } from "./adapters/LocalKycAdapter.js";
 import { BankIdKycAdapter } from "./adapters/BankIdKycAdapter.js";
 import { BingoEngine, DomainError } from "./game/BingoEngine.js";
-import { Game2Engine } from "./game/Game2Engine.js";
+import { Game3Engine } from "./game/Game3Engine.js";
 import { PostgresResponsibleGamingStore } from "./game/PostgresResponsibleGamingStore.js";
 import type { GameSnapshot, Player, RoomSnapshot } from "./game/types.js";
 import { PlatformService } from "./platform/PlatformService.js";
@@ -227,12 +227,17 @@ const responsibleGamingStore = platformConnectionString.length > 0
   ? new PostgresResponsibleGamingStore({ connectionString: platformConnectionString, schema: pgSchema, ssl: pgSsl })
   : undefined;
 
-// BIN-615 / PR-C2: Instantiate Game2Engine (subclass of BingoEngine). G1 rooms
-// are unaffected — Game2Engine.onDrawCompleted is guarded by variantConfig and
-// falls through to BingoEngine's no-op default for non-G2 rounds.
-// Factory rule: one engine class for the whole process; G2/G3 subclasses
-// compose on top via guarded hook overrides, not per-room instantiation.
-const engine = new Game2Engine(localBingoAdapter, walletAdapter, {
+// BIN-615 / PR-C3b: Instantiate Game3Engine (subclass of Game2Engine ⊂
+// BingoEngine). One engine instance serves G1 / G2 / G3 rooms concurrently:
+//   - Game3Engine.onDrawCompleted guards on isGame3Round (slug + patternEvalMode
+//     + no jackpotNumberTable) and no-ops otherwise.
+//   - super.onDrawCompleted is chained → Game2Engine's hook fires for G2 rounds
+//     (jackpotNumberTable present), no-ops otherwise.
+//   - Non-G2/G3 rounds fall through to BingoEngine's no-op default, preserving
+//     G1 manual-claim semantics untouched.
+// Factory rule: one engine class for the whole process; per-variant behaviour
+// is composed via guarded hook overrides, not per-room instantiation.
+const engine = new Game3Engine(localBingoAdapter, walletAdapter, {
   minRoundIntervalMs: bingoMinRoundIntervalMs, minPlayersToStart: bingoMinPlayersToStart,
   dailyLossLimit: bingoDailyLossLimit, monthlyLossLimit: bingoMonthlyLossLimit,
   playSessionLimitMs: bingoPlaySessionLimitMs, pauseDurationMs: bingoPauseDurationMs,

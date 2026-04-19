@@ -6,6 +6,7 @@ import { addBreadcrumb, captureError } from "../observability/sentry.js";
 import { metrics as promMetrics } from "../util/metrics.js";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import { Game2Engine, type G2DrawEffects } from "../game/Game2Engine.js";
+import { Game3Engine, type G3DrawEffects } from "../game/Game3Engine.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
 import type { RoomSnapshot, Ticket, ClaimType } from "../game/types.js";
@@ -55,6 +56,53 @@ function emitG2DrawEvents(io: Server, effects: G2DrawEffects): void {
       gameId: effects.gameId,
       playerId: winner.playerId,
       ticketId: winner.ticketId,
+      drawIndex: effects.drawIndex,
+    });
+  }
+}
+
+/**
+ * BIN-615 / PR-C3b: Emit Game 3 wire-contract events from a single draw's
+ * stashed side-effects (`Game3Engine.getG3LastDrawEffects`). Legacy parity:
+ *   - g3:pattern:changed  → emit only when `effects.patternsChanged === true`
+ *                           (cycler.step returned changed=true on this draw).
+ *   - g3:pattern:auto-won → emit once per winning pattern batch after the
+ *                           auto-claim has paid all (ticket, pattern) winners.
+ *
+ * Emission order: `g3:pattern:changed` first (so clients update pattern UI
+ * before win banners), then one `g3:pattern:auto-won` per winning pattern.
+ */
+export function emitG3DrawEvents(io: Server, effects: G3DrawEffects): void {
+  // Pattern list mutation: fire before any winner event so listeners can
+  // refresh active-pattern UI before a winner banner references it.
+  if (effects.patternsChanged) {
+    io.to(effects.roomCode).emit("g3:pattern:changed", {
+      roomCode: effects.roomCode,
+      gameId: effects.gameId,
+      activePatterns: effects.patternSnapshot
+        .filter((p) => !p.isWon)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          design: p.design,
+          patternDataList: p.patternDataList,
+          ballNumberThreshold: p.ballThreshold,
+        })),
+      drawIndex: effects.drawIndex,
+    });
+  }
+
+  // One g3:pattern:auto-won per winning pattern batch — legacy parity with
+  // processPatternWinners broadcasting one PatternWon per pattern.
+  for (const winner of effects.winners) {
+    if (winner.ticketWinners.length === 0) continue;
+    io.to(effects.roomCode).emit("g3:pattern:auto-won", {
+      roomCode: effects.roomCode,
+      gameId: effects.gameId,
+      patternId: winner.patternId,
+      patternName: winner.patternName,
+      winnerPlayerIds: winner.ticketWinners.map((t) => t.playerId),
+      prizePerWinner: winner.pricePerWinner,
       drawIndex: effects.drawIndex,
     });
   }
@@ -666,6 +714,15 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
         if (engine instanceof Game2Engine) {
           const effects = engine.getG2LastDrawEffects(roomCode);
           if (effects) emitG2DrawEvents(io, effects);
+        }
+        // BIN-615 / PR-C3b: emit Game 3 wire events for any G3 draw effects
+        // stashed by Game3Engine.onDrawCompleted. No-op for non-G3 rooms.
+        // Game3Engine extends Game2Engine so the `instanceof Game2Engine`
+        // branch also fires for G3 runtimes — the two stashes are independent
+        // and G2/G3 guards are mutually exclusive, so at most one emits.
+        if (engine instanceof Game3Engine) {
+          const g3Effects = engine.getG3LastDrawEffects(roomCode);
+          if (g3Effects) emitG3DrawEvents(io, g3Effects);
         }
 
         const snapshot = await emitRoomUpdate(roomCode);
