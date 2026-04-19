@@ -4,13 +4,16 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "apps/backend"
+    "apps/backend",
+    "apps/admin-web"
   ],
   "scripts": {
     "dev": "npm --prefix apps/backend run dev",
+    "dev:admin": "npm -w @spillorama/admin-web run dev",
     "dev:games": "npm -w @spillorama/game-client run dev",
     "check": "npm --prefix apps/backend run check",
-    "build": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build && npm --prefix apps/backend run build",
+    "build": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build && npm -w @spillorama/admin-web run build && npm --prefix apps/backend run build",
+    "build:admin": "npm -w @spillorama/admin-web run build",
     "build:types": "npm -w @spillorama/shared-types run build",
     "build:games": "npm -w @spillorama/shared-types run build && npm -w @spillorama/game-client run build",
     "test:compliance": "npm --prefix apps/backend run test:compliance",
