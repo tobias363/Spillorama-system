@@ -56,6 +56,7 @@ export const routes: RouteDef[] = [
 
   { path: "/productList", titleKey: "product_list", module: "Product Management" },
   { path: "/categoryList", titleKey: "category_list", module: "Product Management" },
+  { path: "/hallProductList", titleKey: "hall_product_management", module: "Product Management" },
   { path: "/orderHistory", titleKey: "order_history", module: "Product Management" },
 
   { path: "/role", titleKey: "role_management", roles: ["admin", "super-admin"] },

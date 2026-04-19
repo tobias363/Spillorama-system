@@ -20,6 +20,7 @@ import { isReportRoute, mountReportRoute } from "./pages/reports/index.js";
 import { isAmountwithdrawRoute, mountAmountwithdrawRoute } from "./pages/amountwithdraw/index.js";
 import { isTransactionRoute, mountTransactionRoute } from "./pages/transactions/index.js";
 import { isWalletRoute, mountWalletRoute } from "./pages/wallets/index.js";
+import { isProductsRoute, mountProductsRoute } from "./pages/products/index.js";
 import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPage.js";
 
 const MAINTENANCE_MODE = false;
@@ -109,6 +110,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isWalletRoute(bare)) {
         mountWalletRoute(container, bare);
+        return;
+      }
+      if (isProductsRoute(bare)) {
+        mountProductsRoute(container, bare);
         return;
       }
       renderUnknown(container, path);
@@ -215,6 +220,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (isWalletRoute(route.path)) {
     mountWalletRoute(container, route.path);
+    return;
+  }
+  if (isProductsRoute(route.path)) {
+    mountProductsRoute(container, route.path);
     return;
   }
   renderPlaceholder(container, route);
