@@ -131,8 +131,10 @@ describe("fetchGameTypeList", () => {
     expect(result[1]?.slug).toBe("rocket");
 
     // Auth header included
-    const [, init] = spy.mock.calls[0] ?? [];
-    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer abc123" });
+    const calls = spy.mock.calls as unknown as Array<[string, RequestInit?]>;
+    expect(calls.length).toBeGreaterThan(0);
+    const firstCall = calls[0]!;
+    expect(firstCall[1]?.headers).toMatchObject({ Authorization: "Bearer abc123" });
   });
 
   it("returns [] on empty response", async () => {
