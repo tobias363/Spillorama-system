@@ -1748,3 +1748,154 @@ test("BIN-505/506: mystery + colorDraft prizes flow through playMiniGame same as
   assert.equal(colorResult.type, "colorDraft");
   assert.ok(colorResult.prizeAmount >= 0);
 });
+
+// ── BIN-615 / PR-C3: lucky-number hook & state-machine ────────────────────────
+// Hook was lifted from Game2Engine → BingoEngine so any variant with
+// luckyNumberPrize > 0 can opt in. Game 1 (no luckyNumberPrize) must never
+// see the hook; Game 2 keeps its inline coupling (not exercised here, see
+// Game2Engine.test.ts). These tests exercise the base-class state+hook
+// contract directly via a probe subclass.
+
+interface LuckyCallArgs {
+  roomCode: string;
+  playerId: string;
+  luckyNumber: number;
+  lastBall: number;
+  drawIndex: number;
+  luckyPrize: number;
+}
+
+class LuckyProbeEngine extends BingoEngine {
+  public readonly luckyCalls: LuckyCallArgs[] = [];
+
+  protected async onLuckyNumberDrawn(ctx: {
+    room: import("./types.js").RoomState;
+    game: import("./types.js").GameState;
+    player: import("./types.js").Player;
+    luckyNumber: number;
+    lastBall: number;
+    drawIndex: number;
+    variantConfig: import("./variantConfig.js").GameVariantConfig;
+  }): Promise<void> {
+    this.luckyCalls.push({
+      roomCode: ctx.room.code,
+      playerId: ctx.player.id,
+      luckyNumber: ctx.luckyNumber,
+      lastBall: ctx.lastBall,
+      drawIndex: ctx.drawIndex,
+      luckyPrize: ctx.variantConfig.luckyNumberPrize ?? 0,
+    });
+  }
+
+  public readLucky(roomCode: string, playerId: string): number | undefined {
+    return this.getLuckyNumber(roomCode, playerId);
+  }
+}
+
+test("BIN-615 PR-C3: onLuckyNumberDrawn fires when luckyNumberPrize > 0 and ball matches", async () => {
+  const engine = new LuckyProbeEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0,
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-lucky-1", playerName: "Host", walletId: "wallet-host-lucky",
+  });
+  await engine.joinRoom({ roomCode, hallId: "hall-lucky-1", playerName: "Guest", walletId: "wallet-guest-lucky" });
+  // Variant opts into the hook by setting luckyNumberPrize > 0.
+  await engine.startGame({
+    roomCode,
+    actorPlayerId: hostId,
+    ticketsPerPlayer: 1,
+    payoutPercent: 80,
+    variantConfig: {
+      ticketTypes: [{ name: "Small Yellow", type: "small", priceMultiplier: 1, ticketCount: 1 }],
+      patterns: [],
+      luckyNumberPrize: 100,
+    },
+  });
+  engine.setLuckyNumber(roomCode, hostId, 7);
+  prioritizeDrawNumbers(engine, roomCode, [7]);
+  await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+  assert.equal(engine.luckyCalls.length, 1, "hook should fire once when drawn ball matches");
+  assert.equal(engine.luckyCalls[0].playerId, hostId);
+  assert.equal(engine.luckyCalls[0].luckyNumber, 7);
+  assert.equal(engine.luckyCalls[0].lastBall, 7);
+  assert.equal(engine.luckyCalls[0].luckyPrize, 100);
+});
+
+test("BIN-615 PR-C3: onLuckyNumberDrawn does NOT fire when luckyNumberPrize is 0 (Game 1)", async () => {
+  const engine = new LuckyProbeEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0,
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-lucky-2", playerName: "Host", walletId: "wallet-host-lucky-2",
+  });
+  await engine.joinRoom({ roomCode, hallId: "hall-lucky-2", playerName: "Guest", walletId: "wallet-guest-lucky-2" });
+  // Default Game 1 style: no luckyNumberPrize set → treated as 0.
+  await engine.startGame({ roomCode, actorPlayerId: hostId, ticketsPerPlayer: 1, payoutPercent: 80 });
+  engine.setLuckyNumber(roomCode, hostId, 3);
+  prioritizeDrawNumbers(engine, roomCode, [3]);
+  await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+  assert.equal(engine.luckyCalls.length, 0, "hook must never fire for Game 1 (no luckyNumberPrize)");
+});
+
+test("BIN-615 PR-C3: onLuckyNumberDrawn does NOT fire when drawn ball differs from lucky number", async () => {
+  const engine = new LuckyProbeEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0,
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-lucky-3", playerName: "Host", walletId: "wallet-host-lucky-3",
+  });
+  await engine.joinRoom({ roomCode, hallId: "hall-lucky-3", playerName: "Guest", walletId: "wallet-guest-lucky-3" });
+  await engine.startGame({
+    roomCode,
+    actorPlayerId: hostId,
+    ticketsPerPlayer: 1,
+    payoutPercent: 80,
+    variantConfig: {
+      ticketTypes: [{ name: "Small Yellow", type: "small", priceMultiplier: 1, ticketCount: 1 }],
+      patterns: [],
+      luckyNumberPrize: 50,
+    },
+  });
+  engine.setLuckyNumber(roomCode, hostId, 42);
+  prioritizeDrawNumbers(engine, roomCode, [11]);
+  await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+  assert.equal(engine.luckyCalls.length, 0, "hook only fires when lastBall === luckyNumber");
+});
+
+test("BIN-615 PR-C3: luckyNumbersByPlayer state-machine — add, read, destroyRoom clears", async () => {
+  const engine = new LuckyProbeEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0,
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-lucky-4", playerName: "Host", walletId: "wallet-host-lucky-4",
+  });
+  await engine.joinRoom({ roomCode, hallId: "hall-lucky-4", playerName: "Guest", walletId: "wallet-guest-lucky-4" });
+  // Read before add → undefined
+  assert.equal(engine.readLucky(roomCode, hostId), undefined, "no lucky set initially");
+  // Add
+  engine.setLuckyNumber(roomCode, hostId, 17);
+  assert.equal(engine.readLucky(roomCode, hostId), 17, "readLucky after setLuckyNumber");
+  // Overwrite (legacy behaviour: last-write-wins)
+  engine.setLuckyNumber(roomCode, hostId, 23);
+  assert.equal(engine.readLucky(roomCode, hostId), 23, "last-write-wins");
+  // destroyRoom should clear the per-room state
+  engine.destroyRoom(roomCode);
+  assert.equal(engine.readLucky(roomCode, hostId), undefined, "destroyRoom clears luckyNumbersByPlayer");
+});
+
+test("BIN-615 PR-C3: setLuckyNumber validates against variantConfig.maxBallValue (defaults to 60 for G1)", async () => {
+  const engine = new LuckyProbeEngine(new FixedTicketBingoAdapter(), new InMemoryWalletAdapter(), {
+    minDrawIntervalMs: 0,
+  });
+  const { roomCode, playerId: hostId } = await engine.createRoom({
+    hallId: "hall-lucky-5", playerName: "Host", walletId: "wallet-host-lucky-5",
+  });
+  await engine.joinRoom({ roomCode, hallId: "hall-lucky-5", playerName: "Guest", walletId: "wallet-guest-lucky-5" });
+  // Before startGame no variantConfig cached → maxBall default 60.
+  assert.throws(() => engine.setLuckyNumber(roomCode, hostId, 0), /mellom 1 og 60/);
+  assert.throws(() => engine.setLuckyNumber(roomCode, hostId, 61), /mellom 1 og 60/);
+  assert.throws(() => engine.setLuckyNumber(roomCode, hostId, 1.5), /mellom 1 og 60/);
+  engine.setLuckyNumber(roomCode, hostId, 1);
+  engine.setLuckyNumber(roomCode, hostId, 60);
+});

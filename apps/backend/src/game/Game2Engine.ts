@@ -21,7 +21,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { BingoEngine, DomainError } from "./BingoEngine.js";
+import { BingoEngine } from "./BingoEngine.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
 import { hasFull3x3 } from "./ticket.js";
@@ -86,37 +86,6 @@ export class Game2Engine extends BingoEngine {
    * calls {@link getG2LastDrawEffects} which atomically reads-and-clears.
    */
   private readonly lastDrawEffectsByRoom = new Map<string, G2DrawEffects>();
-
-  /**
-   * BIN-615 / PR-C2: Per-room last-known luckyNumber set by the player via
-   * lucky:set. G2 pays luckyNumberPrize if (lastBall === luckyNumber && player won).
-   *
-   * Legacy ref: gamehelper/game2.js:1628-1712 (checkLuckyNumber).
-   *
-   * Populated by {@link setLuckyNumber} — called from gameEvents.ts `lucky:set`.
-   */
-  private readonly luckyNumbersByPlayer = new Map<string, Map<string, number>>(); // roomCode → playerId → luckyNumber
-
-  /**
-   * BIN-615 / PR-C2: Record a player's lucky number for this room.
-   * Validates against variantConfig.maxBallValue so G2 (1..21), G1 (1..60), etc. work.
-   */
-  setLuckyNumber(roomCode: string, playerId: string, luckyNumber: number): void {
-    const vc = this.variantConfigByRoom.get(roomCode);
-    const maxBall = vc?.maxBallValue ?? 60;
-    if (!Number.isInteger(luckyNumber) || luckyNumber < 1 || luckyNumber > maxBall) {
-      throw new DomainError(
-        "INVALID_LUCKY_NUMBER",
-        `luckyNumber må være et heltall mellom 1 og ${maxBall}.`
-      );
-    }
-    let roomMap = this.luckyNumbersByPlayer.get(roomCode);
-    if (!roomMap) {
-      roomMap = new Map();
-      this.luckyNumbersByPlayer.set(roomCode, roomMap);
-    }
-    roomMap.set(playerId, luckyNumber);
-  }
 
   /**
    * BIN-615 / PR-C2: Public reader for the socket layer. Returns undefined when

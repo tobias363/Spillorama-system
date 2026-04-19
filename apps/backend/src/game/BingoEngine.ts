@@ -227,6 +227,22 @@ export class BingoEngine {
    */
   protected readonly variantConfigByRoom = new Map<string, import("./variantConfig.js").GameVariantConfig>();
 
+  /**
+   * BIN-615 / PR-C3: Per-room per-player lucky-number registry. Lifted from
+   * Game2Engine (PR-C2) so any variant with `variantConfig.luckyNumberPrize > 0`
+   * can participate.
+   *
+   * Populated by {@link setLuckyNumber} (called from gameEvents.ts `lucky:set`
+   * socket handler), read by {@link onLuckyNumberDrawn} hook fan-out in
+   * drawNextNumber. Cleared on destroyRoom.
+   *
+   * Protected so Game2Engine (existing inline jackpot+bonus coupling) can read
+   * the same state when processing winners.
+   *
+   * Legacy ref: gamehelper/game2.js:1628-1712 (checkLuckyNumber).
+   */
+  protected readonly luckyNumbersByPlayer = new Map<string, Map<string, number>>();
+
   constructor(
     // BIN-615 / PR-C2: protected so Game2Engine can invoke adapter hooks
     // (onClaimLogged, onCheckpoint) and wallet transfers for auto-claim payouts.
@@ -784,6 +800,71 @@ export class BingoEngine {
     // No-op by default. G1 uses manual-claim (existing claim:submit flow).
   }
 
+  /**
+   * BIN-615 / PR-C3: Register a player's lucky number for a room.
+   *
+   * Validated against `variantConfig.maxBallValue` (defaults to 60 when the
+   * variantConfig hasn't been cached yet — matches legacy G1 range). Variants
+   * that don't support lucky numbers (`luckyNumberPrize` absent or 0) may still
+   * accept the set call — the hook simply never fires.
+   *
+   * Legacy ref: gamehelper/game2.js:1628-1712 (checkLuckyNumber validates the
+   * same way). Lifted here in PR-C3 so all BingoEngine subclasses share it.
+   */
+  setLuckyNumber(roomCode: string, playerId: string, luckyNumber: number): void {
+    const vc = this.variantConfigByRoom.get(roomCode);
+    const maxBall = vc?.maxBallValue ?? 60;
+    if (!Number.isInteger(luckyNumber) || luckyNumber < 1 || luckyNumber > maxBall) {
+      throw new DomainError(
+        "INVALID_LUCKY_NUMBER",
+        `luckyNumber må være et heltall mellom 1 og ${maxBall}.`
+      );
+    }
+    let roomMap = this.luckyNumbersByPlayer.get(roomCode);
+    if (!roomMap) {
+      roomMap = new Map();
+      this.luckyNumbersByPlayer.set(roomCode, roomMap);
+    }
+    roomMap.set(playerId, luckyNumber);
+  }
+
+  /**
+   * BIN-615 / PR-C3: Read a player's lucky number for a room. Returns undefined
+   * when not set. Protected for subclass access; socket-layer reads go through
+   * its own cache (gameEvents.ts `luckyNumbersByRoom`).
+   */
+  protected getLuckyNumber(roomCode: string, playerId: string): number | undefined {
+    return this.luckyNumbersByPlayer.get(roomCode)?.get(playerId);
+  }
+
+  /**
+   * BIN-615 / PR-C3: Variant-specific lucky-number hook. Invoked by
+   * {@link drawNextNumber} once per (player, lastBall) pair where the player's
+   * registered lucky number equals the ball just drawn — AND the round's
+   * `variantConfig.luckyNumberPrize > 0`.
+   *
+   * Default is a no-op so G1 rooms (no luckyNumberPrize) never see this hook.
+   * Game2Engine keeps its existing inline coupling (lucky bonus only paid when
+   * the player is also a winner) so the base hook stays dormant for G2 too.
+   * Future variants (G3+) may override to pay a standalone bonus.
+   *
+   * Contract:
+   *   - Called AFTER onDrawCompleted, BEFORE writeDrawCheckpoint.
+   *   - Errors are logged and swallowed (must not fail the draw).
+   *   - Fired at most once per (player, draw) pair.
+   */
+  protected async onLuckyNumberDrawn(_ctx: {
+    room: RoomState;
+    game: GameState;
+    player: Player;
+    luckyNumber: number;
+    lastBall: number;
+    drawIndex: number;
+    variantConfig: import("./variantConfig.js").GameVariantConfig;
+  }): Promise<void> {
+    // No-op by default.
+  }
+
   async drawNextNumber(input: DrawNextInput): Promise<{ number: number; drawIndex: number; gameId: string }> {
     const room = this.requireRoom(input.roomCode);
     this.assertHost(room, input.actorPlayerId);
@@ -846,16 +927,44 @@ export class BingoEngine {
     // BIN-615 / PR-C1: variant-specific post-draw hook (no-op by default).
     // Subclasses (Game3Engine in PR-C3) override to implement auto-claim /
     // pattern-cycling after each ball. Errors are logged but do not fail the draw.
+    const variantConfigForDraw = this.variantConfigByRoom.get(room.code);
     try {
       await this.onDrawCompleted({
         room,
         game,
         lastBall: nextNumber,
         drawIndex: game.drawnNumbers.length,
-        variantConfig: this.variantConfigByRoom.get(room.code)
+        variantConfig: variantConfigForDraw
       });
     } catch (err) {
       logger.error({ err, gameId: game.id, roomCode: room.code }, "onDrawCompleted hook failed");
+    }
+    // BIN-615 / PR-C3: Fan-out lucky-number hook. Fires per-player when the
+    // player's registered luckyNumber matches lastBall AND the variant enables
+    // lucky numbers (luckyNumberPrize > 0). Default onLuckyNumberDrawn is
+    // no-op — G1 (no luckyNumberPrize) and G2 (uses inline coupling) unchanged.
+    if (variantConfigForDraw && (variantConfigForDraw.luckyNumberPrize ?? 0) > 0) {
+      const roomLucky = this.luckyNumbersByPlayer.get(room.code);
+      if (roomLucky && roomLucky.size > 0) {
+        for (const [playerId, luckyNumber] of roomLucky) {
+          if (luckyNumber !== nextNumber) continue;
+          const player = room.players.get(playerId);
+          if (!player) continue;
+          try {
+            await this.onLuckyNumberDrawn({
+              room,
+              game,
+              player,
+              luckyNumber,
+              lastBall: nextNumber,
+              drawIndex: game.drawnNumbers.length,
+              variantConfig: variantConfigForDraw
+            });
+          } catch (err) {
+            logger.error({ err, gameId: game.id, roomCode: room.code, playerId }, "onLuckyNumberDrawn hook failed");
+          }
+        }
+      }
     }
     // HOEY-3: Checkpoint after each draw — persists draw sequence state
     await this.writeDrawCheckpoint(room, game);
@@ -1600,6 +1709,7 @@ export class BingoEngine {
     this.roomLastRoundStartMs.delete(code);
     this.lastDrawAtByRoom.delete(code);
     this.variantConfigByRoom.delete(code); // BIN-615 / PR-C1
+    this.luckyNumbersByPlayer.delete(code); // BIN-615 / PR-C3
     this.roomStateStore?.delete(code); // BIN-251
   }
 

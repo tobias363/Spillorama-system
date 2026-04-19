@@ -8,6 +8,19 @@ export type GameStatus = "WAITING" | "RUNNING" | "ENDED";
 
 // ── Pattern system ──────────────────────────────────────────────────────────
 
+/**
+ * 25-bit bitmask representing a 5×5 bingo pattern.
+ *
+ * Bit `i` (0-indexed, row-major) is set when cell `i` must be marked for the
+ * pattern to match. Full House = 0x1FFFFFF (all 25 bits). Shared between
+ * backend PatternMatcher (Game 3 Mønsterbingo) and admin-UI pattern editor so
+ * both sides agree on the wire representation of custom patterns.
+ *
+ * Stored as `number` — a plain 32-bit JS integer is more than enough for
+ * 25 bits, and AND/OR are cheap (single CPU op).
+ */
+export type PatternMask = number;
+
 export interface PatternDefinition {
   id: string;
   name: string;
