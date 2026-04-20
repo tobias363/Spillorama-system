@@ -120,7 +120,54 @@ describe("Socket.IO integration", () => {
     // Verify bob received the draw:new broadcast
     const drawEvent = await drawPromise;
     assert.equal(drawEvent.number, drawResult.data!.number, "broadcast number should match");
-    assert.equal(drawEvent.drawIndex, 1, "first draw should have drawIndex 1 (length after push)");
+    // BIN-689: drawIndex is 0-based (array-index of the ball in drawnNumbers).
+    // The client's gap-detection contract is 0-based (`lastAppliedDrawIndex = -1`
+    // expects drawIndex=0 for the first ball). The previous 1-based value
+    // caused every draw to look like a gap on staging — see GameBridge.ts:355.
+    assert.equal(drawEvent.drawIndex, 0, "first draw should have drawIndex 0 (0-based array index)");
+  });
+
+  test("BIN-689: consecutive draw:new events increment drawIndex by 1 from 0", async () => {
+    // Locks the 0-based-sequence wire contract so the off-by-one bug
+    // (GameBridge gap-loop, BallTube empty on staging) cannot regress.
+    const alice = await server.connectClient("token-alice");
+    const bob = await server.connectClient("token-bob");
+
+    const r1 = await alice.emit<AckResponse<{ roomCode: string; playerId: string }>>(
+      "room:create", { hallId: "hall-test" },
+    );
+    assert.ok(r1.ok && r1.data);
+    const roomCode = r1.data.roomCode;
+
+    const r2 = await bob.emit<AckResponse<{ playerId: string }>>(
+      "room:create", { hallId: "hall-test" },
+    );
+    assert.ok(r2.ok && r2.data);
+
+    await alice.emit<AckResponse>("bet:arm", { roomCode, armed: true });
+    await bob.emit<AckResponse>("bet:arm", { roomCode, armed: true });
+
+    const startResult = await alice.emit<AckResponse>(
+      "game:start", { roomCode, entryFee: 10, ticketsPerPlayer: 1 },
+    );
+    assert.ok(startResult.ok, `game:start failed: ${startResult.error?.message}`);
+
+    // Collect drawIndex for 3 consecutive draws from bob's socket.
+    const received: number[] = [];
+    bob.socket.on("draw:new", (p: { drawIndex: number }) => {
+      received.push(p.drawIndex);
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const res = await alice.emit<AckResponse<{ number: number }>>(
+        "draw:next", { roomCode },
+      );
+      assert.ok(res.ok, `draw:next #${i + 1} failed: ${res.error?.message}`);
+    }
+
+    // Wait a tick for the broadcast to reach the listener.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(received, [0, 1, 2], "drawIndex must be 0-based and increment by 1");
   });
 
   // ── 2b. BIN-509: ticket:replace ──────────────────────────────────────────
