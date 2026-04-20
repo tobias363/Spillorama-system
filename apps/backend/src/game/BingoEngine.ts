@@ -9,6 +9,9 @@ import * as variantConfigModule from "./variantConfig.js";
 const logger = rootLogger.child({ module: "engine" });
 import {
   findFirstCompleteLinePatternIndex,
+  countCompleteLines,
+  countCompleteRows,
+  countCompleteColumns,
   hasFullBingo,
   makeRoomCode,
   ticketContainsNumber
@@ -901,6 +904,260 @@ export class BingoEngine {
     return this.luckyNumbersByPlayer.get(roomCode)?.get(playerId);
   }
 
+  // ── BIN-694: 3-fase norsk 75-ball bingo ──────────────────────────────────
+
+  /**
+   * BIN-694: Evaluér om aktiv fase er vunnet etter siste ball. Kalles
+   * automatisk fra `drawNextNumber` når `patternEvalMode ===
+   * "auto-claim-on-draw"`.
+   *
+   * Fase-modell (prosjektleder-spec 2026-04-20):
+   *   1. "1 Rad"     → ≥1 hel linje (av 12 mulige per brett)
+   *   2. "2 Rader"   → ≥2 hele linjer
+   *   3. "Fullt Hus" → alle 25 felt merket
+   *
+   * Multi-winner-split: flere spillere som oppfyller samme fase på
+   * samme ball deler premien likt (per spiller, ikke per brett — så en
+   * spiller med 3 vinnende brett regnes som ÉN vinner i splittingen).
+   *
+   * Etter at fasen er vunnet fortsetter metoden rekursivt for å dekke
+   * det sjeldne scenariet der samme ball fullfører to faser (f.eks.
+   * spilleren fikk både 1. og 2. linje på samme ball).
+   *
+   * Runden avsluttes kun når Fullt Hus-fasen er vunnet (eller via
+   * MAX_DRAWS_REACHED / DRAW_BAG_EMPTY i drawNextNumber).
+   */
+  private async evaluateActivePhase(room: RoomState, game: GameState): Promise<void> {
+    if (!game.patternResults || game.status !== "RUNNING") return;
+
+    // Find next unwon phase in `order` (patternResults preserves config order).
+    const activeResult = game.patternResults.find((r) => !r.isWon);
+    if (!activeResult) return;
+
+    const activePattern = game.patterns?.find((p) => p.id === activeResult.patternId);
+    if (!activePattern) return;
+
+    // BIN-694: Auto-claim bruker `game.drawnNumbers` som vinner-grunnlag,
+    // IKKE `game.marks` — marks er for klient-side UI (manuell merking
+    // via socket `ticket:mark`), men server-side evaluation skal være
+    // basert på hva som faktisk er trukket. Dette gjør også at spillere
+    // som ikke aktivt trykker "merk" fortsatt kan vinne.
+    const drawnSet = new Set(game.drawnNumbers);
+
+    // Collect unique winners — a player wins the phase regardless of how
+    // many tickets they have; multi-winner split is per-player.
+    const winnerPlayerIds: string[] = [];
+    for (const [playerId, tickets] of game.tickets) {
+      let anyWins = false;
+      for (let i = 0; i < tickets.length; i += 1) {
+        if (this.meetsPhaseRequirement(activePattern, tickets[i], drawnSet)) {
+          anyWins = true;
+          break;
+        }
+      }
+      if (anyWins) winnerPlayerIds.push(playerId);
+    }
+
+    if (winnerPlayerIds.length === 0) return;
+
+    // Compute total prize for this phase + per-winner split.
+    const phasePrizePercent = activePattern.prizePercent ?? 0;
+    const totalPhasePrize = Math.floor(game.prizePool * phasePrizePercent / 100);
+    // Floor division — any remainder stays in the pool (goes to next phase
+    // or is unclaimed at game end). Matches Unity behaviour.
+    const prizePerWinner = Math.floor(totalPhasePrize / winnerPlayerIds.length);
+
+    // Pay out each winner before marking the phase won — so a wallet
+    // failure for one winner doesn't leave the phase half-committed.
+    for (const playerId of winnerPlayerIds) {
+      await this.payoutPhaseWinner(
+        room, game, playerId, activePattern, activeResult, prizePerWinner,
+      );
+    }
+
+    // Mark phase as won. For multi-winner the `winnerId` is set to the
+    // first winner (backward compat with single-winner test assertions);
+    // the full list lives in the per-winner ClaimRecords on game.claims.
+    activeResult.isWon = true;
+    activeResult.wonAtDraw = game.drawnNumbers.length;
+    activeResult.winnerId = winnerPlayerIds[0];
+    activeResult.payoutAmount = prizePerWinner;
+
+    // End round when Fullt Hus is won.
+    if (activePattern.claimType === "BINGO") {
+      const endedAtMs = Date.now();
+      game.status = "ENDED";
+      game.bingoWinnerId = winnerPlayerIds[0];
+      game.endedAt = new Date(endedAtMs).toISOString();
+      game.endedReason = "BINGO_CLAIMED";
+      await this.finishPlaySessionsForGame(room, game, endedAtMs);
+      await this.writeGameEndCheckpoint(room, game);
+      return;
+    }
+
+    // Phase 1 → mark lineWinnerId for backward-compat with existing readers.
+    if (activePattern.claimType === "LINE" && !game.lineWinnerId) {
+      game.lineWinnerId = winnerPlayerIds[0];
+    }
+
+    // Rare: same ball won two phases simultaneously — recurse.
+    await this.evaluateActivePhase(room, game);
+  }
+
+  /**
+   * BIN-694: Evaluér om et brett oppfyller aktiv fase sitt krav.
+   *
+   * Fase-modell (norsk 75-ball, avklart 2026-04-20):
+   *   - "1 Rad" (fase 1): ≥1 horisontal rad ELLER ≥1 vertikal kolonne
+   *   - "2 Rader" (fase 2): ≥2 hele vertikale kolonner
+   *   - "3 Rader" (fase 3): ≥3 hele vertikale kolonner
+   *   - "4 Rader" (fase 4): ≥4 hele vertikale kolonner
+   *   - "Fullt Hus" (fase 5): alle 25 felt merket
+   *
+   * Ingen diagonaler teller. Pattern-navn er autoritativt — gjør
+   * backend-logikken forståelig ved inspeksjon av config.
+   *
+   * Ukjente pattern-navn: faller tilbake til `claimType`-basert sjekk
+   * (LINE = 1 linje, BINGO = fullt hus) for backward-compat med eldre
+   * variant-config som ikke følger norsk fase-navngiving.
+   */
+  private meetsPhaseRequirement(
+    pattern: PatternDefinition,
+    ticket: Ticket,
+    drawnSet: Set<number>,
+  ): boolean {
+    if (pattern.claimType === "BINGO") {
+      return hasFullBingo(ticket, drawnSet);
+    }
+    const nameLc = pattern.name.toLowerCase();
+    const rowCount = countCompleteRows(ticket, drawnSet);
+    const colCount = countCompleteColumns(ticket, drawnSet);
+    if (/^\s*1\s*rad\b/.test(nameLc)) {
+      // Fase 1: 1 hel rad ELLER 1 hel kolonne
+      return rowCount >= 1 || colCount >= 1;
+    }
+    if (/^\s*2\s*rad/.test(nameLc)) return colCount >= 2;
+    if (/^\s*3\s*rad/.test(nameLc)) return colCount >= 3;
+    if (/^\s*4\s*rad/.test(nameLc)) return colCount >= 4;
+    // Fallback for ukjente navn: 1 hvilken som helst linje (bakoverkompat).
+    return rowCount >= 1 || colCount >= 1;
+  }
+
+  /**
+   * BIN-694: Pay out a single phase-winner (one of potentially many).
+   * Re-uses the existing prize-policy / wallet-transfer / compliance /
+   * ledger / audit / checkpoint chain so auto-claim and submitClaim end
+   * up with the same ledger trail.
+   *
+   * `prizePerWinner` is already the split amount (totalPhasePrize ÷ N).
+   */
+  private async payoutPhaseWinner(
+    room: RoomState,
+    game: GameState,
+    playerId: string,
+    pattern: PatternDefinition,
+    patternResult: { patternId: string; patternName: string; claimType: ClaimType; isWon: boolean },
+    prizePerWinner: number,
+  ): Promise<void> {
+    const player = this.requirePlayer(room, playerId);
+    const gameType: LedgerGameType = "DATABINGO";
+    const channel: LedgerChannel = "INTERNET";
+    const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
+
+    const rtpBudgetBefore = roundCurrency(Math.max(0, game.remainingPayoutBudget));
+
+    // Cap against single-prize-policy + remaining pool + RTP budget.
+    const capped = this.prizePolicy.applySinglePrizeCap({
+      hallId: room.hallId,
+      gameType: "DATABINGO",
+      amount: prizePerWinner,
+    });
+    const afterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);
+    const payout = Math.min(afterPoolCap, game.remainingPayoutBudget);
+
+    const claim: ClaimRecord = {
+      id: randomUUID(),
+      playerId: player.id,
+      type: pattern.claimType,
+      valid: true,
+      createdAt: new Date().toISOString(),
+      winningPatternIndex: 0,
+      patternIndex: 0,
+    };
+    game.claims.push(claim);
+
+    if (payout > 0) {
+      const transfer = await this.walletAdapter.transfer(
+        houseAccountId,
+        player.walletId,
+        payout,
+        `${pattern.name} prize ${room.code}`,
+        { idempotencyKey: `phase-${patternResult.patternId}-${game.id}-${player.id}` },
+      );
+      player.balance += payout;
+      game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
+      game.remainingPayoutBudget = roundCurrency(Math.max(0, game.remainingPayoutBudget - payout));
+      await this.compliance.recordLossEntry(player.walletId, room.hallId, {
+        type: "PAYOUT",
+        amount: payout,
+        createdAtMs: Date.now(),
+      });
+      await this.ledger.recordComplianceLedgerEvent({
+        hallId: room.hallId,
+        gameType,
+        channel,
+        eventType: "PRIZE",
+        amount: payout,
+        roomCode: room.code,
+        gameId: game.id,
+        claimId: claim.id,
+        playerId: player.id,
+        walletId: player.walletId,
+        sourceAccountId: transfer.fromTx.accountId,
+        targetAccountId: transfer.toTx.accountId,
+        policyVersion: capped.policy.id,
+      });
+      await this.payoutAudit.appendPayoutAuditEvent({
+        kind: "CLAIM_PRIZE",
+        claimId: claim.id,
+        gameId: game.id,
+        roomCode: room.code,
+        hallId: room.hallId,
+        policyVersion: capped.policy.id,
+        amount: payout,
+        walletId: player.walletId,
+        playerId: player.id,
+        sourceAccountId: houseAccountId,
+        txIds: [transfer.fromTx.id, transfer.toTx.id],
+      });
+      claim.payoutTransactionIds = [transfer.fromTx.id, transfer.toTx.id];
+      if (this.bingoAdapter.onCheckpoint) {
+        await this.writePayoutCheckpointWithRetry(
+          room, game, claim.id, payout, [transfer.fromTx.id, transfer.toTx.id], pattern.claimType,
+        );
+      }
+      await this.rooms.persist(room.code);
+    }
+
+    const rtpBudgetAfter = roundCurrency(Math.max(0, game.remainingPayoutBudget));
+    claim.payoutAmount = payout;
+    claim.payoutPolicyVersion = capped.policy.id;
+    claim.payoutWasCapped = payout < prizePerWinner;
+    claim.rtpBudgetBefore = rtpBudgetBefore;
+    claim.rtpBudgetAfter = rtpBudgetAfter;
+    claim.rtpCapped = payout < afterPoolCap;
+
+    if (this.bingoAdapter.onClaimLogged) {
+      await this.bingoAdapter.onClaimLogged({
+        roomCode: room.code,
+        gameId: game.id,
+        playerId: player.id,
+        type: pattern.claimType,
+        valid: true,
+      });
+    }
+  }
+
   /**
    * BIN-615 / PR-C3: Variant-specific lucky-number hook. Invoked by
    * {@link drawNextNumber} once per (player, lastBall) pair where the player's
@@ -1002,6 +1259,25 @@ export class BingoEngine {
       });
     } catch (err) {
       logger.error({ err, gameId: game.id, roomCode: room.code }, "onDrawCompleted hook failed");
+    }
+    // BIN-694: 3-fase norsk 75-ball bingo auto-claim. Gates bak
+    // `autoClaimPhaseMode` (ny flag i variantConfig, satt kun av
+    // DEFAULT_NORSK_BINGO_CONFIG). G2/G3 har sin egen auto-claim via
+    // onDrawCompleted-override og skal IKKE kjøre denne pathen.
+    //
+    // Kjører etter hver ball: sjekker om noen brett oppfyller aktiv
+    // fase (1 Rad / 2 Rader / Fullt Hus), splitter premien mellom
+    // samtidige vinnere, markerer fasen som vunnet. Kun Fullt Hus-
+    // fasen avslutter runden.
+    if (variantConfigForDraw?.autoClaimPhaseMode && game.status === "RUNNING") {
+      try {
+        await this.evaluateActivePhase(room, game);
+      } catch (err) {
+        logger.error(
+          { err, gameId: game.id, roomCode: room.code },
+          "[BIN-694] evaluateActivePhase failed",
+        );
+      }
     }
     // BIN-615 / PR-C3: Fan-out lucky-number hook. Fires per-player when the
     // player's registered luckyNumber matches lastBall AND the variant enables
@@ -1201,24 +1477,43 @@ export class BingoEngine {
     let winningPatternIndex: number | undefined;
 
     if (input.type === "LINE") {
-      if (game.lineWinnerId) {
+      // BIN-694: LINE-claim dekker fase 1-4. Finn aktiv uvunnet
+      // LINE-pattern og valider via `meetsPhaseRequirement` (som
+      // håndterer navn-basert fase-oppslag — "1 Rad" = rad/kolonne,
+      // "2-4 Rader" = N kolonner). Når auto-claim-on-draw er aktiv,
+      // har denne pathen sjelden arbeid — vinneren er allerede
+      // påvist i evaluateActivePhase.
+      const activeLineResult = game.patternResults?.find(
+        (r) => r.claimType === "LINE" && !r.isWon,
+      );
+      if (!activeLineResult) {
         reason = "LINE_ALREADY_CLAIMED";
       } else {
-        for (let ticketIndex = 0; ticketIndex < playerTickets.length; ticketIndex += 1) {
-          const resolvedPatternIndex = findFirstCompleteLinePatternIndex(
-            playerTickets[ticketIndex],
-            playerMarks[ticketIndex]
-          );
-          if (resolvedPatternIndex < 0) {
-            continue;
-          }
-
-          valid = true;
-          winningPatternIndex = resolvedPatternIndex;
-          break;
-        }
-        if (!valid) {
+        const activeLinePattern = game.patterns?.find((p) => p.id === activeLineResult.patternId);
+        if (!activeLinePattern) {
           reason = "NO_VALID_LINE";
+        } else {
+          for (let ticketIndex = 0; ticketIndex < playerTickets.length; ticketIndex += 1) {
+            if (this.meetsPhaseRequirement(
+              activeLinePattern,
+              playerTickets[ticketIndex],
+              playerMarks[ticketIndex],
+            )) {
+              valid = true;
+              // Historisk kontrakt: winningPatternIndex peker på første
+              // komplette linje (0-9 = rad/kolonne). Brukes av bonus-
+              // trigger-pattern-indeks og enkelte audits.
+              winningPatternIndex = findFirstCompleteLinePatternIndex(
+                playerTickets[ticketIndex],
+                playerMarks[ticketIndex],
+              );
+              if (winningPatternIndex < 0) winningPatternIndex = 0;
+              break;
+            }
+          }
+          if (!valid) {
+            reason = "NO_VALID_LINE";
+          }
         }
       }
     } else if (input.type === "BINGO") {

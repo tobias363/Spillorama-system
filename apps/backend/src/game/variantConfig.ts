@@ -116,12 +116,25 @@ export interface GameVariantConfig {
    * rounded via Math.round, audited through PayoutAuditTrail.
    */
   jackpotNumberTable?: Record<string, { price: number; isCash: boolean }>;
+  /**
+   * BIN-694: Når satt, evaluerer engine `evaluateActivePhase` etter
+   * hver draw (3-fase norsk 75-ball bingo). Kun DEFAULT_NORSK_BINGO_CONFIG
+   * setter denne — G2/G3 har egen auto-claim via onDrawCompleted-override.
+   */
+  autoClaimPhaseMode?: boolean;
 }
 
 // ── Default configs ───────────────────────────────────────────────────────────
 
 const DEFAULT_TICKET_COLORS = ["Small Yellow", "Small White", "Small Purple", "Small Red", "Small Green", "Small Orange"];
 
+/**
+ * Legacy "standard"-variant. Beholdt for bakoverkompatibilitet med
+ * eldre tester + `gameType: "standard"`-rom som ikke er migrert til
+ * norsk 3-fase-bingo. 4 separate LINE-pattern + Fullt Hus, manual-claim.
+ *
+ * Nye rom bør bruke `DEFAULT_NORSK_BINGO_CONFIG` (3-fase, auto-claim).
+ */
 export const DEFAULT_STANDARD_CONFIG: GameVariantConfig = {
   ticketTypes: [
     ...DEFAULT_TICKET_COLORS.map((name) => ({
@@ -137,6 +150,57 @@ export const DEFAULT_STANDARD_CONFIG: GameVariantConfig = {
     { name: "Row 4", claimType: "LINE" as const, prizePercent: 10, design: 4 },
     { name: "Full House", claimType: "BINGO" as const, prizePercent: 60, design: 0 },
   ],
+};
+
+/**
+ * BIN-694: Norsk 75-ball bingo — 5 sekvensielle faser.
+ *
+ * Avklart av Tobias 2026-04-20:
+ * - **Fase 1 (1 Rad)**: 1 hel rad (vannrett) ELLER 1 hel kolonne (loddrett)
+ * - **Fase 2 (2 Rader)**: ≥2 hele vertikale kolonner (kun loddrett)
+ * - **Fase 3 (3 Rader)**: ≥3 hele vertikale kolonner (kun loddrett)
+ * - **Fase 4 (4 Rader)**: ≥4 hele vertikale kolonner (kun loddrett)
+ * - **Fase 5 (Fullt Hus)**: alle 25 felt merket
+ *
+ * Ingen diagonaler teller i noen fase. "Rad N" i fase-terminologien
+ * betyr **N hele vertikale kolonner** (ikke N horisontale rader) —
+ * fase 1 er den eneste fasen som godtar horisontal rad.
+ *
+ * Trekningen stopper aldri mellom fasene — fortsetter til Fullt Hus er
+ * vunnet. Ved samtidige vinnere i samme fase (flere spillere oppfyller
+ * kravet ved samme trukket ball) deles premien likt (floor-div).
+ *
+ * Premie-prosenter 15/15/15/15/40 (sum 100%) — overstyrbar per hall
+ * via `hall_game_schedules.variant_config` JSONB.
+ *
+ * `claimType` gjenbrukes fra eksisterende kontrakt:
+ *   - "LINE"  = fase 1-4 (backend avgjør fase via pattern-navn)
+ *   - "BINGO" = fase 5 (Fullt Hus)
+ *
+ * `patternEvalMode: "auto-claim-on-draw"` — server sjekker alle brett
+ * etter hver trukket ball. Server-autoritativ evaluering basert på
+ * `game.drawnNumbers` (ikke `game.marks`) slik at spillere som ikke
+ * aktivt merker sine brett fortsatt får premie automatisk.
+ */
+export const DEFAULT_NORSK_BINGO_CONFIG: GameVariantConfig = {
+  ticketTypes: [
+    ...DEFAULT_TICKET_COLORS.map((name) => ({
+      name, type: "small", priceMultiplier: 1, ticketCount: 1,
+    })),
+    { name: "Large Yellow", type: "large", priceMultiplier: 3, ticketCount: 3 },
+    { name: "Large White", type: "large", priceMultiplier: 3, ticketCount: 3 },
+  ],
+  patterns: [
+    { name: "1 Rad", claimType: "LINE" as const, prizePercent: 15, design: 1 },
+    { name: "2 Rader", claimType: "LINE" as const, prizePercent: 15, design: 2 },
+    { name: "3 Rader", claimType: "LINE" as const, prizePercent: 15, design: 3 },
+    { name: "4 Rader", claimType: "LINE" as const, prizePercent: 15, design: 4 },
+    { name: "Fullt Hus", claimType: "BINGO" as const, prizePercent: 40, design: 0 },
+  ],
+  patternEvalMode: "auto-claim-on-draw",
+  autoClaimPhaseMode: true,
+  maxBallValue: 75,
+  drawBagSize: 75,
 };
 
 export const DEFAULT_ELVIS_CONFIG: GameVariantConfig = {
@@ -233,6 +297,13 @@ export function getDefaultVariantConfig(gameType: string): GameVariantConfig {
     case "monsterbingo":
     case "mønsterbingo":
       return DEFAULT_GAME3_CONFIG;
+    // BIN-694: Norsk 75-ball bingo (Game 1) — 3-fase auto-claim
+    case "game_1":
+    case "bingo":
+    case "norsk-bingo":
+      return DEFAULT_NORSK_BINGO_CONFIG;
+    // BIN-694: `"standard"` beholdt for eldre tester + legacy rom.
+    // Nye G1-rom bruker `gameType: "bingo"` → DEFAULT_NORSK_BINGO_CONFIG.
     default: return DEFAULT_STANDARD_CONFIG;
   }
 }

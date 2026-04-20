@@ -330,6 +330,65 @@ export function hasAnyCompleteLine(ticket: Ticket, marks: Set<number>): boolean 
   return findFirstCompleteLinePatternIndex(ticket, marks) >= 0;
 }
 
+/**
+ * BIN-694: Tell antall hele horisontale rader på et brett.
+ *
+ * Norsk 75-ball bingo (avklart av Tobias 2026-04-20): kun **horisontale
+ * rader** og **vertikale kolonner** teller — INGEN diagonaler, uansett
+ * fase. Per fase-modell:
+ *   - Fase 1 ("1 Rad"):       ≥1 horisontal rad ELLER ≥1 vertikal kolonne
+ *   - Fase 2 ("2 Rader"):     ≥2 hele vertikale kolonner
+ *   - Fase 3 ("3 Rader"):     ≥3 hele vertikale kolonner
+ *   - Fase 4 ("4 Rader"):     ≥4 hele vertikale kolonner
+ *   - Fase 5 ("Fullt Hus"):   alle 25 felt (hasFullBingo)
+ *
+ * Merk navngivingen: "Rad N" i fase-terminologien betyr **N hele
+ * vertikale kolonner**, ikke N horisontale rader. Fase 1 er den eneste
+ * fasen som godtar en horisontal rad — alle senere faser krever at
+ * vinner-brettet har N hele kolonner merket.
+ *
+ * Gratis-feltet (grid[2][2] === 0) teller alltid som merket.
+ */
+export function countCompleteRows(ticket: Ticket, marks: Set<number>): number {
+  const rows = ticket.grid.length;
+  const cols = ticket.grid[0]?.length ?? 0;
+  let count = 0;
+  for (let row = 0; row < rows; row += 1) {
+    let complete = true;
+    for (let col = 0; col < cols; col += 1) {
+      if (!isMarked(ticket, marks, row, col)) { complete = false; break; }
+    }
+    if (complete) count += 1;
+  }
+  return count;
+}
+
+/** BIN-694: Tell antall hele vertikale kolonner på et brett. */
+export function countCompleteColumns(ticket: Ticket, marks: Set<number>): number {
+  const rows = ticket.grid.length;
+  const cols = ticket.grid[0]?.length ?? 0;
+  let count = 0;
+  for (let col = 0; col < cols; col += 1) {
+    let complete = true;
+    for (let row = 0; row < rows; row += 1) {
+      if (!isMarked(ticket, marks, row, col)) { complete = false; break; }
+    }
+    if (complete) count += 1;
+  }
+  return count;
+}
+
+/**
+ * BIN-694: Tell totalt antall hele linjer (rader + kolonner).
+ *
+ * Bevart for bakoverkompatibilitet og informative logg/UI-visninger,
+ * men **vinner-evaluering bruker countCompleteRows + countCompleteColumns
+ * separat** fordi fase 2-4 kun godtar kolonner.
+ */
+export function countCompleteLines(ticket: Ticket, marks: Set<number>): number {
+  return countCompleteRows(ticket, marks) + countCompleteColumns(ticket, marks);
+}
+
 export function hasFullBingo(ticket: Ticket, marks: Set<number>): boolean {
   for (let row = 0; row < ticket.grid.length; row += 1) {
     for (let col = 0; col < ticket.grid[row].length; col += 1) {

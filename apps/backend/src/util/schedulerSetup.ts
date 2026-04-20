@@ -141,6 +141,14 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
     },
     onAutoDraw: async (roomCode: string, hostPlayerId: string): Promise<{ roundEnded: boolean }> => {
       let roundEnded = false;
+      // BIN-694: snapshot won-pattern ids BEFORE draw so we can emit
+      // pattern:won for any phase auto-claim just committed.
+      const beforeSnap = deps.engine.getRoomSnapshot(roomCode);
+      const wonBefore = new Set(
+        (beforeSnap.currentGame?.patternResults ?? [])
+          .filter((r) => r.isWon)
+          .map((r) => r.patternId),
+      );
       try {
         const { number, drawIndex, gameId } = await deps.engine.drawNextNumber({ roomCode, actorPlayerId: hostPlayerId });
         deps.io.to(roomCode).emit("draw:new", { number, source: "auto", drawIndex, gameId });
@@ -148,6 +156,21 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
         if (!(error instanceof DomainError) || error.code !== "NO_MORE_NUMBERS") throw error;
       }
       const postDrawSnapshot = deps.engine.getRoomSnapshot(roomCode);
+      // BIN-694: emit pattern:won for every phase the draw just closed.
+      const afterResults = postDrawSnapshot.currentGame?.patternResults ?? [];
+      for (const r of afterResults) {
+        if (r.isWon && !wonBefore.has(r.patternId)) {
+          deps.io.to(roomCode).emit("pattern:won", {
+            patternId: r.patternId,
+            patternName: r.patternName,
+            winnerId: r.winnerId,
+            wonAtDraw: r.wonAtDraw,
+            payoutAmount: r.payoutAmount,
+            claimType: r.claimType,
+            gameId: postDrawSnapshot.currentGame?.id,
+          });
+        }
+      }
       if (postDrawSnapshot.currentGame?.status !== "RUNNING") roundEnded = true;
       await deps.emitRoomUpdate(roomCode);
       return { roundEnded };

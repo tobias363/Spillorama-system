@@ -738,8 +738,38 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     socket.on("draw:next", rateLimited("draw:next", async (payload: RoomActionPayload, callback: (response: AckResponse<{ number: number; snapshot: RoomSnapshot }>) => void) => {
       try {
         const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+
+        // BIN-694: snapshot won-pattern-ids BEFORE draw so we can emit
+        // `pattern:won` for each phase auto-claim committed during
+        // `drawNextNumber` → `evaluateActivePhase`. Without this emit,
+        // clients would only see the new isWon=true via the next
+        // room:update — no dedicated event to trigger toast / animation.
+        const beforeSnap = engine.getRoomSnapshot(roomCode);
+        const wonBefore = new Set(
+          (beforeSnap.currentGame?.patternResults ?? [])
+            .filter((r) => r.isWon)
+            .map((r) => r.patternId),
+        );
+
         const { number, drawIndex, gameId } = await engine.drawNextNumber({ roomCode, actorPlayerId: playerId });
         io.to(roomCode).emit("draw:new", { number, drawIndex, gameId });
+
+        // BIN-694: emit pattern:won for every phase the draw just closed.
+        const afterSnap = engine.getRoomSnapshot(roomCode);
+        const afterResults = afterSnap.currentGame?.patternResults ?? [];
+        for (const r of afterResults) {
+          if (r.isWon && !wonBefore.has(r.patternId)) {
+            io.to(roomCode).emit("pattern:won", {
+              patternId: r.patternId,
+              patternName: r.patternName,
+              winnerId: r.winnerId,
+              wonAtDraw: r.wonAtDraw,
+              payoutAmount: r.payoutAmount,
+              claimType: r.claimType,
+              gameId: afterSnap.currentGame?.id,
+            });
+          }
+        }
 
         // BIN-615 / PR-C2: emit Game 2 wire events for any G2 draw effects
         // stashed by Game2Engine.onDrawCompleted. No-op for non-G2 rooms.
