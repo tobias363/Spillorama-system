@@ -973,3 +973,379 @@ export const HallGroupListResponseSchema = z.object({
   count: z.number().int().nonnegative(),
 });
 export type HallGroupListResponse = z.infer<typeof HallGroupListResponseSchema>;
+
+// ── BIN-620: GameType CRUD wire schemas ────────────────────────────────────
+// Admin-CRUD for spill-typer (topp-nivå katalog). Mirror av migration
+// `20260425000000_game_types.sql`. GameType-raden er referent fra
+// app_game_management, app_patterns, app_sub_games via `type_slug` / id.
+//
+// Legacy-feltnavn (name, type, pattern, photo, row, columns) bevares i
+// admin-web-mapperen — wire-shape bruker camelCase som matcher service-
+// interface (GameTypeRow i apps/admin-web/.../common/types.ts når Agent A
+// kobler på dette).
+
+const GameTypeStatus = z.enum(["active", "inactive"]);
+
+export const GameTypeRowSchema = z.object({
+  id: z.string().min(1),
+  /** Stabil slug-id (f.eks. "game_1", "bingo"). Kanonisk referent. */
+  typeSlug: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+  photo: z.string(),
+  pattern: z.boolean(),
+  gridRows: z.number().int().positive(),
+  gridColumns: z.number().int().positive(),
+  rangeMin: z.number().int().nullable(),
+  rangeMax: z.number().int().nullable(),
+  totalNoTickets: z.number().int().positive().nullable(),
+  userMaxTickets: z.number().int().positive().nullable(),
+  luckyNumbers: z.array(z.number().int()),
+  status: GameTypeStatus,
+  extra: z.record(z.string(), z.unknown()),
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type GameTypeRow = z.infer<typeof GameTypeRowSchema>;
+
+export const CreateGameTypeSchema = z.object({
+  typeSlug: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+  photo: z.string().max(500).optional(),
+  pattern: z.boolean().optional(),
+  gridRows: z.number().int().positive().optional(),
+  gridColumns: z.number().int().positive().optional(),
+  rangeMin: z.number().int().nullable().optional(),
+  rangeMax: z.number().int().nullable().optional(),
+  totalNoTickets: z.number().int().positive().nullable().optional(),
+  userMaxTickets: z.number().int().positive().nullable().optional(),
+  luckyNumbers: z.array(z.number().int()).optional(),
+  status: GameTypeStatus.optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+export type CreateGameTypeInput = z.infer<typeof CreateGameTypeSchema>;
+
+export const UpdateGameTypeSchema = z
+  .object({
+    typeSlug: z.string().min(1).max(200).optional(),
+    name: z.string().min(1).max(200).optional(),
+    photo: z.string().max(500).optional(),
+    pattern: z.boolean().optional(),
+    gridRows: z.number().int().positive().optional(),
+    gridColumns: z.number().int().positive().optional(),
+    rangeMin: z.number().int().nullable().optional(),
+    rangeMax: z.number().int().nullable().optional(),
+    totalNoTickets: z.number().int().positive().nullable().optional(),
+    userMaxTickets: z.number().int().positive().nullable().optional(),
+    luckyNumbers: z.array(z.number().int()).optional(),
+    status: GameTypeStatus.optional(),
+    extra: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateGameTypeInput = z.infer<typeof UpdateGameTypeSchema>;
+
+export const GameTypeListResponseSchema = z.object({
+  gameTypes: z.array(GameTypeRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type GameTypeListResponse = z.infer<typeof GameTypeListResponseSchema>;
+
+// ── BIN-621: SubGame CRUD wire schemas ────────────────────────────────────
+// Admin-CRUD for sub-game-maler (navngitte bundles av pattern-ids + ticket-
+// farger + status). Mirror av migration `20260425000100_sub_games.sql`.
+// En SubGame er en gjenbrukbar oppskrift som admin binder inn i DailySchedule
+// .subgames_json — hver plan kan velge å kjøre en SubGame for å få en
+// preconfigured kombinasjon av mønstre og farger.
+//
+// Legacy: legacy/unity-backend/App/Models/subGame.js blandet admin-katalog
+// og runtime-state i samme schema. Vi splitter ut: runtime hører til
+// app_game_sessions / hall_game_schedules; admin-katalog bor i app_sub_games.
+
+const SubGameStatus = z.enum(["active", "inactive"]);
+
+export const SubGamePatternRefSchema = z.object({
+  patternId: z.string().min(1),
+  name: z.string().min(1).max(200),
+});
+export type SubGamePatternRef = z.infer<typeof SubGamePatternRefSchema>;
+
+export const SubGameRowSchema = z.object({
+  id: z.string().min(1),
+  /** Referent til app_game_types.type_slug (stabil slug). */
+  gameTypeId: z.string().min(1),
+  /** Display-navn (f.eks. "Game1", "Game3") — ikke unik, kun label. */
+  gameName: z.string().min(1).max(200),
+  /** Visnings-navn på SubGame-malen (unikt per gameType). */
+  name: z.string().min(1).max(200),
+  /** Legacy auto-increment nummer (f.eks. "SG_20220919_032458"). */
+  subGameNumber: z.string().min(1).max(200),
+  patternRows: z.array(SubGamePatternRefSchema),
+  ticketColors: z.array(z.string().min(1)),
+  status: SubGameStatus,
+  extra: z.record(z.string(), z.unknown()),
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type SubGameRow = z.infer<typeof SubGameRowSchema>;
+
+export const CreateSubGameSchema = z.object({
+  gameTypeId: z.string().min(1).max(200),
+  gameName: z.string().min(1).max(200).optional(),
+  name: z.string().min(1).max(200),
+  /** Auto-genereres av service hvis ikke satt. */
+  subGameNumber: z.string().min(1).max(200).optional(),
+  patternRows: z.array(SubGamePatternRefSchema).optional(),
+  ticketColors: z.array(z.string().min(1)).optional(),
+  status: SubGameStatus.optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+export type CreateSubGameInput = z.infer<typeof CreateSubGameSchema>;
+
+export const UpdateSubGameSchema = z
+  .object({
+    gameName: z.string().min(1).max(200).optional(),
+    name: z.string().min(1).max(200).optional(),
+    subGameNumber: z.string().min(1).max(200).optional(),
+    patternRows: z.array(SubGamePatternRefSchema).optional(),
+    ticketColors: z.array(z.string().min(1)).optional(),
+    status: SubGameStatus.optional(),
+    extra: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateSubGameInput = z.infer<typeof UpdateSubGameSchema>;
+
+export const SubGameListResponseSchema = z.object({
+  subGames: z.array(SubGameRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type SubGameListResponse = z.infer<typeof SubGameListResponseSchema>;
+
+// ── BIN-668: LeaderboardTier CRUD wire schemas ────────────────────────────
+// Admin-CRUD for leaderboard-tiers (plass→premie/poeng-mapping). Mirror av
+// migration `20260425000400_leaderboard_tiers.sql`. Dette er KONFIGURASJON
+// (admin-katalog), ikke runtime-state. Runtime `/api/leaderboard` (i
+// apps/backend/src/routes/game.ts) aggregerer poeng fra faktiske wins og er
+// urørt av denne tabellen.
+//
+// tier_name grupperer et sett med rader til en "profil" (f.eks. "default",
+// "daily", "vip"). Unik per (tier_name, place) per ikke-slettet rad.
+
+export const LeaderboardTierRowSchema = z.object({
+  id: z.string().min(1),
+  /** Profil-navn (f.eks. "default", "daily"). Ikke case-sensitive i praksis. */
+  tierName: z.string().min(1).max(200),
+  /** Plassering (1-basert). Positivt heltall. */
+  place: z.number().int().positive(),
+  /** Poeng tildelt for plasseringen. Ikke-negativt heltall. */
+  points: z.number().int().nonnegative(),
+  /** Premie-beløp i NOK. NULL = ingen kontant-premie (kun points). */
+  prizeAmount: z.number().nullable(),
+  /** Fri-form beskrivelse ("Gavekort 500 kr"). Tom streng hvis ikke satt. */
+  prizeDescription: z.string(),
+  active: z.boolean(),
+  extra: z.record(z.string(), z.unknown()),
+  createdByUserId: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type LeaderboardTierRow = z.infer<typeof LeaderboardTierRowSchema>;
+
+export const CreateLeaderboardTierSchema = z.object({
+  tierName: z.string().min(1).max(200).optional(),
+  place: z.number().int().positive(),
+  points: z.number().int().nonnegative().optional(),
+  prizeAmount: z.number().nonnegative().nullable().optional(),
+  prizeDescription: z.string().max(500).optional(),
+  active: z.boolean().optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+export type CreateLeaderboardTierInput = z.infer<typeof CreateLeaderboardTierSchema>;
+
+export const UpdateLeaderboardTierSchema = z
+  .object({
+    tierName: z.string().min(1).max(200).optional(),
+    place: z.number().int().positive().optional(),
+    points: z.number().int().nonnegative().optional(),
+    prizeAmount: z.number().nonnegative().nullable().optional(),
+    prizeDescription: z.string().max(500).optional(),
+    active: z.boolean().optional(),
+    extra: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateLeaderboardTierInput = z.infer<typeof UpdateLeaderboardTierSchema>;
+
+export const LeaderboardTierListResponseSchema = z.object({
+  tiers: z.array(LeaderboardTierRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type LeaderboardTierListResponse = z.infer<
+  typeof LeaderboardTierListResponseSchema
+>;
+
+// ── BIN-624: SavedGame CRUD wire schemas ────────────────────────────────────
+// Admin-CRUD for SavedGame-templates (gjenbrukbare GameManagement-oppsett).
+// Mirror av migration `20260425000200_saved_games.sql`.
+//
+// En SavedGame er IKKE et kjørbart spill — det er en template som admin
+// lagrer slik at et komplett GameManagement-oppsett (ticket-farger, priser,
+// patterns, subgames, halls, days, ...) kan brukes som utgangspunkt for
+// et nytt spill via load-to-game-flyten. `config` er en fri-form Record
+// siden legacy `savedGame` hadde ~50 felter som varierer per gameType;
+// GameManagement-layeret gjør semantisk validering ved load-to-game.
+//
+// Legacy: legacy/unity-backend/App/Models/savedGame.js (Mongo) + handlers
+// i legacy/unity-backend/App/Controllers/GameController.js.
+
+const SavedGameStatus = z.enum(["active", "inactive"]);
+
+export const SavedGameRowSchema = z.object({
+  id: z.string().min(1),
+  /** Referent til app_game_types.type_slug (stabil slug, f.eks. "game_1"). */
+  gameTypeId: z.string().min(1),
+  /** Display-navn på malen (unik per gameType). */
+  name: z.string().min(1).max(200),
+  /** Legacy isAdminSave-flag (styrer synlighet i liste-queries). */
+  isAdminSave: z.boolean(),
+  /** Template-payload (alle legacy savedGame-felter unntatt runtime-state). */
+  config: z.record(z.string(), z.unknown()),
+  status: SavedGameStatus,
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type SavedGameRow = z.infer<typeof SavedGameRowSchema>;
+
+export const CreateSavedGameSchema = z.object({
+  gameTypeId: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+  isAdminSave: z.boolean().optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+  status: SavedGameStatus.optional(),
+});
+export type CreateSavedGameInput = z.infer<typeof CreateSavedGameSchema>;
+
+export const UpdateSavedGameSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    isAdminSave: z.boolean().optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+    status: SavedGameStatus.optional(),
+  })
+  .refine((v: Record<string, unknown>) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateSavedGameInput = z.infer<typeof UpdateSavedGameSchema>;
+
+export const SavedGameListResponseSchema = z.object({
+  savedGames: z.array(SavedGameRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type SavedGameListResponse = z.infer<typeof SavedGameListResponseSchema>;
+
+/**
+ * Load-to-game-respons: payload klient sender videre til GameManagement.create()
+ * (BIN-622). Router returnerer kun data — ingen GameManagement-rad opprettes
+ * inline, slik at klient kan justere felter (name, startDate, endDate, halls)
+ * før faktisk opprettelse.
+ */
+export const SavedGameLoadResponseSchema = z.object({
+  savedGameId: z.string().min(1),
+  gameTypeId: z.string().min(1),
+  name: z.string().min(1).max(200),
+  config: z.record(z.string(), z.unknown()),
+});
+export type SavedGameLoadResponse = z.infer<typeof SavedGameLoadResponseSchema>;
+
+// ── BIN-625: Schedule CRUD wire schemas ───────────────────────────────────
+// Admin-CRUD for Schedule-maler (gjenbrukbare spill-oppskrifter). Distinct
+// fra DailySchedule (BIN-626) som er kalender-rader. Mirror av migration
+// `20260425000300_schedules.sql`.
+//
+// Legacy-opphav: legacy/unity-backend/App/Models/schedule.js (Mongo) —
+// "schedules"-kolleksjonen med scheduleName, scheduleType (Auto|Manual),
+// subGames[] og Innsatsen-spesifikke felter (luckyNumberPrize,
+// ticketColorTypePrice m.fl. innenfor subGames).
+
+const ScheduleType = z.enum(["Auto", "Manual"]);
+const ScheduleStatus = z.enum(["active", "inactive"]);
+
+/**
+ * Fri-form subgame-slot. Feltene matcher legacy scheduleController.
+ * createSchedulePostData. Ukjente felter bevares via `extra` inntil
+ * BIN-621 normaliserer subgame-katalogen.
+ */
+export const ScheduleSubgameSchema = z.object({
+  name: z.string().optional(),
+  customGameName: z.string().optional(),
+  startTime: HhMmOrEmpty.optional(),
+  endTime: HhMmOrEmpty.optional(),
+  notificationStartTime: z.string().optional(),
+  minseconds: z.number().int().nonnegative().optional(),
+  maxseconds: z.number().int().nonnegative().optional(),
+  seconds: z.number().int().nonnegative().optional(),
+  ticketTypesData: z.record(z.string(), z.unknown()).optional(),
+  jackpotData: z.record(z.string(), z.unknown()).optional(),
+  elvisData: z.record(z.string(), z.unknown()).optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+export type ScheduleSubgame = z.infer<typeof ScheduleSubgameSchema>;
+
+export const ScheduleRowSchema = z.object({
+  id: z.string().min(1),
+  scheduleName: z.string().min(1).max(200),
+  /** Auto-generert legacy-stil SID_YYYYMMDD_HHMMSS_… unik. */
+  scheduleNumber: z.string().min(1).max(200),
+  scheduleType: ScheduleType,
+  luckyNumberPrize: z.number().int().nonnegative(),
+  status: ScheduleStatus,
+  isAdminSchedule: z.boolean(),
+  manualStartTime: HhMmOrEmpty,
+  manualEndTime: HhMmOrEmpty,
+  subGames: z.array(ScheduleSubgameSchema),
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type ScheduleRow = z.infer<typeof ScheduleRowSchema>;
+
+export const CreateScheduleSchema = z.object({
+  scheduleName: z.string().min(1).max(200),
+  /** Auto-genereres av service hvis ikke satt. */
+  scheduleNumber: z.string().min(1).max(200).optional(),
+  scheduleType: ScheduleType.optional(),
+  luckyNumberPrize: z.number().int().nonnegative().optional(),
+  status: ScheduleStatus.optional(),
+  isAdminSchedule: z.boolean().optional(),
+  manualStartTime: HhMmOrEmpty.optional(),
+  manualEndTime: HhMmOrEmpty.optional(),
+  subGames: z.array(ScheduleSubgameSchema).optional(),
+});
+export type CreateScheduleInput = z.infer<typeof CreateScheduleSchema>;
+
+export const UpdateScheduleSchema = z
+  .object({
+    scheduleName: z.string().min(1).max(200).optional(),
+    scheduleType: ScheduleType.optional(),
+    luckyNumberPrize: z.number().int().nonnegative().optional(),
+    status: ScheduleStatus.optional(),
+    manualStartTime: HhMmOrEmpty.optional(),
+    manualEndTime: HhMmOrEmpty.optional(),
+    subGames: z.array(ScheduleSubgameSchema).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateScheduleInput = z.infer<typeof UpdateScheduleSchema>;
+
+export const ScheduleListResponseSchema = z.object({
+  schedules: z.array(ScheduleRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type ScheduleListResponse = z.infer<typeof ScheduleListResponseSchema>;

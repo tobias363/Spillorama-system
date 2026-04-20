@@ -96,12 +96,24 @@ import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createAdminGameManagementRouter } from "./routes/adminGameManagement.js";
 import { GameManagementService } from "./admin/GameManagementService.js";
+import { createAdminCloseDayRouter } from "./routes/adminCloseDay.js";
+import { CloseDayService } from "./admin/CloseDayService.js";
 import { createAdminDailySchedulesRouter } from "./routes/adminDailySchedules.js";
 import { DailyScheduleService } from "./admin/DailyScheduleService.js";
+import { createAdminSchedulesRouter } from "./routes/adminSchedules.js";
+import { ScheduleService } from "./admin/ScheduleService.js";
 import { createAdminPatternsRouter } from "./routes/adminPatterns.js";
 import { PatternService } from "./admin/PatternService.js";
 import { createAdminHallGroupsRouter } from "./routes/adminHallGroups.js";
 import { HallGroupService } from "./admin/HallGroupService.js";
+import { createAdminGameTypesRouter } from "./routes/adminGameTypes.js";
+import { GameTypeService } from "./admin/GameTypeService.js";
+import { createAdminSubGamesRouter } from "./routes/adminSubGames.js";
+import { SubGameService } from "./admin/SubGameService.js";
+import { createAdminLeaderboardTiersRouter } from "./routes/adminLeaderboardTiers.js";
+import { LeaderboardTierService } from "./admin/LeaderboardTierService.js";
+import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
+import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
@@ -345,9 +357,29 @@ const gameManagementService = new GameManagementService({
   schema: pgSchema,
 });
 
+// BIN-623: CloseDay (regulatorisk dagslukking per GameManagement). Avhenger
+// av gameManagementService for å hente aggregat-felter + validere at spillet
+// eksisterer. Unique (game_management_id, close_date) i `app_close_day_log`
+// håndhever idempotency; dobbel-lukking returnerer 409.
+const closeDayService = new CloseDayService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+  gameManagementService,
+});
+
 // BIN-626: DailySchedule (daglig spill-plan per hall, kobler GameManagement
 // til hall + tidspunkt + subgames).
 const dailyScheduleService = new DailyScheduleService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-625: Schedule (gjenbrukbar spill-mal / sub-game-bundle). Distinct fra
+// DailySchedule (BIN-626) som er kalender-rader; Schedule er oppskrifta.
+// Legacy Mongo-schema `schedules` normalisert til `app_schedules` med egne
+// kolonner for scheduleName/Number/Type/luckyNumberPrize + sub_games_json
+// for fri-form subgame-bundle (normaliseres i BIN-621 SubGame-katalogen).
+const scheduleService = new ScheduleService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -368,6 +400,46 @@ const patternService = new PatternService({
 // app_daily_schedules (BIN-626) håndhever at hard-delete blokkeres når
 // gruppen er i bruk i en plan.
 const hallGroupService = new HallGroupService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-620: GameType CRUD (topp-nivå katalog av spill-typer). Normaliserer
+// legacy Mongo-schema `gameType` til app_game_types med egne kolonner for
+// aktivt-brukte felter (type_slug, name, pattern, grid-dimensjoner,
+// range/tickets/lucky-numbers). Referenced fra app_game_management,
+// app_patterns, app_sub_games via stabil type_slug.
+const gameTypeService = new GameTypeService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-621: SubGame CRUD (gjenbrukbare pattern-bundles). DailySchedule
+// binder inn SubGame-ids via subgames_json. Normaliserer legacy Mongo-
+// schema `subGame1` til app_sub_games med JSON-lagret pattern_rows +
+// ticket_colors og game_type_id-referanse til GameType.
+const subGameService = new SubGameService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-668: LeaderboardTier CRUD (admin-konfig av plass→premie/poeng-
+// mapping). Ren admin-katalog — runtime /api/leaderboard (routes/game.ts)
+// aggregerer prize-points fra faktiske wins og er uavhengig. Blokkerer
+// Leaderboard-admin-sider i PR-B6 (placeholder inntil dette lander).
+const leaderboardTierService = new LeaderboardTierService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-624: SavedGame CRUD (gjenbrukbare GameManagement-templates). Admin
+// lagrer et komplett GameManagement-oppsett (ticket-farger, priser,
+// patterns, subgames, halls, days) som en navngitt mal; load-to-game-
+// flyten kopierer config inn i et nytt GameManagement-oppsett. Normaliserer
+// legacy Mongo-kolleksjonen `savedGame` til app_saved_games hvor hele
+// template-payloaden lever som config_json (ingen normalisering i v1 siden
+// malen kopieres i sin helhet).
+const savedGameService = new SavedGameService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -676,6 +748,16 @@ app.use(createAdminGameManagementRouter({
   auditLogService,
   gameManagementService,
 }));
+// BIN-623: CloseDay — regulatorisk dagslukking per spill.
+//   GET  /api/admin/games/:id/close-day-summary
+//   POST /api/admin/games/:id/close-day
+// POST skriver audit-log (action = "admin.game.close-day") + `app_close_day_log`-
+// rad. Dobbel-lukking → 409 med kode CLOSE_DAY_ALREADY_CLOSED.
+app.use(createAdminCloseDayRouter({
+  platformService,
+  auditLogService,
+  closeDayService,
+}));
 // BIN-626: DailySchedule CRUD + special + subgame-details. Embedded
 // GameManagement-referansen i /:id/details bruker samme service som over,
 // så admin-UI kan rendre slotType/price uten separat round-trip.
@@ -684,6 +766,15 @@ app.use(createAdminDailySchedulesRouter({
   auditLogService,
   dailyScheduleService,
   gameManagementService,
+}));
+// BIN-625: Schedule CRUD (gjenbrukbare spill-maler). 4 endepunkter —
+// list/detail/create/patch/delete. SCHEDULE_READ / SCHEDULE_WRITE deles
+// med DailySchedule (BIN-626). AuditLog: admin.schedule.{create,update,
+// delete,hard_delete}.
+app.use(createAdminSchedulesRouter({
+  platformService,
+  auditLogService,
+  scheduleService,
 }));
 // BIN-627: Pattern CRUD + dynamic-menu. Aktiverer Agent A's
 // patternManagement-placeholder-sider fra PR-A3a (3 sider) og brukes av
@@ -699,6 +790,41 @@ app.use(createAdminHallGroupsRouter({
   platformService,
   auditLogService,
   hallGroupService,
+}));
+// BIN-620: GameType CRUD. 5 endepunkter — list/detail/create/patch/delete.
+// Global admin-katalog av spill-typer. GAME_TYPE_WRITE er ADMIN-only
+// (matches GAME_CATALOG_WRITE) fordi spill-typer påvirker hele systemet.
+app.use(createAdminGameTypesRouter({
+  platformService,
+  auditLogService,
+  gameTypeService,
+}));
+// BIN-621: SubGame CRUD. 5 endepunkter — list/detail/create/patch/delete.
+// Gjenbrukbare pattern-bundles brukt av DailySchedule. SUB_GAME_WRITE er
+// ADMIN + HALL_OPERATOR (matches PATTERN_WRITE / SCHEDULE_WRITE).
+app.use(createAdminSubGamesRouter({
+  platformService,
+  auditLogService,
+  subGameService,
+}));
+// BIN-668: LeaderboardTier CRUD. 5 endepunkter — list/detail/create/patch/
+// delete. Admin-konfigurert plass→premie/poeng-mapping.
+// LEADERBOARD_TIER_WRITE er ADMIN-only (matches GAME_TYPE_WRITE /
+// GAME_CATALOG_WRITE). Uavhengig av runtime /api/leaderboard.
+app.use(createAdminLeaderboardTiersRouter({
+  platformService,
+  auditLogService,
+  leaderboardTierService,
+}));
+// BIN-624: SavedGame CRUD. 6 endepunkter — list/detail/create/patch/
+// delete/load-to-game. Templates for GameManagement-oppsett (kopieres ved
+// load-to-game). SAVED_GAME_WRITE er ADMIN + HALL_OPERATOR (matches
+// SUB_GAME_WRITE mønsteret). Lukker BIN-624 + aktiverer PR-A3
+// savedGame-sidene (placeholder-state i apps/admin-web).
+app.use(createAdminSavedGamesRouter({
+  platformService,
+  auditLogService,
+  savedGameService,
 }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
