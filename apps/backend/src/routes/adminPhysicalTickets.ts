@@ -38,6 +38,7 @@ import {
   getAccessTokenFromRequest,
   mustBeNonEmptyString,
   parseLimit,
+  parseOptionalInteger,
   isRecordObject,
 } from "../util/httpHelpers.js";
 import { logger as rootLogger } from "../util/logger.js";
@@ -430,6 +431,102 @@ export function createAdminPhysicalTicketsRouter(
       const batchId = mustBeNonEmptyString(req.params.id, "id");
       const transfers = await physicalTicketService.listTransfers(batchId);
       apiSuccess(res, { batchId, transfers, count: transfers.length });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── BIN-640: single-ticket cashout ──────────────────────────────────
+  //
+  // Admin/hall-operator registrerer utbetaling på en vinnende fysisk
+  // billett. Idempotent — forsøk 2 returnerer 400 ALREADY_CASHED_OUT.
+  // Permisjon: PHYSICAL_TICKET_WRITE (ADMIN + HALL_OPERATOR).
+  //
+  // Hall-scope: HALL_OPERATOR kan kun utbetale billetter i egen hall;
+  // håndheves via assertUserHallScope mot ticket.hallId.
+  //
+  // Input:
+  //   { payoutCents: number (>0), notes?: string }
+  // Output:
+  //   { cashout, ticket }
+  //
+  // Regulatorisk mutasjon — AuditLog `admin.physical_ticket.cashout`.
+
+  router.post("/api/admin/physical-tickets/:uniqueId/cashout", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "PHYSICAL_TICKET_WRITE");
+      const uniqueId = mustBeNonEmptyString(req.params.uniqueId, "uniqueId");
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+      const payoutCents = parseOptionalInteger(req.body.payoutCents, "payoutCents");
+      if (payoutCents === undefined || payoutCents <= 0) {
+        throw new DomainError("INVALID_INPUT", "payoutCents må være et positivt heltall.");
+      }
+      const notes =
+        typeof req.body.notes === "string" && req.body.notes.trim()
+          ? req.body.notes.trim()
+          : null;
+
+      // Pre-validate + hall-scope før vi åpner tx.
+      const ticket = await physicalTicketService.findByUniqueId(uniqueId);
+      if (!ticket) {
+        throw new DomainError("PHYSICAL_TICKET_NOT_FOUND", "Billetten finnes ikke.");
+      }
+      assertUserHallScope(actor, ticket.hallId);
+      if (ticket.status !== "SOLD") {
+        throw new DomainError(
+          "PHYSICAL_TICKET_NOT_CASHABLE",
+          `Billetten har status ${ticket.status} — kun SOLD kan utbetales.`
+        );
+      }
+
+      const result = await physicalTicketService.recordCashout({
+        uniqueId: ticket.uniqueId,
+        payoutCents,
+        paidBy: actor.id,
+        notes,
+      });
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actorTypeFromRole(actor.role),
+        action: "admin.physical_ticket.cashout",
+        resource: "physical_ticket",
+        resourceId: result.ticket.uniqueId,
+        details: {
+          uniqueId: result.ticket.uniqueId,
+          gameId: result.cashout.gameId,
+          hallId: result.cashout.hallId,
+          payoutCents: result.cashout.payoutCents,
+          cashoutId: result.cashout.id,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      apiSuccess(res, result);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.get("/api/admin/physical-tickets/:uniqueId/cashout", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "PHYSICAL_TICKET_WRITE");
+      const uniqueId = mustBeNonEmptyString(req.params.uniqueId, "uniqueId");
+      const ticket = await physicalTicketService.findByUniqueId(uniqueId);
+      if (!ticket) {
+        throw new DomainError("PHYSICAL_TICKET_NOT_FOUND", "Billetten finnes ikke.");
+      }
+      assertUserHallScope(actor, ticket.hallId);
+      const cashout = await physicalTicketService.findCashoutByUniqueId(uniqueId);
+      apiSuccess(res, {
+        uniqueId: ticket.uniqueId,
+        status: ticket.status,
+        cashedOut: cashout !== null,
+        cashout,
+      });
     } catch (error) {
       apiFailure(res, error);
     }
