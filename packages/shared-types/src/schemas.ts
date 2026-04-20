@@ -1124,3 +1124,67 @@ export const SubGameListResponseSchema = z.object({
   count: z.number().int().nonnegative(),
 });
 export type SubGameListResponse = z.infer<typeof SubGameListResponseSchema>;
+
+// ── BIN-668: LeaderboardTier CRUD wire schemas ────────────────────────────
+// Admin-CRUD for leaderboard-tiers (plass→premie/poeng-mapping). Mirror av
+// migration `20260425000400_leaderboard_tiers.sql`. Dette er KONFIGURASJON
+// (admin-katalog), ikke runtime-state. Runtime `/api/leaderboard` (i
+// apps/backend/src/routes/game.ts) aggregerer poeng fra faktiske wins og er
+// urørt av denne tabellen.
+//
+// tier_name grupperer et sett med rader til en "profil" (f.eks. "default",
+// "daily", "vip"). Unik per (tier_name, place) per ikke-slettet rad.
+
+export const LeaderboardTierRowSchema = z.object({
+  id: z.string().min(1),
+  /** Profil-navn (f.eks. "default", "daily"). Ikke case-sensitive i praksis. */
+  tierName: z.string().min(1).max(200),
+  /** Plassering (1-basert). Positivt heltall. */
+  place: z.number().int().positive(),
+  /** Poeng tildelt for plasseringen. Ikke-negativt heltall. */
+  points: z.number().int().nonnegative(),
+  /** Premie-beløp i NOK. NULL = ingen kontant-premie (kun points). */
+  prizeAmount: z.number().nullable(),
+  /** Fri-form beskrivelse ("Gavekort 500 kr"). Tom streng hvis ikke satt. */
+  prizeDescription: z.string(),
+  active: z.boolean(),
+  extra: z.record(z.string(), z.unknown()),
+  createdByUserId: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type LeaderboardTierRow = z.infer<typeof LeaderboardTierRowSchema>;
+
+export const CreateLeaderboardTierSchema = z.object({
+  tierName: z.string().min(1).max(200).optional(),
+  place: z.number().int().positive(),
+  points: z.number().int().nonnegative().optional(),
+  prizeAmount: z.number().nonnegative().nullable().optional(),
+  prizeDescription: z.string().max(500).optional(),
+  active: z.boolean().optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+export type CreateLeaderboardTierInput = z.infer<typeof CreateLeaderboardTierSchema>;
+
+export const UpdateLeaderboardTierSchema = z
+  .object({
+    tierName: z.string().min(1).max(200).optional(),
+    place: z.number().int().positive().optional(),
+    points: z.number().int().nonnegative().optional(),
+    prizeAmount: z.number().nonnegative().nullable().optional(),
+    prizeDescription: z.string().max(500).optional(),
+    active: z.boolean().optional(),
+    extra: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateLeaderboardTierInput = z.infer<typeof UpdateLeaderboardTierSchema>;
+
+export const LeaderboardTierListResponseSchema = z.object({
+  tiers: z.array(LeaderboardTierRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type LeaderboardTierListResponse = z.infer<
+  typeof LeaderboardTierListResponseSchema
+>;
