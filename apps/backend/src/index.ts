@@ -93,6 +93,7 @@ import { PostgresHallCashLedger } from "./agent/HallCashLedger.js";
 import { NotImplementedTicketPurchasePort } from "./agent/ports/TicketPurchasePort.js";
 import { PostgresPhysicalTicketReadPort } from "./agent/ports/PhysicalTicketReadPort.js";
 import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.js";
+import { createAdminPhysicalTicketCheckBingoRouter } from "./routes/adminPhysicalTicketCheckBingo.js";
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createAdminReportsPhysicalTicketsRouter } from "./routes/adminReportsPhysicalTickets.js";
 import { createAdminReportsRedFlagCategoriesRouter } from "./routes/adminReportsRedFlagCategories.js";
@@ -795,6 +796,12 @@ app.use(createAdminPhysicalTicketsRouter({
   platformService,
   auditLogService,
   physicalTicketService,
+}));
+// BIN-641: POST /api/admin/physical-tickets/:uniqueId/check-bingo
+app.use(createAdminPhysicalTicketCheckBingoRouter({
+  platformService,
+  physicalTicketService,
+  engine,
 }));
 // BIN-648: GET /api/admin/reports/physical-tickets/aggregate
 app.use(createAdminReportsPhysicalTicketsRouter({
