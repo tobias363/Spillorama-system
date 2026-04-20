@@ -64,18 +64,64 @@ describe("game report pages", () => {
     }
   });
 
-  it("Game1Subgames drill-down renders gap-banner (BIN-647)", async () => {
-    // Default fetch returns 200 empty — endpoint fallback-path is hit only on
-    // 404/501. Simulate 404 to get isPlaceholder=true.
+  it("Game1Subgames drill-down surfaces inline warning when backend 404s (BIN-647 rolling-deploy fallback)", async () => {
+    // BIN-647 backend shipped; the dedicated gap-banner `[data-gap-banner]`
+    // is gone. On 404 we still render a `.alert-warning` inline so operators
+    // know the endpoint isn't responding in their environment.
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "x" } }), {
         status: 404,
         headers: { "content-type": "application/json" },
       })) as typeof fetch;
     const c = document.createElement("div");
-    await renderGame1SubgamesPage(c, "game-xyz");
-    const banner = c.querySelector('[data-gap-banner="BIN-647"]');
-    expect(banner).not.toBeNull();
+    await renderGame1SubgamesPage(c, "parent-schedule-1");
+    const warning = c.querySelector("#subgame-drilldown-table .alert-warning");
+    expect(warning).not.toBeNull();
+    // Filter bar still renders (date-range on DataTable)
+    expect(c.querySelectorAll("input[type=date]").length).toBe(2);
+  });
+
+  it("Game1Subgames drill-down renders items from backend on 200", async () => {
+    const response = {
+      parentId: "parent-1",
+      from: "2026-04-01T00:00:00Z",
+      to: "2026-04-08T00:00:00Z",
+      items: [
+        {
+          subGameId: "sub-1",
+          subGameNumber: "1",
+          parentScheduleId: "parent-1",
+          hallId: "h1",
+          hallName: "Hall 1",
+          gameType: "bingo",
+          gameMode: null,
+          name: "Row 1",
+          sequence: 1,
+          startDate: null,
+          revenue: 10000,
+          totalWinnings: 4000,
+          netProfit: 6000,
+          profitPercentage: 60,
+          ticketCount: 20,
+          players: 5,
+        },
+      ],
+      nextCursor: null,
+      totals: {
+        revenue: 10000,
+        totalWinnings: 4000,
+        netProfit: 6000,
+        ticketCount: 20,
+        players: 5,
+      },
+    };
+    globalThis.fetch = (async () => okJson(response)) as typeof fetch;
+    const c = document.createElement("div");
+    await renderGame1SubgamesPage(c, "parent-1");
+    // Give cursorPaging.load a tick.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(c.querySelector("#subgame-drilldown-table tbody tr")).not.toBeNull();
+    expect(c.querySelector("#subgame-drilldown-table .alert-warning")).toBeNull();
   });
 
   it("Game1History renders DataTable + filter bar", async () => {

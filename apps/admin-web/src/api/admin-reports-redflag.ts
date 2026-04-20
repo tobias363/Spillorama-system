@@ -1,122 +1,109 @@
-// PR-A4a (BIN-645) — red-flag categories + players wrapper (GAPs: BIN-650 + BIN-651).
+// BIN-650/651 wiring — red-flag categories + players API wrappers.
 //
-// Legacy /redFlagCategory returned AML red-flag categories, and the nested
-// /getPlayersRedFlagList returned the players flagged inside each category.
-// Backend adminAml.ts exposes red-flag RULES and red-flag INSTANCES (per-user),
-// but no aggregated CATEGORY + PLAYER-LIST shape. Gaps tracked as:
-//   - BIN-650: GET /api/admin/red-flags/categories
-//   - BIN-651: GET /api/admin/red-flags/players?categoryId&startDate&endDate
-//              + audit-endpoint admin.report.red_flag_players.viewed
+// Previously (PR-A4a / BIN-645) these wrappers returned placeholder shapes and
+// flagged `isPlaceholder=true`. Both endpoints have since landed:
+//   - BIN-650: GET /api/admin/reports/red-flag/categories
+//   - BIN-651: GET /api/admin/reports/red-flag/players (cursor paginated)
 //
-// REGULATORY: red-flag-players-viewer MUST audit-log access when BIN-651 lands.
-// The audit endpoint (admin.report.red_flag_players.viewed) is part of
-// BIN-651's scope (see PR-B2 pattern). Until endpoint exists, we attempt the
-// call and silently ignore 404/501 — the page reports the gap via banner.
+// REGULATORY BIN-651: the backend automatically writes an AuditLog row for
+// each GET on `/api/admin/reports/red-flag/players` (spec: task description).
+// Front-end no longer needs to POST an explicit audit event — the call to the
+// canonical endpoint IS the audit trigger. We keep `logRedFlagPlayersViewed`
+// exported as a no-op for call-site stability during the migration window.
 
 import { apiRequest, ApiError } from "./client.js";
 import type {
-  RedFlagCategory,
+  RedFlagCategoriesResponse,
+  RedFlagCategoryRow,
+  RedFlagPlayersResponse,
   RedFlagPlayerEntry,
 } from "../../../../packages/shared-types/src/reports.js";
 
-export const hasBackendGap = true;
+export type { RedFlagCategoryRow, RedFlagCategoriesResponse };
+export type { RedFlagPlayerEntry, RedFlagPlayersResponse };
 
-// ── BIN-650 ─────────────────────────────────────────────────────────────────
+// ── BIN-650: red-flag categories ────────────────────────────────────────────
 
-export interface RedFlagCategoryResult {
-  categories: RedFlagCategory[];
+export interface RedFlagCategoriesQuery {
+  from?: string;
+  to?: string;
+}
+
+export interface RedFlagCategoriesResult {
+  response: RedFlagCategoriesResponse | null;
   isPlaceholder: boolean;
 }
 
-export async function fetchRedFlagCategories(): Promise<RedFlagCategoryResult> {
+export async function fetchRedFlagCategories(
+  q: RedFlagCategoriesQuery = {}
+): Promise<RedFlagCategoriesResult> {
+  const qs = new URLSearchParams();
+  if (q.from) qs.set("from", q.from);
+  if (q.to) qs.set("to", q.to);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
   try {
-    const res = await apiRequest<{ categories: RedFlagCategory[] }>(
-      "/api/admin/red-flags/categories",
+    const res = await apiRequest<RedFlagCategoriesResponse>(
+      `/api/admin/reports/red-flag/categories${suffix}`,
       { auth: true }
     );
-    return { categories: res.categories, isPlaceholder: false };
+    return { response: res, isPlaceholder: false };
   } catch (err) {
     if (err instanceof ApiError && (err.status === 404 || err.status === 501)) {
-      return { categories: [], isPlaceholder: true };
+      return { response: null, isPlaceholder: true };
     }
     throw err;
   }
 }
 
-export async function fetchRedFlagCategory(categoryId: string): Promise<
-  { category: RedFlagCategory | null; isPlaceholder: boolean }
-> {
-  try {
-    const res = await apiRequest<{ category: RedFlagCategory }>(
-      `/api/admin/red-flags/categories/${encodeURIComponent(categoryId)}`,
-      { auth: true }
-    );
-    return { category: res.category, isPlaceholder: false };
-  } catch (err) {
-    if (err instanceof ApiError && (err.status === 404 || err.status === 501)) {
-      return { category: null, isPlaceholder: true };
-    }
-    throw err;
-  }
-}
-
-// ── BIN-651 ─────────────────────────────────────────────────────────────────
+// ── BIN-651: red-flag players ──────────────────────────────────────────────
 
 export interface RedFlagPlayersQuery {
-  categoryId?: string;
-  startDate?: string;
-  endDate?: string;
+  /** AML rule-category slug, or undefined for all categories. */
+  category?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit?: number;
 }
 
 export interface RedFlagPlayersResult {
-  players: RedFlagPlayerEntry[];
+  response: RedFlagPlayersResponse | null;
   isPlaceholder: boolean;
 }
 
-export async function fetchRedFlagPlayers(q: RedFlagPlayersQuery): Promise<RedFlagPlayersResult> {
+export async function fetchRedFlagPlayers(
+  q: RedFlagPlayersQuery
+): Promise<RedFlagPlayersResult> {
   const qs = new URLSearchParams();
-  if (q.categoryId) qs.set("categoryId", q.categoryId);
-  if (q.startDate) qs.set("startDate", q.startDate);
-  if (q.endDate) qs.set("endDate", q.endDate);
+  if (q.category) qs.set("category", q.category);
+  if (q.from) qs.set("from", q.from);
+  if (q.to) qs.set("to", q.to);
+  if (q.cursor) qs.set("cursor", q.cursor);
+  if (q.limit !== undefined) qs.set("limit", String(q.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
   try {
-    const res = await apiRequest<{ players: RedFlagPlayerEntry[] }>(
-      `/api/admin/red-flags/players?${qs}`,
+    const res = await apiRequest<RedFlagPlayersResponse>(
+      `/api/admin/reports/red-flag/players${suffix}`,
       { auth: true }
     );
-    return { players: res.players, isPlaceholder: false };
+    return { response: res, isPlaceholder: false };
   } catch (err) {
     if (err instanceof ApiError && (err.status === 404 || err.status === 501)) {
-      return { players: [], isPlaceholder: true };
+      return { response: null, isPlaceholder: true };
     }
     throw err;
   }
 }
 
 /**
- * REGULATORY BIN-651: audit-log when a user views the red-flag players list.
- *
- * The endpoint `admin.report.red_flag_players.viewed` is part of BIN-651's
- * scope. Until it lands, we attempt the call and swallow 404/501 silently —
- * this keeps the FE side's call-site stable so when backend ships, audit
- * logging activates automatically without a FE redeploy.
+ * @deprecated BIN-651 backend writes AuditLog automatically on every GET on
+ * `/api/admin/reports/red-flag/players`. Front-end no longer needs an explicit
+ * audit POST. Retained as no-op for call-site stability.
  */
-export async function logRedFlagPlayersViewed(categoryId?: string): Promise<void> {
-  try {
-    await apiRequest<{ ok: true }>("/api/admin/audit/log", {
-      method: "POST",
-      auth: true,
-      body: {
-        action: "admin.report.red_flag_players.viewed",
-        timestamp: new Date().toISOString(),
-        resource: categoryId ? `red-flag-category:${categoryId}` : undefined,
-      },
-    });
-  } catch (err) {
-    if (err instanceof ApiError && (err.status === 404 || err.status === 501)) {
-      // Endpoint not deployed yet — non-fatal. BIN-651 will add it.
-      return;
-    }
-    // Other errors: log but don't break UX.
-    console.warn("[BIN-651] audit-log red-flag-players-viewed failed:", err);
-  }
+export async function logRedFlagPlayersViewed(_categoryId?: string): Promise<void> {
+  // Backend-side AuditLog writer is wired in adminReportsRedFlagPlayers.ts.
+  // Front-end does not POST an audit event; the GET itself is the trigger.
+  return;
 }
+
+export const hasBackendGap = false;

@@ -2109,5 +2109,12 @@
   "edit_player_title": "Rediger spiller",
   "player_updated_success": "Spiller oppdatert.",
   "email_change_blocked_hint": "E-post kan ikke endres her. Kontakt admin for e-post-bytte.",
-  "no_changes_to_save": "Ingen endringer å lagre."
+  "no_changes_to_save": "Ingen endringer å lagre.",
+
+  "all_halls": "Alle haller",
+  "cashed_out": "Utbetalt",
+  "open_flags": "Åpne flagg",
+  "total_flags": "Totale flagg",
+  "from_label": "fra",
+  "to_label": "til"
 }

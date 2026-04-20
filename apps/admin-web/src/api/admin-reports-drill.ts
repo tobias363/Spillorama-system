@@ -1,48 +1,60 @@
-// PR-A4a (BIN-645) — subgame drill-down wrapper (GAP: BIN-647).
+// BIN-647 wiring — sub-game drill-down API wrapper.
 //
-// Legacy /reportGame1/getGame1Subgames returned per-subgame aggregates within
-// a single bingo match (pattern-level stats, winner counts). Backend does not
-// yet expose this — tracked as BIN-647. Wrapper surfaces `hasBackendGap: true`
-// so pages render the gap-banner + funktional filter bar but empty table.
+// Previously (PR-A4a / BIN-645) this wrapper returned a placeholder `rows: []`
+// with `isPlaceholder=true`. BIN-647 shipped the canonical endpoint:
 //
-// When BIN-647 lands, swap `fetchSubgameDrillDown` impl to real apiRequest and
-// flip `hasBackendGap = false`. No page code needs to change.
+//   GET /api/admin/reports/subgame-drill-down?parentId=&from=&to=&cursor=&limit=
+//
+// Response: `SubgameDrillDownResponse` (see shared-types/src/reports.ts).
+// Cursor is an opaque base64url offset; null when exhausted.
 
 import { apiRequest, ApiError } from "./client.js";
-import type { SubgameReportRow } from "../../../../packages/shared-types/src/reports.js";
+import type {
+  SubgameDrillDownResponse,
+  SubgameDrillDownItem,
+} from "../../../../packages/shared-types/src/reports.js";
 
-export const hasBackendGap = true;
+export type { SubgameDrillDownResponse, SubgameDrillDownItem };
 
 export interface SubgameDrillDownQuery {
-  gameId: string;
+  /** `hall_game_schedules.id` of the parent bingo-match. Required. */
+  parentId: string;
+  /** ISO-8601 lower bound. Optional — backend defaults to last 7 days. */
+  from?: string;
+  /** ISO-8601 upper bound. Optional — defaults to now. */
+  to?: string;
+  /** Opaque cursor from previous response's `nextCursor`. */
+  cursor?: string;
+  /** Page size, default 50 on backend. */
+  limit?: number;
 }
 
 export interface SubgameDrillDownResult {
-  gameId: string;
-  rows: SubgameReportRow[];
-  /** True while BIN-647 pending; callers may render gap-banner. */
+  response: SubgameDrillDownResponse | null;
   isPlaceholder: boolean;
 }
 
-/**
- * Fetch sub-game drill-down for a single bingo match. Currently returns empty
- * placeholder (BIN-647). The wrapper still attempts the real endpoint first —
- * if backend lands this silently, the page will work without a redeploy.
- */
 export async function fetchSubgameDrillDown(
   q: SubgameDrillDownQuery
 ): Promise<SubgameDrillDownResult> {
+  const qs = new URLSearchParams();
+  qs.set("parentId", q.parentId);
+  if (q.from) qs.set("from", q.from);
+  if (q.to) qs.set("to", q.to);
+  if (q.cursor) qs.set("cursor", q.cursor);
+  if (q.limit !== undefined) qs.set("limit", String(q.limit));
   try {
-    const res = await apiRequest<{ rows: SubgameReportRow[] }>(
-      `/api/admin/reports/games/bingo/${encodeURIComponent(q.gameId)}/subgames`,
+    const res = await apiRequest<SubgameDrillDownResponse>(
+      `/api/admin/reports/subgame-drill-down?${qs}`,
       { auth: true }
     );
-    return { gameId: q.gameId, rows: res.rows, isPlaceholder: false };
+    return { response: res, isPlaceholder: false };
   } catch (err) {
-    // 404/501 → endpoint not deployed yet. Return placeholder.
     if (err instanceof ApiError && (err.status === 404 || err.status === 501)) {
-      return { gameId: q.gameId, rows: [], isPlaceholder: true };
+      return { response: null, isPlaceholder: true };
     }
     throw err;
   }
 }
+
+export const hasBackendGap = false;

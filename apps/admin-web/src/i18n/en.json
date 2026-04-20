@@ -2116,5 +2116,12 @@
   "edit_player_title": "Edit player",
   "player_updated_success": "Player updated.",
   "email_change_blocked_hint": "Email cannot be changed here. Contact admin to change email.",
-  "no_changes_to_save": "No changes to save."
+  "no_changes_to_save": "No changes to save.",
+
+  "all_halls": "All halls",
+  "cashed_out": "Cashed out",
+  "open_flags": "Open flags",
+  "total_flags": "Total flags",
+  "from_label": "from",
+  "to_label": "to"
 }
