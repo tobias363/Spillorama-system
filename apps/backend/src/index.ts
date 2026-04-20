@@ -102,6 +102,10 @@ import { createAdminPatternsRouter } from "./routes/adminPatterns.js";
 import { PatternService } from "./admin/PatternService.js";
 import { createAdminHallGroupsRouter } from "./routes/adminHallGroups.js";
 import { HallGroupService } from "./admin/HallGroupService.js";
+import { createAdminGameTypesRouter } from "./routes/adminGameTypes.js";
+import { GameTypeService } from "./admin/GameTypeService.js";
+import { createAdminSubGamesRouter } from "./routes/adminSubGames.js";
+import { SubGameService } from "./admin/SubGameService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
@@ -368,6 +372,25 @@ const patternService = new PatternService({
 // app_daily_schedules (BIN-626) håndhever at hard-delete blokkeres når
 // gruppen er i bruk i en plan.
 const hallGroupService = new HallGroupService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-620: GameType CRUD (topp-nivå katalog av spill-typer). Normaliserer
+// legacy Mongo-schema `gameType` til app_game_types med egne kolonner for
+// aktivt-brukte felter (type_slug, name, pattern, grid-dimensjoner,
+// range/tickets/lucky-numbers). Referenced fra app_game_management,
+// app_patterns, app_sub_games via stabil type_slug.
+const gameTypeService = new GameTypeService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-621: SubGame CRUD (gjenbrukbare pattern-bundles). DailySchedule
+// binder inn SubGame-ids via subgames_json. Normaliserer legacy Mongo-
+// schema `subGame1` til app_sub_games med JSON-lagret pattern_rows +
+// ticket_colors og game_type_id-referanse til GameType.
+const subGameService = new SubGameService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -699,6 +722,22 @@ app.use(createAdminHallGroupsRouter({
   platformService,
   auditLogService,
   hallGroupService,
+}));
+// BIN-620: GameType CRUD. 5 endepunkter — list/detail/create/patch/delete.
+// Global admin-katalog av spill-typer. GAME_TYPE_WRITE er ADMIN-only
+// (matches GAME_CATALOG_WRITE) fordi spill-typer påvirker hele systemet.
+app.use(createAdminGameTypesRouter({
+  platformService,
+  auditLogService,
+  gameTypeService,
+}));
+// BIN-621: SubGame CRUD. 5 endepunkter — list/detail/create/patch/delete.
+// Gjenbrukbare pattern-bundles brukt av DailySchedule. SUB_GAME_WRITE er
+// ADMIN + HALL_OPERATOR (matches PATTERN_WRITE / SCHEDULE_WRITE).
+app.use(createAdminSubGamesRouter({
+  platformService,
+  auditLogService,
+  subGameService,
 }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
