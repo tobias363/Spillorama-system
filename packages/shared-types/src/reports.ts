@@ -209,7 +209,19 @@ export interface ShiftSettlementRow {
 
 // ── Gap-endpoint placeholder shapes (BIN-648, BIN-650, BIN-651) ────────────
 
-/** BIN-648: physical-tickets aggregate per hall × day. */
+/**
+ * BIN-648: physical-tickets aggregate — deprecated placeholder-shape.
+ *
+ * Kept for admin-web PR-A4a's fallback wrapper. The canonical wire-shape for
+ * the aggregate endpoint is `PhysicalTicketsAggregateRow` below; new consumers
+ * should use that. Existing consumers of this placeholder will continue to
+ * fall back to the "backend gap" banner (placeholder rows) since the new
+ * endpoint lives under a different URL with a per-(gameId, hallId) shape.
+ *
+ * @deprecated BIN-648 shipped with `PhysicalTicketsAggregateRow`; this shape
+ *             is no longer emitted by the backend and will be removed once
+ *             admin-web migrates.
+ */
 export interface PhysicalTicketReportRow {
   date: string;
   hallId: string;
@@ -218,6 +230,48 @@ export interface PhysicalTicketReportRow {
   ticketsRefunded: number;
   totalStakes: number;
   totalPayouts: number;
+}
+
+// ── BIN-648: physical-tickets aggregate (sold / pending / cashed-out) ──────
+
+/**
+ * BIN-648 canonical shape: one row per `(gameId, hallId)` combination.
+ * Emitted by `GET /api/admin/reports/physical-tickets/aggregate`.
+ *
+ * - `sold`: tickets in scope with status='SOLD' that have NO matching
+ *   `app_agent_transactions` row with `action_type='CASH_OUT'`.
+ * - `pending`: alias for `sold` — BIN-648-contract exposes both so admin-UI
+ *   can map 1:1 to the Linear spec columns without client-side renaming.
+ * - `cashedOut`: tickets SOLD in scope that later had a matching CASH_OUT
+ *   agent-transaction (joined on `ticket_unique_id`).
+ * - `totalRevenueCents`: sum of `COALESCE(ticket.price_cents, batch.default_price_cents)`
+ *   for all SOLD tickets in the row's scope.
+ */
+export interface PhysicalTicketsAggregateRow {
+  gameId: string | null;
+  hallId: string;
+  sold: number;
+  pending: number;
+  cashedOut: number;
+  totalRevenueCents: number;
+}
+
+export interface PhysicalTicketsAggregateTotals {
+  sold: number;
+  pending: number;
+  cashedOut: number;
+  totalRevenueCents: number;
+  rowCount: number;
+}
+
+/** Wire-shape for `GET /api/admin/reports/physical-tickets/aggregate`. */
+export interface PhysicalTicketsAggregateResponse {
+  generatedAt: string;
+  from: string | null;
+  to: string | null;
+  hallId: string | null;
+  rows: PhysicalTicketsAggregateRow[];
+  totals: PhysicalTicketsAggregateTotals;
 }
 
 /**
