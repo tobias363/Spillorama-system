@@ -123,6 +123,8 @@ import { createAdminMiniGamesRouter } from "./routes/adminMiniGames.js";
 import { MiniGamesConfigService } from "./admin/MiniGamesConfigService.js";
 import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
 import { SavedGameService } from "./admin/SavedGameService.js";
+import { createAdminCmsRouter } from "./routes/adminCms.js";
+import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
 import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRedFlagPlayers.js";
@@ -484,6 +486,17 @@ const settingsService = new SettingsService({
   schema: pgSchema,
 });
 const maintenanceService = new MaintenanceService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-676: CMS content + FAQ. Tekst-CRUD for 5 statiske sider (aboutus,
+// terms, support, links, responsible-gaming) pluss full FAQ-CRUD. Service-
+// laget eier slug-whitelist og FEATURE_DISABLED-gate for responsible-gaming
+// PUT (regulatorisk — versjons-historikk-krav, pengespillforskriften §11,
+// blokkert av BIN-680). CMS_WRITE er ADMIN-only; CMS_READ inkluderer
+// HALL_OPERATOR + SUPPORT.
+const cmsService = new CmsService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -908,6 +921,17 @@ app.use(createAdminMaintenanceRouter({
   platformService,
   auditLogService,
   maintenanceService,
+}));
+// BIN-676: CMS content + FAQ. 6 endepunkter — tekst-CRUD for fem slugs +
+// FAQ-CRUD. CMS_WRITE er ADMIN-only (CMS er globalt/regulatorisk-sensitivt,
+// matches SETTINGS_WRITE / LEADERBOARD_TIER_WRITE). PUT /api/admin/cms/
+// responsible-gaming returnerer HTTP 400 + FEATURE_DISABLED inntil BIN-680
+// implementerer versjons-historikk (pengespillforskriften §11). Audit-
+// actions: admin.cms.update + admin.cms.faq.{create,update,delete}.
+app.use(createAdminCmsRouter({
+  platformService,
+  auditLogService,
+  cmsService,
 }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som

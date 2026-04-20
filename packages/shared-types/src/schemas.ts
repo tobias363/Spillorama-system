@@ -1573,3 +1573,76 @@ export const ColordraftConfigSchema = z.object({
   colors: z.array(ColordraftColorSchema),
 });
 export type ColordraftConfig = z.infer<typeof ColordraftConfigSchema>;
+
+// ── BIN-676: CMS content + FAQ wire schemas ─────────────────────────────────
+// Admin-CRUD for fem statiske sider (aboutus/terms/support/links/responsible-
+// gaming) + full FAQ-CRUD. Mirror av migration `20260426000200_cms.sql`.
+//
+// Slug-whitelist er speilet fra `CmsService.CMS_SLUGS` i backend. Frontend
+// bruker enum-varianten slik at UI-valg er i takt med service-validering.
+// `responsible-gaming` er regulatorisk-gated (pengespillforskriften §11) —
+// PUT returnerer FEATURE_DISABLED inntil BIN-680 lander.
+//
+// Legacy-opphav:
+//   legacy/unity-backend/App/Models/cms.js (singleton-dokument med 5 felter)
+//   legacy/unity-backend/App/Models/faq.js
+
+export const CmsSlugSchema = z.enum([
+  "aboutus",
+  "terms",
+  "support",
+  "links",
+  "responsible-gaming",
+]);
+export type CmsSlug = z.infer<typeof CmsSlugSchema>;
+
+export const CmsContentSchema = z.object({
+  slug: CmsSlugSchema,
+  /** Rå tekst-innhold (HTML/markdown). Max 200k tegn. */
+  content: z.string().max(200_000),
+  updatedByUserId: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type CmsContentRow = z.infer<typeof CmsContentSchema>;
+
+export const UpdateCmsContentSchema = z.object({
+  content: z.string().max(200_000),
+});
+export type UpdateCmsContentInput = z.infer<typeof UpdateCmsContentSchema>;
+
+export const FaqEntrySchema = z.object({
+  id: z.string().min(1),
+  question: z.string().min(1).max(1_000),
+  answer: z.string().min(1).max(10_000),
+  sortOrder: z.number().int().nonnegative(),
+  createdByUserId: z.string().nullable(),
+  updatedByUserId: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type FaqEntryRow = z.infer<typeof FaqEntrySchema>;
+
+export const CreateFaqSchema = z.object({
+  question: z.string().min(1).max(1_000),
+  answer: z.string().min(1).max(10_000),
+  sortOrder: z.number().int().nonnegative().optional(),
+});
+export type CreateFaqInput = z.infer<typeof CreateFaqSchema>;
+
+export const UpdateFaqSchema = z
+  .object({
+    question: z.string().min(1).max(1_000).optional(),
+    answer: z.string().min(1).max(10_000).optional(),
+    sortOrder: z.number().int().nonnegative().optional(),
+  })
+  .refine((v: Record<string, unknown>) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateFaqInput = z.infer<typeof UpdateFaqSchema>;
+
+export const FaqListResponseSchema = z.object({
+  faqs: z.array(FaqEntrySchema),
+  count: z.number().int().nonnegative(),
+});
+export type FaqListResponse = z.infer<typeof FaqListResponseSchema>;

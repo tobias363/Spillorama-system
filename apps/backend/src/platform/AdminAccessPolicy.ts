@@ -297,7 +297,21 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     HALL_OPERATOR er bevisst utelatt — dette er ikke hall-lokal konfig.
    */
   MINI_GAMES_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  MINI_GAMES_WRITE:  ["ADMIN"]
+  MINI_GAMES_WRITE:  ["ADMIN"],
+  /**
+   * BIN-676: CMS content + FAQ (aboutus, terms, support, links, responsible-
+   * gaming + Q&A-liste).
+   *   - CMS_READ  : hent tekst-sider + FAQ-liste. Alle admin-roller. SUPPORT
+   *     trenger read-tilgang for kundestøtte ("hva står i terms-siden
+   *     akkurat nå?"), HALL_OPERATOR for å kontekstualisere hall-innhold.
+   *   - CMS_WRITE : oppdatér tekst-sider + FAQ CRUD. ADMIN-only fordi
+   *     CMS-innhold er globalt og regulatorisk-sensitivt (responsible-gaming
+   *     er gated av BIN-680 inntil versjons-historikk er på plass). Samme
+   *     mønster som GAME_CATALOG_WRITE / LEADERBOARD_TIER_WRITE.
+   *     HALL_OPERATOR er bevisst utelatt — CMS er ikke hall-lokal konfig.
+   */
+  CMS_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  CMS_WRITE: ["ADMIN"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
