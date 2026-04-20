@@ -94,6 +94,8 @@ import { NotImplementedTicketPurchasePort } from "./agent/ports/TicketPurchasePo
 import { PostgresPhysicalTicketReadPort } from "./agent/ports/PhysicalTicketReadPort.js";
 import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.js";
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
+import { createAdminReportsPhysicalTicketsRouter } from "./routes/adminReportsPhysicalTickets.js";
+import { PhysicalTicketsAggregateService } from "./admin/PhysicalTicketsAggregate.js";
 import { createAdminGameManagementRouter } from "./routes/adminGameManagement.js";
 import { GameManagementService } from "./admin/GameManagementService.js";
 import { createAdminCloseDayRouter } from "./routes/adminCloseDay.js";
@@ -348,6 +350,14 @@ void securityService.warmBlockedIpCache().catch((err) => {
 // BIN-587 B4a: physical papirbillett-admin. Agent-POS-salget (BIN-583)
 // oppdaterer samme tabell via agent-endepunkt.
 const physicalTicketService = new PhysicalTicketService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-648: read-only aggregat-report over app_physical_tickets ×
+// app_agent_transactions. Egen service så SQL-aggregatet lever ved siden av
+// PhysicalTicketService (som eier skjema + CRUD).
+const physicalTicketsAggregateService = new PhysicalTicketsAggregateService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -768,6 +778,11 @@ app.use(createAdminPhysicalTicketsRouter({
   platformService,
   auditLogService,
   physicalTicketService,
+}));
+// BIN-648: GET /api/admin/reports/physical-tickets/aggregate
+app.use(createAdminReportsPhysicalTicketsRouter({
+  platformService,
+  physicalTicketsAggregateService,
 }));
 app.use(createAdminVouchersRouter({
   platformService,
