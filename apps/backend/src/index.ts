@@ -1074,6 +1074,7 @@ const registerGameEvents = createGameEventHandlers({
   disarmPlayer: (code, id) => roomState.disarmPlayer(code, id),
   disarmAllPlayers: (code) => roomState.disarmAllPlayers(code),
   clearDisplayTicketCache: (code) => roomState.clearDisplayTicketCache(code),
+  getPreRoundTicketsByPlayerId: (code) => roomState.getPreRoundTicketsByPlayerId(code),
   replaceDisplayTicket: (code, id, ticketId, slug) => roomState.replaceDisplayTicket(code, id, ticketId, slug),
   resolveBingoHallGameConfigForRoom, requireActiveHallIdFromInput, buildLeaderboard,
   getVariantConfig: (code) => roomState.getVariantConfig(code),

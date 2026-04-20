@@ -202,6 +202,28 @@ export class RoomStateManager {
     }
   }
 
+  /**
+   * BIN-690: Snapshot the per-player display-ticket cache for a room.
+   *
+   * Returns a `{ playerId: Ticket[] }` map covering every player in this
+   * room that has display-tickets cached. Each ticket array is a **shallow
+   * copy** so callers (engine.startGame) cannot mutate the cache by
+   * accident during adoption.
+   *
+   * Used at `game:start` to adopt the exact grids the player saw while
+   * arming — so the pre-round brett visuals equal the live-round brett.
+   */
+  getPreRoundTicketsByPlayerId(roomCode: string): Record<string, Ticket[]> {
+    const result: Record<string, Ticket[]> = {};
+    const prefix = `${roomCode}:`;
+    for (const [key, tickets] of this.displayTicketCache.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      const playerId = key.slice(prefix.length);
+      result[playerId] = tickets.map((t) => ({ ...t }));
+    }
+    return result;
+  }
+
   // ── Game variant config ───────────────────────────────────────────────────
 
   setVariantConfig(roomCode: string, info: RoomVariantInfo): void {

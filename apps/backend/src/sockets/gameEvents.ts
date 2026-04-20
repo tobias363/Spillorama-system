@@ -236,6 +236,13 @@ export interface GameEventsDeps {
   disarmPlayer: (roomCode: string, playerId: string) => void;
   disarmAllPlayers: (roomCode: string) => void;
   clearDisplayTicketCache: (roomCode: string) => void;
+  /**
+   * BIN-690: snapshot the per-player display-ticket cache so engine.startGame
+   * can adopt the exact grids the player saw while arming. Returns
+   * `{ playerId: Ticket[] }` with a shallow copy so engine mutations don't
+   * leak back into the cache between `startGame` and `clearDisplayTicketCache`.
+   */
+  getPreRoundTicketsByPlayerId?: (roomCode: string) => Record<string, Ticket[]>;
   /** BIN-509: swap one pre-round ticket in place; returns null if ticketId is unknown. */
   /** BIN-672: gameSlug required — see roomState.replaceDisplayTicket doc. */
   replaceDisplayTicket?: (roomCode: string, playerId: string, ticketId: string, gameSlug: string) => Ticket | null;
@@ -675,6 +682,11 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
           Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeBingoSettings.autoRoundTicketsPerPlayer);
         assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
         const variantInfo = deps.getVariantConfig?.(roomCode);
+        // BIN-690: snapshot the display-ticket cache BEFORE startGame so
+        // we can pass it in — the cache is cleared below, and startGame
+        // itself pushes `emitRoomUpdate` which would re-populate the
+        // cache with new random grids if we read it after.
+        const preRoundTicketsByPlayerId = deps.getPreRoundTicketsByPlayerId?.(roomCode);
         await engine.startGame({
           roomCode,
           actorPlayerId: playerId,
@@ -686,6 +698,7 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
           armedPlayerSelections: deps.getArmedPlayerSelections(roomCode),
           gameType: variantInfo?.gameType,
           variantConfig: variantInfo?.config,
+          preRoundTicketsByPlayerId,
         });
         disarmAllPlayers(roomCode);
         clearDisplayTicketCache(roomCode);

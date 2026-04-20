@@ -13,7 +13,7 @@ import {
 import type { ClaimRecord, Ticket } from "./types.js";
 import { BingoEngine, DomainError } from "./BingoEngine.js";
 
-class InMemoryWalletAdapter implements WalletAdapter {
+export class InMemoryWalletAdapter implements WalletAdapter {
   private readonly accounts = new Map<string, WalletAccount>();
   private readonly transactions: WalletTransaction[] = [];
   private txCounter = 0;

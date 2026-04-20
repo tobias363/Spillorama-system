@@ -319,6 +319,7 @@ export async function createTestServer(opts: CreateTestServerOptions = {}): Prom
     disarmPlayer: (code, id) => roomState.disarmPlayer(code, id),
     disarmAllPlayers: (code) => roomState.disarmAllPlayers(code),
     clearDisplayTicketCache: (code) => roomState.clearDisplayTicketCache(code),
+    getPreRoundTicketsByPlayerId: (code: string) => roomState.getPreRoundTicketsByPlayerId(code),
     replaceDisplayTicket: (code: string, id: string, ticketId: string, slug: string) => roomState.replaceDisplayTicket(code, id, ticketId, slug),
     resolveBingoHallGameConfigForRoom: async () => ({ hallId: "hall-test", maxTicketsPerPlayer: 5 }),
     requireActiveHallIdFromInput: async (input) => (typeof input === "string" ? input : "hall-test"),
