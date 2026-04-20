@@ -440,3 +440,57 @@ export interface UniqueTicketRow {
   totalPrizes: number;
   createdAt: string;
 }
+
+// ── BIN-630: player chips-history ──────────────────────────────────────────
+
+/**
+ * BIN-630: one wallet-transaksjon for en gitt spiller i admin-player-detalj-
+ * UI. Chips = wallet-balance i admin-terminologi (legacy bingo-domene).
+ *
+ * Legacy reference:
+ *   `legacy/unity-backend/App/Controllers/PlayerController.js` — external
+ *   transactions API (linje ~1260) viste innskudd, uttak, gevinst, innsats
+ *   og bonuser per spiller via `typeOfTransaction` + `category`.
+ *
+ * Backend-mapping:
+ *   Kilde er `wallet_transactions` (én rad per hendelse på spillerens
+ *   `wallet_accounts.id`). `balanceAfter` regnes ut ved å spille av saldoen
+ *   bakover fra dagens balanse (DESC-sortert). `description` = `reason`.
+ *   `sourceGameId` og `refundedAt` er future-proof felter — nå alltid null
+ *   fordi vi ikke sporer dem direkte på wallet-tx'en (oppslag via
+ *   compliance-ledger kan legges til senere uten wire-endring).
+ */
+export interface ChipsHistoryEntry {
+  id: string;
+  timestamp: string;
+  type:
+    | "DEBIT"
+    | "CREDIT"
+    | "TOPUP"
+    | "WITHDRAWAL"
+    | "TRANSFER_OUT"
+    | "TRANSFER_IN";
+  amount: number;
+  balanceAfter: number;
+  description: string;
+  sourceGameId: string | null;
+  refundedAt: string | null;
+}
+
+/**
+ * BIN-630: paginert chips-historikk. Wire-shape for
+ * `GET /api/admin/players/:id/chips-history`.
+ *
+ * - `userId` / `walletId` ekko request + wallet-kontoen entries kommer fra.
+ * - `from`/`to` ekko requested ISO-vindu (null = ikke oppgitt).
+ * - `items` er DESC på `timestamp` (nyeste først).
+ * - `nextCursor` er opaque base64url-offset (null = ikke flere).
+ */
+export interface ChipsHistoryResponse {
+  userId: string;
+  walletId: string;
+  from: string | null;
+  to: string | null;
+  items: ChipsHistoryEntry[];
+  nextCursor: string | null;
+}
