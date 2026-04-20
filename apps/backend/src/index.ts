@@ -95,6 +95,7 @@ import { PostgresPhysicalTicketReadPort } from "./agent/ports/PhysicalTicketRead
 import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.js";
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createAdminReportsPhysicalTicketsRouter } from "./routes/adminReportsPhysicalTickets.js";
+import { createAdminReportsRedFlagCategoriesRouter } from "./routes/adminReportsRedFlagCategories.js";
 import { PhysicalTicketsAggregateService } from "./admin/PhysicalTicketsAggregate.js";
 import { createAdminGameManagementRouter } from "./routes/adminGameManagement.js";
 import { GameManagementService } from "./admin/GameManagementService.js";
@@ -783,6 +784,12 @@ app.use(createAdminPhysicalTicketsRouter({
 app.use(createAdminReportsPhysicalTicketsRouter({
   platformService,
   physicalTicketsAggregateService,
+}));
+// BIN-650: GET /api/admin/reports/red-flag/categories — AML red-flag
+// kategorier aggregert per rule_slug i `[from, to]`-vinduet.
+app.use(createAdminReportsRedFlagCategoriesRouter({
+  platformService,
+  amlService,
 }));
 app.use(createAdminVouchersRouter({
   platformService,
