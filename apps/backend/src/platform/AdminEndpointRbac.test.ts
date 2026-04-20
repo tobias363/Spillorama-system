@@ -112,6 +112,14 @@ const ENDPOINT_POLICY_CASES: EndpointPolicyCase[] = [
     endpoint: "GET /api/admin/dashboard/game-history",
     permission: "DAILY_REPORT_READ",
     allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    // BIN-618: top-5 by current wallet-balance (legacy Dashboard.js widget).
+    // Separate from /api/admin/dashboard/top-players which ranks by stake
+    // over a date-range.
+    endpoint: "GET /api/admin/players/top",
+    permission: "DAILY_REPORT_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
   }
 ];
 

@@ -126,6 +126,7 @@ import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
 import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRedFlagPlayers.js";
+import { createAdminPlayersTopRouter } from "./routes/adminPlayersTop.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
 import { createAdminUniqueIdsAndPayoutsRouter } from "./routes/adminUniqueIdsAndPayouts.js";
@@ -1110,6 +1111,14 @@ app.use(createAdminReportsRedFlagPlayersRouter({
   auditLogService,
   amlService,
   engine,
+}));
+// BIN-618: top-players dashboard-widget (GET /api/admin/players/top).
+// Lukker TopPlayersBox-gap i admin-web (rendrer "—" i dag). Ranker
+// eligible PLAYER-rader etter gjeldende wallet-balance desc — matcher
+// legacy Dashboard.js:120-127. Read-only, ingen AuditLog.
+app.use(createAdminPlayersTopRouter({
+  platformService,
+  walletAdapter,
 }));
 
 // BIN-583 B3.5: OK Bingo external-machine integration.

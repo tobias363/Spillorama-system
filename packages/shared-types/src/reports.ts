@@ -494,3 +494,39 @@ export interface ChipsHistoryResponse {
   items: ChipsHistoryEntry[];
   nextCursor: string | null;
 }
+
+// ── BIN-618: top-N players by wallet-balance ──────────────────────────────
+
+/**
+ * BIN-618: top-N players by wallet-balance.
+ *
+ * Legacy reference (`legacy/unity-backend/App/Controllers/Dashboard.js:120-127`):
+ *   `PlayerServices.getAllPlayerDataTableSelected(query, { username: 1,
+ *    profilePic: 1, walletAmount: 1 }, 0, 5, { walletAmount: -1 })`.
+ *
+ * The legacy dashboard widget ranks by current wallet balance descending —
+ * NOT by 30-day stake. We preserve that contract so the existing admin-web
+ * `TopPlayersBox` wires up 1:1 (`id` + `username` + `avatar` + `walletAmount`).
+ *
+ * Wire-shape emitted by `GET /api/admin/players/top?metric=wallet&limit=5`:
+ *   `{ players: TopPlayerEntry[], count, limit, generatedAt }`
+ */
+export interface TopPlayerEntry {
+  /** Stable user-id (app_users.id). */
+  id: string;
+  /** Display-name — legacy emitted `username`; we keep that field-name on the wire. */
+  username: string;
+  /** Optional avatar URL — legacy `profilePic`; absent → admin-web falls back to placeholder. */
+  avatar?: string;
+  /** Current wallet balance in Kr (not øre) — matches legacy `walletAmount`. */
+  walletAmount: number;
+}
+
+export interface TopPlayersResponse {
+  generatedAt: string;
+  /** Echoed `limit` query-param. */
+  limit: number;
+  /** Ranked descending by `walletAmount`. `count` == `players.length`. */
+  count: number;
+  players: TopPlayerEntry[];
+}
