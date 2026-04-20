@@ -15,6 +15,56 @@ Før denne sesjonen avsluttet runden ved første pattern-win (én rad). Nå kjø
 
 ---
 
+## 📦 Arkiv — Sprint 1-5 Unity-paritet (pre-monorepo)
+
+**Kontekst:** I parallell med dagens arbeid eksisterte en lokal utviklingsbranch (`claude/interesting-ellis-eb99bd`) med 17 commits Unity-paritet Sprint 1-5. Disse var laget *før* monorepo-restrukturen 2026-04-17 (PR #106, BIN-534) som flyttet `backend/` → `apps/backend/` og `game-client/` → `packages/game-client/`.
+
+**Status per 2026-04-20:** Alle konsepter fra Sprint 1-5 er **100 % absorbert i `main`** i evolvert form via BIN-619 → BIN-696-serien. Ingen unikt arbeid finnes kun i den lokale branchen. Backend-filene som virket "borte" var bare flyttet under monorepo-restrukturen.
+
+**Backup-referanser (begge peker til samme commit `fb8a3a4f`):**
+
+| Type | Navn | Kommando |
+|------|------|----------|
+| Branch | `backup/unity-paritet-sprint15-2026-04-20` | `git fetch origin backup/unity-paritet-sprint15-2026-04-20` |
+| Tag (annotert) | `archive/sprint15-unity-paritet-2026-04-20` | `git fetch origin 'refs/tags/*:refs/tags/*' && git checkout archive/sprint15-unity-paritet-2026-04-20` |
+
+**URL:**
+- https://github.com/tobias363/Spillorama-system/tree/backup/unity-paritet-sprint15-2026-04-20
+- https://github.com/tobias363/Spillorama-system/releases/tag/archive/sprint15-unity-paritet-2026-04-20
+
+### Per-commit absorpsjon (verifisert 2026-04-20)
+
+| Commit | Beskrivelse | Absorbert via |
+|--------|-------------|----------------|
+| `554535d6` | rebuild PlayScreen + dev lobby | Base for alt videre PlayScreen-arbeid |
+| `46a30070` | detect 3x5 vs 5x5 ticket grid | BIN-672 (5×5 defense-in-depth) |
+| `2f5b51cd` | per-player ticket count | BIN-619 (pre-round rendering) |
+| `dc03e24e` | remove auto-arm | Bevart på main |
+| `93c984ee` | per-type ticket selection | BIN-688 (fargemapping) + BIN-690 (grid-adopsjon) |
+| `1fb536c3` | Sprint 1 — core game flow | Alle 7 filer på main |
+| `2439f746` | Sprint 2 — ticket animations | Alle 5 filer på main |
+| `56606e98` | Sprint 3 — complete audio | Alle 5 filer på main |
+| `0eeaf6f0` | Sprint 4 — Elvis replace amount | Begge filer på main |
+| `e4e22a06` | Sprint 5 — visual polish | Alle 5 filer på main |
+| `e055cf23` | audit gaps (flip, large, double-announce) | BIN-687 (flip-drift) + resten på main |
+| `250ceee7` | final audit (host start + per-hall) | Alle 8 filer på main (backend flyttet til `apps/backend/`) |
+| `ef78f6be` | final 2 Unity-diff | Alle 4 filer på main |
+| `806ab84c` | don't show countdown while RUNNING | Bevart på main |
+| `fb8a3a4f` | complete status report docs | Erstattet av denne SESSION_LOG |
+
+### Hvis en utvikler senere finner noe unikt i backup
+
+Cherry-pick-oppskrift:
+```bash
+git fetch origin 'refs/tags/*:refs/tags/*'
+git log archive/sprint15-unity-paritet-2026-04-20 --not origin/main --oneline  # commits ikke på main
+git cherry-pick <commit-sha>  # for konkret endring
+```
+
+Men per verifisering 2026-04-20 finnes ingenting unikt som ikke er representert i evolvert form på main.
+
+---
+
 ## Leverte PR-er (kronologisk, merget til main)
 
 | PR  | BIN    | Tittel                                                           | Lag                         |
