@@ -116,6 +116,8 @@ import { createAdminSettingsRouter } from "./routes/adminSettings.js";
 import { SettingsService } from "./admin/SettingsService.js";
 import { createAdminMaintenanceRouter } from "./routes/adminMaintenance.js";
 import { MaintenanceService } from "./admin/MaintenanceService.js";
+import { createAdminMiniGamesRouter } from "./routes/adminMiniGames.js";
+import { MiniGamesConfigService } from "./admin/MiniGamesConfigService.js";
 import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
 import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
@@ -432,6 +434,16 @@ const subGameService = new SubGameService({
 // aggregerer prize-points fra faktiske wins og er uavhengig. Blokkerer
 // Leaderboard-admin-sider i PR-B6 (placeholder inntil dette lander).
 const leaderboardTierService = new LeaderboardTierService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-679: MiniGames-konfig CRUD (Wheel + Chest + Mystery + Colordraft).
+// Fire singleton-rader i app_mini_games_config. Ren ADMIN-konfig — runtime
+// i Game 1 bruker i dag hardkodede prize-arrays (BingoEngine.MINIGAME_PRIZES);
+// wiring til å lese fra denne tabellen lander som egen PR slik at admin-UI
+// kan lande først uten runtime-risk.
+const miniGamesConfigService = new MiniGamesConfigService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -833,6 +845,18 @@ app.use(createAdminLeaderboardTiersRouter({
   platformService,
   auditLogService,
   leaderboardTierService,
+}));
+// BIN-679: MiniGames config CRUD. 8 endepunkter — GET + PUT for wheel,
+// chest, mystery, colordraft. Admin-konfig av Game 1 mini-spillene;
+// runtime-integrasjonen i Game 1 bruker hardkodede prize-arrays i dag
+// (BingoEngine.MINIGAME_PRIZES) — wiring til denne tabellen er egen PR.
+// MINI_GAMES_WRITE er ADMIN-only (matches GAME_CATALOG_WRITE /
+// LEADERBOARD_TIER_WRITE). AuditLog-action:
+// admin.mini_games.<gameType>.update.
+app.use(createAdminMiniGamesRouter({
+  platformService,
+  auditLogService,
+  miniGamesConfigService,
 }));
 // BIN-624: SavedGame CRUD. 6 endepunkter — list/detail/create/patch/
 // delete/load-to-game. Templates for GameManagement-oppsett (kopieres ved

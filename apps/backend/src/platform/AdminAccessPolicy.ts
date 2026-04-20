@@ -283,7 +283,21 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     — ikke en hall-operatør-beslutning.
    */
   MAINTENANCE_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  MAINTENANCE_WRITE: ["ADMIN"]
+  MAINTENANCE_WRITE: ["ADMIN"],
+  /**
+   * BIN-679: MiniGames config CRUD (Wheel + Chest + Mystery + Colordraft).
+   * Sentral konfig for de fire Game 1 mini-spillene — én singleton-rad per
+   * spill-type. Ren admin-katalog (runtime-integrasjon er egen PR).
+   *   - MINI_GAMES_READ : liste + detalj. Alle admin-roller. SUPPORT
+   *     trenger read-tilgang for compliance/kundestøtte ("hvilken premie-
+   *     struktur gjaldt i dag?").
+   *   - MINI_GAMES_WRITE: oppdatér (singleton PUT). ADMIN-only fordi mini-
+   *     game-konfigen er sentralt definert og gjelder alle haller (samme
+   *     mønster som GAME_CATALOG_WRITE / LEADERBOARD_TIER_WRITE).
+   *     HALL_OPERATOR er bevisst utelatt — dette er ikke hall-lokal konfig.
+   */
+  MINI_GAMES_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  MINI_GAMES_WRITE:  ["ADMIN"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
