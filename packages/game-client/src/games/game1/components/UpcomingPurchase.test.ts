@@ -34,8 +34,8 @@ function ensureResizeObserver(): void {
 }
 
 function makePanel(
-  armSpy: Array<Array<{ type: string; qty: number }>> = [],
-): { panel: UpcomingPurchase; container: HTMLElement; overlay: HtmlOverlayManager; armSpy: Array<Array<{ type: string; qty: number }>> } {
+  armSpy: Array<Array<{ type: string; qty: number; name: string }>> = [],
+): { panel: UpcomingPurchase; container: HTMLElement; overlay: HtmlOverlayManager; armSpy: Array<Array<{ type: string; qty: number; name: string }>> } {
   ensureResizeObserver();
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -100,7 +100,7 @@ describe("UpcomingPurchase (BIN-410 D3)", () => {
   let panel: UpcomingPurchase;
   let container: HTMLElement;
   let overlay: HtmlOverlayManager;
-  let armSpy: Array<Array<{ type: string; qty: number }>>;
+  let armSpy: Array<Array<{ type: string; qty: number; name: string }>>;
 
   beforeEach(() => {
     document.body.innerHTML = "";

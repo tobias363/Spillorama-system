@@ -592,8 +592,21 @@ function buildRoomUpdatePayload(snapshot: RoomSnapshot, nowMs = Date.now()): Roo
     getArmedPlayerTicketCounts: (code) => roomState.getArmedPlayerTicketCounts(code),
     getArmedPlayerSelections: (code) => roomState.getArmedPlayerSelections(code),
     getRoomConfiguredEntryFee,
-    getOrCreateDisplayTickets: (code, id, count, gameSlug) => roomState.getOrCreateDisplayTickets(code, id, count, gameSlug),
+    // The 5th parameter (`colorAssignments`) is what carries the player's
+    // armed selections into the ticket cache — dropping it means pre-round
+    // brett lose their colour, so "Small Purple" armed renders as a default
+    // beige/red placeholder and the next round's tickets get a fresh
+    // index-cycled colour ("Small Yellow" first). The older wrapper silently
+    // truncated this arg, making every buildRoomUpdatePayload call colour-
+    // blind in production while the unit tests (which wired all 5 args)
+    // stayed green.
+    getOrCreateDisplayTickets: (code, id, count, gameSlug, colorAssignments) =>
+      roomState.getOrCreateDisplayTickets(code, id, count, gameSlug, colorAssignments),
     getLuckyNumbers: (code) => roomState.getLuckyNumbers(code),
+    // BIN-694: roomState.variantByRoom is kept populated by
+    // bindDefaultVariantConfig at every room-creation entry point, so the
+    // pre-round handlers (ticket:cancel, ticket:replace, colour expansion)
+    // always see the correct 5-phase Norsk-bingo config for Game 1.
     getVariantConfig: (code) => roomState.getVariantConfig(code),
     // G15 (BIN-431): hall-name + supplier for ticket-detail flip.
     getHallName: getHallNameSync,

@@ -35,7 +35,12 @@ export interface UpcomingPurchaseState {
 
 export interface UpcomingPurchaseOptions {
   overlay: HtmlOverlayManager;
-  onArm: (selections: Array<{ type: string; qty: number }>) => void;
+  // `name` is the canonical ticket-type name (e.g. "Small Yellow") — the
+  // backend uses it to colour pre-round brett per the player's specific pick.
+  // Without it, two "small" selections collapse to whichever small type comes
+  // first in variant config (typically Small Yellow), so every brett renders
+  // yellow regardless of what was armed.
+  onArm: (selections: Array<{ type: string; qty: number; name: string }>) => void;
 }
 
 export class UpcomingPurchase {
@@ -47,10 +52,15 @@ export class UpcomingPurchase {
   private statusMsg: HTMLDivElement;
   private armBtn: HTMLButtonElement;
 
-  private onArm: (selections: Array<{ type: string; qty: number }>) => void;
+  private onArm: (selections: Array<{ type: string; qty: number; name: string }>) => void;
   private alreadyPurchased = 0;
   private typeRows: Array<{
     type: string;
+    /** Canonical ticket-type name (e.g. "Small Yellow") — propagated to
+     *  backend in `onArm` so pre-round brett colour matches the armed
+     *  selection. Two "small" selections without `name` collapse to a single
+     *  colour server-side (the first "small" entry in variant config). */
+    name: string;
     price: number;
     ticketCount: number;
     qty: number;
@@ -213,6 +223,15 @@ export class UpcomingPurchase {
   hide(): void {
     this.root.style.display = "none";
     this.visible = false;
+    // Reset every row to qty=0 so the next open (manual "Kjøp flere brett"
+    // click or mid-round-joiner auto-show) starts fresh. Without this, the
+    // additive bet:arm flow would trigger double-counting the moment a user
+    // re-opens and clicks Kjøp with whatever qty lingered on screen.
+    for (const row of this.typeRows) {
+      row.qty = 0;
+      row.qtyLabel.textContent = "0";
+    }
+    this.recalc();
   }
 
   isShowing(): boolean {
@@ -282,6 +301,7 @@ export class UpcomingPurchase {
 
     const entry = {
       type: tt.type,
+      name: tt.name,
       price,
       ticketCount: tt.ticketCount,
       qty: 0,
@@ -358,7 +378,7 @@ export class UpcomingPurchase {
     if (this.armBtn.disabled) return;
     const selections = this.typeRows
       .filter((r) => r.qty > 0)
-      .map((r) => ({ type: r.type, qty: r.qty }));
+      .map((r) => ({ type: r.type, qty: r.qty, name: r.name }));
     if (selections.length === 0) return;
     this.onArm(selections);
   }

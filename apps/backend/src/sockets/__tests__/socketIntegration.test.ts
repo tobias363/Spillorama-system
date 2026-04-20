@@ -310,6 +310,47 @@ describe("Socket.IO integration", () => {
     assert.equal(cancelAck.error?.code, "GAME_RUNNING");
   });
 
+  test("ticket:cancel works without manual setVariantConfig (engine fallback)", async () => {
+    // Regression — production never called `roomState.setVariantConfig`, so
+    // `ticket:cancel` used to throw NOT_SUPPORTED ("Ingen variant-config for
+    // rommet."). The fix routes variant lookup through the engine, which
+    // hands back default-standard until `startGame` caches a hall-specific
+    // override. Same default-standard is what pre-round colour expansion
+    // and the `bet:arm` weighted-ticket check also fall back to.
+    const alice = await server.connectClient("token-alice");
+    const bob = await server.connectClient("token-bob");
+
+    const r1 = await alice.emit<AckResponse<{ roomCode: string; playerId: string }>>(
+      "room:create", { hallId: "hall-test" },
+    );
+    const roomCode = r1.data!.roomCode;
+    const playerId = r1.data!.playerId;
+    await bob.emit<AckResponse>("room:create", { hallId: "hall-test" });
+
+    // Deliberately skip `server.roomState.setVariantConfig` — mirrors prod.
+    await alice.emit<AckResponse>("bet:arm", {
+      roomCode,
+      armed: true,
+      ticketSelections: [{ type: "small", name: "Small Yellow", qty: 1 }],
+    });
+
+    const tickets = server.roomState.getOrCreateDisplayTickets(
+      roomCode, playerId, 1, "bingo",
+      [{ color: "Small Yellow", type: "small" }],
+    );
+    const onlyTicket = tickets[0];
+
+    const cancelAck = await alice.emit<AckResponse<{ fullyDisarmed: boolean }>>(
+      "ticket:cancel",
+      { roomCode, playerId, ticketId: onlyTicket.id! },
+    );
+    assert.ok(
+      cancelAck.ok,
+      `ticket:cancel must succeed without manual variant-config setup, got ${cancelAck.error?.code}: ${cancelAck.error?.message}`,
+    );
+    assert.equal(cancelAck.data!.fullyDisarmed, true);
+  });
+
   test("BIN-692: ticket:cancel on unknown ticketId returns TICKET_NOT_FOUND", async () => {
     const alice = await server.connectClient("token-alice");
     const bob = await server.connectClient("token-bob");

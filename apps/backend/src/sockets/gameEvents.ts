@@ -670,22 +670,55 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
               throw new DomainError("INVALID_INPUT", "Ingen gyldige billettvalg.");
             }
 
-            // Validate total weighted count <= 30 using variant config ticketTypes for weights
+            // Additive arm: each bet:arm call MERGES the new selections into
+            // the player's existing armed set. Reductions happen via `ticket:cancel`
+            // (× on individual brett). Product decision 2026-04-20 — the buy
+            // popup opens at qty=0 on every re-open, so replace-semantics would
+            // mean re-armed brett vanish every time the player clicks Kjøp.
+            const existing = deps.getArmedPlayerSelections(roomCode)?.[playerId] ?? [];
+            const merged: Array<{ type: string; qty: number; name?: string }> = existing.map((s) => ({
+              type: s.type,
+              qty: s.qty,
+              ...(s.name ? { name: s.name } : {}),
+            }));
+            for (const incoming of selections) {
+              const matchIdx = merged.findIndex((m) =>
+                m.type === incoming.type && (m.name ?? null) === (incoming.name ?? null),
+              );
+              if (matchIdx >= 0) {
+                merged[matchIdx] = { ...merged[matchIdx], qty: merged[matchIdx].qty + incoming.qty };
+              } else {
+                merged.push(incoming);
+              }
+            }
+
+            // Validate combined total weighted count <= 30.
             const variantInfo = deps.getVariantConfig?.(roomCode);
             const ticketTypes = variantInfo?.config?.ticketTypes ?? [];
             let totalWeighted = 0;
-            for (const sel of selections) {
-              const tt = ticketTypes.find((t) => t.type === sel.type);
-              const weight = tt?.ticketCount ?? 1; // ticketCount IS the weight (small=1, large=3, elvis=2)
+            for (const sel of merged) {
+              // BIN-693 lesson: prefer name-match for weight resolution too —
+              // two small-typed entries with different names share a weight of
+              // 1, but for Large/Elvis (same type, distinct names) the weight
+              // lives on the matching row, not the first one.
+              const tt =
+                (sel.name ? ticketTypes.find((t) => t.name === sel.name) : undefined) ??
+                ticketTypes.find((t) => t.type === sel.type);
+              const weight = tt?.ticketCount ?? 1;
               totalWeighted += sel.qty * weight;
             }
             if (totalWeighted > 30) {
-              throw new DomainError("INVALID_INPUT", `Totalt antall brett (${totalWeighted}) overstiger maks 30.`);
+              throw new DomainError(
+                "INVALID_INPUT",
+                `Totalt antall brett (${totalWeighted}) overstiger maks 30.`,
+              );
             }
             if (totalWeighted < 1) {
               throw new DomainError("INVALID_INPUT", "Du må velge minst 1 brett.");
             }
-            armPlayer(roomCode, playerId, totalWeighted, selections);
+            // TEMP diagnostic — remove once bug #3 is verified closed.
+            console.log(`[DIAG bet:arm] room=${roomCode} player=${playerId} existing=${JSON.stringify(existing)} incoming=${JSON.stringify(selections)} merged=${JSON.stringify(merged)} totalWeighted=${totalWeighted}`);
+            armPlayer(roomCode, playerId, totalWeighted, merged);
           } else {
             // Backward compat: flat ticketCount
             const ticketCount = Math.min(30, Math.max(1, Math.round(payload.ticketCount ?? 1)));
@@ -983,6 +1016,10 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
           throw new DomainError("NOT_SUPPORTED", "ticket:cancel ikke konfigurert på serveren.");
         }
 
+        // In production `deps.getVariantConfig` is backed by the engine and
+        // always returns a config (default-standard fallback before startGame).
+        // The null-branch only fires when a test harness leaves the dep
+        // unwired, or from a future regression that drops the fallback.
         const variantInfo = deps.getVariantConfig?.(roomCode);
         if (!variantInfo) {
           throw new DomainError("NOT_SUPPORTED", "Ingen variant-config for rommet.");

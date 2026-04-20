@@ -62,7 +62,7 @@ export class PlayScreen extends Container {
   private headerShiftTween: gsap.core.Tween | null = null;
   private audio: AudioManager;
   private onClaim: ((type: "LINE" | "BINGO") => void) | null = null;
-  private onBuy: ((selections: Array<{ type: string; qty: number }>) => void) | null = null;
+  private onBuy: ((selections: Array<{ type: string; qty: number; name?: string }>) => void) | null = null;
   private bgSprite: Sprite | null = null;
   private screenW: number;
   private screenH: number;
@@ -98,11 +98,16 @@ export class PlayScreen extends Container {
   private isWaitingMode = false;
   private pauseAwareBridge: { getState(): { isPaused: boolean } } | null = null;
   /**
-   * BIN-619: cache for `renderPreRoundTickets` diff-check. `null` = invalid
+   * Cache key for `renderPreRoundTickets` diff-check. `null` = invalid
    * (force rebuild next call). Set back to `null` from `buildTickets` and
    * `enterWaitingMode` since those replace scroller content.
+   *
+   * Must include each ticket's `id` + `color` — not just the count — because
+   * re-arming with the same number of brett but different colours (Yellow
+   * → Purple) produces a fresh ticket list server-side, and a count-only
+   * cache would skip the re-render so the old colours stick on screen.
    */
-  private lastPreRoundCount: number | null = null;
+  private lastPreRoundSignature: string | null = null;
 
   constructor(
     screenWidth: number,
@@ -202,7 +207,7 @@ export class PlayScreen extends Container {
     // tar over auto-display mellom runder (matcher Unity).
     this.buyPopup = new Game1BuyPopup(this.overlayManager);
     // Delegate buy to controller — no direct socket call from view layer.
-    this.buyPopup.setOnBuy((selections: Array<{ type: string; qty: number }>) => {
+    this.buyPopup.setOnBuy((selections: Array<{ type: string; qty: number; name?: string }>) => {
       this.onBuy?.(selections);
     });
 
@@ -295,7 +300,7 @@ export class PlayScreen extends Container {
     this.onClaim = callback;
   }
 
-  setOnBuy(callback: (selections: Array<{ type: string; qty: number }>) => void): void {
+  setOnBuy(callback: (selections: Array<{ type: string; qty: number; name?: string }>) => void): void {
     this.onBuy = callback;
   }
 
@@ -356,7 +361,7 @@ export class PlayScreen extends Container {
     this.centerTop.setGameRunning(false);
     // BIN-619: Invalidate pre-round cache — `clearCards()` below empties the
     // scroller, so next `renderPreRoundTickets` must rebuild from scratch.
-    this.lastPreRoundCount = null;
+    this.lastPreRoundSignature = null;
 
     // Reset from previous game — clear ball tube and called numbers
     // (Unity: bingoBallPanelManager.Reset() + withdrawNumberHistoryPanel.Close())
@@ -485,11 +490,42 @@ export class PlayScreen extends Container {
   }
 
   /**
-   * BIN-410 (D3): Hide the upcoming-purchase panel. Called on PLAYING/SPECTATING
-   * transitions, on D2-threshold disableBuyMore, and on game-finish reset.
+   * BIN-410 (D3): Hide the upcoming-purchase panel. Called after a successful
+   * bet:arm (player goes to "Kjøp flere brett" to re-open at qty=0), on
+   * PLAYING/SPECTATING transitions, on D2-threshold disableBuyMore, and on
+   * game-finish reset.
    */
   hideUpcomingPurchase(): void {
     this.upcomingPurchase?.hide();
+  }
+
+  /**
+   * Live-refresh the upcoming-purchase side panel. No-op when the panel is
+   * hidden (so a player who already clicked Kjøp doesn't get the panel
+   * re-summoned by every incoming room:update) and when ticketTypes haven't
+   * arrived yet. Shows the panel for mid-round joiners as soon as the first
+   * state carrying ticketTypes arrives.
+   */
+  updateUpcomingPurchase(state: GameState): void {
+    if (!state.ticketTypes || state.ticketTypes.length === 0) return;
+    const preRoundCount = state.preRoundTickets?.length ?? 0;
+    if (this.upcomingPurchase?.isShowing()) {
+      this.upcomingPurchase.update({
+        entryFee: state.entryFee || 10,
+        ticketTypes: state.ticketTypes,
+        alreadyPurchased: preRoundCount,
+        gameName: state.gameType,
+      });
+    } else if (preRoundCount === 0) {
+      // Mid-round joiner with no armed brett → auto-open so they see the
+      // "buy for next round" affordance without hunting for the button.
+      this.upcomingPurchase?.show({
+        entryFee: state.entryFee || 10,
+        ticketTypes: state.ticketTypes,
+        alreadyPurchased: 0,
+        gameName: state.gameType,
+      });
+    }
   }
 
   // ── Play mode ──
@@ -503,7 +539,7 @@ export class PlayScreen extends Container {
     this.bingoAlreadyWon = false;
     // BIN-619: buildTickets replaces scroller content from `myTickets` — any
     // pre-round render cached earlier is now stale.
-    this.lastPreRoundCount = null;
+    this.lastPreRoundSignature = null;
 
     // Stop countdown and hide buy popup when entering play mode
     this.leftInfo.stopCountdown();
@@ -552,7 +588,12 @@ export class PlayScreen extends Container {
   renderPreRoundTickets(state: GameState): void {
     this.lastState = state;
     const tickets = state.preRoundTickets ?? [];
-    if (this.lastPreRoundCount === tickets.length) return;
+    // Signature covers count + id + colour so re-arm with a different colour
+    // mix (but same count) invalidates the cache and triggers a fresh render.
+    const signature = tickets
+      .map((t) => `${t.id ?? "_"}:${t.color ?? "_"}`)
+      .join("|");
+    if (this.lastPreRoundSignature === signature) return;
 
     this.inlineScroller.clearCards();
     if (tickets.length > 0) {
@@ -565,7 +606,7 @@ export class PlayScreen extends Container {
       });
       this.inlineScroller.sortBestFirst();
     }
-    this.lastPreRoundCount = tickets.length;
+    this.lastPreRoundSignature = signature;
   }
 
   /**

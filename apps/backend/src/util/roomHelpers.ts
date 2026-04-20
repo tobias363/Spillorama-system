@@ -227,6 +227,8 @@ export function buildRoomUpdatePayload(
         }
       }
     }
+    // TEMP diagnostic — remove once bug #3 is verified closed.
+    console.log(`[DIAG preRound] room=${snapshot.code} player=${player.id} armedCount=${armedCount} selections=${JSON.stringify(selections)} assignments=${JSON.stringify(colorAssignments)}`);
     preRoundTickets[player.id] = getOrCreateDisplayTickets(
       snapshot.code,
       player.id,
@@ -234,6 +236,7 @@ export function buildRoomUpdatePayload(
       snapshot.gameSlug,
       colorAssignments,
     );
+    console.log(`[DIAG preRound] room=${snapshot.code} returnedTickets=${JSON.stringify(preRoundTickets[player.id]?.map((t) => ({ id: t.id, color: t.color, type: t.type })))}`);
   }
 
   // BIN-443: Include variant info so client can show correct purchase UI.
@@ -248,6 +251,8 @@ export function buildRoomUpdatePayload(
   const variantEntryFee = snapshot.currentGame?.entryFee && snapshot.currentGame.entryFee > 0
     ? snapshot.currentGame.entryFee
     : opts.getRoomConfiguredEntryFee(snapshot.code);
+  // TEMP diagnostic — remove once bug #3 is verified closed.
+  console.log(`[DIAG gameVariant] room=${snapshot.code} effectiveGameType=${effectiveGameType} ticketTypes=${JSON.stringify(effectiveConfig.ticketTypes.map((t) => ({ name: t.name, type: t.type, hasName: typeof t.name === "string", hasType: typeof t.type === "string" })))}`);
   const gameVariant = {
     gameType: effectiveGameType,
     ticketTypes: effectiveConfig.ticketTypes,

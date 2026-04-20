@@ -52,7 +52,7 @@ export class TicketGridScroller extends Container {
     this.innerContainer = new Container();
     this.addChild(this.innerContainer);
 
-    // Clipping mask
+    // Clipping mask.
     this.maskGraphics = new Graphics();
     this.maskGraphics.rect(0, 0, viewportWidth, viewportHeight);
     this.maskGraphics.fill(0xffffff);

@@ -398,9 +398,12 @@ class Game1Controller implements GameController {
         // CenterBall + DrawnBalls + PatternMiniGrid kjører som vanlig.
         this.playScreen.buildTickets(state);
         this.playScreen.updateInfo(state);
-        // BIN-410 (D3, Q4 2026-04-18): Upcoming-panel skal IKKE vises under
-        // SPECTATING — Unity viser det kun mellom runder.
-        this.playScreen.hideUpcomingPurchase();
+        // Product decision 2026-04-20 (supersedes Q4 2026-04-18): Mid-round
+        // joiners get the same side panel as WAITING players so they can arm
+        // for the next round without hunting for the "Kjøp flere brett" button.
+        // Reactivated here for SPECTATING; still hidden under PLAYING (the
+        // player is active in the current round with their own tickets).
+        this.playScreen.showUpcomingPurchase(state);
         // BIN-619 (2026-04-19): Spectator mid-round buy — tickets armed for
         // NEXT round render immediately in the scroller, but without marks
         // (owner: "selvfølgelig ikke disse bongene aktive i den trekningen").
@@ -443,6 +446,10 @@ class Game1Controller implements GameController {
     if (this.phase === "SPECTATING" && this.playScreen) {
       this.playScreen.updateInfo(state);
       this.playScreen.renderPreRoundTickets(state);
+      // Mid-round joiners need live updates of the side panel too (ticketTypes
+      // may arrive after the initial transition, and preRoundTickets count
+      // drives the already-purchased cap).
+      this.playScreen.updateUpcomingPurchase(state);
     }
 
     // BIN-460: Show/hide pause overlay based on game state
@@ -622,7 +629,12 @@ class Game1Controller implements GameController {
     this.playScreen?.showBuyPopupResult(result.ok, result.error?.message);
     if (!result.ok) {
       this.showError(result.error?.message || "Kunne ikke kjøpe billetter");
+      return;
     }
+    // Product decision 2026-04-20: every successful Kjøp closes the inline
+    // side panel. Player re-opens via "Kjøp flere brett" (always at qty=0)
+    // to add more brett; additive bet:arm merges with what's already armed.
+    this.playScreen?.hideUpcomingPurchase();
   }
 
   /** A6: Host/admin manual game start — calls game:start on the socket. */

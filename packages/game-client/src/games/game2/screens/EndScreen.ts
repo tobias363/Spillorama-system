@@ -8,9 +8,13 @@ import type { GameState } from "../../../bridge/GameBridge.js";
  */
 export class EndScreen extends Container {
   private onDismiss: (() => void) | null = null;
+  private screenWidth: number;
+  private screenHeight: number;
 
   constructor(screenWidth: number, screenHeight: number) {
     super();
+    this.screenWidth = screenWidth;
+    this.screenHeight = screenHeight;
 
     // Semi-transparent overlay
     const overlay = new Graphics();
@@ -20,10 +24,16 @@ export class EndScreen extends Container {
   }
 
   show(state: GameState): void {
-    const w = this.children[0] ? 400 : 400;
+    const w = 400;
     const h = 280;
-    const cx = (this.parent?.width ?? 800) / 2;
-    const cy = (this.parent?.height ?? 600) / 2;
+    // Use the dims passed to the constructor instead of `this.parent?.width`
+    // — parent.width walks the entire parent-container bounds, and when any
+    // sibling was destroyed mid-transition it has a null transform whose
+    // `.y` getter throws. That crash repeats on every Pixi render tick, so
+    // the console floods with thousands of "Cannot read properties of null
+    // (reading 'y')" errors (seen 2026-04-20 after switching to ENDED).
+    const cx = this.screenWidth / 2;
+    const cy = this.screenHeight / 2;
 
     // Results panel
     const panel = new Container();
