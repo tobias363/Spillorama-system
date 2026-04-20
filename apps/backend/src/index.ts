@@ -100,6 +100,8 @@ import { createAdminCloseDayRouter } from "./routes/adminCloseDay.js";
 import { CloseDayService } from "./admin/CloseDayService.js";
 import { createAdminDailySchedulesRouter } from "./routes/adminDailySchedules.js";
 import { DailyScheduleService } from "./admin/DailyScheduleService.js";
+import { createAdminSchedulesRouter } from "./routes/adminSchedules.js";
+import { ScheduleService } from "./admin/ScheduleService.js";
 import { createAdminPatternsRouter } from "./routes/adminPatterns.js";
 import { PatternService } from "./admin/PatternService.js";
 import { createAdminHallGroupsRouter } from "./routes/adminHallGroups.js";
@@ -368,6 +370,16 @@ const closeDayService = new CloseDayService({
 // BIN-626: DailySchedule (daglig spill-plan per hall, kobler GameManagement
 // til hall + tidspunkt + subgames).
 const dailyScheduleService = new DailyScheduleService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-625: Schedule (gjenbrukbar spill-mal / sub-game-bundle). Distinct fra
+// DailySchedule (BIN-626) som er kalender-rader; Schedule er oppskrifta.
+// Legacy Mongo-schema `schedules` normalisert til `app_schedules` med egne
+// kolonner for scheduleName/Number/Type/luckyNumberPrize + sub_games_json
+// for fri-form subgame-bundle (normaliseres i BIN-621 SubGame-katalogen).
+const scheduleService = new ScheduleService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -754,6 +766,15 @@ app.use(createAdminDailySchedulesRouter({
   auditLogService,
   dailyScheduleService,
   gameManagementService,
+}));
+// BIN-625: Schedule CRUD (gjenbrukbare spill-maler). 4 endepunkter —
+// list/detail/create/patch/delete. SCHEDULE_READ / SCHEDULE_WRITE deles
+// med DailySchedule (BIN-626). AuditLog: admin.schedule.{create,update,
+// delete,hard_delete}.
+app.use(createAdminSchedulesRouter({
+  platformService,
+  auditLogService,
+  scheduleService,
 }));
 // BIN-627: Pattern CRUD + dynamic-menu. Aktiverer Agent A's
 // patternManagement-placeholder-sider fra PR-A3a (3 sider) og brukes av

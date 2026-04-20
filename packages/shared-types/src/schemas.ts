@@ -1262,3 +1262,90 @@ export const SavedGameLoadResponseSchema = z.object({
   config: z.record(z.string(), z.unknown()),
 });
 export type SavedGameLoadResponse = z.infer<typeof SavedGameLoadResponseSchema>;
+
+// ── BIN-625: Schedule CRUD wire schemas ───────────────────────────────────
+// Admin-CRUD for Schedule-maler (gjenbrukbare spill-oppskrifter). Distinct
+// fra DailySchedule (BIN-626) som er kalender-rader. Mirror av migration
+// `20260425000300_schedules.sql`.
+//
+// Legacy-opphav: legacy/unity-backend/App/Models/schedule.js (Mongo) —
+// "schedules"-kolleksjonen med scheduleName, scheduleType (Auto|Manual),
+// subGames[] og Innsatsen-spesifikke felter (luckyNumberPrize,
+// ticketColorTypePrice m.fl. innenfor subGames).
+
+const ScheduleType = z.enum(["Auto", "Manual"]);
+const ScheduleStatus = z.enum(["active", "inactive"]);
+
+/**
+ * Fri-form subgame-slot. Feltene matcher legacy scheduleController.
+ * createSchedulePostData. Ukjente felter bevares via `extra` inntil
+ * BIN-621 normaliserer subgame-katalogen.
+ */
+export const ScheduleSubgameSchema = z.object({
+  name: z.string().optional(),
+  customGameName: z.string().optional(),
+  startTime: HhMmOrEmpty.optional(),
+  endTime: HhMmOrEmpty.optional(),
+  notificationStartTime: z.string().optional(),
+  minseconds: z.number().int().nonnegative().optional(),
+  maxseconds: z.number().int().nonnegative().optional(),
+  seconds: z.number().int().nonnegative().optional(),
+  ticketTypesData: z.record(z.string(), z.unknown()).optional(),
+  jackpotData: z.record(z.string(), z.unknown()).optional(),
+  elvisData: z.record(z.string(), z.unknown()).optional(),
+  extra: z.record(z.string(), z.unknown()).optional(),
+});
+export type ScheduleSubgame = z.infer<typeof ScheduleSubgameSchema>;
+
+export const ScheduleRowSchema = z.object({
+  id: z.string().min(1),
+  scheduleName: z.string().min(1).max(200),
+  /** Auto-generert legacy-stil SID_YYYYMMDD_HHMMSS_… unik. */
+  scheduleNumber: z.string().min(1).max(200),
+  scheduleType: ScheduleType,
+  luckyNumberPrize: z.number().int().nonnegative(),
+  status: ScheduleStatus,
+  isAdminSchedule: z.boolean(),
+  manualStartTime: HhMmOrEmpty,
+  manualEndTime: HhMmOrEmpty,
+  subGames: z.array(ScheduleSubgameSchema),
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type ScheduleRow = z.infer<typeof ScheduleRowSchema>;
+
+export const CreateScheduleSchema = z.object({
+  scheduleName: z.string().min(1).max(200),
+  /** Auto-genereres av service hvis ikke satt. */
+  scheduleNumber: z.string().min(1).max(200).optional(),
+  scheduleType: ScheduleType.optional(),
+  luckyNumberPrize: z.number().int().nonnegative().optional(),
+  status: ScheduleStatus.optional(),
+  isAdminSchedule: z.boolean().optional(),
+  manualStartTime: HhMmOrEmpty.optional(),
+  manualEndTime: HhMmOrEmpty.optional(),
+  subGames: z.array(ScheduleSubgameSchema).optional(),
+});
+export type CreateScheduleInput = z.infer<typeof CreateScheduleSchema>;
+
+export const UpdateScheduleSchema = z
+  .object({
+    scheduleName: z.string().min(1).max(200).optional(),
+    scheduleType: ScheduleType.optional(),
+    luckyNumberPrize: z.number().int().nonnegative().optional(),
+    status: ScheduleStatus.optional(),
+    manualStartTime: HhMmOrEmpty.optional(),
+    manualEndTime: HhMmOrEmpty.optional(),
+    subGames: z.array(ScheduleSubgameSchema).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateScheduleInput = z.infer<typeof UpdateScheduleSchema>;
+
+export const ScheduleListResponseSchema = z.object({
+  schedules: z.array(ScheduleRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type ScheduleListResponse = z.infer<typeof ScheduleListResponseSchema>;
