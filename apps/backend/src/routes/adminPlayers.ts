@@ -548,6 +548,12 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
         }
       }
 
+      // Krev minst ett gyldig felt i payload — unngå no-op-kall som ellers
+      // bare vil lage støy i audit-loggen.
+      if (Object.keys(updates).length === 0) {
+        throw new DomainError("INVALID_INPUT", "Ingen endringer oppgitt.");
+      }
+
       const { previous, updated, changedFields } = await platformService.updatePlayerAsAdmin({
         userId,
         updates,
