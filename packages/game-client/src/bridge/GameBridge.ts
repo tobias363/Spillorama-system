@@ -210,11 +210,20 @@ export class GameBridge {
     this.state.playerCount = snapshot.players.length;
 
     if (snapshot.currentGame) {
-      this.applyGameSnapshot(snapshot.currentGame);
+      // BIN-686: Full snapshot-apply path — reset gap-detection baseline
+      // so draw:new from this point forward can validate correctly.
+      this.applyGameSnapshot(snapshot.currentGame, { resetDrawIndex: true });
     } else {
       this.state.gameStatus = "NONE";
       this.state.gameId = null;
+      // Also reset index — a null currentGame means we're between rounds.
+      this.lastAppliedDrawIndex = -1;
     }
+    // BIN-686: seed previousGameStatus from the applied snapshot so the
+    // first incoming room:update doesn't mistake this for a WAITING→RUNNING
+    // transition (which would trigger an unwanted lastAppliedDrawIndex
+    // reset and drop the next draw:new as a duplicate).
+    this.previousGameStatus = this.state.gameStatus;
 
     // The server's room:create ack returns a full RoomUpdatePayload, not a bare
     // RoomSnapshot. Pull variant info from it so the buy popup gets ticket types
@@ -303,11 +312,21 @@ export class GameBridge {
 
     // Game state
     const prevStatus = this.previousGameStatus;
+    const prevGameId = this.state.gameId;
     if (payload.currentGame) {
-      this.applyGameSnapshot(payload.currentGame);
+      // BIN-686 Bug 3: Reset gap-detection baseline ONLY on a NEW game
+      // (different gameId) or when transitioning into RUNNING from a non-
+      // running state. Within an active round, room:update races with
+      // draw:new so we MUST keep lastAppliedDrawIndex stable — otherwise
+      // every room:update re-baselines and makes the next draw:new look
+      // like a gap, triggering an infinite resync loop.
+      const isNewGame = payload.currentGame.id !== prevGameId;
+      const isRoundStart = prevStatus !== "RUNNING" && payload.currentGame.status === "RUNNING";
+      this.applyGameSnapshot(payload.currentGame, { resetDrawIndex: isNewGame || isRoundStart });
     } else {
       this.state.gameStatus = "NONE";
       this.state.gameId = null;
+      this.lastAppliedDrawIndex = -1;
     }
 
     // Detect game lifecycle transitions
@@ -421,7 +440,7 @@ export class GameBridge {
 
   // ── Helpers ───────────────────────────────────────────────────────────
 
-  private applyGameSnapshot(game: GameSnapshot): void {
+  private applyGameSnapshot(game: GameSnapshot, opts: { resetDrawIndex?: boolean } = {}): void {
     this.state.gameStatus = game.status;
     this.state.gameId = game.id;
     this.state.drawnNumbers = [...game.drawnNumbers];
@@ -430,8 +449,16 @@ export class GameBridge {
         ? game.drawnNumbers[game.drawnNumbers.length - 1]
         : null;
     this.state.drawCount = game.drawnNumbers.length;
-    // BIN-502: snapshot is authoritative — align lastAppliedDrawIndex with it.
-    this.lastAppliedDrawIndex = game.drawnNumbers.length - 1;
+    // BIN-686 Bug 3: Only reset `lastAppliedDrawIndex` when called from a
+    // FULL-snapshot path (applySnapshot / resyncRoom). `room:update` events
+    // also carry a currentGame snapshot, but they RACE with draw:new events
+    // — if we reset lastAppliedDrawIndex on every room:update, the next
+    // draw:new looks like a gap (`drawIndex < expected`) and fires an
+    // infinite resync loop. Keeping the existing index on room:update lets
+    // draw:new's own bookkeeping stay consistent.
+    if (opts.resetDrawIndex) {
+      this.lastAppliedDrawIndex = game.drawnNumbers.length - 1;
+    }
     this.state.totalDrawCapacity = game.drawBag.length + game.drawnNumbers.length;
     this.state.prizePool = game.prizePool;
     this.state.entryFee = game.entryFee;

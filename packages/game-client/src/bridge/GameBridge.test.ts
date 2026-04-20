@@ -482,4 +482,92 @@ describe("GameBridge", () => {
       expect(listener).not.toHaveBeenCalled();
     });
   });
+
+  describe("BIN-686: room:update/draw:new race — no false gap detection", () => {
+    it("room:update within an active round does NOT reset lastAppliedDrawIndex", () => {
+      // Setup: apply snapshot with 5 balls drawn → lastAppliedDrawIndex = 4
+      bridge.start("player-1");
+      bridge.applySnapshot(makeRoomSnapshot({
+        currentGame: makeGameSnapshot({ id: "game-42", drawnNumbers: [1, 2, 3, 4, 5] }),
+      }));
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(4);
+
+      // draw:new for index=5 arrives — applied normally
+      socket.fire("drawNew", { number: 6, drawIndex: 5, gameId: "game-42" });
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(5);
+
+      // Now room:update arrives AFTER draw:new with 6 balls drawn (same game).
+      // Pre-BIN-686: this reset lastAppliedDrawIndex = 5 (drawnNumbers.length - 1),
+      // but then the NEXT draw:new would look like a gap. We assert the index
+      // stays untouched so the next draw:new applies cleanly.
+      socket.fire("roomUpdate", makeRoomUpdate({
+        currentGame: makeGameSnapshot({ id: "game-42", drawnNumbers: [1, 2, 3, 4, 5, 6] }),
+      }));
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(5);
+      expect(bridge.getGapMetrics().gaps).toBe(0);
+    });
+
+    it("draw:new after a series of room:updates is applied, not flagged as gap", () => {
+      bridge.start("player-1");
+      bridge.applySnapshot(makeRoomSnapshot({
+        currentGame: makeGameSnapshot({ id: "g1", drawnNumbers: [1, 2, 3] }),
+      }));
+
+      // Simulate: 5 consecutive room:updates each advancing drawn-count
+      // (scheduler broadcasts). Between each, a draw:new arrives.
+      // The sequence interleaves — room:update-first, then draw:new.
+      for (let i = 0; i < 5; i++) {
+        const count = 4 + i; // 4, 5, 6, 7, 8
+        const newBall = count;
+        const drawn = Array.from({ length: count }, (_, j) => j + 1);
+        // room:update advances server-state view
+        socket.fire("roomUpdate", makeRoomUpdate({
+          currentGame: makeGameSnapshot({ id: "g1", drawnNumbers: drawn }),
+        }));
+        // draw:new for that ball arrives
+        socket.fire("drawNew", { number: newBall, drawIndex: count - 1, gameId: "g1" });
+      }
+
+      // All 5 draw:new events must have applied — no gaps, no duplicates.
+      const metrics = bridge.getGapMetrics();
+      expect(metrics.gaps).toBe(0);
+      expect(metrics.duplicates).toBe(0);
+      expect(metrics.lastAppliedDrawIndex).toBe(7); // 2 (initial) + 5 draws = index 7
+    });
+
+    it("NEW game via room:update (different gameId) DOES reset index", () => {
+      bridge.start("player-1");
+      bridge.applySnapshot(makeRoomSnapshot({
+        currentGame: makeGameSnapshot({ id: "game-A", drawnNumbers: [1, 2, 3, 4, 5] }),
+      }));
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(4);
+
+      // New game — different id. draw:new-events will restart from drawIndex=0,
+      // so the bridge MUST reset its baseline or it'd flag the first draw as
+      // a duplicate.
+      socket.fire("roomUpdate", makeRoomUpdate({
+        currentGame: makeGameSnapshot({ id: "game-B", drawnNumbers: [] }),
+      }));
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(-1);
+
+      // First draw of new game applies cleanly
+      socket.fire("drawNew", { number: 17, drawIndex: 0, gameId: "game-B" });
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(0);
+      expect(bridge.getGapMetrics().gaps).toBe(0);
+    });
+
+    it("WAITING → RUNNING transition resets index (fresh round start)", () => {
+      bridge.start("player-1");
+      // Start in ENDED — server says last game is over
+      bridge.applySnapshot(makeRoomSnapshot({
+        currentGame: makeGameSnapshot({ id: "game-prev", status: "ENDED", drawnNumbers: [1, 2, 3] }),
+      }));
+
+      // room:update fires with a fresh RUNNING game (new gameId, no draws yet)
+      socket.fire("roomUpdate", makeRoomUpdate({
+        currentGame: makeGameSnapshot({ id: "game-new", status: "RUNNING", drawnNumbers: [] }),
+      }));
+      expect(bridge.getGapMetrics().lastAppliedDrawIndex).toBe(-1);
+    });
+  });
 });

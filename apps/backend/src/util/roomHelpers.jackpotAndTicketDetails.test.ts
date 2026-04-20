@@ -144,7 +144,11 @@ test("G15: falls back to hallId when getHallName returns null", () => {
 
 test("G15: pre-round display tickets are enriched too", () => {
   const snap = baseSnapshot();
+  // BIN-686: pre-round tickets now only generate for ARMED players.
+  // Arm p1 with 1 ticket so the preRound entry exists and we can verify
+  // enrichment (hallName, supplierName, price, boughtAt).
   const payload = buildRoomUpdatePayload(snap, Date.now(), buildOpts({
+    getArmedPlayerTicketCounts: () => ({ p1: 1 }),
     getOrCreateDisplayTickets: () => [
       { grid: [[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15]], id: "tkt-0", type: "small" },
     ],
@@ -164,4 +168,54 @@ test("G15: does not overwrite ticket fields that are already populated", () => {
   const t: Ticket = payload.currentGame!.tickets.p1[0];
   assert.equal(t.ticketNumber, "PRE-42");
   assert.equal(t.hallName, "Custom Hall");
+});
+
+// ── BIN-686 Bug 1: unarmed players get NO pre-round tickets ────────────
+
+test("BIN-686 Bug 1: unarmed player gets NO preRoundTickets entry", () => {
+  const snap = baseSnapshot();  // p1 is in players, but we won't arm them
+  let displayTicketsCalls = 0;
+  const payload = buildRoomUpdatePayload(snap, Date.now(), buildOpts({
+    // Explicitly: p1 is not armed — returns empty object
+    getArmedPlayerTicketCounts: () => ({}),
+    getOrCreateDisplayTickets: () => {
+      displayTicketsCalls += 1;
+      return [{ grid: [[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15]], id: "tkt-0", type: "small" }];
+    },
+  }));
+  // Zero display-ticket generation for unarmed players — the auto-preview
+  // behavior that misled users ("Kjøpt: 4" without buying) is gone.
+  assert.equal(displayTicketsCalls, 0, "getOrCreateDisplayTickets must NOT be called for unarmed players");
+  // No preRoundTickets entry for p1.
+  assert.equal(payload.preRoundTickets.p1, undefined);
+});
+
+test("BIN-686 Bug 1: armed player gets preRoundTickets with their chosen count", () => {
+  const snap = baseSnapshot();
+  let receivedCount: number | null = null;
+  const payload = buildRoomUpdatePayload(snap, Date.now(), buildOpts({
+    getArmedPlayerTicketCounts: () => ({ p1: 3 }),
+    getOrCreateDisplayTickets: (_code, _id, count) => {
+      receivedCount = count;
+      return Array.from({ length: count }, (_, i) => ({
+        grid: [[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15]],
+        id: `tkt-${i}`,
+        type: "small",
+      }));
+    },
+  }));
+  assert.equal(receivedCount, 3, "armed count (3) flows through to getOrCreateDisplayTickets");
+  assert.ok(payload.preRoundTickets.p1, "armed player has preRoundTickets entry");
+  assert.equal(payload.preRoundTickets.p1.length, 3);
+});
+
+test("BIN-686 Bug 1: armed count <= 0 is treated as unarmed", () => {
+  const snap = baseSnapshot();
+  const payload = buildRoomUpdatePayload(snap, Date.now(), buildOpts({
+    // Pathological: armed but with 0 count (defensive — never should happen
+    // via proper arming, but guard against it).
+    getArmedPlayerTicketCounts: () => ({ p1: 0 }),
+    getOrCreateDisplayTickets: () => [{ grid: [[1,2,3,4,5]], id: "oops", type: "small" }],
+  }));
+  assert.equal(payload.preRoundTickets.p1, undefined, "armed=0 behaves as unarmed");
 });
