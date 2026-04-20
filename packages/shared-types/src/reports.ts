@@ -220,7 +220,14 @@ export interface PhysicalTicketReportRow {
   totalPayouts: number;
 }
 
-/** BIN-647 (sub-game drill-down). */
+/**
+ * BIN-647 placeholder (PR-A4a). Kept for backward compatibility with the
+ * admin-web gap-banner wrapper (`admin-reports-drill.ts`) which predates the
+ * canonical drill-down shape below. New consumers should use
+ * `SubgameDrillDownItem` + `SubgameDrillDownResponse`.
+ *
+ * @deprecated Use `SubgameDrillDownItem` instead.
+ */
 export interface SubgameReportRow {
   subgameId: string;
   patternName: string;
@@ -229,6 +236,60 @@ export interface SubgameReportRow {
   totalStakes: number;
   totalPrizes: number;
   net: number;
+}
+
+/**
+ * BIN-647: sub-game drill-down row for a single child (sub-game) under a
+ * parent `hall_game_schedules` row.
+ *
+ * Legacy mapping (legacy/unity-backend/App/Views/report/subgame1reports.html):
+ *   gameNumber              → subGameNumber
+ *   gameMode                → gameMode
+ *   startDate               → startDate
+ *   subGames[0].gameName    → name
+ *   halls                   → hallId + hallName
+ *   ticketSold              → ticketCount
+ *   earnedFromTickets       → revenue
+ *   totalWinning            → totalWinnings
+ *   finalGameProfitAmount   → netProfit
+ *   profitPercentage        → profitPercentage
+ *
+ * `players` = count of distinct `wallet_id` with STAKE events for this
+ * sub-game in the requested window (legacy Mongo field was implicit in
+ * `ticketSold` — we expose it explicitly per task spec).
+ */
+export interface SubgameDrillDownItem {
+  subGameId: string;
+  subGameNumber: string | null;
+  parentScheduleId: string;
+  hallId: string;
+  hallName: string;
+  gameType: string;
+  gameMode: string | null;
+  name: string;
+  sequence: number | null;
+  startDate: string | null;
+  revenue: number;
+  totalWinnings: number;
+  netProfit: number;
+  profitPercentage: number;
+  ticketCount: number;
+  players: number;
+}
+
+export interface SubgameDrillDownResponse {
+  parentId: string;
+  from: string;
+  to: string;
+  items: SubgameDrillDownItem[];
+  nextCursor: string | null;
+  totals: {
+    revenue: number;
+    totalWinnings: number;
+    netProfit: number;
+    ticketCount: number;
+    players: number;
+  };
 }
 
 /** BIN-650: red-flag category with count of open flags. */

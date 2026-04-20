@@ -121,6 +121,7 @@ import { MiniGamesConfigService } from "./admin/MiniGamesConfigService.js";
 import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
 import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
+import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
 import { createAdminUniqueIdsAndPayoutsRouter } from "./routes/adminUniqueIdsAndPayouts.js";
@@ -1072,6 +1073,10 @@ app.use(createAdminHallReportsRouter({
   platformService,
   auditLogService,
   reportService: hallAccountReportService,
+}));
+app.use(createAdminReportsSubgameDrillDownRouter({
+  platformService,
+  engine,
 }));
 
 // BIN-583 B3.5: OK Bingo external-machine integration.

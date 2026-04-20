@@ -1513,6 +1513,63 @@ export class PlatformService {
     return rows.map((r) => this.mapScheduleLog(r));
   }
 
+  /**
+   * BIN-647: List schedule-log rows for a given set of schedule-slot ids in
+   * an inclusive ISO window. Used by the subgame-drill-down report to map
+   * sub-game schedule rows → game_session ids for ledger aggregation.
+   *
+   * Returns at most 5_000 rows — a hard ceiling that covers several months of
+   * even the busiest hall; the drill-down is per-parent so this is plenty.
+   */
+  async listScheduleLogForSlots(input: {
+    scheduleSlotIds: string[];
+    from?: string;
+    to?: string;
+  }): Promise<ScheduleLogEntry[]> {
+    await this.ensureInitialized();
+    if (!input.scheduleSlotIds.length) return [];
+    const params: unknown[] = [input.scheduleSlotIds];
+    const conditions: string[] = ["schedule_slot_id = ANY($1::text[])"];
+    if (input.from) {
+      params.push(input.from);
+      conditions.push(`started_at >= $${params.length}`);
+    }
+    if (input.to) {
+      params.push(input.to);
+      conditions.push(`started_at <= $${params.length}`);
+    }
+    const { rows } = await this.pool.query<ScheduleLogRow>(
+      `SELECT * FROM ${this.scheduleLogTable()}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY started_at DESC
+       LIMIT 5000`,
+      params
+    );
+    return rows.map((r) => this.mapScheduleLog(r));
+  }
+
+  /**
+   * BIN-647: Fetch a single schedule-slot by id (parent or child). Returns
+   * null if the row doesn't exist. Lean accessor used by the drill-down
+   * route to resolve `parentId` → hallId for hall-scope enforcement.
+   */
+  async getScheduleSlotById(id: string): Promise<ScheduleSlot | null> {
+    await this.ensureInitialized();
+    if (!id.trim()) return null;
+    const { rows } = await this.pool.query<ScheduleSlotRow>(
+      `SELECT id, hall_id, game_type, display_name, day_of_week, start_time::text,
+              prize_description, max_tickets, is_active, sort_order, variant_config,
+              parent_schedule_id, sub_game_sequence, sub_game_number,
+              created_at, updated_at
+       FROM ${this.scheduleTable()}
+       WHERE id = $1`,
+      [id.trim()]
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return this.mapScheduleSlot(row);
+  }
+
   async listTerminals(options?: {
     hallId?: string;
     includeInactive?: boolean;
