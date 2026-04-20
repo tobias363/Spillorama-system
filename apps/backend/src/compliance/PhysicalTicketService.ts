@@ -174,6 +174,43 @@ export interface PhysicalTicketCashoutResult {
   ticket: PhysicalTicket;
 }
 
+/**
+ * BIN-639: bulk reward-all input. Admin-UI beregner payoutCents per vinner
+ * og sender array med `{ uniqueId, amountCents }`. Service prosesserer hver
+ * ticket som egen mini-transaksjon slik at én feil ikke ruller tilbake de
+ * andre.
+ */
+export interface RewardAllInput {
+  gameId: string;
+  rewards: Array<{ uniqueId: string; amountCents: number }>;
+  actorId: string;
+}
+
+export type RewardAllDetailStatus =
+  | "rewarded"
+  | "skipped_already_distributed"
+  | "skipped_not_stamped"
+  | "skipped_not_won"
+  | "skipped_wrong_game"
+  | "ticket_not_found"
+  | "invalid_amount";
+
+export interface RewardAllDetail {
+  uniqueId: string;
+  status: RewardAllDetailStatus;
+  amountCents?: number;
+  cashoutId?: string;
+  hallId?: string;
+  message?: string;
+}
+
+export interface RewardAllResult {
+  rewardedCount: number;
+  totalPayoutCents: number;
+  skippedCount: number;
+  details: RewardAllDetail[];
+}
+
 export interface PhysicalTicketServiceOptions {
   connectionString: string;
   schema?: string;
@@ -1290,6 +1327,238 @@ export class PhysicalTicketService {
       }
       logger.error({ err, uniqueId }, "[BIN-640] recordCashout failed");
       throw new DomainError("PHYSICAL_CASHOUT_FAILED", "Kunne ikke registrere cashout.");
+    } finally {
+      client.release();
+    }
+  }
+
+  // ── BIN-639: bulk reward-all ───────────────────────────────────────────
+
+  /**
+   * BIN-639: bulk-distribusjon av premier til flere vinnende fysiske billetter.
+   *
+   * Workflow:
+   *   1. Operatør scanner ALLE potensielle vinner-bonger via BIN-641 check-bingo
+   *      (stamper numbers + pattern + evaluated_at på ticket-raden).
+   *   2. Admin-UI kalkulerer payoutCents per vinner basert på game-prize-structure
+   *      + stamped pattern.
+   *   3. Admin kaller dette endepunktet med
+   *      `{ gameId, rewards: [{ uniqueId, amountCents }, ...] }`.
+   *   4. Service går gjennom hver ticket som **egen mini-transaksjon** — én feil
+   *      skipper ikke de andre.
+   *
+   * Per-ticket-statuser:
+   *   - `ticket_not_found`             — billett finnes ikke.
+   *   - `skipped_wrong_game`           — billett er knyttet til annet gameId.
+   *   - `skipped_not_stamped`          — ikke scannet via BIN-641 først (evaluated_at IS NULL).
+   *   - `skipped_not_won`              — stemplet, men tapende (pattern_won IS NULL).
+   *   - `skipped_already_distributed`  — is_winning_distributed === true (idempotens).
+   *   - `rewarded`                     — utbetalt: won_amount_cents + cashout skrevet.
+   *
+   * Idempotens i to lag:
+   *   1. `is_winning_distributed`-flagg på ticket-raden (primær).
+   *   2. `app_physical_ticket_cashouts.ticket_unique_id` UNIQUE-constraint fra
+   *      BIN-640 (defense-in-depth mot race).
+   *
+   * Hver ticket får FOR UPDATE-lock + egen transaksjon for serialisering mot
+   * parallelle `rewardAll`-kall + BIN-640 single-ticket cashout-kall.
+   *
+   * Audit-log skrives IKKE herfra — det er route-lagets ansvar (per-ticket +
+   * bulk-event på slutten).
+   */
+  async rewardAll(input: RewardAllInput): Promise<RewardAllResult> {
+    await this.ensureInitialized();
+    const gameId = input.gameId?.trim();
+    if (!gameId) throw new DomainError("INVALID_INPUT", "gameId er påkrevd.");
+    const actorId = input.actorId?.trim();
+    if (!actorId) throw new DomainError("INVALID_INPUT", "actorId er påkrevd.");
+    if (!Array.isArray(input.rewards)) {
+      throw new DomainError("INVALID_INPUT", "rewards må være array.");
+    }
+
+    const details: RewardAllDetail[] = [];
+    let rewardedCount = 0;
+    let totalPayoutCents = 0;
+    let skippedCount = 0;
+
+    for (const reward of input.rewards) {
+      const uniqueIdRaw = reward?.uniqueId;
+      const uniqueId =
+        typeof uniqueIdRaw === "string" && uniqueIdRaw.trim() ? uniqueIdRaw.trim() : null;
+      if (!uniqueId) {
+        // Defense-in-depth: payload-parsing bør ha stoppet dette før service.
+        // Vi feiler route-nivå (INVALID_INPUT) heller enn å legge til detail.
+        throw new DomainError("INVALID_INPUT", "rewards[].uniqueId er påkrevd.");
+      }
+      const amountCents = Number(reward?.amountCents);
+      if (
+        !Number.isFinite(amountCents) ||
+        !Number.isInteger(amountCents) ||
+        amountCents <= 0
+      ) {
+        details.push({
+          uniqueId,
+          status: "invalid_amount",
+          message: "amountCents må være positivt heltall.",
+        });
+        skippedCount += 1;
+        continue;
+      }
+
+      const detail = await this.rewardOne({
+        uniqueId,
+        amountCents,
+        gameId,
+        actorId,
+      });
+      details.push(detail);
+      if (detail.status === "rewarded") {
+        rewardedCount += 1;
+        totalPayoutCents += detail.amountCents ?? 0;
+      } else {
+        skippedCount += 1;
+      }
+    }
+
+    return { rewardedCount, totalPayoutCents, skippedCount, details };
+  }
+
+  /**
+   * BIN-639-helper: prosesser én ticket som egen transaksjon. Returnerer alltid
+   * en `RewardAllDetail` — kaster IKKE ved forventede skip-scenarier (not found,
+   * wrong game, not stamped, not won, already distributed). Kun infrastruktur-
+   * feil propageres som DomainError.
+   */
+  private async rewardOne(args: {
+    uniqueId: string;
+    amountCents: number;
+    gameId: string;
+    actorId: string;
+  }): Promise<RewardAllDetail> {
+    const { uniqueId, amountCents, gameId, actorId } = args;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: ticketRows } = await client.query<TicketRow>(
+        `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
+                sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
+                created_at, updated_at,
+                numbers_json, pattern_won, won_amount_cents, evaluated_at,
+                is_winning_distributed, winning_distributed_at
+         FROM ${this.ticketsTable()}
+         WHERE unique_id = $1 FOR UPDATE`,
+        [uniqueId]
+      );
+      const ticketRow = ticketRows[0];
+      if (!ticketRow) {
+        await client.query("ROLLBACK");
+        return { uniqueId, status: "ticket_not_found" };
+      }
+
+      if (ticketRow.assigned_game_id !== gameId) {
+        await client.query("ROLLBACK");
+        return {
+          uniqueId,
+          status: "skipped_wrong_game",
+          hallId: ticketRow.hall_id,
+        };
+      }
+
+      if (ticketRow.evaluated_at === null || ticketRow.evaluated_at === undefined) {
+        await client.query("ROLLBACK");
+        return {
+          uniqueId,
+          status: "skipped_not_stamped",
+          hallId: ticketRow.hall_id,
+        };
+      }
+
+      if (ticketRow.pattern_won === null || ticketRow.pattern_won === undefined) {
+        await client.query("ROLLBACK");
+        return {
+          uniqueId,
+          status: "skipped_not_won",
+          hallId: ticketRow.hall_id,
+        };
+      }
+
+      if (ticketRow.is_winning_distributed === true) {
+        await client.query("ROLLBACK");
+        return {
+          uniqueId,
+          status: "skipped_already_distributed",
+          hallId: ticketRow.hall_id,
+        };
+      }
+
+      // Idempotens-defense: hvis cashout allerede eksisterer (fra BIN-640 eller
+      // tidligere reward-all hvor is_winning_distributed-flagget ble satt etter),
+      // respekterer vi UNIQUE-constraint. Pre-check inne i tx.
+      const { rows: existingCashout } = await client.query<{ id: string }>(
+        `SELECT id FROM ${this.cashoutsTable()} WHERE ticket_unique_id = $1 LIMIT 1`,
+        [uniqueId]
+      );
+      if (existingCashout[0]) {
+        await client.query("ROLLBACK");
+        return {
+          uniqueId,
+          status: "skipped_already_distributed",
+          hallId: ticketRow.hall_id,
+        };
+      }
+
+      // Utfør reward: UPDATE ticket + INSERT cashout.
+      await client.query(
+        `UPDATE ${this.ticketsTable()}
+         SET won_amount_cents = $2,
+             is_winning_distributed = true,
+             winning_distributed_at = now(),
+             updated_at = now()
+         WHERE unique_id = $1`,
+        [uniqueId, amountCents]
+      );
+
+      const cashoutId = `ptcash-${randomUUID()}`;
+      await client.query(
+        `INSERT INTO ${this.cashoutsTable()}
+          (id, ticket_unique_id, hall_id, game_id, payout_cents, paid_by, notes, other_data)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+        [
+          cashoutId,
+          uniqueId,
+          ticketRow.hall_id,
+          gameId,
+          amountCents,
+          actorId,
+          null,
+          JSON.stringify({ source: "BIN-639-reward-all" }),
+        ]
+      );
+
+      await client.query("COMMIT");
+      return {
+        uniqueId,
+        status: "rewarded",
+        amountCents,
+        cashoutId,
+        hallId: ticketRow.hall_id,
+      };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      // UNIQUE-violation på cashouts = race med BIN-640 single-cashout eller
+      // parallel rewardAll. Oversett til skipped_already_distributed.
+      if (isUniqueViolation(err)) {
+        return {
+          uniqueId,
+          status: "skipped_already_distributed",
+        };
+      }
+      if (err instanceof DomainError) throw err;
+      logger.error({ err, uniqueId }, "[BIN-639] rewardOne failed");
+      throw new DomainError(
+        "PHYSICAL_REWARD_FAILED",
+        "Kunne ikke utbetale vinner-premie på billett.",
+      );
     } finally {
       client.release();
     }
