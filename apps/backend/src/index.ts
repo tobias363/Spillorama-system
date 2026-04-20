@@ -125,6 +125,7 @@ import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
 import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
+import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRedFlagPlayers.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
 import { createAdminUniqueIdsAndPayoutsRouter } from "./routes/adminUniqueIdsAndPayouts.js";
@@ -1098,6 +1099,16 @@ app.use(createAdminHallReportsRouter({
 }));
 app.use(createAdminReportsSubgameDrillDownRouter({
   platformService,
+  engine,
+}));
+// BIN-651: red-flag players report (AML + regulatorisk AuditLog on view).
+// Paginert liste over red-flaggede spillere med flag-årsak + siste aktivitet.
+// Skriver `admin.report.red_flag_players.viewed` til AuditLog ved vellykket
+// lesning (pengespillforskriften §11).
+app.use(createAdminReportsRedFlagPlayersRouter({
+  platformService,
+  auditLogService,
+  amlService,
   engine,
 }));
 
