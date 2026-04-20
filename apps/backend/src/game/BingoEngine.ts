@@ -128,7 +128,14 @@ interface StartGameInput {
    * Maps playerId → array of { type, qty }.
    * When present, ticket generation uses these instead of flat count + color cycling.
    */
-  armedPlayerSelections?: Record<string, Array<{ type: string; qty: number }>>;
+  /**
+   * BIN-693: `name` is optional on each selection so the engine can
+   * distinguish Small Yellow from Small Purple (same `type: "small"`,
+   * different colour). Without `name`, the engine falls back to
+   * type-only matching which picks the first config entry — fine for
+   * legacy clients that don't yet send `name`.
+   */
+  armedPlayerSelections?: Record<string, Array<{ type: string; qty: number; name?: string }>>;
   /** Win-condition patterns for this round. Defaults to [1 Rad, Full Plate]. */
   patterns?: PatternDefinition[];
   /** Game variant type (from hall_game_schedules.game_type). */
@@ -653,7 +660,24 @@ export class BingoEngine {
           // generate qty * ticketCount actual tickets (e.g. 1 "large" = 3 tickets).
           let ticketIndex = 0;
           for (const sel of playerSelections) {
-            const tt = variantConfig.ticketTypes.find((t) => t.type === sel.type);
+            // BIN-693: Prefer name-based match (Small Yellow vs Small Purple
+            // — same `type: "small"`, distinct `name`). Without this lookup,
+            // `.find(t => t.type === sel.type)` returns the FIRST config
+            // entry for that type (typically Small Yellow), and every
+            // selection in the `small` family becomes Small Yellow — which
+            // is exactly the staging bug Tobias reported: 6 different
+            // colours armed, all 6 brett rendered Small Yellow.
+            //
+            // Mirrors `expandSelectionsToTicketColors` (variantConfig.ts)
+            // so pre-round and live-round resolve colours identically.
+            // Falls back to type-only match for legacy clients that don't
+            // send `name` (pre-BIN-688 bundles), matching the BIN-688
+            // fallback behaviour.
+            const tt =
+              (sel.name
+                ? variantConfig.ticketTypes.find((t) => t.name === sel.name)
+                : undefined) ??
+              variantConfig.ticketTypes.find((t) => t.type === sel.type);
             const ticketsPerUnit = tt?.ticketCount ?? 1;
             const colors = tt?.colors; // For traffic-light: [Red, Yellow, Green]
 
