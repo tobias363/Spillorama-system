@@ -42,6 +42,15 @@ export interface TicketGroupOptions {
   cellSize?: number;
   /** Grid size forwarded to each mini-ticket. */
   gridSize?: "3x5" | "5x5";
+  /**
+   * BIN-692: show a × cancel button in the group's shared header so the
+   * player can drop the whole bundle (Large = 3, Elvis = 2, Traffic = 3).
+   * Backend removes ALL brett in the bundle regardless of which ticketId
+   * the click reports — passing any ticket id in the bundle is safe.
+   * Only enabled during WAITING (PlayScreen toggles based on state).
+   */
+  cancelable?: boolean;
+  onCancel?: (ticketId: string) => void;
 }
 
 /**
@@ -174,6 +183,65 @@ export class TicketGroup extends Container {
     // ── Layout once all children are built ──
     this.layoutMiniTickets();
     this.paintChrome(options.sharedTheme.headerBg);
+
+    // BIN-692: group-level × cancel button. Reports the FIRST ticket id
+    // in the bundle; backend resolves the whole bundle from that id and
+    // removes every mini-ticket in the selection. Must be added AFTER
+    // layout so we know `cardW` for the top-left anchor, and AFTER
+    // paintChrome so it sits above the shared header.
+    if (options.cancelable && options.tickets.length > 0) {
+      const firstTicketId = options.tickets[0].id;
+      if (firstTicketId && options.onCancel) {
+        const cancelBtn = this.buildCancelButton(firstTicketId, options.onCancel, options.sharedTheme.headerText);
+        this.addChild(cancelBtn);
+      }
+    }
+  }
+
+  /**
+   * BIN-692: small × button anchored top-left of the shared group header.
+   * Click drops the whole bundle via `onCancel(firstTicketId)`. Ellers
+   * identisk UX som solo TicketCard sin variant — én × per synlig kort.
+   */
+  private buildCancelButton(
+    ticketId: string,
+    onCancel: (ticketId: string) => void,
+    headerTextColor: number,
+  ): Container {
+    const btn = new Container();
+    btn.eventMode = "static";
+    btn.cursor = "pointer";
+
+    const BTN_SIZE = 18;
+    // OUTER_PAD = 8; HEADER_H = 28 → vertical centre is pad + (HEADER_H-BTN)/2.
+    btn.x = TicketGroup.OUTER_PAD + 4;
+    btn.y = TicketGroup.OUTER_PAD + (TicketGroup.HEADER_H - BTN_SIZE) / 2 - 2;
+
+    const bg = new Graphics();
+    bg.circle(BTN_SIZE / 2, BTN_SIZE / 2, BTN_SIZE / 2);
+    bg.fill({ color: 0x000000, alpha: 0.35 });
+    btn.addChild(bg);
+
+    const cross = new Text({
+      text: "\u00d7",
+      style: {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: 16,
+        fontWeight: "bold",
+        fill: headerTextColor,
+      },
+    });
+    cross.anchor.set(0.5, 0.5);
+    cross.x = BTN_SIZE / 2;
+    cross.y = BTN_SIZE / 2 - 1;
+    btn.addChild(cross);
+
+    btn.on("pointerdown", (e) => {
+      e.stopPropagation();
+      onCancel(ticketId);
+    });
+
+    return btn;
   }
 
   // ── Layout ─────────────────────────────────────────────────────────────

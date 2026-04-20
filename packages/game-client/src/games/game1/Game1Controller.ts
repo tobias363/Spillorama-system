@@ -322,6 +322,7 @@ class Game1Controller implements GameController {
         this.playScreen.setOnBuy((selections) => this.handleBuy(selections));
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
         this.playScreen.setOnCancelTickets(() => this.handleCancelTickets());
+        this.playScreen.setOnCancelTicket((id) => this.handleCancelTicket(id));
         this.playScreen.setOnOpenSettings(() => this.settingsPanel?.show());
         this.playScreen.setOnOpenMarkerBg(() => this.markerBgPanel?.show());
         this.playScreen.setOnStartGame(() => this.handleStartGame());
@@ -350,6 +351,7 @@ class Game1Controller implements GameController {
         this.playScreen.setOnBuy((selections) => this.handleBuy(selections));
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
         this.playScreen.setOnCancelTickets(() => this.handleCancelTickets());
+        this.playScreen.setOnCancelTicket((id) => this.handleCancelTicket(id));
         this.playScreen.setOnOpenSettings(() => this.settingsPanel?.show());
         this.playScreen.setOnOpenMarkerBg(() => this.markerBgPanel?.show());
         this.playScreen.setOnStartGame(() => this.handleStartGame());
@@ -384,6 +386,7 @@ class Game1Controller implements GameController {
         this.playScreen.setOnBuy((selections) => this.handleBuy(selections));
         this.playScreen.setOnLuckyNumberTap(() => this.openLuckyPicker());
         this.playScreen.setOnCancelTickets(() => this.handleCancelTickets());
+        this.playScreen.setOnCancelTicket((id) => this.handleCancelTicket(id));
         this.playScreen.setOnOpenSettings(() => this.settingsPanel?.show());
         this.playScreen.setOnOpenMarkerBg(() => this.markerBgPanel?.show());
         this.playScreen.setOnStartGame(() => this.handleStartGame());
@@ -635,6 +638,39 @@ class Game1Controller implements GameController {
       }
     } else {
       this.toast?.error(result.error?.message || "Kunne ikke avbestille");
+    }
+  }
+
+  /**
+   * BIN-692: per-ticket × cancel. Backend resolves the bundle from the
+   * ticketId (Large = 3 brett, Elvis = 2, Traffic-light = 3) and removes
+   * the whole bundle atomically. UI refresh comes via the room:update
+   * that the backend emits after the cancel commits.
+   *
+   * Guard: extra client-side check that the round is NOT running. The
+   * backend enforces the same guard with a DomainError (GAME_RUNNING),
+   * so this is just early-out to skip an unnecessary round-trip. The ×
+   * is also not rendered in PLAYING/SPECTATING — this is defence-in-depth.
+   */
+  private async handleCancelTicket(ticketId: string): Promise<void> {
+    const state = this.deps.bridge.getState();
+    if (state.gameStatus === "RUNNING") {
+      this.toast?.info("Kan ikke avbestille mens runden pågår.");
+      return;
+    }
+    const result = await this.deps.socket.cancelTicket({
+      roomCode: this.actualRoomCode,
+      ticketId,
+    });
+    if (result.ok) {
+      // UI refreshes via the server-emitted room:update; no local mutation.
+      this.toast?.info(
+        result.data?.fullyDisarmed
+          ? "Alle brett avbestilt"
+          : `Brett avbestilt (${result.data?.removedTicketIds.length ?? 1})`,
+      );
+    } else {
+      this.toast?.error(result.error?.message || "Kunne ikke avbestille brett");
     }
   }
 

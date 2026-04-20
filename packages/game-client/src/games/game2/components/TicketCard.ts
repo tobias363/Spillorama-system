@@ -16,6 +16,18 @@ export interface TicketCardOptions {
   toGoCloseColor?: number;
   /** Cell-level color overrides (Unity TicketColorData) */
   cellColors?: BingoCellColors;
+  /**
+   * BIN-692: show a × "cancel" button at the top-left of the header so
+   * the player can drop a pre-round ticket (or its whole bundle). The
+   * button only renders when `cancelable === true` — PlayScreen toggles
+   * this based on game state (only true in WAITING).
+   *
+   * On click, `onCancel` is invoked with the ticket's `id` (the stable
+   * `tkt-N` id from the display cache). The click also suppresses the
+   * flip interaction so the card doesn't flip while being dismissed.
+   */
+  cancelable?: boolean;
+  onCancel?: (ticketId: string) => void;
 }
 
 /**
@@ -55,6 +67,10 @@ export class TicketCard extends Container {
   private detailsOverlay: Container | null = null;
   private ticketIndex: number;
   private headerTextColor: number;
+
+  // ── BIN-692: cancel-button state ────────────────────────────────────
+  private cancelBtn: Container | null = null;
+  private onCancel: ((ticketId: string) => void) | null = null;
 
   constructor(index: number, options?: TicketCardOptions) {
     super();
@@ -151,6 +167,67 @@ export class TicketCard extends Container {
         this.flipToDetails();
       }
     });
+
+    // ── BIN-692: optional cancel-button (×) in top-left of header ─────
+    this.onCancel = options?.onCancel ?? null;
+    if (options?.cancelable) {
+      this.cancelBtn = this.createCancelButton(headerBgColor, headerTextColor);
+      this.addChild(this.cancelBtn);
+    }
+  }
+
+  /**
+   * BIN-692: build a small circular × button anchored at the top-left of
+   * the header. Intercepts pointerdown so it doesn't trigger the card's
+   * own flip gesture, then fires `onCancel(ticketId)` if loadTicket was
+   * already called.
+   *
+   * Unity parity: `Game1ViewPurchaseElvisTicket.cs:17,49-76` deleteBtn —
+   * a per-ticket × that drops the armed ticket and (for Large/Elvis
+   * bundles) the whole bundle it belongs to.
+   */
+  private createCancelButton(headerBgColor: number, headerTextColor: number): Container {
+    const btn = new Container();
+    btn.eventMode = "static";
+    btn.cursor = "pointer";
+
+    const BTN_SIZE = 18;
+    btn.x = 4;
+    btn.y = (28 - BTN_SIZE) / 2; // vertically centred in the 28px header
+
+    // Contrast circle — slightly darker than the header so the × pops.
+    const bg = new Graphics();
+    bg.circle(BTN_SIZE / 2, BTN_SIZE / 2, BTN_SIZE / 2);
+    bg.fill({ color: 0x000000, alpha: 0.35 });
+    btn.addChild(bg);
+
+    const cross = new Text({
+      text: "\u00d7", // multiplication sign (Unity uses same)
+      style: {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: 16,
+        fontWeight: "bold",
+        fill: headerTextColor,
+      },
+    });
+    cross.anchor.set(0.5, 0.5);
+    cross.x = BTN_SIZE / 2;
+    cross.y = BTN_SIZE / 2 - 1; // optical centring
+    btn.addChild(cross);
+
+    // Suppress the card-level flip pointerdown. `stopPropagation` on the
+    // federated event bubbles up to the Container parent before the
+    // card's listener fires.
+    btn.on("pointerdown", (e) => {
+      e.stopPropagation();
+      const id = this.ticket?.id;
+      if (id && this.onCancel) this.onCancel(id);
+    });
+
+    // Silence unused parameter lint while keeping the signature future-
+    // proof (e.g. if we want to tint based on header bg later).
+    void headerBgColor;
+    return btn;
   }
 
   loadTicket(ticket: Ticket): void {

@@ -211,4 +211,107 @@ export class RoomStateManager {
   getVariantConfig(roomCode: string): RoomVariantInfo | null {
     return this.variantByRoom.get(roomCode) ?? null;
   }
+
+  /**
+   * BIN-692: Cancel a single pre-round ticket — or its whole bundle —
+   * atomically. Returns a diff describing what changed so the caller
+   * (socket handler) can log + emit room:update.
+   *
+   * Bundle semantics: ticket-types with `ticketCount > 1` (Large = 3
+   * brett, Elvis = 2, Traffic-light = 3) are purchased as one unit.
+   * Clicking × on ANY brett in that bundle removes ALL brett in the
+   * bundle — Unity parity with `Game1ViewPurchaseElvisTicket.cs:17,49-76`
+   * deleteBtn.
+   *
+   * Returns `null` when the ticketId isn't in the display cache (stale
+   * client or double-click race) — caller should treat as a no-op.
+   *
+   * Side-effects:
+   *   - Removes `bundleSize` consecutive tickets from displayTicketCache
+   *   - Reduces matching selection.qty by 1; removes selection entry
+   *     when qty hits 0
+   *   - Updates the player's totalWeighted ticket count; fully disarms
+   *     the player when selections are emptied
+   *   - Does NOT touch wallets: pre-round arm is not yet debited
+   *     (BingoEngine.startGame debits the buy-in at game-start)
+   */
+  cancelPreRoundTicket(
+    roomCode: string,
+    playerId: string,
+    ticketId: string,
+    variantConfig: GameVariantConfig,
+  ): { removedTicketIds: string[]; remainingTicketCount: number; fullyDisarmed: boolean } | null {
+    const cacheKey = `${roomCode}:${playerId}`;
+    const displayTickets = this.displayTicketCache.get(cacheKey);
+    if (!displayTickets || displayTickets.length === 0) return null;
+
+    const ticketIdx = displayTickets.findIndex((t) => t.id === ticketId);
+    if (ticketIdx < 0) return null;
+
+    const selections = this.armedPlayerSelectionsByRoom.get(roomCode)?.get(playerId);
+    if (!selections || selections.length === 0) return null;
+
+    // Walk selections in order and find which one this ticket index falls
+    // into. Each selection occupies `qty * ticketsPerUnit` slots in the
+    // display cache, matching `expandSelectionsToTicketColors` order.
+    let cumulativeSlots = 0;
+    for (let selIdx = 0; selIdx < selections.length; selIdx++) {
+      const sel = selections[selIdx];
+      const tt = sel.name
+        ? variantConfig.ticketTypes.find((t) => t.name === sel.name)
+        : variantConfig.ticketTypes.find((t) => t.type === sel.type);
+      const bundleSize = Math.max(1, tt?.ticketCount ?? 1);
+      const slotsForSelection = sel.qty * bundleSize;
+
+      if (ticketIdx < cumulativeSlots + slotsForSelection) {
+        // Ticket belongs to this selection. Find which bundle within it.
+        const offsetWithinSelection = ticketIdx - cumulativeSlots;
+        const bundleIndexWithinSelection = Math.floor(offsetWithinSelection / bundleSize);
+        const bundleStartIdx = cumulativeSlots + bundleIndexWithinSelection * bundleSize;
+
+        // Splice the whole bundle out of the display cache.
+        const removed = displayTickets.splice(bundleStartIdx, bundleSize);
+        const removedTicketIds = removed.map((t) => t.id ?? "");
+
+        // Reduce qty; drop the selection if it hits 0.
+        sel.qty -= 1;
+        if (sel.qty <= 0) {
+          selections.splice(selIdx, 1);
+        }
+
+        // Recompute totalWeighted from remaining selections so
+        // armedPlayerIdsByRoom stays consistent. Fully disarm when nothing
+        // remains — matches the existing `disarmPlayer` contract.
+        let newTotalWeighted = 0;
+        for (const s of selections) {
+          const tt2 = s.name
+            ? variantConfig.ticketTypes.find((t) => t.name === s.name)
+            : variantConfig.ticketTypes.find((t) => t.type === s.type);
+          newTotalWeighted += s.qty * Math.max(1, tt2?.ticketCount ?? 1);
+        }
+
+        let fullyDisarmed = false;
+        if (selections.length === 0 || newTotalWeighted <= 0) {
+          this.disarmPlayer(roomCode, playerId);
+          // Also clear the (now empty) cache entry so the next room:update
+          // doesn't propagate a stale empty list.
+          this.displayTicketCache.delete(cacheKey);
+          fullyDisarmed = true;
+        } else {
+          this.armedPlayerIdsByRoom.get(roomCode)?.set(playerId, newTotalWeighted);
+        }
+
+        return {
+          removedTicketIds,
+          remainingTicketCount: fullyDisarmed ? 0 : newTotalWeighted,
+          fullyDisarmed,
+        };
+      }
+      cumulativeSlots += slotsForSelection;
+    }
+
+    // Ticket index is past all selections — inconsistent state. Treat
+    // as no-op rather than throw; caller logs it.
+    return null;
+  }
 }

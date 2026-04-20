@@ -333,6 +333,14 @@ export class SpilloramaSocket {
     return this.emit(SocketEvents.TICKET_MARK, payload);
   }
 
+  /**
+   * BIN-692: cancel a single pre-round ticket or its whole bundle.
+   * Gated server-side to non-RUNNING rounds. Free (no wallet debit).
+   */
+  async cancelTicket(payload: { roomCode: string; ticketId: string }): Promise<AckResponse<{ removedTicketIds: string[]; remainingTicketCount: number; fullyDisarmed: boolean }>> {
+    return this.emit(SocketEvents.TICKET_CANCEL, payload);
+  }
+
   async submitClaim(payload: { roomCode: string; type: "LINE" | "BINGO" }): Promise<AckResponse<{ snapshot: RoomSnapshot }>> {
     return this.emit(SocketEvents.CLAIM_SUBMIT, payload);
   }

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Server, Socket } from "socket.io";
-import { ClaimSubmitPayloadSchema, TicketReplacePayloadSchema, TicketSwapPayloadSchema } from "@spillorama/shared-types/socket-events";
+import { ClaimSubmitPayloadSchema, TicketReplacePayloadSchema, TicketSwapPayloadSchema, TicketCancelPayloadSchema } from "@spillorama/shared-types/socket-events";
 import { DomainError, toPublicError } from "../game/BingoEngine.js";
 import { addBreadcrumb, captureError } from "../observability/sentry.js";
 import { metrics as promMetrics } from "../util/metrics.js";
@@ -239,6 +239,17 @@ export interface GameEventsDeps {
   /** BIN-509: swap one pre-round ticket in place; returns null if ticketId is unknown. */
   /** BIN-672: gameSlug required — see roomState.replaceDisplayTicket doc. */
   replaceDisplayTicket?: (roomCode: string, playerId: string, ticketId: string, gameSlug: string) => Ticket | null;
+  /**
+   * BIN-692: cancel a single pre-round ticket (or its whole bundle).
+   * See RoomStateManager.cancelPreRoundTicket for bundle semantics.
+   * Returns null when the ticketId is not in the cache (stale client).
+   */
+  cancelPreRoundTicket?: (
+    roomCode: string,
+    playerId: string,
+    ticketId: string,
+    variantConfig: import("../game/variantConfig.js").GameVariantConfig,
+  ) => { removedTicketIds: string[]; remainingTicketCount: number; fullyDisarmed: boolean } | null;
   /**
    * BIN-516: optional chat persistence. When provided, chat:send writes through
    * to the store and chat:history reads from it (falls back to in-memory cache
@@ -867,6 +878,60 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
 
         await emitRoomUpdate(roomCode);
         ackSuccess(callback, { ticketId });
+      } catch (error) {
+        ackFailure(callback, error);
+      }
+    }));
+
+    // BIN-692: ticket:cancel — remove a single pre-round ticket (or its
+    // whole bundle, for Large/Elvis/Traffic-light types). Pre-round arm
+    // is not yet debited, so cancellation is free — no wallet operation.
+    //
+    // Unity parity: `Game1ViewPurchaseElvisTicket.cs:17,49-76` (deleteBtn)
+    // gives the player an in-place × on each ticket that removes the
+    // bundle and disarms when the last bundle is dropped.
+    socket.on("ticket:cancel", rateLimited("ticket:cancel", async (payload: unknown, callback: (response: AckResponse<{ removedTicketIds: string[]; remainingTicketCount: number; fullyDisarmed: boolean }>) => void) => {
+      try {
+        const parsed = TicketCancelPayloadSchema.safeParse(payload);
+        if (!parsed.success) {
+          const first = parsed.error.issues[0];
+          const field = first?.path.join(".") || "payload";
+          throw new DomainError("INVALID_INPUT", `ticket:cancel payload invalid (${field}: ${first?.message ?? "unknown"}).`);
+        }
+        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(parsed.data);
+        const ticketId = parsed.data.ticketId;
+
+        // Gate: never permitted while the round is RUNNING. Cancelling
+        // mid-round would require refunding real money already debited
+        // at game:start — product decision (Tobias, 2026-04-20) is to
+        // forbid it entirely. "Avbestill bonger" cancel-all has the same
+        // gate implicitly (disarm is a no-op under RUNNING).
+        const snapshot = engine.getRoomSnapshot(roomCode);
+        if (snapshot.currentGame?.status === "RUNNING") {
+          throw new DomainError("GAME_RUNNING", "Kan ikke avbestille brett mens runden pågår.");
+        }
+
+        if (!deps.cancelPreRoundTicket) {
+          throw new DomainError("NOT_SUPPORTED", "ticket:cancel ikke konfigurert på serveren.");
+        }
+
+        const variantInfo = deps.getVariantConfig?.(roomCode);
+        if (!variantInfo) {
+          throw new DomainError("NOT_SUPPORTED", "Ingen variant-config for rommet.");
+        }
+
+        const result = deps.cancelPreRoundTicket(
+          roomCode,
+          playerId,
+          ticketId,
+          variantInfo.config,
+        );
+        if (!result) {
+          throw new DomainError("TICKET_NOT_FOUND", `Ingen pre-round billett med id=${ticketId}.`);
+        }
+
+        await emitRoomUpdate(roomCode);
+        ackSuccess(callback, result);
       } catch (error) {
         ackFailure(callback, error);
       }

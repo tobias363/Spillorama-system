@@ -81,6 +81,8 @@ export class PlayScreen extends Container {
   // Callbacks (set by controller)
   private onLuckyNumberTap: (() => void) | null = null;
   private onCancelTickets: (() => void) | null = null;
+  /** BIN-692: per-ticket cancel (× on brett). Fires with the bundle's ticketId. */
+  private onCancelTicket: ((ticketId: string) => void) | null = null;
   private onOpenSettings: (() => void) | null = null;
   private onOpenMarkerBg: (() => void) | null = null;
   /** A6: Host manual start callback. */
@@ -305,6 +307,11 @@ export class PlayScreen extends Container {
 
   setOnLuckyNumberTap(callback: () => void): void {
     this.onLuckyNumberTap = callback;
+  }
+
+  /** BIN-692: per-ticket × handler. Fires with the bundle's ticketId; backend resolves the whole bundle. */
+  setOnCancelTicket(callback: (ticketId: string) => void): void {
+    this.onCancelTicket = callback;
   }
 
   /** Unity: delete button cancels tickets (disarms player). */
@@ -549,7 +556,13 @@ export class PlayScreen extends Container {
 
     this.inlineScroller.clearCards();
     if (tickets.length > 0) {
-      this._renderTicketsIntoScroller(tickets, state, { markActive: false });
+      // BIN-692: pre-round brett are cancelable via × until the round
+      // starts. PLAYING/SPECTATING never call this path (they use
+      // buildTickets), so `cancelable: true` is scope-safe here.
+      this._renderTicketsIntoScroller(tickets, state, {
+        markActive: false,
+        cancelable: true,
+      });
       this.inlineScroller.sortBestFirst();
     }
     this.lastPreRoundCount = tickets.length;
@@ -580,8 +593,15 @@ export class PlayScreen extends Container {
   private _renderTicketsIntoScroller(
     tickets: GameState["myTickets"],
     state: GameState,
-    opts: { markActive: boolean },
+    opts: { markActive: boolean; cancelable?: boolean },
   ): void {
+    // BIN-692: pre-round × callback. Built once per call so the closure
+    // captures the current `this.onCancelTicket` handler. Solo tickets
+    // and groups share the callback — backend resolves the bundle from
+    // any ticketId in it.
+    const cancelHandler = opts.cancelable
+      ? (ticketId: string) => this.onCancelTicket?.(ticketId)
+      : undefined;
     let i = 0;
     while (i < tickets.length) {
       const ticket = tickets[i];
@@ -649,6 +669,8 @@ export class PlayScreen extends Container {
           miniThemes,
           cellSize: 44,
           gridSize,
+          cancelable: opts.cancelable,
+          onCancel: cancelHandler,
         });
 
         // Apply existing marks per mini-ticket, mirroring the solo-card flow.
@@ -686,6 +708,8 @@ export class PlayScreen extends Container {
         toGoColor: theme.toGoColor,
         toGoCloseColor: theme.toGoCloseColor,
         cellColors: theme.cellColors,
+        cancelable: opts.cancelable,
+        onCancel: cancelHandler,
       });
       card.loadTicket(ticket);
 

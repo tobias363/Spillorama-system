@@ -170,6 +170,183 @@ describe("Socket.IO integration", () => {
     assert.deepEqual(received, [0, 1, 2], "drawIndex must be 0-based and increment by 1");
   });
 
+  // ── 2a-cancel. BIN-692: ticket:cancel ────────────────────────────────────
+
+  test("BIN-692: ticket:cancel on a Large bundle removes all 3 brett + decrements selection", async () => {
+    const alice = await server.connectClient("token-alice");
+    const bob = await server.connectClient("token-bob");
+
+    const r1 = await alice.emit<AckResponse<{ roomCode: string; playerId: string }>>(
+      "room:create", { hallId: "hall-test" },
+    );
+    const roomCode = r1.data!.roomCode;
+    const playerId = r1.data!.playerId;
+    await bob.emit<AckResponse>("room:create", { hallId: "hall-test" });
+
+    // Variant with a Large bundle (ticketCount=3) + a Small type.
+    server.roomState.setVariantConfig(roomCode, {
+      gameType: "standard",
+      config: {
+        ticketTypes: [
+          { name: "Small Yellow", type: "small", priceMultiplier: 1, ticketCount: 1 },
+          { name: "Large White", type: "large", priceMultiplier: 3, ticketCount: 3 },
+        ],
+        patterns: [{ name: "Full House", claimType: "BINGO", prizePercent: 100, design: 0 }],
+      },
+    });
+
+    // Arm: 1× Large White (3 brett) + 2× Small Yellow (2 brett) = 5 total.
+    const armAck = await alice.emit<AckResponse>("bet:arm", {
+      roomCode,
+      armed: true,
+      ticketSelections: [
+        { type: "large", name: "Large White", qty: 1 },
+        { type: "small", name: "Small Yellow", qty: 2 },
+      ],
+    });
+    assert.ok(armAck.ok, `bet:arm failed: ${armAck.error?.message}`);
+
+    // Seed display-cache by asking for it with the colour assignments that
+    // expandSelections would produce. Order: [L, L, L, Y, Y].
+    const preTickets = server.roomState.getOrCreateDisplayTickets(roomCode, playerId, 5, "bingo", [
+      { color: "Large White", type: "large" },
+      { color: "Large White", type: "large" },
+      { color: "Large White", type: "large" },
+      { color: "Small Yellow", type: "small" },
+      { color: "Small Yellow", type: "small" },
+    ]);
+    assert.equal(preTickets.length, 5);
+    const middleOfLargeBundle = preTickets[1];
+    assert.equal(middleOfLargeBundle.color, "Large White");
+
+    // × on middle of Large bundle → all 3 Large removed, 2 Small remain.
+    const cancelAck = await alice.emit<AckResponse<{ removedTicketIds: string[]; remainingTicketCount: number; fullyDisarmed: boolean }>>(
+      "ticket:cancel",
+      { roomCode, playerId, ticketId: middleOfLargeBundle.id! },
+    );
+    assert.ok(cancelAck.ok, `ticket:cancel failed: ${cancelAck.error?.message}`);
+    assert.equal(cancelAck.data!.removedTicketIds.length, 3, "whole Large bundle removed");
+    assert.equal(cancelAck.data!.remainingTicketCount, 2, "2 Small brett igjen");
+    assert.equal(cancelAck.data!.fullyDisarmed, false);
+
+    // Selections reflect the drop: Large selection gone, Small Yellow intact.
+    const selections = server.roomState.getArmedPlayerSelections(roomCode)[playerId];
+    assert.equal(selections.length, 1, "only Small Yellow selection remains");
+    assert.equal(selections[0].name, "Small Yellow");
+    assert.equal(selections[0].qty, 2);
+
+    // armedPlayerIds still contains alice (she still has the 2 Small brett).
+    assert.deepEqual(server.roomState.getArmedPlayerIds(roomCode), [playerId]);
+  });
+
+  test("BIN-692: ticket:cancel on last brett fully disarms the player", async () => {
+    const alice = await server.connectClient("token-alice");
+    const bob = await server.connectClient("token-bob");
+
+    const r1 = await alice.emit<AckResponse<{ roomCode: string; playerId: string }>>(
+      "room:create", { hallId: "hall-test" },
+    );
+    const roomCode = r1.data!.roomCode;
+    const playerId = r1.data!.playerId;
+    await bob.emit<AckResponse>("room:create", { hallId: "hall-test" });
+
+    server.roomState.setVariantConfig(roomCode, {
+      gameType: "standard",
+      config: {
+        ticketTypes: [{ name: "Small Yellow", type: "small", priceMultiplier: 1, ticketCount: 1 }],
+        patterns: [{ name: "Full House", claimType: "BINGO", prizePercent: 100, design: 0 }],
+      },
+    });
+
+    await alice.emit<AckResponse>("bet:arm", {
+      roomCode,
+      armed: true,
+      ticketSelections: [{ type: "small", name: "Small Yellow", qty: 1 }],
+    });
+
+    const tickets = server.roomState.getOrCreateDisplayTickets(roomCode, playerId, 1, "bingo", [
+      { color: "Small Yellow", type: "small" },
+    ]);
+    const onlyTicket = tickets[0];
+
+    const cancelAck = await alice.emit<AckResponse<{ fullyDisarmed: boolean }>>(
+      "ticket:cancel",
+      { roomCode, playerId, ticketId: onlyTicket.id! },
+    );
+    assert.ok(cancelAck.ok);
+    assert.equal(cancelAck.data!.fullyDisarmed, true);
+    assert.deepEqual(server.roomState.getArmedPlayerIds(roomCode), []);
+  });
+
+  test("BIN-692: ticket:cancel is rejected during RUNNING with GAME_RUNNING", async () => {
+    const alice = await server.connectClient("token-alice");
+    const bob = await server.connectClient("token-bob");
+
+    const r1 = await alice.emit<AckResponse<{ roomCode: string; playerId: string }>>(
+      "room:create", { hallId: "hall-test" },
+    );
+    const roomCode = r1.data!.roomCode;
+    const playerId = r1.data!.playerId;
+    await bob.emit<AckResponse>("room:create", { hallId: "hall-test" });
+
+    await alice.emit<AckResponse>("bet:arm", { roomCode, armed: true, ticketCount: 1 });
+    await bob.emit<AckResponse>("bet:arm", { roomCode, armed: true, ticketCount: 1 });
+
+    // Cache a ticket so ticketId resolves (backend looks it up before the
+    // RUNNING guard fires, so we need something there — otherwise the
+    // test would pass for the wrong reason).
+    server.roomState.getOrCreateDisplayTickets(roomCode, playerId, 1, "bingo");
+
+    // Start the round.
+    const startAck = await alice.emit<AckResponse>(
+      "game:start", { roomCode, entryFee: 10, ticketsPerPlayer: 1 },
+    );
+    assert.ok(startAck.ok, `game:start failed: ${startAck.error?.message}`);
+
+    const cancelAck = await alice.emit<AckResponse>(
+      "ticket:cancel", { roomCode, playerId, ticketId: "tkt-0" },
+    );
+    assert.equal(cancelAck.ok, false);
+    assert.equal(cancelAck.error?.code, "GAME_RUNNING");
+  });
+
+  test("BIN-692: ticket:cancel on unknown ticketId returns TICKET_NOT_FOUND", async () => {
+    const alice = await server.connectClient("token-alice");
+    const bob = await server.connectClient("token-bob");
+
+    const r1 = await alice.emit<AckResponse<{ roomCode: string; playerId: string }>>(
+      "room:create", { hallId: "hall-test" },
+    );
+    const roomCode = r1.data!.roomCode;
+    const playerId = r1.data!.playerId;
+    await bob.emit<AckResponse>("room:create", { hallId: "hall-test" });
+
+    // Variant must be set so the handler reaches the cache lookup instead
+    // of short-circuiting on NOT_SUPPORTED.
+    server.roomState.setVariantConfig(roomCode, {
+      gameType: "standard",
+      config: {
+        ticketTypes: [{ name: "Small Yellow", type: "small", priceMultiplier: 1, ticketCount: 1 }],
+        patterns: [{ name: "Full House", claimType: "BINGO", prizePercent: 100, design: 0 }],
+      },
+    });
+
+    await alice.emit<AckResponse>("bet:arm", {
+      roomCode,
+      armed: true,
+      ticketSelections: [{ type: "small", name: "Small Yellow", qty: 1 }],
+    });
+    server.roomState.getOrCreateDisplayTickets(roomCode, playerId, 1, "bingo", [
+      { color: "Small Yellow", type: "small" },
+    ]);
+
+    const cancelAck = await alice.emit<AckResponse>(
+      "ticket:cancel", { roomCode, playerId, ticketId: "tkt-does-not-exist" },
+    );
+    assert.equal(cancelAck.ok, false);
+    assert.equal(cancelAck.error?.code, "TICKET_NOT_FOUND");
+  });
+
   // ── 2b. BIN-509: ticket:replace ──────────────────────────────────────────
 
   test("BIN-509: ticket:replace swaps one pre-round ticket in place and debits replaceAmount", async () => {

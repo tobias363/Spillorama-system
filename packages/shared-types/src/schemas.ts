@@ -261,6 +261,30 @@ export const TicketSwapPayloadSchema = z.object({
 export type TicketSwapPayload = z.infer<typeof TicketSwapPayloadSchema>;
 
 /**
+ * BIN-692: ticket:cancel — pre-round cancellation of a single armed ticket
+ * or an entire bundle (Large = 3 brett, Elvis = 2, Traffic-light = 3).
+ *
+ * Semantics:
+ *   - Only allowed while `currentGame.status !== "RUNNING"` — engine
+ *     rejects with `GAME_RUNNING` otherwise.
+ *   - When `ticketId` points into a bundle (ticket-type with
+ *     `ticketCount > 1`), ALL brett in that bundle are removed together.
+ *     One ×-click on a Large Yellow removes all 3 Large Yellow brett.
+ *   - Pre-round stake is not yet debited (game:start does the buy-in),
+ *     so cancellation is free — no wallet operation required. UI shows
+ *     Innsats=0 immediately after the room:update broadcast.
+ *   - If the last bundle for the player is cancelled, the player is
+ *     fully disarmed (removed from `armedPlayerIds`).
+ */
+export const TicketCancelPayloadSchema = z.object({
+  accessToken: z.string().optional(),
+  roomCode: z.string().min(1),
+  playerId: z.string().optional(),
+  ticketId: z.string().min(1),
+});
+export type TicketCancelPayload = z.infer<typeof TicketCancelPayloadSchema>;
+
+/**
  * BIN-585 PR D: admin:hall-balance — hall operator live view of the
  * house account balance(s) for a hall. Replaces legacy getHallBalance.
  * Requires admin auth via admin:login and ROOM_CONTROL_READ.

@@ -13,6 +13,7 @@ export {
   ClaimSubmitPayloadSchema,
   TicketReplacePayloadSchema,
   TicketSwapPayloadSchema,
+  TicketCancelPayloadSchema,
   AdminHallBalancePayloadSchema,
   AdminHallBalanceResponseSchema,
   AdminDisplayScreensaverResponseSchema,
@@ -40,6 +41,7 @@ import type {
   ClaimSubmitPayload as ClaimSubmitPayloadT,
   TicketReplacePayload as TicketReplacePayloadT,
   TicketSwapPayload as TicketSwapPayloadT,
+  TicketCancelPayload as TicketCancelPayloadT,
   AdminHallBalancePayload as AdminHallBalancePayloadT,
   AdminHallBalanceResponse as AdminHallBalanceResponseT,
   AdminDisplayScreensaverResponse as AdminDisplayScreensaverResponseT,
@@ -72,6 +74,8 @@ export const SocketEvents = {
   TICKET_REPLACE: "ticket:replace",
   /** BIN-585: free pre-round ticket swap (Game 5 / Spillorama). Legacy alias: SwapTicket. */
   TICKET_SWAP: "ticket:swap",
+  /** BIN-692: cancel a single pre-round ticket (or its whole bundle). Free — pre-round arm is not yet debited. */
+  TICKET_CANCEL: "ticket:cancel",
   /** BIN-585 PR D: hall operator live balance view. Legacy alias: getHallBalance. */
   ADMIN_HALL_BALANCE: "admin:hall-balance",
   /** BIN-585 PR D: hall-display screensaver config. Legacy alias: ScreenSaver. */
@@ -182,6 +186,16 @@ export type TicketReplacePayload = TicketReplacePayloadT;
  * (Spillorama) by gameSlug so paid games continue to use ticket:replace.
  */
 export type TicketSwapPayload = TicketSwapPayloadT;
+
+/**
+ * BIN-692: payload for `ticket:cancel`. Runtime-validated via
+ * `TicketCancelPayloadSchema`. Only accepted while the game is NOT
+ * RUNNING. Pre-round arming is not debited (buy-in happens at
+ * `game:start`), so cancellation is free — the handler just drops the
+ * bundle from the player's armed selections and the display-cache, then
+ * emits room:update. UI shows Innsats=0 straight after.
+ */
+export type TicketCancelPayload = TicketCancelPayloadT;
 
 /**
  * BIN-585 PR D: payload and response for `admin:hall-balance`. Replaces
