@@ -15,6 +15,18 @@
   background-color: #ff2105 !important;
 }
 
+/* Sticky-footer layout: fjerner den hvite stripa under footer ved kort innhold.
+   AdminLTE 2 sin wrapper har ikke min-height som fyller viewporten, så body-
+   bakgrunnen (hvit default) vises under footer. Vi matcher body-bakgrunnen til
+   AdminLTE-temaet (#ecf0f5) og sikrer at wrapper strekker seg til bunn. */
+html, body {
+  min-height: 100%;
+  background-color: #ecf0f5;
+}
+body.skin-blue .wrapper {
+  min-height: 100vh;
+}
+
 #app[data-state="loading"]::before {
   content: "…";
   display: block;
