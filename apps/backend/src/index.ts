@@ -94,6 +94,7 @@ import { NotImplementedTicketPurchasePort } from "./agent/ports/TicketPurchasePo
 import { PostgresPhysicalTicketReadPort } from "./agent/ports/PhysicalTicketReadPort.js";
 import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.js";
 import { createAdminPhysicalTicketCheckBingoRouter } from "./routes/adminPhysicalTicketCheckBingo.js";
+import { createAdminPhysicalTicketsRewardAllRouter } from "./routes/adminPhysicalTicketsRewardAll.js";
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createAdminReportsPhysicalTicketsRouter } from "./routes/adminReportsPhysicalTickets.js";
 import { createAdminReportsRedFlagCategoriesRouter } from "./routes/adminReportsRedFlagCategories.js";
@@ -812,6 +813,12 @@ app.use(createAdminPhysicalTicketCheckBingoRouter({
   platformService,
   physicalTicketService,
   engine,
+}));
+// BIN-639: POST /api/admin/physical-tickets/reward-all
+app.use(createAdminPhysicalTicketsRewardAllRouter({
+  platformService,
+  auditLogService,
+  physicalTicketService,
 }));
 // BIN-648: GET /api/admin/reports/physical-tickets/aggregate
 app.use(createAdminReportsPhysicalTicketsRouter({
