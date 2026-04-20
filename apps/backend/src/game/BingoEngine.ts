@@ -137,6 +137,20 @@ interface StartGameInput {
   variantConfig?: import("./variantConfig.js").GameVariantConfig;
   /** BIN-463: Test game — skip wallet operations. */
   isTestGame?: boolean;
+  /**
+   * BIN-690: Pre-round display-tickets shown to the player while they
+   * were arming. When provided, `startGame` adopts the cached ticket
+   * grids (and colours) as the real tickets instead of generating fresh
+   * random grids — so the brett the player saw before the round starts
+   * are EXACTLY the brett they play with.
+   *
+   * Shape: playerId → display-ticket[] (same objects that shipped in
+   * preRoundTickets on the wire). The engine validates that the cached
+   * ticket count matches the armed count before adopting; otherwise it
+   * falls back to normal generation (defensive — cache may be stale if
+   * arming changed after the last room:update).
+   */
+  preRoundTicketsByPlayerId?: Record<string, Ticket[]>;
 }
 
 const DEFAULT_PATTERNS: PatternDefinition[] = [
@@ -608,6 +622,27 @@ export class BingoEngine {
         const playerTicketCount = playerTicketCountMap.get(player.id) ?? ticketsPerPlayer;
         const playerTickets: Ticket[] = [];
         const playerMarks: Set<number>[] = [];
+
+        // BIN-690: Adopt pre-round display-tickets as the real tickets so
+        // the grids + colours the player saw while arming are exactly the
+        // brett they now play with. Falls through to normal generation
+        // when the cache is missing or the count doesn't match (defensive:
+        // arming could have changed after the last room:update emitted
+        // the display list).
+        const cachedDisplayTickets = input.preRoundTicketsByPlayerId?.[player.id];
+        if (cachedDisplayTickets && cachedDisplayTickets.length === playerTicketCount) {
+          for (const displayTicket of cachedDisplayTickets) {
+            // Copy so engine-state mutations don't leak into the display
+            // cache (caller clears the cache after startGame, but
+            // cross-state bleed between the pre-round list and the live
+            // `tickets` map would still be a bug if ordering changed).
+            playerTickets.push({ ...displayTicket });
+            playerMarks.push(new Set<number>());
+          }
+          tickets.set(player.id, playerTickets);
+          marks.set(player.id, playerMarks);
+          continue;
+        }
 
         // Check if this player has per-type selections
         const playerSelections = input.armedPlayerSelections?.[player.id];
