@@ -56,6 +56,15 @@ interface Ctx {
     bulkImports: Array<{ rowCount: number }>;
     hallStatusSets: Array<{ userId: string; hallId: string; isActive: boolean; reason: string | null; actorId: string }>;
     bankIdSessions: Array<{ userId: string }>;
+    // BIN-633: admin-opprettede spillere
+    creates: Array<{
+      email: string;
+      displayName: string;
+      surname: string;
+      birthDate: string;
+      phone?: string;
+      hallId?: string | null;
+    }>;
   };
   usersById: Map<string, AppUser>;
   close: () => Promise<void>;
@@ -79,6 +88,7 @@ async function startServer(
   const bulkImports: Ctx["spies"]["bulkImports"] = [];
   const hallStatusSets: Ctx["spies"]["hallStatusSets"] = [];
   const bankIdSessions: Ctx["spies"]["bankIdSessions"] = [];
+  const creates: Ctx["spies"]["creates"] = [];
   const hallStatusByUser = new Map<string, Array<{ hallId: string; isActive: boolean; reason: string | null; updatedBy: string | null; updatedAt: string; createdAt: string }>>();
 
   const usersById = new Map<string, AppUser>();
@@ -214,6 +224,40 @@ async function startServer(
         return true;
       });
     },
+    // BIN-633: admin-opprettet spiller
+    async createPlayerByAdmin(input: {
+      email: string;
+      displayName: string;
+      surname: string;
+      birthDate: string;
+      phone?: string;
+      hallId?: string | null;
+    }): Promise<{ user: AppUser; temporaryPassword: string }> {
+      creates.push({ ...input });
+      const email = input.email.trim().toLowerCase();
+      // Duplikat-sjekk: matcher PostgresPlatformService-oppførselen.
+      const existing = [...usersById.values()].find((u) => u.email.toLowerCase() === email);
+      if (existing) {
+        throw new DomainError("EMAIL_EXISTS", "E-post er allerede registrert.");
+      }
+      if (!input.displayName?.trim()) throw new DomainError("INVALID_INPUT", "displayName er påkrevd.");
+      if (!input.surname?.trim()) throw new DomainError("INVALID_INPUT", "surname er påkrevd.");
+      if (!input.birthDate) throw new DomainError("INVALID_INPUT", "birthDate er påkrevd.");
+      const id = `new-${creates.length}`;
+      const user: AppUser = makeUser({
+        id,
+        email,
+        displayName: input.displayName.trim(),
+        surname: input.surname.trim(),
+        phone: input.phone,
+        birthDate: input.birthDate,
+        kycStatus: "UNVERIFIED",
+        hallId: input.hallId ?? null,
+        complianceData: { createdBy: "ADMIN" },
+      });
+      usersById.set(id, user);
+      return { user, temporaryPassword: "temp-pwd-abc123" };
+    },
     async searchPlayers({ query, limit, includeDeleted }: { query: string; limit?: number; includeDeleted?: boolean }) {
       if (query.length < 2) throw new DomainError("INVALID_INPUT", "query må være minst 2 tegn.");
       const lower = query.toLowerCase();
@@ -259,6 +303,7 @@ async function startServer(
     spies: {
       auditStore, sentEmails, approves, rejects, resubmits, overrides,
       softDeletes, restores, reverifies, bulkImports, hallStatusSets, bankIdSessions,
+      creates,
     },
     usersById,
     close: () => new Promise((resolve) => server.close(() => resolve())),
@@ -827,6 +872,201 @@ test("BIN-587 B2.3: GET export.csv returnerer CSV med Content-Type + BOM", async
     assert.ok(body.includes("email"));
     assert.ok(body.includes("a@test.no"));
     assert.ok(body.includes("b@test.no"));
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-633: POST /api/admin/players (add player) ──────────────────────────
+
+test("BIN-633: POST /api/admin/players — ADMIN oppretter ny spiller + audit + temp-passord", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", {
+      email: "new@test.no",
+      displayName: "Nina",
+      surname: "Ny",
+      birthDate: "1990-05-15",
+      phone: "+4712345678",
+      hallId: "hall-a",
+    });
+    assert.equal(res.status, 200);
+    assert.ok(res.json.data.player);
+    assert.equal(res.json.data.player.email, "new@test.no");
+    assert.equal(res.json.data.player.displayName, "Nina");
+    assert.equal(res.json.data.player.hallId, "hall-a");
+    assert.equal(typeof res.json.data.temporaryPassword, "string");
+    assert.ok(res.json.data.temporaryPassword.length >= 8);
+
+    assert.equal(ctx.spies.creates.length, 1);
+    assert.equal(ctx.spies.creates[0]!.email, "new@test.no");
+    assert.equal(ctx.spies.creates[0]!.hallId, "hall-a");
+
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.create");
+    assert.ok(event, "audit event should be recorded");
+    assert.equal(event!.actorId, "admin-1");
+    assert.equal(event!.actorType, "ADMIN");
+    assert.equal(event!.resource, "user");
+    assert.equal(event!.resourceId, res.json.data.player.id);
+    assert.equal(event!.details.hallId, "hall-a");
+    assert.equal(event!.details.emailDomain, "test.no");
+    // Personvern: temp-passord og full e-post skal IKKE ligge i audit.
+    assert.equal(event!.details.temporaryPassword, undefined);
+    assert.equal(event!.details.email, undefined);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: SUPPORT kan opprette spiller (PLAYER_LIFECYCLE_WRITE)", async () => {
+  const ctx = await startServer({ "sup-tok": supportUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "sup-tok", {
+      email: "sup-created@test.no",
+      displayName: "Support",
+      surname: "Created",
+      birthDate: "1985-01-01",
+    });
+    assert.equal(res.status, 200);
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.create");
+    assert.ok(event);
+    assert.equal(event!.actorType, "SUPPORT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: HALL_OPERATOR får FORBIDDEN", async () => {
+  const ctx = await startServer({ "op-tok": operatorUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "op-tok", {
+      email: "x@test.no",
+      displayName: "X",
+      surname: "Y",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+    assert.equal(ctx.spies.creates.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: PLAYER (vanlig bruker) får FORBIDDEN", async () => {
+  const ctx = await startServer({ "pl-tok": playerUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "pl-tok", {
+      email: "x@test.no",
+      displayName: "X",
+      surname: "Y",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: manglende token gir UNAUTHORIZED", async () => {
+  const ctx = await startServer({}, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", undefined, {
+      email: "x@test.no",
+      displayName: "X",
+      surname: "Y",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "UNAUTHORIZED");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: manglende email gir INVALID_INPUT", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", {
+      displayName: "X",
+      surname: "Y",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+    assert.equal(ctx.spies.creates.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: manglende displayName/surname/birthDate gir INVALID_INPUT", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    for (const missing of ["displayName", "surname", "birthDate"]) {
+      const body: Record<string, string> = {
+        email: "x@test.no",
+        displayName: "X",
+        surname: "Y",
+        birthDate: "1990-01-01",
+      };
+      delete body[missing];
+      const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", body);
+      assert.equal(res.status, 400, `field=${missing}`);
+      assert.equal(res.json.error.code, "INVALID_INPUT", `field=${missing}`);
+    }
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: tom body gir INVALID_INPUT", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", null);
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: duplikat e-post gir EMAIL_EXISTS", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "existing", email: "taken@test.no" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", {
+      email: "taken@test.no",
+      displayName: "Dup",
+      surname: "E",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "EMAIL_EXISTS");
+    // Duplikat skal ikke audit-logges som create-event.
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.filter((e) => e.action === "admin.player.create").length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: hallId utelatt gir player uten hall (hallId=null)", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", {
+      email: "nohall@test.no",
+      displayName: "Nohall",
+      surname: "Ny",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.player.hallId, null);
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.create");
+    assert.equal(event!.details.hallId, null);
   } finally {
     await ctx.close();
   }

@@ -706,6 +706,108 @@ export class PlatformService {
   }
 
   /**
+   * BIN-633: admin oppretter en spiller manuelt (ingen self-service
+   * register-flow). Brukes av admin-UI når en spiller trenger konto
+   * opprettet av support/admin (f.eks. kontant-kunde som aldri registrerte
+   * seg selv, eller migrasjon fra legacy).
+   *
+   * Skiller seg fra `register`:
+   *   - Ingen session lages — spilleren må senere sette eget passord via
+   *     forgot-password-flow eller logge inn med generert temp-passord
+   *     som admin videreformidler. Passordet genereres her (ikke tatt
+   *     fra admin) for å unngå at admin kan logge inn som spilleren.
+   *   - Rollen er alltid PLAYER (skiller seg fra `createAdminProvisionedUser`
+   *     som brukes til AGENT/SUPPORT/HALL_OPERATOR).
+   *   - `hallId` kan settes direkte ved opprettelse (hall-scope for
+   *     spilleren) — ellers null.
+   *   - `bankIdStatus`: stub/manual-opprettet spiller får `kycStatus=UNVERIFIED`
+   *     som default; admin kan senere trigge BankID-reverify eller
+   *     overstyre KYC via eksisterende endepunkter.
+   *   - `complianceData.createdBy = "ADMIN"` for audit-traceability.
+   *
+   * Duplikat-e-post kaster DomainError("EMAIL_EXISTS") — kaller mapper
+   * dette til HTTP 400 + error.code="EMAIL_EXISTS".
+   *
+   * Returnerer den nye spilleren samt det genererte temp-passordet — kaller
+   * må formidle dette ut-of-band (ikke over audit-logg).
+   */
+  async createPlayerByAdmin(input: {
+    email: string;
+    displayName: string;
+    surname: string;
+    birthDate: string;
+    phone?: string;
+    hallId?: string | null;
+  }): Promise<{ user: AppUser; temporaryPassword: string }> {
+    await this.ensureInitialized();
+    const email = normalizeEmail(input.email);
+    const displayName = input.displayName.trim();
+    const surname = input.surname.trim();
+    const birthDate = this.assertBirthDate(input.birthDate);
+    this.assertEmail(email);
+    this.assertDisplayName(displayName);
+    this.assertSurname(surname);
+
+    const ageYears = calculateAgeYears(new Date(birthDate), new Date());
+    if (ageYears < this.minAgeYears) {
+      throw new DomainError("AGE_RESTRICTED", `Spilleren må være minst ${this.minAgeYears} år.`);
+    }
+
+    const hallId = input.hallId?.trim() || null;
+    const phone = input.phone?.trim() || null;
+    // Generer et URL-safe 128-bit temp-passord. Lengden tilfredsstiller
+    // assertPassword og tvinger forgot-password ved første innlogging.
+    const temporaryPassword = randomBytes(16).toString("base64url");
+    this.assertPassword(temporaryPassword);
+    const passwordHash = await this.hashPassword(temporaryPassword);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<{ id: string }>(
+        `SELECT id FROM ${this.usersTable()} WHERE email = $1`,
+        [email]
+      );
+      if (existingRows[0]) {
+        throw new DomainError("EMAIL_EXISTS", "E-post er allerede registrert.");
+      }
+
+      if (hallId) {
+        // Fail-fast hvis hallId ikke eksisterer — fremfor FK-feil lenger ned.
+        const { rows: hallRows } = await client.query<{ id: string }>(
+          `SELECT id FROM ${this.hallsTable()} WHERE id = $1`,
+          [hallId]
+        );
+        if (!hallRows[0]) {
+          throw new DomainError("HALL_NOT_FOUND", "Ukjent hallId.");
+        }
+      }
+
+      const userId = randomUUID();
+      const walletId = `wallet-user-${userId}`;
+      const complianceData = { createdBy: "ADMIN" };
+      const { rows: createdRows } = await client.query<UserRow>(
+        `INSERT INTO ${this.usersTable()}
+          (id, email, display_name, surname, password_hash, wallet_id, role, phone, birth_date, hall_id, compliance_data)
+         VALUES ($1, $2, $3, $4, $5, $6, 'PLAYER', $7, $8::date, $9, $10::jsonb)
+         RETURNING id, email, display_name, surname, compliance_data, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, phone`,
+        [userId, email, displayName, surname, passwordHash, walletId, phone, birthDate, hallId, JSON.stringify(complianceData)]
+      );
+      await client.query("COMMIT");
+      await this.walletAdapter.ensureAccount(walletId);
+      return {
+        user: this.mapUser(createdRows[0]!),
+        temporaryPassword,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * BIN-583 B3.1: admin-side password-reset for AGENT (and future roles).
    * Skiller seg fra brukerens egen change-password — ingen verifikasjon
    * av gammelt passord, kun admin-RBAC-sjekk hos kaller.

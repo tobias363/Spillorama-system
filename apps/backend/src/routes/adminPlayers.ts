@@ -191,6 +191,98 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
     }
   }
 
+  // ── Create player (admin-provisioned) ────────────────────────────────────
+
+  /**
+   * BIN-633: POST /api/admin/players — admin oppretter spiller manuelt.
+   *
+   * Typisk flyt: support har en kontant-kunde i hall som trenger konto
+   * opprettet uten self-service. Admin skriver inn e-post/navn/fødselsdato
+   * og valgfritt hallId; PlatformService genererer et temp-passord som
+   * admin videreformidler ut-of-band (ikke i audit-loggen).
+   *
+   * Request body:
+   *   {
+   *     email: string,
+   *     displayName: string (fornavn),
+   *     surname: string,
+   *     birthDate: "YYYY-MM-DD",
+   *     phone?: string,
+   *     hallId?: string
+   *   }
+   *
+   * Response 200:
+   *   {
+   *     player: PublicPlayerSummary,
+   *     temporaryPassword: string     // vises én gang i admin-UI
+   *   }
+   *
+   * Feilkoder:
+   *   - UNAUTHORIZED / FORBIDDEN: RBAC (PLAYER_LIFECYCLE_WRITE)
+   *   - INVALID_INPUT: valideringsfeil (email, navn, birthDate)
+   *   - EMAIL_EXISTS: spiller med denne e-posten finnes allerede
+   *   - AGE_RESTRICTED: under 18 år
+   *   - HALL_NOT_FOUND: ukjent hallId
+   *
+   * AuditLog: `admin.player.create` med
+   *   { targetUserId, hallId, emailDomain } i details.
+   * Vi logger ikke full e-post eller passord — personvern + sikkerhet.
+   */
+  router.post("/api/admin/players", async (req, res) => {
+    try {
+      const actor = await requireAdminPermissionUser(req, "PLAYER_LIFECYCLE_WRITE");
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+      const email = mustBeNonEmptyString(req.body.email, "email");
+      const displayName = mustBeNonEmptyString(req.body.displayName, "displayName");
+      const surname = mustBeNonEmptyString(req.body.surname, "surname");
+      const birthDate = mustBeNonEmptyString(req.body.birthDate, "birthDate");
+      const phone =
+        typeof req.body.phone === "string" && req.body.phone.trim()
+          ? req.body.phone.trim()
+          : undefined;
+      const hallId =
+        typeof req.body.hallId === "string" && req.body.hallId.trim()
+          ? req.body.hallId.trim()
+          : undefined;
+
+      const result = await platformService.createPlayerByAdmin({
+        email,
+        displayName,
+        surname,
+        birthDate,
+        phone,
+        hallId,
+      });
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
+        action: "admin.player.create",
+        resource: "user",
+        resourceId: result.user.id,
+        details: {
+          targetUserId: result.user.id,
+          hallId: result.user.hallId,
+          // Loggfør kun domene-delen av e-post — personvern-minimering
+          // (full e-post ligger i users-tabellen; admin kan oppslå om
+          // nødvendig via audit→user-flow).
+          emailDomain: email.includes("@") ? email.split("@")[1] : null,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      apiSuccess(res, {
+        player: publicPlayerSummary(result.user),
+        temporaryPassword: result.temporaryPassword,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   // ── List endpoints ───────────────────────────────────────────────────────
 
   router.get("/api/admin/players/pending", async (req, res) => {
