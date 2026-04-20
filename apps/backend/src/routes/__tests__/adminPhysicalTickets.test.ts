@@ -410,6 +410,9 @@ test("BIN-587 B4a: GET games/:gameId/sold returnerer solgte billetter", async ()
     soldAt: "2026-04-18T12:00:00Z", soldBy: "agent-1",
     buyerUserId: "player-1", voidedAt: null, voidedBy: null, voidedReason: null,
     createdAt: "2026-04-18T00:00:00Z", updatedAt: "2026-04-18T12:00:00Z",
+    // BIN-698: win-data defaults (ikke stemplet)
+    numbersJson: null, patternWon: null, wonAmountCents: null,
+    evaluatedAt: null, isWinningDistributed: false, winningDistributedAt: null,
   };
   const ctx = await startServer({ "admin-tok": adminUser }, { seedTickets: [soldTicket] });
   try {

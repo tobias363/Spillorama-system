@@ -628,3 +628,69 @@ export interface PlayerLoginHistoryResponse {
   /** Opaque base64url offset cursor; null when no further pages. */
   nextCursor: string | null;
 }
+
+// ── BIN-698: physical-ticket win-data (prerequisite for BIN-639 reward-all) ──
+
+/**
+ * BIN-698: vinnende mønster stemplet på en fysisk papirbillett ved første
+ * BIN-641 check-bingo. Kanonisk Bingo75-set; utvidelser legges til via ny
+ * migrasjon + eksplisitt whitelist.
+ */
+export type PhysicalTicketPattern =
+  | "row_1"
+  | "row_2"
+  | "row_3"
+  | "row_4"
+  | "full_house";
+
+/**
+ * BIN-698: win-data-felter stemplet på `app_physical_tickets` ved BIN-641
+ * check-bingo. Immutable etter første stamping; BIN-639 (reward-all PR 2)
+ * distribuerer beløp og setter `isWinningDistributed = true`.
+ */
+export interface PhysicalTicketWinData {
+  /**
+   * 25 tall i row-major-rekkefølge (5×5 grid, index 12 = free-centre = 0).
+   * NULL før første check-bingo; immutable etter stamping.
+   */
+  numbersJson: number[] | null;
+  /** Høyeste vinnende mønster ved stamping. NULL = ikke evaluert eller tapte. */
+  patternWon: PhysicalTicketPattern | null;
+  /**
+   * Beregnet payout i cents. NULL = BIN-641 har ikke kalkulert beløp (dagens
+   * PR 1-atferd); BIN-639 (PR 2) setter verdi ved distribusjon.
+   */
+  wonAmountCents: number | null;
+  /** ISO-tidspunkt for første BIN-641-stamping. NULL før check-bingo. */
+  evaluatedAt: string | null;
+  /** true = BIN-639 reward-all har distribuert premien for denne billetten. */
+  isWinningDistributed: boolean;
+  /** ISO-tidspunkt for BIN-639-distribusjon. NULL før distribusjon. */
+  winningDistributedAt: string | null;
+}
+
+/**
+ * BIN-641 / BIN-698 response body for
+ * `POST /api/admin/physical-tickets/:uniqueId/check-bingo`. Utvider dagens
+ * read-only shape med idempotens-metadata (alreadyEvaluated, evaluatedAt)
+ * og win-data-persistens (wonAmountCents, isWinningDistributed) som gjør
+ * BIN-639 reward-all mulig i PR 2.
+ */
+export interface PhysicalTicketCheckBingoResponse {
+  uniqueId: string;
+  gameId: string;
+  gameStatus: string;
+  hasWon: boolean;
+  winningPattern: PhysicalTicketPattern | null;
+  matchedNumbers: number[];
+  drawnNumbersCount: number;
+  payoutEligible: boolean;
+  /** BIN-698: true hvis billetten allerede var stemplet fra en tidligere check. */
+  alreadyEvaluated: boolean;
+  /** BIN-698: ISO-tidspunkt for stamping (satt etter første check-bingo). */
+  evaluatedAt: string | null;
+  /** BIN-698: stamplet beløp. NULL i PR 1 — BIN-639 setter verdi ved distribusjon. */
+  wonAmountCents: number | null;
+  /** BIN-698: true når BIN-639 har distribuert premien. */
+  isWinningDistributed: boolean;
+}

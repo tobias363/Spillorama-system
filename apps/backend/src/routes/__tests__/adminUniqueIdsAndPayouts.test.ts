@@ -48,6 +48,14 @@ function makeTicket(overrides: Partial<PhysicalTicket> & { id: string; uniqueId:
     voidedReason: overrides.voidedReason ?? null,
     createdAt: overrides.createdAt ?? "2026-04-18T00:00:00Z",
     updatedAt: overrides.updatedAt ?? "2026-04-18T00:00:00Z",
+    // BIN-698: win-data defaults
+    numbersJson: "numbersJson" in overrides ? overrides.numbersJson! : null,
+    patternWon: "patternWon" in overrides ? overrides.patternWon! : null,
+    wonAmountCents: "wonAmountCents" in overrides ? overrides.wonAmountCents! : null,
+    evaluatedAt: "evaluatedAt" in overrides ? overrides.evaluatedAt! : null,
+    isWinningDistributed: overrides.isWinningDistributed ?? false,
+    winningDistributedAt:
+      "winningDistributedAt" in overrides ? overrides.winningDistributedAt! : null,
   };
 }
 

@@ -83,13 +83,28 @@ function makeTicket(overrides: Partial<PhysicalTicket> & { uniqueId: string; hal
     voidedReason: overrides.voidedReason ?? null,
     createdAt: overrides.createdAt ?? "2026-04-20T09:00:00Z",
     updatedAt: overrides.updatedAt ?? "2026-04-20T10:00:00Z",
+    // BIN-698: win-data defaults (ikke stemplet fra før)
+    numbersJson: "numbersJson" in overrides ? overrides.numbersJson! : null,
+    patternWon: "patternWon" in overrides ? overrides.patternWon! : null,
+    wonAmountCents: "wonAmountCents" in overrides ? overrides.wonAmountCents! : null,
+    evaluatedAt: "evaluatedAt" in overrides ? overrides.evaluatedAt! : null,
+    isWinningDistributed: overrides.isWinningDistributed ?? false,
+    winningDistributedAt:
+      "winningDistributedAt" in overrides ? overrides.winningDistributedAt! : null,
   };
 }
 
 // ── Test harness ─────────────────────────────────────────────────────────
 
+interface StampCall {
+  uniqueId: string;
+  numbers: number[];
+  patternWon: string | null;
+}
+
 interface Ctx {
   baseUrl: string;
+  stampCalls: StampCall[];
   close: () => Promise<void>;
 }
 
@@ -117,9 +132,33 @@ async function startServer(opts: {
     },
   } as unknown as PlatformService;
 
+  const stampCalls: StampCall[] = [];
+
   const physicalTicketService = {
     async findByUniqueId(uniqueId: string) {
       return ticketsByUid.get(uniqueId) ?? null;
+    },
+    // BIN-698: mock stampWinData — persister in-memory slik at idempotens-
+    // tester kan observere at andre check returnerer cached verdi.
+    async stampWinData(input: { uniqueId: string; numbers: number[]; patternWon: string | null }) {
+      stampCalls.push({
+        uniqueId: input.uniqueId,
+        numbers: [...input.numbers],
+        patternWon: input.patternWon,
+      });
+      const existing = ticketsByUid.get(input.uniqueId);
+      if (!existing) throw new DomainError("PHYSICAL_TICKET_NOT_FOUND", "ikke funnet");
+      // Idempotens: hvis allerede stemplet, returner uendret (samme som service).
+      if (existing.numbersJson !== null) return existing;
+      const stamped: PhysicalTicket = {
+        ...existing,
+        numbersJson: [...input.numbers],
+        patternWon: input.patternWon as PhysicalTicket["patternWon"],
+        evaluatedAt: "2026-04-20T10:05:00Z",
+        updatedAt: "2026-04-20T10:05:00Z",
+      };
+      ticketsByUid.set(input.uniqueId, stamped);
+      return stamped;
     },
   } as unknown as PhysicalTicketService;
 
@@ -207,6 +246,7 @@ async function startServer(opts: {
   const port = (server.address() as AddressInfo).port;
   return {
     baseUrl: `http://127.0.0.1:${port}`,
+    stampCalls,
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 }
@@ -650,6 +690,186 @@ test("BIN-641: matchedNumbers inkluderer ikke free-centre (0)", async () => {
     assert.equal(res.status, 200);
     // Bongen har 0 i senter — skal IKKE være i matchedNumbers.
     assert.equal(res.json.data.matchedNumbers.includes(0), false);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-698: stamping + idempotens + NUMBERS_MISMATCH ────────────────────
+
+test("BIN-698: første check stempler numbers + pattern på ticket-raden", async () => {
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    tickets: [makeTicket({ uniqueId: "200001", hallId: "hall-a", assignedGameId: "game-1" })],
+    games: [{ id: "game-1", roomCode: "ABC123", hallId: "hall-a", drawnNumbers: [1, 2, 3, 4, 5] }],
+  });
+  try {
+    const res = await post(ctx.baseUrl, "/api/admin/physical-tickets/200001/check-bingo", "admin-tok", {
+      gameId: "game-1",
+      numbers: makeBingo75Numbers(),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.alreadyEvaluated, false);
+    assert.equal(res.json.data.hasWon, true);
+    assert.equal(res.json.data.winningPattern, "row_1");
+    assert.equal(res.json.data.evaluatedAt, "2026-04-20T10:05:00Z");
+    assert.equal(res.json.data.wonAmountCents, null);
+    assert.equal(res.json.data.isWinningDistributed, false);
+    // Stamping skjedde én gang med riktige verdier.
+    assert.equal(ctx.stampCalls.length, 1);
+    assert.equal(ctx.stampCalls[0]!.uniqueId, "200001");
+    assert.equal(ctx.stampCalls[0]!.patternWon, "row_1");
+    assert.deepEqual(ctx.stampCalls[0]!.numbers, makeBingo75Numbers());
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-698: andre check på samme billett returnerer cached verdi (idempotens)", async () => {
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    tickets: [makeTicket({ uniqueId: "200002", hallId: "hall-a", assignedGameId: "game-1" })],
+    // Første check: kun 5 trukket → Row 1. Etter stamping legger vi til flere
+    // trekk i game-state, men BIN-641 skal returnere CACHED pattern (Row 1).
+    games: [{ id: "game-1", roomCode: "ABC123", hallId: "hall-a", drawnNumbers: [1, 2, 3, 4, 5] }],
+  });
+  try {
+    const r1 = await post(ctx.baseUrl, "/api/admin/physical-tickets/200002/check-bingo", "admin-tok", {
+      gameId: "game-1",
+      numbers: makeBingo75Numbers(),
+    });
+    assert.equal(r1.status, 200);
+    assert.equal(r1.json.data.alreadyEvaluated, false);
+    assert.equal(r1.json.data.winningPattern, "row_1");
+    assert.equal(ctx.stampCalls.length, 1);
+
+    // Andre check — skal returnere cached uten å stamp på nytt.
+    const r2 = await post(ctx.baseUrl, "/api/admin/physical-tickets/200002/check-bingo", "admin-tok", {
+      gameId: "game-1",
+      numbers: makeBingo75Numbers(),
+    });
+    assert.equal(r2.status, 200);
+    assert.equal(r2.json.data.alreadyEvaluated, true);
+    assert.equal(r2.json.data.winningPattern, "row_1");
+    assert.equal(r2.json.data.evaluatedAt, "2026-04-20T10:05:00Z");
+    // Ingen ny stamp-kall: andre gang tok vi idempotens-pathen.
+    assert.equal(ctx.stampCalls.length, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-698: divergente numbers på andre check gir NUMBERS_MISMATCH", async () => {
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    tickets: [makeTicket({ uniqueId: "200003", hallId: "hall-a", assignedGameId: "game-1" })],
+    games: [{ id: "game-1", roomCode: "ABC123", hallId: "hall-a", drawnNumbers: [1, 2, 3, 4, 5] }],
+  });
+  try {
+    // Første check stempler billetten med standard numbers.
+    const r1 = await post(ctx.baseUrl, "/api/admin/physical-tickets/200003/check-bingo", "admin-tok", {
+      gameId: "game-1",
+      numbers: makeBingo75Numbers(),
+    });
+    assert.equal(r1.status, 200);
+    assert.equal(r1.json.data.alreadyEvaluated, false);
+
+    // Andre check med DIFFERENT numbers i første rad — svindel-forsøk.
+    const tamperedNumbers = makeBingo75Numbers({
+      row0: [99, 98, 97, 96, 95],
+    });
+    // Men vår validator krever [0,75] så bruk tall innenfor intervall men ulike.
+    const validTampered = makeBingo75Numbers({
+      row0: [70, 71, 72, 73, 74],
+    });
+    const r2 = await post(ctx.baseUrl, "/api/admin/physical-tickets/200003/check-bingo", "admin-tok", {
+      gameId: "game-1",
+      numbers: validTampered,
+    });
+    assert.equal(r2.status, 400);
+    assert.equal(r2.json.error.code, "NUMBERS_MISMATCH");
+    // Stampet fortsatt kun én gang.
+    assert.equal(ctx.stampCalls.length, 1);
+    void tamperedNumbers; // silence unused
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-698: tapende billett (hasWon=false) stempler også numbers + null-pattern", async () => {
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    tickets: [makeTicket({ uniqueId: "200004", hallId: "hall-a", assignedGameId: "game-1" })],
+    // Tilfeldige treff uten å fullføre noe mønster.
+    games: [{ id: "game-1", roomCode: "ABC123", hallId: "hall-a", drawnNumbers: [1, 7, 15, 19, 25] }],
+  });
+  try {
+    const res = await post(ctx.baseUrl, "/api/admin/physical-tickets/200004/check-bingo", "admin-tok", {
+      gameId: "game-1",
+      numbers: makeBingo75Numbers(),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.hasWon, false);
+    assert.equal(res.json.data.winningPattern, null);
+    assert.equal(res.json.data.alreadyEvaluated, false);
+    // Vi stampler uansett: numbers + null-pattern (slik at numbers_json er
+    // satt — BIN-639 bruker won_amount_cents > 0 som filter, ikke numbers_json).
+    assert.equal(ctx.stampCalls.length, 1);
+    assert.equal(ctx.stampCalls[0]!.patternWon, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-698: response inneholder wonAmountCents=null + isWinningDistributed=false i PR 1", async () => {
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    tickets: [makeTicket({ uniqueId: "200005", hallId: "hall-a", assignedGameId: "game-1" })],
+    games: [{ id: "game-1", roomCode: "ABC123", hallId: "hall-a", drawnNumbers: [1, 2, 3, 4, 5] }],
+  });
+  try {
+    const res = await post(ctx.baseUrl, "/api/admin/physical-tickets/200005/check-bingo", "admin-tok", {
+      gameId: "game-1",
+      numbers: makeBingo75Numbers(),
+    });
+    assert.equal(res.status, 200);
+    // PR 1-kontrakt: BIN-641 stampler IKKE beløp. BIN-639 (PR 2) setter dette.
+    assert.equal(res.json.data.wonAmountCents, null);
+    assert.equal(res.json.data.isWinningDistributed, false);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-698: matchende numbers på andre check bruker cached pattern selv om flere trukket", async () => {
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    // Start-tilstand: allerede stemplet som Row 1 med standard-numbers.
+    tickets: [
+      makeTicket({
+        uniqueId: "200006",
+        hallId: "hall-a",
+        assignedGameId: "game-1",
+        numbersJson: makeBingo75Numbers(),
+        patternWon: "row_1",
+        evaluatedAt: "2026-04-20T10:00:00Z",
+      }),
+    ],
+    // Nå er det trukket tall som ville gitt Row 2 ved fresh eval.
+    games: [{ id: "game-1", roomCode: "ABC123", hallId: "hall-a", drawnNumbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }],
+  });
+  try {
+    const res = await post(ctx.baseUrl, "/api/admin/physical-tickets/200006/check-bingo", "admin-tok", {
+      gameId: "game-1",
+      numbers: makeBingo75Numbers(),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.alreadyEvaluated, true);
+    // Cached pattern vinner — IKKE freshly computed Row 2.
+    assert.equal(res.json.data.winningPattern, "row_1");
+    assert.equal(res.json.data.evaluatedAt, "2026-04-20T10:00:00Z");
+    // Ingen nye stamp-kall ble gjort (allerede stemplet).
+    assert.equal(ctx.stampCalls.length, 0);
   } finally {
     await ctx.close();
   }

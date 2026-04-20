@@ -41,6 +41,25 @@ export interface PhysicalTicketBatch {
   updatedAt: string;
 }
 
+/**
+ * BIN-698: vinnende mønster stemplet på billett-raden ved første BIN-641
+ * check-bingo. Kanonisk 5×5 Bingo75-set; utvidelser gjøres via ny migrasjon.
+ */
+export type PhysicalTicketPattern =
+  | "row_1"
+  | "row_2"
+  | "row_3"
+  | "row_4"
+  | "full_house";
+
+const VALID_PHYSICAL_TICKET_PATTERNS: readonly PhysicalTicketPattern[] = [
+  "row_1",
+  "row_2",
+  "row_3",
+  "row_4",
+  "full_house",
+] as const;
+
 export interface PhysicalTicket {
   id: string;
   batchId: string;
@@ -57,6 +76,25 @@ export interface PhysicalTicket {
   voidedReason: string | null;
   createdAt: string;
   updatedAt: string;
+  // ── BIN-698: win-data (stemplet av BIN-641 check-bingo ved første kall).
+  /**
+   * 25 tall i row-major-rekkefølge (5×5 grid, index 12 = free-centre = 0).
+   * NULL før første check-bingo; immutable etter stamping.
+   */
+  numbersJson: number[] | null;
+  /** Høyeste vinnende mønster ved stamping. NULL = ikke evaluert eller tapte. */
+  patternWon: PhysicalTicketPattern | null;
+  /**
+   * Beregnet payout i cents. NULL = BIN-641 stamplet ikke beløp (dagens
+   * oppførsel); BIN-639 (PR 2) setter verdi når admin distribuerer.
+   */
+  wonAmountCents: number | null;
+  /** Tidspunkt for første BIN-641-stamping. NULL før check-bingo. */
+  evaluatedAt: string | null;
+  /** true = BIN-639 reward-all har distribuert premien. */
+  isWinningDistributed: boolean;
+  /** Tidspunkt for BIN-639-distribusjon. NULL før distribusjon. */
+  winningDistributedAt: string | null;
 }
 
 export interface CreateBatchInput {
@@ -172,6 +210,14 @@ interface TicketRow {
   voided_reason: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  // BIN-698: win-data-kolonner. pg-driver returnerer JSONB som parsed object,
+  // men eldre miljøer kan returnere string — håndteres i mapTicket.
+  numbers_json?: unknown;
+  pattern_won?: string | null;
+  won_amount_cents?: string | number | null;
+  evaluated_at?: Date | string | null;
+  is_winning_distributed?: boolean | null;
+  winning_distributed_at?: Date | string | null;
 }
 
 interface CashoutRow {
@@ -193,6 +239,41 @@ function isUniqueViolation(err: unknown): boolean {
     "code" in err &&
     (err as { code?: string }).code === "23505"
   );
+}
+
+/**
+ * BIN-698: parse `numbers_json` fra DB (JSONB → parsed array). Returnerer
+ * null hvis verdien ikke er en array av 25 heltall (defense-in-depth).
+ * pg-driver returnerer JSONB som allerede-parsed JS-objekt; eldre driver-
+ * versjoner kan returnere string — begge støttes.
+ */
+function parseNumbersJson(raw: unknown): number[] | null {
+  if (raw === null || raw === undefined) return null;
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(value)) return null;
+  if (value.length !== 25) return null;
+  const out: number[] = [];
+  for (const v of value) {
+    const n = typeof v === "number" ? v : Number(v);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) return null;
+    out.push(n);
+  }
+  return out;
+}
+
+/** BIN-698: validér pattern-tekst fra DB mot whitelist. */
+function parsePattern(raw: string | null): PhysicalTicketPattern | null {
+  if (raw === null) return null;
+  return (VALID_PHYSICAL_TICKET_PATTERNS as readonly string[]).includes(raw)
+    ? (raw as PhysicalTicketPattern)
+    : null;
 }
 
 function asJsonObject(value: unknown): Record<string, unknown> {
@@ -609,7 +690,9 @@ export class PhysicalTicketService {
     const { rows } = await this.pool.query<TicketRow>(
       `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
               sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
-              created_at, updated_at
+              created_at, updated_at,
+              numbers_json, pattern_won, won_amount_cents, evaluated_at,
+              is_winning_distributed, winning_distributed_at
        FROM ${this.ticketsTable()}
        WHERE ${conditions.join(" AND ")}
        ORDER BY sold_at DESC NULLS LAST
@@ -663,7 +746,9 @@ export class PhysicalTicketService {
     const { rows } = await this.pool.query<TicketRow>(
       `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
               sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
-              created_at, updated_at
+              created_at, updated_at,
+              numbers_json, pattern_won, won_amount_cents, evaluated_at,
+              is_winning_distributed, winning_distributed_at
        FROM ${this.ticketsTable()}
        ${where}
        ORDER BY created_at DESC
@@ -746,7 +831,9 @@ export class PhysicalTicketService {
     const { rows } = await this.pool.query<TicketRow>(
       `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
               sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
-              created_at, updated_at
+              created_at, updated_at,
+              numbers_json, pattern_won, won_amount_cents, evaluated_at,
+              is_winning_distributed, winning_distributed_at
        FROM ${this.ticketsTable()}
        ${where}
        ORDER BY unique_id::bigint ASC
@@ -768,12 +855,106 @@ export class PhysicalTicketService {
     const { rows } = await this.pool.query<TicketRow>(
       `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
               sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
-              created_at, updated_at
+              created_at, updated_at,
+              numbers_json, pattern_won, won_amount_cents, evaluated_at,
+              is_winning_distributed, winning_distributed_at
        FROM ${this.ticketsTable()}
        WHERE unique_id = $1`,
       [uniqueId.trim()]
     );
     return rows[0] ? this.mapTicket(rows[0]) : null;
+  }
+
+  /**
+   * BIN-698: Stamper vinn-data (numbers + pattern) på billett-raden ved
+   * første BIN-641 check-bingo. Idempotens:
+   *
+   *   - Hvis `numbers_json` er NULL: stampler inn, setter `evaluated_at = NOW()`.
+   *   - Hvis `numbers_json` ER satt: returnerer eksisterende rad uten mutasjon.
+   *     Caller må selv verifisere at klientens numbers[] matcher den stemplede
+   *     verdien før dette kalles (rute-laget gjør dette).
+   *
+   * `wonAmountCents` er bevisst NULL i BIN-641-PR 1 — BIN-639 (PR 2) setter
+   * dette når admin distribuerer premien per billett.
+   *
+   * Bruker FOR UPDATE + transaksjon for å serialisere race-kondisjoner der
+   * to agent-scannere sender samme unique-ID samtidig.
+   */
+  async stampWinData(input: {
+    uniqueId: string;
+    numbers: number[];
+    patternWon: PhysicalTicketPattern | null;
+  }): Promise<PhysicalTicket> {
+    await this.ensureInitialized();
+    const uniqueId = input.uniqueId?.trim();
+    if (!uniqueId) throw new DomainError("INVALID_INPUT", "uniqueId er påkrevd.");
+    if (!Array.isArray(input.numbers) || input.numbers.length !== 25) {
+      throw new DomainError("INVALID_INPUT", "numbers må være array med 25 heltall.");
+    }
+    for (let i = 0; i < 25; i += 1) {
+      const n = input.numbers[i]!;
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 75) {
+        throw new DomainError("INVALID_INPUT", `numbers[${i}] må være heltall i [0,75].`);
+      }
+    }
+    if (
+      input.patternWon !== null &&
+      !VALID_PHYSICAL_TICKET_PATTERNS.includes(input.patternWon)
+    ) {
+      throw new DomainError("INVALID_INPUT", `Ukjent patternWon: ${String(input.patternWon)}`);
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<TicketRow>(
+        `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
+                sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
+                created_at, updated_at,
+                numbers_json, pattern_won, won_amount_cents, evaluated_at,
+                is_winning_distributed, winning_distributed_at
+         FROM ${this.ticketsTable()}
+         WHERE unique_id = $1 FOR UPDATE`,
+        [uniqueId]
+      );
+      const existing = existingRows[0];
+      if (!existing) {
+        throw new DomainError("PHYSICAL_TICKET_NOT_FOUND", "Billetten finnes ikke.");
+      }
+
+      // Idempotens: allerede stemplet → returner uten mutasjon.
+      if (existing.numbers_json !== null && existing.numbers_json !== undefined) {
+        await client.query("COMMIT");
+        return this.mapTicket(existing);
+      }
+
+      const { rows } = await client.query<TicketRow>(
+        `UPDATE ${this.ticketsTable()}
+         SET numbers_json = $2::jsonb,
+             pattern_won = $3,
+             evaluated_at = now(),
+             updated_at = now()
+         WHERE unique_id = $1
+         RETURNING id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
+                   sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
+                   created_at, updated_at,
+                   numbers_json, pattern_won, won_amount_cents, evaluated_at,
+                   is_winning_distributed, winning_distributed_at`,
+        [uniqueId, JSON.stringify(input.numbers), input.patternWon]
+      );
+      await client.query("COMMIT");
+      return this.mapTicket(rows[0]!);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      if (err instanceof DomainError) throw err;
+      logger.error({ err, uniqueId }, "[BIN-698] stampWinData failed");
+      throw new DomainError(
+        "PHYSICAL_STAMP_FAILED",
+        "Kunne ikke stemple win-data på billetten."
+      );
+    } finally {
+      client.release();
+    }
   }
 
   async getLastRegisteredUniqueId(hallId: string): Promise<{ hallId: string; lastUniqueId: string | null; maxRangeEnd: number | null }> {
@@ -848,7 +1029,9 @@ export class PhysicalTicketService {
          WHERE unique_id = $1
          RETURNING id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
                    sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
-                   created_at, updated_at`,
+                   created_at, updated_at,
+                   numbers_json, pattern_won, won_amount_cents, evaluated_at,
+                   is_winning_distributed, winning_distributed_at`,
         [uniqueId, soldBy, buyerUserId, priceCents]
       );
       await client.query("COMMIT");
@@ -1046,7 +1229,9 @@ export class PhysicalTicketService {
       const { rows: ticketRows } = await client.query<TicketRow>(
         `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
                 sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
-                created_at, updated_at
+                created_at, updated_at,
+                numbers_json, pattern_won, won_amount_cents, evaluated_at,
+                is_winning_distributed, winning_distributed_at
          FROM ${this.ticketsTable()}
          WHERE unique_id = $1 FOR UPDATE`,
         [uniqueId]
@@ -1160,6 +1345,16 @@ export class PhysicalTicketService {
       voidedReason: row.voided_reason,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at),
+      // ── BIN-698: win-data
+      numbersJson: parseNumbersJson(row.numbers_json),
+      patternWon: parsePattern(row.pattern_won ?? null),
+      wonAmountCents:
+        row.won_amount_cents === null || row.won_amount_cents === undefined
+          ? null
+          : Number(row.won_amount_cents),
+      evaluatedAt: asIsoOrNull(row.evaluated_at ?? null),
+      isWinningDistributed: row.is_winning_distributed === true,
+      winningDistributedAt: asIsoOrNull(row.winning_distributed_at ?? null),
     };
   }
 
@@ -1211,8 +1406,27 @@ export class PhysicalTicketService {
           voided_by TEXT NULL,
           voided_reason TEXT NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          numbers_json JSONB NULL,
+          pattern_won TEXT NULL
+            CHECK (pattern_won IS NULL OR pattern_won IN ('row_1','row_2','row_3','row_4','full_house')),
+          won_amount_cents BIGINT NULL
+            CHECK (won_amount_cents IS NULL OR won_amount_cents >= 0),
+          evaluated_at TIMESTAMPTZ NULL,
+          is_winning_distributed BOOLEAN NOT NULL DEFAULT false,
+          winning_distributed_at TIMESTAMPTZ NULL
         )`
+      );
+      // BIN-698: Defense-in-depth for miljøer der tabellen finnes fra før —
+      // legger til kolonner hvis de mangler (matcher migrasjon 20260427000100).
+      await client.query(
+        `ALTER TABLE ${this.ticketsTable()}
+           ADD COLUMN IF NOT EXISTS numbers_json JSONB NULL,
+           ADD COLUMN IF NOT EXISTS pattern_won TEXT NULL,
+           ADD COLUMN IF NOT EXISTS won_amount_cents BIGINT NULL,
+           ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ NULL,
+           ADD COLUMN IF NOT EXISTS is_winning_distributed BOOLEAN NOT NULL DEFAULT false,
+           ADD COLUMN IF NOT EXISTS winning_distributed_at TIMESTAMPTZ NULL`
       );
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_ptb_hall
@@ -1226,6 +1440,13 @@ export class PhysicalTicketService {
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_pt_game_status
          ON ${this.ticketsTable()}(assigned_game_id, status)
          WHERE assigned_game_id IS NOT NULL`
+      );
+      // BIN-698: partial index for BIN-639 reward-all query
+      //   ("alle vinnende billetter i et game som ikke er utbetalt ennå").
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_pt_undistributed_winners
+         ON ${this.ticketsTable()}(assigned_game_id)
+         WHERE won_amount_cents > 0 AND is_winning_distributed = false`
       );
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_pt_hall_status

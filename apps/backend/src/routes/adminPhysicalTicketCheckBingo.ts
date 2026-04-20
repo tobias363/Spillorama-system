@@ -189,6 +189,15 @@ function collectMatchedNumbers(numbers: number[], drawn: Set<number>): number[] 
   return matched;
 }
 
+/** BIN-698: sammenligner to number-arrays element-for-element. */
+function arraysEqual(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export function createAdminPhysicalTicketCheckBingoRouter(
   deps: AdminPhysicalTicketCheckBingoDeps
 ): express.Router {
@@ -271,23 +280,66 @@ export function createAdminPhysicalTicketCheckBingoRouter(
       }
 
       const drawnSet = new Set<number>(gameCtx.drawnNumbers);
-      const ticketMask = buildMaskFromNumbers(numbers, drawnSet);
-      const winningPattern = pickWinningPattern(ticketMask);
-      const matchedNumbers = collectMatchedNumbers(numbers, drawnSet);
+
+      // BIN-698: Idempotens-håndtering. Hvis billetten allerede er stemplet
+      // (numbers_json satt), verifiserer vi at klientens numbers[] matcher
+      // det som ligger lagret. Divergens => NUMBERS_MISMATCH (svindel-sikring:
+      // agenten kan ikke "finne opp" nye tall for samme billett).
+      let effectiveNumbers = numbers;
+      let cachedPatternWon: CheckBingoWinningPattern | null = null;
+      let wasAlreadyStamped = false;
+      if (ticket.numbersJson !== null) {
+        wasAlreadyStamped = true;
+        if (!arraysEqual(ticket.numbersJson, numbers)) {
+          throw new DomainError(
+            "NUMBERS_MISMATCH",
+            "Billetten er allerede stemplet med andre tall. Sjekk papir-bongen på nytt.",
+          );
+        }
+        effectiveNumbers = ticket.numbersJson;
+        cachedPatternWon = ticket.patternWon;
+      }
+
+      const ticketMask = buildMaskFromNumbers(effectiveNumbers, drawnSet);
+      const computedPattern = pickWinningPattern(ticketMask);
+      const matchedNumbers = collectMatchedNumbers(effectiveNumbers, drawnSet);
+
+      // BIN-698: Hvis billetten ikke er stemplet fra før, stamp vinn-data
+      // atomisk. Vi stamper ALLTID etter første check (selv "tapte" — pattern
+      // kan være null — slik at idempotensen er entydig: numbers_json satt
+      // ⇔ stemplet). BIN-639 (PR 2) filtrerer videre på won_amount_cents > 0.
+      let stampedTicket = ticket;
+      if (!wasAlreadyStamped) {
+        stampedTicket = await physicalTicketService.stampWinData({
+          uniqueId: ticket.uniqueId,
+          numbers: effectiveNumbers,
+          patternWon: computedPattern,
+        });
+      }
+
+      const finalPattern = wasAlreadyStamped ? cachedPatternWon : computedPattern;
 
       apiSuccess(res, {
         uniqueId: ticket.uniqueId,
         gameId,
         gameStatus: gameCtx.gameStatus,
-        hasWon: winningPattern !== null,
-        winningPattern,
+        hasWon: finalPattern !== null,
+        winningPattern: finalPattern,
         matchedNumbers,
         drawnNumbersCount: gameCtx.drawnNumbers.length,
         // payoutEligible skiller seg fra hasWon kun ved fremtidige flagg
         // (f.eks. "ticket.cashedOut"). I dagens skjema mangler vi den
         // kolonnen, så payoutEligible === hasWon. BIN-640 cashout-endepunkt
         // kan innføre egen cashedOut-state senere uten å bryte kontrakten.
-        payoutEligible: winningPattern !== null,
+        payoutEligible: finalPattern !== null,
+        // BIN-698: observability — tillater admin-UI å vise "sjekket tidligere
+        // i dag" og skjule re-stamp-knapp.
+        alreadyEvaluated: wasAlreadyStamped,
+        evaluatedAt: stampedTicket.evaluatedAt,
+        // Stamplet win-amount (NULL i PR 1; BIN-639 setter når admin
+        // distribuerer).
+        wonAmountCents: stampedTicket.wonAmountCents,
+        isWinningDistributed: stampedTicket.isWinningDistributed,
       });
     } catch (error) {
       apiFailure(res, error);
