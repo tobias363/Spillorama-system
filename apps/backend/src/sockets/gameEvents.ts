@@ -755,10 +755,12 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
         io.to(roomCode).emit("draw:new", { number, drawIndex, gameId });
 
         // BIN-694: emit pattern:won for every phase the draw just closed.
+        // BIN-696: include winnerIds + winnerCount for multi-winner popup.
         const afterSnap = engine.getRoomSnapshot(roomCode);
         const afterResults = afterSnap.currentGame?.patternResults ?? [];
         for (const r of afterResults) {
           if (r.isWon && !wonBefore.has(r.patternId)) {
+            const winnerIds = r.winnerIds ?? (r.winnerId ? [r.winnerId] : []);
             io.to(roomCode).emit("pattern:won", {
               patternId: r.patternId,
               patternName: r.patternName,
@@ -767,6 +769,8 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
               payoutAmount: r.payoutAmount,
               claimType: r.claimType,
               gameId: afterSnap.currentGame?.id,
+              winnerIds,
+              winnerCount: winnerIds.length,
             });
           }
         }

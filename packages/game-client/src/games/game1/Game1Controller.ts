@@ -557,19 +557,47 @@ class Game1Controller implements GameController {
   private onPatternWon(result: PatternWonPayload, _state: GameState): void {
     if (this.phase === "PLAYING" && this.playScreen) this.playScreen.onPatternWon(result);
 
-    // Toast notification (Unity: OnPatternWon_Spillorama shows winner info)
-    const isMe = result.winnerId === this.myPlayerId;
+    // BIN-696: Vis annonsering til alle spillere om at fasen er vunnet.
+    // Fullt Hus har spesiell tekst ("Spillet er over") — alle andre faser
+    // bruker pattern-navnet direkte ("Rad 1 er vunnet", "Rad 2 er vunnet",
+    // osv.). Standardisert 3s varighet per Tobias' ønske (2026-04-20).
+    const isFullHouse = result.claimType === "BINGO";
+    const phaseMsg = isFullHouse
+      ? "Fullt Hus er vunnet. Spillet er over."
+      : `${result.patternName} er vunnet!`;
+    this.toast?.info(phaseMsg, 3000);
+
+    // BIN-696: Vinner-spesifikk annonsering med split-forklaring.
+    // `winnerIds` er fullt array ved multi-winner split (flere spillere
+    // oppfylte fasen samtidig). `winnerId` peker til første vinner (back-
+    // compat). Hvis backend ikke har sendt winnerIds (eldre deploy), fall
+    // tilbake til `winnerId`-sjekk.
+    const winnerIds = result.winnerIds ?? (result.winnerId ? [result.winnerId] : []);
+    const isMe = this.myPlayerId !== null && winnerIds.includes(this.myPlayerId);
+    const winnerCount = result.winnerCount ?? winnerIds.length;
+
     if (isMe) {
-      this.toast?.win(`Du vant ${result.patternName}! ${result.payoutAmount} kr`);
+      // BIN-696 tekst-revisjon per Tobias 2026-04-20:
+      //   Solo-vinner:   "Du vant 1 Rad!\nGevinst: 15 kr"
+      //   Multi-winner:  "Du vant 1 Rad!\nDin gevinst: 15 kr (premien delt på 3 spillere som vant samtidig)"
+      // "Din gevinst" understreker at beløpet er denne spillerens andel
+      // etter split; solo trenger ikke distinksjonen.
+      const firstLine = isFullHouse
+        ? "Du vant Fullt Hus!"
+        : `Du vant ${result.patternName}!`;
+      const secondLine = winnerCount > 1
+        ? `Din gevinst: ${result.payoutAmount} kr (premien delt på ${winnerCount} spillere som vant samtidig)`
+        : `Gevinst: ${result.payoutAmount} kr`;
+
+      this.toast?.win(`${firstLine}\n${secondLine}`, 5000);
       this.deps.audio.playBingoSound();
-    } else {
-      this.toast?.info(`${result.patternName} vunnet av en annen spiller`);
     }
 
     telemetry.trackEvent("pattern_won", {
       patternName: result.patternName,
       isMe,
       payoutAmount: result.payoutAmount,
+      winnerCount,
     });
   }
 

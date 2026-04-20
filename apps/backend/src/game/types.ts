@@ -47,6 +47,13 @@ export interface PatternResult {
   wonAtDraw?: number;
   payoutAmount?: number;
   claimId?: string;
+  /**
+   * BIN-696: Alle spiller-IDer som vant denne fasen på samme draw.
+   * Brukes av klient-popup for å forklare multi-winner-split
+   * ("Premien delt på 3 spillere"). `winnerId` beholdes for backward-
+   * compat og peker til første vinner.
+   */
+  winnerIds?: string[];
 }
 
 export interface Player {

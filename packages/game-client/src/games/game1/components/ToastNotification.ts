@@ -61,7 +61,12 @@ export class ToastNotification {
       transform: "translateY(-10px)",
       transition: "opacity 0.3s, transform 0.3s",
       pointerEvents: "auto",
-      whiteSpace: "nowrap",
+      // BIN-696: `pre-line` bevarer `\n` i meldinger som linjeskift
+      // (f.eks. "Du vant 1 Rad!\nGevinst: 15 kr"), mens normal
+      // whitespace-collapse fortsatt virker for vanlige enkel-linje-
+      // toasts. `nowrap` er flyttet bort — tekst wraps naturlig på
+      // narrow skjerm nå, noe som også er et UX-plus for lange navn.
+      whiteSpace: "pre-line",
     });
     el.textContent = message;
     this.container.appendChild(el);

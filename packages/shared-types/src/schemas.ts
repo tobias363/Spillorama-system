@@ -389,7 +389,13 @@ export const TicketMarkPayloadSchema = z.object({
 });
 export type TicketMarkPayload = z.infer<typeof TicketMarkPayloadSchema>;
 
-/** BIN-527: `pattern:won` broadcast — fires after a valid claim commits. */
+/**
+ * BIN-527: `pattern:won` broadcast — fires after a valid claim commits.
+ *
+ * BIN-696: Utvidet med `winnerIds` + `winnerCount` for å støtte multi-
+ * winner-split-forklaring i klient-popup. `winnerId` beholdes for
+ * backward compat (peker til første vinner ved split).
+ */
 export const PatternWonPayloadSchema = z.object({
   patternId: z.string(),
   patternName: z.string(),
@@ -398,6 +404,10 @@ export const PatternWonPayloadSchema = z.object({
   payoutAmount: z.number().nonnegative(),
   claimType: ClaimType,
   gameId: z.string(),
+  /** BIN-696: alle spiller-IDer som vant fasen på samme draw. Minst 1. */
+  winnerIds: z.array(z.string()).optional(),
+  /** BIN-696: antall samtidige vinnere (lik winnerIds.length — for UI-enkelhet). */
+  winnerCount: z.number().int().positive().optional(),
 });
 export type PatternWonPayload = z.infer<typeof PatternWonPayloadSchema>;
 

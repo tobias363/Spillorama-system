@@ -977,10 +977,12 @@ export class BingoEngine {
 
     // Mark phase as won. For multi-winner the `winnerId` is set to the
     // first winner (backward compat with single-winner test assertions);
-    // the full list lives in the per-winner ClaimRecords on game.claims.
+    // the full list lives in `winnerIds` (BIN-696) + per-winner
+    // ClaimRecords on game.claims.
     activeResult.isWon = true;
     activeResult.wonAtDraw = game.drawnNumbers.length;
     activeResult.winnerId = winnerPlayerIds[0];
+    activeResult.winnerIds = [...winnerPlayerIds];
     activeResult.payoutAmount = prizePerWinner;
 
     // End round when Fullt Hus is won.

@@ -157,9 +157,11 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
       }
       const postDrawSnapshot = deps.engine.getRoomSnapshot(roomCode);
       // BIN-694: emit pattern:won for every phase the draw just closed.
+      // BIN-696: include winnerIds + winnerCount for multi-winner popup.
       const afterResults = postDrawSnapshot.currentGame?.patternResults ?? [];
       for (const r of afterResults) {
         if (r.isWon && !wonBefore.has(r.patternId)) {
+          const winnerIds = r.winnerIds ?? (r.winnerId ? [r.winnerId] : []);
           deps.io.to(roomCode).emit("pattern:won", {
             patternId: r.patternId,
             patternName: r.patternName,
@@ -168,6 +170,8 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
             payoutAmount: r.payoutAmount,
             claimType: r.claimType,
             gameId: postDrawSnapshot.currentGame?.id,
+            winnerIds,
+            winnerCount: winnerIds.length,
           });
         }
       }
