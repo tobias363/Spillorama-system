@@ -1,10 +1,11 @@
 /**
- * BIN-587 B5-rest + BIN-630: integrasjonstester for admin player activity router.
+ * BIN-587 B5-rest + BIN-629 + BIN-630: integrasjonstester for admin player activity router.
  *
  * Dekker:
  *   GET /api/admin/players/:id/transactions
  *   GET /api/admin/players/:id/game-history
- *   GET /api/admin/players/:id/chips-history
+ *   GET /api/admin/players/:id/chips-history   (BIN-630)
+ *   GET /api/admin/players/:id/login-history   (BIN-629)
  */
 
 import assert from "node:assert/strict";
@@ -17,6 +18,10 @@ import type { WalletAdapter, WalletTransaction, WalletTransactionType } from "..
 import type { BingoEngine } from "../../game/BingoEngine.js";
 import type { ComplianceLedgerEntry, LedgerEventType } from "../../game/ComplianceLedger.js";
 import { DomainError } from "../../game/BingoEngine.js";
+import {
+  AuditLogService,
+  InMemoryAuditLogStore,
+} from "../../compliance/AuditLogService.js";
 
 const adminUser: PublicAppUser = {
   id: "admin-1", email: "a@test.no", displayName: "Admin",
@@ -48,6 +53,7 @@ interface Ctx {
   close: () => Promise<void>;
   listLedgerCalls: Array<Parameters<BingoEngine["listComplianceLedgerEntries"]>[0]>;
   listTxCalls: Array<{ walletId: string; limit: number | undefined }>;
+  auditStore: InMemoryAuditLogStore;
 }
 
 async function startServer(opts: {
@@ -100,9 +106,14 @@ async function startServer(opts: {
     },
   } as unknown as BingoEngine;
 
+  const auditStore = new InMemoryAuditLogStore();
+  const auditLogService = new AuditLogService(auditStore);
+
   const app = express();
   app.use(express.json());
-  app.use(createAdminPlayerActivityRouter({ platformService, walletAdapter, engine }));
+  app.use(
+    createAdminPlayerActivityRouter({ platformService, walletAdapter, engine, auditLogService }),
+  );
 
   const server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", () => resolve()));
@@ -111,6 +122,7 @@ async function startServer(opts: {
     baseUrl: `http://127.0.0.1:${port}`,
     listLedgerCalls,
     listTxCalls,
+    auditStore,
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 }
@@ -507,6 +519,207 @@ test("BIN-630: chips-history — manglende Authorization → UNAUTHORIZED", asyn
       typeof res.json.error.code === "string" && res.json.error.code.length > 0,
       "skal returnere en error.code",
     );
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-629: login-history ──────────────────────────────────────────────────
+
+async function seedLogin(
+  ctx: Ctx,
+  opts: { actorId: string; success: boolean; ip?: string; ua?: string; failureReason?: string },
+): Promise<void> {
+  await ctx.auditStore.append({
+    actorId: opts.actorId,
+    actorType: "USER",
+    action: opts.success ? "auth.login" : "auth.login.failed",
+    resource: "session",
+    resourceId: null,
+    details: opts.success ? {} : { failureReason: opts.failureReason ?? "INVALID_CREDENTIALS" },
+    ipAddress: opts.ip ?? "127.0.0.1",
+    userAgent: opts.ua ?? "Mozilla/TestAgent",
+  });
+}
+
+test("BIN-629: PLAYER blokkert fra login-history", async () => {
+  const ctx = await startServer({
+    users: { "pl-tok": playerUser },
+    usersById: { "target-1": makePlayer("target-1") },
+  });
+  try {
+    const r = await req(ctx.baseUrl, "/api/admin/players/target-1/login-history", "pl-tok");
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-629: HALL_OPERATOR blokkert (PLAYER_KYC_READ er ADMIN/SUPPORT-only)", async () => {
+  const ctx = await startServer({
+    users: { "op-a-tok": operatorA },
+    usersById: { "target-1": makePlayer("target-1") },
+  });
+  try {
+    const r = await req(ctx.baseUrl, "/api/admin/players/target-1/login-history", "op-a-tok");
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-629: ADMIN + SUPPORT kan lese login-history", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser, "sup-tok": supportUser },
+    usersById: { "target-1": player },
+  });
+  try {
+    await seedLogin(ctx, { actorId: "target-1", success: true });
+    for (const token of ["admin-tok", "sup-tok"]) {
+      const r = await req(ctx.baseUrl, "/api/admin/players/target-1/login-history", token);
+      assert.equal(r.status, 200, `token ${token} gave ${r.status}: ${JSON.stringify(r.json)}`);
+      assert.equal(r.json.data.userId, "target-1");
+      assert.equal(r.json.data.items.length, 1);
+      assert.equal(r.json.data.items[0].success, true);
+      assert.equal(r.json.data.items[0].ipAddress, "127.0.0.1");
+    }
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-629: ikke-PLAYER target avvises", async () => {
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-admin": { ...makePlayer("target-admin"), role: "ADMIN" } },
+  });
+  try {
+    const r = await req(ctx.baseUrl, "/api/admin/players/target-admin/login-history", "admin-tok");
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-629: returnerer success + failed, nyeste først, med failureReason", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+  });
+  try {
+    await seedLogin(ctx, { actorId: "target-1", success: false, failureReason: "INVALID_CREDENTIALS" });
+    await seedLogin(ctx, { actorId: "target-1", success: true });
+    const r = await req(ctx.baseUrl, "/api/admin/players/target-1/login-history", "admin-tok");
+    assert.equal(r.status, 200);
+    assert.equal(r.json.data.items.length, 2);
+    // Nyeste (success) først.
+    assert.equal(r.json.data.items[0].success, true);
+    assert.equal(r.json.data.items[0].failureReason, null);
+    assert.equal(r.json.data.items[1].success, false);
+    assert.equal(r.json.data.items[1].failureReason, "INVALID_CREDENTIALS");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-629: filtrerer ut andre spilleres events", async () => {
+  const target = makePlayer("target-1");
+  const other = makePlayer("other-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": target, "other-1": other },
+  });
+  try {
+    await seedLogin(ctx, { actorId: "target-1", success: true });
+    await seedLogin(ctx, { actorId: "other-1", success: true });
+    await seedLogin(ctx, { actorId: "other-1", success: false });
+    const r = await req(ctx.baseUrl, "/api/admin/players/target-1/login-history", "admin-tok");
+    assert.equal(r.status, 200);
+    assert.equal(r.json.data.items.length, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-629: cursor-paginering returnerer nextCursor og neste side", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+  });
+  try {
+    for (let i = 0; i < 5; i++) {
+      await seedLogin(ctx, { actorId: "target-1", success: true, ip: `10.0.0.${i}` });
+    }
+    const first = await req(ctx.baseUrl, "/api/admin/players/target-1/login-history?limit=2", "admin-tok");
+    assert.equal(first.status, 200);
+    assert.equal(first.json.data.items.length, 2);
+    assert.ok(first.json.data.nextCursor, "should return nextCursor");
+
+    const second = await req(
+      ctx.baseUrl,
+      `/api/admin/players/target-1/login-history?limit=2&cursor=${encodeURIComponent(first.json.data.nextCursor)}`,
+      "admin-tok",
+    );
+    assert.equal(second.status, 200);
+    assert.equal(second.json.data.items.length, 2);
+    // Ingen overlap.
+    const ids1 = new Set(first.json.data.items.map((e: { id: string }) => e.id));
+    for (const item of second.json.data.items) {
+      assert.ok(!ids1.has(item.id), "second-page row should not appear on first page");
+    }
+
+    const third = await req(
+      ctx.baseUrl,
+      `/api/admin/players/target-1/login-history?limit=2&cursor=${encodeURIComponent(second.json.data.nextCursor)}`,
+      "admin-tok",
+    );
+    assert.equal(third.status, 200);
+    assert.equal(third.json.data.items.length, 1);
+    assert.equal(third.json.data.nextCursor, null, "final page should not return a cursor");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-629: from/to-validering — 'from' > 'to' gir INVALID_INPUT", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+  });
+  try {
+    const r = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-1/login-history?from=2026-05-01T00:00:00Z&to=2026-04-01T00:00:00Z",
+      "admin-tok",
+    );
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-629: from/to-validering — ugyldig ISO gir INVALID_INPUT", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+  });
+  try {
+    const r = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-1/login-history?from=not-a-date",
+      "admin-tok",
+    );
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error.code, "INVALID_INPUT");
   } finally {
     await ctx.close();
   }

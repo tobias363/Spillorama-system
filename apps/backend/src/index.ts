@@ -752,6 +752,7 @@ app.use(createAuthRouter({
   bankIdAdapter,
   authTokenService,
   emailService,
+  auditLogService,
   webBaseUrl,
   supportEmail,
 }));
@@ -945,6 +946,7 @@ app.use(createAdminPlayerActivityRouter({
   platformService,
   walletAdapter,
   engine,
+  auditLogService,
 }));
 
 // BIN-583 B3.1: agent auth/shift + admin agent-CRUD.

@@ -1,15 +1,18 @@
 /**
- * BIN-587 B5-rest + BIN-630: admin-view av spillers aktivitet.
+ * BIN-587 B5-rest + BIN-629 + BIN-630: admin-view av spillers aktivitet.
  *
  * Endepunkter:
  *   GET /api/admin/players/:id/transactions    — wallet-transaksjoner (B5)
  *   GET /api/admin/players/:id/game-history    — ledger-entries (stakes/prizes) (B5)
  *   GET /api/admin/players/:id/chips-history   — paginert chips-historikk (BIN-630)
+ *   GET /api/admin/players/:id/login-history   — auth.login* audit-rader (BIN-629)
  *
- * Alle er read-only; ingen audit-logging. Hall-scope for HALL_OPERATOR:
- * siden spillere ikke har hall-tilhørighet per tx, gir vi ADMIN/SUPPORT
- * tilgang men krever at HALL_OPERATOR spesifiserer hall-filter som
- * matcher egen hall.
+ * Alle read-only; ingen audit-logging (ikke regulatorisk — samme policy som
+ * BIN-647/BIN-648). Hall-scope for HALL_OPERATOR på game-history: siden
+ * spillere ikke har hall-tilhørighet per tx, gir vi ADMIN/SUPPORT tilgang
+ * men krever at HALL_OPERATOR spesifiserer hall-filter som matcher egen
+ * hall. chips-history og login-history er ikke hall-scoped; kun ADMIN +
+ * SUPPORT (PLAYER_KYC_READ).
  */
 
 import express from "express";
@@ -17,6 +20,7 @@ import { DomainError } from "../game/BingoEngine.js";
 import type { BingoEngine } from "../game/BingoEngine.js";
 import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import type { AuditLogService } from "../compliance/AuditLogService.js";
 import {
   assertAdminPermission,
   resolveHallScopeFilter,
@@ -30,11 +34,17 @@ import {
   parseLimit,
 } from "../util/httpHelpers.js";
 import { buildChipsHistory } from "../admin/ChipsHistoryService.js";
+import {
+  buildLoginHistoryResponse,
+  decodeLoginCursor,
+} from "../admin/LoginHistoryService.js";
 
 export interface AdminPlayerActivityRouterDeps {
   platformService: PlatformService;
   walletAdapter: WalletAdapter;
   engine: BingoEngine;
+  /** BIN-629: source for `auth.login*` audit rows. */
+  auditLogService: AuditLogService;
 }
 
 function parseOptionalIso(value: unknown, fieldName: string): string | undefined {
@@ -58,7 +68,7 @@ function optionalNonEmpty(value: unknown): string | undefined {
 }
 
 export function createAdminPlayerActivityRouter(deps: AdminPlayerActivityRouterDeps): express.Router {
-  const { platformService, walletAdapter, engine } = deps;
+  const { platformService, walletAdapter, engine, auditLogService } = deps;
   const router = express.Router();
 
   async function requirePermission(req: express.Request, permission: AdminPermission): Promise<PublicAppUser> {
@@ -187,6 +197,54 @@ export function createAdminPlayerActivityRouter(deps: AdminPlayerActivityRouterD
         items: result.items,
         nextCursor: result.nextCursor,
       });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // BIN-629: GET /api/admin/players/:id/login-history?from&to&limit&cursor
+  //
+  // Paginerte login-forsøk (success + failed) for en spiller. Kilden er
+  // `app_audit_log` med action-prefix `auth.login`. Read-only, ingen audit
+  // på leseoperasjonen (ikke regulatorisk). Permission: PLAYER_KYC_READ —
+  // samme som transactions/game-history; HALL_OPERATOR får 403 (login-
+  // historikk er sentralisert compliance, ikke per-hall).
+  router.get("/api/admin/players/:id/login-history", async (req, res) => {
+    try {
+      await requirePermission(req, "PLAYER_KYC_READ");
+      const userId = mustBeNonEmptyString(req.params.id, "id");
+      const target = await platformService.getUserById(userId);
+      if (target.role !== "PLAYER") {
+        throw new DomainError("INVALID_INPUT", "Endepunktet er kun for spillere.");
+      }
+      const from = parseOptionalIso(req.query.from, "from");
+      const to = parseOptionalIso(req.query.to, "to");
+      if (from && to && Date.parse(from) > Date.parse(to)) {
+        throw new DomainError("INVALID_INPUT", "'from' må være <= 'to'.");
+      }
+      const pageSize = parseLimit(req.query.limit, 50);
+      const cursor = optionalNonEmpty(req.query.cursor);
+      const offset = cursor ? decodeLoginCursor(cursor) : 0;
+
+      // Over-fetch by one so we know whether a next page exists without
+      // issuing a COUNT. Same trick as other admin-report routes.
+      const events = await auditLogService.listLoginHistory({
+        actorId: target.id,
+        from: from ?? undefined,
+        to: to ?? undefined,
+        limit: pageSize + 1,
+        offset,
+      });
+
+      const response = buildLoginHistoryResponse({
+        userId: target.id,
+        events,
+        from: from ?? null,
+        to: to ?? null,
+        pageSize,
+        offset,
+      });
+      apiSuccess(res, response);
     } catch (error) {
       apiFailure(res, error);
     }
