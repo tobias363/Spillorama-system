@@ -114,6 +114,27 @@ export interface ScanResult {
   ruleSlugsEvaluated: string[];
 }
 
+/**
+ * BIN-650: aggregerings-resultat per AML rule-kategori. Én rad per `rule_slug`
+ * som ENTEN har en rule-rad i `app_aml_rules` ELLER har minst én red-flag
+ * opprettet i `[from, to]`-vinduet. Slug-er som finnes i rules-katalogen uten
+ * flag-rader i vinduet returneres med `count=0`/`openCount=0` slik at UI-en
+ * kan vise kategori-listen konsistent.
+ */
+export interface AmlCategoryCountRow {
+  slug: string;
+  label: string;
+  severity: AmlSeverity;
+  description: string | null;
+  count: number;
+  openCount: number;
+}
+
+export interface AggregateCategoryCountsInput {
+  from?: string;
+  to?: string;
+}
+
 export interface AmlServiceOptions {
   connectionString: string;
   schema?: string;
@@ -385,6 +406,89 @@ export class AmlService {
 
   async listFlagsForUser(userId: string, limit = 100): Promise<AmlRedFlag[]> {
     return this.listRedFlags({ userId, limit });
+  }
+
+  /**
+   * BIN-650: teller red-flag-rader per `rule_slug` (= kategori) innenfor et
+   * valgfritt `[from, to]`-vindu (filtreres på `created_at`). Alle aktive
+   * rules i `app_aml_rules` returneres alltid — også de med null flag i
+   * vinduet — slik at admin-UI kan vise full katalog.
+   *
+   * Pengespillforskriften §11: admin trenger en oversikt over hvor mange
+   * spillere som har truffet hver red-flag-kategori for å vurdere
+   * forebyggende tiltak. `count` er totalen; `openCount` er subsettet som
+   * fortsatt er uløst (status='OPEN').
+   */
+  async aggregateCategoryCounts(
+    input: AggregateCategoryCountsInput = {}
+  ): Promise<AmlCategoryCountRow[]> {
+    await this.ensureInitialized();
+    const params: unknown[] = [];
+    const flagConditions: string[] = [];
+    if (input.from) {
+      const fromMs = Date.parse(input.from);
+      if (!Number.isFinite(fromMs)) {
+        throw new DomainError("INVALID_INPUT", "'from' må være en ISO-8601 dato/tid.");
+      }
+      params.push(new Date(fromMs).toISOString());
+      flagConditions.push(`created_at >= $${params.length}`);
+    }
+    if (input.to) {
+      const toMs = Date.parse(input.to);
+      if (!Number.isFinite(toMs)) {
+        throw new DomainError("INVALID_INPUT", "'to' må være en ISO-8601 dato/tid.");
+      }
+      params.push(new Date(toMs).toISOString());
+      flagConditions.push(`created_at <= $${params.length}`);
+    }
+    if (input.from && input.to && Date.parse(input.from) > Date.parse(input.to)) {
+      throw new DomainError("INVALID_INPUT", "'from' må være <= 'to'.");
+    }
+    const flagWhere = flagConditions.length ? `WHERE ${flagConditions.join(" AND ")}` : "";
+
+    // FULL OUTER JOIN: hver aktiv rule OG hver slug som faktisk har flagg
+    // i vinduet. Rules som ikke har flagg i vinduet gir count=0. Flagg
+    // med slug som ikke lenger finnes i rules-katalogen (f.eks. soft-
+    // disabled eller `manual`) returneres også slik at tellingen blir
+    // fullstendig.
+    const sql = `
+      WITH flag_counts AS (
+        SELECT rule_slug,
+               COUNT(*)::bigint AS cnt,
+               COUNT(*) FILTER (WHERE status = 'OPEN')::bigint AS open_cnt,
+               MAX(severity) AS observed_severity
+          FROM ${this.flagsTable()}
+          ${flagWhere}
+         GROUP BY rule_slug
+      )
+      SELECT COALESCE(r.slug, f.rule_slug)                 AS slug,
+             COALESCE(r.label, f.rule_slug)                AS label,
+             COALESCE(r.severity, f.observed_severity, 'LOW') AS severity,
+             r.description                                  AS description,
+             COALESCE(f.cnt, 0)::bigint                     AS cnt,
+             COALESCE(f.open_cnt, 0)::bigint                AS open_cnt
+        FROM ${this.rulesTable()} r
+        FULL OUTER JOIN flag_counts f ON f.rule_slug = r.slug
+       WHERE (r.slug IS NOT NULL AND r.is_active = true) OR f.rule_slug IS NOT NULL
+       ORDER BY slug ASC
+    `;
+    const { rows } = await this.pool.query<{
+      slug: string;
+      label: string;
+      severity: AmlSeverity;
+      description: string | null;
+      cnt: string | number;
+      open_cnt: string | number;
+    }>(sql, params);
+
+    return rows.map((r) => ({
+      slug: r.slug,
+      label: r.label,
+      severity: r.severity,
+      description: r.description,
+      count: Number(r.cnt),
+      openCount: Number(r.open_cnt),
+    }));
   }
 
   async createRedFlag(input: CreateRedFlagInput): Promise<AmlRedFlag> {

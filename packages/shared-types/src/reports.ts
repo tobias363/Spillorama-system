@@ -346,13 +346,61 @@ export interface SubgameDrillDownResponse {
   };
 }
 
-/** BIN-650: red-flag category with count of open flags. */
+/**
+ * BIN-650 placeholder: red-flag category with count of open flags.
+ *
+ * Kept for admin-web PR-A4a's gap-banner wrapper
+ * (`admin-reports-redflag.ts`). The canonical wire-shape emitted by
+ * `GET /api/admin/reports/red-flag/categories` is
+ * `RedFlagCategoryRow` + `RedFlagCategoriesResponse` below.
+ *
+ * @deprecated Use `RedFlagCategoryRow` + `RedFlagCategoriesResponse` instead.
+ */
 export interface RedFlagCategory {
   id: string;
   name: string;
   description: string;
   playerCount: number;
   severity: "LOW" | "MEDIUM" | "HIGH";
+}
+
+/**
+ * BIN-650 canonical shape: one row per AML rule-category aggregated over
+ * the requested `[from, to]` window.
+ *
+ * Legacy mapping (`legacy/unity-backend/App/Controllers/redFlagCategoryController.js`):
+ *   redFlagData[].name  → label
+ *   (implicit count)    → count
+ *   translate.*         → description
+ *
+ * `category` is the AML rule-slug (e.g. `high-velocity`, `lost-per-day`,
+ * `pep`, `risk-country`). `severity` matches `AmlService.AmlSeverity`.
+ * `count` is the number of red-flags (all statuses) for that slug in the
+ * window. `openCount` is the subset still with status='OPEN' — useful
+ * for compliance dashboards that surface unresolved flags.
+ */
+export interface RedFlagCategoryRow {
+  category: string;
+  label: string;
+  description: string | null;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  count: number;
+  openCount: number;
+}
+
+export interface RedFlagCategoriesTotals {
+  totalFlags: number;
+  totalOpenFlags: number;
+  categoryCount: number;
+}
+
+/** Wire-shape for `GET /api/admin/reports/red-flag/categories`. */
+export interface RedFlagCategoriesResponse {
+  from: string;
+  to: string;
+  generatedAt: string;
+  categories: RedFlagCategoryRow[];
+  totals: RedFlagCategoriesTotals;
 }
 
 /** BIN-651: player flagged in a red-flag category. */

@@ -39,7 +39,16 @@ function newStore(): Store {
   return { rules: new Map(), flags: new Map() };
 }
 
-function runQuery(store: Store, sql: string, params: unknown[] = []): { rows: Array<RuleRow | FlagRow | { status: string } | { id: string }>; rowCount: number } {
+interface CategoryAggRow {
+  slug: string;
+  label: string;
+  severity: string;
+  description: string | null;
+  cnt: number;
+  open_cnt: number;
+}
+
+function runQuery(store: Store, sql: string, params: unknown[] = []): { rows: Array<RuleRow | FlagRow | { status: string } | { id: string } | CategoryAggRow>; rowCount: number } {
   const trimmed = sql.trim();
   const isRules = sql.includes("app_aml_rules");
   const isFlags = sql.includes("app_aml_red_flags");
@@ -47,6 +56,67 @@ function runQuery(store: Store, sql: string, params: unknown[] = []): { rows: Ar
   if (trimmed.startsWith("BEGIN") || trimmed.startsWith("COMMIT") || trimmed.startsWith("ROLLBACK") ||
       trimmed.startsWith("CREATE") || trimmed.startsWith("CREATE SCHEMA")) {
     return { rows: [], rowCount: 0 };
+  }
+
+  // BIN-650 aggregat-CTE: WITH flag_counts AS (...) SELECT ... FULL OUTER JOIN
+  // Bruker slug fra rules + flags for å dekke (a) aktive rules uten flag,
+  // (b) flags med slug som ikke er i rules-katalogen (soft-disabled/manual).
+  if (trimmed.startsWith("WITH flag_counts")) {
+    let fromFilter: number | null = null;
+    let toFilter: number | null = null;
+    let pIdx = 0;
+    if (sql.includes("created_at >= $")) {
+      fromFilter = Date.parse(params[pIdx++] as string);
+    }
+    if (sql.includes("created_at <= $")) {
+      toFilter = Date.parse(params[pIdx++] as string);
+    }
+    const flagsInWindow = [...store.flags.values()].filter((f) => {
+      const ms = f.created_at.getTime();
+      if (fromFilter !== null && ms < fromFilter) return false;
+      if (toFilter !== null && ms > toFilter) return false;
+      return true;
+    });
+    const bySlug = new Map<string, { cnt: number; open_cnt: number; observed_severity: string }>();
+    for (const f of flagsInWindow) {
+      const agg = bySlug.get(f.rule_slug) ?? { cnt: 0, open_cnt: 0, observed_severity: f.severity };
+      agg.cnt += 1;
+      if (f.status === "OPEN") agg.open_cnt += 1;
+      // Emulerer MAX(severity) — alfabetisk for enkelthet (samsvarer med testene vi trenger).
+      if (f.severity > agg.observed_severity) agg.observed_severity = f.severity;
+      bySlug.set(f.rule_slug, agg);
+    }
+    const result: CategoryAggRow[] = [];
+    // Alle aktive rules (med count fra flags eller 0).
+    for (const rule of store.rules.values()) {
+      if (!rule.is_active) continue;
+      const agg = bySlug.get(rule.slug);
+      result.push({
+        slug: rule.slug,
+        label: rule.label,
+        severity: rule.severity,
+        description: rule.description,
+        cnt: agg?.cnt ?? 0,
+        open_cnt: agg?.open_cnt ?? 0,
+      });
+    }
+    // Flags med slug som IKKE er i aktive rules.
+    const activeSlugs = new Set(
+      [...store.rules.values()].filter((r) => r.is_active).map((r) => r.slug),
+    );
+    for (const [slug, agg] of bySlug) {
+      if (activeSlugs.has(slug)) continue;
+      result.push({
+        slug,
+        label: slug,
+        severity: agg.observed_severity,
+        description: null,
+        cnt: agg.cnt,
+        open_cnt: agg.open_cnt,
+      });
+    }
+    result.sort((a, b) => a.slug.localeCompare(b.slug));
+    return { rows: result, rowCount: result.length };
   }
 
   if (trimmed.startsWith("SELECT") && isRules) {
@@ -362,4 +432,98 @@ test("BIN-587 B3-aml: listRedFlags filtrerer på userId", async () => {
   const forP1 = await svc.listRedFlags({ userId: "p-1" });
   assert.equal(forP1.length, 1);
   assert.equal(forP1[0]!.userId, "p-1");
+});
+
+// ── BIN-650: aggregateCategoryCounts ─────────────────────────────────────
+
+test("BIN-650: aggregateCategoryCounts returnerer alle aktive rules med count=0 når ingen flags", async () => {
+  const store = newStore();
+  const svc = AmlService.forTesting(makePool(store), makePaymentSvc({ calls: [], toReturn: [] }));
+  await svc.upsertRules([
+    { slug: "high-amount", label: "High amount", severity: "HIGH", description: "over terskel" },
+    { slug: "high-velocity", label: "High velocity", severity: "MEDIUM" },
+  ]);
+  const rows = await svc.aggregateCategoryCounts();
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]!.slug, "high-amount");
+  assert.equal(rows[0]!.label, "High amount");
+  assert.equal(rows[0]!.severity, "HIGH");
+  assert.equal(rows[0]!.description, "over terskel");
+  assert.equal(rows[0]!.count, 0);
+  assert.equal(rows[0]!.openCount, 0);
+  assert.equal(rows[1]!.slug, "high-velocity");
+});
+
+test("BIN-650: aggregateCategoryCounts teller flags per slug + skiller open", async () => {
+  const store = newStore();
+  const svc = AmlService.forTesting(makePool(store), makePaymentSvc({ calls: [], toReturn: [] }));
+  await svc.upsertRules([
+    { slug: "high-amount", label: "High amount", severity: "HIGH" },
+  ]);
+  // 3 flags på high-amount: 2 OPEN, 1 REVIEWED.
+  const f1 = await svc.createRedFlag({ userId: "p-1", ruleSlug: "high-amount", severity: "HIGH", reason: "a", openedBy: null });
+  await svc.createRedFlag({ userId: "p-2", ruleSlug: "high-amount", severity: "HIGH", reason: "b", openedBy: null });
+  await svc.createRedFlag({ userId: "p-3", ruleSlug: "high-amount", severity: "HIGH", reason: "c", openedBy: null });
+  await svc.reviewRedFlag({ flagId: f1.id, reviewerId: "admin-1", outcome: "REVIEWED", note: "ok" });
+
+  const rows = await svc.aggregateCategoryCounts();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.count, 3);
+  assert.equal(rows[0]!.openCount, 2);
+});
+
+test("BIN-650: aggregateCategoryCounts inkluderer 'manual'-slug selv om den ikke er i rules", async () => {
+  const store = newStore();
+  const svc = AmlService.forTesting(makePool(store), makePaymentSvc({ calls: [], toReturn: [] }));
+  // Ingen rules — kun et manuelt flag.
+  await svc.createRedFlag({ userId: "p-1", severity: "HIGH", reason: "mistenkelig", openedBy: "admin-1" });
+  const rows = await svc.aggregateCategoryCounts();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.slug, "manual");
+  assert.equal(rows[0]!.label, "manual");
+  assert.equal(rows[0]!.description, null);
+  assert.equal(rows[0]!.count, 1);
+  assert.equal(rows[0]!.openCount, 1);
+});
+
+test("BIN-650: aggregateCategoryCounts ignorerer flags utenfor [from, to]-vinduet", async () => {
+  const store = newStore();
+  const svc = AmlService.forTesting(makePool(store), makePaymentSvc({ calls: [], toReturn: [] }));
+  await svc.upsertRules([
+    { slug: "rule-a", label: "Rule A", severity: "LOW" },
+  ]);
+  const f1 = await svc.createRedFlag({ userId: "p-1", ruleSlug: "rule-a", severity: "LOW", reason: "r", openedBy: null });
+  // Manipulerer created_at direkte i stub-storen for å simulere gammel rad.
+  const row = store.flags.get(f1.id)!;
+  row.created_at = new Date("2026-01-01T00:00:00Z");
+  store.flags.set(f1.id, row);
+
+  // Vindu som ekskluderer januar-raden.
+  const rows = await svc.aggregateCategoryCounts({
+    from: "2026-04-01T00:00:00Z",
+    to: "2026-04-30T23:59:59Z",
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.count, 0);
+});
+
+test("BIN-650: aggregateCategoryCounts avviser ugyldig from", async () => {
+  const store = newStore();
+  const svc = AmlService.forTesting(makePool(store), makePaymentSvc({ calls: [], toReturn: [] }));
+  await assert.rejects(
+    () => svc.aggregateCategoryCounts({ from: "ikke-iso" }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT",
+  );
+});
+
+test("BIN-650: aggregateCategoryCounts avviser from > to", async () => {
+  const store = newStore();
+  const svc = AmlService.forTesting(makePool(store), makePaymentSvc({ calls: [], toReturn: [] }));
+  await assert.rejects(
+    () => svc.aggregateCategoryCounts({
+      from: "2026-05-01T00:00:00Z",
+      to: "2026-04-01T00:00:00Z",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT",
+  );
 });
