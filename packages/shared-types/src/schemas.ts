@@ -153,6 +153,16 @@ export const RoomSnapshotSchema = z.object({
 export const TicketSelectionSchema = z.object({
   type: z.string(),
   qty: z.number().int().nonnegative(),
+  /**
+   * BIN-688: human-readable ticket-type name (e.g. "Small Yellow").
+   * Optional for backward compat — clients that only send `type` still
+   * work; colours will then fall back to sequential cycling.
+   *
+   * When present, the backend uses `name` to colour each generated
+   * pre-round ticket, so the brett rendered in "Neste spill"-panelet
+   * matches what the user actually selected.
+   */
+  name: z.string().optional(),
 });
 export type TicketSelection = z.infer<typeof TicketSelectionSchema>;
 

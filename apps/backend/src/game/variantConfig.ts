@@ -294,6 +294,72 @@ export function patternConfigToDefinitions(patterns: PatternConfig[]): PatternDe
 }
 
 /**
+ * BIN-688: expand armed `TicketSelection[]` to a per-ticket colour/type
+ * list so pre-round tickets in `preRoundTickets` render in the exact
+ * colour the player picked.
+ *
+ * Resolution order (first match wins):
+ *   1. `selection.name` matches a `TicketTypeConfig.name` → use that
+ *      config's name + type. Handles "Small Yellow" vs "Small Purple".
+ *   2. `selection.type` matches a `TicketTypeConfig.type` → use that
+ *      config's name (first match) + type. Handles legacy clients that
+ *      only send the type code.
+ *   3. Nothing matches → fall back to `assignTicketColors` sequential
+ *      cycling for the remaining count.
+ *
+ * For each selection, we expand `qty × ticketCount` ticket-slots. For
+ * bundle tickets (large=3 brett per kjøp, elvis=2, traffic-light=3), each
+ * slot inherits the bundle's colour. Traffic-light is expanded via its
+ * per-bundle `colors` triplet (Red/Yellow/Green) so each of the 3 brett
+ * gets a distinct colour.
+ */
+export function expandSelectionsToTicketColors(
+  selections: ReadonlyArray<{ type: string; qty: number; name?: string }>,
+  variantConfig: GameVariantConfig,
+  gameType: string,
+): { color: string; type: string }[] {
+  const out: { color: string; type: string }[] = [];
+  const ticketTypes = variantConfig.ticketTypes;
+
+  for (const sel of selections) {
+    if (sel.qty <= 0) continue;
+
+    // Prefer name-match (distinguishes Small Yellow vs Small Purple).
+    let tt = sel.name
+      ? ticketTypes.find((t) => t.name === sel.name)
+      : undefined;
+    // Fallback: match by type code (ambiguous for multi-colour types,
+    // but preserves legacy-client behaviour).
+    if (!tt) tt = ticketTypes.find((t) => t.type === sel.type);
+
+    if (!tt) continue; // Unknown type — skipped; filled by fallback below.
+
+    const slotsPerQty = Math.max(1, tt.ticketCount);
+    for (let q = 0; q < sel.qty; q++) {
+      // Traffic-light: each bundle yields 3 brett in distinct colours.
+      if (tt.type === "traffic-light" && tt.colors && tt.colors.length > 0) {
+        for (let s = 0; s < slotsPerQty; s++) {
+          const c = tt.colors[s % tt.colors.length];
+          out.push({ color: c, type: "traffic-" + c.split(" ")[1]?.toLowerCase() });
+        }
+      } else {
+        // Small/large/elvis: all brett in the bundle share the colour.
+        for (let s = 0; s < slotsPerQty; s++) {
+          out.push({ color: tt.name, type: tt.type });
+        }
+      }
+    }
+  }
+
+  // If callers armed something we couldn't resolve (unknown selection
+  // or zero-overlap) fall back so every slot still has a colour.
+  if (out.length === 0) {
+    return assignTicketColors(0, variantConfig, gameType);
+  }
+  return out;
+}
+
+/**
  * Determine ticket colors for a player based on variant config.
  *
  * For standard: cycle through available small colors.

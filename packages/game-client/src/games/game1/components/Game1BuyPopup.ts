@@ -34,10 +34,13 @@ export class Game1BuyPopup {
   private statusMsg: HTMLDivElement;
   private buyBtn: HTMLButtonElement;
 
-  private onBuy: ((selections: Array<{ type: string; qty: number }>) => void) | null = null;
+  private onBuy: ((selections: Array<{ type: string; qty: number; name?: string }>) => void) | null = null;
   private alreadyPurchased = 0;
   private typeRows: Array<{
     type: string;
+    /** BIN-688: ticket-type name (e.g. "Small Yellow") — sent to backend so
+     * pre-round brett render in the colour the player actually selected. */
+    name: string;
     price: number;
     ticketCount: number;
     qty: number;
@@ -166,7 +169,10 @@ export class Game1BuyPopup {
 
     for (const tt of ticketTypes) {
       const price = Math.round(entryFee * tt.priceMultiplier);
-      this.buildTypeCard(this.getDisplayName(tt), tt.type, price, tt.ticketCount);
+      // BIN-688: pass `tt.name` separately from display-name so the
+      // backend gets the canonical colour name ("Small Yellow") regardless
+      // of any UI formatting applied in getDisplayName.
+      this.buildTypeCard(this.getDisplayName(tt), tt.type, tt.name, price, tt.ticketCount);
     }
 
     this.updateTotal();
@@ -182,7 +188,7 @@ export class Game1BuyPopup {
     return this.backdrop.style.display !== "none";
   }
 
-  setOnBuy(callback: (selections: Array<{ type: string; qty: number }>) => void): void {
+  setOnBuy(callback: (selections: Array<{ type: string; qty: number; name?: string }>) => void): void {
     this.onBuy = callback;
   }
 
@@ -220,7 +226,12 @@ export class Game1BuyPopup {
     return tt.name;
   }
 
-  private buildTypeCard(name: string, type: string, price: number, ticketCount: number): void {
+  private buildTypeCard(displayName: string, type: string, canonicalName: string, price: number, ticketCount: number): void {
+    // `displayName` is used for the label (may differ from canonicalName, e.g.
+    // "Traffic Light" vs individual colours). `canonicalName` is the variant
+    // config's `name` field and is what the backend needs to colour pre-round
+    // tickets correctly (BIN-688).
+    const name = displayName;
     const card = document.createElement("div");
     Object.assign(card.style, {
       background: "rgba(0,0,0,0.3)",
@@ -289,6 +300,7 @@ export class Game1BuyPopup {
 
     const entry = {
       type,
+      name: canonicalName,
       price,
       ticketCount,
       qty: 0,
@@ -409,9 +421,12 @@ export class Game1BuyPopup {
     this.buyBtn.style.opacity = "0.6";
     this.buyBtn.textContent = "Vennligst vent...";
     this.statusMsg.textContent = "";
+    // BIN-688: include `name` so the backend can colour each pre-round
+    // ticket according to the specific variant (Small Yellow vs Small
+    // Purple — both have `type === "small"`, name is the distinguisher).
     const selections = this.typeRows
       .filter((r) => r.qty > 0)
-      .map((r) => ({ type: r.type, qty: r.qty }));
+      .map((r) => ({ type: r.type, qty: r.qty, name: r.name }));
     this.onBuy?.(selections);
   }
 

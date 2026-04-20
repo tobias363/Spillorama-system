@@ -6,7 +6,7 @@ import type { RoomSnapshot, RoomSummary, Ticket } from "../game/types.js";
 import type { DrawScheduler } from "../draw-engine/DrawScheduler.js";
 import type { BingoSchedulerSettings } from "./bingoSettings.js";
 import type { GameVariantConfig, TicketTypeConfig } from "../game/variantConfig.js";
-import { getDefaultVariantConfig } from "../game/variantConfig.js";
+import { expandSelectionsToTicketColors, getDefaultVariantConfig } from "../game/variantConfig.js";
 import { roundCurrency } from "./currency.js";
 
 // ── Room priority ──────────────────────────────────────────────────────────────
@@ -138,10 +138,20 @@ export function buildRoomUpdatePayload(
     schedulerTickMs: number;
     getArmedPlayerIds: (roomCode: string) => string[];
     getArmedPlayerTicketCounts: (roomCode: string) => Record<string, number>;
-    getArmedPlayerSelections?: (roomCode: string) => Record<string, Array<{ type: string; qty: number }>>;
+    getArmedPlayerSelections?: (roomCode: string) => Record<string, Array<{ type: string; qty: number; name?: string }>>;
     getRoomConfiguredEntryFee: (roomCode: string) => number;
-    /** BIN-672: gameSlug is REQUIRED — see roomState.getOrCreateDisplayTickets doc. */
-    getOrCreateDisplayTickets: (roomCode: string, playerId: string, count: number, gameSlug: string) => Ticket[];
+    /**
+     * BIN-672: gameSlug is REQUIRED — see roomState.getOrCreateDisplayTickets doc.
+     * BIN-688: pass `colorAssignments` so pre-round brett render in the
+     * colour the player actually armed (Small Yellow vs Small Purple).
+     */
+    getOrCreateDisplayTickets: (
+      roomCode: string,
+      playerId: string,
+      count: number,
+      gameSlug: string,
+      colorAssignments?: Array<{ color: string; type: string }>,
+    ) => Ticket[];
     getLuckyNumbers: (roomCode: string) => Record<string, number>;
     /** BIN-443: Variant config for client purchase UI. */
     getVariantConfig?: (roomCode: string) => { gameType: string; config: GameVariantConfig } | null;
@@ -178,6 +188,10 @@ export function buildRoomUpdatePayload(
   const preRoundTickets: Record<string, Ticket[]> = {};
   const gameTickets = snapshot.currentGame?.tickets ?? {};
   const armedTicketCounts = opts.getArmedPlayerTicketCounts(snapshot.code);
+  // BIN-688: resolve armed selections once so the loop can colour each
+  // player's pre-round brett according to their specific pick.
+  const armedSelections = opts.getArmedPlayerSelections?.(snapshot.code) ?? {};
+  const variantInfoForColor = opts.getVariantConfig?.(snapshot.code);
   for (const player of snapshot.players) {
     if (gameTickets[player.id] && gameTickets[player.id].length > 0) continue;
     const armedCount = armedTicketCounts[player.id];
@@ -185,11 +199,40 @@ export function buildRoomUpdatePayload(
       // Not armed — no preview tickets. Scroll area stays empty.
       continue;
     }
+    // BIN-688: expand selections → per-ticket colour list when variant
+    // config + selections are available. Missing either → undefined, so
+    // the cache preserves backward-compatible "no colour" behaviour.
+    const selections = armedSelections[player.id];
+    let colorAssignments: Array<{ color: string; type: string }> | undefined;
+    if (selections && selections.length > 0 && variantInfoForColor) {
+      const assignments = expandSelectionsToTicketColors(
+        selections,
+        variantInfoForColor.config,
+        variantInfoForColor.gameType,
+      );
+      // Trim/pad to armedCount so the cache contract (length === count)
+      // never breaks — expand should already return exactly armedCount
+      // entries, but this guards against off-by-one drift between the
+      // armedCount stored in armedPlayerIdsByRoom and the bundle-
+      // multiplied count derived from selections.
+      if (assignments.length >= armedCount) {
+        colorAssignments = assignments.slice(0, armedCount);
+      } else if (assignments.length > 0) {
+        // Pad by repeating the last known colour — avoids undefined-
+        // colour slots when the client armed fewer selection slots than
+        // the server-calculated ticket count. Rare; logged separately.
+        colorAssignments = assignments.slice();
+        while (colorAssignments.length < armedCount) {
+          colorAssignments.push(assignments[assignments.length - 1]);
+        }
+      }
+    }
     preRoundTickets[player.id] = getOrCreateDisplayTickets(
       snapshot.code,
       player.id,
       armedCount,
       snapshot.gameSlug,
+      colorAssignments,
     );
   }
 

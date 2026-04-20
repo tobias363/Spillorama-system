@@ -317,7 +317,7 @@ export class SpilloramaSocket {
     return this.emit(SocketEvents.ROOM_STATE, payload);
   }
 
-  async armBet(payload: { roomCode: string; armed?: boolean; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number }> }): Promise<AckResponse<{ snapshot: RoomSnapshot; armed: boolean }>> {
+  async armBet(payload: { roomCode: string; armed?: boolean; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number; name?: string }> }): Promise<AckResponse<{ snapshot: RoomSnapshot; armed: boolean }>> {
     return this.emit(SocketEvents.BET_ARM, payload);
   }
 
