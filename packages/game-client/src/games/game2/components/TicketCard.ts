@@ -505,6 +505,15 @@ export class TicketCard extends Container {
           duration: 0.25,
           ease: "power2.out",
           onComplete: () => {
+            // BIN-687: reset pivot + x-offset applied by flipToDetails
+            // (lines 439-441). Without this, each flip accumulates
+            // `this.x += cardW/2`, drifting the card sideways until it
+            // overlaps its neighbours. Mirrors the reset in
+            // stopAllAnimations (lines 256-260).
+            if (this.pivot.x !== 0) {
+              this.x -= this.pivot.x;
+              this.pivot.x = 0;
+            }
             this.isFlipping = false;
             this.isFlipped = false;
           },
