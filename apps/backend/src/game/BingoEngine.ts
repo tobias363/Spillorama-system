@@ -985,7 +985,20 @@ export class BingoEngine {
     }
     // MEDIUM-1/BIN-253: Record draw timestamp for interval enforcement
     this.lastDrawAtByRoom.set(room.code, Date.now());
-    return { number: nextNumber, drawIndex: game.drawnNumbers.length, gameId: game.id };
+    // BIN-689: The **wire-level** `drawIndex` is the 0-based array index of
+    // the ball in `drawnNumbers` (i.e. `length - 1`). The client's
+    // GameBridge gap-detection contract (BIN-502) is 0-based —
+    // `lastAppliedDrawIndex = -1` means no draws yet, so the first ball is
+    // expected at drawIndex=0. Previously we returned `length`, which is
+    // 1-based (first ball drawIndex=1), causing every draw to look like a
+    // gap → infinite resync loop on staging (BallTube empty, no animation
+    // fired). Ref: GameBridge.ts:355 + GameBridge.test.ts.
+    //
+    // NB: Engine-internal hooks (`onDrawCompleted`, `onLuckyNumberDrawn`)
+    // and the `onNumberDrawn` bingoAdapter callback keep the 1-based
+    // "drawnCount" semantics above — PatternCycler.step() and
+    // GAME2_MIN_DRAWS_FOR_CHECK both depend on that.
+    return { number: nextNumber, drawIndex: game.drawnNumbers.length - 1, gameId: game.id };
   }
 
   /**
