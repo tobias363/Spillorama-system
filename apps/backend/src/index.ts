@@ -97,6 +97,8 @@ import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { createAdminReportsPhysicalTicketsRouter } from "./routes/adminReportsPhysicalTickets.js";
 import { createAdminReportsRedFlagCategoriesRouter } from "./routes/adminReportsRedFlagCategories.js";
 import { PhysicalTicketsAggregateService } from "./admin/PhysicalTicketsAggregate.js";
+import { createAdminPhysicalTicketsGamesInHallRouter } from "./routes/adminPhysicalTicketsGamesInHall.js";
+import { PhysicalTicketsGamesInHallService } from "./admin/PhysicalTicketsGamesInHall.js";
 import { createAdminGameManagementRouter } from "./routes/adminGameManagement.js";
 import { GameManagementService } from "./admin/GameManagementService.js";
 import { createAdminCloseDayRouter } from "./routes/adminCloseDay.js";
@@ -363,6 +365,14 @@ const physicalTicketService = new PhysicalTicketService({
 // app_agent_transactions. Egen service så SQL-aggregatet lever ved siden av
 // PhysicalTicketService (som eier skjema + CRUD).
 const physicalTicketsAggregateService = new PhysicalTicketsAggregateService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-638: per-hall per-game aggregat med pending-cashout-count. Samme
+// tabell-kilder som BIN-648 men narrowed til én hall og beriket med
+// display_name + is_active fra hall_game_schedules (LEFT JOIN).
+const physicalTicketsGamesInHallService = new PhysicalTicketsGamesInHallService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -800,6 +810,11 @@ app.use(createAdminPhysicalTicketsRouter({
 app.use(createAdminReportsPhysicalTicketsRouter({
   platformService,
   physicalTicketsAggregateService,
+}));
+// BIN-638: GET /api/admin/physical-tickets/games/in-hall
+app.use(createAdminPhysicalTicketsGamesInHallRouter({
+  platformService,
+  physicalTicketsGamesInHallService,
 }));
 // BIN-650: GET /api/admin/reports/red-flag/categories — AML red-flag
 // kategorier aggregert per rule_slug i `[from, to]`-vinduet.
