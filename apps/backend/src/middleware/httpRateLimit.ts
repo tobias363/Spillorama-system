@@ -39,6 +39,13 @@ export const DEFAULT_HTTP_RATE_LIMITS: HttpRateLimitTier[] = [
   { prefix: "/api/wallet/me/timed-pause",   config: { windowMs: 60_000, maxRequests: 5 } },
   { prefix: "/api/wallet/me/loss-limits",   config: { windowMs: 60_000, maxRequests: 10 } },
 
+  // Admin catalog reads: the admin dashboard polls 6 endpoints every 10s
+  // (~36 req/min/tab), on top of click-through traffic across list/view pages.
+  // The shared `/api/` 120/min tier leaves almost no headroom for a single
+  // logged-in admin. Admin routes are auth-guarded (requireAdmin) so a higher
+  // limit is safe — anonymous abuse still falls back to /api/ below.
+  { prefix: "/api/admin",                config: { windowMs: 60_000,  maxRequests: 600 } },
+
   // General API reads: generous
   { prefix: "/api/",                     config: { windowMs: 60_000,  maxRequests: 120 } },
 ];

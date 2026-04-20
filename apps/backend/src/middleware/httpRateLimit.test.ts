@@ -96,4 +96,22 @@ describe("HttpRateLimiter", () => {
     assert.ok(loginConfig);
     assert.equal(loginConfig.maxRequests, 5); // default from DEFAULT_HTTP_RATE_LIMITS
   });
+
+  it("admin routes resolve to the dedicated /api/admin tier, not the shared /api/ fallback", () => {
+    // Regression guard for the rate-limit bug on /gameType/view/:id in admin-
+    // web: the dashboard polls 6 endpoints every 10 s plus click-through traffic,
+    // so admin routes need a higher limit than the general /api/ tier. If a
+    // future change removes the /api/admin tier these asserts catch it before
+    // production admins start seeing "For mange forespørsler".
+    const limiter = new HttpRateLimiter();
+    const gamesConfig = limiter.resolveConfig("/api/admin/games");
+    assert.ok(gamesConfig);
+    assert.ok(
+      gamesConfig.maxRequests >= 300,
+      `expected admin tier maxRequests >= 300, got ${gamesConfig.maxRequests}`
+    );
+    // Non-admin routes still fall back to the shared /api/ tier.
+    const walletConfig = limiter.resolveConfig("/api/wallet/me");
+    assert.equal(walletConfig?.maxRequests, 120);
+  });
 });

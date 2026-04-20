@@ -171,6 +171,13 @@ void initSentry();
 
 const app = express();
 
+// Behind Render/Cloudflare we sit behind at least one reverse proxy. Without
+// trust-proxy Express resolves `req.ip` to the proxy's address, which means
+// every client shares one bucket in the HTTP rate-limiter and legitimate admin
+// traffic (dashboard polling + navigation) trips a shared 120 req/min cap.
+// Matches the legacy backend (legacy/unity-backend/Boot/Server.js:208).
+app.set("trust proxy", true);
+
 // BIN-49: CORS — require explicit origins in production, never allow wildcard "*"
 const corsAllowedOriginsRaw = (process.env.CORS_ALLOWED_ORIGINS ?? "").trim();
 const isProduction = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
