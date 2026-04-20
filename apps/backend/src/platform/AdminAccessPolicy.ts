@@ -249,7 +249,18 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     utelatt — leaderboard-tier er ikke hall-lokal konfig.
    */
   LEADERBOARD_TIER_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  LEADERBOARD_TIER_WRITE: ["ADMIN"]
+  LEADERBOARD_TIER_WRITE: ["ADMIN"],
+  /**
+   * BIN-624: SavedGame CRUD (gjenbrukbare GameManagement-templates).
+   *   - SAVED_GAME_READ : liste + detalj. Alle admin-roller.
+   *   - SAVED_GAME_WRITE: opprett/oppdatér/slett + load-to-game. ADMIN +
+   *     HALL_OPERATOR. SavedGame-maler er template-katalog (aldri kjørbare
+   *     spill), så hall-operator kan lagre/laste egne maler — samme mønster
+   *     som SUB_GAME_WRITE. SUPPORT er bevisst utelatt (compliance-rolle,
+   *     ikke drift; SUPPORT får kun READ).
+   */
+  SAVED_GAME_READ:   ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  SAVED_GAME_WRITE:  ["ADMIN", "HALL_OPERATOR"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

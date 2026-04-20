@@ -1188,3 +1188,77 @@ export const LeaderboardTierListResponseSchema = z.object({
 export type LeaderboardTierListResponse = z.infer<
   typeof LeaderboardTierListResponseSchema
 >;
+
+// ── BIN-624: SavedGame CRUD wire schemas ────────────────────────────────────
+// Admin-CRUD for SavedGame-templates (gjenbrukbare GameManagement-oppsett).
+// Mirror av migration `20260425000200_saved_games.sql`.
+//
+// En SavedGame er IKKE et kjørbart spill — det er en template som admin
+// lagrer slik at et komplett GameManagement-oppsett (ticket-farger, priser,
+// patterns, subgames, halls, days, ...) kan brukes som utgangspunkt for
+// et nytt spill via load-to-game-flyten. `config` er en fri-form Record
+// siden legacy `savedGame` hadde ~50 felter som varierer per gameType;
+// GameManagement-layeret gjør semantisk validering ved load-to-game.
+//
+// Legacy: legacy/unity-backend/App/Models/savedGame.js (Mongo) + handlers
+// i legacy/unity-backend/App/Controllers/GameController.js.
+
+const SavedGameStatus = z.enum(["active", "inactive"]);
+
+export const SavedGameRowSchema = z.object({
+  id: z.string().min(1),
+  /** Referent til app_game_types.type_slug (stabil slug, f.eks. "game_1"). */
+  gameTypeId: z.string().min(1),
+  /** Display-navn på malen (unik per gameType). */
+  name: z.string().min(1).max(200),
+  /** Legacy isAdminSave-flag (styrer synlighet i liste-queries). */
+  isAdminSave: z.boolean(),
+  /** Template-payload (alle legacy savedGame-felter unntatt runtime-state). */
+  config: z.record(z.string(), z.unknown()),
+  status: SavedGameStatus,
+  createdBy: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type SavedGameRow = z.infer<typeof SavedGameRowSchema>;
+
+export const CreateSavedGameSchema = z.object({
+  gameTypeId: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+  isAdminSave: z.boolean().optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+  status: SavedGameStatus.optional(),
+});
+export type CreateSavedGameInput = z.infer<typeof CreateSavedGameSchema>;
+
+export const UpdateSavedGameSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    isAdminSave: z.boolean().optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+    status: SavedGameStatus.optional(),
+  })
+  .refine((v: Record<string, unknown>) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateSavedGameInput = z.infer<typeof UpdateSavedGameSchema>;
+
+export const SavedGameListResponseSchema = z.object({
+  savedGames: z.array(SavedGameRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type SavedGameListResponse = z.infer<typeof SavedGameListResponseSchema>;
+
+/**
+ * Load-to-game-respons: payload klient sender videre til GameManagement.create()
+ * (BIN-622). Router returnerer kun data — ingen GameManagement-rad opprettes
+ * inline, slik at klient kan justere felter (name, startDate, endDate, halls)
+ * før faktisk opprettelse.
+ */
+export const SavedGameLoadResponseSchema = z.object({
+  savedGameId: z.string().min(1),
+  gameTypeId: z.string().min(1),
+  name: z.string().min(1).max(200),
+  config: z.record(z.string(), z.unknown()),
+});
+export type SavedGameLoadResponse = z.infer<typeof SavedGameLoadResponseSchema>;
