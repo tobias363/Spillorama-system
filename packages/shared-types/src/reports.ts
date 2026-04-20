@@ -366,6 +366,23 @@ export interface RedFlagPlayerEntry {
   lastActivity: string;
 }
 
+/**
+ * BIN-651: paginated response for GET /api/admin/reports/red-flag/players.
+ *
+ * `category` is the slug that was filtered on (null = all categories).
+ * `from`/`to` echo the requested ISO window (null = no bound).
+ * `nextCursor` is an opaque base64url offset; null when no more rows.
+ * `totalCount` is the total number of matching flags before pagination.
+ */
+export interface RedFlagPlayersResponse {
+  category: string | null;
+  from: string | null;
+  to: string | null;
+  items: RedFlagPlayerEntry[];
+  nextCursor: string | null;
+  totalCount: number;
+}
+
 /** Unique-ticket range report. */
 export interface UniqueTicketRow {
   uniqueId: string;
