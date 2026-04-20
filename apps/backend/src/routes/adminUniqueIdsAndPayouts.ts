@@ -9,6 +9,10 @@
  * data (BingoEngine.generateTopPlayers / generateGameSessions finnes
  * allerede fra B3-report — vi snevrer til én spiller / ett game).
  *
+ * BIN-649: range-rapport for unique-tickets — numerisk range på unique_id
+ * med valgfri hallId/status/opprettet-dato-filter. Read-only, ingen
+ * AuditLog (samme pattern som BIN-587 B3 daily/monthly-reports).
+ *
  * Endepunkter:
  *   GET /api/admin/unique-ids?hallId&status
  *   POST /api/admin/unique-ids/check
@@ -16,6 +20,7 @@
  *   GET /api/admin/unique-ids/:uniqueId/transactions
  *   GET /api/admin/payouts/by-player/:userId
  *   GET /api/admin/payouts/by-game/:gameId/tickets
+ *   GET /api/admin/reports/unique-tickets/range    ← BIN-649
  */
 
 import express from "express";
@@ -36,6 +41,7 @@ import {
   getAccessTokenFromRequest,
   mustBeNonEmptyString,
   parseLimit,
+  parseOptionalInteger,
   isRecordObject,
 } from "../util/httpHelpers.js";
 
@@ -56,6 +62,46 @@ function parseStatus(raw: unknown): PhysicalTicketStatus | undefined {
     throw new DomainError("INVALID_INPUT", "status må være UNSOLD, SOLD eller VOIDED.");
   }
   return upper;
+}
+
+/** BIN-649: parse numerisk unique-id (BIGINT, må være ≥ 0). */
+function parseNumericId(raw: unknown, field: string): number | undefined {
+  const n = parseOptionalInteger(raw, field);
+  if (n === undefined) return undefined;
+  if (n < 0) {
+    throw new DomainError("INVALID_INPUT", `${field} må være ≥ 0.`);
+  }
+  return n;
+}
+
+/** BIN-649: ikke-negativt heltall (f.eks. offset) med fallback. */
+function parsePositiveInt(raw: unknown, field: string, fallback: number): number {
+  const n = parseOptionalInteger(raw, field);
+  if (n === undefined) return fallback;
+  if (n < 0) {
+    throw new DomainError("INVALID_INPUT", `${field} må være ≥ 0.`);
+  }
+  return n;
+}
+
+/**
+ * BIN-649: parse valgfri ISO-dato/tidspunkt. Akseptererer både rene datoer
+ * (YYYY-MM-DD) og full ISO-timestamp — vi sender tekst direkte til Postgres
+ * som gjør TIMESTAMPTZ-konvertering og trygt kaster på ugyldig format.
+ */
+function parseIsoDateParam(raw: unknown, field: string): string | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw !== "string") {
+    throw new DomainError("INVALID_INPUT", `${field} må være en streng.`);
+  }
+  const trimmed = raw.trim();
+  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(trimmed)) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${field} må være ISO-dato (YYYY-MM-DD eller YYYY-MM-DDTHH:mm:ssZ).`
+    );
+  }
+  return trimmed;
 }
 
 export function createAdminUniqueIdsAndPayoutsRouter(
@@ -207,6 +253,58 @@ export function createAdminUniqueIdsAndPayoutsRouter(
         startDate: topReport.startDate,
         endDate: topReport.endDate,
         summary: playerRow,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── BIN-649: unique-tickets range report ────────────────────────────
+
+  router.get("/api/admin/reports/unique-tickets/range", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "DAILY_REPORT_READ");
+      const hallIdInput =
+        typeof req.query.hallId === "string" ? req.query.hallId.trim() || undefined : undefined;
+      const hallId = resolveHallScopeFilter(actor, hallIdInput);
+      const status = parseStatus(req.query.status);
+      const uniqueIdStart = parseNumericId(req.query.uniqueIdStart, "uniqueIdStart");
+      const uniqueIdEnd = parseNumericId(req.query.uniqueIdEnd, "uniqueIdEnd");
+      const createdFrom = parseIsoDateParam(req.query.from, "from");
+      const createdTo = parseIsoDateParam(req.query.to, "to");
+      if (
+        uniqueIdStart !== undefined &&
+        uniqueIdEnd !== undefined &&
+        uniqueIdEnd < uniqueIdStart
+      ) {
+        throw new DomainError("INVALID_INPUT", "uniqueIdEnd må være ≥ uniqueIdStart.");
+      }
+      if (createdFrom && createdTo && createdTo < createdFrom) {
+        throw new DomainError("INVALID_INPUT", "to må være ≥ from.");
+      }
+      const limit = parseLimit(req.query.limit, 200);
+      const offset = parsePositiveInt(req.query.offset, "offset", 0);
+      const tickets = await physicalTicketService.listUniqueIdsInRange({
+        hallId,
+        status,
+        uniqueIdStart,
+        uniqueIdEnd,
+        createdFrom,
+        createdTo,
+        limit,
+        offset,
+      });
+      apiSuccess(res, {
+        hallId: hallId ?? null,
+        status: status ?? null,
+        uniqueIdStart: uniqueIdStart ?? null,
+        uniqueIdEnd: uniqueIdEnd ?? null,
+        from: createdFrom ?? null,
+        to: createdTo ?? null,
+        limit,
+        offset,
+        rows: tickets,
+        count: tickets.length,
       });
     } catch (error) {
       apiFailure(res, error);

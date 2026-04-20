@@ -167,6 +167,42 @@ function runQuery(store: Store, sql: string, params: unknown[] = []): { rows: un
       ).length;
       return { rows: [{ count: String(count) }], rowCount: 1 };
     }
+    // BIN-649: range-query med ORDER BY unique_id::bigint
+    if (sql.includes("ORDER BY unique_id::bigint")) {
+      let list = [...store.tickets.values()];
+      let pIdx = 0;
+      if (sql.includes("hall_id = $")) {
+        const hallId = params[pIdx++] as string;
+        list = list.filter((x) => x.hall_id === hallId);
+      }
+      if (sql.includes("status = $")) {
+        const status = params[pIdx++] as "UNSOLD" | "SOLD" | "VOIDED";
+        list = list.filter((x) => x.status === status);
+      }
+      if (sql.includes("unique_id ~ '^[0-9]+$'")) {
+        list = list.filter((x) => /^[0-9]+$/.test(x.unique_id));
+      }
+      if (sql.includes("unique_id::bigint >= $")) {
+        const start = params[pIdx++] as number;
+        list = list.filter((x) => Number(x.unique_id) >= start);
+      }
+      if (sql.includes("unique_id::bigint <= $")) {
+        const end = params[pIdx++] as number;
+        list = list.filter((x) => Number(x.unique_id) <= end);
+      }
+      if (sql.includes("created_at >= $")) {
+        const from = params[pIdx++] as string;
+        list = list.filter((x) => x.created_at.toISOString() >= from);
+      }
+      if (sql.includes("created_at <= $")) {
+        const to = params[pIdx++] as string;
+        list = list.filter((x) => x.created_at.toISOString() <= to);
+      }
+      list = list.sort((a, b) => Number(a.unique_id) - Number(b.unique_id));
+      const limit = params[pIdx++] as number;
+      const offset = params[pIdx++] as number;
+      return { rows: list.slice(offset, offset + limit), rowCount: list.length };
+    }
     // List sold for game
     if (sql.includes("assigned_game_id = $1")) {
       const [gameId] = params as [string];
@@ -570,4 +606,142 @@ test("BIN-587 B4a: markSold avviser negativ priceCents", async () => {
     () => svc.markSold({ uniqueId: "1", soldBy: "agent-1", priceCents: -100 }),
     (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT"
   );
+});
+
+// ── BIN-649: listUniqueIdsInRange for admin-rapport ───────────────────────
+
+test("BIN-649: listUniqueIdsInRange returnerer alle billetter hvis ingen filter (sortert på unique_id)", async () => {
+  const store = newStore();
+  const svc = PhysicalTicketService.forTesting(makePool(store));
+  const batch = await svc.createBatch({
+    hallId: "hall-a", batchName: "r-all", rangeStart: 1, rangeEnd: 5,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(batch.id);
+  const result = await svc.listUniqueIdsInRange();
+  assert.equal(result.length, 5);
+  assert.deepEqual(result.map((r) => r.uniqueId), ["1", "2", "3", "4", "5"]);
+});
+
+test("BIN-649: listUniqueIdsInRange filtrerer på uniqueIdStart/uniqueIdEnd (inclusive)", async () => {
+  const store = newStore();
+  const svc = PhysicalTicketService.forTesting(makePool(store));
+  const batch = await svc.createBatch({
+    hallId: "hall-a", batchName: "r-range", rangeStart: 100, rangeEnd: 110,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(batch.id);
+  const mid = await svc.listUniqueIdsInRange({ uniqueIdStart: 103, uniqueIdEnd: 106 });
+  assert.deepEqual(mid.map((r) => r.uniqueId), ["103", "104", "105", "106"]);
+  // Kun start (open-ended end)
+  const openEnd = await svc.listUniqueIdsInRange({ uniqueIdStart: 108 });
+  assert.deepEqual(openEnd.map((r) => r.uniqueId), ["108", "109", "110"]);
+  // Kun end (open-ended start)
+  const openStart = await svc.listUniqueIdsInRange({ uniqueIdEnd: 102 });
+  assert.deepEqual(openStart.map((r) => r.uniqueId), ["100", "101", "102"]);
+});
+
+test("BIN-649: listUniqueIdsInRange avviser reversert range", async () => {
+  const store = newStore();
+  const svc = PhysicalTicketService.forTesting(makePool(store));
+  await assert.rejects(
+    () => svc.listUniqueIdsInRange({ uniqueIdStart: 200, uniqueIdEnd: 100 }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT" && /uniqueIdEnd/.test(err.message)
+  );
+});
+
+test("BIN-649: listUniqueIdsInRange filtrerer på hallId", async () => {
+  const store = newStore();
+  const svc = PhysicalTicketService.forTesting(makePool(store));
+  const a = await svc.createBatch({
+    hallId: "hall-a", batchName: "A", rangeStart: 1, rangeEnd: 3,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(a.id);
+  const b = await svc.createBatch({
+    hallId: "hall-b", batchName: "B", rangeStart: 100, rangeEnd: 102,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(b.id);
+  const onlyA = await svc.listUniqueIdsInRange({ hallId: "hall-a" });
+  assert.deepEqual(onlyA.map((r) => r.uniqueId).sort(), ["1", "2", "3"]);
+  const onlyB = await svc.listUniqueIdsInRange({ hallId: "hall-b" });
+  assert.deepEqual(onlyB.map((r) => r.uniqueId).sort(), ["100", "101", "102"]);
+});
+
+test("BIN-649: listUniqueIdsInRange filtrerer på status (UNSOLD/SOLD/VOIDED)", async () => {
+  const store = newStore();
+  const svc = PhysicalTicketService.forTesting(makePool(store));
+  const batch = await svc.createBatch({
+    hallId: "hall-a", batchName: "st", rangeStart: 1, rangeEnd: 4,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(batch.id);
+  await svc.markSold({ uniqueId: "2", soldBy: "agent-1" });
+  // Manuell VOIDED for ticket "3" (test-shortcut)
+  const t3 = [...store.tickets.values()].find((x) => x.unique_id === "3")!;
+  t3.status = "VOIDED";
+  const unsold = await svc.listUniqueIdsInRange({ status: "UNSOLD" });
+  assert.deepEqual(unsold.map((r) => r.uniqueId).sort(), ["1", "4"]);
+  const sold = await svc.listUniqueIdsInRange({ status: "SOLD" });
+  assert.deepEqual(sold.map((r) => r.uniqueId), ["2"]);
+  const voided = await svc.listUniqueIdsInRange({ status: "VOIDED" });
+  assert.deepEqual(voided.map((r) => r.uniqueId), ["3"]);
+});
+
+test("BIN-649: listUniqueIdsInRange kombinerer hallId + range + status", async () => {
+  const store = newStore();
+  const svc = PhysicalTicketService.forTesting(makePool(store));
+  const a = await svc.createBatch({
+    hallId: "hall-a", batchName: "combo-a", rangeStart: 1, rangeEnd: 10,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(a.id);
+  const b = await svc.createBatch({
+    hallId: "hall-b", batchName: "combo-b", rangeStart: 100, rangeEnd: 110,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(b.id);
+  // Selg "3" og "7" i hall-a
+  await svc.markSold({ uniqueId: "3", soldBy: "agent-1" });
+  await svc.markSold({ uniqueId: "7", soldBy: "agent-1" });
+  // Selg "102" i hall-b
+  await svc.markSold({ uniqueId: "102", soldBy: "agent-1" });
+  // Hall-a + status=SOLD + range 5..10 → bare "7"
+  const soldInA = await svc.listUniqueIdsInRange({
+    hallId: "hall-a", status: "SOLD", uniqueIdStart: 5, uniqueIdEnd: 10,
+  });
+  assert.deepEqual(soldInA.map((r) => r.uniqueId), ["7"]);
+  // Hall-b + status=SOLD → bare "102"
+  const soldInB = await svc.listUniqueIdsInRange({ hallId: "hall-b", status: "SOLD" });
+  assert.deepEqual(soldInB.map((r) => r.uniqueId), ["102"]);
+});
+
+test("BIN-649: listUniqueIdsInRange respekterer limit + offset (paginering)", async () => {
+  const store = newStore();
+  const svc = PhysicalTicketService.forTesting(makePool(store));
+  const batch = await svc.createBatch({
+    hallId: "hall-a", batchName: "pg", rangeStart: 1, rangeEnd: 10,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(batch.id);
+  const page1 = await svc.listUniqueIdsInRange({ limit: 3, offset: 0 });
+  assert.deepEqual(page1.map((r) => r.uniqueId), ["1", "2", "3"]);
+  const page2 = await svc.listUniqueIdsInRange({ limit: 3, offset: 3 });
+  assert.deepEqual(page2.map((r) => r.uniqueId), ["4", "5", "6"]);
+  const pageLast = await svc.listUniqueIdsInRange({ limit: 5, offset: 8 });
+  assert.deepEqual(pageLast.map((r) => r.uniqueId), ["9", "10"]);
+});
+
+test("BIN-649: listUniqueIdsInRange limit har hard øvre-grense på 500", async () => {
+  const store = newStore();
+  const svc = PhysicalTicketService.forTesting(makePool(store));
+  const batch = await svc.createBatch({
+    hallId: "hall-a", batchName: "cap", rangeStart: 1, rangeEnd: 3,
+    defaultPriceCents: 100, createdBy: "admin-1",
+  });
+  await svc.generateTickets(batch.id);
+  // Limit 9999 skal bli capped til 500 — ikke kaste.
+  const result = await svc.listUniqueIdsInRange({ limit: 9999 });
+  assert.equal(result.length, 3);
 });

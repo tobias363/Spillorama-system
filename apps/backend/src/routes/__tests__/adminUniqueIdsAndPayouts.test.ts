@@ -96,6 +96,48 @@ async function startServer(
       if (filter?.limit) list = list.slice(0, filter.limit);
       return list;
     },
+    async listUniqueIdsInRange(filter: {
+      hallId?: string;
+      uniqueIdStart?: number;
+      uniqueIdEnd?: number;
+      createdFrom?: string;
+      createdTo?: string;
+      status?: PhysicalTicketStatus;
+      limit?: number;
+      offset?: number;
+    }) {
+      if (
+        filter.uniqueIdStart !== undefined &&
+        filter.uniqueIdEnd !== undefined &&
+        filter.uniqueIdEnd < filter.uniqueIdStart
+      ) {
+        throw new DomainError("INVALID_INPUT", "uniqueIdEnd må være ≥ uniqueIdStart.");
+      }
+      let list = tickets;
+      if (filter.hallId) list = list.filter((t) => t.hallId === filter.hallId);
+      if (filter.status) list = list.filter((t) => t.status === filter.status);
+      if (filter.uniqueIdStart !== undefined || filter.uniqueIdEnd !== undefined) {
+        list = list.filter((t) => /^[0-9]+$/.test(t.uniqueId));
+      }
+      if (filter.uniqueIdStart !== undefined) {
+        const s = filter.uniqueIdStart;
+        list = list.filter((t) => Number(t.uniqueId) >= s);
+      }
+      if (filter.uniqueIdEnd !== undefined) {
+        const e = filter.uniqueIdEnd;
+        list = list.filter((t) => Number(t.uniqueId) <= e);
+      }
+      if (filter.createdFrom) {
+        list = list.filter((t) => t.createdAt >= filter.createdFrom!);
+      }
+      if (filter.createdTo) {
+        list = list.filter((t) => t.createdAt <= filter.createdTo!);
+      }
+      list = [...list].sort((a, b) => Number(a.uniqueId) - Number(b.uniqueId));
+      const offset = filter.offset ?? 0;
+      const limit = filter.limit ?? 200;
+      return list.slice(offset, offset + limit);
+    },
   } as unknown as PhysicalTicketService;
 
   const engine = {
@@ -428,5 +470,220 @@ test("BIN-587 B4b: payouts HALL_OPERATOR tvunget til egen hall via resolveHallSc
     assert.equal(bypass.json.error.code, "FORBIDDEN");
   } finally {
     await ctx.close();
+  }
+});
+
+// ── BIN-649: unique-tickets range report ─────────────────────────────────
+
+test("BIN-649: GET /reports/unique-tickets/range RBAC — PLAYER blokkert", async () => {
+  const ctx = await startServer({ "pl-tok": playerUser });
+  try {
+    const res = await req(ctx.baseUrl, "GET", "/api/admin/reports/unique-tickets/range", "pl-tok");
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-649: GET /reports/unique-tickets/range SUPPORT kan lese (DAILY_REPORT_READ)", async () => {
+  const tickets = [
+    makeTicket({ id: "t-1", uniqueId: "100", hallId: "hall-a" }),
+    makeTicket({ id: "t-2", uniqueId: "200", hallId: "hall-b" }),
+  ];
+  const ctx = await startServer({ "sup-tok": supportUser }, { tickets });
+  try {
+    const res = await req(ctx.baseUrl, "GET", "/api/admin/reports/unique-tickets/range", "sup-tok");
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.count, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-649: GET /reports/unique-tickets/range filtrerer på uniqueIdStart/uniqueIdEnd", async () => {
+  const tickets = [
+    makeTicket({ id: "t-1", uniqueId: "50",  hallId: "hall-a" }),
+    makeTicket({ id: "t-2", uniqueId: "100", hallId: "hall-a" }),
+    makeTicket({ id: "t-3", uniqueId: "150", hallId: "hall-a" }),
+    makeTicket({ id: "t-4", uniqueId: "200", hallId: "hall-a" }),
+  ];
+  const ctx = await startServer({ "admin-tok": adminUser }, { tickets });
+  try {
+    const res = await req(
+      ctx.baseUrl, "GET",
+      "/api/admin/reports/unique-tickets/range?uniqueIdStart=100&uniqueIdEnd=150",
+      "admin-tok"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.count, 2);
+    assert.deepEqual(
+      (res.json.data.rows as Array<{ uniqueId: string }>).map((r) => r.uniqueId),
+      ["100", "150"]
+    );
+    assert.equal(res.json.data.uniqueIdStart, 100);
+    assert.equal(res.json.data.uniqueIdEnd, 150);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-649: GET /reports/unique-tickets/range avviser reversert range (400 INVALID_INPUT)", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser });
+  try {
+    const res = await req(
+      ctx.baseUrl, "GET",
+      "/api/admin/reports/unique-tickets/range?uniqueIdStart=500&uniqueIdEnd=100",
+      "admin-tok"
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-649: GET /reports/unique-tickets/range avviser ugyldig ISO-dato på from", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser });
+  try {
+    const res = await req(
+      ctx.baseUrl, "GET",
+      "/api/admin/reports/unique-tickets/range?from=i-morgen",
+      "admin-tok"
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-649: GET /reports/unique-tickets/range filtrerer på status", async () => {
+  const tickets = [
+    makeTicket({ id: "t-1", uniqueId: "1", hallId: "hall-a", status: "UNSOLD" }),
+    makeTicket({ id: "t-2", uniqueId: "2", hallId: "hall-a", status: "SOLD" }),
+    makeTicket({ id: "t-3", uniqueId: "3", hallId: "hall-a", status: "VOIDED" }),
+  ];
+  const ctx = await startServer({ "admin-tok": adminUser }, { tickets });
+  try {
+    const res = await req(
+      ctx.baseUrl, "GET",
+      "/api/admin/reports/unique-tickets/range?status=SOLD",
+      "admin-tok"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.count, 1);
+    assert.equal(res.json.data.rows[0].uniqueId, "2");
+    assert.equal(res.json.data.status, "SOLD");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-649: GET /reports/unique-tickets/range HALL_OPERATOR scope-låst til egen hall", async () => {
+  const tickets = [
+    makeTicket({ id: "t-a", uniqueId: "10", hallId: "hall-a" }),
+    makeTicket({ id: "t-b", uniqueId: "20", hallId: "hall-b" }),
+  ];
+  const ctx = await startServer({ "op-a-tok": operatorA }, { tickets });
+  try {
+    // Ingen hallId oppgitt → auto-scopet til hall-a
+    const res = await req(
+      ctx.baseUrl, "GET",
+      "/api/admin/reports/unique-tickets/range",
+      "op-a-tok"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.count, 1);
+    assert.equal(res.json.data.rows[0].hallId, "hall-a");
+    assert.equal(res.json.data.hallId, "hall-a");
+    // Forsøk på å overstyre til hall-b blokkeres
+    const bypass = await req(
+      ctx.baseUrl, "GET",
+      "/api/admin/reports/unique-tickets/range?hallId=hall-b",
+      "op-a-tok"
+    );
+    assert.equal(bypass.status, 400);
+    assert.equal(bypass.json.error.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-649: GET /reports/unique-tickets/range respekterer limit + offset", async () => {
+  const tickets = [
+    makeTicket({ id: "t-1", uniqueId: "1", hallId: "hall-a" }),
+    makeTicket({ id: "t-2", uniqueId: "2", hallId: "hall-a" }),
+    makeTicket({ id: "t-3", uniqueId: "3", hallId: "hall-a" }),
+    makeTicket({ id: "t-4", uniqueId: "4", hallId: "hall-a" }),
+  ];
+  const ctx = await startServer({ "admin-tok": adminUser }, { tickets });
+  try {
+    const page1 = await req(
+      ctx.baseUrl, "GET",
+      "/api/admin/reports/unique-tickets/range?limit=2&offset=0",
+      "admin-tok"
+    );
+    assert.equal(page1.status, 200);
+    assert.equal(page1.json.data.count, 2);
+    assert.deepEqual(
+      (page1.json.data.rows as Array<{ uniqueId: string }>).map((r) => r.uniqueId),
+      ["1", "2"]
+    );
+    const page2 = await req(
+      ctx.baseUrl, "GET",
+      "/api/admin/reports/unique-tickets/range?limit=2&offset=2",
+      "admin-tok"
+    );
+    assert.equal(page2.status, 200);
+    assert.deepEqual(
+      (page2.json.data.rows as Array<{ uniqueId: string }>).map((r) => r.uniqueId),
+      ["3", "4"]
+    );
+    assert.equal(page2.json.data.offset, 2);
+    assert.equal(page2.json.data.limit, 2);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-649: GET /reports/unique-tickets/range read-only — ingen AuditLog", async () => {
+  const tickets = [makeTicket({ id: "t-1", uniqueId: "1", hallId: "hall-a" })];
+  const auditStore = new InMemoryAuditLogStore();
+  const auditLogService = new AuditLogService(auditStore);
+  const appUsers = new Map<string, AppUser>();
+  const platformService = {
+    async getUserFromAccessToken(token: string) {
+      if (token !== "admin-tok") throw new DomainError("UNAUTHORIZED", "bad");
+      return adminUser;
+    },
+    async getUserById(id: string) {
+      const u = appUsers.get(id);
+      if (!u) throw new DomainError("USER_NOT_FOUND", "nf");
+      return u;
+    },
+  } as unknown as PlatformService;
+  const physicalTicketService = {
+    async listUniqueIdsInRange() { return tickets; },
+  } as unknown as PhysicalTicketService;
+  const engine = {} as unknown as BingoEngine;
+  const app = express();
+  app.use(express.json());
+  app.use(createAdminUniqueIdsAndPayoutsRouter({
+    platformService, auditLogService, physicalTicketService, engine,
+  }));
+  const server = app.listen(0);
+  await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+  const port = (server.address() as AddressInfo).port;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/admin/reports/unique-tickets/range`, {
+      headers: { Authorization: "Bearer admin-tok" },
+    });
+    assert.equal(res.status, 200);
+    // Read-only endepunkt skal ikke skrive AuditLog
+    const entries = await auditStore.list({ limit: 10 });
+    assert.equal(entries.length, 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

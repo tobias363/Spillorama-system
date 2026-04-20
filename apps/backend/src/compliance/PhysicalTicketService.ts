@@ -605,6 +605,89 @@ export class PhysicalTicketService {
   }
 
   /**
+   * BIN-649: list unique-IDs i en numerisk range, valgfritt med
+   * hallId / status / oppretted-dato-filter. Brukt av admin-rapporten
+   * `GET /api/admin/reports/unique-tickets/range`.
+   *
+   * `unique_id` er TEXT i schemaet, men innholdet er alltid en numerisk
+   * BIGINT (batch-generert fra range_start..range_end). Derfor caster vi
+   * til BIGINT i SQL-predikatet — vi forkaster evt. ikke-numeriske ID-er
+   * (skal ikke kunne finnes i praksis, men defense-in-depth).
+   *
+   * Paginering: offset+limit (samme mønster som B4a listUniqueIds). Max-
+   * limit 500 — større uttrekk må bruke CSV-eksport (PR-A4a-pattern).
+   */
+  async listUniqueIdsInRange(filter: {
+    hallId?: string;
+    uniqueIdStart?: number;
+    uniqueIdEnd?: number;
+    createdFrom?: string;
+    createdTo?: string;
+    status?: PhysicalTicketStatus;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<PhysicalTicket[]> {
+    await this.ensureInitialized();
+    const limit = filter.limit && filter.limit > 0 ? Math.min(Math.floor(filter.limit), 500) : 100;
+    const offset = filter.offset && filter.offset > 0 ? Math.floor(filter.offset) : 0;
+    if (
+      filter.uniqueIdStart !== undefined &&
+      filter.uniqueIdEnd !== undefined &&
+      filter.uniqueIdEnd < filter.uniqueIdStart
+    ) {
+      throw new DomainError("INVALID_INPUT", "uniqueIdEnd må være ≥ uniqueIdStart.");
+    }
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (filter.hallId) {
+      params.push(filter.hallId);
+      conditions.push(`hall_id = $${params.length}`);
+    }
+    if (filter.status) {
+      params.push(filter.status);
+      conditions.push(`status = $${params.length}`);
+    }
+    // Cast unique_id til BIGINT for numerisk range-sammenligning. Vi krever
+    // at teksten er heltall (regex) ellers får vi cast-exception — så
+    // eksluder dem eksplisitt først.
+    if (filter.uniqueIdStart !== undefined || filter.uniqueIdEnd !== undefined) {
+      conditions.push(`unique_id ~ '^[0-9]+$'`);
+    }
+    if (filter.uniqueIdStart !== undefined) {
+      params.push(filter.uniqueIdStart);
+      conditions.push(`unique_id::bigint >= $${params.length}`);
+    }
+    if (filter.uniqueIdEnd !== undefined) {
+      params.push(filter.uniqueIdEnd);
+      conditions.push(`unique_id::bigint <= $${params.length}`);
+    }
+    if (filter.createdFrom) {
+      params.push(filter.createdFrom);
+      conditions.push(`created_at >= $${params.length}`);
+    }
+    if (filter.createdTo) {
+      params.push(filter.createdTo);
+      conditions.push(`created_at <= $${params.length}`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    params.push(limit);
+    const limitParam = params.length;
+    params.push(offset);
+    const offsetParam = params.length;
+    const { rows } = await this.pool.query<TicketRow>(
+      `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
+              sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
+              created_at, updated_at
+       FROM ${this.ticketsTable()}
+       ${where}
+       ORDER BY unique_id::bigint ASC
+       LIMIT $${limitParam} OFFSET $${offsetParam}`,
+      params
+    );
+    return rows.map((r) => this.mapTicket(r));
+  }
+
+  /**
    * BIN-587 B4b: finn billett via unique-ID. Brukt av admin-search +
    * checkUniqueId-endepunkt for å verifisere billett-eksistens + status.
    */
