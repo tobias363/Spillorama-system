@@ -107,6 +107,35 @@ export interface PhysicalTicketBatchTransfer {
   ticketCountAtTransfer: number;
 }
 
+/**
+ * BIN-640: én cashout-rad per utbetalt fysisk billett. UNIQUE-constraint
+ * på `ticketUniqueId` gir idempotens.
+ */
+export interface PhysicalTicketCashout {
+  id: string;
+  ticketUniqueId: string;
+  hallId: string;
+  gameId: string | null;
+  payoutCents: number;
+  paidBy: string;
+  paidAt: string;
+  notes: string | null;
+  otherData: Record<string, unknown>;
+}
+
+export interface RecordCashoutInput {
+  uniqueId: string;
+  payoutCents: number;
+  paidBy: string;
+  notes?: string | null;
+  otherData?: Record<string, unknown>;
+}
+
+export interface PhysicalTicketCashoutResult {
+  cashout: PhysicalTicketCashout;
+  ticket: PhysicalTicket;
+}
+
 export interface PhysicalTicketServiceOptions {
   connectionString: string;
   schema?: string;
@@ -143,6 +172,45 @@ interface TicketRow {
   voided_reason: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+interface CashoutRow {
+  id: string;
+  ticket_unique_id: string;
+  hall_id: string;
+  game_id: string | null;
+  payout_cents: string | number;
+  paid_by: string;
+  paid_at: Date | string;
+  notes: string | null;
+  other_data: unknown;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: string }).code === "23505"
+  );
+}
+
+function asJsonObject(value: unknown): Record<string, unknown> {
+  if (value === null || value === undefined) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
 }
 
 function asIso(value: Date | string): string {
@@ -217,6 +285,7 @@ export class PhysicalTicketService {
 
   private batchesTable(): string { return `"${this.schema}"."app_physical_ticket_batches"`; }
   private ticketsTable(): string { return `"${this.schema}"."app_physical_tickets"`; }
+  private cashoutsTable(): string { return `"${this.schema}"."app_physical_ticket_cashouts"`; }
 
   // ── Batch CRUD ─────────────────────────────────────────────────────────
 
@@ -922,6 +991,125 @@ export class PhysicalTicketService {
     }));
   }
 
+  // ── BIN-640: single-ticket cashout ─────────────────────────────────────
+
+  /**
+   * BIN-640: hent registrert cashout for en fysisk billett (eller null hvis
+   * ikke utbetalt). Brukt av route for å svare med cashout-status + av
+   * `recordCashout` som idempotens-pre-check.
+   */
+  async findCashoutByUniqueId(uniqueId: string): Promise<PhysicalTicketCashout | null> {
+    await this.ensureInitialized();
+    const trimmed = uniqueId?.trim();
+    if (!trimmed) throw new DomainError("INVALID_INPUT", "uniqueId er påkrevd.");
+    const { rows } = await this.pool.query<CashoutRow>(
+      `SELECT id, ticket_unique_id, hall_id, game_id, payout_cents,
+              paid_by, paid_at, notes, other_data
+       FROM ${this.cashoutsTable()}
+       WHERE ticket_unique_id = $1
+       LIMIT 1`,
+      [trimmed]
+    );
+    return rows[0] ? this.mapCashout(rows[0]) : null;
+  }
+
+  /**
+   * BIN-640: registrer cashout for én fysisk billett.
+   *
+   * Precondition: billett finnes, status='SOLD', ikke allerede utbetalt.
+   * Bruker UNIQUE-constraint på `ticket_unique_id` som siste linje for
+   * idempotens (race-safe). Vi låser billett-raden med FOR UPDATE slik at
+   * parallelle forsøk serialiseres.
+   *
+   * Feilkoder:
+   *   - PHYSICAL_TICKET_NOT_FOUND — billetten finnes ikke.
+   *   - PHYSICAL_TICKET_NOT_CASHABLE — status != SOLD.
+   *   - ALREADY_CASHED_OUT — billetten er allerede utbetalt.
+   *   - INVALID_INPUT — inputvalidering.
+   */
+  async recordCashout(input: RecordCashoutInput): Promise<PhysicalTicketCashoutResult> {
+    await this.ensureInitialized();
+    const uniqueId = input.uniqueId?.trim();
+    if (!uniqueId) throw new DomainError("INVALID_INPUT", "uniqueId er påkrevd.");
+    const paidBy = input.paidBy?.trim();
+    if (!paidBy) throw new DomainError("INVALID_INPUT", "paidBy er påkrevd.");
+    const payoutCents = Number(input.payoutCents);
+    if (!Number.isFinite(payoutCents) || !Number.isInteger(payoutCents) || payoutCents <= 0) {
+      throw new DomainError("INVALID_INPUT", "payoutCents må være et positivt heltall.");
+    }
+    const notes = input.notes?.trim() || null;
+    const otherData = input.otherData ?? {};
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: ticketRows } = await client.query<TicketRow>(
+        `SELECT id, batch_id, unique_id, hall_id, status, price_cents, assigned_game_id,
+                sold_at, sold_by, buyer_user_id, voided_at, voided_by, voided_reason,
+                created_at, updated_at
+         FROM ${this.ticketsTable()}
+         WHERE unique_id = $1 FOR UPDATE`,
+        [uniqueId]
+      );
+      const ticketRow = ticketRows[0];
+      if (!ticketRow) {
+        throw new DomainError("PHYSICAL_TICKET_NOT_FOUND", "Billetten finnes ikke.");
+      }
+      if (ticketRow.status !== "SOLD") {
+        throw new DomainError(
+          "PHYSICAL_TICKET_NOT_CASHABLE",
+          `Billetten har status ${ticketRow.status} — kun SOLD kan utbetales.`
+        );
+      }
+      // Idempotens-pre-check innenfor transaksjonen.
+      const { rows: existingCashout } = await client.query<{ id: string }>(
+        `SELECT id FROM ${this.cashoutsTable()} WHERE ticket_unique_id = $1 LIMIT 1`,
+        [uniqueId]
+      );
+      if (existingCashout[0]) {
+        throw new DomainError(
+          "ALREADY_CASHED_OUT",
+          "Billetten er allerede utbetalt."
+        );
+      }
+
+      const cashoutId = `ptcash-${randomUUID()}`;
+      const { rows: inserted } = await client.query<CashoutRow>(
+        `INSERT INTO ${this.cashoutsTable()}
+          (id, ticket_unique_id, hall_id, game_id, payout_cents, paid_by, notes, other_data)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+         RETURNING id, ticket_unique_id, hall_id, game_id, payout_cents,
+                   paid_by, paid_at, notes, other_data`,
+        [
+          cashoutId,
+          uniqueId,
+          ticketRow.hall_id,
+          ticketRow.assigned_game_id,
+          payoutCents,
+          paidBy,
+          notes,
+          JSON.stringify(otherData),
+        ]
+      );
+      await client.query("COMMIT");
+      return {
+        cashout: this.mapCashout(inserted[0]!),
+        ticket: this.mapTicket(ticketRow),
+      };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      if (err instanceof DomainError) throw err;
+      // UNIQUE-violation (postgres error 23505) på race = ALREADY_CASHED_OUT.
+      if (isUniqueViolation(err)) {
+        throw new DomainError("ALREADY_CASHED_OUT", "Billetten er allerede utbetalt.");
+      }
+      logger.error({ err, uniqueId }, "[BIN-640] recordCashout failed");
+      throw new DomainError("PHYSICAL_CASHOUT_FAILED", "Kunne ikke registrere cashout.");
+    } finally {
+      client.release();
+    }
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────
 
   private mapBatch(row: BatchRow): PhysicalTicketBatch {
@@ -938,6 +1126,20 @@ export class PhysicalTicketService {
       createdBy: row.created_by,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at),
+    };
+  }
+
+  private mapCashout(row: CashoutRow): PhysicalTicketCashout {
+    return {
+      id: row.id,
+      ticketUniqueId: row.ticket_unique_id,
+      hallId: row.hall_id,
+      gameId: row.game_id,
+      payoutCents: Number(row.payout_cents),
+      paidBy: row.paid_by,
+      paidAt: asIso(row.paid_at),
+      notes: row.notes,
+      otherData: asJsonObject(row.other_data),
     };
   }
 
@@ -1028,6 +1230,29 @@ export class PhysicalTicketService {
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_pt_hall_status
          ON ${this.ticketsTable()}(hall_id, status)`
+      );
+      // BIN-640: single-ticket cashouts — én rad per utbetalt fysisk billett.
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.cashoutsTable()} (
+          id TEXT PRIMARY KEY,
+          ticket_unique_id TEXT NOT NULL UNIQUE,
+          hall_id TEXT NOT NULL,
+          game_id TEXT NULL,
+          payout_cents BIGINT NOT NULL CHECK (payout_cents > 0),
+          paid_by TEXT NOT NULL,
+          paid_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          notes TEXT NULL,
+          other_data JSONB NOT NULL DEFAULT '{}'::jsonb
+        )`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_ptc_hall_paid_at
+         ON ${this.cashoutsTable()}(hall_id, paid_at DESC)`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_ptc_game
+         ON ${this.cashoutsTable()}(game_id, paid_at DESC)
+         WHERE game_id IS NOT NULL`
       );
       await client.query("COMMIT");
     } catch (err) {

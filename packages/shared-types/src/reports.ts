@@ -274,6 +274,67 @@ export interface PhysicalTicketsAggregateResponse {
   totals: PhysicalTicketsAggregateTotals;
 }
 
+// ── BIN-638: physical-tickets games-in-hall aggregate ─────────────────────
+
+/**
+ * BIN-638: per-game aggregate-row scoped to a single hall.
+ * Emitted by `GET /api/admin/physical-tickets/games/in-hall?hallId=&from=&to=`.
+ *
+ * Legacy-reference: `legacy/unity-backend/App/Views/physicalTickets/
+ * physicalGameTicketList.html` viste per-game liste med pending/rewarded-
+ * tellere før agent dykker inn i enkelt-billettene. Denne kontrakten er den
+ * nye canonical shape som blokkerer admin-web PR-B3.
+ *
+ * - `gameId`: `app_physical_tickets.assigned_game_id` (kan være `null` for
+ *   billetter som er SOLD uten eksplisitt game-tilordning).
+ * - `name`: `hall_game_schedules.display_name` når `gameId` matcher en
+ *   schedule-slot; null ellers (pragmatisk lookup — `assigned_game_id` kan
+ *   referere til session-IDer uten schedule-slot-rad).
+ * - `status`: `hall_game_schedules.is_active ? 'ACTIVE' : 'INACTIVE'`, null
+ *   hvis gameId ikke matcher en schedule-slot.
+ * - `sold`: billetter i scope med status='SOLD' (inkluderer både cashed-out
+ *   og ikke-cashed-out). Nært analogt til BIN-648 `sold + cashedOut`.
+ * - `pendingCashoutCount`: sold-billetter som IKKE har en matchende
+ *   `app_agent_transactions` CASH_OUT-rad. Samme som BIN-648's `pending`.
+ * - `cashedOut`: sold-billetter med matchende CASH_OUT-transaksjon.
+ * - `ticketsInPlay`: alias for `pendingCashoutCount` — BIN-638-kontrakten
+ *   (Linear-spec) eksponerer begge navnene eksplisitt så admin-UI kan
+ *   mappe 1:1 til kolonnene `ticketsInPlay` og `pendingCashoutCount` uten
+ *   klient-side rename.
+ * - `totalRevenueCents`: sum av `COALESCE(ticket.price_cents,
+ *   batch.default_price_cents)` for alle SOLD-billetter i raden.
+ */
+export interface PhysicalTicketsGameInHallRow {
+  gameId: string | null;
+  name: string | null;
+  status: "ACTIVE" | "INACTIVE" | null;
+  sold: number;
+  pendingCashoutCount: number;
+  /** Alias for `pendingCashoutCount` — BIN-638-kontrakten krever begge. */
+  ticketsInPlay: number;
+  cashedOut: number;
+  totalRevenueCents: number;
+}
+
+export interface PhysicalTicketsGamesInHallTotals {
+  sold: number;
+  pendingCashoutCount: number;
+  ticketsInPlay: number;
+  cashedOut: number;
+  totalRevenueCents: number;
+  rowCount: number;
+}
+
+/** Wire-shape for `GET /api/admin/physical-tickets/games/in-hall`. */
+export interface PhysicalTicketsGamesInHallResponse {
+  generatedAt: string;
+  hallId: string;
+  from: string | null;
+  to: string | null;
+  rows: PhysicalTicketsGameInHallRow[];
+  totals: PhysicalTicketsGamesInHallTotals;
+}
+
 /**
  * BIN-647 placeholder (PR-A4a). Kept for backward compatibility with the
  * admin-web gap-banner wrapper (`admin-reports-drill.ts`) which predates the
