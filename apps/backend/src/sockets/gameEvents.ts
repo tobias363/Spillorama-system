@@ -230,7 +230,7 @@ export interface GameEventsDeps {
   findPlayerInRoomByWallet: (snapshot: RoomSnapshot, walletId: string) => RoomSnapshot["players"][number] | null;
   getRoomConfiguredEntryFee: (roomCode: string) => number;
   getArmedPlayerIds: (roomCode: string) => string[];
-  armPlayer: (roomCode: string, playerId: string, ticketCount?: number, selections?: Array<{ type: string; qty: number }>) => void;
+  armPlayer: (roomCode: string, playerId: string, ticketCount?: number, selections?: Array<{ type: string; qty: number; name?: string }>) => void;
   getArmedPlayerTicketCounts: (roomCode: string) => Record<string, number>;
   getArmedPlayerSelections: (roomCode: string) => Record<string, Array<{ type: string; qty: number }>>;
   disarmPlayer: (roomCode: string, playerId: string) => void;
@@ -607,7 +607,7 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     }));
 
     socket.on("bet:arm", rateLimited("bet:arm", async (
-      payload: RoomActionPayload & { armed?: boolean; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number }> },
+      payload: RoomActionPayload & { armed?: boolean; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number; name?: string }> },
       callback: (response: AckResponse<{ snapshot: RoomSnapshot; armed: boolean }>) => void
     ) => {
       try {
@@ -616,9 +616,16 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
         if (wantArmed) {
           // New path: per-type selections
           if (Array.isArray(payload.ticketSelections) && payload.ticketSelections.length > 0) {
+            // BIN-688: preserve `name` so pre-round tickets can be coloured
+            // per the player's specific pick (Small Yellow vs Small Purple
+            // both have type="small").
             const selections = payload.ticketSelections
               .filter((s) => s && typeof s.type === "string" && typeof s.qty === "number" && s.qty > 0)
-              .map((s) => ({ type: s.type, qty: Math.max(1, Math.round(s.qty)) }));
+              .map((s) => ({
+                type: s.type,
+                qty: Math.max(1, Math.round(s.qty)),
+                ...(typeof s.name === "string" && s.name.length > 0 ? { name: s.name } : {}),
+              }));
 
             if (selections.length === 0) {
               throw new DomainError("INVALID_INPUT", "Ingen gyldige billettvalg.");

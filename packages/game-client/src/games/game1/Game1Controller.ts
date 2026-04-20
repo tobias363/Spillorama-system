@@ -572,10 +572,13 @@ class Game1Controller implements GameController {
 
   // ── User actions ──────────────────────────────────────────────────────
 
-  private async handleBuy(selections: Array<{ type: string; qty: number }> = []): Promise<void> {
+  private async handleBuy(selections: Array<{ type: string; qty: number; name?: string }> = []): Promise<void> {
     // If selections are provided (new per-type path), send ticketSelections.
+    // BIN-688: `name` is forwarded so the backend can colour pre-round
+    // tickets per the player's specific colour pick (Small Yellow vs
+    // Small Purple both share type="small").
     // Otherwise fall back to flat ticketCount for backward compat.
-    const payload: { roomCode: string; armed: true; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number }> } = {
+    const payload: { roomCode: string; armed: true; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number; name?: string }> } = {
       roomCode: this.actualRoomCode,
       armed: true,
     };

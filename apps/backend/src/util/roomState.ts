@@ -9,10 +9,17 @@ import type { GameVariantConfig } from "../game/variantConfig.js";
 
 /** Per-type ticket selection stored for an armed player. */
 export interface TicketSelection {
-  /** Ticket type code, e.g. "small-yellow", "large-white", "elvis". */
+  /** Ticket type code, e.g. "small", "large", "elvis". */
   type: string;
   /** How many of this ticket type to purchase. */
   qty: number;
+  /**
+   * BIN-688: human-readable ticket-type name (e.g. "Small Yellow"),
+   * matching `TicketTypeConfig.name` in variantConfig.ts. Optional for
+   * backward compat — clients that only send `type` still arm successfully,
+   * but pre-round tickets then fall back to sequential colour cycling.
+   */
+  name?: string;
 }
 
 export interface ChatMessage {
@@ -111,16 +118,62 @@ export class RoomStateManager {
   // generate 3×5 Databingo60 tickets instead of Bingo75 5×5 — root cause
   // of BIN-619/BIN-671 bug. Now the callers must pass it explicitly;
   // generateTicketForGame throws on unknown slugs (see commit 5).
-  getOrCreateDisplayTickets(roomCode: string, playerId: string, count: number, gameSlug: string): Ticket[] {
+  //
+  // BIN-688: `colorAssignments` lets callers colour each generated ticket
+  // according to the player's armed selections (Small Yellow vs Small
+  // Purple — both have type="small", colour is the distinguisher). If the
+  // signature of the colour assignments changes between calls, we
+  // invalidate the cache even when `count` matches — otherwise changing
+  // armed selections (same total, different mix) would keep showing the
+  // old colours. Omitting `colorAssignments` preserves the pre-BIN-688
+  // behaviour of sequential cycling client-side.
+  getOrCreateDisplayTickets(
+    roomCode: string,
+    playerId: string,
+    count: number,
+    gameSlug: string,
+    colorAssignments?: Array<{ color: string; type: string }>,
+  ): Ticket[] {
     const key = `${roomCode}:${playerId}`;
     const cached = this.displayTicketCache.get(key);
-    if (cached && cached.length === count) return cached;
+    if (cached && cached.length === count && this.colorsMatch(cached, colorAssignments)) {
+      return cached;
+    }
     // Format is decided by `generateTicketForGame` in ticket.ts — single source
     // of truth for all game slugs (Game 1 75-ball, Game 2 3×3, others 60-ball).
     const tickets: Ticket[] = [];
-    for (let i = 0; i < count; i++) tickets.push({ ...generateTicketForGame(gameSlug), id: `tkt-${i}` });
+    for (let i = 0; i < count; i++) {
+      const base = { ...generateTicketForGame(gameSlug), id: `tkt-${i}` };
+      const assignment = colorAssignments?.[i];
+      if (assignment) {
+        base.color = assignment.color;
+        base.type = assignment.type;
+      }
+      tickets.push(base);
+    }
     this.displayTicketCache.set(key, tickets);
     return tickets;
+  }
+
+  /**
+   * BIN-688: compare cached tickets' `color`/`type` with a fresh
+   * `colorAssignments` array. Mismatch → cache must regenerate so UI
+   * reflects the new armed selections.
+   *
+   * If `colorAssignments` is undefined, a match means the cache also has
+   * no colours (backward-compat path).
+   */
+  private colorsMatch(cached: Ticket[], colorAssignments?: Array<{ color: string; type: string }>): boolean {
+    if (!colorAssignments) {
+      // Cache hit only if cached tickets likewise have no colours.
+      return cached.every((t) => t.color === undefined);
+    }
+    if (cached.length !== colorAssignments.length) return false;
+    for (let i = 0; i < cached.length; i++) {
+      if (cached[i].color !== colorAssignments[i].color) return false;
+      if (cached[i].type !== colorAssignments[i].type) return false;
+    }
+    return true;
   }
 
   /**
