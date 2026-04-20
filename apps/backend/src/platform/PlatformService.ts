@@ -2942,6 +2942,171 @@ export class PlatformService {
     return this.withBalance(this.mapUser(row));
   }
 
+  /**
+   * BIN-634: admin-redigering av eksisterende spiller.
+   *
+   * Tillatte felter: `displayName`, `surname`, `phone`, `hallId`.
+   * `email` er IKKE tillatt her — identitetsbevarende endring; e-post-bytte
+   * må eventuelt gå via egen endpoint (reset-flyt, KYC-re-verify).
+   *
+   * Returnerer både tidligere og oppdatert versjon slik at route-laget kan
+   * logge et fullt diff til AuditLog (regulatorisk krav — se
+   * pengespillforskriften §13 om sporbarhet).
+   */
+  async updatePlayerAsAdmin(input: {
+    userId: string;
+    updates: {
+      displayName?: string;
+      surname?: string | null;
+      phone?: string | null;
+      hallId?: string | null;
+    };
+  }): Promise<{
+    previous: PublicAppUser;
+    updated: PublicAppUser;
+    changedFields: Array<"displayName" | "surname" | "phone" | "hallId">;
+  }> {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(input.userId, "userId");
+    const updates = input.updates ?? {};
+
+    // Validér + normaliser per felt før vi åpner transaksjon.
+    const normalized: {
+      displayName?: string;
+      surname?: string | null;
+      phone?: string | null;
+      hallId?: string | null;
+    } = {};
+
+    if (updates.displayName !== undefined) {
+      const name = updates.displayName.trim();
+      this.assertDisplayName(name);
+      normalized.displayName = name;
+    }
+    if (updates.surname !== undefined) {
+      if (updates.surname === null) {
+        normalized.surname = null;
+      } else {
+        const s = updates.surname.trim();
+        this.assertSurname(s);
+        normalized.surname = s;
+      }
+    }
+    if (updates.phone !== undefined) {
+      if (updates.phone === null) {
+        normalized.phone = null;
+      } else {
+        const p = updates.phone.trim();
+        if (p.length > 40) {
+          throw new DomainError("INVALID_INPUT", "phone er for lang (maks 40 tegn).");
+        }
+        normalized.phone = p.length ? p : null;
+      }
+    }
+    if (updates.hallId !== undefined) {
+      normalized.hallId =
+        updates.hallId === null || updates.hallId === ""
+          ? null
+          : this.assertEntityReference(updates.hallId, "hallId");
+    }
+
+    const hasAnyField =
+      normalized.displayName !== undefined ||
+      normalized.surname !== undefined ||
+      normalized.phone !== undefined ||
+      normalized.hallId !== undefined;
+    if (!hasAnyField) {
+      throw new DomainError("INVALID_INPUT", "Ingen endringer oppgitt.");
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<UserRow>(
+        `SELECT id, email, display_name, surname, phone, compliance_data, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at
+         FROM ${this.usersTable()}
+         WHERE id = $1
+         FOR UPDATE`,
+        [userId]
+      );
+      const existingRow = existingRows[0];
+      if (!existingRow) {
+        throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+      }
+      const previous = this.mapUser(existingRow);
+
+      // Valider hall-eksistens om den endres og ikke er null.
+      if (normalized.hallId !== undefined && normalized.hallId !== null) {
+        const { rows: hallRows } = await client.query(
+          `SELECT id FROM ${this.hallsTable()} WHERE id = $1`,
+          [normalized.hallId]
+        );
+        if (!hallRows[0]) {
+          throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+        }
+      }
+
+      const sets: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      const changedFields: Array<"displayName" | "surname" | "phone" | "hallId"> = [];
+
+      if (
+        normalized.displayName !== undefined &&
+        normalized.displayName !== previous.displayName
+      ) {
+        sets.push(`display_name = $${idx++}`);
+        values.push(normalized.displayName);
+        changedFields.push("displayName");
+      }
+      if (normalized.surname !== undefined && (normalized.surname ?? null) !== (previous.surname ?? null)) {
+        sets.push(`surname = $${idx++}`);
+        values.push(normalized.surname);
+        changedFields.push("surname");
+      }
+      if (normalized.phone !== undefined && (normalized.phone ?? null) !== (previous.phone ?? null)) {
+        sets.push(`phone = $${idx++}`);
+        values.push(normalized.phone);
+        changedFields.push("phone");
+      }
+      if (
+        normalized.hallId !== undefined &&
+        (normalized.hallId ?? null) !== (previous.hallId ?? null)
+      ) {
+        sets.push(`hall_id = $${idx++}`);
+        values.push(normalized.hallId);
+        changedFields.push("hallId");
+      }
+
+      if (sets.length === 0) {
+        // No-op: ingen faktisk endring. Returner uendret bruker, tom diff.
+        await client.query("COMMIT");
+        const unchanged = await this.withBalance(previous);
+        return { previous: unchanged, updated: unchanged, changedFields: [] };
+      }
+
+      sets.push(`updated_at = now()`);
+      values.push(userId);
+
+      const { rows: updatedRows } = await client.query<UserRow>(
+        `UPDATE ${this.usersTable()}
+         SET ${sets.join(", ")}
+         WHERE id = $${idx}
+         RETURNING id, email, display_name, surname, phone, compliance_data, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at`,
+        values
+      );
+      await client.query("COMMIT");
+      const updated = await this.withBalance(this.mapUser(updatedRows[0]!));
+      const previousWithBalance = await this.withBalance(previous);
+      return { previous: previousWithBalance, updated, changedFields };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
   assertUserEligibleForGameplay(user: PublicAppUser): void {
     // DEV: skip KYC/age checks in development mode
     if (process.env.NODE_ENV !== "production") {

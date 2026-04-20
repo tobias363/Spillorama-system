@@ -469,6 +469,137 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
 
   // ── Mutations ────────────────────────────────────────────────────────────
 
+  /**
+   * BIN-634: PUT /api/admin/players/:id — admin-redigering av
+   * eksisterende spiller.
+   *
+   * Tillatte felter: displayName, surname, phone, hallId.
+   * E-post er IKKE redigerbar her (identitetsbevarende; returnerer
+   * INVALID_INPUT hvis klient forsøker). Andre felter ignoreres.
+   *
+   * AuditLog: `admin.player.update` med full diff
+   * `{ targetUserId, changedFields, previousValues, newValues, actor }`
+   * — regulatorisk krav (pengespillforskriften §13).
+   *
+   * Hall-endring: hvis hallId endres må den nye hallen finnes (ellers
+   * HALL_NOT_FOUND). Audit-hendelsen reflekterer migrasjon via previous
+   * vs new.
+   *
+   * Permission: PLAYER_LIFECYCLE_WRITE (samme som hall-status, soft-delete,
+   * bankid-reverify — dette er en lifecycle-operasjon). ADMIN + SUPPORT.
+   * HALL_OPERATOR er bevisst utelatt — player-metadata er sentralt, ikke
+   * hall-lokalt (samme mønster som soft-delete). Hall-scope-begrensning for
+   * HALL_OPERATOR kan vurderes separat hvis behov oppstår (se BIN-635+).
+   */
+  router.put("/api/admin/players/:id", async (req, res) => {
+    try {
+      const actor = await requireAdminPermissionUser(req, "PLAYER_LIFECYCLE_WRITE");
+      const userId = mustBeNonEmptyString(req.params.id, "id");
+      if (!isRecordObject(req.body)) {
+        throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+      }
+
+      // Identitetsbevarende: email ikke tillatt her.
+      if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "E-post kan ikke endres via denne endepunktet. Kontakt admin for e-post-bytte."
+        );
+      }
+
+      const updates: {
+        displayName?: string;
+        surname?: string | null;
+        phone?: string | null;
+        hallId?: string | null;
+      } = {};
+
+      if (Object.prototype.hasOwnProperty.call(req.body, "displayName")) {
+        if (typeof req.body.displayName !== "string") {
+          throw new DomainError("INVALID_INPUT", "displayName må være en tekst.");
+        }
+        updates.displayName = req.body.displayName;
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body, "surname")) {
+        if (req.body.surname === null) {
+          updates.surname = null;
+        } else if (typeof req.body.surname === "string") {
+          updates.surname = req.body.surname;
+        } else {
+          throw new DomainError("INVALID_INPUT", "surname må være en tekst eller null.");
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body, "phone")) {
+        if (req.body.phone === null) {
+          updates.phone = null;
+        } else if (typeof req.body.phone === "string") {
+          updates.phone = req.body.phone;
+        } else {
+          throw new DomainError("INVALID_INPUT", "phone må være en tekst eller null.");
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body, "hallId")) {
+        if (req.body.hallId === null) {
+          updates.hallId = null;
+        } else if (typeof req.body.hallId === "string") {
+          updates.hallId = req.body.hallId;
+        } else {
+          throw new DomainError("INVALID_INPUT", "hallId må være en tekst eller null.");
+        }
+      }
+
+      const { previous, updated, changedFields } = await platformService.updatePlayerAsAdmin({
+        userId,
+        updates,
+      });
+
+      // Audit: logg kun faktisk endrede felter + deres previous + new
+      // verdier. Fullstendig diff (regulatorisk spor), men vi unngår å
+      // spamme audit med uendrede felter. Hvis ingen felter ble endret
+      // (no-op) logges fortsatt en hendelse med tom diff — det dokumenterer
+      // at en admin så på / "rørte" posten uten faktisk endring.
+      const previousValues: Record<string, unknown> = {};
+      const newValues: Record<string, unknown> = {};
+      for (const field of changedFields) {
+        previousValues[field] = (previous as unknown as Record<string, unknown>)[field] ?? null;
+        newValues[field] = (updated as unknown as Record<string, unknown>)[field] ?? null;
+      }
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
+        action: "admin.player.update",
+        resource: "user",
+        resourceId: userId,
+        details: {
+          targetUserId: userId,
+          changedFields,
+          previousValues,
+          newValues,
+          // Markér eksplisitt om hall-migrasjon skjedde — gjør det lettere
+          // å filtrere i audit-rapporter (compliance ber ofte om "alle
+          // hall-flytninger i perioden X").
+          hallMigration:
+            changedFields.includes("hallId")
+              ? {
+                  from: previous.hallId,
+                  to: updated.hallId,
+                }
+              : null,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      apiSuccess(res, {
+        player: publicPlayerSummary(updated),
+        changedFields,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   router.post("/api/admin/players/:id/approve", async (req, res) => {
     try {
       const actor = await requireAdminPermissionUser(req, "PLAYER_KYC_MODERATE");
