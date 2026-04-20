@@ -706,6 +706,108 @@ export class PlatformService {
   }
 
   /**
+   * BIN-633: admin oppretter en spiller manuelt (ingen self-service
+   * register-flow). Brukes av admin-UI når en spiller trenger konto
+   * opprettet av support/admin (f.eks. kontant-kunde som aldri registrerte
+   * seg selv, eller migrasjon fra legacy).
+   *
+   * Skiller seg fra `register`:
+   *   - Ingen session lages — spilleren må senere sette eget passord via
+   *     forgot-password-flow eller logge inn med generert temp-passord
+   *     som admin videreformidler. Passordet genereres her (ikke tatt
+   *     fra admin) for å unngå at admin kan logge inn som spilleren.
+   *   - Rollen er alltid PLAYER (skiller seg fra `createAdminProvisionedUser`
+   *     som brukes til AGENT/SUPPORT/HALL_OPERATOR).
+   *   - `hallId` kan settes direkte ved opprettelse (hall-scope for
+   *     spilleren) — ellers null.
+   *   - `bankIdStatus`: stub/manual-opprettet spiller får `kycStatus=UNVERIFIED`
+   *     som default; admin kan senere trigge BankID-reverify eller
+   *     overstyre KYC via eksisterende endepunkter.
+   *   - `complianceData.createdBy = "ADMIN"` for audit-traceability.
+   *
+   * Duplikat-e-post kaster DomainError("EMAIL_EXISTS") — kaller mapper
+   * dette til HTTP 400 + error.code="EMAIL_EXISTS".
+   *
+   * Returnerer den nye spilleren samt det genererte temp-passordet — kaller
+   * må formidle dette ut-of-band (ikke over audit-logg).
+   */
+  async createPlayerByAdmin(input: {
+    email: string;
+    displayName: string;
+    surname: string;
+    birthDate: string;
+    phone?: string;
+    hallId?: string | null;
+  }): Promise<{ user: AppUser; temporaryPassword: string }> {
+    await this.ensureInitialized();
+    const email = normalizeEmail(input.email);
+    const displayName = input.displayName.trim();
+    const surname = input.surname.trim();
+    const birthDate = this.assertBirthDate(input.birthDate);
+    this.assertEmail(email);
+    this.assertDisplayName(displayName);
+    this.assertSurname(surname);
+
+    const ageYears = calculateAgeYears(new Date(birthDate), new Date());
+    if (ageYears < this.minAgeYears) {
+      throw new DomainError("AGE_RESTRICTED", `Spilleren må være minst ${this.minAgeYears} år.`);
+    }
+
+    const hallId = input.hallId?.trim() || null;
+    const phone = input.phone?.trim() || null;
+    // Generer et URL-safe 128-bit temp-passord. Lengden tilfredsstiller
+    // assertPassword og tvinger forgot-password ved første innlogging.
+    const temporaryPassword = randomBytes(16).toString("base64url");
+    this.assertPassword(temporaryPassword);
+    const passwordHash = await this.hashPassword(temporaryPassword);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<{ id: string }>(
+        `SELECT id FROM ${this.usersTable()} WHERE email = $1`,
+        [email]
+      );
+      if (existingRows[0]) {
+        throw new DomainError("EMAIL_EXISTS", "E-post er allerede registrert.");
+      }
+
+      if (hallId) {
+        // Fail-fast hvis hallId ikke eksisterer — fremfor FK-feil lenger ned.
+        const { rows: hallRows } = await client.query<{ id: string }>(
+          `SELECT id FROM ${this.hallsTable()} WHERE id = $1`,
+          [hallId]
+        );
+        if (!hallRows[0]) {
+          throw new DomainError("HALL_NOT_FOUND", "Ukjent hallId.");
+        }
+      }
+
+      const userId = randomUUID();
+      const walletId = `wallet-user-${userId}`;
+      const complianceData = { createdBy: "ADMIN" };
+      const { rows: createdRows } = await client.query<UserRow>(
+        `INSERT INTO ${this.usersTable()}
+          (id, email, display_name, surname, password_hash, wallet_id, role, phone, birth_date, hall_id, compliance_data)
+         VALUES ($1, $2, $3, $4, $5, $6, 'PLAYER', $7, $8::date, $9, $10::jsonb)
+         RETURNING id, email, display_name, surname, compliance_data, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, phone`,
+        [userId, email, displayName, surname, passwordHash, walletId, phone, birthDate, hallId, JSON.stringify(complianceData)]
+      );
+      await client.query("COMMIT");
+      await this.walletAdapter.ensureAccount(walletId);
+      return {
+        user: this.mapUser(createdRows[0]!),
+        temporaryPassword,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * BIN-583 B3.1: admin-side password-reset for AGENT (and future roles).
    * Skiller seg fra brukerens egen change-password — ingen verifikasjon
    * av gammelt passord, kun admin-RBAC-sjekk hos kaller.
@@ -2838,6 +2940,171 @@ export class PlatformService {
       throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
     }
     return this.withBalance(this.mapUser(row));
+  }
+
+  /**
+   * BIN-634: admin-redigering av eksisterende spiller.
+   *
+   * Tillatte felter: `displayName`, `surname`, `phone`, `hallId`.
+   * `email` er IKKE tillatt her — identitetsbevarende endring; e-post-bytte
+   * må eventuelt gå via egen endpoint (reset-flyt, KYC-re-verify).
+   *
+   * Returnerer både tidligere og oppdatert versjon slik at route-laget kan
+   * logge et fullt diff til AuditLog (regulatorisk krav — se
+   * pengespillforskriften §13 om sporbarhet).
+   */
+  async updatePlayerAsAdmin(input: {
+    userId: string;
+    updates: {
+      displayName?: string;
+      surname?: string | null;
+      phone?: string | null;
+      hallId?: string | null;
+    };
+  }): Promise<{
+    previous: PublicAppUser;
+    updated: PublicAppUser;
+    changedFields: Array<"displayName" | "surname" | "phone" | "hallId">;
+  }> {
+    await this.ensureInitialized();
+    const userId = this.assertEntityReference(input.userId, "userId");
+    const updates = input.updates ?? {};
+
+    // Validér + normaliser per felt før vi åpner transaksjon.
+    const normalized: {
+      displayName?: string;
+      surname?: string | null;
+      phone?: string | null;
+      hallId?: string | null;
+    } = {};
+
+    if (updates.displayName !== undefined) {
+      const name = updates.displayName.trim();
+      this.assertDisplayName(name);
+      normalized.displayName = name;
+    }
+    if (updates.surname !== undefined) {
+      if (updates.surname === null) {
+        normalized.surname = null;
+      } else {
+        const s = updates.surname.trim();
+        this.assertSurname(s);
+        normalized.surname = s;
+      }
+    }
+    if (updates.phone !== undefined) {
+      if (updates.phone === null) {
+        normalized.phone = null;
+      } else {
+        const p = updates.phone.trim();
+        if (p.length > 40) {
+          throw new DomainError("INVALID_INPUT", "phone er for lang (maks 40 tegn).");
+        }
+        normalized.phone = p.length ? p : null;
+      }
+    }
+    if (updates.hallId !== undefined) {
+      normalized.hallId =
+        updates.hallId === null || updates.hallId === ""
+          ? null
+          : this.assertEntityReference(updates.hallId, "hallId");
+    }
+
+    const hasAnyField =
+      normalized.displayName !== undefined ||
+      normalized.surname !== undefined ||
+      normalized.phone !== undefined ||
+      normalized.hallId !== undefined;
+    if (!hasAnyField) {
+      throw new DomainError("INVALID_INPUT", "Ingen endringer oppgitt.");
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existingRows } = await client.query<UserRow>(
+        `SELECT id, email, display_name, surname, phone, compliance_data, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at
+         FROM ${this.usersTable()}
+         WHERE id = $1
+         FOR UPDATE`,
+        [userId]
+      );
+      const existingRow = existingRows[0];
+      if (!existingRow) {
+        throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+      }
+      const previous = this.mapUser(existingRow);
+
+      // Valider hall-eksistens om den endres og ikke er null.
+      if (normalized.hallId !== undefined && normalized.hallId !== null) {
+        const { rows: hallRows } = await client.query(
+          `SELECT id FROM ${this.hallsTable()} WHERE id = $1`,
+          [normalized.hallId]
+        );
+        if (!hallRows[0]) {
+          throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+        }
+      }
+
+      const sets: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+      const changedFields: Array<"displayName" | "surname" | "phone" | "hallId"> = [];
+
+      if (
+        normalized.displayName !== undefined &&
+        normalized.displayName !== previous.displayName
+      ) {
+        sets.push(`display_name = $${idx++}`);
+        values.push(normalized.displayName);
+        changedFields.push("displayName");
+      }
+      if (normalized.surname !== undefined && (normalized.surname ?? null) !== (previous.surname ?? null)) {
+        sets.push(`surname = $${idx++}`);
+        values.push(normalized.surname);
+        changedFields.push("surname");
+      }
+      if (normalized.phone !== undefined && (normalized.phone ?? null) !== (previous.phone ?? null)) {
+        sets.push(`phone = $${idx++}`);
+        values.push(normalized.phone);
+        changedFields.push("phone");
+      }
+      if (
+        normalized.hallId !== undefined &&
+        (normalized.hallId ?? null) !== (previous.hallId ?? null)
+      ) {
+        sets.push(`hall_id = $${idx++}`);
+        values.push(normalized.hallId);
+        changedFields.push("hallId");
+      }
+
+      if (sets.length === 0) {
+        // No-op: ingen faktisk endring. Returner uendret bruker, tom diff.
+        await client.query("COMMIT");
+        const unchanged = await this.withBalance(previous);
+        return { previous: unchanged, updated: unchanged, changedFields: [] };
+      }
+
+      sets.push(`updated_at = now()`);
+      values.push(userId);
+
+      const { rows: updatedRows } = await client.query<UserRow>(
+        `UPDATE ${this.usersTable()}
+         SET ${sets.join(", ")}
+         WHERE id = $${idx}
+         RETURNING id, email, display_name, surname, phone, compliance_data, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at`,
+        values
+      );
+      await client.query("COMMIT");
+      const updated = await this.withBalance(this.mapUser(updatedRows[0]!));
+      const previousWithBalance = await this.withBalance(previous);
+      return { previous: previousWithBalance, updated, changedFields };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw this.wrapError(error);
+    } finally {
+      client.release();
+    }
   }
 
   assertUserEligibleForGameplay(user: PublicAppUser): void {

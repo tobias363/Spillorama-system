@@ -30,6 +30,8 @@ function makeUser(overrides: Partial<AppUser> & { id: string }): AppUser {
     id: overrides.id,
     email: overrides.email ?? `${overrides.id}@test.no`,
     displayName: overrides.displayName ?? overrides.id,
+    surname: overrides.surname,
+    phone: overrides.phone,
     walletId: overrides.walletId ?? `wallet-${overrides.id}`,
     role: overrides.role ?? "PLAYER",
     hallId: overrides.hallId ?? null,
@@ -56,6 +58,19 @@ interface Ctx {
     bulkImports: Array<{ rowCount: number }>;
     hallStatusSets: Array<{ userId: string; hallId: string; isActive: boolean; reason: string | null; actorId: string }>;
     bankIdSessions: Array<{ userId: string }>;
+    // BIN-633: admin-opprettede spillere
+    creates: Array<{
+      email: string;
+      displayName: string;
+      surname: string;
+      birthDate: string;
+      phone?: string;
+      hallId?: string | null;
+    }>;
+    playerUpdates: Array<{
+      userId: string;
+      updates: { displayName?: string; surname?: string | null; phone?: string | null; hallId?: string | null };
+    }>;
   };
   usersById: Map<string, AppUser>;
   close: () => Promise<void>;
@@ -79,6 +94,9 @@ async function startServer(
   const bulkImports: Ctx["spies"]["bulkImports"] = [];
   const hallStatusSets: Ctx["spies"]["hallStatusSets"] = [];
   const bankIdSessions: Ctx["spies"]["bankIdSessions"] = [];
+  const creates: Ctx["spies"]["creates"] = [];
+  const playerUpdates: Ctx["spies"]["playerUpdates"] = [];
+  const knownHallIds = new Set<string>(["hall-a", "hall-b", "hall-nord"]);
   const hallStatusByUser = new Map<string, Array<{ hallId: string; isActive: boolean; reason: string | null; updatedBy: string | null; updatedAt: string; createdAt: string }>>();
 
   const usersById = new Map<string, AppUser>();
@@ -214,6 +232,97 @@ async function startServer(
         return true;
       });
     },
+    // BIN-633: admin-opprettet spiller
+    async createPlayerByAdmin(input: {
+      email: string;
+      displayName: string;
+      surname: string;
+      birthDate: string;
+      phone?: string;
+      hallId?: string | null;
+    }): Promise<{ user: AppUser; temporaryPassword: string }> {
+      creates.push({ ...input });
+      const email = input.email.trim().toLowerCase();
+      // Duplikat-sjekk: matcher PostgresPlatformService-oppførselen.
+      const existing = [...usersById.values()].find((u) => u.email.toLowerCase() === email);
+      if (existing) {
+        throw new DomainError("EMAIL_EXISTS", "E-post er allerede registrert.");
+      }
+      if (!input.displayName?.trim()) throw new DomainError("INVALID_INPUT", "displayName er påkrevd.");
+      if (!input.surname?.trim()) throw new DomainError("INVALID_INPUT", "surname er påkrevd.");
+      if (!input.birthDate) throw new DomainError("INVALID_INPUT", "birthDate er påkrevd.");
+      const id = `new-${creates.length}`;
+      const user: AppUser = makeUser({
+        id,
+        email,
+        displayName: input.displayName.trim(),
+        surname: input.surname.trim(),
+        phone: input.phone,
+        birthDate: input.birthDate,
+        kycStatus: "UNVERIFIED",
+        hallId: input.hallId ?? null,
+        complianceData: { createdBy: "ADMIN" },
+      });
+      usersById.set(id, user);
+      return { user, temporaryPassword: "temp-pwd-abc123" };
+    },
+    async updatePlayerAsAdmin(input: {
+      userId: string;
+      updates: { displayName?: string; surname?: string | null; phone?: string | null; hallId?: string | null };
+    }) {
+      playerUpdates.push({ userId: input.userId, updates: input.updates });
+      const u = usersById.get(input.userId);
+      if (!u) throw new DomainError("USER_NOT_FOUND", "not found");
+      // Replikér minimal domain-logikk så testene kan fange Zod-like
+      // valideringsfeil i route-laget uten å trekke inn ekte DB.
+      const upd = input.updates;
+      if (upd.displayName !== undefined && upd.displayName.trim().length === 0) {
+        throw new DomainError("INVALID_INPUT", "displayName er påkrevd.");
+      }
+      if (upd.hallId !== undefined && upd.hallId !== null && !knownHallIds.has(upd.hallId)) {
+        throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+      }
+      const previous: AppUser = { ...u };
+      const updated: AppUser = { ...u };
+      const changedFields: Array<"displayName" | "surname" | "phone" | "hallId"> = [];
+      if (upd.displayName !== undefined) {
+        const next = upd.displayName.trim();
+        if (next !== previous.displayName) {
+          updated.displayName = next;
+          changedFields.push("displayName");
+        }
+      }
+      if (upd.surname !== undefined) {
+        const next = upd.surname === null ? null : upd.surname.trim();
+        if ((previous.surname ?? null) !== next) {
+          updated.surname = next ?? undefined;
+          changedFields.push("surname");
+        }
+      }
+      if (upd.phone !== undefined) {
+        const next = upd.phone === null ? null : upd.phone.trim();
+        if ((previous.phone ?? null) !== next) {
+          updated.phone = next ?? undefined;
+          changedFields.push("phone");
+        }
+      }
+      if (upd.hallId !== undefined) {
+        const next = upd.hallId;
+        if ((previous.hallId ?? null) !== (next ?? null)) {
+          updated.hallId = next;
+          changedFields.push("hallId");
+        }
+      }
+      usersById.set(input.userId, updated);
+      // Formatér null-felter slik at DTO-serialisering returnerer null
+      // (publicPlayerSummary bruker `?? null` for optional-felter, så vi
+      // speiler denne for stubben også).
+      return {
+        previous: { ...previous, balance: 0 },
+        updated: { ...updated, balance: 0 },
+        changedFields,
+      };
+    },
     async searchPlayers({ query, limit, includeDeleted }: { query: string; limit?: number; includeDeleted?: boolean }) {
       if (query.length < 2) throw new DomainError("INVALID_INPUT", "query må være minst 2 tegn.");
       const lower = query.toLowerCase();
@@ -259,6 +368,8 @@ async function startServer(
     spies: {
       auditStore, sentEmails, approves, rejects, resubmits, overrides,
       softDeletes, restores, reverifies, bulkImports, hallStatusSets, bankIdSessions,
+      creates,
+      playerUpdates,
     },
     usersById,
     close: () => new Promise((resolve) => server.close(() => resolve())),
@@ -827,6 +938,425 @@ test("BIN-587 B2.3: GET export.csv returnerer CSV med Content-Type + BOM", async
     assert.ok(body.includes("email"));
     assert.ok(body.includes("a@test.no"));
     assert.ok(body.includes("b@test.no"));
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-633: POST /api/admin/players (add player) ──────────────────────────
+
+test("BIN-633: POST /api/admin/players — ADMIN oppretter ny spiller + audit + temp-passord", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", {
+      email: "new@test.no",
+      displayName: "Nina",
+      surname: "Ny",
+      birthDate: "1990-05-15",
+      phone: "+4712345678",
+      hallId: "hall-a",
+    });
+    assert.equal(res.status, 200);
+    assert.ok(res.json.data.player);
+    assert.equal(res.json.data.player.email, "new@test.no");
+    assert.equal(res.json.data.player.displayName, "Nina");
+    assert.equal(res.json.data.player.hallId, "hall-a");
+    assert.equal(typeof res.json.data.temporaryPassword, "string");
+    assert.ok(res.json.data.temporaryPassword.length >= 8);
+
+    assert.equal(ctx.spies.creates.length, 1);
+    assert.equal(ctx.spies.creates[0]!.email, "new@test.no");
+    assert.equal(ctx.spies.creates[0]!.hallId, "hall-a");
+
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.create");
+    assert.ok(event, "audit event should be recorded");
+    assert.equal(event!.actorId, "admin-1");
+    assert.equal(event!.actorType, "ADMIN");
+    assert.equal(event!.resource, "user");
+    assert.equal(event!.resourceId, res.json.data.player.id);
+    assert.equal(event!.details.hallId, "hall-a");
+    assert.equal(event!.details.emailDomain, "test.no");
+    // Personvern: temp-passord og full e-post skal IKKE ligge i audit.
+    assert.equal(event!.details.temporaryPassword, undefined);
+    assert.equal(event!.details.email, undefined);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-634: PUT /api/admin/players/:id (edit player) ─────────────────────
+
+test("BIN-634: PUT /api/admin/players/:id — ADMIN oppdaterer displayName + phone", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1", displayName: "Gammel", phone: "11112222" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "admin-tok", {
+      displayName: "Nytt Navn",
+      phone: "99988777",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.player.displayName, "Nytt Navn");
+    assert.equal(res.json.data.player.phone, "99988777");
+    assert.deepEqual(res.json.data.changedFields.sort(), ["displayName", "phone"]);
+    assert.equal(ctx.spies.playerUpdates.length, 1);
+
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.update");
+    assert.ok(event, "forventet audit-event admin.player.update");
+    assert.equal(event!.actorId, "admin-1");
+    assert.equal(event!.actorType, "ADMIN");
+    assert.equal(event!.resource, "user");
+    assert.equal(event!.resourceId, "p-1");
+    assert.equal(event!.details.targetUserId, "p-1");
+    assert.deepEqual(
+      (event!.details.changedFields as string[]).sort(),
+      ["displayName", "phone"]
+    );
+    const prev = event!.details.previousValues as Record<string, unknown>;
+    const next = event!.details.newValues as Record<string, unknown>;
+    assert.equal(prev.displayName, "Gammel");
+    assert.equal(next.displayName, "Nytt Navn");
+    assert.equal(prev.phone, "11112222");
+    assert.equal(next.phone, "99988777");
+    assert.equal(event!.details.hallMigration, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: SUPPORT kan opprette spiller (PLAYER_LIFECYCLE_WRITE)", async () => {
+  const ctx = await startServer({ "sup-tok": supportUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "sup-tok", {
+      email: "sup-created@test.no",
+      displayName: "Support",
+      surname: "Created",
+      birthDate: "1985-01-01",
+    });
+    assert.equal(res.status, 200);
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.create");
+    assert.ok(event);
+    assert.equal(event!.actorType, "SUPPORT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — e-post-endring returnerer INVALID_INPUT", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1", email: "bob@test.no" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "admin-tok", {
+      email: "ny-email@test.no",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+    assert.equal(ctx.spies.playerUpdates.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — hallId-endring logger hallMigration + krever eksisterende hall", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1", hallId: "hall-a" })]
+  );
+  try {
+    // Ukjent hall → HALL_NOT_FOUND
+    const notFound = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "admin-tok", {
+      hallId: "hall-utopia",
+    });
+    assert.equal(notFound.status, 400);
+    assert.equal(notFound.json.error.code, "HALL_NOT_FOUND");
+
+    // Gyldig hall-migrasjon
+    const ok = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "admin-tok", {
+      hallId: "hall-b",
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.data.player.hallId, "hall-b");
+    assert.deepEqual(ok.json.data.changedFields, ["hallId"]);
+
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.update");
+    assert.ok(event);
+    const migration = event!.details.hallMigration as { from: string | null; to: string | null };
+    assert.equal(migration.from, "hall-a");
+    assert.equal(migration.to, "hall-b");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — SUPPORT har tilgang", async () => {
+  const ctx = await startServer(
+    { "sup-tok": supportUser },
+    [makeUser({ id: "p-1", displayName: "Old" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "sup-tok", {
+      displayName: "Support-Endring",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.player.displayName, "Support-Endring");
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.update");
+    assert.equal(event!.actorType, "SUPPORT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: HALL_OPERATOR får FORBIDDEN", async () => {
+  const ctx = await startServer({ "op-tok": operatorUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "op-tok", {
+      email: "x@test.no",
+      displayName: "X",
+      surname: "Y",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+    assert.equal(ctx.spies.creates.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: PLAYER (vanlig bruker) får FORBIDDEN", async () => {
+  const ctx = await startServer({ "pl-tok": playerUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "pl-tok", {
+      email: "x@test.no",
+      displayName: "X",
+      surname: "Y",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: manglende token gir UNAUTHORIZED", async () => {
+  const ctx = await startServer({}, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", undefined, {
+      email: "x@test.no",
+      displayName: "X",
+      surname: "Y",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "UNAUTHORIZED");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: manglende email gir INVALID_INPUT", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", {
+      displayName: "X",
+      surname: "Y",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+    assert.equal(ctx.spies.creates.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: manglende displayName/surname/birthDate gir INVALID_INPUT", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    for (const missing of ["displayName", "surname", "birthDate"]) {
+      const body: Record<string, string> = {
+        email: "x@test.no",
+        displayName: "X",
+        surname: "Y",
+        birthDate: "1990-01-01",
+      };
+      delete body[missing];
+      const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", body);
+      assert.equal(res.status, 400, `field=${missing}`);
+      assert.equal(res.json.error.code, "INVALID_INPUT", `field=${missing}`);
+    }
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: tom body gir INVALID_INPUT", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", null);
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: duplikat e-post gir EMAIL_EXISTS", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "existing", email: "taken@test.no" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", {
+      email: "taken@test.no",
+      displayName: "Dup",
+      surname: "E",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "EMAIL_EXISTS");
+    // Duplikat skal ikke audit-logges som create-event.
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.filter((e) => e.action === "admin.player.create").length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — HALL_OPERATOR får FORBIDDEN", async () => {
+  const ctx = await startServer(
+    { "op-tok": operatorUser },
+    [makeUser({ id: "p-1" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "op-tok", {
+      displayName: "Forsøk",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+    assert.equal(ctx.spies.playerUpdates.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-633: hallId utelatt gir player uten hall (hallId=null)", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players", "admin-tok", {
+      email: "nohall@test.no",
+      displayName: "Nohall",
+      surname: "Ny",
+      birthDate: "1990-01-01",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.player.hallId, null);
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.create");
+    assert.equal(event!.details.hallId, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — PLAYER får FORBIDDEN", async () => {
+  const ctx = await startServer(
+    { "pl-tok": playerUser },
+    [makeUser({ id: "p-1" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "pl-tok", {
+      displayName: "Forsøk",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — ingen endringer → INVALID_INPUT", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "admin-tok", {});
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — ugyldig felt-type returnerer INVALID_INPUT", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "admin-tok", {
+      displayName: 12345,
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+    assert.equal(ctx.spies.playerUpdates.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — surname kan settes til null", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1", displayName: "Kari", surname: "Normann" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "admin-tok", {
+      surname: null,
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.player.surname, null);
+    assert.deepEqual(res.json.data.changedFields, ["surname"]);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — hallId kan settes til null (fjerne tilknytning)", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1", hallId: "hall-a" })]
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/p-1", "admin-tok", {
+      hallId: null,
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.player.hallId, null);
+    const event = await waitForAudit(ctx.spies.auditStore, "admin.player.update");
+    const migration = event!.details.hallMigration as { from: string | null; to: string | null };
+    assert.equal(migration.from, "hall-a");
+    assert.equal(migration.to, null);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-634: PUT /api/admin/players/:id — ukjent spiller gir USER_NOT_FOUND", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    []
+  );
+  try {
+    const res = await req(ctx.baseUrl, "PUT", "/api/admin/players/does-not-exist", "admin-tok", {
+      displayName: "Hei",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "USER_NOT_FOUND");
   } finally {
     await ctx.close();
   }
