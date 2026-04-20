@@ -110,6 +110,8 @@ import { createAdminSubGamesRouter } from "./routes/adminSubGames.js";
 import { SubGameService } from "./admin/SubGameService.js";
 import { createAdminLeaderboardTiersRouter } from "./routes/adminLeaderboardTiers.js";
 import { LeaderboardTierService } from "./admin/LeaderboardTierService.js";
+import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
+import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
@@ -414,6 +416,18 @@ const subGameService = new SubGameService({
 // aggregerer prize-points fra faktiske wins og er uavhengig. Blokkerer
 // Leaderboard-admin-sider i PR-B6 (placeholder inntil dette lander).
 const leaderboardTierService = new LeaderboardTierService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-624: SavedGame CRUD (gjenbrukbare GameManagement-templates). Admin
+// lagrer et komplett GameManagement-oppsett (ticket-farger, priser,
+// patterns, subgames, halls, days) som en navngitt mal; load-to-game-
+// flyten kopierer config inn i et nytt GameManagement-oppsett. Normaliserer
+// legacy Mongo-kolleksjonen `savedGame` til app_saved_games hvor hele
+// template-payloaden lever som config_json (ingen normalisering i v1 siden
+// malen kopieres i sin helhet).
+const savedGameService = new SavedGameService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -780,6 +794,16 @@ app.use(createAdminLeaderboardTiersRouter({
   platformService,
   auditLogService,
   leaderboardTierService,
+}));
+// BIN-624: SavedGame CRUD. 6 endepunkter — list/detail/create/patch/
+// delete/load-to-game. Templates for GameManagement-oppsett (kopieres ved
+// load-to-game). SAVED_GAME_WRITE er ADMIN + HALL_OPERATOR (matches
+// SUB_GAME_WRITE mønsteret). Lukker BIN-624 + aktiverer PR-A3
+// savedGame-sidene (placeholder-state i apps/admin-web).
+app.use(createAdminSavedGamesRouter({
+  platformService,
+  auditLogService,
+  savedGameService,
 }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
