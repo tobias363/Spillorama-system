@@ -128,9 +128,11 @@ async function setupRoomWithNPlayers(
 /**
  * Hjelp: kjør fase 1-vinn for N identiske spillere.
  *
- * Med prizePool = entryFee × N og payoutPercent satt slik at hele poolen
- * er utbetalingsbudsjett, blir fase 1-totalen `prizePool × phase1Percent`.
- * Vi regner den ut her så testen kan assertere på eksakt øre-beløp.
+ * DEFAULT_NORSK_BINGO_CONFIG bruker fast premie for "1 Rad" (100 kr fast via
+ * `winningType: "fixed"` + `prize1`). totalPhasePrize er dermed uavhengig av
+ * poolen og lik `prize1`, så lenge entryFee × N dekker utbetalingen (ellers
+ * capes den av `remainingPrizePool` / `remainingPayoutBudget` i
+ * payoutPhaseWinner — callers bør velge entryFee slik at pool > fixed-premie).
  *
  * Returnerer alle claims fra game snapshot + totalPhasePrize + rest.
  */
@@ -170,10 +172,14 @@ async function runPhase1ForNPlayers(
 
   const snapshot = engine.getRoomSnapshot(roomCode);
   const game = snapshot.currentGame!;
-  const phase1Percent = game.patterns?.find((p) => p.name === "1 Rad")?.prizePercent ?? 0;
-
+  // 2026-04-21: fast-premie-mønster — les `winningType` + `prize1` i stedet for
+  // `prizePercent × pool`. Faller tilbake til legacy-math hvis variantConfig
+  // skiftes til "percent"-mode i fremtidige tester.
+  const phase1 = game.patterns?.find((p) => p.name === "1 Rad");
   const prizePool = entryFee * n;
-  const totalPhasePrize = Math.floor(prizePool * phase1Percent / 100);
+  const totalPhasePrize = phase1?.winningType === "fixed"
+    ? Math.max(0, phase1.prize1 ?? 0)
+    : Math.floor(prizePool * (phase1?.prizePercent ?? 0) / 100);
   const prizePerWinner = Math.floor(totalPhasePrize / n);
   const houseRetainedRest = totalPhasePrize - n * prizePerWinner;
 
@@ -194,66 +200,71 @@ async function runPhase1ForNPlayers(
 
 // ── Split-matrise ────────────────────────────────────────────────────────────
 
-// Kontekst: DEFAULT_NORSK_BINGO_CONFIG har fase 1 ("1 Rad") = 15 %. Alle
-// split-tester er derfor regnet som `totalPhasePrize = floor(pool × 15 / 100)`.
-// payoutPercent=100 gir full pool som utbetalingsbudsjett — så RTP-caps ikke
-// skjuler split-tester.
+// Kontekst: DEFAULT_NORSK_BINGO_CONFIG bruker fast premie for "1 Rad" = 100 kr
+// (via `winningType: "fixed"` + `prize1`, Tobias-godkjent 2026-04-21). Alle
+// split-tester regnes derfor som `totalPhasePrize = 100 kr` uavhengig av pool —
+// `prizePerWinner = floor(100 / N)` + rest til huset. payoutPercent=100 gir
+// full pool som utbetalingsbudsjett, og entryFee velges slik at pool ≥ 100 kr
+// så ingen RTP-cap trigger i payoutPhaseWinner.
 
 test("PR5: split-matrise — 1 vinner på 100 kr får hele fase 1 (ingen rest)", async () => {
-  // 1 × 100 kr = 100 kr pool. Fase 1 (15%) = 15 kr. Per spiller = 15. Rest = 0.
+  // 1 × 100 kr = 100 kr pool. Fase 1 = fast 100 kr. Per spiller = 100. Rest = 0.
   const { claims, totalPhasePrize, prizePerWinner, houseRetainedRest, splitEvents } =
     await runPhase1ForNPlayers(1, 100, 100);
   assert.equal(claims.length, 1);
-  assert.equal(totalPhasePrize, 15);
-  assert.equal(prizePerWinner, 15);
-  assert.equal(claims[0]!.payoutAmount, 15, "vinner får hele fase-premien");
+  assert.equal(totalPhasePrize, 100);
+  assert.equal(prizePerWinner, 100);
+  assert.equal(claims[0]!.payoutAmount, 100, "vinner får hele fase-premien");
   assert.equal(houseRetainedRest, 0, "ingen rest ved 1 vinner");
   assert.equal(splitEvents.length, 0, "audit kun når rest > 0");
 });
 
 test("PR5: split-matrise — 2 vinnere på 100 kr → 50-50 split, 0 rest", async () => {
-  // 2 × 100 = 200 kr pool. Fase 1 (15%) = 30 kr. Per spiller = 15. Rest = 0.
+  // 2 × 100 = 200 kr pool. Fase 1 = fast 100 kr. Per spiller = 50. Rest = 0.
   const { claims, totalPhasePrize, prizePerWinner, houseRetainedRest, splitEvents } =
     await runPhase1ForNPlayers(2, 100, 100);
   assert.equal(claims.length, 2);
-  assert.equal(totalPhasePrize, 30);
-  assert.equal(prizePerWinner, 15);
+  assert.equal(totalPhasePrize, 100);
+  assert.equal(prizePerWinner, 50);
   for (const c of claims) {
-    assert.equal(c.payoutAmount, 15, "hver vinner får halvparten");
+    assert.equal(c.payoutAmount, 50, "hver vinner får halvparten");
   }
   assert.equal(houseRetainedRest, 0, "2-split går opp");
   assert.equal(splitEvents.length, 0, "ingen audit ved 0 rest");
 });
 
-test("PR5: split-matrise — 3 vinnere, total deler jevnt → ingen rest", async () => {
-  // 3 × 100 = 300 kr pool. Fase 1 (15%) = 45 kr. Per spiller = 15. Rest = 0.
+test("PR5: split-matrise — 4 vinnere, total deler jevnt → ingen rest", async () => {
+  // 4 × 100 = 400 kr pool. Fase 1 = fast 100 kr. Per spiller = 25. Rest = 0.
+  // (Tidligere N=3 — endret til N=4 etter variantConfig-skifte til fast 100 kr
+  // for å bevare "deler jevnt → 0 rest"-semantikken. Uneven N=3/N=7 dekkes
+  // av den påfølgende testen.)
   const { claims, totalPhasePrize, prizePerWinner, houseRetainedRest, splitEvents } =
-    await runPhase1ForNPlayers(3, 100, 100);
-  assert.equal(claims.length, 3);
-  assert.equal(totalPhasePrize, 45);
-  assert.equal(prizePerWinner, 15);
+    await runPhase1ForNPlayers(4, 100, 100);
+  assert.equal(claims.length, 4);
+  assert.equal(totalPhasePrize, 100);
+  assert.equal(prizePerWinner, 25);
   assert.equal(houseRetainedRest, 0);
   assert.equal(splitEvents.length, 0);
 });
 
 test("PR5: split-matrise — 7 vinnere med uneven split → rest til huset", async () => {
-  // 7 × 103 = 721 kr pool. Fase 1 (15%) = floor(721 × 0.15) = 108 kr.
-  // Per spiller: floor(108/7) = 15 kr. Rest = 108 - 7×15 = 3 kr til huset.
+  // 7 × 103 = 721 kr pool. Fase 1 = fast 100 kr.
+  // Per spiller: floor(100/7) = 14 kr. Rest = 100 - 7×14 = 2 kr til huset.
   const { claims, totalPhasePrize, prizePerWinner, houseRetainedRest, splitEvents } =
     await runPhase1ForNPlayers(7, 103, 100);
   assert.equal(claims.length, 7);
-  assert.equal(totalPhasePrize, 108, "totalPhasePrize = floor(721 × 15 / 100) = 108");
-  assert.equal(prizePerWinner, 15, "floor(108/7) = 15");
-  assert.equal(houseRetainedRest, 3, "108 - 7×15 = 3 kr rest til huset");
+  assert.equal(totalPhasePrize, 100, "fast 100 kr fase-premie uavhengig av pool");
+  assert.equal(prizePerWinner, 14, "floor(100/7) = 14");
+  assert.equal(houseRetainedRest, 2, "100 - 7×14 = 2 kr rest til huset");
   for (const c of claims) {
-    assert.equal(c.payoutAmount, 15, "hver vinner får lik floor-verdi");
+    assert.equal(c.payoutAmount, 14, "hver vinner får lik floor-verdi");
   }
   assert.equal(splitEvents.length, 1, "audit logget én gang når rest > 0");
   const ev = splitEvents[0]!;
-  assert.equal(ev.amount, 3);
+  assert.equal(ev.amount, 2);
   assert.equal(ev.winnerCount, 7);
-  assert.equal(ev.totalPhasePrize, 108);
-  assert.equal(ev.prizePerWinner, 15);
+  assert.equal(ev.totalPhasePrize, 100);
+  assert.equal(ev.prizePerWinner, 14);
   assert.equal(ev.patternName, "1 Rad");
 });
 
