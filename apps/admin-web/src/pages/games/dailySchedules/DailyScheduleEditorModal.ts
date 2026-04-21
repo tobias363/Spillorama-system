@@ -1,8 +1,16 @@
-// BIN-626: DailySchedule create/edit modal.
+// BIN-626 + GAME1_SCHEDULE PR2: DailySchedule create/edit modal.
 //
 // Kjerne-felter (name, startDate, endDate, day OR weekDays-bitmask,
 // hallId, hallIds, gameManagementId, startTime, endTime, status, specialGame).
 // subgames lagres som JSON-array inntil BIN-621/627 normaliserer catalogen.
+//
+// GAME1_SCHEDULE PR 2: `scheduleId` (scalar) + `scheduleIdByDay` (per-dag
+// mapping) lagres i `otherData` slik at backend-scheduler-ticken kan
+// spawne Game 1-rader fra riktig schedule-mal. KK-flagget at
+// `app_daily_schedules` ikke har eksplisitt FK til `app_schedules`; inntil
+// det rettes opp i et eget BIN bruker vi `other_data.scheduleId` /
+// `other_data.scheduleIdByDay` som første-klasses signal. Admin-UI laster
+// schedule-liste ved modal-åpning og presenterer dropdown.
 
 import { Modal, type ModalInstance } from "../../../components/Modal.js";
 import { Toast } from "../../../components/Toast.js";
@@ -23,6 +31,23 @@ import {
   type DailyScheduleDay,
   type DailyScheduleHallIds,
 } from "./DailyScheduleState.js";
+import { listSchedules, type ScheduleRow } from "../../../api/admin-schedules.js";
+
+/**
+ * GAME1_SCHEDULE PR 2: weekday-nøkler matcher backend
+ * `resolveScheduleIdForDay` (JS `Date.getUTCDay`-indeksering). Backend
+ * aksepterer både korte (mon, tue, …) og lange (monday, …) varianter —
+ * vi bruker lange her for konsistens med øvrige admin-UI felter.
+ */
+const SCHEDULE_ID_WEEKDAYS: readonly DailyScheduleDay[] = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
 
 export interface OpenDailyScheduleEditorOpts {
   mode: "create" | "edit" | "special";
@@ -94,6 +119,35 @@ function parseHallIds(
   return out;
 }
 
+/**
+ * GAME1_SCHEDULE PR 2: hent scheduleId + scheduleIdByDay fra existing
+ * otherData. Returnerer tomme strenger hvis ikke satt.
+ */
+function readScheduleIdFromOtherData(
+  otherData: Record<string, unknown> | undefined
+): {
+  scheduleId: string;
+  scheduleIdByDay: Partial<Record<DailyScheduleDay, string>>;
+} {
+  if (!otherData || typeof otherData !== "object") {
+    return { scheduleId: "", scheduleIdByDay: {} };
+  }
+  const scheduleId =
+    typeof otherData.scheduleId === "string" ? otherData.scheduleId : "";
+  const raw = otherData.scheduleIdByDay;
+  const byDay: Partial<Record<DailyScheduleDay, string>> = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const map = raw as Record<string, unknown>;
+    for (const day of SCHEDULE_ID_WEEKDAYS) {
+      const v = map[day];
+      if (typeof v === "string" && v.trim()) {
+        byDay[day] = v.trim();
+      }
+    }
+  }
+  return { scheduleId, scheduleIdByDay: byDay };
+}
+
 export async function openDailyScheduleEditorModal(
   opts: OpenDailyScheduleEditorOpts
 ): Promise<void> {
@@ -113,8 +167,21 @@ export async function openDailyScheduleEditorModal(
     }
   }
 
+  // GAME1_SCHEDULE PR 2: hent alle aktive schedule-maler for dropdown.
+  // Soft-fail — viser fortsatt modal uten scheduleId-felt hvis API-ikke-tilgjengelig.
+  let scheduleMalList: ScheduleRow[] = [];
+  try {
+    const res = await listSchedules({ status: "active", limit: 200 });
+    scheduleMalList = Array.isArray(res?.schedules) ? res.schedules : [];
+  } catch (err) {
+    // Ikke-kritisk — scheduleId er fortsatt valgfritt manuelt inntastet i fallback.
+    scheduleMalList = [];
+  }
+  const otherDataInitial = (existing?.otherData ?? {}) as Record<string, unknown>;
+  const scheduleIdState = readScheduleIdFromOtherData(otherDataInitial);
+
   const body = document.createElement("div");
-  body.innerHTML = renderForm(existing, isSpecial);
+  body.innerHTML = renderForm(existing, isSpecial, scheduleMalList, scheduleIdState);
 
   const validate = (): DailyScheduleFormPayload | null => {
     setError(body, null);
@@ -179,6 +246,28 @@ export async function openDailyScheduleEditorModal(
       return null;
     }
 
+    // GAME1_SCHEDULE PR 2: samle scheduleId + scheduleIdByDay i otherData.
+    const scheduleIdScalar = readField(body, "ds-schedule-id");
+    const scheduleIdByDay: Record<string, string> = {};
+    for (const dayKey of SCHEDULE_ID_WEEKDAYS) {
+      const v = readField(body, `ds-schedule-id-${dayKey}`);
+      if (v) scheduleIdByDay[dayKey] = v;
+    }
+    // Start fra existing otherData slik at vi ikke mister andre felter.
+    const otherData: Record<string, unknown> = {
+      ...(otherDataInitial ?? {}),
+    };
+    // Fjern tidligere scheduleId-felter før ny verdi settes for å unngå
+    // stale data når bruker tømmer feltet.
+    delete otherData.scheduleId;
+    delete otherData.scheduleIdByDay;
+    if (scheduleIdScalar) {
+      otherData.scheduleId = scheduleIdScalar;
+    }
+    if (Object.keys(scheduleIdByDay).length > 0) {
+      otherData.scheduleIdByDay = scheduleIdByDay;
+    }
+
     const payload: DailyScheduleFormPayload = {
       name,
       startDate,
@@ -189,6 +278,7 @@ export async function openDailyScheduleEditorModal(
       stopGame,
       specialGame,
       subgames,
+      otherData,
     };
     if (endDate) payload.endDate = endDate;
     else payload.endDate = null;
@@ -241,7 +331,15 @@ export async function openDailyScheduleEditorModal(
   });
 }
 
-function renderForm(existing: DailyScheduleRow | null, isSpecial: boolean): string {
+function renderForm(
+  existing: DailyScheduleRow | null,
+  isSpecial: boolean,
+  scheduleMalList: ScheduleRow[],
+  scheduleIdState: {
+    scheduleId: string;
+    scheduleIdByDay: Partial<Record<DailyScheduleDay, string>>;
+  }
+): string {
   const name = existing?.name ?? "";
   const startDate = existing?.startDate ?? new Date().toISOString().slice(0, 10);
   const endDate = existing?.endDate ?? "";
@@ -270,6 +368,35 @@ function renderForm(existing: DailyScheduleRow | null, isSpecial: boolean): stri
       </label>`;
     })
     .join("");
+
+  // GAME1_SCHEDULE PR 2: scheduleId-dropdown(er). Scalar + per-dag.
+  const buildScheduleIdOptions = (selected: string): string => {
+    const opts = scheduleMalList
+      .map((s) => {
+        const sel = s.id === selected ? "selected" : "";
+        const label = `${s.scheduleName}${s.scheduleNumber ? ` (${s.scheduleNumber})` : ""}`;
+        return `<option value="${escapeHtml(s.id)}" ${sel}>${escapeHtml(label)}</option>`;
+      })
+      .join("");
+    const emptyOpt = `<option value="" ${selected ? "" : "selected"}>—</option>`;
+    return `${emptyOpt}${opts}`;
+  };
+  const scheduleIdScalarSelect = `
+      <select id="ds-schedule-id" class="form-control">
+        ${buildScheduleIdOptions(scheduleIdState.scheduleId)}
+      </select>`;
+  const perDayRows = SCHEDULE_ID_WEEKDAYS.map((dayKey) => {
+    const selected = scheduleIdState.scheduleIdByDay[dayKey] ?? "";
+    return `
+        <div class="form-group col-sm-6" style="margin-bottom:6px;">
+          <label for="ds-schedule-id-${dayKey}" style="font-weight:normal;">
+            ${escapeHtml(t(`weekday_${dayKey.slice(0, 3)}`))}
+          </label>
+          <select id="ds-schedule-id-${dayKey}" class="form-control">
+            ${buildScheduleIdOptions(selected)}
+          </select>
+        </div>`;
+  }).join("");
 
   return `
     <form id="ds-editor-form" novalidate>
@@ -378,6 +505,28 @@ function renderForm(existing: DailyScheduleRow | null, isSpecial: boolean): stri
           </label>
         </div>
       </div>
+      <fieldset style="border:1px solid #ddd;padding:8px 12px;margin-bottom:12px;">
+        <legend style="font-size:14px;width:auto;padding:0 4px;">
+          ${escapeHtml(t("select_schedule"))}
+        </legend>
+        <div class="form-group">
+          <label for="ds-schedule-id">
+            ${escapeHtml(t("select_schedule"))}
+          </label>
+          ${scheduleIdScalarSelect}
+          <p class="help-block" style="font-size:11px;">
+            ${escapeHtml(t("schedule_id_hint"))}
+          </p>
+        </div>
+        <details>
+          <summary style="cursor:pointer;font-size:13px;margin-bottom:6px;">
+            ${escapeHtml(t("select_schedule_for_each_weeday"))}
+          </summary>
+          <div class="row" style="margin-top:6px;">
+            ${perDayRows}
+          </div>
+        </details>
+      </fieldset>
       <div class="form-group">
         <label for="ds-subgames">${escapeHtml(t("sub_games"))} (JSON)</label>
         <textarea id="ds-subgames" class="form-control" rows="5"

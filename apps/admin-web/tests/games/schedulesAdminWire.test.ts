@@ -582,4 +582,101 @@ describe("DailyScheduleEditorModal (BIN-626)", () => {
     expect(err!.style.display).toBe("block");
     expect(onSaved).not.toHaveBeenCalled();
   });
+
+  it("GAME1_SCHEDULE PR 2: skriver scheduleId til otherData ved lagring", async () => {
+    const fetchMock = installFetch((url, init) => {
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      const urlStr = String(url);
+      // GET /api/admin/schedules — returner to schedule-maler for dropdown
+      if (method === "GET" && urlStr.includes("/api/admin/schedules")) {
+        return successResponse({
+          schedules: [
+            {
+              id: "sch-alpha",
+              scheduleName: "Alpha",
+              scheduleNumber: "SID_alpha",
+              scheduleType: "Manual",
+              status: "active",
+              luckyNumberPrize: 0,
+              isAdminSchedule: true,
+              manualStartTime: "",
+              manualEndTime: "",
+              subGames: [],
+              createdBy: "admin-1",
+              createdAt: "",
+              updatedAt: "",
+            },
+            {
+              id: "sch-beta",
+              scheduleName: "Beta",
+              scheduleNumber: "SID_beta",
+              scheduleType: "Auto",
+              status: "active",
+              luckyNumberPrize: 0,
+              isAdminSchedule: true,
+              manualStartTime: "",
+              manualEndTime: "",
+              subGames: [],
+              createdBy: "admin-1",
+              createdAt: "",
+              updatedAt: "",
+            },
+          ],
+          count: 2,
+        });
+      }
+      if (method === "POST") {
+        const body = JSON.parse((init as RequestInit).body as string);
+        return successResponse({
+          id: "ds-new",
+          name: body.name,
+          gameManagementId: null,
+          hallId: null,
+          hallIds: {},
+          weekDays: body.weekDays ?? 0,
+          day: null,
+          startDate: body.startDate,
+          endDate: null,
+          startTime: "",
+          endTime: "",
+          status: "active",
+          stopGame: false,
+          specialGame: false,
+          isSavedGame: false,
+          isAdminSavedGame: false,
+          innsatsenSales: 0,
+          subgames: [],
+          otherData: body.otherData ?? {},
+          createdBy: null,
+          createdAt: "",
+          updatedAt: "",
+        });
+      }
+      return successResponse({});
+    });
+    const onSaved = vi.fn();
+    await openDailyScheduleEditorModal({ mode: "create", onSaved });
+    await flush();
+    const nameInput = document.querySelector<HTMLInputElement>("#ds-name");
+    nameInput!.value = "Med schedule";
+    const monCheck = document.querySelector<HTMLInputElement>("#ds-wd-mon");
+    monCheck!.checked = true;
+    // Velg schedule-mal i scalar-dropdown.
+    const scheduleSelect = document.querySelector<HTMLSelectElement>("#ds-schedule-id");
+    expect(scheduleSelect).not.toBeNull();
+    scheduleSelect!.value = "sch-alpha";
+    const confirmBtn = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".modal-footer button")
+    ).find((b) => b.getAttribute("data-action") === "confirm");
+    confirmBtn!.click();
+    await flush();
+    const postCall = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall).toBeTruthy();
+    const body = JSON.parse((postCall![1] as RequestInit).body as string);
+    expect(body.otherData).toBeDefined();
+    expect(body.otherData.scheduleId).toBe("sch-alpha");
+    expect(onSaved).toHaveBeenCalled();
+  });
 });

@@ -996,6 +996,7 @@
   "save_game": "Save game",
   "select_time_slot": "Select time slot",
   "select_schedule": "Select schedule",
+  "schedule_id_hint": "Choose the schedule template used to spawn Game 1 rounds. Optional per-day overrides let different weekdays use different templates.",
   "select_group_of_halls": "Select Group of Halls",
   "select_master_hall": "Select Master Hall",
   "hall_is_already_designated_as_a_master_hall_in_the_normal_event_please_select_a_different_hall_or_change_the_setting": "The hall is already designated as a master hall in the normal event. Please select a different hall or change the setting.",
