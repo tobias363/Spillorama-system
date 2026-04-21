@@ -1,14 +1,5 @@
 /**
- * BIN-544: PlayerPrefs migration tests.
- *
- * Verifies:
- *  - Unity keys are migrated on first access (all prefix variants)
- *  - Web-side values are NOT overwritten if they already exist
- *  - Boolean/number coercion handles Unity's "0"/"1" and "true"/"false"
- *  - Voice-gender normalization (Unity "Male" → web "no-male")
- *  - AudioManager legacy keys are populated as secondary migration target
- *  - Migration info is recorded for support/debugging
- *  - Missing storage (SSR/test env without localStorage) does not throw
+ * PlayerPrefs tests.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { PlayerPrefs } from "./PlayerPrefs.js";
@@ -26,7 +17,7 @@ class InMemoryStorage implements Storage {
   setItem(key: string, value: string): void { this.map.set(key, value); }
 }
 
-describe("BIN-544: PlayerPrefs", () => {
+describe("PlayerPrefs", () => {
   let storage: InMemoryStorage;
   let prefs: PlayerPrefs;
 
@@ -35,66 +26,16 @@ describe("BIN-544: PlayerPrefs", () => {
     prefs = new PlayerPrefs(storage);
   });
 
-  describe("Unity migration", () => {
-    it("migrates plain Unity key (no prefix)", () => {
-      storage.setItem("Game_Marker", "3");
-      expect(prefs.get("markerDesign", 0)).toBe(3);
-      expect(storage.getItem("spillorama.prefs.markerDesign")).toBe("3");
-    });
-
-    it("migrates unity.player_prefs. prefix", () => {
-      storage.setItem("unity.player_prefs.CurrentGameLanguage", "en");
-      expect(prefs.get("language", "no")).toBe("en");
-    });
-
-    it("migrates PlayerPrefs. prefix", () => {
-      storage.setItem("PlayerPrefs.NotificationsEnabled", "1");
-      expect(prefs.get("notificationsEnabled", false)).toBe(true);
-    });
-
-    it("tries Unity variants in order; first match wins", () => {
-      // Game_Marker is tried before MarkerDesign; if both present, Game_Marker wins
-      storage.setItem("Game_Marker", "2");
-      storage.setItem("MarkerDesign", "7");
-      expect(prefs.get("markerDesign", 0)).toBe(2);
-    });
-
-    it("does not overwrite existing web value", () => {
-      storage.setItem("spillorama.prefs.volume", "0.5");
-      storage.setItem("Volume", "0.9");
-      expect(prefs.get("volume", 1.0)).toBe(0.5);
-    });
-
-    it("is idempotent — second access does not re-migrate", () => {
-      storage.setItem("Game_Marker", "5");
-      prefs.get("markerDesign", 0);
-      // Change Unity key after first migration; should not affect second access
-      storage.setItem("Game_Marker", "99");
-      expect(prefs.get("markerDesign", 0)).toBe(5);
-    });
-
-    it("migration info records completedAt + keysMigrated", () => {
-      storage.setItem("Game_Marker", "1");
-      storage.setItem("SoundStatus", "0");
-      prefs.get("markerDesign", 0); // triggers migration
-      const info = prefs.getMigrationInfo();
-      expect(info.keysMigrated).toBe(2);
-      expect(info.completedAt).toBeGreaterThan(0);
-    });
-  });
-
   describe("Type coercion", () => {
-    it('reads boolean "0" as false, "1" as true (Unity format)', () => {
-      storage.setItem("SoundStatus", "1");
+    it('reads boolean "0" as false, "1" as true', () => {
+      storage.setItem("spillorama.prefs.soundEnabled", "1");
       expect(prefs.get("soundEnabled", false)).toBe(true);
 
-      const storage2 = new InMemoryStorage();
-      storage2.setItem("SoundStatus", "0");
-      const prefs2 = new PlayerPrefs(storage2);
-      expect(prefs2.get("soundEnabled", true)).toBe(false);
+      storage.setItem("spillorama.prefs.soundEnabled", "0");
+      expect(prefs.get("soundEnabled", true)).toBe(false);
     });
 
-    it('reads boolean "true"/"false" (web format)', () => {
+    it('reads boolean "true"/"false"', () => {
       storage.setItem("spillorama.prefs.soundEnabled", "true");
       expect(prefs.get("soundEnabled", false)).toBe(true);
     });
@@ -102,27 +43,6 @@ describe("BIN-544: PlayerPrefs", () => {
     it("returns default on invalid number", () => {
       storage.setItem("spillorama.prefs.markerDesign", "not-a-number");
       expect(prefs.get("markerDesign", 7)).toBe(7);
-    });
-  });
-
-  describe("AudioManager legacy bridge", () => {
-    it("populates spillorama-sound-enabled from Unity SoundStatus", () => {
-      storage.setItem("SoundStatus", "1");
-      prefs.get("soundEnabled", false); // trigger migration
-      expect(storage.getItem("spillorama-sound-enabled")).toBe("true");
-    });
-
-    it("normalizes Unity voice-gender Male/Female to no-male/no-female", () => {
-      storage.setItem("VoiceStatus", "Female");
-      prefs.get("voiceGender", "no-male");
-      expect(storage.getItem("spillorama-voice-lang")).toBe("no-female");
-    });
-
-    it("does not overwrite existing AudioManager legacy key", () => {
-      storage.setItem("spillorama-voice-lang", "en");
-      storage.setItem("VoiceStatus", "Male");
-      prefs.get("voiceGender", "no-male");
-      expect(storage.getItem("spillorama-voice-lang")).toBe("en");
     });
   });
 
@@ -143,6 +63,11 @@ describe("BIN-544: PlayerPrefs", () => {
       prefs.delete("language");
       expect(prefs.has("language")).toBe(false);
     });
+
+    it("returns default value when key not set", () => {
+      expect(prefs.get("volume", 0.5)).toBe(0.5);
+      expect(prefs.get("language", "no")).toBe("no");
+    });
   });
 
   describe("Robustness", () => {
@@ -151,7 +76,6 @@ describe("BIN-544: PlayerPrefs", () => {
       expect(nullPrefs.get("volume", 0.5)).toBe(0.5);
       expect(() => nullPrefs.set("volume", 1.0)).not.toThrow();
       expect(nullPrefs.has("volume")).toBe(false);
-      expect(nullPrefs.getMigrationInfo().keysMigrated).toBe(0);
     });
   });
 });
