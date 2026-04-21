@@ -355,3 +355,91 @@ test("legacy cross-check: col 2 med kun centre-free → remaining = 4", () => {
   // Best kandidat er rad 2 eller col 2 — begge trenger 4.
   assert.equal(remaining, 4);
 });
+
+// ── Audit-funn #8 tillegg: edge-case + defensiv semantikk ───────────────────
+//
+// 5 nye tester som dokumenterer kontrakten for input-validering og
+// defensive invariants — slik at Agent 3's Fase 5-konsolidering og senere
+// refactors ikke kan bryte stille. Referanse: scope-plan GO fra PM.
+
+test("edge-case: buildTicketMask med markings kortere enn 25 → manglende celler tolkes som umarkerte", () => {
+  // Kontrakt i JSDoc: "markings.length må være 25. Kortere → vi bruker det
+  // som finnes; manglende celler tolkes som umarkerte." Testen låser denne
+  // tolkningen så den ikke kan regresse stille til "kast feil" eller
+  // "tolk som markert".
+  const grid = emptyGrid();
+  const shortMarkings = [true, true, true]; // kun idx 0..2 markert
+  const mask = buildTicketMask(grid, shortMarkings);
+  // Forventet: idx 0, 1, 2 satt + centre (idx 12) satt, ingen andre.
+  assert.equal((mask & 1) !== 0, true, "idx 0 markert");
+  assert.equal((mask & 2) !== 0, true, "idx 1 markert");
+  assert.equal((mask & 4) !== 0, true, "idx 2 markert");
+  assert.equal((mask & (1 << 12)) !== 0, true, "centre alltid markert");
+  // Ingen ander bits.
+  assert.equal(mask, 1 | 2 | 4 | (1 << 12));
+});
+
+test("edge-case: buildTicketMask med markings[12]=false → centre fortsatt satt (defensiv)", () => {
+  // JSDoc: "Celle=0 er free centre (idx 12) og teller alltid som markert
+  // (selv om markings.marked[12] skulle være false — defensiv semantikk)."
+  // Låser at sentrum-bit er grid-drevet, ikke markings-drevet.
+  const grid = emptyGrid();
+  const markings = new Array(25).fill(false);
+  markings[12] = false; // eksplisitt falsk
+  const mask = buildTicketMask(grid, markings);
+  assert.equal(
+    (mask & (1 << 12)) !== 0, true,
+    "centre skal være markert uansett markings[12]",
+  );
+});
+
+test("edge-case: buildTicketMask med null-celler i grid → null teller som vanlig (ikke-centre)", () => {
+  // Grid-typen er `(number | null)[]`. null-celler er ikke centre (kun 0
+  // er centre), så de trenger eksplisitt markings for å telle.
+  const grid: Array<number | null> = new Array(25).fill(1);
+  grid[12] = 0; // centre
+  grid[3] = null; // umarkert null-celle
+  const markings = new Array(25).fill(false);
+  const mask = buildTicketMask(grid, markings);
+  // Kun centre satt — null-celle ved idx 3 skal IKKE være auto-markert.
+  assert.equal(mask, 1 << 12, "null-celle != 0 → ikke auto-markert");
+
+  // Nå marker idx 3 eksplisitt — skal da settes.
+  markings[3] = true;
+  const mask2 = buildTicketMask(grid, markings);
+  assert.equal(
+    (mask2 & (1 << 3)) !== 0, true,
+    "null-celle med eksplisitt marking=true skal settes",
+  );
+});
+
+test("edge-case: evaluatePhase med ugyldig fase (0, 6, -1, NaN) → isWinner=false", () => {
+  // masksForPhase returnerer [] for ukjente faser, og evaluatePhase
+  // returnerer {false, null} når candidates er tom. Låser denne
+  // fail-closed-semantikken for alle "ugyldige" input — spesielt viktig
+  // siden fase-nummer kommer fra DB-queries som kan inneholde rusk.
+  const grid = emptyGrid();
+  const markings = new Array(25).fill(true);
+  for (const bad of [0, 6, -1, 99, Number.NaN]) {
+    const result = evaluatePhase(grid, markings, bad);
+    assert.equal(
+      result.isWinner, false,
+      `fase=${bad}: skal aldri returnere isWinner=true`,
+    );
+    assert.equal(result.matchedMask, null);
+  }
+});
+
+test("edge-case: remainingForPhase returnerer Infinity for ugyldig fase", () => {
+  // Unik kontrakt — Infinity signaliserer "ingen kandidat", brukes av
+  // kall-steder som "igjen"-tellere så UI ikke viser tall som "0" feilaktig.
+  const grid = emptyGrid();
+  const markings = new Array(25).fill(true);
+  for (const bad of [0, 6, -1, 99]) {
+    const remaining = remainingForPhase(grid, markings, bad);
+    assert.equal(
+      remaining, Infinity,
+      `fase=${bad}: remaining skal være Infinity (ingen kandidat-masks)`,
+    );
+  }
+});

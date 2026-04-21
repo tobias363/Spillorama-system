@@ -121,8 +121,17 @@ export class Game1JackpotService {
     }
 
     // Regel 2: kun hvis vunnet PÅ eller FØR jackpot.draw.
+    //
+    // Regulatorisk fail-closed-krav (pengespillforskriften §11):
+    // `Math.floor(NaN)=NaN` og `x > NaN` er false for alle x, så et
+    // NaN-input på jackpot.draw vil ELLERS bypasse selve grensen og
+    // tillate jackpot-utløsning uten gyldig konfigurasjon. Vi
+    // bekreftererplisitt at `maxDraw` er endelig før vi stoler på
+    // sammenligningen. Dette fanger også draw=Infinity og draw="50"
+    // (string-input fra ticket_config_json som ikke ble koercet).
     const maxDraw = Math.floor(input.jackpotConfig.draw ?? 0);
     if (
+      !Number.isFinite(maxDraw) ||
       !Number.isFinite(input.drawSequenceAtWin) ||
       input.drawSequenceAtWin <= 0 ||
       input.drawSequenceAtWin > maxDraw

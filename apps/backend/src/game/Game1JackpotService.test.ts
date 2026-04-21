@@ -285,3 +285,99 @@ test("resolveColorFamily (#316): red/green/orange utvidet til egne familier", ()
   assert.equal(resolveColorFamily("small_orange"), "orange");
   assert.equal(resolveColorFamily("orange"), "orange");
 });
+
+// ── 4c-services-coverage tillegg: config-defensivity + fallback-kombinasjoner ──
+
+test("defensivity: jackpot.draw ugyldig (negativ, 0, undefined, NaN, Infinity) → aldri trigget", () => {
+  // Regulatorisk fail-closed mot rusk fra ticket_config_json
+  // (pengespillforskriften §11).
+  //
+  // - draw=undefined → `?? 0` gjør det til 0, `drawSeq > 0` fanger.
+  // - draw=0 eller negativ → samme path.
+  // - draw=NaN → `Math.floor(NaN)=NaN`, fanget av eksplisitt
+  //   `!Number.isFinite(maxDraw)`-guard. Uten denne fanget `x > NaN` er
+  //   false → jackpot ville feilaktig utløses.
+  // - draw=Infinity → `Math.floor(Infinity)=Infinity`, fanget av samme
+  //   isFinite-guard. Uten det ville ENHVER drawSeq tillate jackpot.
+  const svc = new Game1JackpotService();
+  const badDraws = [
+    -1,
+    0,
+    undefined as unknown as number,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ];
+  for (const draw of badDraws) {
+    const r = svc.evaluate({
+      phase: 5,
+      drawSequenceAtWin: 10, // ville vært OK ved normal draw-verdi
+      ticketColor: "small_yellow",
+      jackpotConfig: { prizeByColor: { yellow: 10000 }, draw },
+    });
+    assert.equal(r.triggered, false, `draw=${draw}: skal ikke trigge`);
+    assert.equal(r.amountCents, 0);
+  }
+});
+
+test("defensivity: prizeByColor helt fraværende (undefined) → fail-closed non-triggered", () => {
+  // Config-shape-variasjoner fra DB: {} eller {prizeByColor: undefined}.
+  // Koden har `?? {}` — men sjekker eksakt og familie-fallback mot den.
+  // Verifisér at begge paths gir `triggered: false, lookupMatch: 'none'`.
+  const svc = new Game1JackpotService();
+
+  const r1 = svc.evaluate({
+    phase: 5, drawSequenceAtWin: 30, ticketColor: "small_yellow",
+    // @ts-expect-error — tester kjøretids-defensivitet mot manglende felt
+    jackpotConfig: { draw: 50 },
+  });
+  assert.equal(r1.triggered, false);
+  assert.equal(r1.amountCents, 0);
+  assert.equal(r1.lookupMatch, "none");
+
+  const r2 = svc.evaluate({
+    phase: 5, drawSequenceAtWin: 30, ticketColor: "small_yellow",
+    jackpotConfig: { prizeByColor: {}, draw: 50 },
+  });
+  assert.equal(r2.triggered, false);
+  assert.equal(r2.lookupMatch, "none");
+});
+
+test("fallback-subtilitet: exact=0 faller til familie>0 (fordi >0-check)", () => {
+  // Koden: `if (typeof exact === "number" && Number.isFinite(exact) &&
+  // exact > 0)`. Hvis exact er 0 eksplisitt konfigurert (admin "av'er"
+  // én farge men beholder familie-fallback), skal family brukes.
+  const svc = new Game1JackpotService();
+  const r = svc.evaluate({
+    phase: 5, drawSequenceAtWin: 30, ticketColor: "small_yellow",
+    jackpotConfig: {
+      prizeByColor: { small_yellow: 0, yellow: 5000 },
+      draw: 50,
+    },
+  });
+  // exact=0 avvises → faller til family 'yellow' = 5000.
+  assert.equal(r.triggered, true);
+  assert.equal(r.lookupMatch, "family");
+  assert.equal(r.amountCents, 5000 * 100);
+});
+
+test("Math.floor på jackpot.draw: 50.9 → 50 (PÅ) / 50.1 → 50 (PÅ)", () => {
+  // Låser tolkningen: Math.floor gjør at 50.x → 50 uansett x.
+  // Draw-sekvens=50 er da PÅ grensen, skal trigge.
+  const svc = new Game1JackpotService();
+  for (const drawCfg of [50.9, 50.1, 50.0]) {
+    const r = svc.evaluate({
+      phase: 5, drawSequenceAtWin: 50, ticketColor: "small_yellow",
+      jackpotConfig: { prizeByColor: { yellow: 10000 }, draw: drawCfg },
+    });
+    assert.equal(
+      r.triggered, true,
+      `draw=${drawCfg}: Math.floor→50, drawSeq=50 skal trigge`,
+    );
+  }
+  // Drawseq=51 med draw=50.9 skal IKKE trigge (floor(50.9)=50 < 51).
+  const r51 = svc.evaluate({
+    phase: 5, drawSequenceAtWin: 51, ticketColor: "small_yellow",
+    jackpotConfig: { prizeByColor: { yellow: 10000 }, draw: 50.9 },
+  });
+  assert.equal(r51.triggered, false, "drawSeq=51 > floor(50.9)=50 → ikke trigget");
+});

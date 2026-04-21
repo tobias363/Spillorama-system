@@ -306,3 +306,154 @@ test("tick: multiple games med ulike seconds-verdier beregnes per-game", async (
   assert.equal(r.skippedNotDue, 1);
   assert.deepEqual(called, ["g-2"]);
 });
+
+// ── 4c-services-coverage tillegg: 6 nye tester per PM-godkjent scope ────────
+
+test("defensivity: seconds=0 eller negativ → defaultSeconds brukes", () => {
+  // `pickPositiveInt` avviser 0, negativ, float — faller til defaultSeconds=5.
+  // Låser at ugyldig config fra DB ikke fører til infinite-loop (seconds=0 =
+  // always-due).
+  const now = Date.now();
+  // last=2s siden, seconds skulle vært 0 (=always-due), men faller til default=5 → ikke due.
+  const { service, called } = makeService([
+    {
+      id: "g1",
+      ticket_config_json: { seconds: 0 },
+      draws_completed: 1,
+      last_drawn_at: new Date(now - 2_000),
+      engine_started_at: new Date(now - 2_000),
+    },
+  ]);
+  return service.tick().then((r) => {
+    assert.equal(r.drawsTriggered, 0, "seconds=0 skal falle til default=5 → 2s < 5s → ikke due");
+    assert.equal(r.skippedNotDue, 1);
+    assert.equal(called.length, 0);
+  });
+});
+
+test("defensivity: seconds=negativ eller float → defaultSeconds brukes", async () => {
+  const now = Date.now();
+  const eightSecAgo = new Date(now - 8_000);
+  // Negativ → default 5. 8s siden → due.
+  const { service: svc1, called: c1 } = makeService([
+    {
+      id: "g1",
+      ticket_config_json: { seconds: -3 },
+      draws_completed: 1,
+      last_drawn_at: eightSecAgo,
+      engine_started_at: eightSecAgo,
+    },
+  ]);
+  const r1 = await svc1.tick();
+  assert.equal(r1.drawsTriggered, 1, "seconds=-3 → default=5, 8s > 5s → due");
+  assert.deepEqual(c1, ["g1"]);
+
+  // Float 3.5 — pickPositiveInt avviser ikke-heltall → default 5.
+  const { service: svc2, called: c2 } = makeService([
+    {
+      id: "g1",
+      ticket_config_json: { seconds: 3.5 },
+      draws_completed: 1,
+      last_drawn_at: new Date(now - 4_000),
+      engine_started_at: new Date(now - 4_000),
+    },
+  ]);
+  const r2 = await svc2.tick();
+  assert.equal(r2.drawsTriggered, 0, "seconds=3.5 → default=5, 4s < 5s → ikke due");
+  assert.equal(c2.length, 0);
+});
+
+test("defensivity: ticket_config som malformed JSON-streng → defaultSeconds brukes", async () => {
+  const now = Date.now();
+  const sixSecAgo = new Date(now - 6_000);
+  const { service, called } = makeService([
+    {
+      id: "g1",
+      ticket_config_json: "{not valid json", // string som ikke parser
+      draws_completed: 1,
+      last_drawn_at: sixSecAgo,
+      engine_started_at: sixSecAgo,
+    },
+  ]);
+  const r = await service.tick();
+  // Default=5, 6s > 5s → due.
+  assert.equal(r.drawsTriggered, 1);
+  assert.deepEqual(called, ["g1"]);
+});
+
+test("parseLastDrawnMs: ugyldig dato-streng → fallback til Date.now() → skipped", async () => {
+  // `new Date("garbage")` gir Invalid Date, `.getTime()` gir NaN.
+  // Sammenligning `dueAt = NaN + seconds*1000 = NaN`, `now < NaN` er false,
+  // så tick-en prøver å kalle drawNext. MEN — dette dokumenterer kun
+  // dagens oppførsel. Mer robust ville vært fallback til Date.now() slik
+  // at NaN-rows alltid skippes.
+  //
+  // Låser dagens observerbare oppførsel: ugyldig string gir NaN-drawAt og
+  // drawNext BLIR kalt. (Faktisk ikke `skipped` som navnet antyder —
+  // testen dokumenterer en quirk som bør tas med Agent 3 i Fase 5
+  // konsolideringen.)
+  const { service, called } = makeService([
+    {
+      id: "g1",
+      ticket_config_json: { seconds: 5 },
+      draws_completed: 1,
+      last_drawn_at: "definitely not a date",
+      engine_started_at: new Date(Date.now() - 60_000),
+    },
+  ]);
+  const r = await service.tick();
+  // `NaN < Date.now()` er false → `now < dueAt` der dueAt=NaN også false
+  // → faller inn i drawNext-kallet.
+  assert.equal(r.checked, 1);
+  // Dokumenterer dagens quirk: drawNext trigges (ikke skipped).
+  assert.equal(r.drawsTriggered, 1);
+  assert.deepEqual(called, ["g1"]);
+});
+
+test("errorMessages cappet til 10 når mange games feiler samtidig", async () => {
+  // errorMessages: Array.push gated med `< 10`. Test: 12 games feiler,
+  // errorMessages.length skal være nøyaktig 10. Dette beskytter tick-response
+  // fra å vokse ubegrenset ved store cascading failures.
+  const now = Date.now();
+  const oldAt = new Date(now - 10_000);
+  const rows = [];
+  const failIds = [];
+  for (let i = 1; i <= 12; i++) {
+    rows.push({
+      id: `g-${i}`,
+      ticket_config_json: { seconds: 5 },
+      draws_completed: 1,
+      last_drawn_at: oldAt,
+      engine_started_at: oldAt,
+    });
+    failIds.push(`g-${i}`);
+  }
+  const { service, called } = makeService(rows, { throwOnIds: failIds });
+  const r = await service.tick();
+  assert.equal(r.checked, 12);
+  assert.equal(r.errors, 12, "alle 12 feiler");
+  assert.equal(r.errorMessages?.length, 10, "men errorMessages cappet til 10");
+  assert.equal(called.length, 12, "drawNext kalles fortsatt for alle");
+});
+
+test("pool-query-feil propagerer til caller (kontraktstest for JobScheduler)", async () => {
+  // PM-direktiv 4c #3: pool-feil skal propagere til JobScheduler, ikke
+  // fanges inne i tick(). Slik blir kritiske DB-feil synlige i ops-logg
+  // i stedet for å bli stumme.
+  const boomPool = {
+    async query() {
+      throw new Error("simulated pg connection lost");
+    },
+  };
+  const { service: drawEngine } = makeFakeDrawEngine();
+  const service = new Game1AutoDrawTickService({
+    pool: boomPool as never,
+    drawEngine,
+  });
+
+  await assert.rejects(
+    service.tick(),
+    (err) =>
+      err instanceof Error && err.message.includes("connection lost"),
+  );
+});
