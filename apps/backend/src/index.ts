@@ -53,8 +53,11 @@ import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
 import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
+import { Game1TicketPurchaseService } from "./game/Game1TicketPurchaseService.js";
+import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAdapter.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
+import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createWalletRouter } from "./routes/wallet.js";
@@ -577,7 +580,27 @@ const agentTransactionStore = new PostgresAgentTransactionStore({
   pool: platformService.getPool(),
   schema: pgSchema,
 });
-const ticketPurchasePort = new NotImplementedTicketPurchasePort();
+// GAME1_SCHEDULE PR 4a: TicketPurchasePort wires til Game1TicketPurchaseService
+// via adapter. Selve servicen instansieres lengre ned (trenger
+// game1HallReadyService først), så porten peker til en sen-bindet adapter
+// som løser service-instansen ved første kall. Dette løser sirkulær-
+// initialisering uten å måtte re-bestille hele IoC-grafen.
+let game1TicketPurchaseServiceRef: Game1TicketPurchaseService | null = null;
+const ticketPurchasePort = {
+  async purchase(
+    input: import("./agent/ports/TicketPurchasePort.js").DigitalTicketPurchaseInput
+  ): Promise<import("./agent/ports/TicketPurchasePort.js").DigitalTicketPurchaseResult> {
+    if (!game1TicketPurchaseServiceRef) {
+      // Fallback: hvis servicen ikke er satt enda (init-rekkefølge-feil),
+      // returner not-implemented så utvikleren ser problemet tydelig.
+      return new NotImplementedTicketPurchasePort().purchase(input);
+    }
+    const adapter = new Game1TicketPurchasePortAdapter({
+      service: game1TicketPurchaseServiceRef,
+    });
+    return adapter.purchase(input);
+  },
+};
 
 const webBaseUrl =
   (process.env.APP_WEB_BASE_URL?.trim() || "http://localhost:5173").replace(/\/+$/, "");
@@ -813,6 +836,22 @@ const game1MasterControlService = new Game1MasterControlService({
   schema: pgSchema,
 });
 
+// GAME1_SCHEDULE PR 4a: ticket-purchase-foundation. Drifter
+// app_game1_ticket_purchases (kjøp + refund). Player-flow bruker servicen
+// direkte via createGame1PurchaseRouter; agent-POS-flyten bruker adapteren
+// (Game1TicketPurchasePortAdapter) som mapper fra BIN-583-porten.
+const game1TicketPurchaseService = new Game1TicketPurchaseService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  walletAdapter,
+  platformService,
+  hallReadyService: game1HallReadyService,
+  auditLogService,
+});
+// GAME1_SCHEDULE PR 4a: bind forward-ref slik at `ticketPurchasePort` (opprettet
+// tidligere pga. agent-service dependency) kan delegere til den nye servicen.
+game1TicketPurchaseServiceRef = game1TicketPurchaseService;
+
 // ── Mount routers ─────────────────────────────────────────────────────────────
 
 const bingoSettingsState = {
@@ -979,6 +1018,15 @@ app.use(createAdminGame1MasterRouter({
   auditLogService,
   masterControlService: game1MasterControlService,
   io,
+}));
+// GAME1_SCHEDULE PR 4a: ticket-purchase-router for Game 1. 3 endepunkter —
+// POST /api/game1/purchase, POST /api/game1/purchase/:id/refund,
+// GET /api/game1/purchase/game/:scheduledGameId. Player-path (digital_wallet)
+// og agent-path (cash_agent/card_agent) deler samme handler — auth-route
+// differensierer på role + hall-scope.
+app.use(createGame1PurchaseRouter({
+  platformService,
+  purchaseService: game1TicketPurchaseService,
 }));
 // BIN-627: Pattern CRUD + dynamic-menu. Aktiverer Agent A's
 // patternManagement-placeholder-sider fra PR-A3a (3 sider) og brukes av

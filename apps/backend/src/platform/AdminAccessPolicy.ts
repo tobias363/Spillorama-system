@@ -337,6 +337,21 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    */
   GAME1_MASTER_WRITE:      ["ADMIN", "HALL_OPERATOR", "AGENT"],
   /**
+   * GAME1_SCHEDULE PR4a: ticket-purchase-foundation for Game 1.
+   *   - GAME1_PURCHASE_WRITE: utfør ticket-kjøp + refund mot et scheduled_game.
+   *     PLAYER (kjøp med digital_wallet), AGENT (cash_agent/card_agent),
+   *     ADMIN (refund + support-flow). HALL_OPERATOR og SUPPORT er bevisst
+   *     utelatt: HALL_OPERATOR kjøper ikke billetter (bingovert-rolle er
+   *     drift), SUPPORT er compliance-review (read-only i pengeflyt).
+   *     Route-laget skiller agent-path (må ha aktiv shift + match hallId)
+   *     fra player-path (må være egen bruker).
+   *   - GAME1_PURCHASE_READ: se egne/andres purchase-historikk. Alle
+   *     admin-roller + AGENT (agent trenger innsyn i eget salg). PLAYER
+   *     har implicit read av egne kjøp via separat endepunkt.
+   */
+  GAME1_PURCHASE_WRITE:    ["ADMIN", "AGENT", "PLAYER"],
+  GAME1_PURCHASE_READ:     ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  /**
    * BIN-700: Loyalty-system (tier-CRUD + player-state + points-award +
    * tier-override).
    *   - LOYALTY_READ  : list tiers, detail, player-state. Alle admin-roller
