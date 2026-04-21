@@ -1,18 +1,19 @@
-// PR-A6 (BIN-674) — CMS dispatcher.
+// BIN-676 — CMS dispatcher.
 //
 // Routes:
 //   /cms                          → CmsListPage (6-rad statisk oversikt)
-//   /faq                          → FaqListPage (DataTable placeholder)
+//   /faq                          → FaqListPage (live backend CRUD)
 //   /addFAQ                       → FaqFormPage (create)
 //   /faqEdit/:id                  → FaqFormPage (edit — hash-regex)
 //   /TermsofService               → CmsTextEditPage("terms_of_service")
 //   /Support                      → CmsTextEditPage("support")
 //   /Aboutus                      → CmsTextEditPage("about_us")
-//   /ResponsibleGameing           → CmsTextEditPage("responsible_gaming", regulatorisk-låst)
+//   /ResponsibleGameing           → CmsTextEditPage("responsible_gaming", BIN-680 låst)
 //   /LinksofOtherAgencies         → CmsTextEditPage("links_of_other_agencies")
 //
-// Backend-gap: BIN-A6-CMS (alle sider localStorage-fallback).
-// Regulatorisk-gap: BIN-A6-SPILLVETT-AUDIT (§11 pengespillforskriften).
+// Backend: /api/admin/cms/* (BIN-676 merged).
+// Regulatorisk-gate: PUT responsible-gaming returnerer FEATURE_DISABLED
+// inntil BIN-680 (versjons-historikk) merges. GET fungerer — read-only UI.
 
 import { renderCmsListPage } from "./CmsListPage.js";
 import { renderFaqListPage } from "./FaqListPage.js";

@@ -1,4 +1,4 @@
-// PR-A6 (BIN-674) — /cms list.
+// BIN-676 — /cms list.
 // Port of legacy/unity-backend/App/Views/CMS/cmsPage.html.
 //
 // Statisk 6-rad oversikt over CMS-sider. Hver rad peker til /view +
@@ -55,10 +55,6 @@ export function renderCmsListPage(container: HTMLElement): void {
   container.innerHTML = `
     ${contentHeader("cms_management", "cms_management")}
     <section class="content">
-      <div class="callout callout-warning" data-testid="cms-placeholder-banner">
-        <i class="fa fa-clock-o"></i>
-        ${escapeHtml(t("cms_placeholder_banner"))}
-      </div>
       ${boxOpen("cms_management", "primary")}
         <table class="table table-bordered table-striped" data-testid="cms-table">
           <thead>
