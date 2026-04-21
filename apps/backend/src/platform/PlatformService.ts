@@ -88,7 +88,13 @@ export interface HallDefinition {
   settlementAccount?: string;
   invoiceMethod?: string;
   isActive: boolean;
-  /** BIN-540: which client engine this hall serves (unity | web | unity-fallback). */
+  /**
+   * Historically a BIN-540 rollback flag (`unity` | `web` | `unity-fallback`).
+   * Unity is no longer shipped — the only valid value is `"web"`. DB-kolonnen
+   * er droppet (migrasjon 20260429000000). Feltet beholdes i API-shapen slik
+   * at eksisterende admin-UI ikke krasjer ved deploy, men verdien er alltid
+   * "web" og settere er no-ops.
+   */
   clientVariant: HallClientVariant;
   /** BIN-498: optional embed URL shown on the hall TV-display between rounds. */
   tvUrl?: string;
@@ -117,10 +123,8 @@ export interface UpdateHallInput {
   invoiceMethod?: string;
   isActive?: boolean;
   /**
-   * BIN-540: admin-facing flip for per-hall client engine. Mutation path for
-   * the pilot-cutover (`unity` → `web`) and rollback (`web` → `unity`).
-   * Cache invalidated automatically — next `/api/halls/:slug/client-variant`
-   * call sees the new value.
+   * Legacy BIN-540 felt. Aksepteres for shape-compat men ignoreres —
+   * verdien er alltid "web" (Unity er avviklet).
    */
   clientVariant?: HallClientVariant;
 }
@@ -324,8 +328,6 @@ interface HallRow {
   settlement_account: string | null;
   invoice_method: string | null;
   is_active: boolean;
-  /** BIN-540. */
-  client_variant: HallClientVariant;
   /** BIN-498. */
   tv_url: string | null;
   created_at: Date | string;
@@ -1048,7 +1050,7 @@ export class PlatformService {
     await this.ensureInitialized();
     const includeInactive = options?.includeInactive ?? false;
     const { rows } = await this.pool.query<HallRow>(
-      `SELECT id, slug, name, region, address, is_active, client_variant, tv_url, created_at, updated_at
+      `SELECT id, slug, name, region, address, is_active, tv_url, created_at, updated_at
        FROM ${this.hallsTable()}
        ${includeInactive ? "" : "WHERE is_active = true"}
        ORDER BY name ASC, slug ASC`
@@ -1145,10 +1147,6 @@ export class PlatformService {
     const nextSettlementAccount = update.settlementAccount !== undefined ? (update.settlementAccount?.trim() || null) : (current.settlementAccount ?? null);
     const nextInvoiceMethod = update.invoiceMethod !== undefined ? (update.invoiceMethod?.trim() || null) : (current.invoiceMethod ?? null);
     const nextIsActive = update.isActive !== undefined ? Boolean(update.isActive) : current.isActive;
-    // BIN-540 admin-flip: validate against the constrained set; leave unchanged if undefined.
-    const nextClientVariant = update.clientVariant !== undefined
-      ? this.assertClientVariant(update.clientVariant)
-      : current.clientVariant;
 
     if (nextSlug !== current.slug) {
       const { rows: conflictRows } = await this.pool.query<{ id: string }>(
@@ -1170,35 +1168,13 @@ export class PlatformService {
            settlement_account = $7,
            invoice_method = $8,
            is_active = $9,
-           client_variant = $10,
            updated_at = now()
        WHERE id = $1
        RETURNING *`,
-      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive, nextClientVariant]
+      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive]
     );
 
-    // Cache invalidation removed — see getHallClientVariant comment.
     return this.mapHall(rows[0]);
-  }
-
-  /**
-   * BIN-540: narrow `clientVariant` input to the three accepted values
-   * before it reaches the DB (the DB check-constraint is the last line
-   * of defence, but a typo here should surface as INVALID_INPUT, not
-   * INTERNAL_ERROR).
-   */
-  private assertClientVariant(value: unknown): HallClientVariant {
-    if (typeof value !== "string") {
-      throw new DomainError("INVALID_INPUT", "clientVariant må være en string.");
-    }
-    const normalized = value.trim() as HallClientVariant;
-    if (!HALL_CLIENT_VARIANTS.includes(normalized)) {
-      throw new DomainError(
-        "INVALID_INPUT",
-        `clientVariant må være én av: ${HALL_CLIENT_VARIANTS.join(", ")}.`
-      );
-    }
-    return normalized;
   }
 
   // ── BIN-503: TV-display tokens ──────────────────────────────────────────
@@ -3228,10 +3204,8 @@ export class PlatformService {
       settlementAccount: row.settlement_account ?? undefined,
       invoiceMethod: row.invoice_method ?? undefined,
       isActive: row.is_active,
-      // Post-Unity (2026-04-21): normalize to "web" regardless of the stored
-      // value so old "unity" / "unity-fallback" rows don't leak out of the
-      // service boundary. The DB column is kept for shape-compat; a future
-      // migration may drop it entirely.
+      // Post-Unity (2026-04-21): DB-kolonnen er droppet. Feltet beholdes i
+      // API-shapen (alltid "web") så eksisterende admin-UI ikke krasjer.
       clientVariant: "web",
       tvUrl: row.tv_url ?? undefined,
       createdAt: asIso(row.created_at),
@@ -3438,7 +3412,7 @@ export class PlatformService {
     const normalizedReference = this.assertEntityReference(hallReference, "hallId");
     const normalizedSlug = normalizedReference.toLowerCase();
     const { rows } = await this.pool.query<HallRow>(
-      `SELECT id, slug, name, region, address, is_active, client_variant, tv_url, created_at, updated_at
+      `SELECT id, slug, name, region, address, is_active, tv_url, created_at, updated_at
        FROM ${this.hallsTable()}
        WHERE id = $1
           OR slug = $2
