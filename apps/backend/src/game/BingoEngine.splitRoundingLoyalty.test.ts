@@ -210,7 +210,7 @@ async function runPhase1ForNPlayers(
 test("PR5: split-matrise — 1 vinner på 100 kr får hele fase 1 (ingen rest)", async () => {
   // 1 × 100 kr = 100 kr pool. Fase 1 = fast 100 kr. Per spiller = 100. Rest = 0.
   const { claims, totalPhasePrize, prizePerWinner, houseRetainedRest, splitEvents } =
-    await runPhase1ForNPlayers(1, 100, 100);
+    await runPhase1ForNPlayers(1, 200, 100);
   assert.equal(claims.length, 1);
   assert.equal(totalPhasePrize, 100);
   assert.equal(prizePerWinner, 100);
@@ -222,14 +222,14 @@ test("PR5: split-matrise — 1 vinner på 100 kr får hele fase 1 (ingen rest)",
 test("PR5: split-matrise — 2 vinnere på 100 kr → 50-50 split, 0 rest", async () => {
   // 2 × 100 = 200 kr pool. Fase 1 = fast 100 kr. Per spiller = 50. Rest = 0.
   const { claims, totalPhasePrize, prizePerWinner, houseRetainedRest, splitEvents } =
-    await runPhase1ForNPlayers(2, 100, 100);
+    await runPhase1ForNPlayers(2, 200, 100);
   assert.equal(claims.length, 2);
   assert.equal(totalPhasePrize, 100);
   assert.equal(prizePerWinner, 50);
   for (const c of claims) {
     assert.equal(c.payoutAmount, 50, "hver vinner får halvparten");
   }
-  assert.equal(houseRetainedRest, 0, "2-split går opp");
+  assert.equal(houseRetainedRest, 0, "100/2 går opp");
   assert.equal(splitEvents.length, 0, "ingen audit ved 0 rest");
 });
 
@@ -271,13 +271,13 @@ test("PR5: split-matrise — 7 vinnere med uneven split → rest til huset", asy
 // ── Loyalty hooks ────────────────────────────────────────────────────────────
 
 test("PR5: loyalty ticket.purchase — hook kalles én gang per spiller ved buy-in", async () => {
-  const { loyaltyEvents } = await runPhase1ForNPlayers(3, 100, 100);
+  const { loyaltyEvents } = await runPhase1ForNPlayers(3, 200, 100);
   const purchaseEvents = loyaltyEvents.filter((e) => e.kind === "ticket.purchase");
   assert.equal(purchaseEvents.length, 3, "3 ticket.purchase-events for 3 spillere");
   for (const ev of purchaseEvents) {
     assert.equal(ev.kind, "ticket.purchase");
     if (ev.kind === "ticket.purchase") {
-      assert.equal(ev.amount, 100, "buy-in-beløp = 100 kr");
+      assert.equal(ev.amount, 200, "buy-in-beløp = 200 kr");
       assert.equal(ev.ticketCount, 1);
       assert.ok(ev.roomCode);
       assert.ok(ev.gameId);
@@ -287,7 +287,7 @@ test("PR5: loyalty ticket.purchase — hook kalles én gang per spiller ved buy-
 });
 
 test("PR5: loyalty game.win — hook kalles én gang per vinner ved fase-win", async () => {
-  const { loyaltyEvents, prizePerWinner } = await runPhase1ForNPlayers(3, 100, 100);
+  const { loyaltyEvents, prizePerWinner } = await runPhase1ForNPlayers(3, 200, 100);
   const winEvents = loyaltyEvents.filter((e) => e.kind === "game.win");
   // Med 3 identiske spillere som vinner fase 1 samtidig, forventer vi 3
   // game.win-events. Fase 2 og videre faser vil også trigge hook-kall, men

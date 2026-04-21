@@ -196,10 +196,10 @@ export const DEFAULT_NORSK_BINGO_CONFIG: GameVariantConfig = {
   // av eksisterende `applySinglePrizeCap` + `remainingPrizePool` i
   // payoutPhaseWinner — huset dekker ikke differansen.
   patterns: [
-    { name: "1 Rad",    claimType: "LINE" as const,  prizePercent: 0, design: 1, winningType: "fixed" as const, prize1: 100 },
-    { name: "2 Rader",  claimType: "LINE" as const,  prizePercent: 0, design: 2, winningType: "fixed" as const, prize1: 200 },
-    { name: "3 Rader",  claimType: "LINE" as const,  prizePercent: 0, design: 3, winningType: "fixed" as const, prize1: 200 },
-    { name: "4 Rader",  claimType: "LINE" as const,  prizePercent: 0, design: 4, winningType: "fixed" as const, prize1: 200 },
+    { name: "1 Rad", claimType: "LINE" as const, prizePercent: 0, design: 1, winningType: "fixed" as const, prize1: 100 },
+    { name: "2 Rader", claimType: "LINE" as const, prizePercent: 0, design: 2, winningType: "fixed" as const, prize1: 200 },
+    { name: "3 Rader", claimType: "LINE" as const, prizePercent: 0, design: 3, winningType: "fixed" as const, prize1: 200 },
+    { name: "4 Rader", claimType: "LINE" as const, prizePercent: 0, design: 4, winningType: "fixed" as const, prize1: 200 },
     { name: "Fullt Hus", claimType: "BINGO" as const, prizePercent: 0, design: 0, winningType: "fixed" as const, prize1: 1000 },
   ],
   patternEvalMode: "auto-claim-on-draw",
