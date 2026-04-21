@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 320" width="240" height="320" role="img" aria-label="Elvis 1 placeholder">
+  <title>Elvis 1 — 500 kr</title>
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff3a0"/>
+      <stop offset="0.55" stop-color="#f5c103"/>
+      <stop offset="1" stop-color="#987d00"/>
+    </linearGradient>
+  </defs>
+  <rect width="240" height="320" fill="url(#g1)"/>
+  <rect x="6" y="6" width="228" height="308" fill="none" stroke="#4b0000" stroke-width="4" rx="12"/>
+  <text x="120" y="120" text-anchor="middle" font-family="Impact, 'Arial Black', sans-serif" font-size="56" fill="#4b0000" stroke="#fff3a0" stroke-width="2">ELVIS</text>
+  <text x="120" y="200" text-anchor="middle" font-family="Impact, 'Arial Black', sans-serif" font-size="120" fill="#4b0000" stroke="#fff3a0" stroke-width="3">1</text>
+  <text x="120" y="270" text-anchor="middle" font-family="Arial, sans-serif" font-weight="700" font-size="28" fill="#4b0000">500 kr</text>
+  <text x="120" y="298" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b0000" opacity="0.6">placeholder</text>
+</svg>
