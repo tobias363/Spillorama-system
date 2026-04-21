@@ -130,6 +130,9 @@ import { createAdminSettingsRouter } from "./routes/adminSettings.js";
 import { SettingsService } from "./admin/SettingsService.js";
 import { createAdminMaintenanceRouter } from "./routes/adminMaintenance.js";
 import { MaintenanceService } from "./admin/MaintenanceService.js";
+import { createAdminSystemInfoRouter } from "./routes/adminSystemInfo.js";
+import { createAdminTransactionsRouter } from "./routes/adminTransactions.js";
+import { createAdminAuditLogRouter } from "./routes/adminAuditLog.js";
 import { createAdminMiniGamesRouter } from "./routes/adminMiniGames.js";
 import { MiniGamesConfigService } from "./admin/MiniGamesConfigService.js";
 import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
@@ -1028,6 +1031,25 @@ app.use(createAdminMaintenanceRouter({
   platformService,
   auditLogService,
   maintenanceService,
+}));
+// BIN-678: system-info (runtime-diagnostikk). Rolle: SETTINGS_READ. Read-only.
+app.use(createAdminSystemInfoRouter({ platformService }));
+// BIN-655: generisk transaksjons-logg (union over wallet_transactions +
+// app_agent_transactions + payment-requests). Rolle: PLAYER_KYC_READ.
+// Cursor-paginert (base64url-offset, samme mønster som BIN-647).
+app.use(createAdminTransactionsRouter({
+  platformService,
+  pool: platformService.getPool(),
+  schema: pgSchema,
+}));
+// BIN-655: audit-log UI-endpoint (read-only). Rolle: AUDIT_LOG_READ.
+// Wraps AuditLogService.list med cursor-paginering og `resource`/`action`/
+// `actorId`/`from`/`to`-filter. Separat fra /api/admin/audit/events (som
+// ligger i adminSecurity.ts fra BIN-587 B3) slik at frontend kan lene seg
+// på én stabil shape med nextCursor.
+app.use(createAdminAuditLogRouter({
+  platformService,
+  auditLogService,
 }));
 // BIN-676: CMS content + FAQ. 6 endepunkter — tekst-CRUD for fem slugs +
 // FAQ-CRUD. CMS_WRITE er ADMIN-only (CMS er globalt/regulatorisk-sensitivt,

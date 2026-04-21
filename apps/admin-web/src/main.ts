@@ -34,6 +34,7 @@ import { isGroupHallRoute, mountGroupHallRoute } from "./pages/groupHall/index.j
 import { isCmsRoute, mountCmsRoute } from "./pages/cms/index.js";
 import { isSettingsRoute, mountSettingsRoute } from "./pages/settings/index.js";
 import { isSystemInformationRoute, mountSystemInformationRoute } from "./pages/systemInformation/index.js";
+import { isAuditLogRoute, mountAuditLogRoute } from "./pages/auditLog/index.js";
 import { isOtherGamesRoute, mountOtherGamesRoute } from "./pages/otherGames/index.js";
 import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPage.js";
 import { mountAgentDashboard, unmountAgentDashboard } from "./pages/agent-dashboard/AgentDashboardPage.js";
@@ -206,6 +207,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isSystemInformationRoute(bare)) {
         mountSystemInformationRoute(container, bare);
+        return;
+      }
+      if (isAuditLogRoute(bare)) {
+        mountAuditLogRoute(container, bare);
         return;
       }
       if (isOtherGamesRoute(bare)) {
@@ -389,6 +394,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (isSystemInformationRoute(route.path)) {
     mountSystemInformationRoute(container, route.path);
+    return;
+  }
+  if (isAuditLogRoute(route.path)) {
+    mountAuditLogRoute(container, route.path);
     return;
   }
   if (isOtherGamesRoute(route.path)) {
