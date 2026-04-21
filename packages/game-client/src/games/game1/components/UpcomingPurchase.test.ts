@@ -195,15 +195,15 @@ describe("UpcomingPurchase (BIN-410 D3)", () => {
     getArmBtn(root).click();
 
     expect(armSpy.length).toBe(1);
-    expect(armSpy[0]).toEqual([{ type: "small-yellow", qty: 1 }]);
+    expect(armSpy[0]).toEqual([{ type: "small-yellow", qty: 1, name: "Small" }]);
 
     // Add elvis on top, then arm again
     getPlusBtn(rows[1]).click();
     getArmBtn(root).click();
     expect(armSpy.length).toBe(2);
     expect(armSpy[1]).toEqual([
-      { type: "small-yellow", qty: 1 },
-      { type: "elvis", qty: 1 },
+      { type: "small-yellow", qty: 1, name: "Small" },
+      { type: "elvis", qty: 1, name: "Large Elvis" },
     ]);
   });
 
