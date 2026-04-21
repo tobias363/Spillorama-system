@@ -232,7 +232,7 @@ export interface GameEventsDeps {
   getArmedPlayerIds: (roomCode: string) => string[];
   armPlayer: (roomCode: string, playerId: string, ticketCount?: number, selections?: Array<{ type: string; qty: number; name?: string }>) => void;
   getArmedPlayerTicketCounts: (roomCode: string) => Record<string, number>;
-  getArmedPlayerSelections: (roomCode: string) => Record<string, Array<{ type: string; qty: number }>>;
+  getArmedPlayerSelections: (roomCode: string) => Record<string, Array<{ type: string; qty: number; name?: string }>>;
   disarmPlayer: (roomCode: string, playerId: string) => void;
   disarmAllPlayers: (roomCode: string) => void;
   clearDisplayTicketCache: (roomCode: string) => void;
