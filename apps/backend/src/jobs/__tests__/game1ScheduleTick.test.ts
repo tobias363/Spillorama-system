@@ -1,8 +1,8 @@
 /**
- * GAME1_SCHEDULE PR 1: tests for the JobScheduler-integration wrapper.
+ * GAME1_SCHEDULE PR 1+2: tests for the JobScheduler-integration wrapper.
  *
  * Verifies:
- *   - Job calls all three service methods in sequence
+ *   - Job calls all four service methods in sequence (PR2 added transitionReadyToStartGames)
  *   - Job aggregates item counts into JobResult
  *   - Feature-flag disabled → scheduler does not run the job (verified
  *     via JobScheduler harness)
@@ -21,6 +21,7 @@ silentLogger.level = "silent";
 interface ServiceRecorder {
   spawnCalls: number;
   openCalls: number;
+  readyCalls: number;
   cancelCalls: number;
 }
 
@@ -30,6 +31,7 @@ function makeService(overrides: {
   skippedSchedules?: number;
   errors?: number;
   opened?: number;
+  readied?: number;
   cancelled?: number;
   throwCode?: string;
 } = {}): {
@@ -39,6 +41,7 @@ function makeService(overrides: {
   const recorder: ServiceRecorder = {
     spawnCalls: 0,
     openCalls: 0,
+    readyCalls: 0,
     cancelCalls: 0,
   };
   const service = {
@@ -60,6 +63,10 @@ function makeService(overrides: {
       recorder.openCalls++;
       return overrides.opened ?? 0;
     },
+    transitionReadyToStartGames: async () => {
+      recorder.readyCalls++;
+      return overrides.readied ?? 0;
+    },
     cancelEndOfDayUnstartedGames: async () => {
       recorder.cancelCalls++;
       return overrides.cancelled ?? 0;
@@ -68,16 +75,18 @@ function makeService(overrides: {
   return { service, recorder };
 }
 
-test("game1-schedule-tick: kaller alle 3 service-metoder i sekvens", async () => {
+test("game1-schedule-tick: kaller alle 4 service-metoder i sekvens", async () => {
   const { service, recorder } = makeService({
     spawned: 2,
     opened: 1,
+    readied: 0,
     cancelled: 0,
   });
   const job = createGame1ScheduleTickJob({ service });
   const result = await job(Date.now());
   assert.equal(recorder.spawnCalls, 1);
   assert.equal(recorder.openCalls, 1);
+  assert.equal(recorder.readyCalls, 1);
   assert.equal(recorder.cancelCalls, 1);
   assert.equal(result.itemsProcessed, 3);
   assert.match(result.note ?? "", /spawned=2/);
@@ -91,17 +100,19 @@ test("game1-schedule-tick: aggregerer tellere for note-feltet", async () => {
     skippedSchedules: 2,
     errors: 1,
     opened: 4,
+    readied: 1,
     cancelled: 2,
   });
   const job = createGame1ScheduleTickJob({ service });
   const result = await job(Date.now());
-  assert.equal(result.itemsProcessed, 5 + 4 + 2);
+  assert.equal(result.itemsProcessed, 5 + 4 + 1 + 2);
   const note = result.note ?? "";
   assert.match(note, /spawned=5/);
   assert.match(note, /skipped=3/);
   assert.match(note, /skippedSchedules=2/);
   assert.match(note, /errors=1/);
   assert.match(note, /opened=4/);
+  assert.match(note, /readied=1/);
   assert.match(note, /cancelled=2/);
 });
 

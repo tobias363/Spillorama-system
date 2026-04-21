@@ -1,12 +1,14 @@
 /**
- * GAME1_SCHEDULE PR 1: JobScheduler-job som kaller Game1ScheduleTickService.
+ * GAME1_SCHEDULE PR 1+2: JobScheduler-job som kaller Game1ScheduleTickService.
  *
  * Kjører hvert 15. sekund (legacy-paritet). Per tick:
  *   1. spawnUpcomingGame1Games — spawner rader 24t frem
  *   2. openPurchaseForImminentGames — flipper status til purchase_open
- *   3. cancelEndOfDayUnstartedGames — marker rader utløpte rader cancelled
+ *   3. transitionReadyToStartGames — flipper purchase_open → ready_to_start
+ *      når alle deltagende non-excluded haller er klare (PR 2).
+ *   4. cancelEndOfDayUnstartedGames — marker rader utløpte rader cancelled
  *
- * Spec: GAME1_SCHEDULE_SPEC.md §3.3.
+ * Spec: GAME1_SCHEDULE_SPEC.md §3.3 + §3.4.
  *
  * Feature-flag: `GAME1_SCHEDULE_TICK_ENABLED` (default: false i produksjon,
  * aktiveres når admin-UI og ready-flow er klare). Se envConfig.ts.
@@ -36,9 +38,13 @@ export function createGame1ScheduleTickJob(
     try {
       const spawn = await deps.service.spawnUpcomingGame1Games(nowMs);
       const opened = await deps.service.openPurchaseForImminentGames(nowMs);
+      // PR 2: flip purchase_open → ready_to_start når alle haller klare.
+      // Kjøres etter openPurchase slik at samme tick både kan åpne og
+      // markere klar hvis bingovert trykket klar før scheduler neste runde.
+      const readied = await deps.service.transitionReadyToStartGames(nowMs);
       const cancelled = await deps.service.cancelEndOfDayUnstartedGames(nowMs);
 
-      const total = spawn.spawned + opened + cancelled;
+      const total = spawn.spawned + opened + readied + cancelled;
       const noteParts: string[] = [];
       if (spawn.spawned > 0) noteParts.push(`spawned=${spawn.spawned}`);
       if (spawn.skipped > 0) noteParts.push(`skipped=${spawn.skipped}`);
@@ -47,6 +53,7 @@ export function createGame1ScheduleTickJob(
       }
       if (spawn.errors > 0) noteParts.push(`errors=${spawn.errors}`);
       if (opened > 0) noteParts.push(`opened=${opened}`);
+      if (readied > 0) noteParts.push(`readied=${readied}`);
       if (cancelled > 0) noteParts.push(`cancelled=${cancelled}`);
 
       return {

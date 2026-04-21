@@ -663,4 +663,118 @@ export class Game1ScheduleTickService {
     );
     return rowCount ?? 0;
   }
+
+  /**
+   * GAME1_SCHEDULE PR 2: transition 'purchase_open' → 'ready_to_start' når
+   * alle participating non-excluded haller har is_ready=true. Returnerer
+   * antall spill som ble oppdatert.
+   *
+   * Logikk (SQL-first for ytelse):
+   *   - Finn alle games i status='purchase_open'
+   *   - For hvert game:
+   *       * Hent deltagende non-excluded haller via participating_halls_json
+   *         (inkluder master_hall_id selv om den ikke er i listen).
+   *       * Sjekk at ALLE disse har en rad i hall_ready_status med is_ready=true.
+   *       * Hvis ja → UPDATE status='ready_to_start'.
+   *
+   * Vi setter ikke actual_start_time her — det skjer i PR 3 (master-start).
+   * `ready_to_start` betyr kun "alle grønne, master kan trykke START".
+   */
+  async transitionReadyToStartGames(nowMs: number): Promise<number> {
+    const now = new Date(nowMs);
+    // Hent kandidater + deres participating-liste. SQL-join med COUNT/
+    // AGG er mulig, men participating_halls_json er JSONB-array så en
+    // JS-loop er klarere og håndterer master-hall-spesialcasen uten
+    // krevende jsonb_array_elements-uttrykk.
+    const { rows: candidates } = await this.pool.query<{
+      id: string;
+      participating_halls_json: unknown;
+      master_hall_id: string;
+    }>(
+      `SELECT id, participating_halls_json, master_hall_id
+         FROM ${this.scheduledGamesTable()}
+         WHERE status = 'purchase_open'
+           AND scheduled_end_time > $1::timestamptz`,
+      [now.toISOString()]
+    );
+
+    if (candidates.length === 0) return 0;
+
+    let transitioned = 0;
+    for (const g of candidates) {
+      const participating = (() => {
+        const raw = g.participating_halls_json;
+        if (Array.isArray(raw)) {
+          return raw.filter((x: unknown): x is string => typeof x === "string");
+        }
+        if (typeof raw === "string") {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              return parsed.filter((x: unknown): x is string => typeof x === "string");
+            }
+          } catch {
+            return [];
+          }
+        }
+        return [];
+      })();
+      const hallSet = new Set<string>(participating);
+      hallSet.add(g.master_hall_id);
+      const hallIds = Array.from(hallSet);
+      if (hallIds.length === 0) continue;
+
+      // Hent ready-rader for disse hallene.
+      const { rows: readyRows } = await this.pool.query<{
+        hall_id: string;
+        is_ready: boolean;
+        excluded_from_game: boolean;
+      }>(
+        `SELECT hall_id, is_ready, excluded_from_game
+           FROM ${this.hallReadyTable()}
+           WHERE game_id = $1`,
+        [g.id]
+      );
+      const byHall = new Map<string, { isReady: boolean; excluded: boolean }>();
+      for (const r of readyRows) {
+        byHall.set(r.hall_id, {
+          isReady: Boolean(r.is_ready),
+          excluded: Boolean(r.excluded_from_game),
+        });
+      }
+      // Regel: minst én non-excluded hall, og ALLE non-excluded må være ready.
+      // Haller uten rad teller som excluded=false + isReady=false.
+      let hasCandidate = false;
+      let allReady = true;
+      for (const hallId of hallIds) {
+        const r = byHall.get(hallId) ?? { isReady: false, excluded: false };
+        if (r.excluded) continue;
+        hasCandidate = true;
+        if (!r.isReady) {
+          allReady = false;
+          break;
+        }
+      }
+      if (!hasCandidate || !allReady) continue;
+
+      const { rowCount } = await this.pool.query(
+        `UPDATE ${this.scheduledGamesTable()}
+           SET status = 'ready_to_start', updated_at = now()
+           WHERE id = $1 AND status = 'purchase_open'`,
+        [g.id]
+      );
+      if ((rowCount ?? 0) > 0) {
+        transitioned += 1;
+        log.info(
+          { gameId: g.id, hallCount: hallIds.length },
+          "[GAME1_SCHEDULE PR2] transitioned purchase_open → ready_to_start"
+        );
+      }
+    }
+    return transitioned;
+  }
+
+  private hallReadyTable(): string {
+    return `"${this.schema}"."app_game1_hall_ready_status"`;
+  }
 }

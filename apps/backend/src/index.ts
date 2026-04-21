@@ -50,6 +50,8 @@ import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
 import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
 import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
+import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
+import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createWalletRouter } from "./routes/wallet.js";
@@ -738,7 +740,9 @@ jobScheduler.register({
   }),
 });
 
-// GAME1_SCHEDULE PR 1: 15s-tick som spawner Game 1-rader fra daily_schedules.
+// GAME1_SCHEDULE PR 1+2: 15s-tick som spawner Game 1-rader fra daily_schedules,
+// flipper status 'scheduled' → 'purchase_open', 'purchase_open' →
+// 'ready_to_start' når alle haller klare, og cancel-er utløpte rader.
 // Default OFF — feature-flag aktiveres i staging når PR 2-3 er merget.
 const game1ScheduleTickService = new Game1ScheduleTickService({
   pool: platformService.getPool(),
@@ -746,10 +750,17 @@ const game1ScheduleTickService = new Game1ScheduleTickService({
 });
 jobScheduler.register({
   name: "game1-schedule-tick",
-  description: "Spawn Game 1 games from daily_schedules + advance state machine (GAME1_SCHEDULE PR 1).",
+  description: "Spawn Game 1 games from daily_schedules + advance state machine (GAME1_SCHEDULE PR 1+2).",
   intervalMs: jobGame1ScheduleTickIntervalMs,
   enabled: jobGame1ScheduleTickEnabled,
   run: createGame1ScheduleTickJob({ service: game1ScheduleTickService }),
+});
+
+// GAME1_SCHEDULE PR 2: per-hall ready-flow service. Håndterer bingovert-
+// trykker-klar + master-UI getReadyStatusForGame + purchase-cutoff-helper.
+const game1HallReadyService = new Game1HallReadyService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
 });
 
 // ── Mount routers ─────────────────────────────────────────────────────────────
@@ -897,6 +908,17 @@ app.use(createAdminSchedulesRouter({
   platformService,
   auditLogService,
   scheduleService,
+}));
+// GAME1_SCHEDULE PR 2: per-hall ready-flow i Game 1. 3 endepunkter —
+// POST /halls/:hallId/ready, POST /halls/:hallId/unready,
+// GET /games/:gameId/ready-status. GAME1_HALL_READY_WRITE (ADMIN +
+// HALL_OPERATOR + AGENT) + GAME1_GAME_READ. Broadcaster
+// `game1:ready-status-update` til admin-UI + hall-displays.
+app.use(createAdminGame1ReadyRouter({
+  platformService,
+  auditLogService,
+  hallReadyService: game1HallReadyService,
+  io,
 }));
 // BIN-627: Pattern CRUD + dynamic-menu. Aktiverer Agent A's
 // patternManagement-placeholder-sider fra PR-A3a (3 sider) og brukes av
@@ -1057,6 +1079,14 @@ const agentTransactionService = new AgentTransactionService({
   agentShiftService,
   agentStore,
   transactionStore: agentTransactionStore,
+  // GAME1_SCHEDULE PR 2: purchase-cutoff-port. assertPurchaseOpenForHall
+  // kaster PURCHASE_CLOSED_FOR_HALL når bingovert har trykket klar for
+  // gameId+hallId. Kalles både ved fysisk salg (assignedGameId) og digital
+  // register-ticket. Legacy games uten schedule passerer (ingen row).
+  game1PurchaseCutoff: {
+    assertPurchaseOpenForHall: (gameId: string, hallId: string) =>
+      game1HallReadyService.assertPurchaseOpenForHall(gameId, hallId),
+  },
 });
 app.use(createAgentTransactionsRouter({
   platformService,

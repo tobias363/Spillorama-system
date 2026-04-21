@@ -467,6 +467,128 @@ test("sellPhysicalTicket kan ikke selge samme ticket to ganger (partial unique-i
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// GAME1_SCHEDULE PR 2: Purchase-cutoff-guard
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Monkey-patch cutoff inn på eksisterende service-instans (bruker makeSetup-
+ * infrastruktur for agent/player/physical-ticket seeding). Service er
+ * stateless etter konstruktion, og feltet er private; vi omgår via
+ * (service as unknown as { purchaseCutoff }) slik at testene slipper å
+ * duplisere hele makeSetup-stiloppsettet.
+ */
+function attachPurchaseCutoff(
+  service: AgentTransactionService,
+  cutoff: { assertPurchaseOpenForHall: (gameId: string, hallId: string) => Promise<void> }
+): void {
+  (service as unknown as { purchaseCutoff: typeof cutoff }).purchaseCutoff = cutoff;
+}
+
+test("GAME1_SCHEDULE PR2: sellPhysicalTicket avvises hvis purchase-cutoff kaster PURCHASE_CLOSED_FOR_HALL", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  ctx.physicalRead.seed({
+    uniqueId: "T-pr2",
+    batchId: "b1",
+    hallId: "hall-a",
+    status: "UNSOLD",
+    priceCents: 5000,
+    assignedGameId: "g1", // knyttet til spesifikt Game 1-spill
+  });
+
+  attachPurchaseCutoff(ctx.service, {
+    assertPurchaseOpenForHall: async () => {
+      throw new DomainError(
+        "PURCHASE_CLOSED_FOR_HALL",
+        "Stengt for salg."
+      );
+    },
+  });
+
+  await assert.rejects(
+    ctx.service.sellPhysicalTicket({
+      agentUserId: "a1",
+      playerUserId: "p1",
+      ticketUniqueId: "T-pr2",
+      paymentMethod: "CASH",
+      clientRequestId: "r-1",
+    }),
+    (err) =>
+      err instanceof DomainError && err.code === "PURCHASE_CLOSED_FOR_HALL"
+  );
+  // Guard skal ha triggered før mark-sold.
+  assert.equal(ctx.physicalMark.calls.length, 0);
+});
+
+test("GAME1_SCHEDULE PR2: sellPhysicalTicket passerer cutoff for tickets uten assignedGameId", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  ctx.physicalRead.seed({
+    uniqueId: "T-nogame",
+    batchId: "b1",
+    hallId: "hall-a",
+    status: "UNSOLD",
+    priceCents: 5000,
+    assignedGameId: null, // ingen knytning til Game 1-spill
+  });
+
+  const cutoffCalls: Array<[string, string]> = [];
+  attachPurchaseCutoff(ctx.service, {
+    assertPurchaseOpenForHall: async (gameId, hallId) => {
+      cutoffCalls.push([gameId, hallId]);
+    },
+  });
+
+  // Salget skal passere uten å kalle purchase-cutoff.
+  await ctx.service.sellPhysicalTicket({
+    agentUserId: "a1",
+    playerUserId: "p1",
+    ticketUniqueId: "T-nogame",
+    paymentMethod: "CASH",
+    clientRequestId: "r-1",
+  });
+  assert.equal(
+    cutoffCalls.length,
+    0,
+    "purchase-cutoff skal ikke kalles når assignedGameId=null"
+  );
+  assert.equal(ctx.physicalMark.calls.length, 1);
+});
+
+test("GAME1_SCHEDULE PR2: sellPhysicalTicket kaller cutoff med gameId+hallId når assignedGameId satt", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  ctx.physicalRead.seed({
+    uniqueId: "T-pr2-ok",
+    batchId: "b1",
+    hallId: "hall-a",
+    status: "UNSOLD",
+    priceCents: 5000,
+    assignedGameId: "g1",
+  });
+
+  const cutoffCalls: Array<[string, string]> = [];
+  attachPurchaseCutoff(ctx.service, {
+    assertPurchaseOpenForHall: async (gameId, hallId) => {
+      cutoffCalls.push([gameId, hallId]);
+    },
+  });
+
+  await ctx.service.sellPhysicalTicket({
+    agentUserId: "a1",
+    playerUserId: "p1",
+    ticketUniqueId: "T-pr2-ok",
+    paymentMethod: "CASH",
+    clientRequestId: "r-1",
+  });
+  assert.equal(cutoffCalls.length, 1);
+  assert.deepEqual(cutoffCalls[0], ["g1", "hall-a"]);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CANCEL SALE
 // ═══════════════════════════════════════════════════════════════════════════
 

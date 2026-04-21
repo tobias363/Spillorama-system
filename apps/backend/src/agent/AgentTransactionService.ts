@@ -33,6 +33,23 @@ import type {
 import type { TicketPurchasePort } from "./ports/TicketPurchasePort.js";
 import type { PhysicalTicketReadPort } from "./ports/PhysicalTicketReadPort.js";
 
+/**
+ * GAME1_SCHEDULE PR 2: purchase-cutoff-guard. Kalles før physical + digital
+ * ticket-sale-endepunkter godtar nye kjøp. Implementeres som en port så
+ * AgentTransactionService ikke trenger å avhenge av Game1HallReadyService
+ * direkte (enkel tester-substitusjon, samme mønster som
+ * PhysicalTicketReadPort).
+ */
+export interface Game1PurchaseCutoffPort {
+  /**
+   * Kaster `PURCHASE_CLOSED_FOR_HALL` (DomainError) hvis hallen har
+   * trykket klar for gameId. Passerer uten feil når hallen fortsatt er
+   * åpen for kjøp (eller når gameId ikke er kjent — fallback for legacy
+   * games uten schedule).
+   */
+  assertPurchaseOpenForHall(gameId: string, hallId: string): Promise<void>;
+}
+
 /** Default 10-minutters vindu for physical-sale-cancel (match legacy). */
 export const CANCEL_SALE_WINDOW_MS = 10 * 60 * 1000;
 
@@ -96,6 +113,13 @@ export interface AgentTransactionServiceDeps {
   agentShiftService: AgentShiftService;
   agentStore: AgentStore;
   transactionStore: AgentTransactionStore;
+  /**
+   * GAME1_SCHEDULE PR 2: valgfri purchase-cutoff-port. Når injectet blir
+   * hall-ready-statusen konsultert før physical + digital sales slippes
+   * gjennom. Unntatt i testene slik at eksisterende suite ikke brekker —
+   * index.ts injiserer Game1HallReadyService-adapteren i prod.
+   */
+  game1PurchaseCutoff?: Game1PurchaseCutoffPort;
 }
 
 export class AgentTransactionService {
@@ -108,6 +132,7 @@ export class AgentTransactionService {
   private readonly shifts: AgentShiftService;
   private readonly store: AgentStore;
   private readonly txs: AgentTransactionStore;
+  private readonly purchaseCutoff: Game1PurchaseCutoffPort | null;
 
   constructor(deps: AgentTransactionServiceDeps) {
     this.platform = deps.platformService;
@@ -119,6 +144,7 @@ export class AgentTransactionService {
     this.shifts = deps.agentShiftService;
     this.store = deps.agentStore;
     this.txs = deps.transactionStore;
+    this.purchaseCutoff = deps.game1PurchaseCutoff ?? null;
   }
 
   // ── Player lookup + balance ─────────────────────────────────────────────
@@ -266,6 +292,17 @@ export class AgentTransactionService {
       throw new DomainError(
         "PHYSICAL_TICKET_NOT_SELLABLE",
         `Billetten har status ${ticket.status} — kan ikke selges.`
+      );
+    }
+
+    // GAME1_SCHEDULE PR 2: purchase-cutoff-guard. Hvis billetten er knyttet
+    // til et Game 1-spill (assignedGameId) og bingovert i denne hallen har
+    // trykket klar, avvises salget med PURCHASE_CLOSED_FOR_HALL. Tickets
+    // uten assignedGameId (åpen-batch-salg) passerer uendret.
+    if (this.purchaseCutoff && ticket.assignedGameId) {
+      await this.purchaseCutoff.assertPurchaseOpenForHall(
+        ticket.assignedGameId,
+        shift.hallId
       );
     }
 
@@ -444,6 +481,17 @@ export class AgentTransactionService {
     const shift = await this.requireActiveShift(input.agentUserId);
     await this.requirePlayerInHall(input.playerUserId, shift.hallId);
     const totalPriceCents = input.pricePerTicketCents * input.ticketCount;
+
+    // GAME1_SCHEDULE PR 2: purchase-cutoff-guard for digital ticket-kjøp.
+    // Hvis Game 1-spillet med input.gameId har bingovert-klar-status for
+    // agentens hall → avvis med PURCHASE_CLOSED_FOR_HALL. Games som ikke
+    // finnes i app_game1_scheduled_games (legacy, Game 2/3) passerer.
+    if (this.purchaseCutoff) {
+      await this.purchaseCutoff.assertPurchaseOpenForHall(
+        input.gameId,
+        shift.hallId
+      );
+    }
 
     // Kaller port — i B3.2 kaster stub NOT_IMPLEMENTED.
     // Når G2/G3 er web-native (BIN-608) wires real impl inn.

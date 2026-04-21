@@ -311,7 +311,21 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     HALL_OPERATOR er bevisst utelatt — CMS er ikke hall-lokal konfig.
    */
   CMS_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  CMS_WRITE: ["ADMIN"]
+  CMS_WRITE: ["ADMIN"],
+  /**
+   * GAME1_SCHEDULE PR2: per-hall ready-flow i Game 1.
+   *   - GAME1_GAME_READ : hent ready-status for et spill på tvers av haller
+   *     + liste spawned games. Alle admin-roller + AGENT (bingovert trenger
+   *     innsyn i egen hall's status). Hall-scope håndheves i route-laget
+   *     via assertUserHallScope for HALL_OPERATOR/AGENT.
+   *   - GAME1_HALL_READY_WRITE: trykke "klar" / angre "klar" for en hall.
+   *     ADMIN + HALL_OPERATOR + AGENT. SUPPORT er bevisst utelatt —
+   *     compliance-rolle, ikke drift. Bingovert (AGENT eller HALL_OPERATOR)
+   *     er primær-actor; ADMIN inkludert for drift/helpdesk ("ADMIN har
+   *     alle"-invariant). Hall-scope håndheves i route.
+   */
+  GAME1_GAME_READ:         ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  GAME1_HALL_READY_WRITE:  ["ADMIN", "HALL_OPERATOR", "AGENT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

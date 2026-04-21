@@ -12,6 +12,7 @@
  *   - spawnUpcomingGame1Games (happy path + idempotens + gap-håndtering)
  *   - openPurchaseForImminentGames
  *   - cancelEndOfDayUnstartedGames
+ *   - transitionReadyToStartGames (PR 2)
  */
 
 import assert from "node:assert/strict";
@@ -529,4 +530,166 @@ test("cancelEndOfDayUnstartedGames: marker rader cancelled med stop_reason", asy
     queries[0]!.sql,
     /status IN \('scheduled', 'purchase_open', 'ready_to_start'\)/
   );
+});
+
+// ── transitionReadyToStartGames (PR 2) ────────────────────────────────────────
+
+test("transitionReadyToStartGames: flipper purchase_open → ready_to_start når alle haller klare", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) =>
+          sql.includes("SELECT id, participating_halls_json, master_hall_id") &&
+          sql.includes("status = 'purchase_open'"),
+        rows: [
+          {
+            id: "game-1",
+            participating_halls_json: ["hall-1", "hall-2"],
+            master_hall_id: "hall-1",
+          },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("SELECT hall_id, is_ready, excluded_from_game"),
+        rows: [
+          { hall_id: "hall-1", is_ready: true, excluded_from_game: false },
+          { hall_id: "hall-2", is_ready: true, excluded_from_game: false },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("SET status = 'ready_to_start'"),
+        rows: [],
+        rowCount: 1,
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const count = await svc.transitionReadyToStartGames(fixedNow);
+  assert.equal(count, 1);
+  // Verify final UPDATE has status='purchase_open' guard for idempotens.
+  const upd = queries.find((q) => q.sql.includes("SET status = 'ready_to_start'"));
+  assert.ok(upd, "forventet UPDATE-query");
+  assert.match(upd!.sql, /status = 'purchase_open'/);
+});
+
+test("transitionReadyToStartGames: hopper over når en hall mangler ready-rad", async () => {
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) =>
+          sql.includes("SELECT id, participating_halls_json, master_hall_id"),
+        rows: [
+          {
+            id: "game-1",
+            participating_halls_json: ["hall-1", "hall-2"],
+            master_hall_id: "hall-1",
+          },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("SELECT hall_id, is_ready, excluded_from_game"),
+        rows: [
+          { hall_id: "hall-1", is_ready: true, excluded_from_game: false },
+          // hall-2 mangler rad
+        ],
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const count = await svc.transitionReadyToStartGames(fixedNow);
+  assert.equal(count, 0);
+});
+
+test("transitionReadyToStartGames: teller ikke excluded haller i 'allReady'", async () => {
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) =>
+          sql.includes("SELECT id, participating_halls_json, master_hall_id"),
+        rows: [
+          {
+            id: "game-1",
+            participating_halls_json: ["hall-1", "hall-2"],
+            master_hall_id: "hall-1",
+          },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("SELECT hall_id, is_ready, excluded_from_game"),
+        rows: [
+          { hall_id: "hall-1", is_ready: true, excluded_from_game: false },
+          { hall_id: "hall-2", is_ready: false, excluded_from_game: true },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("SET status = 'ready_to_start'"),
+        rows: [],
+        rowCount: 1,
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const count = await svc.transitionReadyToStartGames(fixedNow);
+  assert.equal(count, 1);
+});
+
+test("transitionReadyToStartGames: håndterer JSONB-string (Pool returnerer string)", async () => {
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) =>
+          sql.includes("SELECT id, participating_halls_json, master_hall_id"),
+        rows: [
+          {
+            id: "game-1",
+            participating_halls_json: JSON.stringify(["hall-1"]),
+            master_hall_id: "hall-1",
+          },
+        ],
+      },
+      {
+        match: (sql) =>
+          sql.includes("SELECT hall_id, is_ready, excluded_from_game"),
+        rows: [{ hall_id: "hall-1", is_ready: true, excluded_from_game: false }],
+      },
+      {
+        match: (sql) => sql.includes("SET status = 'ready_to_start'"),
+        rows: [],
+        rowCount: 1,
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const count = await svc.transitionReadyToStartGames(fixedNow);
+  assert.equal(count, 1);
+});
+
+test("transitionReadyToStartGames: ingen kandidater → 0, ingen videre query", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) =>
+          sql.includes("SELECT id, participating_halls_json, master_hall_id"),
+        rows: [],
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const count = await svc.transitionReadyToStartGames(fixedNow);
+  assert.equal(count, 0);
+  assert.equal(queries.length, 1);
 });
