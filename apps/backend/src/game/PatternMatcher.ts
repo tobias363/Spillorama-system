@@ -1,24 +1,27 @@
 /**
- * BIN-615 / PR-C3: 25-bit bitmask pattern matcher for Game 3 (Mønsterbingo).
+ * Generisk 25-bit bitmask-matcher for 5×5 bingo-patterns.
  *
- * Legacy reference: `Helper/bingo.js:1197-1356` (`patternArrays`) — the legacy
- * matcher pre-computes per-ticket arrays of winning numbers. We replace that
- * with a single-AND bitmask check: for each ticket cell, set bit `i` if the
- * number at position `i` (row-major, 0-indexed) has been drawn. A pattern
- * matches when `(ticketMask & patternMask) === patternMask`.
+ * Brukes av:
+ *   - `Game3Engine` + `PatternCycler.test.ts` — Game 3 (Mønsterbingo)
+ *   - `adminPhysicalTicketCheckBingo.ts` — admin-rute for å sjekke fysiske
+ *     bonger manuelt mot rad-kombinasjoner (IKKE Spill 1-spesifikk)
  *
- * Hot-path primitive: `matchesPattern` is a single `&` + `===`, cheaper than
- * `arr.every(n => drawn.has(n))`.
+ * IKKE brukt av Spill 1 (Norsk 75-ball). Spill 1 har egne fase-regler via
+ * `BingoEngine.meetsPhaseRequirement` (som bruker `countCompleteRows` /
+ * `countCompleteColumns` i `ticket.ts`), og klient-speiling i
+ * `packages/game-client/src/games/game1/logic/PatternMasks.ts` (kolonne-
+ * orientert fra fase 2). IKKE gjenbruk ROW_*_MASKS her for Spill 1 — de
+ * horisontale kombinasjonene matcher ikke Spill 1 sin backend-regel.
  *
- * Row 1-4 definitions mirror legacy `patternArrays` cases at bingo.js:1205-1332:
- * - Row 1 = single line (5 horizontal rows + 5 vertical columns) = 10 masks.
- * - Row 2 = any 2 horizontal rows (C(5,2) = 10 combinations) = 10 masks.
- * - Row 3 = any 3 horizontal rows (C(5,3) = 10 combinations) = 10 masks.
- * - Row 4 = any 4 horizontal rows (C(5,4) =  5 combinations) =  5 masks.
- * - Coverall = all 25 bits = 0x1FFFFFF.
+ * Hot-path primitive: `matchesPattern` er en enkel `&` + `===` — billigere
+ * enn `arr.every(n => drawn.has(n))` for høylast-trekning.
  *
- * Note: legacy Row 2/3/4 combine only horizontal rows, NOT columns. Verified
- * against bingo.js:1220-1332.
+ * Row-maske-definisjoner:
+ *   - Row 1 = én hel linje (5 horisontale rader + 5 vertikale kolonner) = 10 masker.
+ *   - Row 2 = 2 horisontale rader (C(5,2) = 10 kombinasjoner).
+ *   - Row 3 = 3 horisontale rader (C(5,3) = 10 kombinasjoner).
+ *   - Row 4 = 4 horisontale rader (C(5,4) =  5 kombinasjoner).
+ *   - Coverall = alle 25 bits = 0x1FFFFFF.
  */
 import type { PatternMask, Ticket } from "@spillorama/shared-types";
 
