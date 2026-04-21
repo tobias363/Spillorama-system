@@ -69,6 +69,22 @@ export interface PatternDefinition {
    * implied by `design`.
    */
   mask?: PatternMask;
+  /**
+   * Admin-configurable prize mode for this pattern.
+   * - "percent" (default, absent): `prizePercent` of remaining pool.
+   * - "fixed":   flat `prize1` kr amount, capped by RTP guards at payout.
+   *
+   * Promoted from backend-local `PatternDefinition` (BIN-615 / PR-C1) so
+   * admin-UI → engine coupling can send per-game prize matrices over the
+   * wire. Clients may read this to render expected prize amounts in the
+   * pattern banner before the game starts.
+   */
+  winningType?: "percent" | "fixed";
+  /**
+   * Fixed prize amount in kr when `winningType === "fixed"`. Ignored for
+   * "percent" mode. Legacy field name: prize1.
+   */
+  prize1?: number;
 }
 
 export interface PatternResult {
