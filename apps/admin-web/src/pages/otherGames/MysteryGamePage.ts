@@ -1,15 +1,18 @@
-// PR-A6 (BIN-674) — /mystery.
-// Port of legacy/unity-backend/App/Views/otherGames/mysteryGame.html.
-// 6 prizes.
+// BIN-679 — /mystery.
+// Mystery config: `{ rewards: MysteryReward[] }` eller legacy `prizeList:
+// number[]`. 6 belønninger.
 
 import { t } from "../../i18n/I18n.js";
-import { Toast } from "../../components/Toast.js";
 import { escapeHtml } from "../adminUsers/shared.js";
 import {
-  getMysteryConfig,
-  updateMysteryConfig,
-} from "../../api/admin-other-games.js";
-import { collectPrizes, renderOtherGamesShell, renderPrizeGrid, submitRow } from "./shared.js";
+  activeAndJsonRow,
+  collectPrizes,
+  loadMiniGameConfig,
+  renderOtherGamesShell,
+  renderPrizeGrid,
+  saveMiniGameFromForm,
+  submitRow,
+} from "./shared.js";
 
 const MYSTERY_COUNT = 6;
 
@@ -25,16 +28,20 @@ export function renderMysteryGamePage(container: HTMLElement): void {
 }
 
 async function mount(host: HTMLElement): Promise<void> {
-  const cfg = await getMysteryConfig();
+  const cfg = await loadMiniGameConfig(host, "mystery");
+  if (!cfg) return;
+
+  const prizeList = extractPrizeList(cfg.config, MYSTERY_COUNT);
 
   host.innerHTML = `
     <form id="mystery-form" class="form-horizontal" data-testid="mystery-form">
       <div class="form-group">
         <label class="col-sm-12">${escapeHtml(t("mystery_game_prize"))}</label>
         <div class="col-sm-12" data-testid="mystery-prizes">
-          ${renderPrizeGrid(cfg.prizeList, MYSTERY_COUNT, "price", "col-lg-2")}
+          ${renderPrizeGrid(prizeList, MYSTERY_COUNT, "price", "col-lg-2")}
         </div>
       </div>
+      ${activeAndJsonRow(cfg.active, cfg.config)}
       ${submitRow()}
     </form>`;
 
@@ -42,13 +49,39 @@ async function mount(host: HTMLElement): Promise<void> {
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
     void (async () => {
-      try {
-        const prizes = collectPrizes(form, "price", MYSTERY_COUNT);
-        await updateMysteryConfig(prizes);
-        Toast.success(t("success"));
-      } catch {
-        Toast.error(t("something_went_wrong"));
-      }
+      const prizes = collectPrizes(form, "price", MYSTERY_COUNT);
+      const structured = {
+        ...cfg.config,
+        rewards: prizes.map((prizeAmount, i) => ({
+          label: String(i + 1),
+          prizeAmount,
+        })),
+        prizeList: prizes,
+      };
+      await saveMiniGameFromForm("mystery", form, structured);
     })();
   });
+}
+
+function extractPrizeList(config: Record<string, unknown>, count: number): number[] {
+  const out: number[] = new Array(count).fill(0);
+  const legacy = config.prizeList;
+  if (Array.isArray(legacy)) {
+    for (let i = 0; i < count; i++) {
+      const v = legacy[i];
+      if (typeof v === "number" && Number.isFinite(v)) out[i] = v;
+    }
+    return out;
+  }
+  const rewards = config.rewards;
+  if (Array.isArray(rewards)) {
+    for (let i = 0; i < count; i++) {
+      const r = rewards[i];
+      if (r && typeof r === "object" && "prizeAmount" in r) {
+        const v = (r as { prizeAmount: unknown }).prizeAmount;
+        if (typeof v === "number" && Number.isFinite(v)) out[i] = v;
+      }
+    }
+  }
+  return out;
 }

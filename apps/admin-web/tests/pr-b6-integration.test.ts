@@ -63,16 +63,16 @@ describe("PR-B6 routes", () => {
     expect(route!.roles).toEqual(["admin", "super-admin"]);
   });
 
-  it("findRoute resolves /leaderboard (unchanged from baseline)", () => {
+  it("findRoute resolves /leaderboard (BIN-668 wired title)", () => {
     const route = findRoute("/leaderboard");
     expect(route).toBeTruthy();
-    expect(route!.titleKey).toBe("leaderboard_management");
+    expect(route!.titleKey).toBe("leaderboard_tier_list_title");
   });
 
-  it("findRoute resolves /addLeaderboard (new placeholder)", () => {
+  it("findRoute resolves /addLeaderboard (BIN-668 wired title)", () => {
     const route = findRoute("/addLeaderboard");
     expect(route).toBeTruthy();
-    expect(route!.titleKey).toBe("add_leaderboard_tier");
+    expect(route!.titleKey).toBe("leaderboard_tier_create");
   });
 });
 

@@ -1,151 +1,188 @@
-// PR-A6 (BIN-674) — admin-system-settings API-wrappers (stub + localStorage).
+// BIN-677 — admin-system-settings API wrappers (wired til backend).
 //
-// Backend-gap: Ingen `/api/admin/system/settings` eller `/maintenance` +
-// `/system/information` endpoints eksisterer i `apps/backend/src/routes/`.
-// Når BIN-A6-SETTINGS og BIN-A6-SYS lander, erstattes localStorage-lag
-// med faktiske apiRequest-kall.
+// Bakgrunn: legacy localStorage-fallback er erstattet med ekte backend-kall
+// mot `/api/admin/settings` (19-nøkkel registry, se
+// apps/backend/src/admin/SettingsService.ts) og `/api/admin/maintenance`
+// (maintenance-vinduer).
 //
-// NB: Per-spill game-settings (bingo round interval, payoutPercent, etc.)
-// er et SEPARAT domene (admin.ts:500-555) og dekkes av PR-A3/A4. Dette er
-// **globale app-settings** (android/ios/webgl-versjoner + spiller-tak).
+// System-wide settings (BIN-677) er nøkkel/verdi med fast registry:
+//   GET   /api/admin/settings       → { settings: SystemSettingRow[], count }
+//   PATCH /api/admin/settings       → body { patches: [{key,value}, ...] }
 //
-// Design-avvik: spiller-tak (daily/monthly spending) er read-only i ny
-// arkitektur — per-hall Spillvett-limits tar presedens (se
-// project_spillvett_implementation.md + apps/backend/src/spillevett/).
+// Maintenance-vinduer (BIN-677) er separate rader; én aktiv om gangen:
+//   GET   /api/admin/maintenance            → liste + active
+//   GET   /api/admin/maintenance/:id        → detalj
+//   POST  /api/admin/maintenance            → opprett
+//   PUT   /api/admin/maintenance/:id        → full update / status-toggle
+//
+// Legacy GlobalAppSettings-felter (android_version etc.) er ikke fjernet
+// men flyttet til system settings-nøkler (`app.android_version`, osv.).
+// SystemInformation (legacy systemInformationData) lagres nå under
+// nøkkelen `system.information` via samme endepunkt.
+//
+// Per-hall Spillvett-tak (daglig/månedlig) tar presedens — ligger i
+// `/api/admin/halls/:id` og er ikke en del av dette API-et.
 
-// ── Settings (global app-config) ─────────────────────────────────────────────
+import { apiRequest } from "./client.js";
 
-export interface GlobalAppSettings {
-  android_version: string;
-  android_store_link: string;
-  ios_version: string;
-  ios_store_link: string;
-  wind_linux_version: string;
-  windows_store_link: string;
-  webgl_version: string;
-  webgl_store_link: string;
-  disable_store_link: "Yes" | "No";
-  /** Read-only i ny arkitektur (per-hall Spillvett tar presedens). */
-  daily_spending: number;
-  /** Read-only i ny arkitektur (per-hall Spillvett tar presedens). */
-  monthly_spending: number;
-  screenSaver: boolean;
-  screenSaverTime: number;
-  updatedAt: string;
+// ── SystemSetting (19-nøkkel registry) ───────────────────────────────────────
+
+export type SystemSettingType = "string" | "number" | "boolean" | "object";
+
+export interface SystemSettingRow {
+  key: string;
+  value: unknown;
+  category: string;
+  description: string;
+  type: SystemSettingType;
+  /** true hvis verdien kommer fra registry-default (ingen DB-rad eksisterer). */
+  isDefault: boolean;
+  updatedByUserId: string | null;
+  updatedAt: string | null;
 }
 
-const DEFAULT_GLOBAL_SETTINGS: GlobalAppSettings = {
-  android_version: "",
-  android_store_link: "",
-  ios_version: "",
-  ios_store_link: "",
-  wind_linux_version: "",
-  windows_store_link: "",
-  webgl_version: "",
-  webgl_store_link: "",
-  disable_store_link: "No",
-  daily_spending: 0,
-  monthly_spending: 0,
-  screenSaver: false,
-  screenSaverTime: 5,
-  updatedAt: new Date(0).toISOString(),
-};
-
-const LS_GLOBAL_SETTINGS_KEY = "bingo_admin_global_settings";
-
-function readLs<T>(key: string, fallback: T): T {
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
+export interface SystemSettingsListResponse {
+  settings: SystemSettingRow[];
+  count: number;
 }
 
-function writeLs<T>(key: string, value: T): void {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // quota exceeded — silently ignore
-  }
+export interface SystemSettingPatchEntry {
+  key: string;
+  value: unknown;
 }
 
-export async function getGlobalSettings(): Promise<GlobalAppSettings> {
-  return readLs<GlobalAppSettings>(LS_GLOBAL_SETTINGS_KEY, DEFAULT_GLOBAL_SETTINGS);
-}
-
-export async function updateGlobalSettings(patch: Partial<GlobalAppSettings>): Promise<GlobalAppSettings> {
-  const current = await getGlobalSettings();
-  const next: GlobalAppSettings = {
-    ...current,
-    ...patch,
-    updatedAt: new Date().toISOString(),
-  };
-  writeLs(LS_GLOBAL_SETTINGS_KEY, next);
-  return next;
-}
-
-// ── Maintenance ──────────────────────────────────────────────────────────────
-
-export interface MaintenanceConfig {
-  id: string;
-  message: string;
-  showBeforeMinutes: number;
-  maintenance_start_date: string;
-  maintenance_end_date: string;
-  status: "active" | "inactive";
-  updatedAt: string;
-}
-
-const DEFAULT_MAINTENANCE: MaintenanceConfig = {
-  id: "maintenance-default",
-  message: "",
-  showBeforeMinutes: 15,
-  maintenance_start_date: "",
-  maintenance_end_date: "",
-  status: "inactive",
-  updatedAt: new Date(0).toISOString(),
-};
-
-const LS_MAINTENANCE_KEY = "bingo_admin_maintenance";
-
-export async function getMaintenance(): Promise<MaintenanceConfig> {
-  return readLs<MaintenanceConfig>(LS_MAINTENANCE_KEY, DEFAULT_MAINTENANCE);
-}
-
-export async function updateMaintenance(patch: Partial<MaintenanceConfig>): Promise<MaintenanceConfig> {
-  const current = await getMaintenance();
-  const next: MaintenanceConfig = {
-    ...current,
-    ...patch,
-    updatedAt: new Date().toISOString(),
-  };
-  writeLs(LS_MAINTENANCE_KEY, next);
-  return next;
-}
-
-// ── System Information ──────────────────────────────────────────────────────
-
-export interface SystemInformationRecord {
-  content: string;
-  updatedAt: string;
-}
-
-const LS_SYSTEM_INFO_KEY = "bingo_admin_system_information";
-
-export async function getSystemInformation(): Promise<SystemInformationRecord> {
-  return readLs<SystemInformationRecord>(LS_SYSTEM_INFO_KEY, {
-    content: "",
-    updatedAt: new Date(0).toISOString(),
+/** Fetch hele 19-nøkkel registeret (katalog + current values). */
+export async function getSystemSettings(): Promise<SystemSettingsListResponse> {
+  return apiRequest<SystemSettingsListResponse>("/api/admin/settings", {
+    auth: true,
   });
 }
 
-export async function updateSystemInformation(content: string): Promise<SystemInformationRecord> {
-  const record: SystemInformationRecord = {
-    content,
-    updatedAt: new Date().toISOString(),
+/** Patch én eller flere nøkler i en batch (transaksjonell i backend). */
+export async function patchSystemSettings(
+  patches: SystemSettingPatchEntry[]
+): Promise<SystemSettingsListResponse> {
+  return apiRequest<SystemSettingsListResponse>("/api/admin/settings", {
+    method: "PATCH",
+    body: { patches },
+    auth: true,
+  });
+}
+
+// ── SystemInformation (singleton under system.information) ──────────────────
+
+export interface SystemInformationRecord {
+  content: string;
+  updatedAt: string | null;
+}
+
+export async function getSystemInformation(): Promise<SystemInformationRecord> {
+  const res = await getSystemSettings();
+  const row = res.settings.find((s) => s.key === "system.information");
+  return {
+    content: typeof row?.value === "string" ? row.value : "",
+    updatedAt: row?.updatedAt ?? null,
   };
-  writeLs(LS_SYSTEM_INFO_KEY, record);
-  return record;
+}
+
+export async function updateSystemInformation(
+  content: string
+): Promise<SystemInformationRecord> {
+  const res = await patchSystemSettings([{ key: "system.information", value: content }]);
+  const row = res.settings.find((s) => s.key === "system.information");
+  return {
+    content: typeof row?.value === "string" ? row.value : content,
+    updatedAt: row?.updatedAt ?? null,
+  };
+}
+
+// ── Maintenance-vinduer ──────────────────────────────────────────────────────
+
+export type MaintenanceStatus = "active" | "inactive";
+
+export interface MaintenanceWindow {
+  id: string;
+  maintenanceStart: string;
+  maintenanceEnd: string;
+  message: string;
+  showBeforeMinutes: number;
+  status: MaintenanceStatus;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  activatedAt: string | null;
+  deactivatedAt: string | null;
+}
+
+export interface MaintenanceListResponse {
+  windows: MaintenanceWindow[];
+  count: number;
+  active: MaintenanceWindow | null;
+}
+
+export interface CreateMaintenanceBody {
+  maintenanceStart: string;
+  maintenanceEnd: string;
+  message?: string;
+  showBeforeMinutes?: number;
+  status?: MaintenanceStatus;
+}
+
+export interface UpdateMaintenanceBody {
+  maintenanceStart?: string;
+  maintenanceEnd?: string;
+  message?: string;
+  showBeforeMinutes?: number;
+  status?: MaintenanceStatus;
+}
+
+export async function listMaintenanceWindows(
+  params: { status?: MaintenanceStatus; limit?: number } = {}
+): Promise<MaintenanceListResponse> {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set("status", params.status);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiRequest<MaintenanceListResponse>(`/api/admin/maintenance${suffix}`, {
+    auth: true,
+  });
+}
+
+export async function getMaintenanceWindow(id: string): Promise<MaintenanceWindow> {
+  return apiRequest<MaintenanceWindow>(
+    `/api/admin/maintenance/${encodeURIComponent(id)}`,
+    { auth: true }
+  );
+}
+
+export async function createMaintenanceWindow(
+  body: CreateMaintenanceBody
+): Promise<MaintenanceWindow> {
+  return apiRequest<MaintenanceWindow>("/api/admin/maintenance", {
+    method: "POST",
+    body,
+    auth: true,
+  });
+}
+
+export async function updateMaintenanceWindow(
+  id: string,
+  body: UpdateMaintenanceBody
+): Promise<MaintenanceWindow> {
+  return apiRequest<MaintenanceWindow>(
+    `/api/admin/maintenance/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      body,
+      auth: true,
+    }
+  );
+}
+
+/** Convenience — aktiver/deaktiver et vindu. */
+export async function setMaintenanceStatus(
+  id: string,
+  status: MaintenanceStatus
+): Promise<MaintenanceWindow> {
+  return updateMaintenanceWindow(id, { status });
 }

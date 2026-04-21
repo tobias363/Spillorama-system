@@ -1,12 +1,10 @@
-// PR-A6 (BIN-674) — settings dispatcher.
+// BIN-677 — settings dispatcher.
 //
 // Routes:
-//   /settings                     → SettingsPage (globale app-versjoner +
-//                                    spiller-tak read-only banner)
+//   /settings                     → SettingsPage (system-wide registry)
 //   /maintenance                  → MaintenanceListPage
-//   /maintenance/edit/:id         → MaintenanceFormPage (hash-regex)
-//
-// Backend-gap: BIN-A6-SETTINGS (ingen /api/admin/system/settings ennå).
+//   /maintenance/new              → MaintenanceFormPage (create)
+//   /maintenance/edit/:id         → MaintenanceFormPage (edit)
 
 import { renderSettingsPage } from "./SettingsPage.js";
 import { renderMaintenanceListPage } from "./MaintenanceListPage.js";
@@ -15,7 +13,9 @@ import { renderMaintenanceFormPage } from "./MaintenanceFormPage.js";
 const MAINTENANCE_EDIT_RE = /^\/maintenance\/edit\/[^/]+$/;
 
 export function isSettingsRoute(path: string): boolean {
-  if (path === "/settings" || path === "/maintenance") return true;
+  if (path === "/settings" || path === "/maintenance" || path === "/maintenance/new") {
+    return true;
+  }
   return MAINTENANCE_EDIT_RE.test(path);
 }
 
@@ -23,6 +23,7 @@ export function mountSettingsRoute(container: HTMLElement, path: string): void {
   container.innerHTML = "";
   if (path === "/settings") return renderSettingsPage(container);
   if (path === "/maintenance") return renderMaintenanceListPage(container);
+  if (path === "/maintenance/new") return renderMaintenanceFormPage(container, null);
   if (MAINTENANCE_EDIT_RE.test(path)) {
     const id = decodeURIComponent(path.slice("/maintenance/edit/".length));
     return renderMaintenanceFormPage(container, id);

@@ -22,9 +22,9 @@ export function renderSystemInformationPage(container: HTMLElement): void {
   container.innerHTML = `
     ${contentHeader("system_information", "system_information")}
     <section class="content">
-      <div class="callout callout-warning" data-testid="system-info-placeholder-banner">
-        <i class="fa fa-clock-o"></i>
-        ${escapeHtml(t("system_information_placeholder_banner"))}
+      <div class="callout callout-info" data-testid="system-info-placeholder-banner">
+        <i class="fa fa-info-circle"></i>
+        ${escapeHtml(t("system_settings_wired_banner"))}
       </div>
       ${boxOpen("system_information", "primary")}
         <div id="system-info-form-host">${escapeHtml(t("loading_ellipsis"))}</div>

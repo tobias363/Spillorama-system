@@ -1,93 +1,136 @@
-// PR-B6 (BIN-664) — Leaderboard tier list (PLACEHOLDER).
-// Port of legacy/unity-backend/App/Views/LeaderboardManagement/leaderboard.html
-// as a read-only placeholder. Backend CRUD (GET/POST/PATCH/DELETE) is
-// tracked as BIN-668 (P3) — see apps/admin-web/src/api/admin-leaderboard.ts.
+// BIN-668 — /leaderboard (tier list + inline delete).
 //
-// Behaviour:
-//   - Tries `listLeaderboardTiers()` which immediately rejects with
-//     ApiError(NOT_IMPLEMENTED, 501). The catch arm renders the
-//     backend-pending banner (+ a BIN-668 link) and a disabled "Add" button.
-//   - Fail-closed: if we ever *do* get a list (e.g. mock-backend during
-//     dev), we render it read-only since the CRUD actions still reject.
-//
-// Regulatorisk:
-//   - Points-config påvirker utbetaling av premier — fail-closed er
-//     kritisk inntil backend støtter AuditLog-actions
-//     `leaderboard.tier.add/update/remove` og "no write while game
-//     active"-sjekk (PR-B6-PLAN §3.1).
+// Backend: GET /api/admin/leaderboard/tiers → { tiers, count }.
+// Tiers sortert etter (tierName, place). Inline slett (soft-delete by
+// default) via DELETE /api/admin/leaderboard/tiers/:id.
 
 import { t } from "../../i18n/I18n.js";
 import { Toast } from "../../components/Toast.js";
-import { DataTable } from "../../components/DataTable.js";
 import { ApiError } from "../../api/client.js";
 import {
+  deleteLeaderboardTier,
   listLeaderboardTiers,
   type LeaderboardTier,
 } from "../../api/admin-leaderboard.js";
-import {
-  backendPendingBanner,
-  boxClose,
-  boxOpen,
-  contentHeader,
-  escapeHtml,
-} from "./shared.js";
+import { boxClose, boxOpen, contentHeader, escapeHtml } from "./shared.js";
 
 export function renderLeaderboardPage(container: HTMLElement): void {
   container.innerHTML = `
-    ${contentHeader("leaderboard_points_table")}
+    ${contentHeader("leaderboard_tier_list_title")}
     <section class="content">
-      ${boxOpen("leaderboard_table", "primary")}
+      ${boxOpen("leaderboard_tier_list_title", "primary")}
         <div class="row" style="margin-bottom:12px;">
           <div class="col-sm-12 text-right">
-            <button type="button" class="btn btn-primary disabled" aria-disabled="true"
-              data-action="add-leaderboard-tier" disabled
-              title="${escapeHtml(t("leaderboard_backend_pending"))}">
+            <a class="btn btn-primary"
+               href="#/addLeaderboard"
+               data-action="add-leaderboard-tier"
+               data-testid="btn-add-leaderboard-tier">
               <i class="fa fa-plus"></i> ${escapeHtml(t("add_leaderboard_tier"))}
-            </button>
+            </a>
           </div>
         </div>
-        <div id="leaderboard-banner"></div>
         <div id="leaderboard-table">${escapeHtml(t("loading_ellipsis"))}</div>
       ${boxClose()}
     </section>`;
 
-  const tableHost = container.querySelector<HTMLElement>("#leaderboard-table")!;
-  const bannerHost = container.querySelector<HTMLElement>("#leaderboard-banner")!;
+  const host = container.querySelector<HTMLElement>("#leaderboard-table")!;
+  void load(host);
 
-  void refresh();
+  host.addEventListener("click", (ev) => {
+    const btn = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
+      "[data-action='delete-tier']"
+    );
+    if (!btn) return;
+    const id = btn.dataset.tierId;
+    if (!id) return;
+    if (!window.confirm(t("leaderboard_tier_confirm_delete"))) return;
+    void remove(host, id);
+  });
+}
 
-  async function refresh(): Promise<void> {
-    tableHost.textContent = t("loading_ellipsis");
-    try {
-      const res = await listLeaderboardTiers();
-      DataTable.mount<LeaderboardTier>(tableHost, {
-        id: "leaderboard-datatable",
-        columns: [
-          {
-            key: "place",
-            title: t("place"),
-            render: (r) => escapeHtml(String(r.place)),
-          },
-          {
-            key: "points",
-            title: t("points"),
-            render: (r) => escapeHtml(String(r.points)),
-          },
-        ],
-        rows: res.tiers,
-        emptyMessage: t("no_data_available_in_table"),
-      });
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "NOT_IMPLEMENTED") {
-        // Expected path until BIN-668 ships — surface the banner, not a
-        // red Toast (this isn't a transient failure, it's planned work).
-        bannerHost.innerHTML = backendPendingBanner();
-        tableHost.innerHTML = "";
-      } else {
-        const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
-        Toast.error(msg);
-        tableHost.innerHTML = `<div class="callout callout-danger">${escapeHtml(msg)}</div>`;
-      }
-    }
+async function load(host: HTMLElement): Promise<void> {
+  try {
+    const { tiers } = await listLeaderboardTiers();
+    host.innerHTML = renderTable(tiers);
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
+    host.innerHTML = `<div class="callout callout-danger" data-testid="leaderboard-load-error">${escapeHtml(msg)}</div>`;
+  }
+}
+
+async function remove(host: HTMLElement, id: string): Promise<void> {
+  try {
+    await deleteLeaderboardTier(id);
+    Toast.success(t("leaderboard_tier_deleted"));
+    await load(host);
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
+    Toast.error(msg);
+  }
+}
+
+function renderTable(tiers: LeaderboardTier[]): string {
+  if (tiers.length === 0) {
+    return `<p class="text-muted" data-testid="leaderboard-empty">${escapeHtml(t("no_data_available_in_table"))}</p>`;
+  }
+  const rows = tiers.map((row) => renderRow(row)).join("");
+  return `
+    <table class="table table-striped" data-testid="leaderboard-table-body">
+      <thead>
+        <tr>
+          <th>${escapeHtml(t("leaderboard_tier_name"))}</th>
+          <th>${escapeHtml(t("leaderboard_place"))}</th>
+          <th>${escapeHtml(t("leaderboard_points"))}</th>
+          <th>${escapeHtml(t("leaderboard_prize_amount"))}</th>
+          <th>${escapeHtml(t("leaderboard_prize_description"))}</th>
+          <th>${escapeHtml(t("leaderboard_active"))}</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderRow(tier: LeaderboardTier): string {
+  const activeBadge = tier.active
+    ? `<span class="label label-success">${escapeHtml(t("active"))}</span>`
+    : `<span class="label label-default">${escapeHtml(t("inactive"))}</span>`;
+  const prize = tier.prizeAmount === null ? "—" : formatPrize(tier.prizeAmount);
+  return `
+    <tr data-testid="tier-row-${escapeHtml(tier.id)}">
+      <td>${escapeHtml(tier.tierName)}</td>
+      <td>${tier.place}</td>
+      <td>${tier.points}</td>
+      <td>${escapeHtml(prize)}</td>
+      <td>${escapeHtml(tier.prizeDescription || "—")}</td>
+      <td>${activeBadge}</td>
+      <td class="text-right">
+        <a class="btn btn-default btn-xs"
+           href="#/leaderboard/edit/${encodeURIComponent(tier.id)}"
+           data-testid="btn-edit-tier-${escapeHtml(tier.id)}">
+          <i class="fa fa-edit"></i> ${escapeHtml(t("edit"))}
+        </a>
+        <button type="button"
+                class="btn btn-danger btn-xs"
+                data-action="delete-tier"
+                data-tier-id="${escapeHtml(tier.id)}"
+                data-testid="btn-delete-tier-${escapeHtml(tier.id)}">
+          <i class="fa fa-trash"></i> ${escapeHtml(t("delete"))}
+        </button>
+      </td>
+    </tr>`;
+}
+
+function formatPrize(amount: number): string {
+  const nf = new Intl.NumberFormat("nb-NO", {
+    style: "currency",
+    currency: "NOK",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+  try {
+    return nf.format(amount);
+  } catch {
+    return `${amount} NOK`;
   }
 }

@@ -105,9 +105,9 @@ export const routes: RouteDef[] = [
   { path: "/withdraw/history/bank", titleKey: "withdraw_history_bank", module: "Withdraw Management" },
   { path: "/withdraw/list/emails", titleKey: "add_email_account", module: "Withdraw Management" },
 
-  { path: "/leaderboard", titleKey: "leaderboard_management" },
-  // PR-B6 (BIN-664) — Leaderboard tier add (PLACEHOLDER until BIN-668 ships).
-  { path: "/addLeaderboard", titleKey: "add_leaderboard_tier", module: "Leaderboard Management" },
+  { path: "/leaderboard", titleKey: "leaderboard_tier_list_title" },
+  // BIN-668 — Leaderboard tier CRUD. `/leaderboard/edit/:id` via hash-regex.
+  { path: "/addLeaderboard", titleKey: "leaderboard_tier_create", module: "Leaderboard Management" },
   { path: "/voucher", titleKey: "voucher_management" },
   { path: "/loyaltyManagement", titleKey: "players_loyalty_management", module: "Loyalty Management" },
   { path: "/loyalty", titleKey: "loyalty_type", module: "Loyalty Management" },
@@ -123,8 +123,9 @@ export const routes: RouteDef[] = [
   { path: "/ResponsibleGameing", titleKey: "responsible_gaming", roles: ["admin", "super-admin"] },
   { path: "/LinksofOtherAgencies", titleKey: "links_of_other_agencies", roles: ["admin", "super-admin"] },
   { path: "/settings", titleKey: "settings", roles: ["admin", "super-admin"] },
-  // PR-A6 — settings sub-pages (maintenance). Edit-route via hash-regex.
-  { path: "/maintenance", titleKey: "maintenance_management", roles: ["admin", "super-admin"] },
+  // BIN-677 — settings sub-pages (maintenance). Edit-route via hash-regex.
+  { path: "/maintenance", titleKey: "maintenance_list_title", roles: ["admin", "super-admin"] },
+  { path: "/maintenance/new", titleKey: "maintenance_new_window", roles: ["admin", "super-admin"] },
   { path: "/system/systemInformation", titleKey: "system_information", roles: ["admin", "super-admin"] },
 
   { path: "/agent/cashinout", titleKey: "cash_in_out", roles: ["agent"] },

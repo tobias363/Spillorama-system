@@ -1,12 +1,18 @@
-// PR-A6 (BIN-674) — /settings.
-// Port of legacy/unity-backend/App/Views/settings/settings.html (640 linjer).
+// BIN-677 — /settings (system-wide key-value registry).
 //
-// Scope-kutt (§2.3 design-avvik):
-//   - Screen-saver image upload SKJULT (kiosk-feature, ikke pilot-kritisk).
-//   - Spiller-tak (daily/monthly spending) READ-ONLY m/ info-banner
-//     (per-hall Spillvett tar presedens).
+// Registry: 19 nøkler i 5 kategorier (general, app_versions, compliance,
+// branding, feature_flags). Se apps/backend/src/admin/SettingsService.ts
+// for full definisjon. Skjer via GET/PATCH /api/admin/settings.
 //
-// Backend-gap: BIN-A6-SETTINGS — localStorage-fallback.
+// UX-valg: Én kategori-seksjon per `category`, per-nøkkel input basert
+// på `type`:
+//   - string  → <input type="text"> / <textarea> (hvis `system.information`)
+//   - number  → <input type="number">
+//   - boolean → <input type="checkbox">
+//   - object  → <textarea> med JSON + parse/stringify ved submit
+//
+// Compliance-nøkler vises med en info-banner som forklarer at per-hall
+// Spillvett-limits tar presedens.
 
 import { t } from "../../i18n/I18n.js";
 import { Toast } from "../../components/Toast.js";
@@ -17,18 +23,34 @@ import {
   escapeHtml,
 } from "../adminUsers/shared.js";
 import {
-  getGlobalSettings,
-  updateGlobalSettings,
-  type GlobalAppSettings,
+  getSystemSettings,
+  patchSystemSettings,
+  type SystemSettingPatchEntry,
+  type SystemSettingRow,
 } from "../../api/admin-system-settings.js";
+import { ApiError } from "../../api/client.js";
+
+const CATEGORY_ORDER: readonly string[] = [
+  "general",
+  "app_versions",
+  "compliance",
+  "branding",
+  "feature_flags",
+];
+
+function categoryLabel(category: string): string {
+  const key = `setting_category_${category}`;
+  return t(key);
+}
 
 export function renderSettingsPage(container: HTMLElement): void {
   container.innerHTML = `
     ${contentHeader("settings", "settings")}
     <section class="content">
-      <div class="callout callout-warning" data-testid="settings-placeholder-banner">
-        <i class="fa fa-clock-o"></i>
-        ${escapeHtml(t("settings_placeholder_banner"))}
+      <div class="callout callout-info" data-testid="settings-wired-banner">
+        <i class="fa fa-info-circle"></i>
+        ${escapeHtml(t("system_settings_wired_banner"))}
+        <p><small>${escapeHtml(t("system_settings_registry_description"))}</small></p>
       </div>
       ${boxOpen("settings", "primary")}
         <div id="settings-form-host">${escapeHtml(t("loading_ellipsis"))}</div>
@@ -40,138 +62,234 @@ export function renderSettingsPage(container: HTMLElement): void {
 }
 
 async function mount(host: HTMLElement): Promise<void> {
-  const current = await getGlobalSettings();
+  let settings: SystemSettingRow[];
+  try {
+    const res = await getSystemSettings();
+    settings = res.settings;
+  } catch (err) {
+    const message = err instanceof ApiError ? err.message : t("something_went_wrong");
+    host.innerHTML = `<div class="callout callout-danger" data-testid="settings-load-error">${escapeHtml(message)}</div>`;
+    return;
+  }
 
-  host.innerHTML = `
-    <form id="settings-form" class="form-horizontal" data-testid="settings-form">
-      <h4>${escapeHtml(t("android_version"))} / ${escapeHtml(t("ios_version"))} / ${escapeHtml(t("webgl_version"))} / ${escapeHtml(t("windows_version"))}</h4>
-      ${versionRow("android_version", t("android_version"), current.android_version)}
-      ${versionRow("android_store_link", t("android_store_link"), current.android_store_link, "text")}
-      ${versionRow("ios_version", t("ios_version"), current.ios_version)}
-      ${versionRow("ios_store_link", t("ios_store_link"), current.ios_store_link, "text")}
-      ${versionRow("wind_linux_version", t("windows_version"), current.wind_linux_version)}
-      ${versionRow("windows_store_link", t("windows_store_link"), current.windows_store_link, "text")}
-      ${versionRow("webgl_version", t("webgl_version"), current.webgl_version)}
-      ${versionRow("webgl_store_link", t("webgl_store_link"), current.webgl_store_link, "text")}
-
-      <div class="form-group">
-        <label class="col-sm-3 control-label" for="sf-disable-store-link">${escapeHtml(t("disable_store_link"))}</label>
-        <div class="col-sm-6">
-          <select id="sf-disable-store-link" name="disable_store_link" class="form-control">
-            <option value="Yes"${current.disable_store_link === "Yes" ? " selected" : ""}>${escapeHtml(t("yes"))}</option>
-            <option value="No"${current.disable_store_link === "No" ? " selected" : ""}>${escapeHtml(t("no"))}</option>
-          </select>
-        </div>
-      </div>
-
-      <hr>
-      <div class="callout callout-info" data-testid="per-hall-spillvett-override-info">
-        <i class="fa fa-info-circle"></i>
-        ${escapeHtml(t("per_hall_spillvett_override_info"))}
-      </div>
-
-      <div class="form-group">
-        <label class="col-sm-3 control-label" for="sf-daily">${escapeHtml(t("daily_spending"))}</label>
-        <div class="col-sm-6">
-          <input type="number"
-                 id="sf-daily"
-                 name="daily_spending"
-                 class="form-control"
-                 data-testid="sf-daily-readonly"
-                 readonly
-                 value="${escapeHtml(String(current.daily_spending))}">
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="col-sm-3 control-label" for="sf-monthly">${escapeHtml(t("monthly_spending"))}</label>
-        <div class="col-sm-6">
-          <input type="number"
-                 id="sf-monthly"
-                 name="monthly_spending"
-                 class="form-control"
-                 data-testid="sf-monthly-readonly"
-                 readonly
-                 value="${escapeHtml(String(current.monthly_spending))}">
-        </div>
-      </div>
-
-      <hr>
-      <div class="form-group">
-        <label class="col-sm-3 control-label" for="sf-screen-saver">${escapeHtml(t("screen_saver"))}</label>
-        <div class="col-sm-6">
-          <input type="checkbox"
-                 id="sf-screen-saver"
-                 name="screenSaver"
-                 data-testid="sf-screensaver"
-                 ${current.screenSaver ? "checked" : ""}>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="col-sm-3 control-label" for="sf-screen-saver-time">${escapeHtml(t("screen_saver_time"))}</label>
-        <div class="col-sm-6">
-          <select id="sf-screen-saver-time" name="screenSaverTime" class="form-control">
-            ${Array.from({ length: 20 }, (_, i) => i + 1)
-              .map(
-                (i) =>
-                  `<option value="${i}"${current.screenSaverTime === i ? " selected" : ""}>${i} ${escapeHtml(t("minutes"))}</option>`
-              )
-              .join("")}
-          </select>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <div class="col-sm-offset-3 col-sm-6">
-          <button type="submit" class="btn btn-success" data-action="save-settings">
-            <i class="fa fa-save"></i> ${escapeHtml(t("submit"))}
-          </button>
-        </div>
-      </div>
-    </form>`;
+  host.innerHTML = renderForm(settings);
 
   const form = host.querySelector<HTMLFormElement>("#settings-form")!;
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    void submit(form, current);
+    void submit(form, settings, host);
   });
 }
 
-function versionRow(name: string, label: string, value: string, type: "text" | "number" = "text"): string {
+function renderForm(settings: SystemSettingRow[]): string {
+  const byCategory = new Map<string, SystemSettingRow[]>();
+  for (const s of settings) {
+    const list = byCategory.get(s.category);
+    if (list) list.push(s);
+    else byCategory.set(s.category, [s]);
+  }
+  // Stabil rekkefølge per CATEGORY_ORDER; ukjente kategorier legges til slutten.
+  const orderedCategories = [
+    ...CATEGORY_ORDER.filter((c) => byCategory.has(c)),
+    ...Array.from(byCategory.keys()).filter((c) => !CATEGORY_ORDER.includes(c)),
+  ];
+
+  const sections = orderedCategories
+    .map((cat) => renderCategorySection(cat, byCategory.get(cat) ?? []))
+    .join("");
+
   return `
-    <div class="form-group">
-      <label class="col-sm-3 control-label" for="sf-${name}">${escapeHtml(label)}</label>
-      <div class="col-sm-6">
-        <input type="${type}"
-               id="sf-${name}"
-               name="${name}"
+    <form id="settings-form" class="form-horizontal" data-testid="settings-form">
+      ${sections}
+      <div class="form-group">
+        <div class="col-sm-offset-3 col-sm-9">
+          <button type="submit" class="btn btn-success" data-action="save-settings">
+            <i class="fa fa-save"></i> ${escapeHtml(t("save"))}
+          </button>
+        </div>
+      </div>
+    </form>`;
+}
+
+function renderCategorySection(category: string, rows: SystemSettingRow[]): string {
+  const complianceInfo =
+    category === "compliance"
+      ? `<div class="callout callout-info" data-testid="per-hall-spillvett-override-info">
+          <i class="fa fa-info-circle"></i> ${escapeHtml(t("per_hall_spillvett_override_info"))}
+        </div>`
+      : "";
+  const fields = rows.map((r) => renderField(r)).join("");
+  return `
+    <fieldset data-testid="settings-section-${escapeHtml(category)}" class="settings-section">
+      <legend>${escapeHtml(categoryLabel(category))}</legend>
+      ${complianceInfo}
+      ${fields}
+    </fieldset>`;
+}
+
+function renderField(row: SystemSettingRow): string {
+  const fieldId = `sf-${row.key.replace(/\./g, "-")}`;
+  const isDefaultBadge = row.isDefault
+    ? `<span class="label label-default" data-testid="${escapeHtml(fieldId)}-default-badge">${escapeHtml(t("setting_is_default"))}</span>`
+    : "";
+  const description = row.description
+    ? `<p class="help-block"><small>${escapeHtml(row.description)}</small></p>`
+    : "";
+
+  let control = "";
+  switch (row.type) {
+    case "boolean":
+      control = `
+        <input type="checkbox"
+               id="${escapeHtml(fieldId)}"
+               name="${escapeHtml(row.key)}"
+               data-setting-type="boolean"
+               data-testid="${escapeHtml(fieldId)}"
+               ${row.value === true ? "checked" : ""}>`;
+      break;
+    case "number":
+      control = `
+        <input type="number"
+               id="${escapeHtml(fieldId)}"
+               name="${escapeHtml(row.key)}"
                class="form-control"
-               value="${escapeHtml(value)}">
+               data-setting-type="number"
+               data-testid="${escapeHtml(fieldId)}"
+               value="${escapeHtml(String(row.value ?? 0))}">`;
+      break;
+    case "object":
+      control = `
+        <textarea id="${escapeHtml(fieldId)}"
+                  name="${escapeHtml(row.key)}"
+                  class="form-control"
+                  rows="4"
+                  data-setting-type="object"
+                  data-testid="${escapeHtml(fieldId)}"
+                  placeholder="{}">${escapeHtml(JSON.stringify(row.value ?? {}, null, 2))}</textarea>`;
+      break;
+    case "string":
+    default: {
+      const val = typeof row.value === "string" ? row.value : "";
+      const isLongText = row.key === "system.information";
+      control = isLongText
+        ? `<textarea id="${escapeHtml(fieldId)}"
+                    name="${escapeHtml(row.key)}"
+                    class="form-control"
+                    rows="6"
+                    data-setting-type="string"
+                    data-testid="${escapeHtml(fieldId)}">${escapeHtml(val)}</textarea>`
+        : `<input type="text"
+                id="${escapeHtml(fieldId)}"
+                name="${escapeHtml(row.key)}"
+                class="form-control"
+                data-setting-type="string"
+                data-testid="${escapeHtml(fieldId)}"
+                value="${escapeHtml(val)}">`;
+      break;
+    }
+  }
+
+  return `
+    <div class="form-group" data-setting-key="${escapeHtml(row.key)}">
+      <label class="col-sm-3 control-label" for="${escapeHtml(fieldId)}">
+        ${escapeHtml(row.key)}
+        ${isDefaultBadge}
+      </label>
+      <div class="col-sm-9">
+        ${control}
+        ${description}
       </div>
     </div>`;
 }
 
-async function submit(form: HTMLFormElement, current: GlobalAppSettings): Promise<void> {
-  const patch: Partial<GlobalAppSettings> = {
-    android_version: (form.querySelector<HTMLInputElement>("#sf-android_version")!).value.trim(),
-    android_store_link: (form.querySelector<HTMLInputElement>("#sf-android_store_link")!).value.trim(),
-    ios_version: (form.querySelector<HTMLInputElement>("#sf-ios_version")!).value.trim(),
-    ios_store_link: (form.querySelector<HTMLInputElement>("#sf-ios_store_link")!).value.trim(),
-    wind_linux_version: (form.querySelector<HTMLInputElement>("#sf-wind_linux_version")!).value.trim(),
-    windows_store_link: (form.querySelector<HTMLInputElement>("#sf-windows_store_link")!).value.trim(),
-    webgl_version: (form.querySelector<HTMLInputElement>("#sf-webgl_version")!).value.trim(),
-    webgl_store_link: (form.querySelector<HTMLInputElement>("#sf-webgl_store_link")!).value.trim(),
-    disable_store_link: (form.querySelector<HTMLSelectElement>("#sf-disable-store-link")!).value as "Yes" | "No",
-    screenSaver: (form.querySelector<HTMLInputElement>("#sf-screen-saver")!).checked,
-    screenSaverTime: Number((form.querySelector<HTMLSelectElement>("#sf-screen-saver-time")!).value),
-    // daily_spending and monthly_spending preserved read-only
-    daily_spending: current.daily_spending,
-    monthly_spending: current.monthly_spending,
-  };
+async function submit(
+  form: HTMLFormElement,
+  original: SystemSettingRow[],
+  host: HTMLElement
+): Promise<void> {
+  const patches: SystemSettingPatchEntry[] = [];
+  const originalByKey = new Map(original.map((r) => [r.key, r]));
+
+  const fields = form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+    "[data-setting-type]"
+  );
+  for (const el of Array.from(fields)) {
+    const key = el.name;
+    const type = el.dataset.settingType as "string" | "number" | "boolean" | "object";
+    const current = originalByKey.get(key);
+    if (!current) continue;
+
+    let newValue: unknown;
+    try {
+      newValue = parseFieldValue(el, type);
+    } catch {
+      Toast.error(`${key}: ${t("setting_json_parse_error")}`);
+      return;
+    }
+    // Bare send patch hvis endret (sparer audit-støy).
+    if (!deepEqual(current.value, newValue)) {
+      patches.push({ key, value: newValue });
+    }
+  }
+
+  if (patches.length === 0) {
+    Toast.success(t("no_changes_to_save"));
+    return;
+  }
 
   try {
-    await updateGlobalSettings(patch);
-    Toast.success(t("success"));
+    const res = await patchSystemSettings(patches);
+    Toast.success(t("setting_save_success"));
+    // Re-render med nye verdier (updatedAt-oppdatering + fjern default-badge).
+    host.innerHTML = renderForm(res.settings);
+    const freshForm = host.querySelector<HTMLFormElement>("#settings-form")!;
+    freshForm.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      void submit(freshForm, res.settings, host);
+    });
+  } catch (err) {
+    const message = err instanceof ApiError ? err.message : t("something_went_wrong");
+    Toast.error(message);
+  }
+}
+
+function parseFieldValue(
+  el: HTMLInputElement | HTMLTextAreaElement,
+  type: "string" | "number" | "boolean" | "object"
+): unknown {
+  switch (type) {
+    case "boolean":
+      return (el as HTMLInputElement).checked;
+    case "number": {
+      const n = Number((el as HTMLInputElement).value);
+      if (!Number.isFinite(n)) {
+        throw new Error("not finite");
+      }
+      return n;
+    }
+    case "object": {
+      const raw = (el as HTMLTextAreaElement).value.trim();
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("not object");
+      }
+      return parsed;
+    }
+    case "string":
+    default:
+      return (el as HTMLInputElement).value;
+  }
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== "object") return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
   } catch {
-    Toast.error(t("something_went_wrong"));
+    return false;
   }
 }

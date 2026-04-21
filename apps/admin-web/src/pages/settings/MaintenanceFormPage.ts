@@ -1,5 +1,11 @@
-// PR-A6 (BIN-674) — /maintenance/edit/:id.
-// Port of legacy/unity-backend/App/Views/settings/maintenanceEdit.html.
+// BIN-677 — /maintenance/new og /maintenance/edit/:id.
+//
+// Opprett eller rediger et maintenance-vindu. Formet deler UI mellom create
+// (POST /api/admin/maintenance) og update (PUT /api/admin/maintenance/:id).
+// Aktiv-invariant (max ett aktivt av gangen) håndheves i backend.
+//
+// UX-valg: <input type="datetime-local"> for start/slutt — vi konverterer
+// til/fra ISO-8601 ved load/submit. showBeforeMinutes 0-10080 (7 dager).
 
 import { t } from "../../i18n/I18n.js";
 import { Toast } from "../../components/Toast.js";
@@ -10,100 +16,195 @@ import {
   escapeHtml,
 } from "../adminUsers/shared.js";
 import {
-  getMaintenance,
-  updateMaintenance,
-  type MaintenanceConfig,
+  createMaintenanceWindow,
+  getMaintenanceWindow,
+  updateMaintenanceWindow,
+  type MaintenanceWindow,
 } from "../../api/admin-system-settings.js";
+import { ApiError } from "../../api/client.js";
 
-export function renderMaintenanceFormPage(container: HTMLElement, _id: string): void {
+export function renderMaintenanceFormPage(container: HTMLElement, id: string | null): void {
+  const titleKey = id ? "maintenance_management" : "maintenance_new_window";
   container.innerHTML = `
-    ${contentHeader("maintenance_management", "settings")}
+    ${contentHeader(titleKey, "settings")}
     <section class="content">
-      <div class="callout callout-warning" data-testid="settings-placeholder-banner">
-        <i class="fa fa-clock-o"></i>
-        ${escapeHtml(t("settings_placeholder_banner"))}
+      <div class="callout callout-info" data-testid="maintenance-wired-banner">
+        <i class="fa fa-info-circle"></i>
+        ${escapeHtml(t("maintenance_wired_banner"))}
       </div>
-      ${boxOpen("maintenance_management", "primary")}
+      ${boxOpen(titleKey, "primary")}
         <div id="maintenance-form-host">${escapeHtml(t("loading_ellipsis"))}</div>
       ${boxClose()}
     </section>`;
 
   const host = container.querySelector<HTMLElement>("#maintenance-form-host")!;
-  void mount(host);
+  void mount(host, id);
 }
 
-async function mount(host: HTMLElement): Promise<void> {
-  const cfg = await getMaintenance();
-  host.innerHTML = `
-    <form id="maintenance-form" class="form-horizontal" data-testid="maintenance-form">
+async function mount(host: HTMLElement, id: string | null): Promise<void> {
+  let existing: MaintenanceWindow | null = null;
+  if (id) {
+    try {
+      existing = await getMaintenanceWindow(id);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : t("something_went_wrong");
+      host.innerHTML = `<div class="callout callout-danger" data-testid="maintenance-load-error">${escapeHtml(message)}</div>`;
+      return;
+    }
+  }
+
+  host.innerHTML = renderForm(existing);
+
+  const form = host.querySelector<HTMLFormElement>("#maintenance-form")!;
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void submit(form, id);
+  });
+}
+
+function renderForm(w: MaintenanceWindow | null): string {
+  const startDefault = w ? isoToLocalInput(w.maintenanceStart) : "";
+  const endDefault = w ? isoToLocalInput(w.maintenanceEnd) : "";
+  const idRow = w
+    ? `
       <div class="form-group">
-        <label class="col-sm-3 control-label" for="mf-message">${escapeHtml(t("maintenance_message"))}</label>
+        <label class="col-sm-3 control-label">${escapeHtml(t("maintenance_window_id"))}</label>
         <div class="col-sm-9">
-          <textarea id="mf-message" name="message" class="form-control" rows="4">${escapeHtml(cfg.message)}</textarea>
+          <p class="form-control-static"><code data-testid="mf-id">${escapeHtml(w.id)}</code></p>
+        </div>
+      </div>`
+    : "";
+  const activatedRow =
+    w && w.activatedAt
+      ? `<div class="form-group">
+          <label class="col-sm-3 control-label">${escapeHtml(t("maintenance_activated_at"))}</label>
+          <div class="col-sm-9"><p class="form-control-static"><code>${escapeHtml(w.activatedAt)}</code></p></div>
+        </div>`
+      : "";
+  const deactivatedRow =
+    w && w.deactivatedAt
+      ? `<div class="form-group">
+          <label class="col-sm-3 control-label">${escapeHtml(t("maintenance_deactivated_at"))}</label>
+          <div class="col-sm-9"><p class="form-control-static"><code>${escapeHtml(w.deactivatedAt)}</code></p></div>
+        </div>`
+      : "";
+  return `
+    <form id="maintenance-form" class="form-horizontal" data-testid="maintenance-form">
+      ${idRow}
+      <div class="form-group">
+        <label class="col-sm-3 control-label" for="mf-start">${escapeHtml(t("maintenance_start_date"))}</label>
+        <div class="col-sm-9">
+          <input type="datetime-local" id="mf-start" name="maintenance_start"
+            class="form-control" required
+            data-testid="mf-start"
+            value="${escapeHtml(startDefault)}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-sm-3 control-label" for="mf-end">${escapeHtml(t("maintenance_end_date"))}</label>
+        <div class="col-sm-9">
+          <input type="datetime-local" id="mf-end" name="maintenance_end"
+            class="form-control" required
+            data-testid="mf-end"
+            value="${escapeHtml(endDefault)}">
+          <p class="help-block"><small>${escapeHtml(t("maintenance_form_times_help"))}</small></p>
         </div>
       </div>
       <div class="form-group">
         <label class="col-sm-3 control-label" for="mf-show-before">${escapeHtml(t("show_before_minutes"))}</label>
         <div class="col-sm-9">
           <input type="number" id="mf-show-before" name="showBeforeMinutes"
-            class="form-control" min="0"
-            value="${escapeHtml(String(cfg.showBeforeMinutes))}">
+            class="form-control" min="0" max="10080" required
+            data-testid="mf-show-before"
+            value="${escapeHtml(String(w?.showBeforeMinutes ?? 60))}">
         </div>
       </div>
       <div class="form-group">
-        <label class="col-sm-3 control-label" for="mf-start">${escapeHtml(t("maintenance_start_date"))}</label>
+        <label class="col-sm-3 control-label" for="mf-message">${escapeHtml(t("maintenance_message"))}</label>
         <div class="col-sm-9">
-          <input type="datetime-local" id="mf-start" name="maintenance_start_date"
-            class="form-control" value="${escapeHtml(cfg.maintenance_start_date)}">
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="col-sm-3 control-label" for="mf-end">${escapeHtml(t("maintenance_end_date"))}</label>
-        <div class="col-sm-9">
-          <input type="datetime-local" id="mf-end" name="maintenance_end_date"
-            class="form-control" value="${escapeHtml(cfg.maintenance_end_date)}">
+          <textarea id="mf-message" name="message" class="form-control" rows="4"
+            maxlength="2000" data-testid="mf-message">${escapeHtml(w?.message ?? "")}</textarea>
         </div>
       </div>
       <div class="form-group">
         <label class="col-sm-3 control-label" for="mf-status">${escapeHtml(t("maintenance_status"))}</label>
         <div class="col-sm-9">
-          <select id="mf-status" name="status" class="form-control">
-            <option value="active"${cfg.status === "active" ? " selected" : ""}>${escapeHtml(t("active"))}</option>
-            <option value="inactive"${cfg.status === "inactive" ? " selected" : ""}>${escapeHtml(t("inactive"))}</option>
+          <select id="mf-status" name="status" class="form-control" data-testid="mf-status">
+            <option value="inactive"${w?.status === "inactive" || !w ? " selected" : ""}>${escapeHtml(t("inactive"))}</option>
+            <option value="active"${w?.status === "active" ? " selected" : ""}>${escapeHtml(t("active"))}</option>
           </select>
         </div>
       </div>
+      ${activatedRow}
+      ${deactivatedRow}
       <div class="form-group">
         <div class="col-sm-offset-3 col-sm-9">
-          <button type="submit" class="btn btn-success" data-action="save-maintenance">
-            <i class="fa fa-save"></i> ${escapeHtml(t("submit"))}
+          <button type="submit" class="btn btn-success" data-action="save-maintenance" data-testid="btn-save-maintenance">
+            <i class="fa fa-save"></i> ${escapeHtml(w ? t("save") : t("maintenance_create"))}
           </button>
           <a class="btn btn-default" href="#/maintenance">${escapeHtml(t("cancel"))}</a>
         </div>
       </div>
     </form>`;
-
-  const form = host.querySelector<HTMLFormElement>("#maintenance-form")!;
-  form.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    void submit(form);
-  });
 }
 
-async function submit(form: HTMLFormElement): Promise<void> {
-  const patch: Partial<MaintenanceConfig> = {
-    message: (form.querySelector<HTMLTextAreaElement>("#mf-message")!).value.trim(),
-    showBeforeMinutes: Number((form.querySelector<HTMLInputElement>("#mf-show-before")!).value),
-    maintenance_start_date: (form.querySelector<HTMLInputElement>("#mf-start")!).value.trim(),
-    maintenance_end_date: (form.querySelector<HTMLInputElement>("#mf-end")!).value.trim(),
-    status: (form.querySelector<HTMLSelectElement>("#mf-status")!).value as "active" | "inactive",
+async function submit(form: HTMLFormElement, id: string | null): Promise<void> {
+  const startLocal = (form.querySelector<HTMLInputElement>("#mf-start")!).value.trim();
+  const endLocal = (form.querySelector<HTMLInputElement>("#mf-end")!).value.trim();
+  const message = (form.querySelector<HTMLTextAreaElement>("#mf-message")!).value;
+  const showBeforeMinutes = Number(
+    (form.querySelector<HTMLInputElement>("#mf-show-before")!).value
+  );
+  const status = (form.querySelector<HTMLSelectElement>("#mf-status")!).value as
+    | "active"
+    | "inactive";
+
+  if (!startLocal || !endLocal) {
+    Toast.error(t("something_went_wrong"));
+    return;
+  }
+
+  const body = {
+    maintenanceStart: localInputToIso(startLocal),
+    maintenanceEnd: localInputToIso(endLocal),
+    message,
+    showBeforeMinutes,
+    status,
   };
 
   try {
-    await updateMaintenance(patch);
-    Toast.success(t("success"));
+    if (id) {
+      await updateMaintenanceWindow(id, body);
+      Toast.success(t("maintenance_window_updated"));
+    } else {
+      await createMaintenanceWindow(body);
+      Toast.success(t("maintenance_window_created"));
+    }
     window.location.hash = "#/maintenance";
-  } catch {
-    Toast.error(t("something_went_wrong"));
+  } catch (err) {
+    const message = err instanceof ApiError ? err.message : t("something_went_wrong");
+    Toast.error(message);
   }
+}
+
+/**
+ * Konverterer ISO-8601 fra backend til `YYYY-MM-DDTHH:mm` som `<input
+ * type="datetime-local">` forstår. Bruker lokal tidssone i Date.
+ */
+function isoToLocalInput(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * Konverterer `YYYY-MM-DDTHH:mm` (datetime-local) → full ISO-8601 (UTC).
+ */
+function localInputToIso(local: string): string {
+  if (!local) return "";
+  const d = new Date(local);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString();
 }

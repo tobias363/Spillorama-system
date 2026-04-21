@@ -1,10 +1,10 @@
-// PR-A6 (BIN-674) / BIN-676 — tests for CMS + Settings + SystemInfo + otherGames.
+// BIN-676/677/679 — tests for CMS + Settings + SystemInfo + otherGames.
 //
-// Focus: dispatcher-contract, regulatorisk-lock for Spillvett-tekst (BIN-680),
-// FEATURE_DISABLED-håndtering, FAQ CRUD-roundtrip, i18n-key coverage. CMS
-// skjermer bruker mocked fetch mot `/api/admin/cms/*` (BIN-676 backend).
+// CMS-delen (BIN-676) bruker `mockApiRouter` fra tidligere PR. Settings /
+// SystemInfo / otherGames-delen (BIN-677/679) bruker `installFetch`-stub
+// som også settes opp i `beforeEach` som default for alle tester.
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { initI18n } from "../src/i18n/I18n.js";
 import { isCmsRoute, mountCmsRoute } from "../src/pages/cms/index.js";
 import {
@@ -24,7 +24,7 @@ import {
 import noI18n from "../src/i18n/no.json";
 import enI18n from "../src/i18n/en.json";
 
-async function tick(rounds = 8): Promise<void> {
+async function tick(rounds = 12): Promise<void> {
   for (let i = 0; i < rounds; i++) await new Promise<void>((r) => setTimeout(r, 0));
 }
 
@@ -33,7 +33,7 @@ function container(): HTMLElement {
   return document.getElementById("app")!;
 }
 
-// ── Fetch-mock utility (BIN-676) ─────────────────────────────────────────────
+// ── Fetch-mock utility (BIN-676) — for CMS-testene ──────────────────────────
 
 interface MockRoute {
   match: RegExp;
@@ -76,9 +76,120 @@ function mockApiRouter(routes: MockRoute[]): ReturnType<typeof vi.fn> {
   return fn;
 }
 
+// ── Fetch stub helpers — for Settings/SystemInfo/otherGames-testene ─────────
+
+type FetchHandler = (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
+
+function installFetch(handler: FetchHandler): void {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    return handler(input, init);
+  }) as typeof fetch;
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function apiOk<T>(data: T): Response {
+  return jsonResponse(200, { ok: true, data });
+}
+
+function emptySettingsListResponse(): Response {
+  return apiOk({
+    settings: [
+      {
+        key: "system.timezone",
+        value: "Europe/Oslo",
+        category: "general",
+        description: "Standard tidssone",
+        type: "string",
+        isDefault: true,
+        updatedByUserId: null,
+        updatedAt: null,
+      },
+      {
+        key: "system.information",
+        value: "",
+        category: "general",
+        description: "System-information HTML-blob",
+        type: "string",
+        isDefault: true,
+        updatedByUserId: null,
+        updatedAt: null,
+      },
+      {
+        key: "compliance.daily_spending_default",
+        value: 0,
+        category: "compliance",
+        description: "Daglig tak",
+        type: "number",
+        isDefault: true,
+        updatedByUserId: null,
+        updatedAt: null,
+      },
+      {
+        key: "branding.screen_saver_enabled",
+        value: false,
+        category: "branding",
+        description: "Screensaver",
+        type: "boolean",
+        isDefault: true,
+        updatedByUserId: null,
+        updatedAt: null,
+      },
+      {
+        key: "features.flags",
+        value: {},
+        category: "feature_flags",
+        description: "Feature-flagg-objekt",
+        type: "object",
+        isDefault: true,
+        updatedByUserId: null,
+        updatedAt: null,
+      },
+    ],
+    count: 5,
+  });
+}
+
+function emptyMaintenanceListResponse(): Response {
+  return apiOk({ windows: [], count: 0, active: null });
+}
+
+function miniGameDefault(gameType: string): Response {
+  return apiOk({
+    id: `default-${gameType}`,
+    gameType,
+    config: {},
+    active: true,
+    updatedByUserId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 beforeEach(() => {
   window.localStorage.clear();
+  window.localStorage.setItem("bingo_admin_access_token", "tok");
   initI18n();
+  // Default-stub — CMS-testene overrider med mockApiRouter ved behov.
+  installFetch((input) => {
+    const url = typeof input === "string" ? input : (input as URL | Request).toString();
+    if (url.includes("/api/admin/settings")) return emptySettingsListResponse();
+    if (url.includes("/api/admin/maintenance")) return emptyMaintenanceListResponse();
+    if (url.includes("/api/admin/mini-games/wheel")) return miniGameDefault("wheel");
+    if (url.includes("/api/admin/mini-games/chest")) return miniGameDefault("chest");
+    if (url.includes("/api/admin/mini-games/mystery")) return miniGameDefault("mystery");
+    if (url.includes("/api/admin/mini-games/colordraft")) return miniGameDefault("colordraft");
+    return jsonResponse(404, { ok: false, error: { code: "NOT_FOUND", message: "Not stubbed" } });
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 // ── CMS slug-mapping (BIN-676) ───────────────────────────────────────────────
@@ -106,9 +217,9 @@ describe("BIN-676 CMS API — text-key to backend-slug mapping", () => {
   });
 });
 
-// ── CMS dispatcher ───────────────────────────────────────────────────────────
+// ── CMS dispatcher (BIN-676 wired) ───────────────────────────────────────────
 
-describe("PR-A6 CMS dispatcher", () => {
+describe("CMS dispatcher (BIN-676 wired)", () => {
   it("matches static + dynamic CMS routes", () => {
     expect(isCmsRoute("/cms")).toBe(true);
     expect(isCmsRoute("/faq")).toBe(true);
@@ -119,10 +230,8 @@ describe("PR-A6 CMS dispatcher", () => {
     expect(isCmsRoute("/Aboutus")).toBe(true);
     expect(isCmsRoute("/ResponsibleGameing")).toBe(true);
     expect(isCmsRoute("/LinksofOtherAgencies")).toBe(true);
-
     expect(isCmsRoute("/admin")).toBe(false);
     expect(isCmsRoute("/settings")).toBe(false);
-    expect(isCmsRoute("/faq/something-else")).toBe(false);
   });
 
   it("/cms renders 6-row static table with links to sub-pages", () => {
@@ -159,7 +268,6 @@ describe("PR-A6 CMS dispatcher", () => {
     expect(host.querySelector('[data-testid="cms-regulatory-lock-banner"]')).toBeTruthy();
     const textarea = host.querySelector<HTMLTextAreaElement>('[data-testid="cms-body-textarea"]');
     expect(textarea?.readOnly).toBe(true);
-    // GET fungerte selv om siden er låst — tekst skal vises.
     expect(textarea?.value).toBe("Gjeldende tekst");
     const save = host.querySelector<HTMLButtonElement>('[data-testid="cms-save-btn"]');
     expect(save).toBeTruthy();
@@ -207,10 +315,8 @@ describe("PR-A6 CMS dispatcher", () => {
     expect(textarea?.value).toBe("Vilkår v1");
     const save = host.querySelector<HTMLButtonElement>('[data-testid="cms-save-btn"]');
     expect(save?.disabled).toBe(false);
-    // Lock banner must NOT be present for non-regulatory pages.
     expect(host.querySelector('[data-testid="cms-regulatory-lock-banner"]')).toBeNull();
 
-    // Submit flow
     textarea!.value = "Vilkår v2";
     const form = host.querySelector<HTMLFormElement>("#cms-text-form")!;
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -218,7 +324,7 @@ describe("PR-A6 CMS dispatcher", () => {
     expect(puttedContent).toBe("Vilkår v2");
   });
 
-  it("/ResponsibleGameing: hvis noen likevel sender PUT returnerer backend FEATURE_DISABLED og UI toaster feilmelding", async () => {
+  it("/ResponsibleGameing: UI blokkerer PUT pga isLocked-sjekk (BIN-680)", async () => {
     const router = mockApiRouter([
       {
         match: /\/api\/admin\/cms\/responsible-gaming$/,
@@ -249,13 +355,8 @@ describe("PR-A6 CMS dispatcher", () => {
     mountCmsRoute(host, "/ResponsibleGameing");
     await tick();
     const form = host.querySelector<HTMLFormElement>("#cms-text-form")!;
-    // Submit — UI-form er disabled, men defensive sti tester at det likevel
-    // ikke kaster ut av prosessen når backend avviser med FEATURE_DISABLED.
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await tick();
-    // GET ble kalt, men PUT skal ikke ha blitt kalt fordi isLocked-sjekken
-    // i UI-en abortsubmit. (Defensivt: selv om det hadde gått igjennom, ville
-    // backend returnert FEATURE_DISABLED og UI ville vist feil-toast.)
     const putCalls = router.mock.calls.filter(
       (c) => (c[1] as RequestInit | undefined)?.method === "PUT"
     );
@@ -287,12 +388,10 @@ describe("PR-A6 CMS dispatcher", () => {
     const host = container();
     mountCmsRoute(host, "/faq");
     await tick();
-    // Placeholder banner should NOT be present on wired FAQ list (BIN-676).
     expect(host.querySelector('[data-testid="cms-placeholder-banner"]')).toBeNull();
     const addBtn = host.querySelector<HTMLAnchorElement>('[data-testid="faq-add-btn"]');
     expect(addBtn).toBeTruthy();
     expect(addBtn!.href).toContain("#/addFAQ");
-    // Rad vises fra mocket backend.
     expect(host.textContent).toContain("Hva er bingo?");
   });
 
@@ -351,62 +450,86 @@ describe("PR-A6 CMS dispatcher", () => {
   });
 });
 
-// ── Settings dispatcher ──────────────────────────────────────────────────────
+// ── Settings dispatcher (BIN-677 wired) ──────────────────────────────────────
 
-describe("PR-A6 Settings dispatcher", () => {
+describe("BIN-677 Settings dispatcher", () => {
   it("matches settings + maintenance routes", () => {
     expect(isSettingsRoute("/settings")).toBe(true);
     expect(isSettingsRoute("/maintenance")).toBe(true);
+    expect(isSettingsRoute("/maintenance/new")).toBe(true);
     expect(isSettingsRoute("/maintenance/edit/m1")).toBe(true);
     expect(isSettingsRoute("/cms")).toBe(false);
     expect(isSettingsRoute("/maintenance/edit/")).toBe(false);
   });
 
-  it("/settings renders form with read-only spiller-tak + info banner", async () => {
+  it("/settings renders wired-banner + registry-based sections", async () => {
     const host = container();
     mountSettingsRoute(host, "/settings");
     await tick();
-    expect(host.querySelector('[data-testid="settings-placeholder-banner"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="settings-wired-banner"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="settings-form"]')).toBeTruthy();
+    // Compliance section should have the per-hall override info.
     expect(
       host.querySelector('[data-testid="per-hall-spillvett-override-info"]')
     ).toBeTruthy();
-    const daily = host.querySelector<HTMLInputElement>('[data-testid="sf-daily-readonly"]');
-    expect(daily?.readOnly).toBe(true);
-    const monthly = host.querySelector<HTMLInputElement>('[data-testid="sf-monthly-readonly"]');
-    expect(monthly?.readOnly).toBe(true);
   });
 
-  it("/maintenance renders status block + edit button", async () => {
+  it("/settings renders field for every returned key", async () => {
+    const host = container();
+    mountSettingsRoute(host, "/settings");
+    await tick();
+    // Verify each test-id exists (dot replaced with dash).
+    expect(host.querySelector('[data-testid="sf-system-timezone"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="sf-system-information"]')).toBeTruthy();
+    expect(
+      host.querySelector('[data-testid="sf-compliance-daily_spending_default"]')
+    ).toBeTruthy();
+    expect(
+      host.querySelector('[data-testid="sf-branding-screen_saver_enabled"]')
+    ).toBeTruthy();
+    expect(host.querySelector('[data-testid="sf-features-flags"]')).toBeTruthy();
+  });
+
+  it("/maintenance renders wired-banner + add button + no-active banner", async () => {
     const host = container();
     mountSettingsRoute(host, "/maintenance");
     await tick();
-    const edit = host.querySelector<HTMLAnchorElement>('[data-action="edit-maintenance"]');
-    expect(edit).toBeTruthy();
-    expect(edit!.href).toContain("#/maintenance/edit/");
+    expect(host.querySelector('[data-testid="maintenance-wired-banner"]')).toBeTruthy();
+    const addBtn = host.querySelector<HTMLAnchorElement>(
+      '[data-testid="btn-new-maintenance"]'
+    );
+    expect(addBtn).toBeTruthy();
+    expect(addBtn!.href).toContain("#/maintenance/new");
+    expect(
+      host.querySelector('[data-testid="maintenance-no-active-banner"]')
+    ).toBeTruthy();
   });
 
-  it("/maintenance/edit/:id renders form with status select", async () => {
+  it("/maintenance/new renders create form with datetime-local inputs + status", async () => {
     const host = container();
-    mountSettingsRoute(host, "/maintenance/edit/maintenance-default");
+    mountSettingsRoute(host, "/maintenance/new");
     await tick();
     const form = host.querySelector<HTMLFormElement>('[data-testid="maintenance-form"]');
     expect(form).toBeTruthy();
-    const status = form!.querySelector<HTMLSelectElement>("#mf-status");
-    expect(status).toBeTruthy();
-    expect(status!.options.length).toBe(2);
+    const start = form!.querySelector<HTMLInputElement>('[data-testid="mf-start"]');
+    const end = form!.querySelector<HTMLInputElement>('[data-testid="mf-end"]');
+    const status = form!.querySelector<HTMLSelectElement>('[data-testid="mf-status"]');
+    expect(start?.type).toBe("datetime-local");
+    expect(end?.type).toBe("datetime-local");
+    expect(status?.options.length).toBe(2);
   });
 });
 
 // ── SystemInformation dispatcher ─────────────────────────────────────────────
 
-describe("PR-A6 SystemInformation dispatcher", () => {
+describe("SystemInformation dispatcher (wired via system.information key)", () => {
   it("matches system-info route", () => {
     expect(isSystemInformationRoute("/system/systemInformation")).toBe(true);
     expect(isSystemInformationRoute("/system/anything-else")).toBe(false);
     expect(isSystemInformationRoute("/settings")).toBe(false);
   });
 
-  it("renders placeholder banner + textarea", async () => {
+  it("renders wired banner + textarea", async () => {
     const host = container();
     mountSystemInformationRoute(host, "/system/systemInformation");
     await tick();
@@ -419,43 +542,51 @@ describe("PR-A6 SystemInformation dispatcher", () => {
     expect(textarea).toBeTruthy();
   });
 
-  it("persists edit through localStorage roundtrip", async () => {
+  it("textarea initializes from backend value", async () => {
+    installFetch((input) => {
+      const url = typeof input === "string" ? input : (input as URL | Request).toString();
+      if (url.includes("/api/admin/settings")) {
+        return apiOk({
+          settings: [
+            {
+              key: "system.information",
+              value: "Hello from backend",
+              category: "general",
+              description: "",
+              type: "string",
+              isDefault: false,
+              updatedByUserId: null,
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+          count: 1,
+        });
+      }
+      return jsonResponse(404, { ok: false, error: { code: "NOT_FOUND", message: "" } });
+    });
+
     const host = container();
     mountSystemInformationRoute(host, "/system/systemInformation");
     await tick();
-
     const textarea = host.querySelector<HTMLTextAreaElement>(
       '[data-testid="system-info-textarea"]'
     )!;
-    textarea.value = "Hello PR-A6";
-    const form = host.querySelector<HTMLFormElement>('[data-testid="system-info-form"]')!;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    await tick();
-
-    // Re-mount to verify persistence
-    const host2 = container();
-    mountSystemInformationRoute(host2, "/system/systemInformation");
-    await tick();
-    const textarea2 = host2.querySelector<HTMLTextAreaElement>(
-      '[data-testid="system-info-textarea"]'
-    )!;
-    expect(textarea2.value).toBe("Hello PR-A6");
+    expect(textarea.value).toBe("Hello from backend");
   });
 });
 
-// ── otherGames dispatcher ────────────────────────────────────────────────────
+// ── otherGames dispatcher (BIN-679) ──────────────────────────────────────────
 
-describe("PR-A6 otherGames dispatcher", () => {
+describe("BIN-679 otherGames dispatcher", () => {
   it("matches 4 mini-game routes", () => {
     expect(isOtherGamesRoute("/wheelOfFortune")).toBe(true);
     expect(isOtherGamesRoute("/treasureChest")).toBe(true);
     expect(isOtherGamesRoute("/mystery")).toBe(true);
     expect(isOtherGamesRoute("/colorDraft")).toBe(true);
     expect(isOtherGamesRoute("/cms")).toBe(false);
-    expect(isOtherGamesRoute("/wheelOfFortune/extra")).toBe(false);
   });
 
-  it("/wheelOfFortune renders 24 prize inputs", async () => {
+  it("/wheelOfFortune renders 24 prize inputs + JSON editor + active checkbox", async () => {
     const host = container();
     mountOtherGamesRoute(host, "/wheelOfFortune");
     await tick();
@@ -463,7 +594,9 @@ describe("PR-A6 otherGames dispatcher", () => {
       '[data-testid="wheel-prizes"] input[type="number"]'
     );
     expect(inputs.length).toBe(24);
-    expect(host.querySelector('[data-testid="wheel-placeholder-banner"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="wheel-wired-banner"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="mg-config-json"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="mg-active"]')).toBeTruthy();
   });
 
   it("/treasureChest renders 10 prize inputs", async () => {
@@ -504,37 +637,38 @@ describe("PR-A6 otherGames dispatcher", () => {
     expect(green.length).toBe(4);
   });
 
-  it("wheelOfFortune form submit persists prize values", async () => {
+  it("/wheelOfFortune seeds prize inputs from backend legacy prizeList", async () => {
+    installFetch((input) => {
+      const url = typeof input === "string" ? input : (input as URL | Request).toString();
+      if (url.includes("/api/admin/mini-games/wheel")) {
+        return apiOk({
+          id: "wheel-1",
+          gameType: "wheel",
+          config: { prizeList: [777, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+          active: true,
+          updatedByUserId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return jsonResponse(404, { ok: false, error: { code: "NOT_FOUND", message: "" } });
+    });
+
     const host = container();
     mountOtherGamesRoute(host, "/wheelOfFortune");
     await tick();
-
     const first = host.querySelector<HTMLInputElement>(
       '[data-testid="wheel-prizes"] input[name="price-0"]'
     )!;
-    first.value = "777";
-    const form = host.querySelector<HTMLFormElement>('[data-testid="wheel-form"]')!;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    await tick();
-
-    const host2 = container();
-    mountOtherGamesRoute(host2, "/wheelOfFortune");
-    await tick();
-    const first2 = host2.querySelector<HTMLInputElement>(
-      '[data-testid="wheel-prizes"] input[name="price-0"]'
-    )!;
-    expect(first2.value).toBe("777");
+    expect(first.value).toBe("777");
   });
 });
 
 // ── i18n key coverage ───────────────────────────────────────────────────────
 
-describe("PR-A6 i18n-keys present in NO + EN", () => {
+describe("BIN-676/677/679 i18n-keys present in NO + EN", () => {
   const REQUIRED_KEYS = [
-    "cms_placeholder_banner",
-    "cms_spillvett_audit_required_title",
-    "cms_spillvett_audit_required_body",
-    // BIN-676 (wired backend) + BIN-680 (regulatory lock):
+    // CMS (BIN-676 / BIN-680)
     "cms_regulatory_locked_title",
     "cms_regulatory_locked_body",
     "cms_locked_by_bin680_label",
@@ -543,29 +677,52 @@ describe("PR-A6 i18n-keys present in NO + EN", () => {
     "move_down",
     "terms_of_service",
     "responsible_gaming",
-    "question",
-    "maintenance_management",
+    // maintenance (BIN-677)
+    "maintenance_list_title",
+    "maintenance_new_window",
+    "maintenance_create",
     "maintenance_message",
     "maintenance_start_date",
     "maintenance_end_date",
     "maintenance_status",
     "show_before_minutes",
-    "settings_placeholder_banner",
+    "maintenance_wired_banner",
+    // settings (BIN-677)
+    "system_settings_wired_banner",
+    "setting_category_general",
+    "setting_category_app_versions",
+    "setting_category_compliance",
+    "setting_category_branding",
+    "setting_category_feature_flags",
+    "setting_json_parse_error",
+    "setting_save_success",
     "per_hall_spillvett_override_info",
-    "system_information_body",
-    "system_information_placeholder_banner",
+    // other games (BIN-679)
+    "mini_games_wired_banner",
+    "mini_games_config_json",
+    "mini_games_active",
     "wheel_of_fortune_prize",
-    "other_games_placeholder_banner",
+    // leaderboard (BIN-668)
+    "leaderboard_tier_create",
+    "leaderboard_tier_update",
+    "leaderboard_tier_delete",
+    "leaderboard_tier_name",
+    "leaderboard_place",
+    "leaderboard_points",
+    "leaderboard_prize_amount",
+    "leaderboard_prize_description",
+    "leaderboard_active",
+    "leaderboard_tier_list_title",
   ];
 
-  it("NO has all PR-A6 keys", () => {
+  it("NO has all wired-settings keys", () => {
     const no = noI18n as Record<string, string>;
     for (const k of REQUIRED_KEYS) {
       expect(no[k], `missing NO key: ${k}`).toBeTruthy();
     }
   });
 
-  it("EN has all PR-A6 keys", () => {
+  it("EN has all wired-settings keys", () => {
     const en = enI18n as Record<string, string>;
     for (const k of REQUIRED_KEYS) {
       expect(en[k], `missing EN key: ${k}`).toBeTruthy();

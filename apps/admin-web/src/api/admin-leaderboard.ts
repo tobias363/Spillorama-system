@@ -1,37 +1,32 @@
-// PR-B6 (BIN-664) — admin Leaderboard tier CRUD API wrappers (PLACEHOLDER).
+// BIN-668 — admin Leaderboard tier CRUD API wrappers (wired til backend).
 //
-// STATUS: Backend-endpoints for leaderboard tier-konfig (place → points)
-// eksisterer IKKE per 2026-04-19. Se Linear BIN-668 for
-// "Leaderboard tier CRUD backend" (4-6t follow-up, P3).
+// Backend-matrisen (se apps/backend/src/routes/adminLeaderboardTiers.ts):
+//   GET    /api/admin/leaderboard/tiers            → liste
+//   GET    /api/admin/leaderboard/tiers/:id        → detalj
+//   POST   /api/admin/leaderboard/tiers            → opprett
+//   PATCH  /api/admin/leaderboard/tiers/:id        → oppdater
+//   DELETE /api/admin/leaderboard/tiers/:id[?hard=true] → soft/hard delete
 //
-// Denne fila definerer typer + stub-funksjoner som kaster en tydelig
-// NOT_IMPLEMENTED-feil til frontend-placeholder-siden kan vise en
-// "backend mangler"-banner UTEN å feile tsc/vite build.
+// Permissions: LEADERBOARD_TIER_READ for GETs, LEADERBOARD_TIER_WRITE
+// (ADMIN-only) for POST/PATCH/DELETE (se AdminAccessPolicy.ts). Backend
+// audit-logger admin.leaderboard.tier.{create,update,delete}.
 //
-// Når BIN-668 merger:
-//   1. Slett NOT_IMPLEMENTED-stubbene
-//   2. Erstatt med ekte apiRequest() mot
-//      GET    /api/admin/leaderboard/tiers
-//      POST   /api/admin/leaderboard/tiers   body {place, points}
-//      PATCH  /api/admin/leaderboard/tiers/:place  body {points}
-//      DELETE /api/admin/leaderboard/tiers/:place
-//   3. Fjern placeholder-banner fra LeaderboardPage.ts
-//
-// Permissions (når BIN-668 merger):
-//   - list:   GAME_CATALOG_READ  eller ny LEADERBOARD_READ
-//   - mutate: GAME_CATALOG_WRITE eller ny LEADERBOARD_WRITE
-//
-// Regulatorisk: Points-konfig påvirker utbetaling av premier. Backend
-// skal ha AuditLog-actions `leaderboard.tier.add/update/remove` og
-// fail-closed "no write while game active"-sjekk (se PR-B6-PLAN §3.1).
+// Schema-mirror: shared-types/schemas.ts → `LeaderboardTierRowSchema`.
 
-import { ApiError } from "./client.js";
+import { apiRequest } from "./client.js";
 
 export interface LeaderboardTier {
+  id: string;
+  tierName: string;
   place: number;
   points: number;
+  prizeAmount: number | null;
+  prizeDescription: string;
+  active: boolean;
+  extra: Record<string, unknown>;
+  createdByUserId: string | null;
+  createdAt: string;
   updatedAt: string;
-  updatedBy: string | null;
 }
 
 export interface ListLeaderboardTiersResponse {
@@ -39,64 +34,87 @@ export interface ListLeaderboardTiersResponse {
   count: number;
 }
 
-/**
- * PLACEHOLDER — kaster NOT_IMPLEMENTED til BIN-668 leverer backend.
- *
- * Frontend-placeholder-siden fanger denne og viser en "Venter på
- * backend (BIN-668)"-banner i stedet for en normal tabell.
- */
-export function listLeaderboardTiers(): Promise<ListLeaderboardTiersResponse> {
-  return Promise.reject(
-    new ApiError(
-      "Leaderboard tier CRUD-backend ikke implementert (se BIN-668)",
-      "NOT_IMPLEMENTED",
-      501
-    )
-  );
+export interface ListLeaderboardTiersQuery {
+  tierName?: string;
+  active?: boolean;
+  limit?: number;
 }
 
-export interface AddLeaderboardTierBody {
+export interface CreateLeaderboardTierBody {
   place: number;
-  points: number;
-}
-
-export function addLeaderboardTier(
-  _body: AddLeaderboardTierBody
-): Promise<LeaderboardTier> {
-  return Promise.reject(
-    new ApiError(
-      "Leaderboard tier CRUD-backend ikke implementert (se BIN-668)",
-      "NOT_IMPLEMENTED",
-      501
-    )
-  );
+  tierName?: string;
+  points?: number;
+  prizeAmount?: number | null;
+  prizeDescription?: string;
+  active?: boolean;
+  extra?: Record<string, unknown>;
 }
 
 export interface UpdateLeaderboardTierBody {
-  points: number;
+  tierName?: string;
+  place?: number;
+  points?: number;
+  prizeAmount?: number | null;
+  prizeDescription?: string;
+  active?: boolean;
+  extra?: Record<string, unknown>;
 }
 
-export function updateLeaderboardTier(
-  _place: number,
-  _body: UpdateLeaderboardTierBody
-): Promise<LeaderboardTier> {
-  return Promise.reject(
-    new ApiError(
-      "Leaderboard tier CRUD-backend ikke implementert (se BIN-668)",
-      "NOT_IMPLEMENTED",
-      501
-    )
+export async function listLeaderboardTiers(
+  query: ListLeaderboardTiersQuery = {}
+): Promise<ListLeaderboardTiersResponse> {
+  const qs = new URLSearchParams();
+  if (query.tierName) qs.set("tierName", query.tierName);
+  if (query.active !== undefined) qs.set("active", String(query.active));
+  if (query.limit) qs.set("limit", String(query.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiRequest<ListLeaderboardTiersResponse>(
+    `/api/admin/leaderboard/tiers${suffix}`,
+    { auth: true }
   );
 }
 
-export function deleteLeaderboardTier(
-  _place: number
-): Promise<{ removed: true }> {
-  return Promise.reject(
-    new ApiError(
-      "Leaderboard tier CRUD-backend ikke implementert (se BIN-668)",
-      "NOT_IMPLEMENTED",
-      501
-    )
+export async function getLeaderboardTier(id: string): Promise<LeaderboardTier> {
+  return apiRequest<LeaderboardTier>(
+    `/api/admin/leaderboard/tiers/${encodeURIComponent(id)}`,
+    { auth: true }
+  );
+}
+
+export async function createLeaderboardTier(
+  body: CreateLeaderboardTierBody
+): Promise<LeaderboardTier> {
+  return apiRequest<LeaderboardTier>("/api/admin/leaderboard/tiers", {
+    method: "POST",
+    body,
+    auth: true,
+  });
+}
+
+export async function updateLeaderboardTier(
+  id: string,
+  body: UpdateLeaderboardTierBody
+): Promise<LeaderboardTier> {
+  return apiRequest<LeaderboardTier>(
+    `/api/admin/leaderboard/tiers/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body,
+      auth: true,
+    }
+  );
+}
+
+export async function deleteLeaderboardTier(
+  id: string,
+  opts: { hard?: boolean } = {}
+): Promise<{ softDeleted: boolean }> {
+  const qs = opts.hard ? "?hard=true" : "";
+  return apiRequest<{ softDeleted: boolean }>(
+    `/api/admin/leaderboard/tiers/${encodeURIComponent(id)}${qs}`,
+    {
+      method: "DELETE",
+      auth: true,
+    }
   );
 }
