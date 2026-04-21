@@ -152,7 +152,7 @@ function createMockPlatformService() {
     assertUserEligibleForGameplay: (_user: PublicAppUser): void => { /* noop in dev */ },
     requireActiveHall: async (hallId: string): Promise<HallDefinition> => ({
       id: hallId, slug: hallId, name: `Test Hall ${hallId}`, region: "test", address: "Test",
-      isActive: true, clientVariant: "unity" as const,
+      isActive: true, clientVariant: "web" as const,
       createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
     }),
     listHallGameConfigs: async () => [{

@@ -1594,7 +1594,7 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
           hallName: hall?.name ?? "(ukjent hall)",
           hallSlug: hall?.slug ?? hallId,
           isActive: hall?.isActive ?? false,
-          clientVariant: hall?.clientVariant ?? "unity",
+          clientVariant: hall?.clientVariant ?? "web",
           rooms: [],
           activeRoomCount: 0,
           totalPlayers: 0,

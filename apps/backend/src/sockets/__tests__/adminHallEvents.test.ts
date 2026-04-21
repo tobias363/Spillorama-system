@@ -121,7 +121,7 @@ function makePlatformStub(opts: {
       if (!knownHallIds.has(hallId)) throw new Error(`unknown hall ${hallId}`);
       return {
         id: hallId, slug: hallId, name: `Hall ${hallId}`, region: "test", address: "test",
-        isActive: true, clientVariant: "unity" as const,
+        isActive: true, clientVariant: "web" as const,
         createdAt: "", updatedAt: "",
       } as HallDefinition;
     },

@@ -68,9 +68,15 @@ export interface UpdateGameInput {
   settings?: Record<string, unknown>;
 }
 
-/** BIN-540: per-hall rollback flag. */
-export type HallClientVariant = "unity" | "web" | "unity-fallback";
-export const HALL_CLIENT_VARIANTS: readonly HallClientVariant[] = ["unity", "web", "unity-fallback"] as const;
+/**
+ * Historically a per-hall rollback switch between Unity and web clients
+ * (BIN-540). Unity is no longer shipped (2026-04-21); the only valid value
+ * is "web". The type + endpoint + DB column are kept for shape-compat —
+ * admin UI still lists the field, existing rows stay as-is, and the
+ * endpoint always answers "web".
+ */
+export type HallClientVariant = "web";
+export const HALL_CLIENT_VARIANTS: readonly HallClientVariant[] = ["web"] as const;
 
 export interface HallDefinition {
   id: string;
@@ -1067,41 +1073,20 @@ export class PlatformService {
     return hall;
   }
 
-  // ── BIN-540: client-variant feature flag ─────────────────────────────────
-  // Read-through cache so the rollout flag doesn't hit Postgres on every
-  // /api/halls/:slug/client-variant call. TTL 60s is a deliberate trade-off:
-  // fast enough that a rollback is effective inside the SLA (< 2 min), slow
-  // enough that the DB never takes more than ~1 rps per hall even under a
-  // thundering-herd reconnect storm.
-  private readonly clientVariantCache = new Map<string, { value: HallClientVariant; expiresAt: number }>();
-  private static readonly CLIENT_VARIANT_TTL_MS = 60_000;
-
-  /**
-   * Public entry point used by the web shell / admin web to decide which
-   * client engine to mount. Fails CLOSED to "unity" on any DB error so a
-   * flipped-flag rollout can never turn into a deny-all.
-   */
-  async getHallClientVariant(hallReference: string): Promise<HallClientVariant> {
-    const cached = this.clientVariantCache.get(hallReference);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.value;
-    }
-    try {
-      const hall = await this.getHall(hallReference);
-      const value = hall.clientVariant;
-      this.clientVariantCache.set(hallReference, { value, expiresAt: Date.now() + PlatformService.CLIENT_VARIANT_TTL_MS });
-      return value;
-    } catch (err) {
-      // Fail-safe: DB miss / connection error defaults to the legacy client.
-      // This is the safe direction — a broken rollout keeps the status quo.
-      console.warn("[BIN-540] getHallClientVariant failed, defaulting to 'unity'", err);
-      return "unity";
-    }
+  // ── Hall client-variant (post-Unity) ─────────────────────────────────────
+  // Historically a BIN-540 rollback flag between Unity and web clients with
+  // a 60 s read-through cache. Unity is no longer shipped (2026-04-21); the
+  // only valid answer is "web". Kept as a method for shape-compat with
+  // admin-web and the `/api/halls/:slug/client-variant` endpoint.
+  async getHallClientVariant(_hallReference: string): Promise<HallClientVariant> {
+    return "web";
   }
 
-  /** Test-only: clear the client-variant cache so tests can rotate the flag. */
+  /** Test-only: no-op retained for backwards source-compat (cache is gone). */
   clearClientVariantCache(): void {
-    this.clientVariantCache.clear();
+    // Intentionally empty — the BIN-540 read-through cache was removed with
+    // the Unity client (2026-04-21). Method kept so tests that still call it
+    // don't error.
   }
 
   async createHall(input: CreateHallInput): Promise<HallDefinition> {
@@ -1192,16 +1177,7 @@ export class PlatformService {
       [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive, nextClientVariant]
     );
 
-    // BIN-540: invalidate cache on any hall update so the next
-    // `/api/halls/:slug/client-variant` read sees the new value even if
-    // the admin flipped `clientVariant` via this endpoint. Clearing by
-    // both id and slug handles both reference forms.
-    if (update.clientVariant !== undefined || nextSlug !== current.slug) {
-      this.clientVariantCache.delete(current.id);
-      this.clientVariantCache.delete(current.slug);
-      this.clientVariantCache.delete(nextSlug);
-    }
-
+    // Cache invalidation removed — see getHallClientVariant comment.
     return this.mapHall(rows[0]);
   }
 
@@ -3252,10 +3228,11 @@ export class PlatformService {
       settlementAccount: row.settlement_account ?? undefined,
       invoiceMethod: row.invoice_method ?? undefined,
       isActive: row.is_active,
-      // BIN-540: default to "unity" if the column is somehow null (should not
-      // happen — CHECK constraint enforces non-null with DEFAULT 'unity' — but
-      // guards against rows pre-dating the migration on a mid-flight deploy).
-      clientVariant: (row.client_variant ?? "unity") as HallClientVariant,
+      // Post-Unity (2026-04-21): normalize to "web" regardless of the stored
+      // value so old "unity" / "unity-fallback" rows don't leak out of the
+      // service boundary. The DB column is kept for shape-compat; a future
+      // migration may drop it entirely.
+      clientVariant: "web",
       tvUrl: row.tv_url ?? undefined,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)

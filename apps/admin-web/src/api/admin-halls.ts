@@ -18,7 +18,9 @@ import { apiRequest } from "./client.js";
 
 // ── Kjerne-typer (speiler backend PlatformService HallDefinition) ────────────
 
-export type HallClientVariant = "unity" | "web" | "unity-fallback";
+// Post-Unity (2026-04-21): only "web" is valid. Kept as a type alias so
+// the HallFormPage dropdown still type-checks.
+export type HallClientVariant = "web";
 
 export interface AdminHall {
   id: string;

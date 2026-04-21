@@ -93,7 +93,7 @@ function makePlatformStub(halls: Array<{ id: string; name: string; tvUrl?: strin
         region: "NO",
         address: "",
         isActive: true,
-        clientVariant: "unity" as const,
+        clientVariant: "web" as const,
         tvUrl: h.tvUrl ?? undefined,
         createdAt: "2026-04-18T00:00:00Z",
         updatedAt: "2026-04-18T00:00:00Z",

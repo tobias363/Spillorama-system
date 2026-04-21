@@ -31,7 +31,7 @@ function hall(id: string, name: string, isActive = true): HallDefinition {
     region: "NO",
     address: "",
     isActive,
-    clientVariant: "unity",
+    clientVariant: "web",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
