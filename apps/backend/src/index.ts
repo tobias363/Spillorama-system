@@ -52,6 +52,10 @@ import { createLoyaltyMonthlyResetJob } from "./jobs/loyaltyMonthlyReset.js";
 import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
 import { Game1RecoveryService } from "./game/Game1RecoveryService.js";
 import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
+import { Game1PayoutService } from "./game/Game1PayoutService.js";
+import { Game1JackpotService } from "./game/Game1JackpotService.js";
+import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
+import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
@@ -270,6 +274,7 @@ const {
   jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
   jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
+  jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -871,17 +876,46 @@ const game1RecoveryService = new Game1RecoveryService({
   schema: pgSchema,
 });
 
-// GAME1_SCHEDULE PR 4b: draw-engine core. Orkestreres av master-control
-// (start/pause/resume/stop), og tar over DrawBag + ticket-assignment +
-// per-kule draws for Game 1 scheduled-games. Kobles inn i master-control
-// via setDrawEngine() for å unngå sirkulær konstruksjon.
+// GAME1_SCHEDULE PR 4c Bolk 2+3: payout + jackpot for Spill 1 scheduled-games.
+// Payout skjer inne i drawNext-transaksjonen slik at wallet-credit-feil
+// rullbaker hele draw-en (§11 fail-closed).
+const game1PayoutService = new Game1PayoutService({
+  walletAdapter,
+  auditLogService,
+  schema: pgSchema,
+  loyaltyHook: loyaltyHookAdapter,
+});
+const game1JackpotService = new Game1JackpotService();
+
+// GAME1_SCHEDULE PR 4b + 4c Bolk 5: draw-engine core. Orkestreres av
+// master-control (start/pause/resume/stop). PR 4c wires payoutService +
+// jackpotService inn slik at drawNext() evaluerer patterns og utbetaler.
+// Kobles inn i master-control via setDrawEngine() for å unngå sirkulær
+// konstruksjon.
 const game1DrawEngineService = new Game1DrawEngineService({
   pool: platformService.getPool(),
   schema: pgSchema,
   ticketPurchaseService: game1TicketPurchaseService,
   auditLogService,
+  payoutService: game1PayoutService,
+  jackpotService: game1JackpotService,
 });
 game1MasterControlService.setDrawEngine(game1DrawEngineService);
+
+// GAME1_SCHEDULE PR 4c Bolk 4: auto-draw-tick (global 1s tick, fixed
+// seconds-intervall per spill). Default OFF til PR 4d socket-flyt aktiveres.
+const game1AutoDrawTickService = new Game1AutoDrawTickService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  drawEngine: game1DrawEngineService,
+});
+jobScheduler.register({
+  name: "game1-auto-draw-tick",
+  description: "Trigger drawNext() for running Spill 1-games når fixed seconds-intervall er passert (GAME1_SCHEDULE PR 4c Bolk 4).",
+  intervalMs: jobGame1AutoDrawIntervalMs,
+  enabled: jobGame1AutoDrawEnabled,
+  run: createGame1AutoDrawTickJob({ service: game1AutoDrawTickService }),
+});
 
 // ── Mount routers ─────────────────────────────────────────────────────────────
 

@@ -58,6 +58,9 @@ import {
 } from "./DrawBagStrategy.js";
 import type { Game1TicketPurchaseService, Game1TicketPurchaseRow } from "./Game1TicketPurchaseService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
+import type { Game1PayoutService, Game1WinningAssignment } from "./Game1PayoutService.js";
+import type { Game1JackpotService, Game1JackpotConfig } from "./Game1JackpotService.js";
+import { evaluatePhase, TOTAL_PHASES } from "./Game1PatternEvaluator.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-draw-engine-service" });
@@ -97,6 +100,16 @@ export interface Game1DrawEngineServiceOptions {
   ticketPurchaseService: Game1TicketPurchaseService;
   auditLogService: AuditLogService;
   config?: Partial<Game1DrawEngineConfig>;
+  /**
+   * GAME1_SCHEDULE PR 4c: pattern-evaluering + payout. Hvis ikke satt,
+   * kjører drawNext() i PR 4b-modus (kun draws + markings, ingen payout).
+   */
+  payoutService?: Game1PayoutService;
+  /**
+   * GAME1_SCHEDULE PR 4c Bolk 3: Jackpot-evaluering for Fullt Hus.
+   * Hvis ikke satt eller ticket_config ikke har jackpot-config → 0 jackpot.
+   */
+  jackpotService?: Game1JackpotService;
 }
 
 // ── Internal row shapes ─────────────────────────────────────────────────────
@@ -123,88 +136,119 @@ interface GameStateRow {
 // ── Grid generators (Game 1 scheduled-game format) ──────────────────────────
 
 /**
- * Generate grid-tall for en ticket i scheduled_game-formatet.
+ * Generate grid-tall for en ticket i Spill 1 (5x5 bingo).
  *
- * Dette er IKKE legacy BingoEngine-formatet (5x5 75-ball) — for
- * scheduled-games (Alt 3) bruker vi det norske 3x3/3x9-formatet:
+ * Tobias' spec (PM-avklaring 2026-04-21): Spill 1 bruker kun 5x5-grid.
+ * `size` ('small'/'large') er en LEGACY PRISKATEGORI (påvirker farge-pris og
+ * UI-rendering) — IKKE grid-format. Alle Spill 1-bretter har 25 celler.
  *
- *   - small (3x3): 9 unike tall fra 1..maxBallValue, random.
- *   - large (3x9): 27 celler, British-style column-ranges.
- *     col 0 = 1..9, col 1 = 10..19, col 2 = 20..29, …, col 8 = 80..90.
- *     Cap'et til maxBallValue — kolonner som overstiger får null i alle celler.
- *     3 rader, per kolonne plukker vi 3 unike tall fra kolonnens range (eller
- *     alle i range hvis range < 3).
+ * Format:
+ *   - 25 celler, flat row-major (idx = row*5 + col).
+ *   - Index 12 (row 2, col 2) = 0 — free centre (alltid "markert").
+ *   - Kolonne-ranges proporsjonalt til maxBallValue:
+ *       col c = [c*step+1 .. (c+1)*step] der step=floor(maxBallValue/5),
+ *       siste kolonne inkluderer rest-en opp til maxBallValue.
+ *     Eksempler:
+ *       maxBallValue=75 → col 0=1..15, col 1=16..30, col 2=31..45,
+ *         col 3=46..60, col 4=61..75 (amerikansk 75-ball).
+ *       maxBallValue=90 → col 0=1..18, col 1=19..36, col 2=37..54,
+ *         col 3=55..72, col 4=73..90 (legacy Helper/bingo.js:970-994).
+ *   - Per kolonne plukker vi 5 unike tall (eller færre hvis range < 5),
+ *     null for padding. NB: col 2 inkluderer kun 4 plukk (row 2 = free centre).
  *
- * Returnerer en flat row-major array (small=9, large=27). null for tomme
- * celler.
+ * Referanse: `.claude/legacy-ref/bingo.js:970-994` (Game 1 ticket-gen) +
+ * `.claude/legacy-ref/Game1/Controllers/GameProcess.js:5519-5597` (Row1-5
+ * pattern-matching antar 5x5) + `PatternMasks.ts` (klient-mirror).
+ *
+ * @param size LEGACY priskategori ("small"/"large"). Påvirker IKKE grid-format.
+ * @param maxBallValue Maks ball-verdi (typisk 75 for moderne Spill 1, 90 for
+ *   legacy). Kolonner distribueres proporsjonalt.
+ * @returns Flat row-major array av 25 celler. Index 12 = 0 (free centre).
+ *   Andre celler: number | null (null for tomme celler hvis range < 5).
  */
 export function generateGridForTicket(
-  size: "small" | "large",
+  _size: "small" | "large",
   maxBallValue: number
 ): Array<number | null> {
-  if (size === "small") {
-    return generateSmallGrid(maxBallValue);
-  }
-  return generateLargeGrid(maxBallValue);
+  return generate5x5Grid(maxBallValue);
 }
 
-function generateSmallGrid(maxBallValue: number): Array<number | null> {
-  const nums = pickUniqueInRange(1, maxBallValue, 9);
-  // Flat row-major 3x3.
-  return nums as Array<number | null>;
-}
+const GRID_FREE_CENTRE_INDEX = 12; // row 2, col 2 i row-major 5x5.
 
 /**
- * Large-grid: 3x9 = 27 celler, row-major.
- *   Row 0: col 0..8 → col 0 = col-range[0], col 1 = col-range[1], etc.
- *
- * Col-range: col c = [c*10+1 .. (c+1)*10] cap'et til maxBallValue.
- *   col 0: 1..10 (men vi skiller første kolonne på 1..9 per British-style,
- *   se under).
- *
- * British-style bingo: col 0 = 1..9, col 1 = 10..19, …, col 8 = 80..90 (90
- * i siste kolonne). Vi følger denne semantikken.
- *
- * Hvis kolonnens range overstiger maxBallValue, blir den kolonnen null
- * i alle tre rader.
+ * Genererer en 5x5 bingo-ticket med free centre og proporsjonal column-range.
+ * Returnerer flat row-major array (25 celler).
  */
-function generateLargeGrid(maxBallValue: number): Array<number | null> {
-  const numCols = 9;
-  const numRows = 3;
-  // Per-kolonne 3 unike tall (eller færre hvis range < 3).
-  const perCol: Array<number | null>[] = [];
+function generate5x5Grid(maxBallValue: number): Array<number | null> {
+  const numCols = 5;
+  const numRows = 5;
+  const ranges = computeColumnRanges(maxBallValue, numCols);
+
+  // Per-kolonne: plukk antall unike tall = rows (5), unntatt col 2 der row 2
+  // er free centre (kun 4 plukk nødvendig).
+  const perCol: Array<Array<number | null>> = [];
   for (let c = 0; c < numCols; c++) {
-    const { start, end } = largeColumnRange(c);
-    // Cap til maxBallValue.
-    const clippedEnd = Math.min(end, maxBallValue);
-    if (clippedEnd < start) {
-      perCol.push([null, null, null]);
+    const { start, end } = ranges[c]!;
+    const needed = c === 2 ? numRows - 1 : numRows;
+    if (end < start) {
+      perCol.push(new Array(numRows).fill(null));
       continue;
     }
-    const rangeSize = clippedEnd - start + 1;
-    const pickCount = Math.min(numRows, rangeSize);
-    const picks = pickUniqueInRange(start, clippedEnd, pickCount).sort(
+    const rangeSize = end - start + 1;
+    const pickCount = Math.min(needed, rangeSize);
+    const picks = pickUniqueInRange(start, end, pickCount).sort(
       (a, b) => a - b
     );
-    // Pad med null hvis range < 3.
-    while (picks.length < numRows) picks.push(null as unknown as number);
-    perCol.push(picks as Array<number | null>);
+    // Fyll kolonnen: 5 slots, med null for padding.
+    const colArr: Array<number | null> = new Array(numRows).fill(null);
+    if (c === 2) {
+      // Row 2 = free centre. Fyll row 0, 1, 3, 4 med picks.
+      let pi = 0;
+      for (let r = 0; r < numRows; r++) {
+        if (r === 2) continue;
+        colArr[r] = pi < picks.length ? picks[pi]! : null;
+        pi++;
+      }
+    } else {
+      for (let r = 0; r < numRows; r++) {
+        colArr[r] = r < picks.length ? picks[r]! : null;
+      }
+    }
+    perCol.push(colArr);
   }
-  // Flat row-major: row 0 på alle kolonner, så row 1, så row 2.
-  const flat: Array<number | null> = [];
+
+  // Flat row-major.
+  const flat: Array<number | null> = new Array(numRows * numCols).fill(null);
   for (let r = 0; r < numRows; r++) {
     for (let c = 0; c < numCols; c++) {
-      flat.push(perCol[c]![r] ?? null);
+      flat[r * numCols + c] = perCol[c]![r]!;
     }
   }
+  // Free centre: idx 12 = 0 (ikke null — eksplisitt 0-sentinel).
+  flat[GRID_FREE_CENTRE_INDEX] = 0;
   return flat;
 }
 
-/** British-style large-bingo column-range: col 0 = 1..9, col N = N*10..N*10+9, col 8 = 80..90. */
-function largeColumnRange(col: number): { start: number; end: number } {
-  if (col === 0) return { start: 1, end: 9 };
-  if (col === 8) return { start: 80, end: 90 };
-  return { start: col * 10, end: col * 10 + 9 };
+/**
+ * Proporsjonal column-range for 5-kolonne 5x5 bingo.
+ *   col 0..3: step = floor(maxBallValue/5), range [c*step+1 .. (c+1)*step].
+ *   col 4:    [4*step+1 .. maxBallValue] (inkluderer rest-en).
+ *
+ * Hvis maxBallValue < 5, får senere kolonner tom range (end<start) og dermed
+ * null-padding.
+ */
+function computeColumnRanges(
+  maxBallValue: number,
+  numCols: number
+): Array<{ start: number; end: number }> {
+  const step = Math.max(1, Math.floor(maxBallValue / numCols));
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (let c = 0; c < numCols; c++) {
+    const start = c * step + 1;
+    const end = c === numCols - 1 ? maxBallValue : (c + 1) * step;
+    ranges.push({ start, end });
+  }
+  return ranges;
 }
 
 function shuffle<T>(values: T[]): T[] {
@@ -233,6 +277,8 @@ export class Game1DrawEngineService {
   private readonly ticketPurchase: Game1TicketPurchaseService;
   private readonly audit: AuditLogService;
   private readonly config: Game1DrawEngineConfig;
+  private readonly payoutService: Game1PayoutService | null;
+  private readonly jackpotService: Game1JackpotService | null;
 
   constructor(options: Game1DrawEngineServiceOptions) {
     this.pool = options.pool;
@@ -247,6 +293,8 @@ export class Game1DrawEngineService {
       defaultMaxDraws:
         options.config?.defaultMaxDraws ?? DEFAULT_GAME1_MAX_DRAWS,
     };
+    this.payoutService = options.payoutService ?? null;
+    this.jackpotService = options.jackpotService ?? null;
   }
 
   // ── Table helpers ─────────────────────────────────────────────────────────
@@ -451,19 +499,37 @@ export class Game1DrawEngineService {
       // grid_numbers_json, og marker riktig indeks.
       await this.markBallOnAssignments(client, scheduledGameId, ball);
 
-      // UPDATE state.
-      const isFinished = nextSequence >= maxDraws;
+      // GAME1_SCHEDULE PR 4c Bolk 5: Evaluér aktiv fase mot alle assignments.
+      // Hvis vinnere finnes → kall payoutService, øk current_phase, eller
+      // ender spillet hvis Fullt Hus.
+      const phaseResult = await this.evaluateAndPayoutPhase(
+        client,
+        scheduledGameId,
+        state.current_phase,
+        nextSequence,
+        game.ticket_config_json
+      );
+
+      // UPDATE state: draws_completed + phase + eventuelt engine_ended_at.
+      const bingoWon = phaseResult.phaseWon && state.current_phase === TOTAL_PHASES;
+      const maxDrawsReached = nextSequence >= maxDraws;
+      const isFinished = bingoWon || maxDrawsReached;
+      const newPhase = phaseResult.phaseWon && !bingoWon
+        ? state.current_phase + 1
+        : state.current_phase;
+
       await client.query(
         `UPDATE ${this.gameStateTable()}
             SET draws_completed   = $2,
                 last_drawn_ball   = $3,
                 last_drawn_at     = now(),
-                engine_ended_at   = CASE WHEN $4::boolean THEN now() ELSE engine_ended_at END
+                current_phase     = $4,
+                engine_ended_at   = CASE WHEN $5::boolean THEN now() ELSE engine_ended_at END
           WHERE scheduled_game_id = $1`,
-        [scheduledGameId, nextSequence, ball, isFinished]
+        [scheduledGameId, nextSequence, ball, newPhase, isFinished]
       );
 
-      // Hvis maxDraws nådd → marker scheduled_game som completed.
+      // Hvis Fullt Hus vunnet eller maxDraws nådd → marker scheduled_game som completed.
       if (isFinished) {
         await client.query(
           `UPDATE ${this.scheduledGamesTable()}
@@ -484,6 +550,11 @@ export class Game1DrawEngineService {
           drawSequence: nextSequence,
           ballValue: ball,
           isFinished,
+          phaseWon: phaseResult.phaseWon,
+          phaseThatWasEvaluated: state.current_phase,
+          phaseAfterDraw: newPhase,
+          winnerCount: phaseResult.winnerCount,
+          bingoWon,
         },
       });
 
@@ -714,8 +785,10 @@ export class Game1DrawEngineService {
       for (const specEntry of purchase.ticketSpec) {
         for (let i = 0; i < specEntry.count; i++) {
           const grid = generateGridForTicket(specEntry.size, maxBallValue);
+          // Free centre (idx 12, cell=0) starter som "markert". Alle andre
+          // celler starter umarkert.
           const markings = {
-            marked: grid.map(() => false),
+            marked: grid.map((cell) => cell === 0),
           };
           const assignmentId = `g1a-${randomUUID()}`;
           await client.query(
@@ -744,6 +817,158 @@ export class Game1DrawEngineService {
       }
     }
     return created;
+  }
+
+  /**
+   * GAME1_SCHEDULE PR 4c Bolk 5: Evaluér aktiv fase mot alle assignments
+   * og utløs payout hvis vinnere finnes. Returnerer state om hvorvidt
+   * fasen ble vunnet (→ caller øker current_phase eller ender spillet).
+   *
+   * Kalles INNE i drawNext-transaksjonen slik at en payout-feil fører til
+   * rollback av hele draw-en (inkludert draws-INSERT og markings).
+   *
+   * Rollback-semantikk: Hvis payoutService.payoutPhase kaster (f.eks.
+   * PAYOUT_WALLET_CREDIT_FAILED) → throw propagerer ut av drawNext-
+   * transaksjonen og runInTransaction utfører ROLLBACK. Dette er
+   * regulatorisk krav (§11 fail-closed).
+   */
+  private async evaluateAndPayoutPhase(
+    client: PoolClient,
+    scheduledGameId: string,
+    currentPhase: number,
+    drawSequenceAtWin: number,
+    ticketConfigJson: unknown
+  ): Promise<{ phaseWon: boolean; winnerCount: number }> {
+    // PR 4b-modus: payoutService ikke wired opp → skip pattern-evaluering.
+    if (!this.payoutService) {
+      return { phaseWon: false, winnerCount: 0 };
+    }
+
+    // Les alle assignments etter markings-oppdatering.
+    // Bruker samme client → samme transaksjon.
+    const { rows } = await client.query<{
+      id: string;
+      grid_numbers_json: unknown;
+      markings_json: unknown;
+      buyer_user_id: string;
+      hall_id: string;
+      ticket_color: string;
+    }>(
+      `SELECT id, grid_numbers_json, markings_json, buyer_user_id, hall_id, ticket_color
+         FROM ${this.assignmentsTable()}
+        WHERE scheduled_game_id = $1`,
+      [scheduledGameId]
+    );
+
+    if (rows.length === 0) {
+      return { phaseWon: false, winnerCount: 0 };
+    }
+
+    // Find alle assignments som oppfyller current_phase.
+    const winners: Array<Game1WinningAssignment & { userId: string }> = [];
+    for (const row of rows) {
+      const grid = parseGridArray(row.grid_numbers_json);
+      const markings = parseMarkings(row.markings_json, grid.length);
+      const eval_ = evaluatePhase(grid, markings, currentPhase);
+      if (eval_.isWinner) {
+        // Slå opp wallet-id for buyer via separat query (én rad).
+        const walletId = await this.resolveWalletIdForUser(client, row.buyer_user_id);
+        winners.push({
+          assignmentId: row.id,
+          walletId,
+          userId: row.buyer_user_id,
+          hallId: row.hall_id,
+          ticketColor: row.ticket_color,
+        });
+      }
+    }
+
+    if (winners.length === 0) {
+      return { phaseWon: false, winnerCount: 0 };
+    }
+
+    // Resolve totalPhasePrizeCents og jackpot fra ticket_config.
+    const resolved = resolvePhaseConfig(ticketConfigJson, currentPhase);
+
+    // Pot = sum av ikke-refunded purchases. Hent fra DB.
+    const potCents = await this.computePotCents(client, scheduledGameId);
+    const totalPhasePrizeCents =
+      resolved.kind === "percent"
+        ? Math.floor(potCents * resolved.percent / 100)
+        : resolved.amountCents;
+
+    // Jackpot (kun fase 5): velg første vinner's farge for lookup.
+    let jackpotAmountCentsPerWinner = 0;
+    if (currentPhase === TOTAL_PHASES && this.jackpotService) {
+      const firstWinner = winners[0]!;
+      const jackpotCfg = resolveJackpotConfig(ticketConfigJson);
+      if (jackpotCfg) {
+        const j = this.jackpotService.evaluate({
+          phase: currentPhase,
+          drawSequenceAtWin,
+          ticketColor: firstWinner.ticketColor,
+          jackpotConfig: jackpotCfg,
+        });
+        if (j.triggered) {
+          jackpotAmountCentsPerWinner = j.amountCents;
+        }
+      }
+    }
+
+    // Kall payoutService. En feil her propagerer ut og rollbacker drawNext.
+    await this.payoutService.payoutPhase(client, {
+      scheduledGameId,
+      phase: currentPhase,
+      drawSequenceAtWin,
+      roomCode: "",
+      totalPhasePrizeCents,
+      winners,
+      jackpotAmountCentsPerWinner,
+      phaseName: phaseDisplayName(currentPhase),
+    });
+
+    return { phaseWon: true, winnerCount: winners.length };
+  }
+
+  /**
+   * Slå opp wallet-id for bruker. For scheduled-games antas én wallet per
+   * user → primary wallet_id i app_users.
+   */
+  private async resolveWalletIdForUser(
+    client: PoolClient,
+    userId: string
+  ): Promise<string> {
+    const { rows } = await client.query<{ wallet_id: string }>(
+      `SELECT wallet_id FROM "${this.schema}"."app_users" WHERE id = $1`,
+      [userId]
+    );
+    const walletId = rows[0]?.wallet_id;
+    if (!walletId) {
+      throw new DomainError(
+        "WALLET_NOT_FOUND",
+        `Wallet-id mangler for bruker ${userId}.`
+      );
+    }
+    return walletId;
+  }
+
+  /**
+   * Sum (non-refunded) purchases.total_amount_cents for scheduled_game.
+   * Pot-kalkulasjon for prize% pattern.
+   */
+  private async computePotCents(
+    client: PoolClient,
+    scheduledGameId: string
+  ): Promise<number> {
+    const { rows } = await client.query<{ pot_cents: string | number | null }>(
+      `SELECT COALESCE(SUM(total_amount_cents), 0) AS pot_cents
+         FROM "${this.schema}"."app_game1_ticket_purchases"
+        WHERE scheduled_game_id = $1
+          AND refunded_at IS NULL`,
+      [scheduledGameId]
+    );
+    const raw = rows[0]?.pot_cents ?? 0;
+    return typeof raw === "number" ? raw : Number.parseInt(String(raw), 10) || 0;
   }
 
   /**
@@ -897,6 +1122,141 @@ function parseGridArray(raw: unknown): Array<number | null> {
     if (typeof v === "number" && Number.isInteger(v)) return v;
     return null;
   });
+}
+
+// ── Phase + config helpers (PR 4c) ──────────────────────────────────────────
+
+/**
+ * Map fase-nummer til admin-form-pattern-key.
+ *   1 → "row_1", 2 → "row_2", 3 → "row_3", 4 → "row_4", 5 → "full_house".
+ */
+function phaseToConfigKey(phase: number): string {
+  if (phase === 5) return "full_house";
+  return `row_${phase}`;
+}
+
+/** Norsk fase-navn for audit og logging. */
+function phaseDisplayName(phase: number): string {
+  switch (phase) {
+    case 1:
+      return "1 Rad";
+    case 2:
+      return "2 Rader";
+    case 3:
+      return "3 Rader";
+    case 4:
+      return "4 Rader";
+    case 5:
+      return "Fullt Hus";
+    default:
+      return `Fase ${phase}`;
+  }
+}
+
+type ResolvedPhaseConfig =
+  | { kind: "percent"; percent: number }
+  | { kind: "fixed"; amountCents: number };
+
+/**
+ * Resolve phase-config fra ticket_config_json.
+ *
+ * Admin-form-shape (Spill1Config.ts): ticket_config.spill1.ticketColors[0]
+ * .prizePerPattern[row_1..full_house] er prosent av pot.
+ *
+ * For PR 4c: bruk FØRSTE ticketColor's prizePerPattern[phase_key] som
+ * prosent. I praksis skal alle farger ha samme prosent-fordeling. Hvis
+ * ikke finnes eller er 0 → returnerer percent=0 (ingen utbetaling for
+ * fasen, men fasen regnes fortsatt som "vunnet" slik at neste fase kan
+ * starte).
+ */
+function resolvePhaseConfig(
+  rawTicketConfig: unknown,
+  phase: number
+): ResolvedPhaseConfig {
+  let parsed: unknown = rawTicketConfig;
+  if (typeof rawTicketConfig === "string") {
+    try {
+      parsed = JSON.parse(rawTicketConfig);
+    } catch {
+      return { kind: "percent", percent: 0 };
+    }
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { kind: "percent", percent: 0 };
+  }
+  const obj = parsed as Record<string, unknown>;
+  const spill1 = obj.spill1 as Record<string, unknown> | undefined;
+  const ticketColors = Array.isArray(spill1?.ticketColors)
+    ? (spill1!.ticketColors as Array<Record<string, unknown>>)
+    : Array.isArray(obj.ticketColors)
+    ? (obj.ticketColors as Array<Record<string, unknown>>)
+    : null;
+  if (!ticketColors || ticketColors.length === 0) {
+    return { kind: "percent", percent: 0 };
+  }
+  const key = phaseToConfigKey(phase);
+  const first = ticketColors[0]!;
+  const ppp = first.prizePerPattern as Record<string, unknown> | undefined;
+  if (ppp) {
+    const raw = ppp[key];
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
+      return { kind: "percent", percent: raw };
+    }
+    if (typeof raw === "string") {
+      const n = Number.parseFloat(raw);
+      if (Number.isFinite(n) && n >= 0) {
+        return { kind: "percent", percent: n };
+      }
+    }
+  }
+  return { kind: "percent", percent: 0 };
+}
+
+/**
+ * Resolve jackpot-config fra ticket_config_json. Returnerer null hvis
+ * jackpot ikke er konfigurert.
+ *
+ * #316: prizeByColor er Record<string, number> med eksakte ticket-farger
+ * (f.eks. "small_yellow") eller farge-familier ("yellow", "elvis"). Alle
+ * verdier konverteres til numbers; ikke-numeriske filtreres bort.
+ */
+function resolveJackpotConfig(
+  rawTicketConfig: unknown
+): Game1JackpotConfig | null {
+  let parsed: unknown = rawTicketConfig;
+  if (typeof rawTicketConfig === "string") {
+    try {
+      parsed = JSON.parse(rawTicketConfig);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+  const spill1 = obj.spill1 as Record<string, unknown> | undefined;
+  const jp =
+    (spill1?.jackpot as Record<string, unknown> | undefined) ??
+    (obj.jackpot as Record<string, unknown> | undefined);
+  if (!jp || typeof jp !== "object") return null;
+  const pbcRaw = jp.prizeByColor as Record<string, unknown> | undefined;
+  if (!pbcRaw || typeof pbcRaw !== "object") return null;
+  const draw = typeof jp.draw === "number" ? jp.draw : Number.parseInt(String(jp.draw), 10);
+  if (!Number.isFinite(draw) || draw <= 0) return null;
+  const prizeByColor: Record<string, number> = {};
+  for (const [key, val] of Object.entries(pbcRaw)) {
+    const n = numberOrZero(val);
+    if (n > 0) prizeByColor[key.toLowerCase()] = n;
+  }
+  return { prizeByColor, draw };
+}
+
+function numberOrZero(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number.parseFloat(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
 }
 
 function parseMarkings(raw: unknown, expectedLength: number): boolean[] {

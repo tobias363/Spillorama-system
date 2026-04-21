@@ -20,9 +20,10 @@
  *   - stopGame setter engine_ended_at.
  *   - getState returnerer riktig view.
  *   - listDraws returnerer draws i rekkefølge.
- *   - Grid-generering: small 9 unike, large 3x9 med riktig column-ranges.
+ *   - Grid-generering: 5x5 med free centre (idx 12 = 0) og proporsjonale
+ *     column-ranges per maxBallValue. 'size'-parameter påvirker ikke format.
  *   - Markings: kule 23 trukket → assignments med grid containing 23 har
- *     markings.marked[idx]=true.
+ *     markings.marked[idx]=true. Free centre (idx 12) alltid markert.
  *   - Audit skrives for start/draw/pause/resume/stop.
  */
 
@@ -176,71 +177,101 @@ function makeService(opts: {
 
 // ── Grid-generator tester ───────────────────────────────────────────────────
 
-test("generateGridForTicket small: 9 unike tall fra 1..60", () => {
-  const grid = generateGridForTicket("small", 60);
-  assert.equal(grid.length, 9);
-  const nums = grid.filter((n): n is number => typeof n === "number");
-  assert.equal(nums.length, 9, "alle celler skal være tall");
-  const unique = new Set(nums);
-  assert.equal(unique.size, 9, "alle tall skal være unike");
-  for (const n of nums) {
-    assert.ok(n >= 1 && n <= 60, `tall ${n} utenfor 1..60`);
-  }
-});
-
-test("generateGridForTicket small: 9 unike tall fra 1..75", () => {
+test("generateGridForTicket: 5x5 m/ free centre (25 celler, idx 12 = 0) — maxBallValue=75", () => {
   const grid = generateGridForTicket("small", 75);
-  assert.equal(grid.length, 9);
-  const nums = grid.filter((n): n is number => typeof n === "number");
-  assert.equal(nums.length, 9);
-  const unique = new Set(nums);
-  assert.equal(unique.size, 9);
-  for (const n of nums) {
-    assert.ok(n >= 1 && n <= 75);
+  assert.equal(grid.length, 25, "5x5 = 25 celler");
+  assert.equal(grid[12], 0, "index 12 (row 2, col 2) = 0 = free centre");
+
+  // 24 unike non-centre celler, alle innenfor 1..75.
+  const nonCentre = grid
+    .filter((_, i) => i !== 12)
+    .filter((n): n is number => typeof n === "number");
+  assert.equal(nonCentre.length, 24, "24 non-centre tall-celler (ingen null)");
+  const unique = new Set(nonCentre);
+  assert.equal(unique.size, 24, "alle non-centre tall skal være unike");
+  for (const n of nonCentre) {
+    assert.ok(n >= 1 && n <= 75, `tall ${n} utenfor 1..75`);
   }
 });
 
-test("generateGridForTicket large: 27 celler (3x9) med col-ranges", () => {
-  const grid = generateGridForTicket("large", 90);
-  assert.equal(grid.length, 27, "3x9 = 27 celler");
-  // Row-major: row 0 celle 0 = col 0 row 0, celle 1 = col 1 row 0, etc.
-  // Col-ranges (British): col 0 = 1..9, col 1 = 10..19, ..., col 8 = 80..90.
+test("generateGridForTicket: 'size' ignoreres — både 'small' og 'large' gir 5x5", () => {
+  const small = generateGridForTicket("small", 75);
+  const large = generateGridForTicket("large", 75);
+  assert.equal(small.length, 25);
+  assert.equal(large.length, 25);
+  assert.equal(small[12], 0);
+  assert.equal(large[12], 0);
+});
+
+test("generateGridForTicket maxBallValue=75: proporsjonale col-ranges (amerikansk 75-ball)", () => {
+  const grid = generateGridForTicket("small", 75);
+  // Row-major: grid[row*5 + col].
+  // col 0 = 1..15, col 1 = 16..30, col 2 = 31..45, col 3 = 46..60, col 4 = 61..75.
   const colRanges: Array<[number, number]> = [
-    [1, 9],
-    [10, 19],
-    [20, 29],
-    [30, 39],
-    [40, 49],
-    [50, 59],
-    [60, 69],
-    [70, 79],
-    [80, 90],
+    [1, 15],
+    [16, 30],
+    [31, 45],
+    [46, 60],
+    [61, 75],
   ];
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 9; col++) {
-      const cell = grid[row * 9 + col];
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 5; col++) {
+      const idx = row * 5 + col;
+      if (idx === 12) continue; // free centre
+      const cell = grid[idx];
       if (cell === null) continue;
       const [lo, hi] = colRanges[col]!;
       assert.ok(
-        cell >= lo && cell <= hi,
+        typeof cell === "number" && cell >= lo && cell <= hi,
         `col ${col} row ${row} = ${cell}, forventet ${lo}..${hi}`
       );
     }
   }
 });
 
-test("generateGridForTicket large maxBallValue=60: col 6-8 er null", () => {
-  const grid = generateGridForTicket("large", 60);
-  assert.equal(grid.length, 27);
-  // col 6: 60..69 — men maxBallValue=60 cap'er til [60..60], så range < 3.
-  //   Kun 1 tall kan plukkes; rest er null.
-  // col 7: 70..79 — utenfor maxBallValue → alle null.
-  // col 8: 80..90 — utenfor maxBallValue → alle null.
-  for (let row = 0; row < 3; row++) {
-    const col7 = grid[row * 9 + 7];
-    const col8 = grid[row * 9 + 8];
-    assert.equal(col7, null, `col 7 row ${row} skal være null`);
-    assert.equal(col8, null, `col 8 row ${row} skal være null`);
+test("generateGridForTicket maxBallValue=90: legacy 90-ball col-ranges (1..18, 19..36, …, 73..90)", () => {
+  const grid = generateGridForTicket("small", 90);
+  assert.equal(grid.length, 25);
+  assert.equal(grid[12], 0);
+  const colRanges: Array<[number, number]> = [
+    [1, 18],
+    [19, 36],
+    [37, 54],
+    [55, 72],
+    [73, 90],
+  ];
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 5; col++) {
+      const idx = row * 5 + col;
+      if (idx === 12) continue;
+      const cell = grid[idx];
+      if (cell === null) continue;
+      const [lo, hi] = colRanges[col]!;
+      assert.ok(
+        typeof cell === "number" && cell >= lo && cell <= hi,
+        `col ${col} row ${row} = ${cell}, forventet ${lo}..${hi}`
+      );
+    }
+  }
+});
+
+test("generateGridForTicket: col 2 unngår row 2 (free centre) — 4 plukk fra col 2, ikke 5", () => {
+  // Kjør 50 ganger for å få statistisk robusthet: col 2 skal ha akkurat 4
+  // ikke-null non-centre tall.
+  for (let trial = 0; trial < 50; trial++) {
+    const grid = generateGridForTicket("small", 75);
+    const col2Nums: number[] = [];
+    for (let r = 0; r < 5; r++) {
+      if (r === 2) continue;
+      const v = grid[r * 5 + 2];
+      if (typeof v === "number" && v !== 0) col2Nums.push(v);
+    }
+    assert.equal(col2Nums.length, 4, "col 2 skal ha 4 non-centre tall (row 2 er free)");
+    const unique = new Set(col2Nums);
+    assert.equal(unique.size, 4, "col 2 skal ha unike tall");
+    for (const n of col2Nums) {
+      assert.ok(n >= 31 && n <= 45, `col 2 tall ${n} utenfor 31..45`);
+    }
   }
 });
 
@@ -910,7 +941,9 @@ test("drawNext: markings oppdateres når kule matcher grid-celle", async () => {
           s.includes("INSERT INTO") && s.includes("app_game1_draws"),
         rows: [],
       },
-      // SELECT assignments — én med grid [23, 5, 7, 10, 20, 30, 40, 50, 60].
+      // SELECT assignments — én med 5x5 grid. Ball 23 skal matche idx 0.
+      // Grid: [23, 16, 17, 18, 19,   1, 20, 21, 46, 61,   2, 22, 0, 47, 62,   3, 24, 32, 48, 63,   4, 25, 33, 49, 64]
+      // Free centre idx 12 = 0 (allerede markert).
       {
         match: (s) =>
           s.includes("FROM") &&
@@ -919,9 +952,21 @@ test("drawNext: markings oppdateres når kule matcher grid-celle", async () => {
         rows: [
           {
             id: "a-1",
-            grid_numbers_json: [23, 5, 7, 10, 20, 30, 40, 50, 60],
+            grid_numbers_json: [
+              23, 16, 17, 18, 19,
+              1, 20, 21, 46, 61,
+              2, 22, 0, 47, 62,
+              3, 24, 32, 48, 63,
+              4, 25, 33, 49, 64,
+            ],
             markings_json: {
-              marked: [false, false, false, false, false, false, false, false, false],
+              marked: [
+                false, false, false, false, false,
+                false, false, false, false, false,
+                false, false, true, false, false,
+                false, false, false, false, false,
+                false, false, false, false, false,
+              ],
             },
           },
         ],
@@ -971,6 +1016,11 @@ test("drawNext: markings oppdateres når kule matcher grid-celle", async () => {
     "markings[0] skal være true (ball 23 = grid[0])"
   );
   assert.equal(markingsJson.marked[1], false);
+  assert.equal(
+    markingsJson.marked[12],
+    true,
+    "markings[12] (free centre) forblir markert"
+  );
 });
 
 // ── pauseGame/resumeGame tester ─────────────────────────────────────────────

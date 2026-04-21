@@ -16,16 +16,19 @@
 --   * buyer_user_id / hall_id denormalisert for enkle queries uten JOIN.
 --   * ticket_color TEXT: farge fra ticket_spec ("yellow", "white", "purple",
 --     "red", "green", "orange", "elvis1"-"elvis5"). Brukes av UI-rendering.
---   * ticket_size TEXT CHECK IN ('small','large'): small = 3x3 (9 tall),
---     large = 3x9 (27 tall, 3 per kolonne i 1..9, 10..19, …, 80..90 —
---     cap'et til maxBallValue).
---   * grid_numbers_json JSONB: flat array row-major.
---     - small: 9 unike tall fra 1..maxBallValue.
---     - large: 27 elementer; `null` for tomme celler (f.eks. col 6-8 ved
---       maxBallValue=60).
---   * markings_json JSONB: { "marked": [bool, ...] } matchende
---     grid_numbers_json.length. Oppdateres av drawNext() hver gang en ny
---     kule matcher en celle.
+--   * ticket_size TEXT CHECK IN ('small','large'): LEGACY PRISKATEGORI.
+--     Påvirker kun pris-oppslag og UI-rendering — IKKE grid-format. Alle Spill
+--     1-bretter er 5x5 (25 celler). Tobias' PM-avklaring 2026-04-21:
+--     "5x5 er det eneste riktige formatet for Spill 1".
+--   * grid_numbers_json JSONB: flat row-major array av 25 celler (5x5). Index
+--     12 (row 2, col 2) = 0 (free centre, alltid markert). Øvrige celler er
+--     tall fra 1..maxBallValue, fordelt proporsjonalt per kolonne (f.eks.
+--     maxBallValue=75 → col 0=1..15, col 1=16..30, col 2=31..45, col 3=46..60,
+--     col 4=61..75). `null` tillatt for padding hvis en kolonne ikke har nok
+--     tall (sjelden — kun ved svært lav maxBallValue).
+--   * markings_json JSONB: { "marked": [bool × 25] } matchende grid. Index 12
+--     er alltid true (free centre). Oppdateres av drawNext() når trukket kule
+--     matcher en ikke-0-celle.
 --   * sequence_in_purchase INT: 1-indexed rekkefølge innenfor purchase.
 --     UNIQUE(purchase_id, sequence_in_purchase) hindrer dobbel-generering.
 --
@@ -53,9 +56,9 @@ CREATE TABLE IF NOT EXISTS app_game1_ticket_assignments (
   ticket_color          TEXT NOT NULL,
   ticket_size           TEXT NOT NULL
                           CHECK (ticket_size IN ('small','large')),
-  -- Grid-tallene (small = 3x3 = 9 tall, large = 3x9 = 27 tall). Flat array,
-  -- row-major. For large med maxBallValue=60 vil høyere kolonner inneholde
-  -- null for tomme celler.
+  -- Grid-tallene: 5x5 flat row-major array (25 celler). Index 12 = 0
+  -- (free centre, alltid markert). ticket_size er LEGACY PRISKATEGORI og
+  -- påvirker IKKE grid-format (Tobias' spec 2026-04-21).
   grid_numbers_json     JSONB NOT NULL,
   -- Rekkefølge-nummer innenfor samme purchase (1-indexed) for audit.
   sequence_in_purchase  INTEGER NOT NULL CHECK (sequence_in_purchase >= 1),
@@ -76,7 +79,7 @@ COMMENT ON TABLE app_game1_ticket_assignments IS
   'GAME1_SCHEDULE PR4b: én rad per fysisk-digital billett for Game 1 scheduled_game. Grid-tall genereres ved startGame() i Game1DrawEngineService.';
 
 COMMENT ON COLUMN app_game1_ticket_assignments.grid_numbers_json IS
-  'GAME1_SCHEDULE PR4b: flat row-major array. small=9 tall (3x3), large=27 (3x9 med null for tomme celler).';
+  'GAME1_SCHEDULE PR4b/4c: flat row-major 5x5 (25 celler). Index 12 = 0 (free centre, alltid markert). Tall 1..maxBallValue fordelt proporsjonalt per kolonne (f.eks. maxBallValue=75 → col 0=1..15, col 4=61..75).';
 
 COMMENT ON COLUMN app_game1_ticket_assignments.markings_json IS
-  'GAME1_SCHEDULE PR4b: { "marked": [bool, ...] }. Oppdateres av drawNext() når trukket kule matcher grid-celle.';
+  'GAME1_SCHEDULE PR4b/4c: { "marked": [bool × 25] }. Index 12 (free centre) alltid true. Oppdateres av drawNext() når trukket kule matcher grid-celle.';

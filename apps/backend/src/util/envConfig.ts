@@ -50,6 +50,9 @@ export interface BingoRuntimeConfig {
   // GAME1_SCHEDULE PR 1: auto-scheduler-tick for Game 1
   jobGame1ScheduleTickEnabled: boolean;
   jobGame1ScheduleTickIntervalMs: number;
+  // GAME1_SCHEDULE PR 4c: auto-draw-tick for Game 1 (fixed seconds-intervall)
+  jobGame1AutoDrawEnabled: boolean;
+  jobGame1AutoDrawIntervalMs: number;
   // Storage
   usePostgresBingoAdapter: boolean;
   checkpointConnectionString: string;
@@ -140,6 +143,11 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   // "hengende" rader uten håndtering. Aktiveres via env-flag i staging først.
   const jobGame1ScheduleTickEnabled = parseBooleanEnv(process.env.GAME1_SCHEDULE_TICK_ENABLED, false);
   const jobGame1ScheduleTickIntervalMs = Math.max(5_000, parsePositiveIntEnv(process.env.GAME1_SCHEDULE_TICK_INTERVAL_MS, 15_000));
+  // GAME1_SCHEDULE PR 4c: auto-draw-tick — default OFF til PR 4d socket-flyt er inne.
+  const jobGame1AutoDrawEnabled = parseBooleanEnv(process.env.GAME1_AUTO_DRAW_ENABLED, false);
+  // Minimum 500 ms — auto-draw trigges hvert `seconds`-felt fra ticket_config,
+  // tick-intervallet bare polles. Default 1000 ms matcher "global 1s tick".
+  const jobGame1AutoDrawIntervalMs = Math.max(500, parsePositiveIntEnv(process.env.GAME1_AUTO_DRAW_INTERVAL_MS, 1_000));
 
   // BIN-159/BIN-240: PostgreSQL checkpointing
   const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
@@ -188,6 +196,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
     jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
+    jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,
