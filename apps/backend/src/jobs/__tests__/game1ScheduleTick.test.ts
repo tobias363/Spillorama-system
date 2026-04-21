@@ -23,6 +23,7 @@ interface ServiceRecorder {
   openCalls: number;
   readyCalls: number;
   cancelCalls: number;
+  timeoutCalls: number;
 }
 
 function makeService(overrides: {
@@ -33,6 +34,7 @@ function makeService(overrides: {
   opened?: number;
   readied?: number;
   cancelled?: number;
+  timedOutGameIds?: string[];
   throwCode?: string;
 } = {}): {
   service: Parameters<typeof createGame1ScheduleTickJob>[0]["service"];
@@ -43,6 +45,7 @@ function makeService(overrides: {
     openCalls: 0,
     readyCalls: 0,
     cancelCalls: 0,
+    timeoutCalls: 0,
   };
   const service = {
     spawnUpcomingGame1Games: async () => {
@@ -71,11 +74,15 @@ function makeService(overrides: {
       recorder.cancelCalls++;
       return overrides.cancelled ?? 0;
     },
+    detectMasterTimeout: async () => {
+      recorder.timeoutCalls++;
+      return { gameIds: overrides.timedOutGameIds ?? [] };
+    },
   } as unknown as Parameters<typeof createGame1ScheduleTickJob>[0]["service"];
   return { service, recorder };
 }
 
-test("game1-schedule-tick: kaller alle 4 service-metoder i sekvens", async () => {
+test("game1-schedule-tick: kaller alle 5 service-metoder i sekvens", async () => {
   const { service, recorder } = makeService({
     spawned: 2,
     opened: 1,
@@ -88,6 +95,7 @@ test("game1-schedule-tick: kaller alle 4 service-metoder i sekvens", async () =>
   assert.equal(recorder.openCalls, 1);
   assert.equal(recorder.readyCalls, 1);
   assert.equal(recorder.cancelCalls, 1);
+  assert.equal(recorder.timeoutCalls, 1);
   assert.equal(result.itemsProcessed, 3);
   assert.match(result.note ?? "", /spawned=2/);
   assert.match(result.note ?? "", /opened=1/);
@@ -102,10 +110,11 @@ test("game1-schedule-tick: aggregerer tellere for note-feltet", async () => {
     opened: 4,
     readied: 1,
     cancelled: 2,
+    timedOutGameIds: ["g-1", "g-2"],
   });
   const job = createGame1ScheduleTickJob({ service });
   const result = await job(Date.now());
-  assert.equal(result.itemsProcessed, 5 + 4 + 1 + 2);
+  assert.equal(result.itemsProcessed, 5 + 4 + 1 + 2 + 2);
   const note = result.note ?? "";
   assert.match(note, /spawned=5/);
   assert.match(note, /skipped=3/);
@@ -114,6 +123,7 @@ test("game1-schedule-tick: aggregerer tellere for note-feltet", async () => {
   assert.match(note, /opened=4/);
   assert.match(note, /readied=1/);
   assert.match(note, /cancelled=2/);
+  assert.match(note, /masterTimeout=2/);
 });
 
 test("game1-schedule-tick: 42P01 fra service → returnerer 0 med note (ikke kast)", async () => {

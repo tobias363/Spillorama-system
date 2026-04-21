@@ -777,4 +777,112 @@ export class Game1ScheduleTickService {
   private hallReadyTable(): string {
     return `"${this.schema}"."app_game1_hall_ready_status"`;
   }
+
+  private masterAuditTable(): string {
+    return `"${this.schema}"."app_game1_master_audit"`;
+  }
+
+  /**
+   * GAME1_SCHEDULE PR 3: detect master-timeout i MVP-form.
+   *
+   * Spec §3.6: master som ikke trykker START innen X minutter etter alle
+   * haller er ready. Per MVP-policy gjør vi INGEN auto-failover — vi
+   * logger event i audit-tabellen og returnerer antall detekterte timeouts
+   * så socket-laget kan broadcaste warning til master-UI.
+   *
+   * Idempotens: for hver game som har vært i `ready_to_start` > terskelen,
+   * skriv kun én audit-rad per state-epoke (ingen ny rad hvis det allerede
+   * finnes en timeout_detected-rad etter siste state-endring).
+   */
+  async detectMasterTimeout(
+    nowMs: number,
+    timeoutThresholdSeconds = 900
+  ): Promise<{ gameIds: string[] }> {
+    const now = new Date(nowMs);
+    const threshold = new Date(nowMs - timeoutThresholdSeconds * 1000);
+
+    const { rows: candidates } = await this.pool.query<{
+      id: string;
+      master_hall_id: string;
+      group_hall_id: string;
+      updated_at: Date | string;
+    }>(
+      `SELECT id, master_hall_id, group_hall_id, updated_at
+         FROM ${this.scheduledGamesTable()}
+         WHERE status = 'ready_to_start'
+           AND updated_at <= $1::timestamptz
+           AND scheduled_end_time > $2::timestamptz`,
+      [threshold.toISOString(), now.toISOString()]
+    );
+    if (candidates.length === 0) return { gameIds: [] };
+
+    const timedOut: string[] = [];
+    for (const g of candidates) {
+      const { rows: existing } = await this.pool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+           FROM ${this.masterAuditTable()}
+           WHERE game_id = $1
+             AND action  = 'timeout_detected'
+             AND created_at >= $2::timestamptz`,
+        [g.id, g.updated_at instanceof Date ? g.updated_at.toISOString() : g.updated_at]
+      );
+      const count = Number(existing[0]?.count ?? "0");
+      if (count > 0) continue;
+
+      const { rows: readyRows } = await this.pool.query<{
+        hall_id: string;
+        is_ready: boolean;
+        excluded_from_game: boolean;
+      }>(
+        `SELECT hall_id, is_ready, excluded_from_game
+           FROM ${this.hallReadyTable()}
+           WHERE game_id = $1`,
+        [g.id]
+      );
+      const snapshot: Record<string, { isReady: boolean; excluded: boolean }> = {};
+      for (const r of readyRows) {
+        snapshot[r.hall_id] = {
+          isReady: Boolean(r.is_ready),
+          excluded: Boolean(r.excluded_from_game),
+        };
+      }
+
+      const auditId = randomUUID();
+      try {
+        await this.pool.query(
+          `INSERT INTO ${this.masterAuditTable()}
+             (id, game_id, action, actor_user_id, actor_hall_id, group_hall_id,
+              halls_ready_snapshot, metadata_json)
+           VALUES ($1, $2, 'timeout_detected', 'SYSTEM', $3, $4, $5::jsonb, $6::jsonb)`,
+          [
+            auditId,
+            g.id,
+            g.master_hall_id,
+            g.group_hall_id,
+            JSON.stringify(snapshot),
+            JSON.stringify({
+              detectedAt: now.toISOString(),
+              thresholdSeconds: timeoutThresholdSeconds,
+              readyToStartSince: g.updated_at instanceof Date
+                ? g.updated_at.toISOString()
+                : g.updated_at,
+            }),
+          ]
+        );
+        timedOut.push(g.id);
+        log.info(
+          { gameId: g.id, thresholdSeconds: timeoutThresholdSeconds },
+          "[GAME1_SCHEDULE PR3] master timeout_detected"
+        );
+      } catch (err) {
+        const code = (err as { code?: string } | null)?.code ?? "";
+        if (code === "42P01") {
+          log.debug({ gameId: g.id }, "master_audit table missing; skipping detect_master_timeout");
+          return { gameIds: [] };
+        }
+        throw err;
+      }
+    }
+    return { gameIds: timedOut };
+  }
 }

@@ -1,0 +1,902 @@
+/**
+ * GAME1_SCHEDULE PR 3: master-control service for Game 1.
+ *
+ * Spec: .claude/worktrees/interesting-ellis-eb99bd/GAME1_SCHEDULE_SPEC.md §3.3 + §3.5 + §3.9.
+ *
+ * Ansvar:
+ *   1) startGame({ gameId, confirmExcludedHalls?, actor })
+ *      - Pre-cond: game.status IN ('purchase_open' med allReady, 'ready_to_start')
+ *      - Validerer at actor er master (actor.id må være fra master_hall_id
+ *        eller være ADMIN).
+ *      - Validerer ingen ikke-bekreftet ekskludert hall.
+ *      - UPDATE status='running', actual_start_time=NOW(), started_by_user_id.
+ *      - AuditLog: 'start' med halls_ready_snapshot.
+ *   2) excludeHall({ gameId, hallId, reason, actor })
+ *      - Gyldig i status='purchase_open' eller 'ready_to_start'.
+ *      - Master kan ikke ekskludere master-hallen selv.
+ *      - UPDATE app_game1_hall_ready_status: excluded_from_game=true.
+ *      - Side-effekt: rullerer 'ready_to_start' tilbake til 'purchase_open'.
+ *      - AuditLog: 'exclude_hall' med hallId + reason i metadata.
+ *   3) includeHall({ gameId, hallId, actor })
+ *      - Reverser exclusion. Kun gyldig i 'purchase_open'.
+ *      - AuditLog: 'include_hall'.
+ *   4) pauseGame({ gameId, reason?, actor }) — status='running' → 'paused'.
+ *   5) resumeGame({ gameId, actor }) — status='paused' → 'running'.
+ *   6) stopGame({ gameId, reason, actor })
+ *      - Gyldig i status IN ('purchase_open', 'ready_to_start', 'running', 'paused').
+ *      - UPDATE status='cancelled', stopped_by_user_id, stop_reason.
+ *      - AuditLog: 'stop' med reason i metadata.
+ *
+ * Design:
+ *   - Service er DB-only: oppdaterer app_game1_scheduled_games +
+ *     app_game1_hall_ready_status + app_game1_master_audit.
+ *     BingoEngine-integrasjon (ad-hoc room-basert engine) gjøres IKKE her —
+ *     BingoEngine.startGame trenger roomCode + player-setup som er
+ *     separat fra scheduled-game-flyten. Spec §3.5 kaller dette "delegate
+ *     til BingoEngine" men BingoEngine er room-scoped, ikke scheduled-
+ *     game-scoped. PR 3-scope begrenses derfor til scheduled-games-
+ *     state-maskin + audit; faktisk draw-engine-wiring kommer i senere
+ *     PR når room-code-mapping er definert.
+ *   - Hall-scope håndheves i route-laget.
+ *   - Audit skrives i samme transaksjon som state-oppdateringen.
+ */
+
+import { randomUUID } from "node:crypto";
+import type { Pool, PoolClient } from "pg";
+import { DomainError } from "./BingoEngine.js";
+import { logger as rootLogger } from "../util/logger.js";
+
+const log = rootLogger.child({ module: "game1-master-control-service" });
+
+export type MasterAuditAction =
+  | "start"
+  | "pause"
+  | "resume"
+  | "stop"
+  | "exclude_hall"
+  | "include_hall"
+  | "timeout_detected";
+
+export const MASTER_AUDIT_ACTIONS: readonly MasterAuditAction[] = [
+  "start",
+  "pause",
+  "resume",
+  "stop",
+  "exclude_hall",
+  "include_hall",
+  "timeout_detected",
+];
+
+export interface MasterActor {
+  userId: string;
+  hallId: string;
+  role: "ADMIN" | "HALL_OPERATOR" | "AGENT" | "SUPPORT";
+}
+
+export interface StartGameInput {
+  gameId: string;
+  confirmExcludedHalls?: string[];
+  actor: MasterActor;
+}
+
+export interface ExcludeHallInput {
+  gameId: string;
+  hallId: string;
+  reason: string;
+  actor: MasterActor;
+}
+
+export interface IncludeHallInput {
+  gameId: string;
+  hallId: string;
+  actor: MasterActor;
+}
+
+export interface PauseGameInput {
+  gameId: string;
+  reason?: string;
+  actor: MasterActor;
+}
+
+export interface ResumeGameInput {
+  gameId: string;
+  actor: MasterActor;
+}
+
+export interface StopGameInput {
+  gameId: string;
+  reason: string;
+  actor: MasterActor;
+}
+
+export interface MasterActionResult {
+  gameId: string;
+  status: string;
+  actualStartTime: string | null;
+  actualEndTime: string | null;
+  auditId: string;
+}
+
+export interface TimeoutDetectedInput {
+  gameId: string;
+}
+
+export interface Game1MasterControlServiceOptions {
+  pool: Pool;
+  schema?: string;
+}
+
+interface ScheduledGameRow {
+  id: string;
+  status: string;
+  master_hall_id: string;
+  group_hall_id: string;
+  participating_halls_json: unknown;
+  actual_start_time: Date | string | null;
+  actual_end_time: Date | string | null;
+}
+
+interface HallReadySnapshotRow {
+  hall_id: string;
+  is_ready: boolean;
+  excluded_from_game: boolean;
+}
+
+function parseHallIdsArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((x): x is string => typeof x === "string");
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((x: unknown): x is string => typeof x === "string");
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function toIso(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  return String(value);
+}
+
+export class Game1MasterControlService {
+  private readonly pool: Pool;
+  private readonly schema: string;
+
+  constructor(options: Game1MasterControlServiceOptions) {
+    this.pool = options.pool;
+    const schema = (options.schema ?? "public").trim();
+    if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
+      throw new DomainError("INVALID_CONFIG", "Ugyldig schema-navn.");
+    }
+    this.schema = schema;
+  }
+
+  /** @internal test helper. */
+  static forTesting(pool: Pool, schema = "public"): Game1MasterControlService {
+    return new Game1MasterControlService({ pool, schema });
+  }
+
+  private scheduledGamesTable(): string {
+    return `"${this.schema}"."app_game1_scheduled_games"`;
+  }
+
+  private hallReadyTable(): string {
+    return `"${this.schema}"."app_game1_hall_ready_status"`;
+  }
+
+  private masterAuditTable(): string {
+    return `"${this.schema}"."app_game1_master_audit"`;
+  }
+
+  async startGame(input: StartGameInput): Promise<MasterActionResult> {
+    return this.runInTransaction(async (client) => {
+      const game = await this.loadGameForUpdate(client, input.gameId);
+      this.assertActorIsMaster(input.actor, game);
+
+      if (game.status !== "ready_to_start" && game.status !== "purchase_open") {
+        throw new DomainError(
+          "GAME_NOT_STARTABLE",
+          `Kan ikke starte spill i status '${game.status}'.`
+        );
+      }
+
+      const readyRows = await this.loadReadySnapshot(client, input.gameId);
+
+      if (game.status === "purchase_open") {
+        const nonExcluded = readyRows.filter((r) => !r.excluded_from_game);
+        if (nonExcluded.length === 0) {
+          throw new DomainError(
+            "NO_READY_HALLS",
+            "Ingen deltakende haller er klare."
+          );
+        }
+        if (!nonExcluded.every((r) => r.is_ready)) {
+          throw new DomainError(
+            "HALLS_NOT_READY",
+            "Ikke alle deltakende haller er klare. Ekskluder manglende haller eller vent."
+          );
+        }
+      }
+
+      const excludedHallIds = readyRows
+        .filter((r) => r.excluded_from_game)
+        .map((r) => r.hall_id);
+      const confirmed = new Set(input.confirmExcludedHalls ?? []);
+      const unconfirmed = excludedHallIds.filter((h) => !confirmed.has(h));
+      if (unconfirmed.length > 0) {
+        throw new DomainError(
+          "EXCLUDED_HALLS_NOT_CONFIRMED",
+          `Master må bekrefte ekskluderte haller: ${unconfirmed.join(", ")}.`
+        );
+      }
+
+      const { rows: updated } = await client.query<ScheduledGameRow>(
+        `UPDATE ${this.scheduledGamesTable()}
+            SET status              = 'running',
+                actual_start_time   = now(),
+                started_by_user_id  = $2,
+                updated_at          = now()
+          WHERE id = $1
+          RETURNING id, status, master_hall_id, group_hall_id,
+                    participating_halls_json, actual_start_time, actual_end_time`,
+        [input.gameId, input.actor.userId]
+      );
+      const row = updated[0];
+      if (!row) {
+        throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke lenger.");
+      }
+
+      const auditId = await this.writeAudit(client, {
+        gameId: input.gameId,
+        action: "start",
+        actor: input.actor,
+        groupHallId: game.group_hall_id,
+        snapshot: this.snapshotReadyRows(readyRows),
+        metadata: {
+          confirmExcludedHalls: input.confirmExcludedHalls ?? [],
+          excludedHallIds,
+        },
+      });
+
+      log.info(
+        { gameId: input.gameId, actorId: input.actor.userId, auditId },
+        "master.start"
+      );
+
+      return {
+        gameId: row.id,
+        status: row.status,
+        actualStartTime: toIso(row.actual_start_time),
+        actualEndTime: toIso(row.actual_end_time),
+        auditId,
+      };
+    });
+  }
+
+  async excludeHall(input: ExcludeHallInput): Promise<MasterActionResult> {
+    const reason = input.reason.trim();
+    if (!reason) {
+      throw new DomainError("INVALID_INPUT", "reason kreves ved eksklusjon.");
+    }
+    return this.runInTransaction(async (client) => {
+      const game = await this.loadGameForUpdate(client, input.gameId);
+      this.assertActorIsMaster(input.actor, game);
+
+      if (game.status !== "purchase_open" && game.status !== "ready_to_start") {
+        throw new DomainError(
+          "EXCLUDE_NOT_ALLOWED",
+          `Kan ikke ekskludere hall når spillet er i status '${game.status}'.`
+        );
+      }
+
+      if (input.hallId === game.master_hall_id) {
+        throw new DomainError(
+          "CANNOT_EXCLUDE_MASTER_HALL",
+          "Master-hallen kan ikke ekskluderes."
+        );
+      }
+
+      const participating = parseHallIdsArray(game.participating_halls_json);
+      if (!participating.includes(input.hallId) && input.hallId !== game.master_hall_id) {
+        throw new DomainError(
+          "HALL_NOT_PARTICIPATING",
+          "Hallen deltar ikke i dette spillet."
+        );
+      }
+
+      await client.query(
+        `INSERT INTO ${this.hallReadyTable()}
+           (game_id, hall_id, is_ready, excluded_from_game, excluded_reason)
+         VALUES ($1, $2, false, true, $3)
+         ON CONFLICT (game_id, hall_id) DO UPDATE
+           SET excluded_from_game = true,
+               excluded_reason    = EXCLUDED.excluded_reason,
+               updated_at         = now()`,
+        [input.gameId, input.hallId, reason]
+      );
+
+      if (game.status === "ready_to_start") {
+        await client.query(
+          `UPDATE ${this.scheduledGamesTable()}
+              SET status     = 'purchase_open',
+                  updated_at = now()
+            WHERE id = $1 AND status = 'ready_to_start'`,
+          [input.gameId]
+        );
+      }
+
+      const readyRows = await this.loadReadySnapshot(client, input.gameId);
+      const updatedStatus = await this.readGameStatus(client, input.gameId);
+
+      const auditId = await this.writeAudit(client, {
+        gameId: input.gameId,
+        action: "exclude_hall",
+        actor: input.actor,
+        groupHallId: game.group_hall_id,
+        snapshot: this.snapshotReadyRows(readyRows),
+        metadata: { hallId: input.hallId, reason },
+      });
+
+      log.info(
+        { gameId: input.gameId, hallId: input.hallId, actorId: input.actor.userId, auditId },
+        "master.exclude_hall"
+      );
+
+      return {
+        gameId: input.gameId,
+        status: updatedStatus,
+        actualStartTime: null,
+        actualEndTime: null,
+        auditId,
+      };
+    });
+  }
+
+  async includeHall(input: IncludeHallInput): Promise<MasterActionResult> {
+    return this.runInTransaction(async (client) => {
+      const game = await this.loadGameForUpdate(client, input.gameId);
+      this.assertActorIsMaster(input.actor, game);
+
+      if (game.status !== "purchase_open") {
+        throw new DomainError(
+          "INCLUDE_NOT_ALLOWED",
+          `Kan kun inkludere hall i status 'purchase_open' (nåværende: '${game.status}').`
+        );
+      }
+
+      const { rowCount } = await client.query(
+        `UPDATE ${this.hallReadyTable()}
+            SET excluded_from_game = false,
+                excluded_reason    = NULL,
+                updated_at         = now()
+          WHERE game_id = $1 AND hall_id = $2 AND excluded_from_game = true`,
+        [input.gameId, input.hallId]
+      );
+      if ((rowCount ?? 0) === 0) {
+        throw new DomainError(
+          "HALL_NOT_EXCLUDED",
+          "Hallen er ikke ekskludert, eller har ingen ready-rad å revertere."
+        );
+      }
+
+      const readyRows = await this.loadReadySnapshot(client, input.gameId);
+      const auditId = await this.writeAudit(client, {
+        gameId: input.gameId,
+        action: "include_hall",
+        actor: input.actor,
+        groupHallId: game.group_hall_id,
+        snapshot: this.snapshotReadyRows(readyRows),
+        metadata: { hallId: input.hallId },
+      });
+
+      log.info(
+        { gameId: input.gameId, hallId: input.hallId, actorId: input.actor.userId, auditId },
+        "master.include_hall"
+      );
+
+      return {
+        gameId: input.gameId,
+        status: game.status,
+        actualStartTime: toIso(game.actual_start_time),
+        actualEndTime: toIso(game.actual_end_time),
+        auditId,
+      };
+    });
+  }
+
+  async pauseGame(input: PauseGameInput): Promise<MasterActionResult> {
+    return this.runInTransaction(async (client) => {
+      const game = await this.loadGameForUpdate(client, input.gameId);
+      this.assertActorIsMaster(input.actor, game);
+
+      if (game.status !== "running") {
+        throw new DomainError(
+          "GAME_NOT_RUNNING",
+          `Kan kun pause et kjørende spill (nåværende status: '${game.status}').`
+        );
+      }
+
+      const { rows: updated } = await client.query<ScheduledGameRow>(
+        `UPDATE ${this.scheduledGamesTable()}
+            SET status     = 'paused',
+                updated_at = now()
+          WHERE id = $1
+          RETURNING id, status, master_hall_id, group_hall_id,
+                    participating_halls_json, actual_start_time, actual_end_time`,
+        [input.gameId]
+      );
+      const row = updated[0];
+      if (!row) {
+        throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke lenger.");
+      }
+
+      const readyRows = await this.loadReadySnapshot(client, input.gameId);
+      const auditId = await this.writeAudit(client, {
+        gameId: input.gameId,
+        action: "pause",
+        actor: input.actor,
+        groupHallId: game.group_hall_id,
+        snapshot: this.snapshotReadyRows(readyRows),
+        metadata: { reason: input.reason?.trim() ?? null },
+      });
+
+      log.info(
+        { gameId: input.gameId, actorId: input.actor.userId, auditId },
+        "master.pause"
+      );
+
+      return {
+        gameId: row.id,
+        status: row.status,
+        actualStartTime: toIso(row.actual_start_time),
+        actualEndTime: toIso(row.actual_end_time),
+        auditId,
+      };
+    });
+  }
+
+  async resumeGame(input: ResumeGameInput): Promise<MasterActionResult> {
+    return this.runInTransaction(async (client) => {
+      const game = await this.loadGameForUpdate(client, input.gameId);
+      this.assertActorIsMaster(input.actor, game);
+
+      if (game.status !== "paused") {
+        throw new DomainError(
+          "GAME_NOT_PAUSED",
+          `Kan kun resume et pauset spill (nåværende status: '${game.status}').`
+        );
+      }
+
+      const { rows: updated } = await client.query<ScheduledGameRow>(
+        `UPDATE ${this.scheduledGamesTable()}
+            SET status     = 'running',
+                updated_at = now()
+          WHERE id = $1
+          RETURNING id, status, master_hall_id, group_hall_id,
+                    participating_halls_json, actual_start_time, actual_end_time`,
+        [input.gameId]
+      );
+      const row = updated[0];
+      if (!row) {
+        throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke lenger.");
+      }
+
+      const readyRows = await this.loadReadySnapshot(client, input.gameId);
+      const auditId = await this.writeAudit(client, {
+        gameId: input.gameId,
+        action: "resume",
+        actor: input.actor,
+        groupHallId: game.group_hall_id,
+        snapshot: this.snapshotReadyRows(readyRows),
+        metadata: {},
+      });
+
+      log.info(
+        { gameId: input.gameId, actorId: input.actor.userId, auditId },
+        "master.resume"
+      );
+
+      return {
+        gameId: row.id,
+        status: row.status,
+        actualStartTime: toIso(row.actual_start_time),
+        actualEndTime: toIso(row.actual_end_time),
+        auditId,
+      };
+    });
+  }
+
+  async stopGame(input: StopGameInput): Promise<MasterActionResult> {
+    const reason = input.reason.trim();
+    if (!reason) {
+      throw new DomainError("INVALID_INPUT", "reason kreves ved stop.");
+    }
+    return this.runInTransaction(async (client) => {
+      const game = await this.loadGameForUpdate(client, input.gameId);
+      this.assertActorIsMaster(input.actor, game);
+
+      const validStatuses = new Set([
+        "purchase_open",
+        "ready_to_start",
+        "running",
+        "paused",
+      ]);
+      if (!validStatuses.has(game.status)) {
+        throw new DomainError(
+          "GAME_NOT_STOPPABLE",
+          `Kan ikke stoppe spill i status '${game.status}'.`
+        );
+      }
+
+      const { rows: updated } = await client.query<ScheduledGameRow>(
+        `UPDATE ${this.scheduledGamesTable()}
+            SET status              = 'cancelled',
+                stopped_by_user_id  = $2,
+                stop_reason         = $3,
+                actual_end_time     = now(),
+                updated_at          = now()
+          WHERE id = $1
+          RETURNING id, status, master_hall_id, group_hall_id,
+                    participating_halls_json, actual_start_time, actual_end_time`,
+        [input.gameId, input.actor.userId, reason]
+      );
+      const row = updated[0];
+      if (!row) {
+        throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke lenger.");
+      }
+
+      const readyRows = await this.loadReadySnapshot(client, input.gameId);
+      const auditId = await this.writeAudit(client, {
+        gameId: input.gameId,
+        action: "stop",
+        actor: input.actor,
+        groupHallId: game.group_hall_id,
+        snapshot: this.snapshotReadyRows(readyRows),
+        metadata: { reason, priorStatus: game.status },
+      });
+
+      log.info(
+        { gameId: input.gameId, actorId: input.actor.userId, auditId, reason },
+        "master.stop"
+      );
+
+      return {
+        gameId: row.id,
+        status: row.status,
+        actualStartTime: toIso(row.actual_start_time),
+        actualEndTime: toIso(row.actual_end_time),
+        auditId,
+      };
+    });
+  }
+
+  /**
+   * Skriv timeout_detected-audit (system-generert). Idempotent for en gitt
+   * game-stateovergang.
+   */
+  async recordTimeoutDetected(
+    input: TimeoutDetectedInput
+  ): Promise<{ auditId: string | null }> {
+    return this.runInTransaction(async (client) => {
+      const game = await this.loadGameForUpdate(client, input.gameId);
+
+      const { rows: existing } = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+           FROM ${this.masterAuditTable()}
+           WHERE game_id = $1
+             AND action  = 'timeout_detected'
+             AND created_at >= (SELECT updated_at - INTERVAL '1 minute'
+                                  FROM ${this.scheduledGamesTable()}
+                                 WHERE id = $1)`,
+        [input.gameId]
+      );
+      const count = Number(existing[0]?.count ?? "0");
+      if (count > 0) {
+        return { auditId: null };
+      }
+
+      const readyRows = await this.loadReadySnapshot(client, input.gameId);
+      const auditId = await this.writeAudit(client, {
+        gameId: input.gameId,
+        action: "timeout_detected",
+        actor: {
+          userId: "SYSTEM",
+          hallId: game.master_hall_id,
+          role: "ADMIN",
+        },
+        groupHallId: game.group_hall_id,
+        snapshot: this.snapshotReadyRows(readyRows),
+        metadata: {
+          detectedAt: new Date().toISOString(),
+          priorStatus: game.status,
+        },
+      });
+
+      log.info({ gameId: input.gameId, auditId }, "master.timeout_detected");
+      return { auditId };
+    });
+  }
+
+  async getGameDetail(gameId: string): Promise<{
+    game: {
+      id: string;
+      status: string;
+      scheduledStartTime: string | null;
+      scheduledEndTime: string | null;
+      actualStartTime: string | null;
+      actualEndTime: string | null;
+      masterHallId: string;
+      groupHallId: string;
+      participatingHallIds: string[];
+      subGameName: string;
+      customGameName: string | null;
+      startedByUserId: string | null;
+      stoppedByUserId: string | null;
+      stopReason: string | null;
+    };
+    halls: Array<{
+      hallId: string;
+      isReady: boolean;
+      readyAt: string | null;
+      readyByUserId: string | null;
+      digitalTicketsSold: number;
+      physicalTicketsSold: number;
+      excludedFromGame: boolean;
+      excludedReason: string | null;
+    }>;
+    auditRecent: Array<{
+      id: string;
+      action: MasterAuditAction;
+      actorUserId: string;
+      actorHallId: string;
+      metadata: Record<string, unknown>;
+      createdAt: string;
+    }>;
+  }> {
+    const { rows: gameRows } = await this.pool.query<{
+      id: string;
+      status: string;
+      scheduled_start_time: Date | string;
+      scheduled_end_time: Date | string;
+      actual_start_time: Date | string | null;
+      actual_end_time: Date | string | null;
+      master_hall_id: string;
+      group_hall_id: string;
+      participating_halls_json: unknown;
+      sub_game_name: string;
+      custom_game_name: string | null;
+      started_by_user_id: string | null;
+      stopped_by_user_id: string | null;
+      stop_reason: string | null;
+    }>(
+      `SELECT id, status, scheduled_start_time, scheduled_end_time,
+              actual_start_time, actual_end_time, master_hall_id,
+              group_hall_id, participating_halls_json, sub_game_name,
+              custom_game_name, started_by_user_id, stopped_by_user_id,
+              stop_reason
+         FROM ${this.scheduledGamesTable()}
+         WHERE id = $1`,
+      [gameId]
+    );
+    const g = gameRows[0];
+    if (!g) {
+      throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke.");
+    }
+
+    const participating = parseHallIdsArray(g.participating_halls_json);
+    const allHalls = new Set<string>(participating);
+    allHalls.add(g.master_hall_id);
+
+    const { rows: readyRows } = await this.pool.query<{
+      hall_id: string;
+      is_ready: boolean;
+      ready_at: Date | string | null;
+      ready_by_user_id: string | null;
+      digital_tickets_sold: number;
+      physical_tickets_sold: number;
+      excluded_from_game: boolean;
+      excluded_reason: string | null;
+    }>(
+      `SELECT hall_id, is_ready, ready_at, ready_by_user_id,
+              digital_tickets_sold, physical_tickets_sold,
+              excluded_from_game, excluded_reason
+         FROM ${this.hallReadyTable()}
+         WHERE game_id = $1`,
+      [gameId]
+    );
+    const readyByHall = new Map<string, (typeof readyRows)[number]>();
+    for (const r of readyRows) readyByHall.set(r.hall_id, r);
+
+    const halls = Array.from(allHalls).map((hallId) => {
+      const r = readyByHall.get(hallId);
+      return {
+        hallId,
+        isReady: Boolean(r?.is_ready ?? false),
+        readyAt: r?.ready_at != null ? toIso(r.ready_at) : null,
+        readyByUserId: r?.ready_by_user_id ?? null,
+        digitalTicketsSold: Number(r?.digital_tickets_sold ?? 0),
+        physicalTicketsSold: Number(r?.physical_tickets_sold ?? 0),
+        excludedFromGame: Boolean(r?.excluded_from_game ?? false),
+        excludedReason: r?.excluded_reason ?? null,
+      };
+    });
+
+    const { rows: auditRows } = await this.pool.query<{
+      id: string;
+      action: string;
+      actor_user_id: string;
+      actor_hall_id: string;
+      metadata_json: unknown;
+      created_at: Date | string;
+    }>(
+      `SELECT id, action, actor_user_id, actor_hall_id, metadata_json, created_at
+         FROM ${this.masterAuditTable()}
+         WHERE game_id = $1
+         ORDER BY created_at DESC
+         LIMIT 50`,
+      [gameId]
+    );
+
+    return {
+      game: {
+        id: g.id,
+        status: g.status,
+        scheduledStartTime: toIso(g.scheduled_start_time),
+        scheduledEndTime: toIso(g.scheduled_end_time),
+        actualStartTime: toIso(g.actual_start_time),
+        actualEndTime: toIso(g.actual_end_time),
+        masterHallId: g.master_hall_id,
+        groupHallId: g.group_hall_id,
+        participatingHallIds: Array.from(allHalls),
+        subGameName: g.sub_game_name,
+        customGameName: g.custom_game_name,
+        startedByUserId: g.started_by_user_id,
+        stoppedByUserId: g.stopped_by_user_id,
+        stopReason: g.stop_reason,
+      },
+      halls,
+      auditRecent: auditRows.map((a) => ({
+        id: a.id,
+        action: a.action as MasterAuditAction,
+        actorUserId: a.actor_user_id,
+        actorHallId: a.actor_hall_id,
+        metadata: (a.metadata_json as Record<string, unknown>) ?? {},
+        createdAt: toIso(a.created_at) ?? "",
+      })),
+    };
+  }
+
+  // ── Internal helpers ───────────────────────────────────────────────────────
+
+  private assertActorIsMaster(actor: MasterActor, game: ScheduledGameRow): void {
+    if (actor.role === "ADMIN") return;
+    if (actor.role === "SUPPORT") {
+      throw new DomainError(
+        "FORBIDDEN",
+        "SUPPORT-rollen har ikke tilgang til master-actions."
+      );
+    }
+    if (actor.hallId !== game.master_hall_id) {
+      throw new DomainError(
+        "FORBIDDEN",
+        `Kun master-hallens operatør kan utføre denne handlingen (krever hall ${game.master_hall_id}).`
+      );
+    }
+  }
+
+  private async runInTransaction<T>(
+    fn: (client: PoolClient) => Promise<T>
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await fn(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // swallow rollback error
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async loadGameForUpdate(
+    client: PoolClient,
+    gameId: string
+  ): Promise<ScheduledGameRow> {
+    const { rows } = await client.query<ScheduledGameRow>(
+      `SELECT id, status, master_hall_id, group_hall_id,
+              participating_halls_json, actual_start_time, actual_end_time
+         FROM ${this.scheduledGamesTable()}
+         WHERE id = $1
+         FOR UPDATE`,
+      [gameId]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke.");
+    }
+    return row;
+  }
+
+  private async readGameStatus(
+    client: PoolClient,
+    gameId: string
+  ): Promise<string> {
+    const { rows } = await client.query<{ status: string }>(
+      `SELECT status FROM ${this.scheduledGamesTable()} WHERE id = $1`,
+      [gameId]
+    );
+    return rows[0]?.status ?? "unknown";
+  }
+
+  private async loadReadySnapshot(
+    client: PoolClient,
+    gameId: string
+  ): Promise<HallReadySnapshotRow[]> {
+    const { rows } = await client.query<HallReadySnapshotRow>(
+      `SELECT hall_id, is_ready, excluded_from_game
+         FROM ${this.hallReadyTable()}
+         WHERE game_id = $1`,
+      [gameId]
+    );
+    return rows;
+  }
+
+  private snapshotReadyRows(
+    rows: HallReadySnapshotRow[]
+  ): Record<string, { isReady: boolean; excluded: boolean }> {
+    const snapshot: Record<string, { isReady: boolean; excluded: boolean }> = {};
+    for (const r of rows) {
+      snapshot[r.hall_id] = {
+        isReady: Boolean(r.is_ready),
+        excluded: Boolean(r.excluded_from_game),
+      };
+    }
+    return snapshot;
+  }
+
+  private async writeAudit(
+    client: PoolClient,
+    input: {
+      gameId: string;
+      action: MasterAuditAction;
+      actor: MasterActor;
+      groupHallId: string;
+      snapshot: Record<string, { isReady: boolean; excluded: boolean }>;
+      metadata: Record<string, unknown>;
+    }
+  ): Promise<string> {
+    const auditId = randomUUID();
+    await client.query(
+      `INSERT INTO ${this.masterAuditTable()}
+         (id, game_id, action, actor_user_id, actor_hall_id, group_hall_id,
+          halls_ready_snapshot, metadata_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)`,
+      [
+        auditId,
+        input.gameId,
+        input.action,
+        input.actor.userId,
+        input.actor.hallId,
+        input.groupHallId,
+        JSON.stringify(input.snapshot),
+        JSON.stringify(input.metadata),
+      ]
+    );
+    return auditId;
+  }
+}

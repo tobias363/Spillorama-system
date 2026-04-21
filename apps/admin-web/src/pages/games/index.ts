@@ -32,6 +32,7 @@ import { renderSavedGameDetailPages } from "./savedGame/SavedGameDetailPages.js"
 import { renderScheduleListPage } from "./schedules/ScheduleListPage.js";
 import { renderScheduleDetailPages } from "./schedules/ScheduleDetailPages.js";
 import { renderDailyScheduleDetailPages } from "./dailySchedules/DailyScheduleDetailPages.js";
+import { renderGame1MasterConsole } from "./master/Game1MasterConsole.js";
 
 /** Static routes that resolve via routes.ts directly (no params). */
 const STATIC_GAMES_ROUTES = new Set<string>([
@@ -91,7 +92,9 @@ export function isGamesRoute(path: string): boolean {
     /^\/dailySchedule\/special\/[^/]+$/.test(bare) ||
     /^\/dailySchedule\/scheduleGame\/[^/]+$/.test(bare) ||
     /^\/dailySchedule\/subgame\/edit\/[^/]+$/.test(bare) ||
-    /^\/dailySchedule\/subgame\/view\/[^/]+$/.test(bare)
+    /^\/dailySchedule\/subgame\/view\/[^/]+$/.test(bare) ||
+    // GAME1_SCHEDULE PR 3: master-konsoll for Game 1
+    /^\/game1\/master\/[^/]+$/.test(bare)
   );
 }
 
@@ -341,6 +344,13 @@ export function mountGamesRoute(container: HTMLElement, path: string): void {
       kind: "subgame-view",
       id: decodeURIComponent(dsSubgameViewMatch[1]),
     });
+    return;
+  }
+
+  // --- GAME1_SCHEDULE PR 3: master-konsoll ---
+  const masterMatch = /^\/game1\/master\/([^/]+)$/.exec(bare);
+  if (masterMatch && masterMatch[1]) {
+    void renderGame1MasterConsole(container, decodeURIComponent(masterMatch[1]));
     return;
   }
 

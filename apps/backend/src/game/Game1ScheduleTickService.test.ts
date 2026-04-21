@@ -693,3 +693,88 @@ test("transitionReadyToStartGames: ingen kandidater → 0, ingen videre query", 
   assert.equal(count, 0);
   assert.equal(queries.length, 1);
 });
+
+// ── detectMasterTimeout (PR 3) ────────────────────────────────────────────────
+
+test("detectMasterTimeout: ingen kandidater → { gameIds: [] }", async () => {
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("SELECT id, master_hall_id, group_hall_id, updated_at"),
+        rows: [],
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.detectMasterTimeout(fixedNow);
+  assert.deepEqual(result.gameIds, []);
+});
+
+test("detectMasterTimeout: kandidat uten tidligere audit → skriver rad + returnerer id", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("SELECT id, master_hall_id, group_hall_id, updated_at"),
+        rows: [
+          {
+            id: "g-timeout",
+            master_hall_id: "hall-m",
+            group_hall_id: "grp-1",
+            updated_at: new Date(fixedNow - 20 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("COUNT(*)") && sql.includes("timeout_detected"),
+        rows: [{ count: "0" }],
+      },
+      {
+        match: (sql) => sql.includes("hall_id, is_ready, excluded_from_game"),
+        rows: [],
+      },
+      {
+        match: (sql) => sql.includes("INSERT INTO") && sql.includes("master_audit"),
+        rows: [],
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.detectMasterTimeout(fixedNow);
+  assert.deepEqual(result.gameIds, ["g-timeout"]);
+  const auditInsert = queries.find(
+    (q) => q.sql.includes("master_audit") && q.sql.includes("INSERT")
+  );
+  assert.ok(auditInsert);
+  assert.equal(auditInsert!.params[1], "g-timeout");
+});
+
+test("detectMasterTimeout: idempotent — hopper over hvis audit allerede finnes", async () => {
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("SELECT id, master_hall_id, group_hall_id, updated_at"),
+        rows: [
+          {
+            id: "g-already",
+            master_hall_id: "hall-m",
+            group_hall_id: "grp-1",
+            updated_at: new Date(fixedNow - 20 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("COUNT(*)") && sql.includes("timeout_detected"),
+        rows: [{ count: "1" }],
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.detectMasterTimeout(fixedNow);
+  assert.deepEqual(result.gameIds, []);
+});
