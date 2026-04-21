@@ -12,7 +12,6 @@ export type TicketDisplayItem = TicketCard | TicketGroup;
 /**
  * Vertical grid scroller for Game 1 tickets.
  *
- * Matches Unity's GridLayoutGroup layout:
  * - cellSize: 250×250
  * - spacing: 10×10
  * - startAxis: Horizontal (fills left→right, wraps down)

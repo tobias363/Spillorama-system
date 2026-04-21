@@ -250,7 +250,7 @@ export type TicketReplacePayload = z.infer<typeof TicketReplacePayloadSchema>;
  * BIN-585: ticket:swap — free pre-round swap (Game 5 / Spillorama).
  * Same wire shape as ticket:replace, but the handler skips the wallet debit.
  * Gated by gameSlug so paid games continue to use ticket:replace.
- * Legacy alias: `SwapTicket` (Unity fallback-klient).
+ * Legacy alias: `SwapTicket`.
  */
 export const TicketSwapPayloadSchema = z.object({
   accessToken: z.string().optional(),

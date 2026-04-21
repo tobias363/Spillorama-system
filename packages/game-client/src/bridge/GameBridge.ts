@@ -110,7 +110,6 @@ type EventMap = {
 
 /**
  * Translates raw socket events into game-specific derived state.
- * Replaces SpilloramaGameBridge.cs from Unity.
  *
  * Game scenes subscribe to high-level events (gameStarted, numberDrawn, etc.)
  * instead of parsing raw RoomUpdatePayload directly.

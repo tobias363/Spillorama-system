@@ -1,6 +1,5 @@
 /**
  * Game plan (spilleplan) panel — shows today's scheduled games for the hall.
- * Matches Unity's PrefabGamePlan1Ticket with Buy/Play buttons per game.
  *
  * Fetches schedule from GET /api/halls/:hallId/schedule and displays
  * each slot with game name, time, variant type, and action buttons.

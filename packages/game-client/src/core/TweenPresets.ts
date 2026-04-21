@@ -3,7 +3,6 @@ import type { Container } from "pixi.js";
 
 /**
  * Reusable GSAP animation presets for bingo game UI.
- * Replaces LeanTween/DOTween patterns from Unity.
  */
 export const TweenPresets = {
   /** Continuous scale ping-pong (1-to-go blink). */

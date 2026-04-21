@@ -77,8 +77,6 @@ export class TicketCard extends Container {
     this.ticketIndex = index;
     const gridSize = options?.gridSize ?? "3x5";
     const cellSize = options?.cellSize ?? (gridSize === "5x5" ? 36 : 44);
-
-    // Theme colors (from Unity TicketColorTheme or defaults)
     const cardBgColor = options?.cardBg ?? TicketCard.DEFAULT_CARD_BG;
     this.cardBgColor = cardBgColor;
     const headerBgColor = options?.headerBg ?? TicketCard.DEFAULT_HEADER_BG;

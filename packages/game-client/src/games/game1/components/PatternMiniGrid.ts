@@ -1,6 +1,5 @@
 /**
  * 5x5 mini-grid showing a pattern visualization with cycling animations.
- * Matches Unity's PrefabBingoGame1Pattern.cs with 5 design types.
  *
  * Design types (from Unity):
  *   0 = custom mask (static highlight from patternDataList)

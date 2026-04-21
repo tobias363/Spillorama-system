@@ -3,7 +3,6 @@ import gsap from "gsap";
 
 /**
  * Countdown timer with scale/color pulse animation.
- * Matches Unity TimerTxtAnim pattern from Game2GamePlayPanel.SocketFlow.cs.
  */
 export class CountdownTimer extends Container {
   private timerText: Text;

@@ -81,8 +81,6 @@ export class PlayScreen extends Container {
     this.drawnBalls.x = gameAreaLeft;
     this.drawnBalls.y = 45;
     this.addChild(this.drawnBalls);
-
-    // Pattern ping-pong banner (port of Unity PrefabBingoGame3Pattern)
     this.patternBanner = new PatternBanner(gameAreaWidth);
     this.patternBanner.x = gameAreaLeft;
     this.patternBanner.y = 78;
