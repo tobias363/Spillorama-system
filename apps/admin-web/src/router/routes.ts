@@ -128,6 +128,8 @@ export const routes: RouteDef[] = [
   { path: "/maintenance/new", titleKey: "maintenance_new_window", roles: ["admin", "super-admin"] },
   { path: "/system/systemInformation", titleKey: "system_information", roles: ["admin", "super-admin"] },
 
+  { path: "/agent/dashboard", titleKey: "agent_dashboard", roles: ["agent"] },
+  { path: "/agent/players", titleKey: "agent_players_title", roles: ["agent"] },
   { path: "/agent/cashinout", titleKey: "cash_in_out", roles: ["agent"] },
   { path: "/agent/physicalCashOut", titleKey: "physical_cash_out", roles: ["agent"] },
   // PR-B1: cash-inout sub-pages. Exact matches only — use query string for

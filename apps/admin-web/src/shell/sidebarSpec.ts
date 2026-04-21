@@ -236,6 +236,8 @@ export const agentSidebar: SidebarNode[] = [
   { kind: "header", labelKey: "main_navigation" },
   spilloramaLive,
   { kind: "leaf", id: "dashboard", path: "/admin", icon: "fa fa-dashboard", labelKey: "dashboard" },
+  { kind: "leaf", id: "agent-dashboard", path: "/agent/dashboard", icon: "fa fa-line-chart", labelKey: "agent_dashboard", agentOnly: true },
+  { kind: "leaf", id: "agent-players", path: "/agent/players", icon: "fa fa-users", labelKey: "agent_players_title", agentOnly: true },
   {
     kind: "group",
     id: "cash-in-out",

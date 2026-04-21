@@ -68,6 +68,7 @@ import { SecurityService } from "./compliance/SecurityService.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createAdminAgentsRouter } from "./routes/adminAgents.js";
 import { createAgentTransactionsRouter } from "./routes/agentTransactions.js";
+import { createAgentDashboardRouter } from "./routes/agentDashboard.js";
 import { createAgentSettlementRouter } from "./routes/agentSettlement.js";
 import { createAdminProductsRouter } from "./routes/adminProducts.js";
 import { createAgentProductsRouter } from "./routes/agentProducts.js";
@@ -1123,6 +1124,16 @@ app.use(createAgentTransactionsRouter({
   platformService,
   agentService,
   agentTransactionService,
+  auditLogService,
+}));
+
+// Agent dashboard + player-list + CSV-eksport. Samme AGENT_TX_READ-rbac
+// som `agentTransactions.ts` — kun AGENT-rollen kan bruke disse endepunktene.
+app.use(createAgentDashboardRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  agentTransactionStore,
   auditLogService,
 }));
 

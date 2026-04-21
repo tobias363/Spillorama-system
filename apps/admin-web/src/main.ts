@@ -36,6 +36,8 @@ import { isSettingsRoute, mountSettingsRoute } from "./pages/settings/index.js";
 import { isSystemInformationRoute, mountSystemInformationRoute } from "./pages/systemInformation/index.js";
 import { isOtherGamesRoute, mountOtherGamesRoute } from "./pages/otherGames/index.js";
 import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPage.js";
+import { mountAgentDashboard, unmountAgentDashboard } from "./pages/agent-dashboard/AgentDashboardPage.js";
+import { mountAgentPlayers } from "./pages/agent-players/AgentPlayersPage.js";
 
 const MAINTENANCE_MODE = false;
 
@@ -256,8 +258,19 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
     return mountDashboard(container, session);
   }
   unmountDashboard();
+  if (route.path !== "/agent/dashboard") {
+    unmountAgentDashboard();
+  }
   if (isLegacySectionRoute(route.path)) {
     mountLegacySection(container, route.path);
+    return;
+  }
+  if (route.path === "/agent/dashboard") {
+    mountAgentDashboard(container);
+    return;
+  }
+  if (route.path === "/agent/players") {
+    mountAgentPlayers(container);
     return;
   }
   if (isCashInOutRoute(route.path)) {
