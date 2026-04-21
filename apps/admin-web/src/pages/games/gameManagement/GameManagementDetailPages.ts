@@ -1,35 +1,40 @@
-// Detail pages for the GameManagement stack — all render-only placeholders
-// pending backend endpoints (BIN-622 CRUD + BIN-623 close-day).
+// Detail pages for the GameManagement stack.
 //
-// Legacy files covered here (8 files, ~6 930 lines collapsed into placeholders
-// because the heavy legacy UIs are write-forms/modals that cannot function
-// without backend endpoints):
+// BIN-684 wire-up (bolk 1): View (read-only) + SubGames er live mot
+// `/api/admin/game-management/:typeId/:id`. Tickets-per-game mangler
+// fortsatt backend-rute → placeholder. CloseDay er BIN-623 → placeholder.
+// Add/Add-G3 er skjema med ~50 felt som ikke er skopet inn i wire-up — PR-A3b
+// lander selve skjema-UI-en senere; her er knappen aktivert og viser
+// placeholder med "kommer".
+//
+// Legacy files covered here (8 files, ~6 930 lines):
 //   - viewGameDetails.html    (383L) → list-per-type (already covered by main list)
-//   - gameAdd.html            (2497L) → add (BIN-622)
-//   - game3Add.html           (2158L) → add Game-3 variant (BIN-622)
-//   - gameView.html           ( 650L) → read-only view (BIN-622 data)
-//   - game3View.html          ( 442L) → read-only view Game-3 (BIN-622 data)
-//   - viewGameTickets.html    ( 585L) → ticket-list (BIN-622)
-//   - ticketView.html         ( 205L) → ticket-modal (BIN-622)
-//   - mainSubGames.html       ( 410L) → nested sub-games (BIN-622)
+//   - gameAdd.html            (2497L) → add (placeholder: skjema-UI kommer)
+//   - game3Add.html           (2158L) → add Game-3 (placeholder: skjema-UI kommer)
+//   - gameView.html           ( 650L) → read-only view — NÅ LIVE
+//   - game3View.html          ( 442L) → read-only view Game-3 — NÅ LIVE
+//   - viewGameTickets.html    ( 585L) → ticket-list (backend-rute mangler)
+//   - ticketView.html         ( 205L) → ticket-modal (backend-rute mangler)
+//   - mainSubGames.html       ( 410L) → nested sub-games — NÅ LIVE (data-only)
 //   - closeDay.html           ( 480L) → day-close confirm (BIN-623)
-//
-// Each page mounts the breadcrumb + backend-placeholder banner and a "back"
-// link to the type-scoped list. Full forms/tables land once backend lists
-// exist, in the BIN-622/623 follow-up PRs.
 
 import { t } from "../../../i18n/I18n.js";
 import { escapeHtml } from "../common/escape.js";
 import { fetchGameTypeList } from "../gameType/GameTypeState.js";
 import type { GameType } from "../common/types.js";
+import {
+  fetchGameManagement,
+  type GameManagementRow,
+} from "./GameManagementState.js";
+import { ApiError } from "../../../api/client.js";
 
 interface ShellOpts {
   title: string;
   breadcrumb: Array<{ label: string; href?: string }>;
-  issue: "BIN-622" | "BIN-623";
-  bannerText: string;
   backHref: string;
   backLabel: string;
+  /** HTML content for the panel body. */
+  body: string;
 }
 
 function renderShell(opts: ShellOpts): string {
@@ -59,18 +64,25 @@ function renderShell(opts: ShellOpts): string {
               <div class="clearfix"></div>
             </div>
             <div class="panel-wrapper collapse in">
-              <div class="panel-body">
-                <div class="alert alert-warning">
-                  <i class="fa fa-info-circle"></i>
-                  ${escapeHtml(opts.bannerText)}
-                  <strong>${escapeHtml(opts.issue)}</strong> må leveres før denne siden er funksjonell.
-                </div>
-              </div>
+              <div class="panel-body">${opts.body}</div>
             </div>
           </div>
         </div></div>
       </section>
     </div></div>`;
+}
+
+function placeholderBody(issue: string, text: string): string {
+  return `
+    <div class="alert alert-warning" data-testid="gm-placeholder">
+      <i class="fa fa-info-circle"></i>
+      ${escapeHtml(text)}
+      <strong>${escapeHtml(issue)}</strong>
+    </div>`;
+}
+
+function loadingBody(): string {
+  return `<div class="text-center" data-testid="gm-detail-loading"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
 }
 
 async function resolveGameType(typeId: string): Promise<GameType | null> {
@@ -94,67 +106,138 @@ function baseCrumb(gt: GameType | null, typeId: string): ShellOpts["breadcrumb"]
   ];
 }
 
-/** /gameManagement/:typeId/add — legacy gameAdd.html (2 497 lines) */
+/** Format ApiError til kontekstuell feilmelding. */
+function formatError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) return t("permission_denied");
+    if (err.status === 404) return t("not_found");
+    return err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Tabell-rad helper. */
+function kvRow(label: string, value: string | number | null | undefined): string {
+  return `<tr><th style="width:30%;">${escapeHtml(label)}</th><td>${escapeHtml(String(value ?? ""))}</td></tr>`;
+}
+
+/** Felles view-tabell brukt av både view og view-g3. */
+function renderGameView(row: GameManagementRow): string {
+  return `
+    <div data-testid="gm-view-details">
+      <table class="table table-bordered" style="max-width:700px;">
+        <tbody>
+          ${kvRow(t("game_id"), row._id)}
+          ${kvRow(t("child_id"), row.childId ?? "")}
+          ${kvRow(t("game_name"), row.name)}
+          ${kvRow(t("ticket_type"), row.ticketType ?? "")}
+          ${kvRow(t("ticket_price"), row.ticketPrice)}
+          ${kvRow(t("start_date"), row.startDate)}
+          ${kvRow(t("end_date"), row.endDate ?? "")}
+          ${kvRow(t("status"), row.status)}
+          ${kvRow(t("total_sold"), row.totalSold ?? 0)}
+          ${kvRow(t("total_earning"), row.totalEarning ?? 0)}
+          ${kvRow(t("created_at"), row.createdAt)}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ── Add / Add-G3: skjema-UI er ute av BIN-684-scope ─────────────────────────
+
+/** /gameManagement/:typeId/add — skjema-UI kommer i egen PR. */
 export async function renderGameManagementAddPage(container: HTMLElement, typeId: string): Promise<void> {
   const gt = await resolveGameType(typeId);
   container.innerHTML = renderShell({
     title: `${t("add_game")} — ${gt?.name ?? typeId}`,
     breadcrumb: [...baseCrumb(gt, typeId), { label: t("add_game") }],
-    issue: "BIN-622",
-    bannerText: "Venter på backend-endpoint for GameManagement CRUD.",
     backHref: `#/gameManagement?typeId=${encodeURIComponent(typeId)}`,
     backLabel: t("back"),
+    body: placeholderBody(
+      "BIN-622",
+      "Add Game-skjema (50+ felt: prize tiers, hall-group visibility, sub-game komposisjon) er under arbeid. CRUD-endpoint er klar."
+    ),
   });
 }
 
-/** /gameManagement/:typeId/add-g3 — legacy game3Add.html (2 158 lines) */
+/** /gameManagement/:typeId/add-g3 — skjema-UI kommer i egen PR. */
 export async function renderGameManagementAddG3Page(container: HTMLElement, typeId: string): Promise<void> {
   const gt = await resolveGameType(typeId);
   container.innerHTML = renderShell({
     title: `${t("add_game")} (Spill 3) — ${gt?.name ?? typeId}`,
     breadcrumb: [...baseCrumb(gt, typeId), { label: `${t("add_game")} (G3)` }],
-    issue: "BIN-622",
-    bannerText: "Venter på backend-endpoint for GameManagement CRUD (Game 3-variant med mønster-grid).",
     backHref: `#/gameManagement?typeId=${encodeURIComponent(typeId)}`,
     backLabel: t("back"),
+    body: placeholderBody(
+      "BIN-622",
+      "Add Game-3-skjema (pattern-grid + sub-games) er under arbeid. CRUD-endpoint er klar."
+    ),
   });
 }
 
-/** /gameManagement/:typeId/view/:id — legacy gameView.html (650 lines) */
+// ── View / View-G3: LIVE ───────────────────────────────────────────────────
+
+/** /gameManagement/:typeId/view/:id — live detail view. */
 export async function renderGameManagementViewPage(
   container: HTMLElement,
   typeId: string,
   id: string
 ): Promise<void> {
   const gt = await resolveGameType(typeId);
+  const title = `${gt?.name ?? typeId} — ${t("view")} #${id}`;
   container.innerHTML = renderShell({
-    title: `${gt?.name ?? typeId} — ${escapeHtml(t("view"))} #${escapeHtml(id)}`,
+    title,
     breadcrumb: [...baseCrumb(gt, typeId), { label: `${t("view")} #${id}` }],
-    issue: "BIN-622",
-    bannerText: "Venter på backend-endpoint for GameManagement detail-data.",
     backHref: `#/gameManagement?typeId=${encodeURIComponent(typeId)}`,
     backLabel: t("back"),
+    body: loadingBody(),
   });
+  const body = container.querySelector<HTMLElement>(".panel-body");
+  if (!body) return;
+  try {
+    const row = await fetchGameManagement(typeId, id);
+    if (!row) {
+      body.innerHTML = `<div class="alert alert-warning" data-testid="gm-not-found">${escapeHtml(t("not_found"))}</div>`;
+      return;
+    }
+    body.innerHTML = renderGameView(row);
+  } catch (err) {
+    body.innerHTML = `<div class="alert alert-danger" data-testid="gm-error">${escapeHtml(formatError(err))}</div>`;
+  }
 }
 
-/** /gameManagement/:typeId/view-g3/:id — legacy game3View.html (442 lines) */
+/** /gameManagement/:typeId/view-g3/:id — live detail view Game-3. */
 export async function renderGameManagementViewG3Page(
   container: HTMLElement,
   typeId: string,
   id: string
 ): Promise<void> {
   const gt = await resolveGameType(typeId);
+  const title = `${gt?.name ?? typeId} (Spill 3) — ${t("view")} #${id}`;
   container.innerHTML = renderShell({
-    title: `${gt?.name ?? typeId} (Spill 3) — ${escapeHtml(t("view"))} #${escapeHtml(id)}`,
+    title,
     breadcrumb: [...baseCrumb(gt, typeId), { label: `${t("view")} G3 #${id}` }],
-    issue: "BIN-622",
-    bannerText: "Venter på backend-endpoint for GameManagement Game-3 detaljer.",
     backHref: `#/gameManagement?typeId=${encodeURIComponent(typeId)}`,
     backLabel: t("back"),
+    body: loadingBody(),
   });
+  const body = container.querySelector<HTMLElement>(".panel-body");
+  if (!body) return;
+  try {
+    const row = await fetchGameManagement(typeId, id);
+    if (!row) {
+      body.innerHTML = `<div class="alert alert-warning" data-testid="gm-not-found">${escapeHtml(t("not_found"))}</div>`;
+      return;
+    }
+    body.innerHTML = renderGameView(row);
+  } catch (err) {
+    body.innerHTML = `<div class="alert alert-danger" data-testid="gm-error">${escapeHtml(formatError(err))}</div>`;
+  }
 }
 
-/** /gameManagement/:typeId/tickets/:id — legacy viewGameTickets.html + ticketView.html modal */
+// ── Tickets — backend-rute mangler (ikke i BIN-622 scope) ──────────────────
+
+/** /gameManagement/:typeId/tickets/:id — tickets-per-game (placeholder). */
 export async function renderGameManagementTicketsPage(
   container: HTMLElement,
   typeId: string,
@@ -162,33 +245,65 @@ export async function renderGameManagementTicketsPage(
 ): Promise<void> {
   const gt = await resolveGameType(typeId);
   container.innerHTML = renderShell({
-    title: `${t("ticket")} — ${gt?.name ?? typeId} #${escapeHtml(id)}`,
+    title: `${t("ticket")} — ${gt?.name ?? typeId} #${id}`,
     breadcrumb: [...baseCrumb(gt, typeId), { label: `${t("ticket")} #${id}` }],
-    issue: "BIN-622",
-    bannerText: "Venter på backend-endpoint for ticket-listing per spill-runde.",
     backHref: `#/gameManagement?typeId=${encodeURIComponent(typeId)}`,
     backLabel: t("back"),
+    body: placeholderBody(
+      "BIN-622",
+      "Ticket-listing per spill-runde: backend-rute mangler (legacy slo sammen 4 tabeller). Kommer i egen PR."
+    ),
   });
 }
 
-/** /gameManagement/subGames/:typeId/:id — legacy mainSubGames.html (410 lines) */
+// ── SubGames — LIVE (data fra samme GameManagement GET) ────────────────────
+
+/** /gameManagement/subGames/:typeId/:id — nested sub-games. */
 export async function renderGameManagementSubGamesPage(
   container: HTMLElement,
   typeId: string,
   id: string
 ): Promise<void> {
   const gt = await resolveGameType(typeId);
+  const title = `${t("sub_game")} — ${gt?.name ?? typeId} #${id}`;
   container.innerHTML = renderShell({
-    title: `${t("sub_game")} — ${gt?.name ?? typeId} #${escapeHtml(id)}`,
+    title,
     breadcrumb: [...baseCrumb(gt, typeId), { label: `${t("sub_game")} #${id}` }],
-    issue: "BIN-622",
-    bannerText: "Venter på backend-endpoint for nested sub-game composition.",
     backHref: `#/gameManagement?typeId=${encodeURIComponent(typeId)}`,
     backLabel: t("back"),
+    body: loadingBody(),
   });
+  const body = container.querySelector<HTMLElement>(".panel-body");
+  if (!body) return;
+  try {
+    const row = await fetchGameManagement(typeId, id);
+    if (!row) {
+      body.innerHTML = `<div class="alert alert-warning" data-testid="gm-not-found">${escapeHtml(t("not_found"))}</div>`;
+      return;
+    }
+    // Sub-game komposisjon ligger i `config.subGames` inntil BIN-621/627 ─
+    // vi rendrer foreldre-row + info om koblet parent (hvis finnes).
+    const parentRow = row.childId
+      ? `<p><strong>${escapeHtml(t("parent_game"))}:</strong> ${escapeHtml(row.childId)}</p>`
+      : "";
+    body.innerHTML = `
+      <div data-testid="gm-subgames">
+        <p><strong>${escapeHtml(t("game_name"))}:</strong> ${escapeHtml(row.name)}</p>
+        ${parentRow}
+        <div class="alert alert-info">
+          <i class="fa fa-info-circle"></i>
+          Sub-game-komposisjon normaliseres først når BIN-621 SubGame CRUD lander (Agent C).
+          Inntil da lagres slots opaque i <code>config.subGames</code>.
+        </div>
+      </div>`;
+  } catch (err) {
+    body.innerHTML = `<div class="alert alert-danger" data-testid="gm-error">${escapeHtml(formatError(err))}</div>`;
+  }
 }
 
-/** /gameManagement/closeDay/:typeId/:id — legacy closeDay.html (480 lines) */
+// ── CloseDay — BIN-623 ikke levert ─────────────────────────────────────────
+
+/** /gameManagement/closeDay/:typeId/:id — BIN-623 placeholder. */
 export async function renderGameManagementCloseDayPage(
   container: HTMLElement,
   typeId: string,
@@ -196,11 +311,13 @@ export async function renderGameManagementCloseDayPage(
 ): Promise<void> {
   const gt = await resolveGameType(typeId);
   container.innerHTML = renderShell({
-    title: `${t("close_day")} — ${gt?.name ?? typeId} #${escapeHtml(id)}`,
+    title: `${t("close_day")} — ${gt?.name ?? typeId} #${id}`,
     breadcrumb: [...baseCrumb(gt, typeId), { label: `${t("close_day")} #${id}` }],
-    issue: "BIN-623",
-    bannerText: "Venter på backend-endpoint for CloseDay — dagsavslutning av løpende spill-runde.",
     backHref: `#/gameManagement?typeId=${encodeURIComponent(typeId)}`,
     backLabel: t("back"),
+    body: placeholderBody(
+      "BIN-623",
+      "Venter på backend-endpoint for CloseDay — dagsavslutning av løpende spill-runde."
+    ),
   });
 }

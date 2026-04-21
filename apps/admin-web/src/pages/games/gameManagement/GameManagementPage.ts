@@ -1,3 +1,8 @@
+// /gameManagement — 1:1 port of legacy/unity-backend/App/Views/GameManagement/game.html (1457 lines).
+//
+// BIN-684 wire-up (bolk 1): Add-knapp er nå aktiv (BIN-622 levert).
+// BIN-623 CloseDay og tickets-per-game endpoints er fortsatt ikke levert —
+// row-actions for de peker på detail-sider som viser eget placeholder-banner.
 //
 // Legacy layout:
 //   - Top bar: "Choose a game" dropdown (game-type picker)
@@ -8,17 +13,20 @@
 //   - Type picker uses hash query string `#/gameManagement?typeId=X` — pattern
 //     matches cash-inout's `?gameId=X` (see PR-B1 §6.7 in PR-A3-PLAN.md).
 //   - Client-side render; DataTable component handles the grid.
-//   - Add/Repeat/CloseDay are BIN-622/BIN-623 placeholders (disabled buttons
-//     with tooltip). Row actions (view/edit/tickets/subgames/closeDay) are
-//     wired but only View+Tickets+SubGames land pages in PR-A3b; Edit and
-//     delete are disabled placeholders.
+//   - Delete is wired but triggers a confirm-dialog + soft-delete via API.
 
 import { t } from "../../../i18n/I18n.js";
 import { DataTable } from "../../../components/DataTable.js";
 import { escapeHtml } from "../common/escape.js";
 import { fetchGameTypeList } from "../gameType/GameTypeState.js";
 import { isDropdownVisible, type GameType } from "../common/types.js";
-import { fetchGameManagementList, isGame3Variant, type GameManagementRow } from "./GameManagementState.js";
+import {
+  fetchGameManagementList,
+  isGame3Variant,
+  deleteGameManagement,
+  type GameManagementRow,
+} from "./GameManagementState.js";
+import { ApiError } from "../../../api/client.js";
 
 export async function renderGameManagementPage(container: HTMLElement, typeId?: string): Promise<void> {
   container.innerHTML = renderShell();
@@ -26,8 +34,8 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
   const selectEl = container.querySelector<HTMLSelectElement>("#gm-type-picker");
   const tableHost = container.querySelector<HTMLElement>("#gm-list-table");
   const headerHost = container.querySelector<HTMLElement>("#gm-list-header");
-  const bannerHost = container.querySelector<HTMLElement>("#gm-backend-banner");
-  if (!selectEl || !tableHost || !headerHost || !bannerHost) return;
+  const addBtnHost = container.querySelector<HTMLElement>("#gm-add-btn-host");
+  if (!selectEl || !tableHost || !headerHost || !addBtnHost) return;
 
   let types: GameType[] = [];
   try {
@@ -48,7 +56,10 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
   // Pre-select from typeId query param.
   if (typeId) {
     selectEl.value = typeId;
-    await renderList(typeId, types, headerHost, tableHost, bannerHost);
+    renderAddButton(addBtnHost, typeId, types);
+    await renderList(typeId, types, headerHost, tableHost);
+  } else {
+    addBtnHost.innerHTML = "";
   }
 
   selectEl.addEventListener("change", () => {
@@ -79,20 +90,11 @@ function renderShell(): string {
               <div class="pull-left">
                 <h6 class="panel-title txt-dark">${escapeHtml(t("game_creation_management"))}</h6>
               </div>
-              <div class="pull-right">
-                <button type="button"
-                  class="btn btn-primary btn-md"
-                  disabled
-                  title="Venter på backend-endpoint — BIN-622">
-                  <i class="fa fa-plus"></i> ${escapeHtml(t("add_game"))}
-                  <small style="opacity:0.75;margin-left:6px;">(BIN-622)</small>
-                </button>
-              </div>
+              <div class="pull-right" id="gm-add-btn-host"></div>
               <div class="clearfix"></div>
             </div>
             <div class="panel-wrapper collapse in">
               <div class="panel-body">
-                <div id="gm-backend-banner"></div>
                 <div class="table-wrap"><div class="table-responsive">
                   <div id="gm-list-table"></div>
                 </div></div>
@@ -104,12 +106,23 @@ function renderShell(): string {
     </div></div>`;
 }
 
+function renderAddButton(host: HTMLElement, typeId: string, types: GameType[]): void {
+  const gt = types.find((x) => x._id === typeId);
+  const isG3 = isGame3Variant(gt);
+  const href = isG3
+    ? `#/gameManagement/${encodeURIComponent(typeId)}/add-g3`
+    : `#/gameManagement/${encodeURIComponent(typeId)}/add`;
+  host.innerHTML = `
+    <a href="${href}" class="btn btn-primary btn-md" data-testid="gm-add-btn">
+      <i class="fa fa-plus"></i> ${escapeHtml(t("add_game"))}
+    </a>`;
+}
+
 async function renderList(
   typeId: string,
   types: GameType[],
   headerHost: HTMLElement,
-  tableHost: HTMLElement,
-  bannerHost: HTMLElement
+  tableHost: HTMLElement
 ): Promise<void> {
   const gt = types.find((t) => t._id === typeId);
   if (!gt) {
@@ -125,19 +138,30 @@ async function renderList(
       <li class="active">${escapeHtml(gt.name)}</li>
     </ol>`;
 
-  bannerHost.innerHTML = `
-    <div class="alert alert-warning" style="margin:0 0 12px;">
-      <i class="fa fa-info-circle"></i>
-      Venter på backend-endpoint.
-      <strong>BIN-622</strong> GameManagement CRUD må leveres før listen viser data.
-    </div>`;
-
-  tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
-  const rows = await fetchGameManagementList(typeId);
-  renderTable(tableHost, rows, gt);
+  tableHost.innerHTML = `<div class="text-center" data-testid="gm-loading"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
+  try {
+    const rows = await fetchGameManagementList(typeId);
+    renderTable(tableHost, rows, gt, typeId, types, headerHost);
+  } catch (err) {
+    const msg = err instanceof ApiError
+      ? err.status === 403
+        ? t("permission_denied")
+        : err.message
+      : err instanceof Error
+        ? err.message
+        : String(err);
+    tableHost.innerHTML = `<div class="alert alert-danger" data-testid="gm-error">${escapeHtml(msg)}</div>`;
+  }
 }
 
-function renderTable(host: HTMLElement, rows: GameManagementRow[], gt: GameType): void {
+function renderTable(
+  host: HTMLElement,
+  rows: GameManagementRow[],
+  gt: GameType,
+  typeId: string,
+  types: GameType[],
+  headerHost: HTMLElement
+): void {
   DataTable.mount(host, {
     className: "gm-list pb-30",
     emptyMessage: t("no_data_available"),
@@ -160,6 +184,32 @@ function renderTable(host: HTMLElement, rows: GameManagementRow[], gt: GameType)
         render: (row) => renderRowActions(gt, row),
       },
     ],
+  });
+
+  // Wire delete buttons — soft-delete via API, then reload.
+  host.querySelectorAll<HTMLButtonElement>("button[data-action='gm-delete']").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const id = btn.getAttribute("data-id");
+      if (!id) return;
+      if (!window.confirm(t("confirm_delete"))) return;
+      btn.disabled = true;
+      const result = await deleteGameManagement(gt._id, id);
+      if (result.ok) {
+        await renderList(typeId, types, headerHost, host);
+      } else {
+        const msg =
+          result.reason === "PERMISSION_DENIED"
+            ? t("permission_denied")
+            : result.reason === "NOT_FOUND"
+              ? t("not_found")
+              : "message" in result
+                ? result.message
+                : t("pending_backend_endpoint");
+        window.alert(msg);
+        btn.disabled = false;
+      }
+    });
   });
 }
 
@@ -188,8 +238,11 @@ function renderRowActions(gt: GameType, row: GameManagementRow): string {
     <a href="${closeDayRoute}" class="btn btn-warning btn-xs btn-rounded" title="${escapeHtml(t("close_day"))}">
       <i class="fa fa-calendar-times-o"></i>
     </a>
-    <button type="button" class="btn btn-danger btn-xs btn-rounded" disabled
-      title="Venter på backend-endpoint — BIN-622">
+    <button type="button"
+      class="btn btn-danger btn-xs btn-rounded"
+      data-action="gm-delete"
+      data-id="${escapeHtml(row._id)}"
+      title="${escapeHtml(t("delete"))}">
       <i class="fa fa-trash"></i>
     </button>`;
 }

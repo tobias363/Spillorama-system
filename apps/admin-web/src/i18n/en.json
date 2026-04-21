@@ -2335,5 +2335,11 @@
   "game1_master_stop_confirm": "Are you sure you want to stop the game? This action cannot be undone.",
   "game1_master_exclude_reason_prompt": "Provide reason to exclude the hall",
   "game1_master_exclude_reason_required": "Reason is required for exclusion.",
-  "spillorama_master_console": "Master Console (Game 1)"
+  "spillorama_master_console": "Master Console (Game 1)",
+  "permission_denied": "You do not have permission to perform this action.",
+  "not_found": "Record not found.",
+  "confirm_delete": "Are you sure you want to delete?",
+  "total_sold": "Total sold",
+  "total_earning": "Total earning",
+  "parent_game": "Parent game"
 }

@@ -2328,5 +2328,11 @@
   "game1_master_stop_confirm": "Er du sikker på at du vil stoppe spillet? Denne handlingen kan ikke omgjøres.",
   "game1_master_exclude_reason_prompt": "Oppgi årsak for å ekskludere hallen",
   "game1_master_exclude_reason_required": "Årsak er påkrevd for eksklusjon.",
-  "spillorama_master_console": "Master-konsoll (Game 1)"
+  "spillorama_master_console": "Master-konsoll (Game 1)",
+  "permission_denied": "Mangler tilgang til denne handlingen.",
+  "not_found": "Finner ikke raden.",
+  "confirm_delete": "Er du sikker på at du vil slette?",
+  "total_sold": "Antall solgt",
+  "total_earning": "Total inntjening",
+  "parent_game": "Foreldrespill"
 }
