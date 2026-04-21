@@ -1,5 +1,6 @@
-import type { Ticket } from "@spillorama/shared-types/game";
+import type { PatternDefinition, Ticket } from "@spillorama/shared-types/game";
 import { getTicketThemeByName, type TicketColorTheme } from "../colors/TicketColorThemes.js";
+import { remainingForPattern } from "../logic/PatternMasks.js";
 
 /**
  * HTML-based bingo ticket. Replaces the Pixi TicketCard pipeline for Game 1.
@@ -56,6 +57,9 @@ export class BingoTicketHtml {
   private marks = new Set<number>();
   private flipTimer: ReturnType<typeof setTimeout> | null = null;
   private flipped = false;
+  /** Fase-aktivt pattern — styrer "igjen"-teller ("X igjen til 1 Rad"). Null
+   *  = whole-card-telling (pre-round / ukjent pattern). */
+  private activePattern: PatternDefinition | null = null;
   /** Dimensions reported to parent (TicketGridHtml uses these for layout-card math). */
   readonly cardWidth = 240;
   readonly cardHeight = 300;
@@ -156,6 +160,14 @@ export class BingoTicketHtml {
       }
     }
     return remaining;
+  }
+
+  /** Sett fase-aktivt pattern. Tekst endres til "X igjen til \<fase\>" når
+   *  satt. Null = fallback til whole-card-telling. */
+  setActivePattern(pattern: PatternDefinition | null): void {
+    if (this.activePattern?.id === pattern?.id) return;
+    this.activePattern = pattern;
+    this.updateToGo();
   }
 
   destroy(): void {
@@ -391,6 +403,26 @@ export class BingoTicketHtml {
   }
 
   private updateToGo(): void {
+    // Fase-aktivt pattern overstyrer whole-card-telling så spilleren ser
+    // "X igjen til 1 Rad" i stedet for "24 igjen" (hele brettet).
+    if (this.activePattern) {
+      const phaseRemaining = remainingForPattern(
+        this.ticket.grid,
+        this.marks,
+        this.activePattern.name,
+      );
+      if (phaseRemaining !== null) {
+        if (phaseRemaining === 0) {
+          this.toGoEl.textContent = `${this.activePattern.name} — klar!`;
+          this.toGoEl.style.color = "#2a9d8f";
+        } else {
+          this.toGoEl.textContent = `${phaseRemaining} igjen til ${this.activePattern.name}`;
+          this.toGoEl.style.color = hex(this.theme.toGoColor);
+        }
+        return;
+      }
+      // Ukjent pattern-navn → fall gjennom til whole-card-telling.
+    }
     const remaining = this.getRemainingCount();
     if (remaining === 0) {
       this.toGoEl.textContent = "Ferdig!";

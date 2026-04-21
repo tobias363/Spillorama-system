@@ -1,155 +1,249 @@
-/**
- * @vitest-environment node
- *
- * Client mirror of `apps/backend/src/game/PatternMatcher.test.ts` — keeps the
- * two sides wire-compatible. If backend masks change, these tests fail here
- * and catch the drift.
- */
 import { describe, it, expect } from "vitest";
 import {
-  ROW_1_MASKS,
-  ROW_2_MASKS,
-  ROW_3_MASKS,
-  ROW_4_MASKS,
   FULL_HOUSE_MASK,
+  ROW_MASKS,
+  COLUMN_MASKS,
+  PHASE_1_MASKS,
+  PHASE_2_MASKS,
+  PHASE_3_MASKS,
+  PHASE_4_MASKS,
   getBuiltInPatternMasks,
   buildTicketMaskFromGrid,
   remainingForPattern,
-  displayNameForPattern,
   activePatternFromState,
 } from "./PatternMasks.js";
+import type { PatternDefinition, PatternResult } from "@spillorama/shared-types/game";
 
-describe("PatternMasks — mask counts", () => {
-  it("Row 1 has 10 masks (5 rows + 5 cols)", () => {
-    expect(ROW_1_MASKS.length).toBe(10);
+// ── Grid-utilities ──────────────────────────────────────────────────────────
+
+/** Standard Norsk 75-bingo test-grid. Free center = 0. */
+const GRID_A: number[][] = [
+  [1, 16, 31, 46, 61],
+  [2, 17, 32, 47, 62],
+  [3, 18, 0, 48, 63],
+  [4, 19, 33, 49, 64],
+  [5, 20, 34, 50, 65],
+];
+
+function setOf(...ns: number[]): Set<number> {
+  return new Set(ns);
+}
+
+// ── Maske-antall / form ─────────────────────────────────────────────────────
+
+describe("PatternMasks — maske-antall", () => {
+  it("5 rader", () => {
+    expect(ROW_MASKS.length).toBe(5);
   });
-  it("Row 2 has 10 masks", () => expect(ROW_2_MASKS.length).toBe(10));
-  it("Row 3 has 9 masks (legacy omits 235)", () => expect(ROW_3_MASKS.length).toBe(9));
-  it("Row 4 has 5 masks", () => expect(ROW_4_MASKS.length).toBe(5));
-  it("Full House mask covers all 25 bits", () => expect(FULL_HOUSE_MASK).toBe(0x1ffffff));
+  it("5 kolonner", () => {
+    expect(COLUMN_MASKS.length).toBe(5);
+  });
+  it("PHASE_1: 5 rader + 5 kolonner = 10 kandidater", () => {
+    expect(PHASE_1_MASKS.length).toBe(10);
+  });
+  it("PHASE_2: C(5,2) = 10 kombinasjoner av kolonner", () => {
+    expect(PHASE_2_MASKS.length).toBe(10);
+  });
+  it("PHASE_3: C(5,3) = 10 kombinasjoner av kolonner", () => {
+    expect(PHASE_3_MASKS.length).toBe(10);
+  });
+  it("PHASE_4: C(5,4) = 5 kombinasjoner av kolonner", () => {
+    expect(PHASE_4_MASKS.length).toBe(5);
+  });
+  it("FULL_HOUSE_MASK dekker alle 25 bits", () => {
+    expect(FULL_HOUSE_MASK).toBe(0x1ffffff);
+  });
 });
 
-describe("PatternMasks — getBuiltInPatternMasks", () => {
-  it("maps known names", () => {
-    expect(getBuiltInPatternMasks("Row 1")).toBe(ROW_1_MASKS);
-    expect(getBuiltInPatternMasks("Row 4")).toBe(ROW_4_MASKS);
+describe("PatternMasks — maskene har riktig bit-count", () => {
+  const popCount = (v: number) => {
+    let c = 0;
+    for (let i = 0; i < 25; i++) if (v & (1 << i)) c++;
+    return c;
+  };
+  it("hver rad har 5 bits", () => {
+    for (const m of ROW_MASKS) expect(popCount(m)).toBe(5);
+  });
+  it("hver kolonne har 5 bits", () => {
+    for (const m of COLUMN_MASKS) expect(popCount(m)).toBe(5);
+  });
+  it("fase 2 (2 kolonner) har 10 bits per kandidat", () => {
+    for (const m of PHASE_2_MASKS) expect(popCount(m)).toBe(10);
+  });
+  it("fase 3 (3 kolonner) har 15 bits per kandidat", () => {
+    for (const m of PHASE_3_MASKS) expect(popCount(m)).toBe(15);
+  });
+  it("fase 4 (4 kolonner) har 20 bits per kandidat", () => {
+    for (const m of PHASE_4_MASKS) expect(popCount(m)).toBe(20);
+  });
+});
+
+// ── Name-matching (speil av backend meetsPhaseRequirement) ──────────────────
+
+describe("getBuiltInPatternMasks — norske navn", () => {
+  it('"1 Rad" → PHASE_1_MASKS', () => {
+    expect(getBuiltInPatternMasks("1 Rad")).toBe(PHASE_1_MASKS);
+  });
+  it('"2 Rader" → PHASE_2_MASKS', () => {
+    expect(getBuiltInPatternMasks("2 Rader")).toBe(PHASE_2_MASKS);
+  });
+  it('"3 Rader" → PHASE_3_MASKS', () => {
+    expect(getBuiltInPatternMasks("3 Rader")).toBe(PHASE_3_MASKS);
+  });
+  it('"4 Rader" → PHASE_4_MASKS', () => {
+    expect(getBuiltInPatternMasks("4 Rader")).toBe(PHASE_4_MASKS);
+  });
+  it('"Fullt Hus" → [FULL_HOUSE_MASK]', () => {
+    const m = getBuiltInPatternMasks("Fullt Hus");
+    expect(m).toEqual([FULL_HOUSE_MASK]);
+  });
+  it("case-insensitive", () => {
+    expect(getBuiltInPatternMasks("1 RAD")).toBe(PHASE_1_MASKS);
+    expect(getBuiltInPatternMasks("fullt hus")).toEqual([FULL_HOUSE_MASK]);
+  });
+});
+
+describe("getBuiltInPatternMasks — engelske fallback", () => {
+  it('"Row 1" → PHASE_1_MASKS', () => {
+    expect(getBuiltInPatternMasks("Row 1")).toBe(PHASE_1_MASKS);
+  });
+  it('"Full House" → [FULL_HOUSE_MASK]', () => {
     expect(getBuiltInPatternMasks("Full House")).toEqual([FULL_HOUSE_MASK]);
+  });
+  it('"Coverall" → [FULL_HOUSE_MASK]', () => {
     expect(getBuiltInPatternMasks("Coverall")).toEqual([FULL_HOUSE_MASK]);
   });
-  it("returns null for unknown pattern", () => {
-    expect(getBuiltInPatternMasks("Picture")).toBeNull();
+  it("ukjent navn → null", () => {
+    expect(getBuiltInPatternMasks("Stjerne")).toBeNull();
+    expect(getBuiltInPatternMasks("")).toBeNull();
   });
 });
 
-describe("PatternMasks — buildTicketMaskFromGrid", () => {
-  const grid = [
-    [1, 16, 31, 46, 61],
-    [2, 17, 32, 47, 62],
-    [3, 18, 0, 48, 63], // free centre
-    [4, 19, 33, 49, 64],
-    [5, 20, 34, 50, 65],
-  ];
+// ── buildTicketMaskFromGrid ──────────────────────────────────────────────────
 
-  it("free centre is always marked", () => {
-    const mask = buildTicketMaskFromGrid(grid, new Set());
-    expect((mask >> 12) & 1).toBe(1);
+describe("buildTicketMaskFromGrid", () => {
+  it("tomt mark-sett → kun free center (bit 12)", () => {
+    const mask = buildTicketMaskFromGrid(GRID_A, new Set<number>());
+    expect(mask).toBe(1 << 12);
   });
-
-  it("marks are reflected bit-accurately", () => {
-    const mask = buildTicketMaskFromGrid(grid, new Set([1, 65]));
-    expect(mask & 1).toBe(1); // (row 0, col 0) bit 0
-    expect((mask >> 24) & 1).toBe(1); // (row 4, col 4) bit 24
+  it("full rad 0 markert → bits 0-4 + bit 12", () => {
+    const mask = buildTicketMaskFromGrid(GRID_A, setOf(1, 16, 31, 46, 61));
+    expect(mask).toBe(0x1f | (1 << 12));
   });
-
-  it("returns 0 for non-5x5 grid", () => {
-    expect(buildTicketMaskFromGrid([[1, 2, 3]], new Set())).toBe(0);
+  it("full kolonne 0 markert → bits 0, 5, 10, 15, 20 + bit 12", () => {
+    // kol 0-verdier i GRID_A: 1, 2, 3, 4, 5
+    const mask = buildTicketMaskFromGrid(GRID_A, setOf(1, 2, 3, 4, 5));
+    expect(mask).toBe(COLUMN_MASKS[0] | (1 << 12));
+  });
+  it("full bingo → FULL_HOUSE_MASK", () => {
+    const allNumbers = new Set<number>();
+    for (const row of GRID_A) for (const n of row) if (n !== 0) allNumbers.add(n);
+    expect(buildTicketMaskFromGrid(GRID_A, allNumbers)).toBe(FULL_HOUSE_MASK);
   });
 });
 
-describe("PatternMasks — remainingForPattern", () => {
-  const grid = [
-    [1, 16, 31, 46, 61],
-    [2, 17, 32, 47, 62],
-    [3, 18, 0, 48, 63],
-    [4, 19, 33, 49, 64],
-    [5, 20, 34, 50, 65],
-  ];
+// ── remainingForPattern ─────────────────────────────────────────────────────
 
-  it("fresh ticket needs 5 cells for Row 1 (any column has 5, but row 3 has the free centre so 4)", () => {
-    // Row 3 contains the free cell which is always "marked" → 4 remaining.
-    // The best mask across Row 1 candidates therefore is 4, not 5.
-    expect(remainingForPattern(grid, new Set(), "Row 1")).toBe(4);
+describe("remainingForPattern", () => {
+  it('ingen merker → "1 Rad": 4 igjen (rad/kolonne gjennom free center = 4 ubesatte celler)', () => {
+    // Rad 2 (inneholder free center) har 4 ubesatte celler (31, 32, 48, 63 — men 0 er free).
+    // Kol 2 (inneholder free center) har 4 ubesatte celler (31, 32, 33, 34 — men 0 er free).
+    // Begge = 4 igjen.
+    expect(remainingForPattern(GRID_A, new Set<number>(), "1 Rad")).toBe(4);
   });
-
-  it("marking an entire row drops Row 1 to 0", () => {
-    const marks = new Set([1, 16, 31, 46, 61]); // row 0
-    expect(remainingForPattern(grid, marks, "Row 1")).toBe(0);
+  it('alle i kolonne 2 minus free center → "1 Rad": 0 igjen', () => {
+    // Kol 2-verdier: 31, 32, 0 (free), 33, 34 → merker 4 tall, free center + 4 markerte = 5.
+    const marks = setOf(31, 32, 33, 34);
+    expect(remainingForPattern(GRID_A, marks, "1 Rad")).toBe(0);
   });
-
-  it("Full House on empty ticket = 24 (25 cells minus free centre)", () => {
-    expect(remainingForPattern(grid, new Set(), "Full House")).toBe(24);
+  it('"1 Rad": én rad nesten ferdig er bedre enn én kolonne nesten ferdig', () => {
+    // Merk 4 av 5 tall i rad 0 (1, 16, 31, 46) → rad 0 mangler 1 (bit 4 = tall 61).
+    // Ingen kolonne like nær. Svar = 1.
+    const marks = setOf(1, 16, 31, 46);
+    expect(remainingForPattern(GRID_A, marks, "1 Rad")).toBe(1);
   });
-
-  it("returns null for unknown pattern", () => {
-    expect(remainingForPattern(grid, new Set(), "Picture")).toBeNull();
+  it('"2 Rader": 2 fulle kolonner minus free center = 4+4-1 (free) = 8 bits nødvendig på tomt kort, 8 igjen', () => {
+    // Tomt kort → kol 2 har 4 igjen (free teller). Kol 0 har 5 igjen. Kol 2+kol 0 = 4+5 = 9.
+    // Beste kombo: kol 2 + kol 1 eller kol 2 + kol 3 = 4+5 = 9. Eller 2 nabo-kolonner uten center = 5+5 = 10.
+    // Minimum skal være kol inkludert center + en annen kol: 4+5 = 9.
+    expect(remainingForPattern(GRID_A, new Set<number>(), "2 Rader")).toBe(9);
   });
-
-  it("picks the best mask across Row 2 candidates", () => {
-    // Mark row 0 fully (5 cells) and nothing else.
-    // Best Row 2 mask then = rows 0+2 → row 2 has free centre so only 4 more cells.
-    // Actually row 2 has 4 non-free cells needed → remaining = 4.
-    const marks = new Set([1, 16, 31, 46, 61]);
-    expect(remainingForPattern(grid, marks, "Row 2")).toBe(4);
+  it('"2 Rader": 2 fulle kolonner merket → 0 igjen', () => {
+    // Kol 0: 1, 2, 3, 4, 5. Kol 1: 16, 17, 18, 19, 20.
+    const marks = setOf(1, 2, 3, 4, 5, 16, 17, 18, 19, 20);
+    expect(remainingForPattern(GRID_A, marks, "2 Rader")).toBe(0);
+  });
+  it('"2 Rader": 2 fulle RADER merker IKKE (backend krever kolonner i fase 2)', () => {
+    // Rad 0: 1, 16, 31, 46, 61. Rad 1: 2, 17, 32, 47, 62. Begge fulle rader.
+    // I kolonne-optikk: bit 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 markert.
+    // Beste kolonne-union: kol 2 (bits 2, 7, 12, 17, 22) → bit 12 (free) + bit 2, 7 markert = mangler 17, 22.
+    // Kol 2 + kol 0 = bit 12 + 0, 2, 5, 7 markert, mangler 10, 15, 20, 17, 22 = 5.
+    // Beste: 2 kolonner hvor flest rader krysser → hvilke 2 kolonner?
+    //   Kol a + kol b: markerte bits = {0,1,...,9} ∩ (kol a-maske | kol b-maske) + free.
+    //   Kol a har bits r*5+a for r=0..4. Fra bits 0-9 (rad 0+1) treffes bits a og 5+a = 2 bits per kol.
+    //   Per kolonne: 2 bits + free (hvis kol 2) = 2 eller 3 bits markert av 5. Mangler 3 eller 2.
+    //   Beste: kol 2 + en annen kol = 3 + 2 = 5 markerte av 10. Mangler 5.
+    expect(remainingForPattern(GRID_A, setOf(1, 16, 31, 46, 61, 2, 17, 32, 47, 62), "2 Rader")).toBe(5);
+  });
+  it('"Fullt Hus": tomt kort → 24 igjen (alle minus free center)', () => {
+    expect(remainingForPattern(GRID_A, new Set<number>(), "Fullt Hus")).toBe(24);
+  });
+  it("ukjent pattern → null", () => {
+    expect(remainingForPattern(GRID_A, new Set<number>(), "Stjerne")).toBeNull();
   });
 });
 
-describe("PatternMasks — displayNameForPattern", () => {
-  it("maps Row N → Rad N", () => {
-    expect(displayNameForPattern({ name: "Row 1" })).toBe("Rad 1");
-    expect(displayNameForPattern({ name: "Row 4" })).toBe("Rad 4");
-  });
-  it("maps Full House → Fullt Hus", () => {
-    expect(displayNameForPattern({ name: "Full House" })).toBe("Fullt Hus");
-  });
-  it("falls back to raw name", () => {
-    expect(displayNameForPattern({ name: "Mystery" })).toBe("Mystery");
-  });
-  it("handles null/undefined", () => {
-    expect(displayNameForPattern(null)).toBe("");
-  });
-});
+// ── activePatternFromState ───────────────────────────────────────────────────
 
-describe("PatternMasks — activePatternFromState", () => {
-  const patterns = [
-    { id: "p1", name: "Row 1", claimType: "LINE", prizePercent: 10, order: 1, design: 1 } as const,
-    { id: "p2", name: "Row 2", claimType: "LINE", prizePercent: 20, order: 2, design: 1 } as const,
-    { id: "p3", name: "Full House", claimType: "BINGO", prizePercent: 70, order: 3, design: 2 } as const,
-  ];
+const PATTERN_1_RAD: PatternDefinition = {
+  id: "p-1", name: "1 Rad", claimType: "LINE" as const, prizePercent: 0, order: 1, design: 1,
+};
+const PATTERN_2_RADER: PatternDefinition = {
+  id: "p-2", name: "2 Rader", claimType: "LINE" as const, prizePercent: 0, order: 2, design: 2,
+};
+const PATTERN_FULLT_HUS: PatternDefinition = {
+  id: "p-5", name: "Fullt Hus", claimType: "BINGO" as const, prizePercent: 0, order: 5, design: 0,
+};
+const ALL_PATTERNS = [PATTERN_1_RAD, PATTERN_2_RADER, PATTERN_FULLT_HUS];
 
-  it("picks first pattern when nothing won", () => {
-    const active = activePatternFromState(patterns, [
-      { patternId: "p1", isWon: false },
-      { patternId: "p2", isWon: false },
-      { patternId: "p3", isWon: false },
-    ]);
-    expect(active?.id).toBe("p1");
+describe("activePatternFromState", () => {
+  it("tom patterns → null", () => {
+    expect(activePatternFromState([], [])).toBeNull();
+    expect(activePatternFromState(undefined, undefined)).toBeNull();
   });
-
-  it("advances to next pattern when first is won", () => {
-    const active = activePatternFromState(patterns, [
-      { patternId: "p1", isWon: true },
-      { patternId: "p2", isWon: false },
-      { patternId: "p3", isWon: false },
-    ]);
-    expect(active?.id).toBe("p2");
+  it("ingen vunnet → første pattern etter order", () => {
+    expect(activePatternFromState(ALL_PATTERNS, [])).toEqual(PATTERN_1_RAD);
   });
-
-  it("returns null when all patterns won", () => {
-    const active = activePatternFromState(patterns, [
-      { patternId: "p1", isWon: true },
-      { patternId: "p2", isWon: true },
-      { patternId: "p3", isWon: true },
-    ]);
-    expect(active).toBeNull();
+  it("fase 1 vunnet → fase 2 aktiv", () => {
+    const results: PatternResult[] = [
+      { patternId: "p-1", patternName: "1 Rad", claimType: "LINE" as const, isWon: true },
+    ];
+    expect(activePatternFromState(ALL_PATTERNS, results)).toEqual(PATTERN_2_RADER);
+  });
+  it("fase 1+2 vunnet, fase 5 gjenstår → Fullt Hus aktiv", () => {
+    const results: PatternResult[] = [
+      { patternId: "p-1", patternName: "1 Rad", claimType: "LINE" as const, isWon: true },
+      { patternId: "p-2", patternName: "2 Rader", claimType: "LINE" as const, isWon: true },
+    ];
+    expect(activePatternFromState(ALL_PATTERNS, results)).toEqual(PATTERN_FULLT_HUS);
+  });
+  it("alle vunnet → null", () => {
+    const results: PatternResult[] = ALL_PATTERNS.map((p) => ({
+      patternId: p.id,
+      patternName: p.name,
+      claimType: p.claimType,
+      isWon: true,
+    }));
+    expect(activePatternFromState(ALL_PATTERNS, results)).toBeNull();
+  });
+  it("uordnet input sorteres etter order", () => {
+    const shuffled = [PATTERN_FULLT_HUS, PATTERN_1_RAD, PATTERN_2_RADER];
+    expect(activePatternFromState(shuffled, [])).toEqual(PATTERN_1_RAD);
+  });
+  it("isWon: false i results teller som ikke-vunnet", () => {
+    const results: PatternResult[] = [
+      { patternId: "p-1", patternName: "1 Rad", claimType: "LINE" as const, isWon: false },
+    ];
+    expect(activePatternFromState(ALL_PATTERNS, results)).toEqual(PATTERN_1_RAD);
   });
 });

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { BingoTicketHtml } from "./BingoTicketHtml.js";
-import type { Ticket } from "@spillorama/shared-types/game";
+import type { PatternDefinition, Ticket } from "@spillorama/shared-types/game";
 
 function makeTicket(override: Partial<Ticket> = {}): Ticket {
   return {
@@ -188,5 +188,81 @@ describe("BingoTicketHtml — loadTicket replaces grid", () => {
     expect(firstCell.textContent).toBe("10");
     const header = t.root.querySelector(".ticket-header-name") as HTMLDivElement;
     expect(header.textContent).toBe("Small Red");
+  });
+});
+
+// ── setActivePattern / "igjen til <fase>"-teller ───────────────────────────
+
+const PATTERN_1_RAD: PatternDefinition = {
+  id: "p-1", name: "1 Rad", claimType: "LINE", prizePercent: 0, order: 1, design: 1,
+};
+const PATTERN_2_RADER: PatternDefinition = {
+  id: "p-2", name: "2 Rader", claimType: "LINE", prizePercent: 0, order: 2, design: 2,
+};
+const PATTERN_FULLT_HUS: PatternDefinition = {
+  id: "p-5", name: "Fullt Hus", claimType: "BINGO", prizePercent: 0, order: 5, design: 0,
+};
+const PATTERN_UKJENT: PatternDefinition = {
+  id: "p-x", name: "Stjerne", claimType: "LINE", prizePercent: 0, order: 99, design: 9,
+};
+
+function getToGoText(t: BingoTicketHtml): string {
+  return (t.root.querySelector(".ticket-togo") as HTMLDivElement).textContent ?? "";
+}
+
+describe("BingoTicketHtml — setActivePattern", () => {
+  let t: BingoTicketHtml;
+
+  beforeEach(() => {
+    t = new BingoTicketHtml({ ticket: makeTicket(), price: 10, rows: 5, cols: 5, cancelable: false });
+    document.body.appendChild(t.root);
+  });
+
+  it("whole-card default (ingen activePattern): 24 igjen", () => {
+    expect(getToGoText(t)).toBe("24 igjen");
+  });
+
+  it('activePattern "1 Rad" tomt kort → "4 igjen til 1 Rad"', () => {
+    t.setActivePattern(PATTERN_1_RAD);
+    expect(getToGoText(t)).toBe("4 igjen til 1 Rad");
+  });
+
+  it('activePattern "1 Rad" + full kolonne 2 minus free → "1 Rad — klar!"', () => {
+    t.setActivePattern(PATTERN_1_RAD);
+    // Kol 2 av GRID: 31, 32, 0 (free), 33, 34 — markér 4 tall.
+    t.markNumbers([31, 32, 33, 34]);
+    expect(getToGoText(t)).toBe("1 Rad — klar!");
+  });
+
+  it('bytte fra "1 Rad" til "2 Rader" oppdaterer teller', () => {
+    t.setActivePattern(PATTERN_1_RAD);
+    expect(getToGoText(t)).toBe("4 igjen til 1 Rad");
+    t.setActivePattern(PATTERN_2_RADER);
+    expect(getToGoText(t)).toBe("9 igjen til 2 Rader");
+  });
+
+  it('activePattern "Fullt Hus" tomt kort → "24 igjen til Fullt Hus"', () => {
+    t.setActivePattern(PATTERN_FULLT_HUS);
+    expect(getToGoText(t)).toBe("24 igjen til Fullt Hus");
+  });
+
+  it("ukjent pattern → fallback til whole-card-telling", () => {
+    t.setActivePattern(PATTERN_UKJENT);
+    expect(getToGoText(t)).toBe("24 igjen");
+  });
+
+  it("null-pattern rydder tilbake til whole-card", () => {
+    t.setActivePattern(PATTERN_1_RAD);
+    expect(getToGoText(t)).toBe("4 igjen til 1 Rad");
+    t.setActivePattern(null);
+    expect(getToGoText(t)).toBe("24 igjen");
+  });
+
+  it("markNumber oppdaterer teller mot aktivt pattern", () => {
+    t.setActivePattern(PATTERN_1_RAD);
+    t.markNumber(31); // Én i kol 2
+    expect(getToGoText(t)).toBe("3 igjen til 1 Rad");
+    t.markNumber(32);
+    expect(getToGoText(t)).toBe("2 igjen til 1 Rad");
   });
 });

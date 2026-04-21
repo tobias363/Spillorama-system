@@ -1,4 +1,5 @@
 import type { GameState } from "../../../bridge/GameBridge.js";
+import { activePatternFromState } from "../logic/PatternMasks.js";
 import type { Ticket } from "@spillorama/shared-types/game";
 import { BingoTicketHtml } from "./BingoTicketHtml.js";
 
@@ -211,6 +212,7 @@ export class TicketGridHtml {
     // owner decision 2026-04-19: "selvfølgelig ikke disse bongene aktive i
     // den trekningen".
     const marksByIndex = state.myMarks ?? [];
+    const activePattern = activePatternFromState(state.patterns, state.patternResults);
     for (let i = 0; i < this.tickets.length; i++) {
       const ticket = this.tickets[i];
       const isLive = i < liveCount;
@@ -222,6 +224,12 @@ export class TicketGridHtml {
           ticket.markNumbers(state.drawnNumbers);
         }
         if (state.myLuckyNumber) ticket.highlightLuckyNumber(state.myLuckyNumber);
+        // Fase-aktiv pattern styrer "igjen"-teller i footer. Pre-round-
+        // bonger beholder whole-card-telling (null) — de spiller ikke i
+        // aktiv runde.
+        ticket.setActivePattern(activePattern);
+      } else {
+        ticket.setActivePattern(null);
       }
     }
   }
