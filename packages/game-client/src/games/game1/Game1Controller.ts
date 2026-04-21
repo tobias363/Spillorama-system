@@ -18,20 +18,7 @@ import { AudioManager } from "../../audio/AudioManager.js";
 import { MiniGameRouter } from "./logic/MiniGameRouter.js";
 import { Game1SocketActions } from "./logic/SocketActions.js";
 import { Game1ReconnectFlow } from "./logic/ReconnectFlow.js";
-
-/**
- * Phase-maskin for Game 1.
- *
- * - LOADING: før snapshot er applied + loader-sync (BIN-500)
- * - WAITING: ingen aktiv runde, countdown mot neste, buy-popup tilgjengelig
- * - PLAYING: aktiv runde, spilleren har billetter
- * - SPECTATING (BIN-507): aktiv runde, spilleren har 0 billetter — ser live
- *   trekning + kan kjøpe for neste runde. Overgang til PLAYING skjer ved
- *   onGameStarted hvis spilleren armet preRoundTickets. Overgang til WAITING
- *   skjer ved onGameEnded hvis ingen preRoundTickets.
- * - ENDED: runde avsluttet, resultater vises før auto-dismiss til WAITING.
- */
-type Phase = "LOADING" | "WAITING" | "PLAYING" | "SPECTATING" | "ENDED";
+import type { Phase } from "./logic/Phase.js";
 
 /** Auto-dismiss delay for end screen before transitioning to waiting (ms). */
 const END_SCREEN_AUTO_DISMISS_MS = 5000;
@@ -276,7 +263,6 @@ class Game1Controller implements GameController {
         // ticket arrays — no per-phase build/render juggling. Callbacks are
         // wired once at construction (they used to be re-wired in every
         // transition, three copies of the exact same 8-line block).
-        this.miniGame?.resetLastPrize();
         this.playScreen = this.buildPlayScreen(w, h);
         this.playScreen.update(state);
         this.playScreen.enableBuyMore();
@@ -303,10 +289,6 @@ class Game1Controller implements GameController {
           this.transitionTo("WAITING", this.deps.bridge.getState());
         });
         this.endScreen.show(state);
-        const prize = this.miniGame?.getLastPrize() ?? 0;
-        if (prize > 0 && typeof (this.endScreen as unknown as { showMiniGameBonus?: (n: number) => void }).showMiniGameBonus === "function") {
-          (this.endScreen as unknown as { showMiniGameBonus: (n: number) => void }).showMiniGameBonus(prize);
-        }
         this.setScreen(this.endScreen);
         break;
     }

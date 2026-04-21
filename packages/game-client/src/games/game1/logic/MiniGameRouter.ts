@@ -31,13 +31,9 @@ interface MiniGameRouterDeps {
 /**
  * Ett ansvar: ta imot `minigame:activated`-event og koordinere riktig overlay
  * (Wheel/TreasureChest/MysteryGame/ColorDraft) fra start til dismiss.
- *
- * Beholder også `lastPrize`-state som Game1Controller bruker til å vise
- * bonus-banner på EndScreen etter en vunnet mini-game.
  */
 export class MiniGameRouter {
   private overlay: MiniGameOverlay | null = null;
-  private lastPrize = 0;
 
   constructor(private readonly deps: MiniGameRouterDeps) {}
 
@@ -81,7 +77,6 @@ export class MiniGameRouter {
       selectedIndex,
     });
     if (result.ok && result.data) {
-      this.lastPrize = result.data.prizeAmount;
       this.overlay?.animateResult(result.data);
       telemetry.trackEvent("minigame_played", {
         type: result.data.type,
@@ -99,16 +94,6 @@ export class MiniGameRouter {
   dismiss(): void {
     this.overlay?.destroy({ children: true });
     this.overlay = null;
-  }
-
-  /** Siste prize-beløp vunnet i mini-game (brukt av EndScreen-bonus-banner). */
-  getLastPrize(): number {
-    return this.lastPrize;
-  }
-
-  /** Nullstilles ved hver ny runde (på onGameStarted i controller). */
-  resetLastPrize(): void {
-    this.lastPrize = 0;
   }
 
   destroy(): void {

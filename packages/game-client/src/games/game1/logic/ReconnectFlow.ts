@@ -2,12 +2,7 @@ import type { GameBridge, GameState } from "../../../bridge/GameBridge.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 import type { LoadingOverlay } from "../../../components/LoadingOverlay.js";
 import { telemetry } from "../../../telemetry/Telemetry.js";
-
-/**
- * Phase-typen deles med Game1Controller. Duplikert for å unngå sirkulær
- * import. Se SocketActions.ts for samme begrunnelse.
- */
-export type Phase = "LOADING" | "WAITING" | "PLAYING" | "SPECTATING" | "ENDED";
+import type { Phase } from "./Phase.js";
 
 export interface ReconnectFlowDeps {
   readonly socket: SpilloramaSocket;

@@ -2,12 +2,7 @@ import type { GameBridge } from "../../../bridge/GameBridge.js";
 import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 import type { ToastNotification } from "../components/ToastNotification.js";
 import type { PlayScreen } from "../screens/PlayScreen.js";
-
-/**
- * Phase-typen deles med Game1Controller. Duplikert her for å unngå en sirkulær
- * import. Konsistens håndheves via typecheck.
- */
-export type Phase = "LOADING" | "WAITING" | "PLAYING" | "SPECTATING" | "ENDED";
+import type { Phase } from "./Phase.js";
 
 export interface SocketActionsDeps {
   readonly socket: SpilloramaSocket;
