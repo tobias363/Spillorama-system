@@ -39,6 +39,8 @@ import {
   type Spill1Config,
   type Spill1TicketColor,
   type Spill1Pattern,
+  type TicketColorConfig,
+  type PatternPrizeMode,
   type ValidationError,
 } from "./Spill1Config.js";
 
@@ -301,8 +303,10 @@ function renderSectionTicketColors(s: FormState): string {
 }
 
 function renderSectionPatternPrizes(s: FormState): string {
-  // Matrix of (ticketColor × pattern) → prize %.
-  // Only renders rows for selected colors; empty state if none selected.
+  // Matrix of (ticketColor × pattern) → { mode, amount }. Per PM-vedtak
+  // 2026-04-21 har hver (farge, fase)-celle sin egen mode-velger
+  // (percent/fixed) + beløp-input. Elvis-farger telles med som egne
+  // farger — ingen separat Elvis-matrise.
   if (s.spill1.ticketColors.length === 0) {
     return `
       <fieldset class="form-group" data-testid="gm-section-pattern-prizes" style="border:1px solid #eee;padding:12px;margin-bottom:12px;">
@@ -320,18 +324,28 @@ function renderSectionPatternPrizes(s: FormState): string {
   const rows = s.spill1.ticketColors
     .map((tc) => {
       const cells = SPILL1_PATTERNS.map((p) => {
-        const val = tc.prizePerPattern[p] ?? 0;
+        const prize = tc.prizePerPattern[p];
+        const mode = prize?.mode ?? "percent";
+        const amount = prize?.amount ?? 0;
+        const percentSelected = mode === "percent" ? " selected" : "";
+        const fixedSelected = mode === "fixed" ? " selected" : "";
         return `<td>
-          <input type="number" class="form-control gm-prize-cell" style="width:80px;"
-            data-testid="gm-prize-${escapeHtml(tc.color)}-${escapeHtml(p)}"
-            data-color="${escapeHtml(tc.color)}" data-pattern="${escapeHtml(p)}"
-            min="0" max="100" step="1" value="${val}">
+          <div style="display:flex;gap:4px;align-items:center;">
+            <select class="form-control gm-prize-mode" style="width:90px;"
+              data-testid="gm-prize-mode-${escapeHtml(tc.color)}-${escapeHtml(p)}"
+              data-color="${escapeHtml(tc.color)}" data-pattern="${escapeHtml(p)}">
+              <option value="percent"${percentSelected}>${escapeHtml(t("gm_prize_mode_percent"))}</option>
+              <option value="fixed"${fixedSelected}>${escapeHtml(t("gm_prize_mode_fixed"))}</option>
+            </select>
+            <input type="number" class="form-control gm-prize-cell" style="width:80px;"
+              data-testid="gm-prize-${escapeHtml(tc.color)}-${escapeHtml(p)}"
+              data-color="${escapeHtml(tc.color)}" data-pattern="${escapeHtml(p)}"
+              min="0" step="1" value="${amount}"
+              title="${escapeHtml(mode === "fixed" ? t("gm_prize_cell_fixed_hint") : t("gm_prize_cell_percent_hint"))}">
+          </div>
         </td>`;
       }).join("");
-      const sum = Object.values(tc.prizePerPattern).reduce<number>(
-        (acc, v) => acc + (Number.isFinite(v) ? (v ?? 0) : 0),
-        0
-      );
+      const sum = sumPercentOnly(tc.prizePerPattern);
       return `<tr>
         <td><strong>${escapeHtml(t(tc.color))}</strong></td>
         ${cells}
@@ -349,6 +363,19 @@ function renderSectionPatternPrizes(s: FormState): string {
         </table>
       </div>
     </fieldset>`;
+}
+
+/** Sum bare percent-mode-amounts — fixed-mode teller ikke mot 100%-taket. */
+function sumPercentOnly(
+  prizePerPattern: TicketColorConfig["prizePerPattern"]
+): number {
+  let total = 0;
+  for (const prize of Object.values(prizePerPattern)) {
+    if (prize && prize.mode === "percent" && Number.isFinite(prize.amount)) {
+      total += prize.amount;
+    }
+  }
+  return total;
 }
 
 function renderSectionJackpot(s: FormState): string {
@@ -536,22 +563,64 @@ function wirePatternPrizeCells(container: HTMLElement, state: FormState): void {
       const entry = state.spill1.ticketColors.find((tc) => tc.color === color);
       if (!entry) return;
       const v = Number(inp.value);
+      const modeSelect = container.querySelector<HTMLSelectElement>(
+        `.gm-prize-mode[data-color="${color}"][data-pattern="${pattern}"]`
+      );
+      const mode: PatternPrizeMode =
+        modeSelect?.value === "fixed" ? "fixed" : "percent";
       if (Number.isFinite(v) && v >= 0) {
-        entry.prizePerPattern[pattern] = v;
+        entry.prizePerPattern[pattern] = { mode, amount: v };
       } else {
         delete entry.prizePerPattern[pattern];
       }
-      const sum = Object.values(entry.prizePerPattern).reduce<number>(
-        (acc, vv) => acc + (Number.isFinite(vv) ? (vv ?? 0) : 0),
-        0
-      );
-      const sumCell = container.querySelector<HTMLElement>(`#gm-prize-sum-${color}`);
-      if (sumCell) {
-        sumCell.textContent = `${sum}%`;
-        sumCell.style.color = sum > 100 ? "#d9534f" : "";
-      }
+      updateSumCell(container, color, entry.prizePerPattern);
     });
   });
+
+  // Mode-velgeren: endrer bare tolkningen av eksisterende amount; utløser
+  // ingen verdi-endring, men må oppdatere sum-cellen siden fixed ikke
+  // teller mot 100%-taket.
+  container.querySelectorAll<HTMLSelectElement>(".gm-prize-mode").forEach((sel) => {
+    sel.addEventListener("change", () => {
+      const color = sel.dataset.color as Spill1TicketColor | undefined;
+      const pattern = sel.dataset.pattern as Spill1Pattern | undefined;
+      if (!color || !pattern) return;
+      const entry = state.spill1.ticketColors.find((tc) => tc.color === color);
+      if (!entry) return;
+      const mode: PatternPrizeMode = sel.value === "fixed" ? "fixed" : "percent";
+      const existing = entry.prizePerPattern[pattern];
+      if (existing) {
+        entry.prizePerPattern[pattern] = { mode, amount: existing.amount };
+      }
+      // Oppdater title-tooltip på input-en for å reflektere ny mode.
+      const amountInput = container.querySelector<HTMLInputElement>(
+        `.gm-prize-cell[data-color="${color}"][data-pattern="${pattern}"]`
+      );
+      if (amountInput) {
+        amountInput.title =
+          mode === "fixed" ? t("gm_prize_cell_fixed_hint") : t("gm_prize_cell_percent_hint");
+      }
+      updateSumCell(container, color, entry.prizePerPattern);
+    });
+  });
+}
+
+function updateSumCell(
+  container: HTMLElement,
+  color: string,
+  prizePerPattern: TicketColorConfig["prizePerPattern"]
+): void {
+  let sum = 0;
+  for (const prize of Object.values(prizePerPattern)) {
+    if (prize && prize.mode === "percent" && Number.isFinite(prize.amount)) {
+      sum += prize.amount;
+    }
+  }
+  const sumCell = container.querySelector<HTMLElement>(`#gm-prize-sum-${color}`);
+  if (sumCell) {
+    sumCell.textContent = `${sum}%`;
+    sumCell.style.color = sum > 100 ? "#d9534f" : "";
+  }
 }
 
 function wireJackpot(container: HTMLElement, state: FormState): void {

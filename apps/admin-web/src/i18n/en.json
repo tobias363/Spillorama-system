@@ -2469,7 +2469,7 @@
   "gm_section_basics": "Basics",
   "gm_section_timing": "Timing (seconds)",
   "gm_section_ticket_colors": "Ticket colors and prices",
-  "gm_section_pattern_prizes": "Pattern prize (% of pot)",
+  "gm_section_pattern_prizes": "Pattern prize (% of pot or flat kr per phase)",
   "gm_section_jackpot": "Jackpot",
   "gm_section_elvis": "Elvis special",
   "gm_section_lucky_number": "Lucky number",
@@ -2483,5 +2483,10 @@
   "gm_minimum_prize_hint": "Only used for Spillerness sub-games.",
   "gm_submit_error_prefix": "Could not save game",
   "gm_unknown_error": "Unknown error while saving. Please try again.",
-  "gm_network_error": "Network error — check your connection and try again."
+  "gm_network_error": "Network error — check your connection and try again.",
+  "pattern_prize_amount_must_be_non_negative": "Prize amount must be a finite number ≥ 0.",
+  "gm_prize_mode_percent": "% of pot",
+  "gm_prize_mode_fixed": "Fixed kr",
+  "gm_prize_cell_percent_hint": "Percent of pot (0-100).",
+  "gm_prize_cell_fixed_hint": "Flat kr amount (may be capped by RTP guards if pool is too small)."
 }

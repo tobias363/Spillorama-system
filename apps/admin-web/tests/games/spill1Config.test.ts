@@ -17,7 +17,11 @@ function validConfig() {
     {
       color: "small_yellow",
       priceNok: 20,
-      prizePerPattern: { row_1: 10, row_2: 20, full_house: 50 },
+      prizePerPattern: {
+        row_1: { mode: "percent", amount: 10 },
+        row_2: { mode: "percent", amount: 20 },
+        full_house: { mode: "percent", amount: 50 },
+      },
     },
   ];
   c.jackpot = {
@@ -122,14 +126,62 @@ describe("validateSpill1Config", () => {
       expect(res.errors.some((e) => e.path.includes("priceNok"))).toBe(true);
     }
   });
-  it("rejects prize-sum > 100%", () => {
+  it("rejects percent-mode prize-sum > 100%", () => {
     const c = validConfig();
-    c.ticketColors[0]!.prizePerPattern = { row_1: 50, row_2: 60, full_house: 10 };
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "percent", amount: 50 },
+      row_2: { mode: "percent", amount: 60 },
+      full_house: { mode: "percent", amount: 10 },
+    };
     const res = validateSpill1Config(c, "x");
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.errors.some((e) => e.message.includes("less_or_equal_to_100"))).toBe(true);
     }
+  });
+  it("does NOT count fixed-mode entries toward the 100% cap", () => {
+    // Fixed-beløp kan fritt overstige pot — kappes av RTP-guards backend.
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "percent", amount: 90 },
+      row_2: { mode: "fixed", amount: 9999 },
+      full_house: { mode: "fixed", amount: 50000 },
+    };
+    const res = validateSpill1Config(c, "x");
+    expect(res.ok).toBe(true);
+  });
+  it("allows mixed percent + fixed modes per color as long as percent sum ≤ 100", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "percent", amount: 15 },
+      row_2: { mode: "percent", amount: 15 },
+      row_3: { mode: "fixed", amount: 200 },
+      row_4: { mode: "fixed", amount: 200 },
+      full_house: { mode: "fixed", amount: 1000 },
+    };
+    const res = validateSpill1Config(c, "x");
+    expect(res.ok).toBe(true);
+  });
+  it("rejects non-finite prize amount", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "percent", amount: Number.NaN },
+    };
+    const res = validateSpill1Config(c, "x");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(
+        res.errors.some((e) => e.path.includes("prizePerPattern.row_1"))
+      ).toBe(true);
+    }
+  });
+  it("rejects negative prize amount", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "fixed", amount: -50 },
+    };
+    const res = validateSpill1Config(c, "x");
+    expect(res.ok).toBe(false);
   });
   it("rejects jackpot draw outside 50-59", () => {
     const c = validConfig();

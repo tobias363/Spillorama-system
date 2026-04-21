@@ -221,6 +221,30 @@ describe("GameManagementAddForm — validering", () => {
     expect(sumCell?.textContent).toBe("110%");
     expect(sumCell?.style.color).toBe("rgb(217, 83, 79)");
   });
+
+  it("mode-toggle til fixed ekskluderer cellen fra %-sum", async () => {
+    // Per PM-vedtak 2026-04-21: fixed-mode kr-beløp teller ikke mot 100%-taket.
+    const c = await setupForm("bingo");
+    toggleCheckbox(c, "gm-ticket-check-small_white");
+    setInputValue(c, "[data-testid='gm-prize-small_white-row_1']", "60");
+    setInputValue(c, "[data-testid='gm-prize-small_white-row_2']", "50");
+    // Begge er percent → sum 110%.
+    let sumCell = c.querySelector<HTMLElement>("[data-testid='gm-prize-sum-small_white']");
+    expect(sumCell?.textContent).toBe("110%");
+
+    // Endre row_2 til fixed → bare row_1 (60) teller.
+    const modeSelect = c.querySelector<HTMLSelectElement>(
+      "[data-testid='gm-prize-mode-small_white-row_2']"
+    );
+    expect(modeSelect).not.toBeNull();
+    if (modeSelect) {
+      modeSelect.value = "fixed";
+      modeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    sumCell = c.querySelector<HTMLElement>("[data-testid='gm-prize-sum-small_white']");
+    expect(sumCell?.textContent).toBe("60%");
+    expect(sumCell?.style.color).toBe("");
+  });
 });
 
 describe("GameManagementAddForm — submit", () => {

@@ -2462,7 +2462,7 @@
   "gm_section_basics": "Grunnleggende",
   "gm_section_timing": "Timing (sekunder)",
   "gm_section_ticket_colors": "Billett-farger og priser",
-  "gm_section_pattern_prizes": "Pattern-gevinst (% av pot)",
+  "gm_section_pattern_prizes": "Pattern-gevinst (% av pot eller fast kr per fase)",
   "gm_section_jackpot": "Jackpot",
   "gm_section_elvis": "Elvis spesial",
   "gm_section_lucky_number": "Lykkelig nummer",
@@ -2476,5 +2476,10 @@
   "gm_minimum_prize_hint": "Kun brukt for Spillerness-subspill.",
   "gm_submit_error_prefix": "Kunne ikke lagre spill",
   "gm_unknown_error": "Ukjent feil ved lagring. Prøv igjen.",
-  "gm_network_error": "Nettverksfeil — sjekk tilkoblingen og prøv igjen."
+  "gm_network_error": "Nettverksfeil — sjekk tilkoblingen og prøv igjen.",
+  "pattern_prize_amount_must_be_non_negative": "Gevinst-beløp må være et tall større eller lik null.",
+  "gm_prize_mode_percent": "% av pot",
+  "gm_prize_mode_fixed": "Fast kr",
+  "gm_prize_cell_percent_hint": "Prosent av pot (0-100).",
+  "gm_prize_cell_fixed_hint": "Fast kroner (kan kappes av RTP-grenser om pot er for liten)."
 }

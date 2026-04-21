@@ -36,16 +36,34 @@ export const SPILL1_PATTERNS = ["row_1", "row_2", "row_3", "row_4", "full_house"
 
 export type Spill1Pattern = (typeof SPILL1_PATTERNS)[number];
 
+/** Hvordan en admin-konfigurert pattern-gevinst tolkes. */
+export type PatternPrizeMode = "percent" | "fixed";
+
+/**
+ * Admin-konfigurert gevinst for én fase på én farge.
+ *
+ * - `mode: "percent"` → `amount` er 0-100, prosent av total pot for den fasen.
+ * - `mode: "fixed"`   → `amount` er hele kroner, flat utbetaling. Kan kappes
+ *   av RTP-guards i backend `payoutPhaseWinner` hvis pool er for liten —
+ *   vinner får da mindre enn lovet beløp (PM-vedtak 2026-04-21).
+ */
+export interface PatternPrize {
+  mode: PatternPrizeMode;
+  /** Prosent (0-100) eller kr-beløp ≥ 0 — avhengig av `mode`. */
+  amount: number;
+}
+
 /** Per-farge pris + gevinst-fordeling per pattern. */
 export interface TicketColorConfig {
   color: Spill1TicketColor;
   /** Pris per bong i NOK (hele kroner). */
   priceNok: number;
   /**
-   * Gevinst per pattern, enten som prosent av pot (0-100) eller fast kr-beløp.
-   * Legacy mønster: prize[color.slice(6)] — der 6 er "Small "/"Large " prefix.
+   * Gevinst per pattern. Hver fase kan være prosent av pot eller fast kr —
+   * valgbart per (farge, fase) via `PatternPrize.mode`. Mangler en fase
+   * tolkes det i backend-mapper som "bruk default for den fasen" (PR B).
    */
-  prizePerPattern: Partial<Record<Spill1Pattern, number>>;
+  prizePerPattern: Partial<Record<Spill1Pattern, PatternPrize>>;
   /** Kun brukt for Spillerness-subspill. */
   minimumPrizeNok?: number;
 }
@@ -155,7 +173,10 @@ function hhmmToMinutes(s: string): number {
  *   - startTime < endTime (hvis endTime satt)
  *   - Minst én ticket-farge valgt
  *   - Per ticket-farge: priceNok > 0
- *   - Per ticket-farge: sum av prizePerPattern ≤ 100 (% av pot)
+ *   - Per ticket-farge: sum av prizePerPattern-entries med mode="percent"
+ *     ≤ 100. Entries med mode="fixed" teller ikke mot taket (kan fritt
+ *     overstige pot; kappes av RTP-guards i backend ved utbetaling).
+ *   - Per prize-entry: amount er et endelig tall ≥ 0.
  *   - minseconds < maxseconds, minseconds >= 3
  *   - notificationStartTime > 0
  *   - Jackpot draw mellom 50 og 59
@@ -220,12 +241,22 @@ export function validateSpill1Config(config: Spill1Config, baseName: string): Va
         message: "please_enter_ticket_price",
       });
     }
-    // Pattern-prize-prosent-total.
-    const total = Object.values(tc.prizePerPattern).reduce<number>(
-      (sum, v) => sum + (Number.isFinite(v) ? (v ?? 0) : 0),
-      0
-    );
-    if (total > 100) {
+    // Per-entry sanity: amount må være endelig og ≥ 0.
+    let percentTotal = 0;
+    for (const [pattern, prize] of Object.entries(tc.prizePerPattern)) {
+      if (!prize) continue;
+      if (!Number.isFinite(prize.amount) || prize.amount < 0) {
+        errors.push({
+          path: `ticketColors[${i}].prizePerPattern.${pattern}`,
+          message: "pattern_prize_amount_must_be_non_negative",
+        });
+        continue;
+      }
+      if (prize.mode === "percent") {
+        percentTotal += prize.amount;
+      }
+    }
+    if (percentTotal > 100) {
       errors.push({
         path: `ticketColors[${i}].prizePerPattern`,
         message: "row_pattern_prize_percentage_must_be_less_or_equal_to_100",

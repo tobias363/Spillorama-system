@@ -75,6 +75,13 @@ export const PatternDefinitionSchema = z.object({
   prizePercent: z.number(),
   order: z.number().int(),
   design: z.number().int(),
+  /**
+   * Admin-configurable prize mode per pattern.
+   * "percent" uses prizePercent of pool; "fixed" uses prize1 as flat kr.
+   */
+  winningType: z.enum(["percent", "fixed"]).optional(),
+  /** Flat kr amount when winningType === "fixed". */
+  prize1: z.number().optional(),
 });
 
 export const PatternResultSchema = z.object({

@@ -170,6 +170,11 @@ Identisk med Game 2, pluss chat:
 - **3 billettyper utsatt** — Farge/trafikklys/elvis-varianter er visuell styling
 - **Chat bruker HTML overlay input** — Fungerer, men posisjonering kan forbedres ved resize
 - **Visuell polish mangler** — Placeholder-grafikk
+- **Per-farge-gevinster (PR A landet)** — Admin kan nå konfigurere percent eller fast-kr gevinst per (farge, fase) i admin-UI Spill 1-form.
+  Runtime-koblingen til engine er _ennå ikke aktiv_ — alle rom kjører på
+  `DEFAULT_NORSK_BINGO_CONFIG` (100/200/200/200/1000 kr fast) inntil
+  PR B lander med `buildVariantConfigFromSpill1Config`-mapper + per-farge
+  `BingoEngine.evaluateActivePhase`-oppslag. Se `docs/architecture/spill1-variantconfig-admin-coupling.md`.
 
 ### Testing
 
