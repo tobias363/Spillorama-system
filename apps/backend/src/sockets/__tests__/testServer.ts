@@ -327,6 +327,10 @@ export async function createTestServer(opts: CreateTestServerOptions = {}): Prom
     getVariantConfig: (code) => roomState.getVariantConfig(code),
     // BIN-694: mirror production wiring so tests exercise the same flow.
     bindDefaultVariantConfig: (code, slug) => roomState.bindDefaultVariantConfig(code, slug),
+    // PR C: testServer bruker async binderen uten fetcher → samme effekt
+    // som default-pathen (ingen DB-lookup), men socket-handlerne går
+    // gjennom samme kode-path som prod.
+    bindVariantConfigForRoom: (code, opts) => roomState.bindVariantConfigForRoom(code, opts),
   };
 
   const registerGameEvents = createGameEventHandlers(deps);

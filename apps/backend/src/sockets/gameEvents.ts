@@ -276,6 +276,18 @@ export interface GameEventsDeps {
    * sees the correct Norsk-bingo pattern names (1 Rad / 2 Rader / …).
    */
   bindDefaultVariantConfig?: (roomCode: string, gameSlug: string) => void;
+  /**
+   * PR C: Async variant-config binder som leser admin-UI-config fra
+   * GameManagement.config_json.spill1 når `gameManagementId` er gitt,
+   * og faller tilbake til default ellers. Kallsteder kan sende
+   * `gameManagementId: undefined` for dagens default-path og få samme
+   * effekt som `bindDefaultVariantConfig` — plumbing-en forbereder
+   * fremtidig scope der `gameManagementId` kommer inn på wire.
+   */
+  bindVariantConfigForRoom?: (
+    roomCode: string,
+    opts: { gameSlug: string; gameManagementId?: string | null },
+  ) => Promise<void>;
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────
@@ -511,7 +523,16 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
         // triggered every LINE phase on the first completed row. Defaulting
         // the gameSlug to "bingo" matches `BingoEngine.createRoom` which
         // does the same fallback on RoomState.gameSlug.
-        deps.bindDefaultVariantConfig?.(roomCode, requestedGameSlug?.trim() || "bingo");
+        // PR C: foretrekk den nye async-binderen som kan lese admin-config
+        // fra GameManagement når `gameManagementId` er tilgjengelig. I dag
+        // sender ingen caller ID-en — faller gjennom til default-path.
+        if (deps.bindVariantConfigForRoom) {
+          await deps.bindVariantConfigForRoom(roomCode, {
+            gameSlug: requestedGameSlug?.trim() || "bingo",
+          });
+        } else {
+          deps.bindDefaultVariantConfig?.(roomCode, requestedGameSlug?.trim() || "bingo");
+        }
         socket.join(roomCode);
         const snapshot = await emitRoomUpdate(roomCode);
         logger.debug({ roomCode }, "BIN-134: room:create SUCCESS");
@@ -542,10 +563,14 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
                 socketId: socket.id,
               });
               roomCode = newRoom.roomCode;
-              // BIN-694: wire DEFAULT variantConfig for the auto-created room.
-              // Same reasoning as the `room:create` branch above — without this
-              // the 5-phase progression fell back to legacy 1-line fallback.
-              deps.bindDefaultVariantConfig?.(roomCode, "bingo");
+              // BIN-694 + PR C: wire variantConfig for the auto-created room.
+              // Uses new async binder if available (forbereder admin-config
+              // wire-up), falls back til default-binder ellers.
+              if (deps.bindVariantConfigForRoom) {
+                await deps.bindVariantConfigForRoom(roomCode, { gameSlug: "bingo" });
+              } else {
+                deps.bindDefaultVariantConfig?.(roomCode, "bingo");
+              }
             }
           }
           const canonicalRoom = getPrimaryRoomForHall(identity.hallId);

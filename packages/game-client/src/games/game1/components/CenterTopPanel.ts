@@ -212,7 +212,16 @@ export class CenterTopPanel {
       const span = document.createElement("span");
       span.style.cssText = "font-size:16px;color:#ddd;flex:1;";
 
-      const prize = result?.payoutAmount ?? Math.round((pattern.prizePercent / 100) * prizePool);
+      // PR C (variantConfig-admin-kobling): honor winningType fra PR A/B.
+      // - "fixed":   vis `prize1` direkte (admin-UI konfigurert flat kr).
+      // - "percent" eller udefinert: prosent av pot (legacy-atferd).
+      // Post-pilot: per-farge-differensiering (vis spillerens egen tickets
+      // farge-matrise) er egen scope — krever per-player snapshot-scoping.
+      const computedPrize =
+        pattern.winningType === "fixed"
+          ? (pattern.prize1 ?? 0)
+          : Math.round((pattern.prizePercent / 100) * prizePool);
+      const prize = result?.payoutAmount ?? computedPrize;
       const won = result?.isWon;
 
       // Display name mapping
@@ -357,7 +366,11 @@ export class CenterTopPanel {
     patternResults: PatternResult[],
     prizePool: number,
   ): string {
-    const pats = patterns.map((p) => `${p.id}:${p.name}:${p.design}:${p.prizePercent}`).join(",");
+    // PR C: inkludér winningType + prize1 i signaturen slik at
+    // signature-cache invalideres når admin endrer fixed-mode-beløp.
+    const pats = patterns
+      .map((p) => `${p.id}:${p.name}:${p.design}:${p.prizePercent}:${p.winningType ?? ""}:${p.prize1 ?? 0}`)
+      .join(",");
     const wins = patternResults
       .map((r) => `${r.patternId}:${r.isWon ? 1 : 0}:${r.payoutAmount ?? 0}`)
       .join(",");

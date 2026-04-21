@@ -436,6 +436,23 @@ const gameManagementService = new GameManagementService({
   schema: pgSchema,
 });
 
+// PR C (variantConfig-admin-kobling): fetcher-hook som
+// `roomState.bindVariantConfigForRoom` bruker når en caller sender
+// gameManagementId. Returnerer `GameManagement.config_json` eller null
+// hvis ikke funnet. Feil propageres til binderen som fanger + logger
+// og faller til default-binding.
+async function fetchGameManagementConfigForRoomState(
+  id: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const gm = await gameManagementService.get(id);
+    return gm.config ?? null;
+  } catch {
+    // Ikke-funnet eller DB-feil → binderen faller til default.
+    return null;
+  }
+}
+
 // BIN-623: CloseDay (regulatorisk dagslukking per GameManagement). Avhenger
 // av gameManagementService for å hente aggregat-felter + validere at spillet
 // eksisterer. Unique (game_management_id, close_date) i `app_close_day_log`
@@ -1492,6 +1509,15 @@ app.use(createAdminRouter({
   // at admin room-create so `meetsPhaseRequirement` gets the correct
   // pattern names instead of falling back to the legacy 1-line rule.
   bindDefaultVariantConfig: (code, slug) => roomState.bindDefaultVariantConfig(code, slug),
+  // PR C: async binder som leser admin-UI-config (config.spill1) fra
+  // GameManagement når `gameManagementId` sendes inn. Fetcher-hooken
+  // holder RoomStateManager fri for service-avhengighet — her kobles
+  // den til den faktiske GameManagementService-instansen.
+  bindVariantConfigForRoom: (code, opts) =>
+    roomState.bindVariantConfigForRoom(code, {
+      ...opts,
+      fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
+    }),
   auditLogService,
   emailService,
   supportEmail,
@@ -1637,6 +1663,15 @@ const registerGameEvents = createGameEventHandlers({
   // BIN-694: wire default variant-config on room-create + room-join auto-create
   // so Game 1 rooms get DEFAULT_NORSK_BINGO_CONFIG (5-phase progression).
   bindDefaultVariantConfig: (code, slug) => roomState.bindDefaultVariantConfig(code, slug),
+  // PR C: async binder som leser admin-UI-config via gameManagementId; faller
+  // til default ellers. Socket-callsites (room:create, room:join-auto) bruker
+  // denne foretrukne pathen i dag uten gameManagementId — plumbing-en er klar
+  // for fremtidig scope der ID-en sendes inn på wire.
+  bindVariantConfigForRoom: (code, opts) =>
+    roomState.bindVariantConfigForRoom(code, {
+      ...opts,
+      fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
+    }),
   chatMessageStore,
 });
 

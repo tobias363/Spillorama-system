@@ -151,6 +151,16 @@ export interface AdminRouterDeps {
    * Idempotent — no-op when a variant is already set for the room.
    */
   bindDefaultVariantConfig?: (roomCode: string, gameSlug: string) => void;
+  /**
+   * PR C: Async binder som leser admin-config via `gameManagementId` og
+   * faller til default ellers. Erstatter `bindDefaultVariantConfig` i
+   * admin-router-calls; plumbing-en forbereder fremtidig scope der
+   * ID-en kommer inn på body til `/room/create`.
+   */
+  bindVariantConfigForRoom?: (
+    roomCode: string,
+    opts: { gameSlug: string; gameManagementId?: string | null },
+  ) => Promise<void>;
   // BIN-588 wire-up: compliance audit + transactional mail. Both are
   // injected so tests can pass fakes and prod can pass the real store.
   auditLogService: AuditLogService;
@@ -1008,10 +1018,15 @@ export function createAdminRouter(deps: AdminRouterDeps): express.Router {
         walletId: requestedHostWalletId,
         roomCode: enforceSingleRoomPerHall ? "BINGO1" : undefined
       });
-      // BIN-694: wire DEFAULT variantConfig for admin-created rooms. Admin
-      // route defaults to "bingo" gameSlug (same fallback as `engine.createRoom`
-      // when none specified) so the room gets the 5-phase Norsk-bingo config.
-      deps.bindDefaultVariantConfig?.(roomCode, "bingo");
+      // BIN-694 + PR C: wire variantConfig for admin-created rooms. Foretrekker
+      // ny async binder som kan lese admin-UI-config via gameManagementId;
+      // faller til default-binder ellers. I dag har ikke /room/create
+      // gameManagementId i body — fremtidig scope legger til den.
+      if (deps.bindVariantConfigForRoom) {
+        await deps.bindVariantConfigForRoom(roomCode, { gameSlug: "bingo" });
+      } else {
+        deps.bindDefaultVariantConfig?.(roomCode, "bingo");
+      }
       const snapshot = await emitRoomUpdate(roomCode);
       auditAdmin(req, adminUser, "room.create", "room", roomCode, { hallId });
       apiSuccess(res, {
