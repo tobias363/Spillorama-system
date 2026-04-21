@@ -8,11 +8,16 @@
  *                         kolonne (5 celler). Free centre (idx 12) teller som
  *                         markert. Legacy: GameProcess.js:5543-5559 ($or mellom
  *                         rowChecks/columnChecks). Gjelder kun for Row 1.
- *   Fase 2 "2 Rader"    — 2 hele horisontale rader markert. Vertikale kolonner
- *                         teller IKKE etter fase 1. Legacy:5564.
- *   Fase 3 "3 Rader"    — 3 hele horisontale rader.                Legacy:5569.
- *   Fase 4 "4 Rader"    — 4 hele horisontale rader.                Legacy:5574.
+ *   Fase 2 "2 Rader"    — 2 hele VERTIKALE KOLONNER markert. Horisontale rader
+ *                         teller IKKE etter fase 1. Legacy:5564. Ref:
+ *                         BingoEngine.meetsPhaseRequirement L1168 (colCount >= 2).
+ *   Fase 3 "3 Rader"    — 3 hele VERTIKALE KOLONNER.                Legacy:5569.
+ *   Fase 4 "4 Rader"    — 4 hele VERTIKALE KOLONNER.                Legacy:5574.
  *   Fase 5 "Fullt Hus"  — alle 24 non-centre + centre = 25 markert. Legacy:5579.
+ *
+ * Merk: Navnet "Rader" i norsk databingo Spill 1 refererer historisk til
+ * vertikale kolonner for fase 2-4 (se BIN-694 og BingoEngine.ts:1153-1173).
+ * Kun fase 1 aksepterer begge orienteringer.
  *
  * Design:
  *   - Mask-baserte evalueringer med 25-bit integer (identisk semantikk som
@@ -26,6 +31,8 @@
  * Referanse:
  *   - `.claude/legacy-ref/Game1/Controllers/GameProcess.js:5519-5597`
  *     (`checkWinningPattern` — $or av rowChecks + columnChecks for Row 1).
+ *   - `apps/backend/src/game/BingoEngine.ts:1153-1173` (parity-kilde;
+ *     `meetsPhaseRequirement` bruker `colCount >= N` for fase 2-4).
  *   - `packages/game-client/src/games/game1/logic/PatternMasks.ts`
  *     (klient-mirror brukt av BingoTicketHtml til "igjen"-counter).
  *
@@ -71,7 +78,7 @@ const HORIZONTAL_ROW_MASKS: readonly PatternMask[] = Object.freeze([
   horizontalRowMask(4),
 ]);
 
-/** De 5 vertikale kolonnene (c=0..4). Kun brukt for fase 1. */
+/** De 5 vertikale kolonnene (c=0..4). Brukt for fase 1 og fase 2-4. */
 const VERTICAL_COLUMN_MASKS: readonly PatternMask[] = Object.freeze([
   verticalColumnMask(0),
   verticalColumnMask(1),
@@ -90,19 +97,19 @@ const PHASE_1_MASKS: readonly PatternMask[] = Object.freeze([
   ...VERTICAL_COLUMN_MASKS,
 ]);
 
-/** Alle 10 kombinasjoner av 2 horisontale rader (C(5,2) = 10). */
+/** Alle 10 kombinasjoner av 2 vertikale kolonner (C(5,2) = 10). */
 const PHASE_2_MASKS: readonly PatternMask[] = Object.freeze(
-  buildRowCombinations(2)
+  buildColumnCombinations(2)
 );
 
-/** Alle 10 kombinasjoner av 3 horisontale rader (C(5,3) = 10). */
+/** Alle 10 kombinasjoner av 3 vertikale kolonner (C(5,3) = 10). */
 const PHASE_3_MASKS: readonly PatternMask[] = Object.freeze(
-  buildRowCombinations(3)
+  buildColumnCombinations(3)
 );
 
-/** Alle 5 kombinasjoner av 4 horisontale rader (C(5,4) = 5). */
+/** Alle 5 kombinasjoner av 4 vertikale kolonner (C(5,4) = 5). */
 const PHASE_4_MASKS: readonly PatternMask[] = Object.freeze(
-  buildRowCombinations(4)
+  buildColumnCombinations(4)
 );
 
 /** Fullt Hus — alle 25 bits. */
@@ -206,15 +213,15 @@ export function remainingForPhase(
 
 // ── Pure internals ──────────────────────────────────────────────────────────
 
-/** Bygg alle C(5,k) kombinasjoner av horisontale rader OR'et sammen. */
-function buildRowCombinations(k: number): PatternMask[] {
+/** Bygg alle C(5,k) kombinasjoner av vertikale kolonner OR'et sammen. */
+function buildColumnCombinations(k: number): PatternMask[] {
   const out: PatternMask[] = [];
   const n = 5;
   const indices = new Array(k).fill(0);
   for (let i = 0; i < k; i++) indices[i] = i;
   while (true) {
     let m = 0;
-    for (const r of indices) m |= HORIZONTAL_ROW_MASKS[r]!;
+    for (const c of indices) m |= VERTICAL_COLUMN_MASKS[c]!;
     out.push(m);
     // Neste kombinasjon (lexicographic).
     let i = k - 1;
