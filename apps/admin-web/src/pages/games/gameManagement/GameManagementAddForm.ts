@@ -352,35 +352,48 @@ function renderSectionPatternPrizes(s: FormState): string {
 }
 
 function renderSectionJackpot(s: FormState): string {
+  // Draw-feltet rendres alltid (uavhengig av farge-konfigurasjon).
+  const drawCell = `
+    <div class="col-sm-3" style="margin-bottom:8px;">
+      <label>${escapeHtml(t("jackpot_draw"))} (50-59)</label>
+      <input type="number" class="form-control" id="gm-jackpot-draw"
+        data-testid="gm-jackpot-draw"
+        min="50" max="59" step="1" value="${s.spill1.jackpot.draw}">
+    </div>`;
+
+  // Dynamisk rendring: én prize-input per konfigurert ticket-farge.
+  // Hvis ingen farger valgt, vis hjelpetekst.
+  if (s.spill1.ticketColors.length === 0) {
+    return `
+    <fieldset class="form-group" data-testid="gm-section-jackpot" style="border:1px solid #eee;padding:12px;margin-bottom:12px;">
+      ${sectionHeader(t("gm_section_jackpot"))}
+      <div id="gm-jackpot-color-inputs">
+        <p class="text-muted" data-testid="gm-jackpot-empty">${escapeHtml(t("gm_jackpot_configure_colors_first"))}</p>
+      </div>
+      <div class="row">${drawCell}</div>
+    </fieldset>`;
+  }
+
+  const cells = s.spill1.ticketColors
+    .map((tc) => {
+      const prize = s.spill1.jackpot.prizeByColor[tc.color] ?? 0;
+      return `
+        <div class="col-sm-3" style="margin-bottom:8px;">
+          <label title="${escapeHtml(t("gm_jackpot_prize_hint"))}">${escapeHtml(t(tc.color))} (NOK)</label>
+          <input type="number" class="form-control gm-jackpot-color-prize"
+            data-testid="gm-jackpot-prize-${escapeHtml(tc.color)}"
+            data-color="${escapeHtml(tc.color)}"
+            min="0" step="1" value="${prize}">
+        </div>`;
+    })
+    .join("");
+
   return `
     <fieldset class="form-group" data-testid="gm-section-jackpot" style="border:1px solid #eee;padding:12px;margin-bottom:12px;">
       ${sectionHeader(t("gm_section_jackpot"))}
-      <div class="row">
-        <div class="col-sm-3">
-          <label>${escapeHtml(t("jackpot_white_prize"))} (NOK)</label>
-          <input type="number" class="form-control" id="gm-jackpot-white"
-            data-testid="gm-jackpot-white"
-            min="0" step="1" value="${s.spill1.jackpot.prizeByColor.white}">
-        </div>
-        <div class="col-sm-3">
-          <label>${escapeHtml(t("jackpot_yellow_prize"))} (NOK)</label>
-          <input type="number" class="form-control" id="gm-jackpot-yellow"
-            data-testid="gm-jackpot-yellow"
-            min="0" step="1" value="${s.spill1.jackpot.prizeByColor.yellow}">
-        </div>
-        <div class="col-sm-3">
-          <label>${escapeHtml(t("jackpot_purple_prize"))} (NOK)</label>
-          <input type="number" class="form-control" id="gm-jackpot-purple"
-            data-testid="gm-jackpot-purple"
-            min="0" step="1" value="${s.spill1.jackpot.prizeByColor.purple}">
-        </div>
-        <div class="col-sm-3">
-          <label>${escapeHtml(t("jackpot_draw"))} (50-59)</label>
-          <input type="number" class="form-control" id="gm-jackpot-draw"
-            data-testid="gm-jackpot-draw"
-            min="50" max="59" step="1" value="${s.spill1.jackpot.draw}">
-        </div>
-      </div>
+      <p class="text-muted" style="margin-bottom:8px;font-size:12px;">${escapeHtml(t("gm_jackpot_per_color_hint"))}</p>
+      <div class="row" id="gm-jackpot-color-inputs">${cells}</div>
+      <div class="row">${drawCell}</div>
     </fieldset>`;
 }
 
@@ -485,8 +498,11 @@ function wireTicketColors(container: HTMLElement, state: FormState): void {
         state.spill1.ticketColors = state.spill1.ticketColors.filter((tc) => tc.color !== color);
         if (priceInput) priceInput.disabled = true;
         if (minPrizeInput) minPrizeInput.disabled = true;
+        // Rydd også bort eventuell jackpot-entry for fargen som ble av-valgt.
+        delete state.spill1.jackpot.prizeByColor[color];
       }
       refreshPatternPrizeTable(container, state);
+      refreshJackpotSection(container, state);
     });
   });
 
@@ -539,18 +555,42 @@ function wirePatternPrizeCells(container: HTMLElement, state: FormState): void {
 }
 
 function wireJackpot(container: HTMLElement, state: FormState): void {
-  container.querySelector<HTMLInputElement>("#gm-jackpot-white")?.addEventListener("input", (ev) => {
-    state.spill1.jackpot.prizeByColor.white = Number((ev.target as HTMLInputElement).value);
-  });
-  container.querySelector<HTMLInputElement>("#gm-jackpot-yellow")?.addEventListener("input", (ev) => {
-    state.spill1.jackpot.prizeByColor.yellow = Number((ev.target as HTMLInputElement).value);
-  });
-  container.querySelector<HTMLInputElement>("#gm-jackpot-purple")?.addEventListener("input", (ev) => {
-    state.spill1.jackpot.prizeByColor.purple = Number((ev.target as HTMLInputElement).value);
-  });
+  // Draw-feltet er alltid i DOM.
   container.querySelector<HTMLInputElement>("#gm-jackpot-draw")?.addEventListener("input", (ev) => {
     state.spill1.jackpot.draw = Number((ev.target as HTMLInputElement).value);
   });
+
+  // Per-farge prize-inputs: wiret dynamisk etter antall konfigurerte farger.
+  container.querySelectorAll<HTMLInputElement>(".gm-jackpot-color-prize").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      const color = inp.dataset.color;
+      if (!color) return;
+      const v = Number(inp.value);
+      if (Number.isFinite(v)) {
+        state.spill1.jackpot.prizeByColor[color] = v;
+      } else {
+        delete state.spill1.jackpot.prizeByColor[color];
+      }
+    });
+  });
+}
+
+/**
+ * Re-render jackpot-seksjonen når ticket-farge-valget endres.
+ * Kalt fra wireTicketColors → toggleCheckbox (change-handler). Behoder
+ * draw-verdien og tidligere per-farge-prize-entries via state — DOM bygges
+ * bare om.
+ */
+function refreshJackpotSection(container: HTMLElement, state: FormState): void {
+  const section = container.querySelector<HTMLElement>("[data-testid='gm-section-jackpot']");
+  if (!section) return;
+  const newHtml = renderSectionJackpot(state);
+  const tmp = document.createElement("div");
+  tmp.innerHTML = newHtml;
+  const inner = tmp.querySelector<HTMLElement>("[data-testid='gm-section-jackpot']");
+  if (inner) section.innerHTML = inner.innerHTML;
+  // Re-wire events (draw + per-farge prize-inputs).
+  wireJackpot(container, state);
 }
 
 function wireElvisAndLucky(container: HTMLElement, state: FormState): void {
@@ -718,4 +758,5 @@ export const __test__ = {
   writeResultToMessage,
   renderFormShell,
   refreshPatternPrizeTable,
+  refreshJackpotSection,
 };

@@ -50,14 +50,20 @@ export interface TicketColorConfig {
   minimumPrizeNok?: number;
 }
 
-/** Jackpot-konfigurasjon per farge. */
+/** Jackpot-konfigurasjon per farge.
+ *
+ * `prizeByColor` er en generisk map fra ticket-farge-slug til premie i NOK.
+ * Tidligere var denne låst til `{ white, yellow, purple }`, men siden admin
+ * nå kan konfigurere jackpot for en hvilken som helst av de 14 farger i
+ * SPILL1_TICKET_COLORS, bruker vi `Record<string, number>` (backend
+ * `jackpotData` er allerede `z.record(z.string(), z.unknown())`).
+ *
+ * Nøklene er farge-slugger som matcher SPILL1_TICKET_COLORS, f.eks.
+ * `small_white`, `large_yellow`, `elvis1`. 0 = ingen jackpot for den fargen.
+ */
 export interface JackpotConfig {
-  /** Jackpot-premie i NOK (hele kroner) per farge-gruppe. */
-  prizeByColor: {
-    white: number;
-    yellow: number;
-    purple: number;
-  };
+  /** Jackpot-premie i NOK (hele kroner) per farge-slug. */
+  prizeByColor: Record<string, number>;
   /** Antall kuler som må trekkes for å vinne jackpot (typisk 50-59). */
   draw: number;
 }
@@ -123,7 +129,7 @@ export function emptySpill1Config(): Spill1Config {
     },
     ticketColors: [],
     jackpot: {
-      prizeByColor: { white: 0, yellow: 0, purple: 0 },
+      prizeByColor: {},
       draw: 50,
     },
     elvis: { replaceTicketPriceNok: 0 },
@@ -231,9 +237,19 @@ export function validateSpill1Config(config: Spill1Config, baseName: string): Va
   if (!Number.isInteger(config.jackpot.draw) || config.jackpot.draw < 50 || config.jackpot.draw > 59) {
     errors.push({ path: "jackpot.draw", message: "jackpot_draw_between_50_57" });
   }
-  for (const color of ["white", "yellow", "purple"] as const) {
-    const v = config.jackpot.prizeByColor[color];
-    if (v !== 0 && (v < 5000 || v > 50000)) {
+  // Jackpot-premie per farge: 0 betyr "ingen jackpot"; ellers må være 5000-50000 kr.
+  // Nøklene er fri-form (en hvilken som helst farge-slug) — men vi validerer
+  // bare nummerisk range, ikke om slug tilhører SPILL1_TICKET_COLORS (form-UI
+  // er kilden til sannhet for hvilke farger som er aktuelle).
+  for (const [color, prize] of Object.entries(config.jackpot.prizeByColor)) {
+    if (!Number.isFinite(prize)) {
+      errors.push({
+        path: `jackpot.prizeByColor.${color}`,
+        message: "jackpot_prize_must_between_5k_50k",
+      });
+      continue;
+    }
+    if (prize !== 0 && (prize < 5000 || prize > 50000)) {
       errors.push({
         path: `jackpot.prizeByColor.${color}`,
         message: "jackpot_prize_must_between_5k_50k",
@@ -295,6 +311,23 @@ export function buildSpill1Payload(input: {
     ? `${input.isoDate}T${input.spill1.endTime}:00.000Z`
     : null;
 
+  // Normaliser jackpot.prizeByColor: dropp farger med 0 eller ikke-endelige
+  // verdier slik at backend får bare aktive jackpot-farger. Bevar original
+  // struktur for alle andre felter.
+  const normalizedPrizeByColor: Record<string, number> = {};
+  for (const [color, prize] of Object.entries(input.spill1.jackpot.prizeByColor)) {
+    if (Number.isFinite(prize) && prize > 0) {
+      normalizedPrizeByColor[color] = prize;
+    }
+  }
+  const normalizedSpill1: Spill1Config = {
+    ...input.spill1,
+    jackpot: {
+      ...input.spill1.jackpot,
+      prizeByColor: normalizedPrizeByColor,
+    },
+  };
+
   return {
     gameTypeId: input.gameTypeId,
     name: input.name,
@@ -303,6 +336,6 @@ export function buildSpill1Payload(input: {
     startDate: startIso,
     endDate: endIso,
     status: "active",
-    config: { spill1: input.spill1 },
+    config: { spill1: normalizedSpill1 },
   };
 }

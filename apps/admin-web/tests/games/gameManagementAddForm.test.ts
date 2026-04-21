@@ -146,6 +146,51 @@ describe("GameManagementAddForm — render", () => {
     toggleCheckbox(c, "gm-ticket-check-small_white");
     expect(priceInput?.disabled).toBe(false);
   });
+
+  it("jackpot-seksjonen viser hjelpetekst når ingen ticket-farger er valgt", async () => {
+    const c = await setupForm("bingo");
+    expect(c.querySelector("[data-testid='gm-jackpot-empty']")).not.toBeNull();
+    // Draw-feltet skal alltid være synlig.
+    expect(c.querySelector("[data-testid='gm-jackpot-draw']")).not.toBeNull();
+    // Men ingen per-farge prize-inputs.
+    expect(
+      c.querySelector("[data-testid='gm-jackpot-prize-small_white']")
+    ).toBeNull();
+  });
+
+  it("jackpot-seksjonen rendrer én prize-input per valgt ticket-farge", async () => {
+    const c = await setupForm("bingo");
+    toggleCheckbox(c, "gm-ticket-check-small_white");
+    toggleCheckbox(c, "gm-ticket-check-small_red");
+    toggleCheckbox(c, "gm-ticket-check-elvis1");
+    expect(c.querySelector("[data-testid='gm-jackpot-empty']")).toBeNull();
+    expect(
+      c.querySelector("[data-testid='gm-jackpot-prize-small_white']")
+    ).not.toBeNull();
+    expect(
+      c.querySelector("[data-testid='gm-jackpot-prize-small_red']")
+    ).not.toBeNull();
+    expect(
+      c.querySelector("[data-testid='gm-jackpot-prize-elvis1']")
+    ).not.toBeNull();
+    // Ingen inputs for farger som IKKE er valgt.
+    expect(
+      c.querySelector("[data-testid='gm-jackpot-prize-small_yellow']")
+    ).toBeNull();
+  });
+
+  it("av-valg av ticket-farge fjerner jackpot-input for samme farge", async () => {
+    const c = await setupForm("bingo");
+    toggleCheckbox(c, "gm-ticket-check-small_white");
+    expect(
+      c.querySelector("[data-testid='gm-jackpot-prize-small_white']")
+    ).not.toBeNull();
+    toggleCheckbox(c, "gm-ticket-check-small_white");
+    expect(
+      c.querySelector("[data-testid='gm-jackpot-prize-small_white']")
+    ).toBeNull();
+    expect(c.querySelector("[data-testid='gm-jackpot-empty']")).not.toBeNull();
+  });
 });
 
 describe("GameManagementAddForm — validering", () => {
@@ -274,6 +319,51 @@ describe("GameManagementAddForm — submit", () => {
     );
     const alert = c.querySelector<HTMLElement>("[data-testid='gm-global-alert-danger']");
     expect(alert?.textContent).toContain("startDate");
+  });
+
+  it("submit inkluderer per-farge jackpot-prize i payload", async () => {
+    const c = await setupForm("bingo");
+    await fillValidForm(c);
+    // Legg til en ekstra farge + sett jackpot-premier på flere farger.
+    toggleCheckbox(c, "gm-ticket-check-small_red");
+    setInputValue(c, "[data-testid='gm-ticket-price-small_red']", "15");
+    setInputValue(c, "[data-testid='gm-jackpot-prize-small_white']", "10000");
+    setInputValue(c, "[data-testid='gm-jackpot-prize-small_red']", "7500");
+    const fetchSpy = mockFetchSuccess({
+      id: "gm-new-1",
+      gameTypeId: "bingo",
+      parentId: null,
+      name: "Fredag Bingo",
+      ticketType: "Small",
+      ticketPrice: 1500,
+      startDate: "2026-05-01T18:00:00.000Z",
+      endDate: "2026-05-01T20:00:00.000Z",
+      status: "active",
+      totalSold: 0,
+      totalEarning: 0,
+      config: {},
+      repeatedFromId: null,
+      createdBy: "admin-1",
+      createdAt: "2026-04-21T12:00:00Z",
+      updatedAt: "2026-04-21T12:00:00Z",
+    });
+    const submit = c.querySelector<HTMLButtonElement>("[data-testid='gm-submit']");
+    submit?.click();
+    await vi.waitFor(() =>
+      expect(c.querySelector("[data-testid='gm-global-alert-success']")).not.toBeNull()
+    );
+    const body = JSON.parse(fetchSpy.mock.calls[0]?.[1].body as string) as {
+      config: {
+        spill1: {
+          jackpot: { prizeByColor: Record<string, number>; draw: number };
+        };
+      };
+    };
+    expect(body.config.spill1.jackpot.prizeByColor).toEqual({
+      small_white: 10000,
+      small_red: 7500,
+    });
+    expect(body.config.spill1.jackpot.draw).toBe(55);
   });
 
   it("submit 404 NOT_FOUND: viser not-found-melding", async () => {

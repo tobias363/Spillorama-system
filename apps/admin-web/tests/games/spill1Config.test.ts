@@ -21,7 +21,7 @@ function validConfig() {
     },
   ];
   c.jackpot = {
-    prizeByColor: { white: 10000, yellow: 0, purple: 0 },
+    prizeByColor: { small_white: 10000 },
     draw: 55,
   };
   return c;
@@ -139,13 +139,53 @@ describe("validateSpill1Config", () => {
   });
   it("rejects jackpot prize outside 5k-50k (when non-zero)", () => {
     const c = validConfig();
-    c.jackpot.prizeByColor.white = 1000;
+    c.jackpot.prizeByColor.small_white = 1000;
     const res = validateSpill1Config(c, "x");
     expect(res.ok).toBe(false);
   });
   it("accepts jackpot prize of exactly 0 (means no jackpot for that color)", () => {
     const c = validConfig();
-    c.jackpot.prizeByColor = { white: 0, yellow: 0, purple: 0 };
+    c.jackpot.prizeByColor = { small_white: 0, large_yellow: 0 };
+    const res = validateSpill1Config(c, "x");
+    expect(res.ok).toBe(true);
+  });
+  it("accepts jackpot prize set for any of the 14 ticket colors (not only white/yellow/purple)", () => {
+    const c = validConfig();
+    c.jackpot.prizeByColor = {
+      small_red: 10000,
+      small_green: 7500,
+      small_orange: 5000,
+      elvis1: 15000,
+      elvis5: 50000,
+      large_white: 25000,
+    };
+    const res = validateSpill1Config(c, "x");
+    expect(res.ok).toBe(true);
+  });
+  it("rejects jackpot prize above 50000 for arbitrary color", () => {
+    const c = validConfig();
+    c.jackpot.prizeByColor = { small_red: 50001 };
+    const res = validateSpill1Config(c, "x");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(
+        res.errors.some(
+          (e) =>
+            e.path === "jackpot.prizeByColor.small_red" &&
+            e.message === "jackpot_prize_must_between_5k_50k"
+        )
+      ).toBe(true);
+    }
+  });
+  it("rejects non-finite jackpot prize value", () => {
+    const c = validConfig();
+    c.jackpot.prizeByColor = { small_white: Number.NaN };
+    const res = validateSpill1Config(c, "x");
+    expect(res.ok).toBe(false);
+  });
+  it("accepts empty prizeByColor map (jackpot fully disabled)", () => {
+    const c = validConfig();
+    c.jackpot.prizeByColor = {};
     const res = validateSpill1Config(c, "x");
     expect(res.ok).toBe(true);
   });
@@ -195,5 +235,59 @@ describe("buildSpill1Payload", () => {
       spill1: c,
     });
     expect(p.endDate).toBeNull();
+  });
+
+  it("filters out zero-prize and non-finite jackpot entries in payload", () => {
+    const c = validConfig();
+    c.jackpot.prizeByColor = {
+      small_white: 10000,
+      small_yellow: 0, // skal filtreres bort
+      small_red: 7500,
+      elvis1: Number.NaN, // skal filtreres bort
+    };
+    const p = buildSpill1Payload({
+      gameTypeId: "bingo",
+      name: "Test",
+      isoDate: "2026-05-15",
+      spill1: c,
+    });
+    expect(p.config.spill1.jackpot.prizeByColor).toEqual({
+      small_white: 10000,
+      small_red: 7500,
+    });
+    // Original draw + andre jackpot-felter bevares.
+    expect(p.config.spill1.jackpot.draw).toBe(55);
+  });
+
+  it("sends empty prizeByColor map when no color has non-zero jackpot", () => {
+    const c = validConfig();
+    c.jackpot.prizeByColor = { small_white: 0, large_yellow: 0 };
+    const p = buildSpill1Payload({
+      gameTypeId: "bingo",
+      name: "Test",
+      isoDate: "2026-05-15",
+      spill1: c,
+    });
+    expect(p.config.spill1.jackpot.prizeByColor).toEqual({});
+  });
+
+  it("supports arbitrary ticket colors in payload (not only white/yellow/purple)", () => {
+    const c = validConfig();
+    c.jackpot.prizeByColor = {
+      small_orange: 8000,
+      elvis3: 20000,
+      large_purple: 30000,
+    };
+    const p = buildSpill1Payload({
+      gameTypeId: "bingo",
+      name: "Test",
+      isoDate: "2026-05-15",
+      spill1: c,
+    });
+    expect(p.config.spill1.jackpot.prizeByColor).toEqual({
+      small_orange: 8000,
+      elvis3: 20000,
+      large_purple: 30000,
+    });
   });
 });
