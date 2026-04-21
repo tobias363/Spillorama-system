@@ -56,7 +56,11 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const bingoPlaySessionLimitMs = parsePositiveIntEnv(process.env.BINGO_PLAY_SESSION_LIMIT_MS, 60 * 60 * 1000);
   const bingoPauseDurationMs = parsePositiveIntEnv(process.env.BINGO_PAUSE_DURATION_MS, 5 * 60 * 1000);
   const bingoSelfExclusionMinMs = Math.max(365 * 24 * 60 * 60 * 1000, parsePositiveIntEnv(process.env.BINGO_SELF_EXCLUSION_MIN_MS, 365 * 24 * 60 * 60 * 1000));
-  const bingoMaxDrawsPerRound = Math.min(60, Math.max(1, parsePositiveIntEnv(process.env.BINGO_MAX_DRAWS_PER_ROUND, 30)));
+  // Cap at 75 so Game 1 (Bingo75) can draw all balls; smaller draw bags
+  // (Databingo60) stop naturally at 60 and don't care about the ceiling.
+  // The engine itself already validates this range — see BingoEngine
+  // constructor (1..MAX_BINGO_BALLS_75).
+  const bingoMaxDrawsPerRound = Math.min(75, Math.max(1, parsePositiveIntEnv(process.env.BINGO_MAX_DRAWS_PER_ROUND, 75)));
   const isProductionRuntime = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
   const bingoMinPlayersToStart = 1;
   const fixedAutoDrawIntervalMs = 2000;

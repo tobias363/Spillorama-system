@@ -1,4 +1,4 @@
-import { generateDatabingo60Ticket, generateBingo75Ticket } from "../game/ticket.js";
+import { generateTicketForGame } from "../game/ticket.js";
 import type {
   BingoSystemAdapter,
   CheckpointInput,
@@ -9,15 +9,9 @@ import type {
   NumberDrawnInput
 } from "./BingoSystemAdapter.js";
 
-/** Game slugs that use 75-ball (5×5) tickets. */
-const BINGO75_SLUGS = new Set(["bingo", "game_1"]);
-
 export class LocalBingoSystemAdapter implements BingoSystemAdapter {
   async createTicket(input: CreateTicketInput) {
-    if (input.gameSlug && BINGO75_SLUGS.has(input.gameSlug)) {
-      return generateBingo75Ticket(input.color, input.type);
-    }
-    return generateDatabingo60Ticket();
+    return generateTicketForGame(input.gameSlug, input.color, input.type);
   }
 
   async onGameStarted(_input: GameStartedInput): Promise<void> {

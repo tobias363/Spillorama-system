@@ -184,7 +184,7 @@ function buildRoomUpdatePayload(snapshot: RoomSnapshot, nowMs = Date.now()): Roo
     getArmedPlayerTicketCounts: (code) => roomState.getArmedPlayerTicketCounts(code),
     getArmedPlayerSelections: (code) => roomState.getArmedPlayerSelections(code),
     getRoomConfiguredEntryFee,
-    getOrCreateDisplayTickets: (code, id, count) => roomState.getOrCreateDisplayTickets(code, id, count),
+    getOrCreateDisplayTickets: (code, id, count, gameSlug) => roomState.getOrCreateDisplayTickets(code, id, count, gameSlug),
     getLuckyNumbers: (code) => roomState.getLuckyNumbers(code),
     getVariantConfig: (code) => roomState.getVariantConfig(code),
   });

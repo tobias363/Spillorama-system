@@ -157,10 +157,19 @@ export function buildRoomUpdatePayload(
   const variantInfo = opts.getVariantConfig?.(snapshot.code);
   const effectiveGameType = variantInfo?.gameType ?? "standard";
   const effectiveConfig = variantInfo?.config ?? getDefaultVariantConfig(effectiveGameType);
+  // Resolve a single authoritative entry fee for the room, regardless of
+  // whether a game is currently running. The buy popup needs this BEFORE the
+  // first round starts — earlier code fell back to a hard-coded "10 kr"
+  // placeholder while the player was actually charged the configured price.
+  const configuredEntryFee = opts.getRoomConfiguredEntryFee(snapshot.code);
+  const effectiveEntryFee = snapshot.currentGame?.entryFee && snapshot.currentGame.entryFee > 0
+    ? snapshot.currentGame.entryFee
+    : configuredEntryFee;
   const gameVariant = {
     gameType: effectiveGameType,
     ticketTypes: effectiveConfig.ticketTypes,
     replaceAmount: effectiveConfig.replaceAmount,
+    entryFee: effectiveEntryFee,
   };
 
   // ── Server-authoritative stake per player ──────────────────────────────────

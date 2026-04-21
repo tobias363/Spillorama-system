@@ -12,7 +12,8 @@ import {
   hasFullBingo,
   makeRoomCode,
   makeShuffledBallBag,
-  ticketContainsNumber
+  ticketContainsNumber,
+  uses75Ball
 } from "./ticket.js";
 import type {
   ClaimRecord,
@@ -188,8 +189,6 @@ const DEFAULT_SELF_EXCLUSION_MIN_MS = 365 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_DRAWS_PER_ROUND = 30;
 const MAX_BINGO_BALLS_60 = 60;
 const MAX_BINGO_BALLS_75 = 75;
-/** Game slugs that use 75-ball format. */
-const BINGO75_SLUGS = new Set(["bingo", "game_1"]);
 const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
 /** BIN-253: Minimum milliseconds between successive manual draw calls to prevent rapid-fire draws. */
 const MIN_MANUAL_DRAW_INTERVAL_MS = 500;
@@ -492,6 +491,13 @@ export class BingoEngine {
       const requested = input.armedPlayerTicketCounts?.[player.id] ?? ticketsPerPlayer;
       playerTicketCountMap.set(player.id, Math.min(requested, ticketsPerPlayer));
     }
+    // BIN-437: Resolve variant config up-front — needed both for the buy-in
+    // loop (per-type pricing) and the ticket-generation loop further down.
+    // Declaring it here avoids a TDZ trap where the buy-in loop crashed with
+    // "Cannot access 'variantConfig' before initialization".
+    const variantGameType = input.gameType ?? "standard";
+    const variantConfig = input.variantConfig ?? variantConfigModule.getDefaultVariantConfig(variantGameType);
+
     if (entryFee > 0 && !isTestGame) {
       try {
         for (const player of eligiblePlayers) {
@@ -559,9 +565,7 @@ export class BingoEngine {
     const tickets = new Map<string, Ticket[]>();
     const marks = new Map<string, Set<number>[]>();
 
-    // BIN-437: Use variant config for ticket colors (replaces hardcoded cycling).
-    const variantGameType = input.gameType ?? "standard";
-    const variantConfig = input.variantConfig ?? variantConfigModule.getDefaultVariantConfig(variantGameType);
+    // variantConfig + variantGameType already resolved above (before the buy-in loop).
 
     try {
       for (const player of eligiblePlayers) {
@@ -674,7 +678,7 @@ export class BingoEngine {
       payoutPercent: normalizedPayoutPercent,
       maxPayoutBudget,
       remainingPayoutBudget: maxPayoutBudget,
-      drawBag: makeShuffledBallBag(BINGO75_SLUGS.has(room.gameSlug ?? "") ? MAX_BINGO_BALLS_75 : MAX_BINGO_BALLS_60),
+      drawBag: makeShuffledBallBag(uses75Ball(room.gameSlug) ? MAX_BINGO_BALLS_75 : MAX_BINGO_BALLS_60),
       drawnNumbers: [],
       tickets,
       marks,

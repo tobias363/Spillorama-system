@@ -17,10 +17,7 @@ import type {
   GameEndedInput
 } from "./BingoSystemAdapter.js";
 import type { Ticket } from "../game/types.js";
-import { generateDatabingo60Ticket, generateBingo75Ticket } from "../game/ticket.js";
-
-/** Game slugs that use 75-ball (5×5) tickets — must match LocalBingoSystemAdapter. */
-const BINGO75_SLUGS = new Set(["bingo", "game_1"]);
+import { generateTicketForGame } from "../game/ticket.js";
 
 interface PostgresBingoSystemAdapterOptions {
   connectionString: string;
@@ -43,14 +40,7 @@ export class PostgresBingoSystemAdapter implements BingoSystemAdapter {
   }
 
   async createTicket(input: CreateTicketInput): Promise<Ticket> {
-    // Use gameSlug to pick the correct ticket format — matches LocalBingoSystemAdapter.
-    // Game 1 (bingo / game_1) uses 75-ball 5×5 tickets; everything else uses 60-ball 3×5.
-    const ticket = (input.gameSlug && BINGO75_SLUGS.has(input.gameSlug))
-      ? generateBingo75Ticket(input.color, input.type)
-      : generateDatabingo60Ticket();
-    if (input.color) ticket.color = input.color;
-    if (input.type) ticket.type = input.type;
-    return ticket;
+    return generateTicketForGame(input.gameSlug, input.color, input.type);
   }
 
   async onGameStarted(_input: GameStartedInput): Promise<void> {

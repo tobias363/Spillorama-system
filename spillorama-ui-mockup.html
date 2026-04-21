@@ -1,0 +1,1659 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spillorama – Bingo</title>
+  <style>
+    /* ══════════════════════════════════════
+       1 variabel styrer alle kolonne-gap
+    ══════════════════════════════════════ */
+    :root {
+      --gap: 65px;
+
+      /* ── Draw-animation positions (adjust these freely) ──
+         Coordinates are relative to .main-layout (top-left = 0,0).
+         --draw-pipe-x:   horizontal center of the pipe/pins — moves BOTH pins + ball emerge-x together
+         --draw-pipe-gap: horizontal gap between the two pins (pin inner edges)
+         --draw-pipe-width: thickness of each pin
+         --draw-ball-emerge-y: how far below main-layout top the ball sits during showcase
+         --draw-ball-showcase-scale: zoom factor while the ball is held in showcase
+         --draw-ball-tube-x/y: landing position at the top of the drawn-balls tube
+      */
+      /* Pipe (pins) — move these close to the right-side elements */
+      --draw-pipe-x: 432px;         /* visual centre of the pipe; pins are positioned around it */
+      --draw-pipe-gap: 90px;        /* horizontal gap between the two pins */
+      --draw-pipe-width: 14px;      /* thickness of each pin */
+
+      /* Ball vertical stops — ball first comes fully out of the pipe (emerge-y),
+         then grows in place to showcase-y while x stays locked on --draw-pipe-x. */
+      --draw-ball-emerge-y: 65px;     /* whole ball just below the pipe (pins end at y=46) */
+      --draw-ball-showcase-y: 85px;   /* ball settles a bit lower while growing */
+      --draw-ball-showcase-scale: 2;
+
+      /* Landing sequence — two stops:
+         1) adjacent to the ring (touching its right edge) — ball arrives here, then waits briefly
+         2) at the ring position — ball slides in while the previous ring ball is pushed out
+         This lets the incoming ball visibly "push" the 62 forward without ever overlapping it. */
+      --draw-ball-adjacent-x: 222px; /* just right of ring (ring ends at x=218) */
+      --draw-ball-adjacent-y: 33px;
+      --draw-ball-tube-x: 134px;     /* ring left edge — final landing spot */
+      --draw-ball-tube-y: 33px;      /* ring top  edge */
+
+      /* Derived (ball is 84px wide → translate.x = centre − 42).
+         Ball stays on --draw-pipe-x throughout emergence AND showcase (no horizontal drift). */
+      --draw-ball-translate-x: calc(var(--draw-pipe-x) - 42px);
+      /* Curve-rounding midpoint between showcase and adjacent — makes the path arc smoothly
+         instead of bending at a hard corner when the ball leaves the showcase. */
+      --draw-ball-mid-translate-x: calc((var(--draw-ball-translate-x) + var(--draw-ball-adjacent-x) - 42px) / 2);
+      --draw-ball-mid-y: calc((var(--draw-ball-showcase-y) + var(--draw-ball-adjacent-y)) / 2);
+    }
+
+    /* Register length custom properties so @keyframes can interpolate them smoothly. */
+    @property --draw-pipe-x         { syntax: '<length>'; inherits: true; initial-value: 405px; }
+    @property --draw-ball-translate-x { syntax: '<length>'; inherits: true; initial-value: 363px; }
+    @property --draw-ball-emerge-y  { syntax: '<length>'; inherits: true; initial-value: 65px; }
+    @property --draw-ball-showcase-y { syntax: '<length>'; inherits: true; initial-value: 85px; }
+    @property --draw-ball-adjacent-x { syntax: '<length>'; inherits: true; initial-value: 222px; }
+    @property --draw-ball-adjacent-y { syntax: '<length>'; inherits: true; initial-value: 33px; }
+    @property --draw-ball-tube-x    { syntax: '<length>'; inherits: true; initial-value: 134px; }
+    @property --draw-ball-tube-y    { syntax: '<length>'; inherits: true; initial-value: 33px; }
+    @property --draw-ball-mid-translate-x { syntax: '<length>'; inherits: true; initial-value: 285px; }
+    @property --draw-ball-mid-y     { syntax: '<length>'; inherits: true; initial-value: 59px; }
+    @property --draw-ball-showcase-scale { syntax: '<number>'; inherits: true; initial-value: 2; }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: url('file:///Users/tobiashaugen/.gemini/antigravity/brain/bd99094b-260a-4ae4-bb15-d523702a67b9/media__1776553750883.png') center/cover no-repeat fixed #1a0a0a;
+      color: #fff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── TOP NAV (matches web-shell game bar) ── */
+    .topnav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 50px;
+      height: 80px;
+      background: linear-gradient(180deg, #5c1010 0%, #3d0d0d 100%);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      flex-shrink: 0;
+      z-index: 10;
+      gap: 20px;
+    }
+
+    /* Left group: logo + divider + back button */
+    .game-bar-left {
+      display: flex; align-items: center;
+      gap: 20px; flex-shrink: 0;
+    }
+    .game-bar-logo {
+      display: flex; align-items: center;
+      text-decoration: none; flex-shrink: 0;
+    }
+    .game-bar-logo-img { height: 46px; width: auto; display: block; }
+    .topnav-divider {
+      width: 1px; height: 28px;
+      background: rgba(255,255,255,0.1);
+      flex-shrink: 0;
+    }
+    .btn-back {
+      display: flex; align-items: center; gap: 7px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 20px;
+      padding: 0 16px;
+      height: 36px;
+      background: rgba(255,255,255,0.07);
+      color: rgba(255,255,255,0.9);
+      font-family: inherit;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer; white-space: nowrap;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .btn-back:hover { background: rgba(255,255,255,0.13); }
+
+    /* Center: game name */
+    .game-bar-title {
+      flex: 1;
+      text-align: center;
+      font-size: 14px; font-weight: 600;
+      color: rgba(255,255,255,0.5);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* Right group: hall + balance + wallet */
+    .game-bar-right {
+      display: flex; align-items: center;
+      gap: 20px; flex-shrink: 0;
+    }
+    .hall-select-wrap {
+      display: flex; align-items: center; gap: 0;
+      height: 36px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 20px;
+      background: rgba(255,255,255,0.06);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .hall-select-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 34px; height: 100%;
+      color: rgba(255,255,255,0.5);
+      flex-shrink: 0;
+      pointer-events: none;
+    }
+    .hall-select {
+      padding: 0 10px 0 2px;
+      height: 100%;
+      border: none;
+      background: transparent;
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer;
+      min-width: 120px;
+      max-width: 200px;
+    }
+    .hall-select option { background: #1a0a0a; }
+
+    .balance-chip {
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 14px;
+      height: 36px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.1);
+      font-size: 14px; font-weight: 800;
+      color: #81c784;
+      white-space: nowrap;
+    }
+    .balance-chip::before {
+      content: '';
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #81c784;
+      box-shadow: 0 0 6px #81c784;
+      flex-shrink: 0;
+    }
+
+    .btn-wallet {
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 14px;
+      height: 36px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 20px;
+      background: rgba(255,255,255,0.07);
+      color: rgba(255,255,255,0.9);
+      font-family: inherit;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .btn-wallet:hover { background: rgba(255,255,255,0.13); }
+
+    /* ── MAIN AREA ── */
+    .main-layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      background: url('file:///Users/tobiashaugen/.gemini/antigravity/brain/bd99094b-260a-4ae4-bb15-d523702a67b9/media__1776549246289.jpg') center/cover no-repeat;
+    }
+    .main-layout::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 3px,
+        rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px
+      );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── DRAWN BALLS COLUMN (far left) ── */
+    /* Outer wrapper provides the dark panel background */
+    .balls-column-wrap {
+      width: 140px;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 2;
+      background: none;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 0 0 16px 0;
+      margin-left: 0px; /* Fine-tuned distance to the board edge */
+      /* Project a unified outer shadow across the fully assembled glass pipe parts */
+      filter: drop-shadow(4px 4px 12px rgba(0,0,0,0.6));
+    }
+
+    /* Structural Pipe Layers drawing the flawless seamless 3D L-shape bend offscreen */
+    /* Structural Pipe Layers drawing the flawless seamless 3D L-shape bend offscreen */
+    
+    /* NEW: Horizontal Intake Pipe going RIGHT */
+    .tube-glass-intake {
+      position: absolute;
+      top: 21px; left: 118px; /* Offset from header to provide visual clearance */
+      width: 154px; /* Extends right to smoothly blend into diagonal */
+      height: 108px;
+      background: linear-gradient(to top, 
+        rgba(0,0,0,0.05) 0px,
+        rgba(255,255,255,0.10) 24px,
+        rgba(0,0,0,0.45) 32px,
+        rgba(0,0,0,0.10) 66px,
+        rgba(0,0,0,0.45) 100px,
+        rgba(255,255,255,0.18) 108px
+      );
+      border-top: 2px solid rgba(255,255,255,0.18);
+      border-bottom: 2px solid rgba(255,255,255,0.08); 
+      z-index: 1;
+    }
+
+    /* 5. Diagonal Track */
+    .tube-glass-diagonal {
+      position: absolute;
+      top: 45px; left: 255px; 
+      width: 224px; height: 108px;
+      transform: rotate(13.9deg);
+      border-radius: 12px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.0) 0px, rgba(0,0,0,0.45) 8px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.45) 76px, rgba(255,255,255,0) 108px);
+    }
+
+    /* 6. Showcase Chamber Sphere */
+    .tube-glass-chamber {
+      position: absolute;
+      top: 15px; left: 362px;
+      width: 220px; height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.2) 40%, rgba(0,0,0,0.6) 100%);
+      box-shadow: inset -5px -5px 15px rgba(0,0,0,0.8);
+    }
+
+    /* FOREGROUND GLASS: Rendered OVER the balls to make them look INSIDE the tube */
+    .glass-overlay-front {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 100;
+      contain: none;
+    }
+    .glass-overlay-front > div {
+      /* Remove inherited sharp corners, use class-defined shapes */
+      box-shadow: inset 0 2px 10px rgba(255,255,255,0.1), inset 0 -2px 10px rgba(255,255,255,0.05) !important;
+      backdrop-filter: blur(1.0px) brightness(1.05) !important;
+      border: none !important;
+      z-index: auto !important;
+    }
+    .glass-overlay-front .tube-glass-vert {
+      background: linear-gradient(to right, rgba(255,255,255,0.5) 0px, rgba(255,255,255,0) 10px, rgba(255,255,255,0) 90px, rgba(255,255,255,0.15) 108px) !important;
+      box-shadow: inset 4px 0 10px rgba(255,255,255,0.15), inset -4px 0 10px rgba(255,255,255,0.05) !important;
+    }
+    .glass-overlay-front .tube-glass-intake,
+    .glass-overlay-front .tube-glass-diagonal {
+      background: linear-gradient(to bottom, rgba(255,255,255,0.5) 0px, rgba(255,255,255,0) 10px, rgba(255,255,255,0) 90px, rgba(255,255,255,0.15) 108px) !important;
+      box-shadow: inset 0 4px 10px rgba(255,255,255,0.15), inset 0 -4px 10px rgba(255,255,255,0.05) !important;
+    }
+    .glass-overlay-front .tube-glass-chamber {
+      background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0.05) 100%) !important;
+      box-shadow: inset -5px -5px 15px rgba(255,255,255,0.05), inset 5px 5px 25px rgba(255,255,255,0.2) !important;
+    }
+    .glass-overlay-front .tube-glass-corner-top {
+      background: radial-gradient(circle at 108px 108px, rgba(255,255,255,0) 0px, rgba(255,255,255,0) 98px, rgba(255,255,255,0.4) 108px) !important;
+    }
+    .glass-overlay-front .tube-glass-corner {
+      background: radial-gradient(circle at 108px 0px, rgba(255,255,255,0) 0px, rgba(255,255,255,0) 98px, rgba(255,255,255,0.4) 108px) !important;
+      box-shadow: none !important;
+    }
+    .glass-overlay-front > div::before, .glass-overlay-front > div::after { display: none !important; }
+    
+    /* End overlay */
+
+
+    /* 5. Diagonal Track */
+    .tube-glass-diagonal {
+      position: absolute;
+      top: 45px; left: 255px; 
+      width: 224px; height: 108px;
+      transform: rotate(13.9deg);
+      border-radius: 12px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.0) 0px, rgba(0,0,0,0.45) 8px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.45) 76px, rgba(255,255,255,0) 108px);
+    }
+
+    /* 6. Showcase Chamber Sphere */
+    .tube-glass-chamber {
+      position: absolute;
+      top: 15px; left: 362px;
+      width: 220px; height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.2) 40%, rgba(0,0,0,0.6) 100%);
+      box-shadow: inset -5px -5px 15px rgba(0,0,0,0.8);
+    }
+
+    /* NEW: TOP CORNER module (right bend) */
+    .tube-glass-corner-top {
+      position: absolute;
+      top: 21px; left: 10px; /* Synchronized drop to match intake pipe */
+      width: 108px; height: 108px;
+      /* Radially bends light from vertical to horizontal-right. Pivot is exactly bottom-right! */
+      background: radial-gradient(circle at bottom right, 
+        rgba(0,0,0,0.05) 0px,
+        rgba(255,255,255,0.10) 24px,
+        rgba(0,0,0,0.45) 32px,
+        rgba(0,0,0,0.10) 66px,
+        rgba(0,0,0,0.45) 100px,
+        rgba(255,255,255,0.18) 108px,
+        transparent 110px
+      );
+      border-top-left-radius: 108px; /* The massive physical sweep for top outer bend */
+      border-left: 2px solid rgba(255,255,255,0.18);
+      border-top: 2px solid rgba(255,255,255,0.18);
+      z-index: 1;
+    }
+
+    /* 1. Straight vertical pipe */
+    .tube-glass-vert {
+      position: absolute;
+      top: 129px; left: 10px; /* 21px offset + 108px elbow = 129px */
+      width: 108px; bottom: 108px;
+      background: linear-gradient(to right, rgba(255,255,255,0.18) 0px, rgba(0,0,0,0.45) 8px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.45) 76px, rgba(255,255,255,0.10) 84px, rgba(0,0,0,0.05) 108px);
+      border-left: 2px solid rgba(255,255,255,0.18);
+      border-right: 2px solid rgba(255,255,255,0.08);
+      z-index: 1;
+    }
+
+    /* 2. Seamless 90-degree Corner */
+    .tube-glass-corner {
+      position: absolute;
+      bottom: 0px; left: 10px; 
+      width: 108px; height: 108px;
+      background: radial-gradient(circle at 0 0, rgba(255,255,255,0.18) 0px, rgba(0,0,0,0.45) 8px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.45) 76px, rgba(255,255,255,0.10) 84px, rgba(0,0,0,0.05) 108px);
+      border-bottom-right-radius: 108px;
+      border-right: 2px solid rgba(255,255,255,0.08);
+      border-bottom: 2px solid rgba(255,255,255,0.08);
+      z-index: 1;
+    }
+
+    /* 3. Horizontal Exit Pipe Extension (shooting off left screen) */
+    .tube-glass-corner::before {
+      content: '';
+      position: absolute;
+      top: 0; right: 100%; 
+      width: 1000px; height: 108px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.18) 0px, rgba(0,0,0,0.45) 8px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.10) 42px, rgba(0,0,0,0.45) 76px, rgba(255,255,255,0.10) 84px, rgba(0,0,0,0.05) 108px);
+      border-top: 2px solid rgba(255,255,255,0.18);
+      border-bottom: 2px solid rgba(255,255,255,0.08);
+      box-shadow: 0 4px 18px rgba(0,0,0,0.5); /* Insets removed to eliminate seam tears */
+    }
+    
+    /* Clean up residual */
+    .tube-glass-horiz {
+      display: none; 
+    }
+
+    /* The "tube" itself (now just an invisible frictionless container for balls) */
+    .balls-tube {
+      width: 108px;
+      height: calc(100% - 22px); /* Recalculate physical height to prevent bottom overflow */
+      margin-top: 21px; /* Drop container exactly 21px to sit immediately below the new offset */
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 4px; /* 4px gap provides the requested separation, with reduced top padding to preserve bottom clearance */
+      padding: 14px 0 16px 0;
+      overflow: visible;
+      scrollbar-width: none;
+      z-index: 5;
+    }
+    .balls-tube::-webkit-scrollbar { display: none; }
+
+    /* shadow fade from header opening so balls look like they drop from above */
+    .balls-tube::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 48px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.8), rgba(0,0,0,0.35) 40%, transparent);
+      pointer-events: none;
+      z-index: 10;
+    }
+    /* bottom fade-out removed visually as we now use actual L-pipe */
+
+    .drawn-ball {
+      width: 81px; height: 81px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      font-weight: 800;
+      color: #1a0a0a;
+      flex-shrink: 0;
+      position: relative;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: contain;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));
+    }
+    
+    /* All tube balls sit ABOVE the active (flying) ball — so the incoming ball's trajectory
+       reads as gliding BEHIND the tube balls instead of crossing over them.
+       position: relative lets us use `left` for the :first-child offset without clobbering the
+       FLIP animation's `transform` property. */
+    .drawn-ball {
+      position: relative;
+      z-index: 8;
+    }
+    /* Descending z-index by DOM order, so a higher-up ball always renders IN FRONT of the
+       ball below it. Prevents the "ball 77 goes under ball 62" overlap during the push when
+       two adjacent balls are moving and their edges brush past each other. */
+    .drawn-ball:nth-child(1) { z-index: 20; }
+    .drawn-ball:nth-child(2) { z-index: 19; }
+    .drawn-ball:nth-child(3) { z-index: 18; }
+    .drawn-ball:nth-child(4) { z-index: 17; }
+    .drawn-ball:nth-child(5) { z-index: 16; }
+    .drawn-ball:nth-child(6) { z-index: 15; }
+    .drawn-ball:nth-child(7) { z-index: 14; }
+    .drawn-ball:nth-child(8) { z-index: 13; left: 0px; }
+    .drawn-ball:nth-child(9) { z-index: 12; left: -8px; }
+    .drawn-ball:nth-child(10) { z-index: 11; left: -24px; }
+    /* Top ball nudged slightly right (restored from 15px down to 7px) to fine-tune the stagger without clipping. */
+    .drawn-ball:first-child {
+      left: 8px;
+    }
+    /* Exit animation for the bottom ball being pushed out of the tube.
+       The exiting ball is moved to position:absolute (inside the tube) so it no longer affects flex layout. */
+    .drawn-ball.exiting {
+      position: absolute;
+      /* Duration matches PUSH_SLIDE_MS (900 ms). Ease-out so it kicks out with noticeable
+         initial velocity — a real "shove" — then decelerates naturally. */
+      animation: ball-exit 0.9s linear forwards;
+      z-index: 30;
+      pointer-events: none;
+    }
+    @keyframes ball-exit {
+      0%   { transform: translateX(0px) rotate(-22deg); opacity: 1; }
+      60%  { transform: translateX(-70px) translateY(18px) rotate(-60deg); opacity: 1; }
+      100% { transform: translateX(-200px) translateY(40px) rotate(-110deg); opacity: 0; }
+    }
+
+    /* ── DRAW ANIMATION: drop-pipe legs, active ball flying to tube ── */
+    /* Two glass-pipe legs matching the main tube's glass style — ball emerges between them */
+    .drop-pipe {
+      position: absolute;
+      top: 0;
+      width: var(--draw-pipe-width);
+      height: 46px;
+      background: linear-gradient(to right,
+        rgba(255,255,255,0.18) 0px,
+        rgba(0,0,0,0.45) 2px,
+        rgba(0,0,0,0.10) 6px,
+        rgba(0,0,0,0.10) 8px,
+        rgba(0,0,0,0.45) 12px,
+        rgba(255,255,255,0.06) 14px);
+      border-left: 2px solid rgba(255,255,255,0.18);
+      border-right: 2px solid rgba(255,255,255,0.08);
+      box-shadow:
+        inset  2px 0 5px rgba(0,0,0,0.7),
+        inset -2px 0 5px rgba(0,0,0,0.5),
+        0 4px 10px rgba(0,0,0,0.5);
+      z-index: 3;
+      pointer-events: none;
+    }
+    /* Pins derive their X from --draw-pipe-x + --draw-pipe-gap, so moving --draw-pipe-x moves BOTH. */
+    .drop-pipe-left  { left: calc(var(--draw-pipe-x) - var(--draw-pipe-gap) / 2 - var(--draw-pipe-width)); }
+    .drop-pipe-right { left: calc(var(--draw-pipe-x) + var(--draw-pipe-gap) / 2); }
+
+    /* Animated ball — single element with combined translate + scale in one animation.
+       Merging avoids any sync drift between two separately-driven animations, and the
+       single transform is one composited layer the browser can keep on the GPU. */
+    .active-ball {
+      position: absolute;
+      top: 0; left: 0;
+      width: 81px; height: 81px;
+      z-index: 6; /* above pins and tube balls so it reads as the active drawn ball */
+      pointer-events: none;
+      will-change: transform, opacity;
+      transform-origin: center center;
+      backface-visibility: hidden;
+      /* Promote to its own compositor layer so the browser can keep the element's rasterized
+         bitmap on the GPU and just transform it each frame — no repainting as scale changes. */
+      contain: layout paint;
+      animation: draw-flow 5s linear infinite;
+    }
+    /* The visible ball: PNG + pseudo-element shadow. No `filter: drop-shadow`, because that
+       forces a full re-rasterization each frame when the element scales (which is the most
+       common source of perceptible jank on scaling balls). Instead we use a pre-positioned
+       pseudo-element with a radial-gradient shadow — it rides along with the transform but
+       doesn't require per-frame filter buffers. */
+    .active-ball-inner {
+      position: relative;
+      width: 100%; height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: contain;
+      backface-visibility: hidden;
+      /* Own composite layer so the PNG bitmap is rasterized once and reused — no repaint
+         when the outer transform changes scale. */
+      transform: translateZ(0);
+      will-change: transform;
+    }
+    .active-ball-inner::before {
+      content: '';
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      bottom: -6%;
+      height: 24%;
+      background: radial-gradient(ellipse at center,
+        rgba(0,0,0,0.55) 0%,
+        rgba(0,0,0,0.3) 40%,
+        transparent 70%);
+      pointer-events: none;
+      z-index: -1;
+    }
+    .active-ball-inner span {
+      display: block;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 25px;
+      font-weight: 800;
+      color: #1a0a0a;
+      line-height: 1;
+      letter-spacing: -0.5px;
+      transform: translate(-2px, 0);
+    }
+
+    /* Single merged animation: translate3d + scale3d + opacity — explicitly 3D so the browser
+       always uses a GPU composite layer (cheaper per frame than 2D transforms in some renderers).
+       Scale values follow a smoothstep curve for continuous acceleration/deceleration.
+       Uses translate3d / scale3d instead of translate / scale so every keyframe mentions Z;
+       this is the strongest hint to force GPU compositing in all Chromium/WebKit versions. */
+    @keyframes draw-flow {
+      /* ── Hidden phase ── */
+      0%   { transform: translate3d(var(--draw-ball-translate-x), -90px, 0) scale3d(1, 1, 1); opacity: 0; }
+      4%   { transform: translate3d(var(--draw-ball-translate-x), -75px, 0) scale3d(1, 1, 1); opacity: 0; }
+      8%   { transform: translate3d(var(--draw-ball-translate-x), -55px, 0) scale3d(1, 1, 1); opacity: 0.4; }
+      /* ── Emergence through the pins — ball drops further before growth kicks in ── */
+      12%  { transform: translate3d(var(--draw-ball-translate-x), -32px, 0) scale3d(1.000, 1.000, 1); opacity: 1; }
+      14%  { transform: translate3d(var(--draw-ball-translate-x), -18px, 0) scale3d(1.000, 1.000, 1); opacity: 1; }
+      16%  { transform: translate3d(var(--draw-ball-translate-x), -4px, 0) scale3d(1.000, 1.000, 1); opacity: 1; }
+      18%  { transform: translate3d(var(--draw-ball-translate-x), 10px, 0) scale3d(1.000, 1.000, 1); opacity: 1; }
+      /* ── Scale-up phase (smoothstep 1 → showcase-scale over 18 % → 42 %) ── */
+      20%  { transform: translate3d(var(--draw-ball-translate-x), 22px, 0) scale3d(1.020, 1.020, 1); opacity: 1; }
+      22%  { transform: translate3d(var(--draw-ball-translate-x), 32px, 0) scale3d(1.074, 1.074, 1); opacity: 1; }
+      24%  { transform: translate3d(var(--draw-ball-translate-x), 42px, 0) scale3d(1.156, 1.156, 1); opacity: 1; }
+      26%  { transform: translate3d(var(--draw-ball-translate-x), 50px, 0) scale3d(1.259, 1.259, 1); opacity: 1; }
+      28%  { transform: translate3d(var(--draw-ball-translate-x), 58px, 0) scale3d(1.377, 1.377, 1); opacity: 1; }
+      30%  { transform: translate3d(var(--draw-ball-translate-x), var(--draw-ball-emerge-y), 0) scale3d(1.500, 1.500, 1); opacity: 1; }
+      32%  { transform: translate3d(var(--draw-ball-translate-x), 71px, 0) scale3d(1.624, 1.624, 1); opacity: 1; }
+      34%  { transform: translate3d(var(--draw-ball-translate-x), 76px, 0) scale3d(1.741, 1.741, 1); opacity: 1; }
+      36%  { transform: translate3d(var(--draw-ball-translate-x), 80px, 0) scale3d(1.844, 1.844, 1); opacity: 1; }
+      38%  { transform: translate3d(var(--draw-ball-translate-x), 83px, 0) scale3d(1.926, 1.926, 1); opacity: 1; }
+      40%  { transform: translate3d(var(--draw-ball-translate-x), 84px, 0) scale3d(1.980, 1.980, 1); opacity: 1; }
+      42%  { transform: translate3d(var(--draw-ball-translate-x), var(--draw-ball-showcase-y), 0) scale3d(var(--draw-ball-showcase-scale), var(--draw-ball-showcase-scale), 1); opacity: 1; }
+      /* ── Peak hold: ball stays at full size so the number is readable ── */
+      46%  { transform: translate3d(var(--draw-ball-translate-x), var(--draw-ball-showcase-y), 0) scale3d(var(--draw-ball-showcase-scale), var(--draw-ball-showcase-scale), 1); opacity: 1; }
+      50%  { transform: translate3d(var(--draw-ball-translate-x), var(--draw-ball-showcase-y), 0) scale3d(var(--draw-ball-showcase-scale), var(--draw-ball-showcase-scale), 1); opacity: 1; }
+      /* ── Approach phase (50% → 78% = 28% = 1400 ms).
+         X uses LINEAR interpolation → constant velocity (168 px / 1400 ms ≈ 120 px/s).
+         Y uses delayed smoothstep so the ball stays near showcase-y until past the pin.
+         Scale uses ease-out so the ball starts shrinking immediately when it leaves showcase.
+         Linear X matches the LINEAR push that follows (at same 120 px/s), so the velocity
+         is continuous across the whole showcase → adjacent → ring journey. ── */
+      52%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.9286 + var(--draw-ball-adjacent-x) * 0.0714), var(--draw-ball-showcase-y), 0) scale3d(1.862, 1.862, 1); opacity: 1; }
+      54%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.8571 + var(--draw-ball-adjacent-x) * 0.1429), var(--draw-ball-showcase-y), 0) scale3d(1.734, 1.734, 1); opacity: 1; }
+      56%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.7857 + var(--draw-ball-adjacent-x) * 0.2143), var(--draw-ball-showcase-y), 0) scale3d(1.617, 1.617, 1); opacity: 1; }
+      58%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.7143 + var(--draw-ball-adjacent-x) * 0.2857), var(--draw-ball-showcase-y), 0) scale3d(1.509, 1.509, 1); opacity: 1; }
+      60%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.6429 + var(--draw-ball-adjacent-x) * 0.3571), var(--draw-ball-showcase-y), 0) scale3d(1.413, 1.413, 1); opacity: 1; }
+      62%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.5714 + var(--draw-ball-adjacent-x) * 0.4286), var(--draw-ball-showcase-y), 0) scale3d(1.327, 1.327, 1); opacity: 1; }
+      64%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.5 + var(--draw-ball-adjacent-x) * 0.5), calc(var(--draw-ball-showcase-y) * 0.981 + var(--draw-ball-adjacent-y) * 0.019), 0) scale3d(1.250, 1.250, 1); opacity: 1; }
+      66%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.4286 + var(--draw-ball-adjacent-x) * 0.5714), calc(var(--draw-ball-showcase-y) * 0.923 + var(--draw-ball-adjacent-y) * 0.077), 0) scale3d(1.184, 1.184, 1); opacity: 1; }
+      68%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.3571 + var(--draw-ball-adjacent-x) * 0.6429), calc(var(--draw-ball-showcase-y) * 0.731 + var(--draw-ball-adjacent-y) * 0.269), 0) scale3d(1.127, 1.127, 1); opacity: 1; }
+      70%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.2857 + var(--draw-ball-adjacent-x) * 0.7143), calc(var(--draw-ball-showcase-y) * 0.519 + var(--draw-ball-adjacent-y) * 0.481), 0) scale3d(1.082, 1.082, 1); opacity: 1; }
+      72%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.2143 + var(--draw-ball-adjacent-x) * 0.7857), calc(var(--draw-ball-showcase-y) * 0.327 + var(--draw-ball-adjacent-y) * 0.673), 0) scale3d(1.046, 1.046, 1); opacity: 1; }
+      74%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.1429 + var(--draw-ball-adjacent-x) * 0.8571), calc(var(--draw-ball-showcase-y) * 0.173 + var(--draw-ball-adjacent-y) * 0.827), 0) scale3d(1.020, 1.020, 1); opacity: 1; }
+      76%  { transform: translate3d(calc(var(--draw-ball-translate-x) * 0.0714 + var(--draw-ball-adjacent-x) * 0.9286), calc(var(--draw-ball-showcase-y) * 0.058 + var(--draw-ball-adjacent-y) * 0.942), 0) scale3d(1.005, 1.005, 1); opacity: 1; }
+      /* ── Adjacent (push starts here) → ring, 78% → 96% = 18 % of 5 s = 900 ms ── */
+      78%  {
+        transform: translate3d(var(--draw-ball-adjacent-x), var(--draw-ball-adjacent-y), 0) scale3d(1, 1, 1);
+        opacity: 1;
+        /* Ease-in: accelerates horizontally. Combined with ease-out vertically it guarantees corners don't intersect. */
+        animation-timing-function: ease-in;
+      }
+      96%  { transform: translate3d(var(--draw-ball-tube-x), var(--draw-ball-tube-y), 0) scale3d(1, 1, 1); opacity: 1; }
+      /* ── Fade + reset ── */
+      98%  { transform: translate3d(var(--draw-ball-tube-x), var(--draw-ball-tube-y), 0) scale3d(1, 1, 1); opacity: 0; }
+      100% { transform: translate3d(var(--draw-ball-translate-x), -90px, 0) scale3d(1, 1, 1); opacity: 0; }
+    }
+
+    /* Number sits inside the white circle of the ball PNG */
+    .drawn-ball span {
+      display: block;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 25px;
+      font-weight: 800;
+      color: #1a0a0a;
+      line-height: 1;
+      letter-spacing: -0.5px;
+      /* nudge into the white circle of the ball PNG */
+      transform: translate(-2px, 0);
+    }
+    .ball-green  { background-image: url('Hovedspill 1 nytt design/baller/Asset 2.png'); }
+    .ball-red    { background-image: url('Hovedspill 1 nytt design/baller/Asset 4.png'); }
+    .ball-blue   { background-image: url('Hovedspill 1 nytt design/baller/Asset 3.png'); }
+    .ball-purple { background-image: url('Hovedspill 1 nytt design/baller/Asset 5.png'); }
+    .ball-orange { background-image: url('Hovedspill 1 nytt design/baller/Asset 6.png'); }
+    .ball-yellow { background-image: url('Hovedspill 1 nytt design/baller/Asset 1.png'); }
+
+    /* ── LEFT INFO PANEL ── */
+    .left-panel {
+      flex-shrink: 0;
+      align-self: flex-start;
+      position: relative;
+      z-index: 2;
+      background: none;
+      display: flex;
+      flex-direction: row;
+      gap: 30px;
+      align-items: flex-start;
+      margin-top: 0px;
+      padding: 33px 0 18px 0; /* Aligned vertically center with the glass pipe using the new 84px ball center */
+      margin-left: -6px; /* Gap between ball 62 and ball 54 matches vertical gap between tube balls */
+    }
+
+    .col-player {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .player-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .bet-info { font-size: 16px; color: #bbb; line-height: 1.6; }
+
+    .col-ring {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .game-number-ring {
+      width: 81px; height: 81px; /* Shrunk to perfectly match the drawn-ball identical sizes */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: contain;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));
+    }
+    
+    /* Inherit exact standard typography tweaks so it structurally acts identical to normal balls */
+    .game-number-ring span {
+      display: block;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 26px;
+      font-weight: 800;
+      color: #1a0a0a;
+      line-height: 1;
+      letter-spacing: -0.5px;
+      transform: translate(-2px, 0); /* Nudge into the white circle reflection */
+    }
+
+    /* ── CENTER AREA ── */
+    .center-area {
+      flex: 1;
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      padding: 30px 0 18px 0;
+      margin-left: 30px;
+      margin-right: 20px;
+    }
+    .center-top {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      align-self: center;
+      gap: 0;
+      /* UNIFIED PANEL FRAME */
+      background: radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45));
+      border: 1px solid rgba(255, 120, 50, 0.35);
+      border-radius: 14px;
+      box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255,255,255,0.1);
+      overflow: hidden;
+    }
+
+    /* COMBO PANEL (Now internal left zone) */
+    .combo-panel {
+      padding: 15px 26px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      width: 376px;
+    }
+    .combo-grid-col {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+    .combo-header {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 2px;
+    }
+    .jackpot-display {
+      font-size: 11px;
+      font-weight: 800;
+      color: #fff;
+      white-space: nowrap;
+      text-align: center;
+      margin-bottom: 6px;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+      letter-spacing: 0.5px;
+    }
+    .jackpot-display span { color: #ffcc00; font-size: 13px; }
+    .combo-header .gamename {
+      font-size: 11px;
+      font-weight: 700;
+      color: #ffffff;
+      /* background: rgba(0, 0, 0, 0.5); */
+      padding: 2px 0px;
+      /* border-radius: 7px; */
+      /* border: 1px solid rgba(255, 255, 255, 0.1); */
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      text-align: center;
+    }
+    .combo-body {
+      display: flex;
+      gap: 20px;
+      justify-content: space-between;
+      align-items: stretch;
+    }
+    
+    .bingo-grid {
+      width: 136px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      grid-template-rows: repeat(5, 1fr);
+      gap: 2px;
+      background: transparent;
+      padding: 0;
+      border: none;
+      aspect-ratio: 1 / 1;
+    }
+    .bingo-cell {
+      width: 100%; height: 100%;
+      background: rgba(100,20,20,0.4);
+      border: 1px solid rgba(255,80,80,0.2);
+      border-radius: 2px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .bingo-cell.hit {
+      background: linear-gradient(135deg, #f1c40f, #d35400);
+      border-color: #ffcc00;
+      box-shadow: inset 0 0 4px rgba(255,255,255,0.4), 0 0 4px rgba(255,150,0,0.5);
+    }
+
+    .prize-list {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-end;
+      gap: 8px;
+      flex: 1;
+    }
+    .prize-pill {
+      background: rgba(120, 20, 20, 0.4);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255, 100, 100, 0.2);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+      border-radius: 14px;
+      height: 24px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: #c1c1c1;
+      width: 85%;
+      box-sizing: border-box;
+      white-space: nowrap;
+    }
+    .prize-pill.completed {
+      text-decoration: line-through;
+      text-decoration-thickness: 1.5px;
+      opacity: 0.5;
+    }
+    .prize-pill.active {
+      border: 1.5px solid #ffcc00;
+      color: #fff;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 0 6px rgba(255,200,0,0.2);
+    }
+
+    /* ACTION BUTTONS */
+    .action-buttons-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      padding: 14px 25px 5px 25px;
+      border-left: 1px solid rgba(255, 120, 50, 0.2);
+      box-shadow: inset 10px 0 20px rgba(0, 0, 0, 0.15);
+      justify-content: flex-start;
+    }
+    .btn-action-primary {
+      background: rgba(120, 20, 20, 0.4);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255, 100, 100, 0.2);
+      border-radius: 10px;
+      padding: 9px 12px;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 100, 100, 0.1);
+      transition: all 0.15s ease-out;
+    }
+    .btn-action-primary:hover {
+      background: linear-gradient(180deg, rgba(60,20,20,0.5), rgba(25,5,5,0.7));
+      border-color: rgba(255,255,255,0.5);
+      color: #fff;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.7), inset 0 1px 2px rgba(255,255,255,0.3);
+      transform: translateY(-1px);
+    }
+    .btn-action-primary:active {
+      transform: translateY(1px);
+      background: rgba(10,5,5,0.7);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    /* ── CHAT PANEL ── */
+    .chat-panel {
+      width: 265px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      z-index: 2;
+      background: rgba(10,2,2,0.55);
+      border-left: 1px solid rgba(200,70,70,0.4);
+      backdrop-filter: blur(4px);
+    }
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 14px 12px 10px;
+      border-bottom: 1px solid rgba(200,70,70,0.3);
+    }
+    .btn-hide-chat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: none;
+      border: none;
+      color: #ccc;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .active-players-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(200,70,70,0.3);
+      font-size: 13px;
+      color: #ccc;
+    }
+    .active-count { display: flex; align-items: center; gap: 8px; }
+    .green-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #4caf50;
+      box-shadow: 0 0 6px rgba(76,175,80,0.7);
+    }
+    .chat-messages { flex: 1; overflow-y: auto; }
+    .chat-input-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px;
+      border-top: 1px solid rgba(200,70,70,0.3);
+    }
+    .chat-input {
+      flex: 1;
+      background: rgba(40,10,10,0.7);
+      border: 1px solid rgba(150,50,50,0.5);
+      border-radius: 20px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #ccc;
+      outline: none;
+    }
+    .chat-input::placeholder { color: #666; }
+    .emoji-btn { font-size: 18px; cursor: pointer; background: none; border: none; }
+    .send-btn {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: #e65c00;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #fff;
+      font-size: 14px;
+    }
+
+    /* ── FLOATING BUTTONS ── */
+    .debug-btn {
+      position: fixed;
+      bottom: 18px; right: 18px;
+      background: #e65c00;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      z-index: 100;
+    }
+
+    /* ── BUY-MORE-BOARDS MODAL ── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(3px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+    }
+    .modal-backdrop.open { display: flex; }
+
+    .modal-buy {
+      background: radial-gradient(ellipse at top, rgba(60, 15, 15, 0.95), rgba(20, 5, 5, 0.97));
+      border: 1px solid rgba(255, 100, 100, 0.35);
+      border-radius: 18px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.08);
+      width: min(760px, 92vw);
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 26px 30px 24px;
+      color: #fff;
+      font-family: inherit;
+      position: relative;
+    }
+    .modal-buy-header {
+      margin-bottom: 18px;
+    }
+    .modal-buy-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: #ffcc00;
+      margin-bottom: 4px;
+    }
+    .modal-buy-subtitle {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.55);
+    }
+    .modal-buy-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: rgba(255, 255, 255, 0.8);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-buy-close:hover { background: rgba(255, 255, 255, 0.14); }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .product-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 16px;
+      background: rgba(20, 5, 5, 0.55);
+      border: 1px solid rgba(255, 100, 100, 0.18);
+      border-radius: 10px;
+    }
+    .product-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .product-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .product-price {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.55);
+    }
+    .qty-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .qty-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.06);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s;
+    }
+    .qty-btn:hover { background: rgba(255, 255, 255, 0.14); }
+    .qty-btn:active { background: rgba(255, 255, 255, 0.22); }
+    .qty-value {
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+      min-width: 18px;
+      text-align: center;
+    }
+
+    .modal-buy-divider {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.1);
+      margin: 6px 0 14px;
+    }
+    .modal-buy-total {
+      text-align: center;
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 14px;
+    }
+    .btn-buy-submit {
+      width: 100%;
+      background: linear-gradient(180deg, rgba(200, 40, 40, 0.55), rgba(120, 20, 20, 0.75));
+      border: 1px solid rgba(255, 100, 100, 0.45);
+      border-radius: 12px;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      padding: 14px 0;
+      cursor: pointer;
+      transition: filter 0.15s;
+    }
+    .btn-buy-submit:hover { filter: brightness(1.1); }
+    .btn-buy-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+  <!-- TOP NAV (matches web-shell game bar) -->
+  <nav class="topnav">
+    <!-- Left: logo + divider + back button -->
+    <div class="game-bar-left">
+      <a class="game-bar-logo" href="#">
+        <img class="game-bar-logo-img" src="Logo/logo hvit.png" alt="Spillorama">
+      </a>
+      <div class="topnav-divider"></div>
+      <button class="btn-back">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Tilbake til lobby
+      </button>
+      <button class="btn-back">Se oppleste tall</button>
+      <button class="btn-back">Bytt bakgrunn og markør</button>
+    </div>
+
+
+    <!-- Right: hall + balance + wallet -->
+    <div class="game-bar-right">
+      <div class="hall-select-wrap">
+        <div class="hall-select-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </div>
+        <select class="hall-select">
+          <option>Default hall</option>
+        </select>
+      </div>
+      <span class="balance-chip">910 kr</span>
+      <button class="btn-wallet">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+        <span>Lommebok</span>
+      </button>
+    </div>
+  </nav>
+
+
+  <!-- MAIN LAYOUT -->
+  <div class="main-layout">
+
+    <!-- Draw pipe legs + active (flying) ball -->
+    <div class="drop-pipe drop-pipe-left"></div>
+    <div class="drop-pipe drop-pipe-right"></div>
+    <div class="active-ball"><div class="active-ball-inner ball-blue"><span>77</span></div></div>
+
+    <!-- DRAWN BALLS COLUMN -->
+    <div class="balls-column-wrap">
+      <div class="tube-glass-intake"></div>
+      <div class="tube-glass-diagonal"></div>
+      <div class="tube-glass-chamber"></div>
+      <div class="tube-glass-corner-top"></div>
+      <div class="tube-glass-vert"></div>
+      <div class="tube-glass-corner"></div>
+      <div class="balls-tube">
+        <div class="drawn-ball ball-green"><span>54</span></div>
+        <div class="drawn-ball ball-red"><span>25</span></div>
+        <div class="drawn-ball ball-yellow"><span>26</span></div>
+        <div class="drawn-ball ball-blue"><span>3</span></div>
+        <div class="drawn-ball ball-red"><span>18</span></div>
+        <div class="drawn-ball ball-blue"><span>14</span></div>
+        <div class="drawn-ball ball-purple"><span>33</span></div>
+        <div class="drawn-ball ball-yellow"><span>48</span></div>
+        <div class="drawn-ball ball-orange"><span>41</span></div>
+      </div>
+    </div>
+
+    <!-- LEFT INFO PANEL (number ring + player info) -->
+    <div class="left-panel">
+      <!-- Kolonne 1: siste trukne ball -->
+      <div class="col-ring">
+        <div class="game-number-ring ball-red"><span>62</span></div>
+      </div>
+    </div>
+
+    <!-- CENTER -->
+    <div class="center-area">
+      <!-- Wrapper to align player info directly to the left of the unified panel -->
+      <div class="center-top-wrapper" style="display: flex; flex-direction: row; align-items: stretch; gap: 12px; align-self: center; margin-left: 220px;">
+        
+        <!-- Spillerinfo moved inntil combo-panel -->
+        <div class="col-player" style="justify-content: flex-start; padding-top: 18px; min-width: 120px;">
+          <div class="player-info">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+            02
+          </div>
+          <div class="bet-info">
+            Innsats: 40 kr<br>
+            Gevinst: 0 kr
+          </div>
+        </div>
+
+        <div class="center-top">
+          
+          <!-- COMBO PANEL (Bingo Grid + Prize List) -->
+          <div class="combo-panel">
+            <div class="combo-body">
+              <!-- Left Column: Header + Grid -->
+              <div class="combo-grid-col">
+                <div class="bingo-grid">
+                <!-- Row 1 -->
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+
+                <!-- Row 2 -->
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+
+                <!-- Row 3 -->
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+
+                <!-- Row 4 -->
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+
+                <!-- Row 5 -->
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell hit"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+                <div class="bingo-cell"></div>
+              </div>
+              </div>
+              <!-- Right Column -->
+              <div class="prize-list">
+                <div class="prize-pill completed">Row 1 - 100 kr</div>
+                <div class="prize-pill active">Row 2 - 100 kr</div>
+                <div class="prize-pill">Row 3 - 100 kr</div>
+                <div class="prize-pill">Row 4 - 100 kr</div>
+                <div class="prize-pill">Row 5 - 500 kr</div>
+              </div>
+            </div>
+          </div>
+
+        <!-- ACTION BUTTONS PANEL -->
+        <div class="action-buttons-panel">
+          <div class="combo-header">
+            <div class="gamename">GAME 2:<br>KOMBINERTINNSATS</div>
+          </div>
+          <div class="jackpot-display">57 JACKPOT : <span>500 KR</span></div>
+          <button class="btn-action-primary">Forhåndskjøp til dagens spill</button>
+          <button class="btn-action-primary" id="open-buy-modal">Kjøp flere brett</button>
+        </div>
+
+      </div>
+      </div>
+    </div>
+
+    <!-- CHAT PANEL -->
+    <div class="chat-panel">
+      <div class="chat-header">
+        <button class="btn-hide-chat">
+          Skjul chat
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+        </button>
+      </div>
+      <div class="active-players-bar">
+        <span>Aktive spillere</span>
+        <div class="active-count">
+          <span>0</span>
+          <div class="green-dot"></div>
+        </div>
+      </div>
+      <div class="chat-messages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" type="text" placeholder="Skriv Meldingen">
+        <button class="emoji-btn">😊</button>
+        <button class="send-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- FG GLASS OVERLAY (Z-INDEX 100) MUST BE LAST IN MAIN-LAYOUT -->
+    <div class="glass-overlay-front">
+      <div class="tube-glass-intake"></div>
+      <div class="tube-glass-diagonal"></div>
+      <div class="tube-glass-chamber"></div>
+      <div class="tube-glass-corner-top"></div>
+      <div class="tube-glass-vert"></div>
+      <div class="tube-glass-corner"></div>
+    </div>
+  </div>
+
+  <button class="debug-btn">🐞 Debug</button>
+
+  <!-- BUY-MORE-BOARDS MODAL -->
+  <div class="modal-backdrop" id="buy-modal-backdrop">
+    <div class="modal-buy" role="dialog" aria-labelledby="buy-modal-title">
+      <button class="modal-buy-close" id="close-buy-modal" aria-label="Lukk">×</button>
+      <div class="modal-buy-header">
+        <div class="modal-buy-title" id="buy-modal-title">Neste spill</div>
+        <div class="modal-buy-subtitle">standard</div>
+      </div>
+      <div class="product-grid">
+        <div class="product-row" data-price="10">
+          <div class="product-info">
+            <div class="product-name">Small Yellow</div>
+            <div class="product-price">10 kr</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" data-qty="-1">−</button>
+            <div class="qty-value">0</div>
+            <button class="qty-btn" data-qty="1">+</button>
+          </div>
+        </div>
+        <div class="product-row" data-price="10">
+          <div class="product-info">
+            <div class="product-name">Small White</div>
+            <div class="product-price">10 kr</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" data-qty="-1">−</button>
+            <div class="qty-value">0</div>
+            <button class="qty-btn" data-qty="1">+</button>
+          </div>
+        </div>
+        <div class="product-row" data-price="10">
+          <div class="product-info">
+            <div class="product-name">Small Purple</div>
+            <div class="product-price">10 kr</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" data-qty="-1">−</button>
+            <div class="qty-value">0</div>
+            <button class="qty-btn" data-qty="1">+</button>
+          </div>
+        </div>
+        <div class="product-row" data-price="10">
+          <div class="product-info">
+            <div class="product-name">Small Red</div>
+            <div class="product-price">10 kr</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" data-qty="-1">−</button>
+            <div class="qty-value">0</div>
+            <button class="qty-btn" data-qty="1">+</button>
+          </div>
+        </div>
+        <div class="product-row" data-price="10">
+          <div class="product-info">
+            <div class="product-name">Small Green</div>
+            <div class="product-price">10 kr</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" data-qty="-1">−</button>
+            <div class="qty-value">0</div>
+            <button class="qty-btn" data-qty="1">+</button>
+          </div>
+        </div>
+        <div class="product-row" data-price="10">
+          <div class="product-info">
+            <div class="product-name">Small Orange</div>
+            <div class="product-price">10 kr</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" data-qty="-1">−</button>
+            <div class="qty-value">0</div>
+            <button class="qty-btn" data-qty="1">+</button>
+          </div>
+        </div>
+        <div class="product-row" data-price="30">
+          <div class="product-info">
+            <div class="product-name">Large Yellow (3 brett)</div>
+            <div class="product-price">30 kr</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" data-qty="-1">−</button>
+            <div class="qty-value">0</div>
+            <button class="qty-btn" data-qty="1">+</button>
+          </div>
+        </div>
+        <div class="product-row" data-price="30">
+          <div class="product-info">
+            <div class="product-name">Large White (3 brett)</div>
+            <div class="product-price">30 kr</div>
+          </div>
+          <div class="qty-controls">
+            <button class="qty-btn" data-qty="-1">−</button>
+            <div class="qty-value">0</div>
+            <button class="qty-btn" data-qty="1">+</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-buy-divider"></div>
+      <div class="modal-buy-total">Totalt: <span id="buy-total">0</span> kr</div>
+      <button class="btn-buy-submit" id="buy-submit">Kjøp <span id="buy-submit-amount">0</span> kr</button>
+    </div>
+  </div>
+
+  <script>
+    // Illustrerer at gevinsten kan være 2 rader — enten horisontalt eller vertikalt.
+    // Animerer et 2-linjers mønster som flytter seg ned, så over til 2 kolonner som flytter seg sideveis, i loop.
+    (function () {
+      const cells = document.querySelectorAll('.bingo-grid .bingo-cell');
+      if (!cells.length) return;
+
+      const steps = [
+        { type: 'rows', start: 0 }, // rad 1+2
+        { type: 'rows', start: 1 }, // rad 2+3
+        { type: 'rows', start: 2 }, // rad 3+4
+        { type: 'rows', start: 3 }, // rad 4+5
+        { type: 'cols', start: 0 }, // kol 1+2
+        { type: 'cols', start: 1 }, // kol 2+3
+        { type: 'cols', start: 2 }, // kol 3+4
+        { type: 'cols', start: 3 }, // kol 4+5
+      ];
+
+      let step = 1; // start at rad 2+3 (matches initial mockup state)
+
+      function render() {
+        const s = steps[step % steps.length];
+        cells.forEach((cell, i) => {
+          const row = Math.floor(i / 5);
+          const col = i % 5;
+          const hit = s.type === 'rows'
+            ? (row === s.start || row === s.start + 1)
+            : (col === s.start || col === s.start + 1);
+          cell.classList.toggle('hit', hit);
+        });
+      }
+
+      render();
+      setInterval(() => { step++; render(); }, 900);
+    })();
+
+    // Draw cycle: each animationiteration, the active ball "lands" in the tube.
+    // Prepend it as a new tube ball, remove the bottom one, then set active to the next draw.
+    (function () {
+      const activeBall = document.querySelector('.active-ball');
+      const activeInner = document.querySelector('.active-ball-inner');
+      const tube = document.querySelector('.balls-tube');
+      const ring = document.querySelector('.game-number-ring');
+      if (!activeBall || !activeInner || !tube || !ring) return;
+
+      const BALL_COLORS = ['ball-green','ball-red','ball-blue','ball-purple','ball-orange','ball-yellow'];
+      const drawPool = [
+        { color: 'ball-green', n: 8 },
+        { color: 'ball-orange', n: 45 },
+        { color: 'ball-purple', n: 12 },
+        { color: 'ball-yellow', n: 31 },
+        { color: 'ball-red', n: 64 },
+        { color: 'ball-blue', n: 29 },
+        { color: 'ball-green', n: 71 },
+        { color: 'ball-red', n: 5 },
+      ];
+      let drawIdx = 0;
+
+      function setBallVisual(el, color, n) {
+        BALL_COLORS.forEach(c => el.classList.remove(c));
+        el.classList.add(color);
+        el.querySelector('span').textContent = n;
+      }
+
+      // Make the tube a positioning context so exiting balls can be pinned absolutely to their last spot.
+      tube.style.position = 'relative';
+
+      // Draw cycle tick — runs every 5 s independent of the CSS animation (so it works
+      // even if the browser pauses the document timeline, e.g. when the tab is not focused).
+      // Must match the animation-duration of .active-ball / .active-ball-inner (5s).
+      const DRAW_CYCLE_MS = 5000;
+      // The active ball reaches ADJACENT at 78 % (= 3.9 s) and slides into the ring by 96 %
+      // (= 4.8 s). The 18 % = 900 ms window is the push: all chained animations use ease-out
+      // so they start with noticeable velocity (kinetic "kick" when the ball makes contact)
+      // and decelerate smoothly — the natural physics of one object shoving another along.
+      const LAND_OFFSET_MS = 3900;  // 78 % of 5 s — incoming ball arrives adjacent to ring
+      const PUSH_SLIDE_MS  = 900;   // 78 % → 96 % = 18 % of 5 s = 900 ms
+
+      const advanceCycle = () => {
+        const incomingColor = [...activeInner.classList].find(c => BALL_COLORS.includes(c));
+        const incomingN = activeInner.querySelector('span').textContent;
+
+        const ringColor = [...ring.classList].find(c => BALL_COLORS.includes(c));
+        const ringN = ring.querySelector('span').textContent;
+        const ringRect = ring.getBoundingClientRect();
+
+        // Snapshot existing tube ball positions BEFORE the DOM change (FLIP technique).
+        const existingBalls = [...tube.children].filter(b => !b.classList.contains('exiting'));
+        const oldRects = new Map(existingBalls.map(b => [b, b.getBoundingClientRect()]));
+        const tubeRect = tube.getBoundingClientRect();
+
+        // Pin the bottom ball to its current spot and animate it out of the tube.
+        const exitBall = existingBalls[existingBalls.length - 1];
+        if (exitBall) {
+          const r = oldRects.get(exitBall);
+          exitBall.style.left = (r.left - tubeRect.left) + 'px';
+          exitBall.style.top  = (r.top  - tubeRect.top)  + 'px';
+          exitBall.style.margin = '0';
+          exitBall.classList.add('exiting');
+          setTimeout(() => exitBall.remove(), 950);
+        }
+
+        // Prepend the PREVIOUS ring ball into the tube — starts at ring position, flies to tube top.
+        const newTubeBall = document.createElement('div');
+        newTubeBall.className = `drawn-ball ${ringColor}`;
+        newTubeBall.innerHTML = `<span>${ringN}</span>`;
+        tube.prepend(newTubeBall);
+
+        const newBallRect = newTubeBall.getBoundingClientRect();
+        const ringDx = ringRect.left - newBallRect.left;
+        const ringDy = ringRect.top  - newBallRect.top;
+        newTubeBall.style.transition = 'none';
+        newTubeBall.style.transform = `translate(${ringDx}px, ${ringDy}px)`;
+        // During the flight, the incoming ball renders BEHIND all the tube balls (z=5, below
+        // every :nth-child z-index). Prevents it from visually "going over" the ball below
+        // when their bounding boxes brush against each other in the late phase of the slower
+        // animation. After the transition completes, inline z-index is cleared and the CSS
+        // :nth-child(1) z=20 takes over so it reads as the front of the stack at rest.
+        newTubeBall.style.zIndex = '5';
+
+        // Hide the original ring ball while the clone slides away — avoids "two 62s" flash.
+        ring.style.opacity = '0';
+
+        // All balls (incoming + existing tube balls) use the same PUSH_SLIDE_MS duration —
+        // moves the whole chain in perfect lockstep, no timing differentials.
+        requestAnimationFrame(() => {
+          newTubeBall.style.transition = `transform ${PUSH_SLIDE_MS}ms ease-in`;
+          newTubeBall.style.transform = '';
+        });
+        setTimeout(() => {
+          newTubeBall.style.transition = '';
+          newTubeBall.style.transform = '';
+          newTubeBall.style.zIndex = '';
+        }, PUSH_SLIDE_MS + 50);
+
+        // Shift existing tube balls down one slot (FLIP). All balls at same duration.
+        existingBalls.forEach((b) => {
+          if (b === exitBall) return;
+          const oldRect = oldRects.get(b);
+          const newRect = b.getBoundingClientRect();
+          const dx = oldRect.left - newRect.left;
+          const dy = oldRect.top  - newRect.top;
+          if (dx !== 0 || dy !== 0) {
+            b.style.transition = 'none';
+            b.style.transform = `translate(${dx}px, ${dy}px)`;
+            requestAnimationFrame(() => {
+              b.style.transition = `transform ${PUSH_SLIDE_MS}ms ease-out`;
+              b.style.transform = '';
+            });
+            setTimeout(() => {
+              b.style.transition = '';
+              b.style.transform = '';
+            }, PUSH_SLIDE_MS + 50);
+          }
+        });
+
+        // When the incoming ball reaches the ring position (PUSH_SLIDE_MS later, at 90% of the
+        // CSS animation), swap the ring's content to the incoming ball and snap it back visible.
+        setTimeout(() => {
+          setBallVisual(ring, incomingColor, incomingN);
+          ring.style.opacity = ''; // clear the inline 0 — ring is visible again
+        }, PUSH_SLIDE_MS);
+
+        // After the active ball has fully faded (at 98% ≈ 900 ms after tick), cycle it to the next draw.
+        setTimeout(() => {
+          const next = drawPool[drawIdx % drawPool.length];
+          setBallVisual(activeInner, next.color, next.n);
+          drawIdx++;
+        }, 950);
+      };
+
+      setTimeout(() => {
+        advanceCycle();
+        setInterval(advanceCycle, DRAW_CYCLE_MS);
+      }, LAND_OFFSET_MS);
+    })();
+
+    // Buy-more-boards modal: open/close + quantity + total.
+    (function () {
+      const backdrop = document.getElementById('buy-modal-backdrop');
+      const openBtn = document.getElementById('open-buy-modal');
+      const closeBtn = document.getElementById('close-buy-modal');
+      const totalEl = document.getElementById('buy-total');
+      const submitAmountEl = document.getElementById('buy-submit-amount');
+      if (!backdrop || !openBtn) return;
+
+      openBtn.addEventListener('click', () => backdrop.classList.add('open'));
+      closeBtn.addEventListener('click', () => backdrop.classList.remove('open'));
+      backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) backdrop.classList.remove('open');
+      });
+
+      function recalcTotal() {
+        let total = 0;
+        backdrop.querySelectorAll('.product-row').forEach(row => {
+          const price = Number(row.dataset.price) || 0;
+          const qty = Number(row.querySelector('.qty-value').textContent) || 0;
+          total += price * qty;
+        });
+        totalEl.textContent = total;
+        submitAmountEl.textContent = total;
+      }
+
+      backdrop.querySelectorAll('.qty-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const row = btn.closest('.product-row');
+          const val = row.querySelector('.qty-value');
+          const cur = Number(val.textContent) || 0;
+          const delta = Number(btn.dataset.qty) || 0;
+          const next = Math.max(0, cur + delta);
+          val.textContent = next;
+          recalcTotal();
+        });
+      });
+    })();
+  </script>
+
+</body>
+</html>

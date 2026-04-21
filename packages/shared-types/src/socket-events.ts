@@ -133,6 +133,9 @@ export type RoomUpdatePayload = RoomSnapshot & {
     gameType: string;
     ticketTypes: TicketTypeInfo[];
     replaceAmount?: number;
+    /** Per-ticket entry fee used by the popup to display prices BEFORE a
+     *  round starts. Mirrors `currentGame.entryFee` when a game is RUNNING. */
+    entryFee?: number;
   };
 };
 

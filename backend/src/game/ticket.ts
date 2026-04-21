@@ -40,6 +40,40 @@ export function makeShuffledBallBag(maxNumber = 60): number[] {
  * @param color  Display color name for the client, e.g. "Small Yellow", "Elvis 1".
  * @param type   Ticket type code for variant logic, e.g. "small", "large", "elvis".
  */
+/**
+ * Game slugs that use the 75-ball / 5x5 ticket format with free centre cell.
+ * Single source of truth — referenced by every site that picks ticket format
+ * or draw-bag size, so the choice can never drift out of sync.
+ *
+ * Game 1 ("bingo") is the canonical 75-ball game per Unity reference. The
+ * "game_1" alias is kept because some legacy callers send the numeric form.
+ */
+export const BINGO75_SLUGS: ReadonlySet<string> = new Set(["bingo", "game_1"]);
+
+/** True if a room/game with this slug should use the 75-ball / 5x5 format. */
+export function uses75Ball(gameSlug: string | null | undefined): boolean {
+  return BINGO75_SLUGS.has(gameSlug ?? "");
+}
+
+/**
+ * Generate a single ticket for the given game slug.
+ *
+ * - 75-ball games (Game 1 / "bingo"): 5x5 grid with free centre cell.
+ * - All other games: 3x5 Databingo60 grid (no free cell).
+ *
+ * Use this everywhere a ticket is created so the format stays consistent
+ * with `uses75Ball` and the engine's draw-bag selection.
+ */
+export function generateTicketForGame(
+  gameSlug: string | null | undefined,
+  color?: string,
+  type?: string,
+): Ticket {
+  return uses75Ball(gameSlug)
+    ? generateBingo75Ticket(color, type)
+    : generateDatabingo60Ticket();
+}
+
 export function generateBingo75Ticket(color?: string, type?: string): Ticket {
   const columns = [
     pickUniqueInRange(1, 15, 5),    // B
