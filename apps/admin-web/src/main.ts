@@ -27,6 +27,7 @@ import { isProductsRoute, mountProductsRoute } from "./pages/products/index.js";
 import { isSecurityRoute, mountSecurityRoute } from "./pages/security/index.js";
 import { isRiskCountryRoute, mountRiskCountryRoute } from "./pages/riskCountry/index.js";
 import { isLeaderboardRoute, mountLeaderboardRoute } from "./pages/leaderboard/index.js";
+import { isLoyaltyRoute, mountLoyaltyRoute } from "./pages/loyalty/index.js";
 import { isAdminUsersRoute, mountAdminUsersRoute } from "./pages/adminUsers/index.js";
 import { isRoleRoute, mountRoleRoute } from "./pages/role/index.js";
 import { isHallRoute, mountHallRoute } from "./pages/hall/index.js";
@@ -179,6 +180,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isLeaderboardRoute(bare)) {
         mountLeaderboardRoute(container, bare);
+        return;
+      }
+      if (isLoyaltyRoute(bare)) {
+        mountLoyaltyRoute(container, bare);
         return;
       }
       if (isAdminUsersRoute(bare)) {
@@ -366,6 +371,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (isLeaderboardRoute(route.path)) {
     mountLeaderboardRoute(container, route.path);
+    return;
+  }
+  if (isLoyaltyRoute(route.path)) {
+    mountLoyaltyRoute(container, route.path);
     return;
   }
   if (isAdminUsersRoute(route.path)) {

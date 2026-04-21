@@ -215,15 +215,16 @@ export const adminSidebar: SidebarNode[] = [
   { kind: "leaf", id: "leaderboard", path: "/leaderboard", icon: "fa fa-credit-card-alt", labelKey: "leaderboard_management" },
   { kind: "leaf", id: "voucher", path: "/voucher", icon: "fa fa-users mr-20", labelKey: "voucher_management" },
 
+  // BIN-700: tier-CRUD + spiller-liste.
   {
     kind: "group",
     id: "loyalty-management",
-    icon: "fa fa-user-secret",
+    icon: "fa fa-star",
     labelKey: "loyalty_management",
     module: "Loyalty Management",
     children: [
-      { kind: "leaf", id: "loyaltyManagement", path: "/loyaltyManagement", icon: "fa fa-circle-o", labelKey: "players_loyalty_management" },
-      { kind: "leaf", id: "loyalty", path: "/loyalty", icon: "fa fa-circle-o", labelKey: "loyalty_type" },
+      { kind: "leaf", id: "loyaltyManagement", path: "/loyaltyManagement", icon: "fa fa-circle-o", labelKey: "loyalty_tier_list_title" },
+      { kind: "leaf", id: "loyaltyPlayers", path: "/loyaltyManagement/players", icon: "fa fa-circle-o", labelKey: "loyalty_players_title" },
     ],
   },
 
