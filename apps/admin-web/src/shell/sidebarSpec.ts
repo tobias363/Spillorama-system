@@ -193,6 +193,8 @@ export const adminSidebar: SidebarNode[] = [
     children: [
       { kind: "leaf", id: "depositRequests", path: "/deposit/requests", icon: "fa fa-circle-o", labelKey: "deposit_request" },
       { kind: "leaf", id: "depositHistory", path: "/deposit/history", icon: "fa fa-circle-o", labelKey: "deposit_history" },
+      // BIN-655 — generisk transaksjons-logg (wallet + agent + payment-requests).
+      { kind: "leaf", id: "transactionsLog", path: "/transactions/log", icon: "fa fa-circle-o", labelKey: "transactions_log" },
     ],
   },
   {
@@ -229,6 +231,10 @@ export const adminSidebar: SidebarNode[] = [
   { kind: "leaf", id: "cms", path: "/cms", icon: "fa fa-users mr-20", labelKey: "cms_management", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "settings", path: "/settings", icon: "fa fa-gears mr-20", labelKey: "settings", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "system-information", path: "/system/systemInformation", icon: "fa fa-bar-chart", labelKey: "system_information", superAdminOnly: true },
+  // BIN-678 — runtime-diagnostikk (version, build-SHA, uptime, feature-flags).
+  { kind: "leaf", id: "system-diagnostics", path: "/system/info", icon: "fa fa-heartbeat", labelKey: "system_diagnostics", superAdminOnly: true },
+  // BIN-655 (alt) — audit-logg (append-only compliance-view).
+  { kind: "leaf", id: "audit-log", path: "/auditLog", icon: "fa fa-history", labelKey: "audit_log_title", superAdminOnly: true },
 ];
 
 // Agent sidebar — legacy/.../navigation.html:713-1548 (subset, permission-gated)

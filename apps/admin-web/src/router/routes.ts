@@ -127,6 +127,11 @@ export const routes: RouteDef[] = [
   { path: "/maintenance", titleKey: "maintenance_list_title", roles: ["admin", "super-admin"] },
   { path: "/maintenance/new", titleKey: "maintenance_new_window", roles: ["admin", "super-admin"] },
   { path: "/system/systemInformation", titleKey: "system_information", roles: ["admin", "super-admin"] },
+  // BIN-678 — runtime-diagnostikk (system-info-snapshot).
+  { path: "/system/info", titleKey: "system_diagnostics", roles: ["admin", "super-admin"] },
+  // BIN-655 — generisk transaksjonslogg + audit-logg.
+  { path: "/transactions/log", titleKey: "transactions_log", module: "Transactions Management" },
+  { path: "/auditLog", titleKey: "audit_log_title" },
 
   { path: "/agent/dashboard", titleKey: "agent_dashboard", roles: ["agent"] },
   { path: "/agent/players", titleKey: "agent_players_title", roles: ["agent"] },
