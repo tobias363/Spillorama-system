@@ -95,6 +95,28 @@ export interface AwardLoyaltyPointsInput {
   createdByUserId: string;
 }
 
+/**
+ * GAME1_SCHEDULE PR 5: automatisk activity-award-input. Brukes fra
+ * BingoEngine-hook ved buy-in / game-win. Forskjellig fra admin-award ved:
+ *   - `eventType` er fritt-form (f.eks. 'ticket.purchase', 'game.win').
+ *   - `createdByUserId` er NULL (system-event).
+ *   - `pointsDelta=0` er tillatt — vi lar porten sende 0 hvis
+ *     business-regelen bestemmer at små buy-ins ikke gir poeng enda.
+ *     Da skrives KUN en event-rad (markør), ingen state-mutasjon.
+ */
+export interface AwardLoyaltyActivityInput {
+  userId: string;
+  /** Fritt-form event-type-slug. F.eks. 'ticket.purchase', 'game.win'. */
+  eventType: string;
+  /** Poeng-endring. 0 = bare markør-event, ingen state-oppdatering. */
+  pointsDelta: number;
+  /**
+   * Fri-form metadata om aktiviteten (gameId, roomCode, amount i kr, etc.).
+   * Lagret i events.metadata_json. Ingen PII forventet.
+   */
+  metadata?: Record<string, unknown>;
+}
+
 export interface OverrideLoyaltyTierInput {
   userId: string;
   /** NULL = fjern override (lås opp for automatic assignment). */
@@ -666,6 +688,94 @@ export class LoyaltyService {
         event: this.mapEventRow(eventRow),
         tierChanged,
       };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * GAME1_SCHEDULE PR 5 (BIN-700 follow-up): automatisk points-award fra
+   * spill-aktivitet (ticket-kjøp, game-win). Skiller seg fra `awardPoints`
+   * ved at event-type er fritt-form, createdByUserId er NULL (system), og
+   * pointsDelta=0 er tillatt (rene markør-events).
+   *
+   * Kalles fra `LoyaltyPointsHookAdapter` som implementerer
+   * LoyaltyPointsHookPort for BingoEngine. Fire-and-forget-semantikk —
+   * metoden er idempotent på event-id-nivå men idempotent-nøkkel på tvers
+   * av events må enforces av kaller (port-adapter bruker randomUUID).
+   *
+   * Tier-reassign skjer kun når pointsDelta != 0 så 0-delta markører ikke
+   * triggere unødvendig SQL-overhead.
+   */
+  async awardPointsForActivity(input: AwardLoyaltyActivityInput): Promise<LoyaltyEvent> {
+    await this.ensureInitialized();
+    const userId = assertNonEmptyString(input.userId, "userId");
+    const eventType = assertNonEmptyString(input.eventType, "eventType", 120);
+    const pointsDelta = assertInteger(input.pointsDelta, "pointsDelta");
+    const metadata = assertObject(input.metadata, "metadata");
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      if (pointsDelta !== 0) {
+        const nowMonthKey = monthKeyFromDate(new Date());
+        await client.query(
+          `INSERT INTO ${this.stateTable()}
+             (user_id, lifetime_points, month_points, month_key, last_updated_at)
+           VALUES ($1, GREATEST(0, $2), GREATEST(0, $2), $3, now())
+           ON CONFLICT (user_id) DO UPDATE SET
+             lifetime_points = GREATEST(0, ${this.stateTable()}.lifetime_points + EXCLUDED.lifetime_points),
+             month_points    = CASE
+               WHEN ${this.stateTable()}.month_key = $3 OR ${this.stateTable()}.month_key IS NULL
+                 THEN GREATEST(0, ${this.stateTable()}.month_points + EXCLUDED.month_points)
+               ELSE GREATEST(0, EXCLUDED.month_points)
+             END,
+             month_key       = $3,
+             last_updated_at = now()`,
+          [userId, pointsDelta, nowMonthKey]
+        );
+      }
+
+      const eventId = randomUUID();
+      const eventInsert = await client.query<LoyaltyEventRow>(
+        `INSERT INTO ${this.eventTable()}
+           (id, user_id, event_type, points_delta, metadata_json, created_by_user_id)
+         VALUES ($1, $2, $3, $4, $5::jsonb, NULL)
+         RETURNING id, user_id, event_type, points_delta, metadata_json,
+                   created_by_user_id, created_at`,
+        [eventId, userId, eventType, pointsDelta, JSON.stringify(metadata)]
+      );
+
+      // Auto-tier-reassign: bare når faktisk points-delta (state oppdatert).
+      if (pointsDelta !== 0) {
+        const stateRes = await client.query<LoyaltyPlayerStateRow>(
+          `SELECT current_tier_id, lifetime_points, tier_locked
+           FROM ${this.stateTable()} WHERE user_id = $1`,
+          [userId]
+        );
+        const stateRow = stateRes.rows[0];
+        if (stateRow && !stateRow.tier_locked) {
+          const newTierId = await this.resolveAutoTierIdInTx(
+            client,
+            Number(stateRow.lifetime_points)
+          );
+          if (newTierId !== stateRow.current_tier_id) {
+            await client.query(
+              `UPDATE ${this.stateTable()}
+               SET current_tier_id = $1, last_updated_at = now()
+               WHERE user_id = $2`,
+              [newTierId, userId]
+            );
+          }
+        }
+      }
+
+      await client.query("COMMIT");
+      return this.mapEventRow(eventInsert.rows[0]!);
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
       throw err;

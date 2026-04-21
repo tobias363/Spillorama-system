@@ -50,7 +50,9 @@ import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
 import { createLoyaltyMonthlyResetJob } from "./jobs/loyaltyMonthlyReset.js";
 import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
+import { Game1RecoveryService } from "./game/Game1RecoveryService.js";
 import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
+import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
@@ -287,6 +289,16 @@ const responsibleGamingStore = platformConnectionString.length > 0
   ? new PostgresResponsibleGamingStore({ connectionString: platformConnectionString, schema: pgSchema, ssl: pgSsl })
   : undefined;
 
+// GAME1_SCHEDULE PR 5 (BIN-700 follow-up): LoyaltyService må konstrueres
+// FØR engine så LoyaltyPointsHookAdapter kan injiseres via engine-options.
+// Hovedregistreringen + singleton-bruken nedenfor refererer til samme
+// `loyaltyService`-instans — ikke to forskjellige.
+const loyaltyService = new LoyaltyService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+const loyaltyHookAdapter = new LoyaltyPointsHookAdapter({ service: loyaltyService });
+
 // BIN-615 / PR-C3b: Instantiate Game3Engine (subclass of Game2Engine ⊂
 // BingoEngine). One engine instance serves G1 / G2 / G3 rooms concurrently:
 //   - Game3Engine.onDrawCompleted guards on isGame3Round (slug + patternEvalMode
@@ -302,7 +314,10 @@ const engine = new Game3Engine(localBingoAdapter, walletAdapter, {
   dailyLossLimit: bingoDailyLossLimit, monthlyLossLimit: bingoMonthlyLossLimit,
   playSessionLimitMs: bingoPlaySessionLimitMs, pauseDurationMs: bingoPauseDurationMs,
   selfExclusionMinMs: bingoSelfExclusionMinMs, maxDrawsPerRound: bingoMaxDrawsPerRound,
-  persistence: responsibleGamingStore, roomStateStore
+  persistence: responsibleGamingStore, roomStateStore,
+  // GAME1_SCHEDULE PR 5: wire loyalty-hook (fire-and-forget points-award
+  // ved ticket.purchase + game.win). Default split-rounding-audit er no-op.
+  loyaltyHook: loyaltyHookAdapter,
 });
 
 // BIN-274: Configurable KYC provider
@@ -487,15 +502,9 @@ const leaderboardTierService = new LeaderboardTierService({
   schema: pgSchema,
 });
 
-// BIN-700: Loyalty-system (tier-CRUD + player-state + points-award).
-// Persistent per-spiller lojalitets-nivå basert på akkumulert aktivitet.
-// Uavhengig av BIN-668 leaderboard-tier (plass-basert premie-mapping).
-// Manuell points-award + tier-override i denne PR; automatic assignment
-// fra spill-aktivitet krever BingoEngine-integrasjon (egen follow-up).
-const loyaltyService = new LoyaltyService({
-  connectionString: platformConnectionString,
-  schema: pgSchema,
-});
+// BIN-700 / GAME1_SCHEDULE PR 5: loyaltyService er konstruert over engine
+// (linje ~290) så LoyaltyPointsHookAdapter kan injiseres i engine-options.
+// Referansen brukes videre her for admin-CRUD-routes + JobScheduler.
 
 // BIN-679: MiniGames-konfig CRUD (Wheel + Chest + Mystery + Colordraft).
 // Fire singleton-rader i app_mini_games_config. Ren ADMIN-konfig — runtime
@@ -809,6 +818,15 @@ const game1HallReadyService = new Game1HallReadyService({
 // GAME1_SCHEDULE PR 3: master-control service. Håndterer master-start/pause/
 // resume/stop + hall-exclude/include med regulatorisk audit (app_game1_master_audit).
 const game1MasterControlService = new Game1MasterControlService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+
+// GAME1_SCHEDULE PR 5 (§3.8): schedule-level crash recovery. Kjører én gang
+// ved boot og cancel-er app_game1_scheduled_games-rader som er `running` eller
+// `paused` MER enn 2 timer etter scheduled_end_time (overdue). Engine-level
+// state håndteres fortsatt av BIN-245-flyten nedenfor.
+const game1RecoveryService = new Game1RecoveryService({
   pool: platformService.getPool(),
   schema: pgSchema,
 });
@@ -1688,6 +1706,23 @@ const PORT = Number(process.env.PORT ?? 4000);
       }
       if (restored + ended > 0) console.warn(`[BIN-245] Recovery complete: ${restored} game(s) restored, ${ended} game(s) ended`);
     } catch (err) { console.error("[BIN-245] Crash recovery failed:", err); }
+  }
+
+  // GAME1_SCHEDULE PR 5 (§3.8): Schedule-level crash recovery. Scanner
+  // app_game1_scheduled_games for rader i running/paused som har overskredet
+  // 2h-vinduet etter scheduled_end_time og auto-kansellerer dem med audit.
+  // Kjøres ETTER BIN-245 engine-recovery så runtime-state er restaurert først.
+  try {
+    const recoveryResult = await game1RecoveryService.runRecoveryPass();
+    if (recoveryResult.inspected > 0) {
+      console.warn(
+        `[game1-recovery] Inspected ${recoveryResult.inspected} scheduled games — ` +
+        `cancelled ${recoveryResult.cancelled} overdue, preserved ${recoveryResult.preserved} in-window, ` +
+        `${recoveryResult.failures.length} failures.`,
+      );
+    }
+  } catch (err) {
+    console.error("[game1-recovery] Schedule-level recovery pass failed:", err);
   }
 
   server.listen(PORT, () => {

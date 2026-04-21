@@ -481,3 +481,87 @@ test("BIN-700 service: monthlyReset() idempotent når monthKey matcher", async (
   // UPDATE-queryen har WHERE month_key < $1 OR month_key IS NULL
   assert.ok(calls[0]!.sql.includes("month_key"));
 });
+
+// ── PR 5: awardPointsForActivity validering ─────────────────────────────────
+
+test("PR5 service: awardPointsForActivity() avviser tom userId", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "empty userId",
+    () =>
+      svc.awardPointsForActivity({
+        userId: "",
+        eventType: "ticket.purchase",
+        pointsDelta: 10,
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("PR5 service: awardPointsForActivity() avviser tom eventType", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "empty eventType",
+    () =>
+      svc.awardPointsForActivity({
+        userId: "u-1",
+        eventType: "",
+        pointsDelta: 10,
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("PR5 service: awardPointsForActivity() avviser ikke-heltall delta", async () => {
+  const svc = makeValidatingService();
+  await expectDomainError(
+    "non-integer delta",
+    () =>
+      svc.awardPointsForActivity({
+        userId: "u-1",
+        eventType: "game.win",
+        pointsDelta: 10.5,
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("PR5 service: awardPointsForActivity() tillater pointsDelta=0 (markør-event)", async () => {
+  // 0-delta skal hoppe over state-INSERT men fortsatt skrive event-rad.
+  // Vi stubber pool.connect med en enkel klient som returnerer en event-rad.
+  const client = {
+    query: async (sql: string) => {
+      if (sql.trim() === "BEGIN" || sql.trim() === "COMMIT") return { rows: [], rowCount: 0 };
+      if (sql.includes("INSERT INTO") && sql.includes("app_loyalty_events")) {
+        return {
+          rows: [{
+            id: "evt-1",
+            user_id: "u-1",
+            event_type: "ticket.purchase",
+            points_delta: 0,
+            metadata_json: {},
+            created_by_user_id: null,
+            created_at: new Date("2026-04-21T12:00:00Z"),
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => undefined,
+  };
+  const pool = {
+    connect: async () => client,
+    query: async () => ({ rows: [], rowCount: 0 }),
+  };
+  const svc = makeServiceWithPool(pool);
+  const ev = await svc.awardPointsForActivity({
+    userId: "u-1",
+    eventType: "ticket.purchase",
+    pointsDelta: 0,
+    metadata: { amountKr: 10 },
+  });
+  assert.equal(ev.eventType, "ticket.purchase");
+  assert.equal(ev.pointsDelta, 0);
+  assert.equal(ev.createdByUserId, null);
+});
