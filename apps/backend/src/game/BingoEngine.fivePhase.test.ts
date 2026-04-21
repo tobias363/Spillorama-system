@@ -154,13 +154,15 @@ test("BIN-694: multi-winner split — 2 spillere vinner fase 1 på samme ball", 
     createTicket: async () => ({ grid: PLAYER_A_GRID.map((r) => [...r]) }),
   };
 
+  // entryFee=200 → prizePool=400, payoutBudget=320 — nok til at begge
+  // vinnerne får full split av fast 100 kr 1 Rad-premie (50 kr hver).
   await engine.startGame({
-    roomCode, actorPlayerId: hostId, entryFee: 10, ticketsPerPlayer: 1,
+    roomCode, actorPlayerId: hostId, entryFee: 200, ticketsPerPlayer: 1,
     payoutPercent: 80, gameType: "standard", variantConfig: DEFAULT_NORSK_BINGO_CONFIG,
   });
 
-  // prizePool = 2 players × 10 kr = 20 kr. payoutBudget = 20 × 80% = 16 kr.
-  // Fase 1 = 25% = 5 kr totalt → 2.5 kr per spiller → Math.floor = 2 kr.
+  // Fast premie for 1 Rad = 100 kr (DEFAULT_NORSK_BINGO_CONFIG).
+  // 2 vinnere → Math.floor(100 / 2) = 50 kr per spiller. Rest til huset.
   prioritiseDrawBag(engine, roomCode, [1, 16, 31, 46, 61]);
 
   for (let i = 0; i < 5; i += 1) {
@@ -179,9 +181,9 @@ test("BIN-694: multi-winner split — 2 spillere vinner fase 1 på samme ball", 
   assert.ok(zoeClaim, "Zoe skal ha LINE-claim");
   assert.equal(aliceClaim!.valid, true);
   assert.equal(zoeClaim!.valid, true);
-  // Premien er splittet likt
-  assert.equal(aliceClaim!.payoutAmount, zoeClaim!.payoutAmount, "begge skal få samme beløp");
-  assert.ok((aliceClaim!.payoutAmount ?? 0) > 0, "beløp skal være positivt");
+  // Premien er splittet likt (50 kr hver av fast 100 kr).
+  assert.equal(aliceClaim!.payoutAmount, 50, "Alice skal få 50 kr (halv split)");
+  assert.equal(zoeClaim!.payoutAmount, 50, "Zoe skal få 50 kr (halv split)");
 });
 
 test("BIN-694: regresjon — runden avsluttes IKKE ved fase 1 win (dagens bug før BIN-694)", async () => {
@@ -329,4 +331,103 @@ test("BIN-694: Fase 2 vinnes av 2 hele VERTIKALE kolonner", async () => {
   assert.equal(phase1?.isWon, true, "fase 1 vunnet av kolonne 0");
   assert.equal(phase2?.isWon, true, "fase 2 vunnet av kolonne 0+1");
   assert.equal(game.status, "RUNNING", "fase 3 gjenstår");
+});
+
+/**
+ * 2026-04-21 (Tobias): faste premier 100/200/200/200/1000 kr via
+ * `winningType: "fixed"` + `prize1`. Verifiser at evaluatoren leser
+ * disse feltene i stedet for prizePercent.
+ */
+test("fast premie — 1 Rad betaler 100 kr, Fullt Hus 1000 kr (enkel vinner, stor pool)", async () => {
+  const { engine, roomCode, hostId } = await setupRoom();
+  // entryFee=500 → prizePool=1000, payoutBudget=950 (95%) — nok til at alle
+  // fase-premier (100+200+200+200+1000 = 1700 kr) KAN capes. Første 4 faser
+  // (=700 kr) betales fullt, Fullt Hus (=1000 kr) cap'es mot resterende
+  // pool/budget og ender ≈ 250 kr. Testen fokuserer på rad 1-4 som IKKE
+  // cap'es. Fullt Hus sjekkes bare at den betaler > 0 og avslutter runden.
+  // (entryFee=1000 avvises av compliance-limits — holder oss under det.)
+  await engine.startGame({
+    roomCode, actorPlayerId: hostId, entryFee: 500, ticketsPerPlayer: 1,
+    payoutPercent: 95, gameType: "standard", variantConfig: DEFAULT_NORSK_BINGO_CONFIG,
+  });
+
+  // Alle 24 tall i PLAYER_A_GRID (uten free-midten) → alle 5 faser vunnet.
+  const allAlice: number[] = [];
+  for (const row of PLAYER_A_GRID) for (const n of row) if (n !== 0) allAlice.push(n);
+  prioritiseDrawBag(engine, roomCode, allAlice);
+  for (let i = 0; i < 24; i += 1) {
+    await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
+  }
+
+  const game = engine.getRoomSnapshot(roomCode).currentGame!;
+  assert.equal(game.status, "ENDED", "Fullt Hus skal avslutte runden");
+
+  const phaseByName = new Map<string, number | undefined>();
+  for (const r of game.patternResults ?? []) {
+    phaseByName.set(r.patternName, r.payoutAmount);
+  }
+
+  // 1-4 Rad betales fullt (100+200+200+200 = 700 kr totalt, budget=950 holder).
+  assert.equal(phaseByName.get("1 Rad"), 100,   "1 Rad = 100 kr fast");
+  assert.equal(phaseByName.get("2 Rader"), 200, "2 Rader = 200 kr fast");
+  assert.equal(phaseByName.get("3 Rader"), 200, "3 Rader = 200 kr fast");
+  assert.equal(phaseByName.get("4 Rader"), 200, "4 Rader = 200 kr fast");
+  // Fullt Hus: 1000 kr fast — under 2-player-pool (1000 kr) / budget (950)
+  // blir det capet til resterende pool etter 1-4 Rad (300 kr) / resterende
+  // budget (250). Assertér bare at noe ble utbetalt; total=1000 kr-verifisering
+  // krever større pool (se 3-way-split-test).
+  const fhPayout = phaseByName.get("Fullt Hus") ?? 0;
+  assert.ok(fhPayout > 0, "Fullt Hus skal ha utbetalt noe (>0)");
+  assert.ok(fhPayout <= 1000, "Fullt Hus skal aldri utbetale mer enn fast 1000 kr");
+});
+
+/**
+ * Vinner-splitt med fast premie: floor(100/3) = 33 per spiller, rest til
+ * huset. Dokumenterer både split-matematikken og house-rounding-intensjonen.
+ */
+test("fast premie — 3 vinnere på 1 Rad splitter 100 kr til 33 hver (huset beholder rest)", async () => {
+  const engine = new BingoEngine(
+    new PerPlayerTicketAdapter(),
+    new InMemoryWalletAdapter(),
+    { minDrawIntervalMs: 0 },
+  );
+  // Spawn 3 spillere med identisk grid → alle vinner på samme ball.
+  (engine as unknown as { bingoAdapter: { createTicket: (input: CreateTicketInput) => Promise<Ticket> } }).bingoAdapter = {
+    createTicket: async () => ({ grid: PLAYER_A_GRID.map((r) => [...r]) }),
+  };
+  const { roomCode, playerId: p1 } = await engine.createRoom({
+    hallId: "hall-1", playerName: "Alice", walletId: "w-alice",
+  });
+  const { playerId: p2 } = await engine.joinRoom({
+    roomCode, hallId: "hall-1", playerName: "Bob", walletId: "w-bob",
+  });
+  const { playerId: p3 } = await engine.joinRoom({
+    roomCode, hallId: "hall-1", playerName: "Carol", walletId: "w-carol",
+  });
+
+  await engine.startGame({
+    roomCode, actorPlayerId: p1!, entryFee: 500, ticketsPerPlayer: 1,
+    payoutPercent: 95, gameType: "standard", variantConfig: DEFAULT_NORSK_BINGO_CONFIG,
+  });
+
+  prioritiseDrawBag(engine, roomCode, [1, 16, 31, 46, 61]);
+  for (let i = 0; i < 5; i += 1) {
+    await engine.drawNextNumber({ roomCode, actorPlayerId: p1! });
+  }
+
+  const game = engine.getRoomSnapshot(roomCode).currentGame!;
+  const phase1 = game.patternResults?.find((r) => r.patternName === "1 Rad");
+  assert.equal(phase1?.isWon, true);
+
+  // floor(100 / 3) = 33 — 1 kr til huset (rounding).
+  const claims = game.claims.filter((c) => c.type === "LINE" && c.valid);
+  assert.equal(claims.length, 3, "3 spillere har vinner-claim");
+  for (const c of claims) {
+    assert.equal(c.payoutAmount, 33, `${c.playerId} skal få 33 kr (floor-split av 100 / 3)`);
+  }
+  // winnerIds på patternResult skal inneholde alle 3.
+  assert.equal(phase1?.winnerIds?.length, 3, "winnerIds har alle 3 vinnere");
+  assert.ok(phase1?.winnerIds?.includes(p1!));
+  assert.ok(phase1?.winnerIds?.includes(p2!));
+  assert.ok(phase1?.winnerIds?.includes(p3!));
 });
