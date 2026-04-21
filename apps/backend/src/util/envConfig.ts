@@ -44,6 +44,9 @@ export interface BingoRuntimeConfig {
   jobRgCleanupEnabled: boolean;
   jobRgCleanupIntervalMs: number;
   jobRgCleanupRunAtHour: number;
+  // GAME1_SCHEDULE PR 1: auto-scheduler-tick for Game 1
+  jobGame1ScheduleTickEnabled: boolean;
+  jobGame1ScheduleTickIntervalMs: number;
   // Storage
   usePostgresBingoAdapter: boolean;
   checkpointConnectionString: string;
@@ -123,6 +126,12 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const jobRgCleanupIntervalMs = Math.max(60_000, parsePositiveIntEnv(process.env.JOB_RG_CLEANUP_INTERVAL_MS, 15 * 60 * 1000));
   const jobRgCleanupRunAtHour = Math.min(23, Math.max(0, Math.floor(parseNonNegativeNumberEnv(process.env.JOB_RG_CLEANUP_RUN_AT_HOUR, 0))));
 
+  // GAME1_SCHEDULE PR 1: auto-scheduler-tick for Game 1. Default OFF inntil
+  // ready-flow + master-start (PR 2-3) er klare, så tick-en ikke spawner
+  // "hengende" rader uten håndtering. Aktiveres via env-flag i staging først.
+  const jobGame1ScheduleTickEnabled = parseBooleanEnv(process.env.GAME1_SCHEDULE_TICK_ENABLED, false);
+  const jobGame1ScheduleTickIntervalMs = Math.max(5_000, parsePositiveIntEnv(process.env.GAME1_SCHEDULE_TICK_INTERVAL_MS, 15_000));
+
   // BIN-159/BIN-240: PostgreSQL checkpointing
   const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
   const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, true) && checkpointConnectionString.length > 0;
@@ -168,6 +177,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
     jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
     jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
+    jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,
