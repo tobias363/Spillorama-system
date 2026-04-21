@@ -1,13 +1,17 @@
-// PR-A6 (BIN-674) — tests for CMS + Settings + SystemInfo + otherGames pages.
+// PR-A6 (BIN-674) / BIN-676 — tests for CMS + Settings + SystemInfo + otherGames.
 //
-// Focus: dispatcher-contract, placeholder-banner rendering, form-submit
-// roundtrip via localStorage-fallback, regulatorisk-lock for Spillvett-tekst,
-// i18n-key coverage. Holdes innenfor LOC-budsjett ved å samle alle fire
-// domener i ett spec-fil.
+// Focus: dispatcher-contract, regulatorisk-lock for Spillvett-tekst (BIN-680),
+// FEATURE_DISABLED-håndtering, FAQ CRUD-roundtrip, i18n-key coverage. CMS
+// skjermer bruker mocked fetch mot `/api/admin/cms/*` (BIN-676 backend).
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { initI18n } from "../src/i18n/I18n.js";
 import { isCmsRoute, mountCmsRoute } from "../src/pages/cms/index.js";
+import {
+  textKeyToSlug,
+  isRegulatoryLocked,
+  CMS_REGULATORY_LOCKED_SLUGS,
+} from "../src/api/admin-cms.js";
 import { isSettingsRoute, mountSettingsRoute } from "../src/pages/settings/index.js";
 import {
   isSystemInformationRoute,
@@ -20,7 +24,7 @@ import {
 import noI18n from "../src/i18n/no.json";
 import enI18n from "../src/i18n/en.json";
 
-async function tick(rounds = 6): Promise<void> {
+async function tick(rounds = 8): Promise<void> {
   for (let i = 0; i < rounds; i++) await new Promise<void>((r) => setTimeout(r, 0));
 }
 
@@ -29,9 +33,77 @@ function container(): HTMLElement {
   return document.getElementById("app")!;
 }
 
+// ── Fetch-mock utility (BIN-676) ─────────────────────────────────────────────
+
+interface MockRoute {
+  match: RegExp;
+  method?: string;
+  handler: (url: string, init: RequestInit | undefined) => unknown;
+  status?: number;
+}
+
+function mockApiRouter(routes: MockRoute[]): ReturnType<typeof vi.fn> {
+  const fn = vi.fn();
+  fn.mockImplementation((url: string, init?: RequestInit) => {
+    const method = (init?.method ?? "GET").toUpperCase();
+    const route = routes.find(
+      (r) =>
+        r.match.test(url) &&
+        (r.method ? r.method.toUpperCase() === method : true)
+    );
+    if (!route) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error: { code: "NOT_MOCKED", message: `${method} ${url}` },
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    }
+    const body = route.handler(url, init);
+    const status = route.status ?? 200;
+    return Promise.resolve(
+      new Response(
+        JSON.stringify(status < 400 ? { ok: true, data: body } : body),
+        { status, headers: { "Content-Type": "application/json" } }
+      )
+    );
+  });
+  (globalThis as unknown as { fetch: typeof fetch }).fetch =
+    fn as unknown as typeof fetch;
+  return fn;
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   initI18n();
+});
+
+// ── CMS slug-mapping (BIN-676) ───────────────────────────────────────────────
+
+describe("BIN-676 CMS API — text-key to backend-slug mapping", () => {
+  it("mapper frontend-nøkler til backend-slugs", () => {
+    expect(textKeyToSlug("terms_of_service")).toBe("terms");
+    expect(textKeyToSlug("support")).toBe("support");
+    expect(textKeyToSlug("about_us")).toBe("aboutus");
+    expect(textKeyToSlug("links_of_other_agencies")).toBe("links");
+    expect(textKeyToSlug("responsible_gaming")).toBe("responsible-gaming");
+  });
+
+  it("responsible_gaming er regulatorisk-låst, andre er ikke", () => {
+    expect(isRegulatoryLocked("responsible_gaming")).toBe(true);
+    expect(isRegulatoryLocked("terms_of_service")).toBe(false);
+    expect(isRegulatoryLocked("support")).toBe(false);
+    expect(isRegulatoryLocked("about_us")).toBe(false);
+    expect(isRegulatoryLocked("links_of_other_agencies")).toBe(false);
+  });
+
+  it("responsible-gaming er med i CMS_REGULATORY_LOCKED_SLUGS", () => {
+    expect(CMS_REGULATORY_LOCKED_SLUGS).toContain("responsible-gaming");
+    expect(CMS_REGULATORY_LOCKED_SLUGS.length).toBe(1);
+  });
 });
 
 // ── CMS dispatcher ───────────────────────────────────────────────────────────
@@ -60,52 +132,222 @@ describe("PR-A6 CMS dispatcher", () => {
     expect(table).toBeTruthy();
     const rows = host.querySelectorAll("tbody tr");
     expect(rows.length).toBe(6);
-    // Banner present
-    expect(host.querySelector('[data-testid="cms-placeholder-banner"]')).toBeTruthy();
+    // Placeholder banner should NOT be present on wired list (BIN-676).
+    expect(host.querySelector('[data-testid="cms-placeholder-banner"]')).toBeNull();
     // Responsible row points to /ResponsibleGameing
     const responsibleRow = host.querySelector('[data-testid="cms-row-responsible"]');
     expect(responsibleRow?.innerHTML).toContain("#/ResponsibleGameing");
   });
 
-  it("/ResponsibleGameing shows regulatory lock banner and disables edit", async () => {
+  it("/ResponsibleGameing shows regulatory lock banner and renders read-only textarea with disabled save (BIN-680)", async () => {
+    mockApiRouter([
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming$/,
+        method: "GET",
+        handler: () => ({
+          slug: "responsible-gaming",
+          content: "Gjeldende tekst",
+          updatedByUserId: null,
+          createdAt: "2026-04-20T00:00:00Z",
+          updatedAt: "2026-04-20T00:00:00Z",
+        }),
+      },
+    ]);
     const host = container();
     mountCmsRoute(host, "/ResponsibleGameing");
     await tick();
     expect(host.querySelector('[data-testid="cms-regulatory-lock-banner"]')).toBeTruthy();
     const textarea = host.querySelector<HTMLTextAreaElement>('[data-testid="cms-body-textarea"]');
-    expect(textarea?.disabled).toBe(true);
-    const submit = host.querySelector<HTMLButtonElement>('[data-action="save-cms-text"]');
-    expect(submit?.disabled).toBe(true);
+    expect(textarea?.readOnly).toBe(true);
+    // GET fungerte selv om siden er låst — tekst skal vises.
+    expect(textarea?.value).toBe("Gjeldende tekst");
+    const save = host.querySelector<HTMLButtonElement>('[data-testid="cms-save-btn"]');
+    expect(save).toBeTruthy();
+    expect(save!.disabled).toBe(true);
+    expect(save!.title).toContain("BIN-680");
   });
 
-  it("/TermsofService allows edit (no regulatory lock)", async () => {
+  it("/TermsofService allows edit (no regulatory lock) and roundtrips via PUT", async () => {
+    let puttedContent: string | null = null;
+    mockApiRouter([
+      {
+        match: /\/api\/admin\/cms\/terms$/,
+        method: "GET",
+        handler: () => ({
+          slug: "terms",
+          content: "Vilkår v1",
+          updatedByUserId: null,
+          createdAt: "2026-04-20T00:00:00Z",
+          updatedAt: "2026-04-20T00:00:00Z",
+        }),
+      },
+      {
+        match: /\/api\/admin\/cms\/terms$/,
+        method: "PUT",
+        handler: (_url, init) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            content: string;
+          };
+          puttedContent = body.content;
+          return {
+            slug: "terms",
+            content: body.content,
+            updatedByUserId: "actor-1",
+            createdAt: "2026-04-20T00:00:00Z",
+            updatedAt: "2026-04-20T00:00:00Z",
+          };
+        },
+      },
+    ]);
     const host = container();
     mountCmsRoute(host, "/TermsofService");
     await tick();
     const textarea = host.querySelector<HTMLTextAreaElement>('[data-testid="cms-body-textarea"]');
-    expect(textarea?.disabled).toBe(false);
-    const submit = host.querySelector<HTMLButtonElement>('[data-action="save-cms-text"]');
-    expect(submit?.disabled).toBe(false);
+    expect(textarea?.readOnly).toBe(false);
+    expect(textarea?.value).toBe("Vilkår v1");
+    const save = host.querySelector<HTMLButtonElement>('[data-testid="cms-save-btn"]');
+    expect(save?.disabled).toBe(false);
+    // Lock banner must NOT be present for non-regulatory pages.
+    expect(host.querySelector('[data-testid="cms-regulatory-lock-banner"]')).toBeNull();
+
+    // Submit flow
+    textarea!.value = "Vilkår v2";
+    const form = host.querySelector<HTMLFormElement>("#cms-text-form")!;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await tick();
+    expect(puttedContent).toBe("Vilkår v2");
   });
 
-  it("/faq renders DataTable placeholder with add button", async () => {
+  it("/ResponsibleGameing: hvis noen likevel sender PUT returnerer backend FEATURE_DISABLED og UI toaster feilmelding", async () => {
+    const router = mockApiRouter([
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming$/,
+        method: "GET",
+        handler: () => ({
+          slug: "responsible-gaming",
+          content: "",
+          updatedByUserId: null,
+          createdAt: "2026-04-20T00:00:00Z",
+          updatedAt: "2026-04-20T00:00:00Z",
+        }),
+      },
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming$/,
+        method: "PUT",
+        status: 400,
+        handler: () => ({
+          ok: false,
+          error: {
+            code: "FEATURE_DISABLED",
+            message:
+              "Redigering av 'responsible-gaming' krever versjons-historikk og er foreløpig deaktivert. Blokkert av BIN-680.",
+          },
+        }),
+      },
+    ]);
+    const host = container();
+    mountCmsRoute(host, "/ResponsibleGameing");
+    await tick();
+    const form = host.querySelector<HTMLFormElement>("#cms-text-form")!;
+    // Submit — UI-form er disabled, men defensive sti tester at det likevel
+    // ikke kaster ut av prosessen når backend avviser med FEATURE_DISABLED.
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await tick();
+    // GET ble kalt, men PUT skal ikke ha blitt kalt fordi isLocked-sjekken
+    // i UI-en abortsubmit. (Defensivt: selv om det hadde gått igjennom, ville
+    // backend returnert FEATURE_DISABLED og UI ville vist feil-toast.)
+    const putCalls = router.mock.calls.filter(
+      (c) => (c[1] as RequestInit | undefined)?.method === "PUT"
+    );
+    expect(putCalls.length).toBe(0);
+  });
+
+  it("/faq renders DataTable med add-button og viser FAQ-rader fra backend", async () => {
+    mockApiRouter([
+      {
+        match: /\/api\/admin\/cms\/faq$/,
+        method: "GET",
+        handler: () => ({
+          faqs: [
+            {
+              id: "faq-1",
+              question: "Hva er bingo?",
+              answer: "Et spill.",
+              sortOrder: 0,
+              createdByUserId: "u1",
+              updatedByUserId: "u1",
+              createdAt: "2026-04-20T00:00:00Z",
+              updatedAt: "2026-04-20T00:00:00Z",
+            },
+          ],
+          count: 1,
+        }),
+      },
+    ]);
     const host = container();
     mountCmsRoute(host, "/faq");
     await tick();
-    expect(host.querySelector('[data-testid="cms-placeholder-banner"]')).toBeTruthy();
-    const addBtn = host.querySelector<HTMLAnchorElement>('[data-action="add-faq"]');
+    // Placeholder banner should NOT be present on wired FAQ list (BIN-676).
+    expect(host.querySelector('[data-testid="cms-placeholder-banner"]')).toBeNull();
+    const addBtn = host.querySelector<HTMLAnchorElement>('[data-testid="faq-add-btn"]');
     expect(addBtn).toBeTruthy();
     expect(addBtn!.href).toContain("#/addFAQ");
+    // Rad vises fra mocket backend.
+    expect(host.textContent).toContain("Hva er bingo?");
   });
 
-  it("/addFAQ renders form with question + answer required fields", async () => {
+  it("/addFAQ renders form with question + answer required fields and POSTs on submit", async () => {
+    let postedBody: unknown = null;
+    mockApiRouter([
+      {
+        match: /\/api\/admin\/cms\/faq$/,
+        method: "POST",
+        handler: (_url, init) => {
+          postedBody = JSON.parse(String(init?.body ?? "{}"));
+          return {
+            id: "faq-created",
+            question: (postedBody as { question: string }).question,
+            answer: (postedBody as { answer: string }).answer,
+            sortOrder: 0,
+            createdByUserId: "u1",
+            updatedByUserId: "u1",
+            createdAt: "2026-04-20T00:00:00Z",
+            updatedAt: "2026-04-20T00:00:00Z",
+          };
+        },
+      },
+    ]);
     const host = container();
     mountCmsRoute(host, "/addFAQ");
     await tick();
-    const form = host.querySelector<HTMLFormElement>('[data-testid="faq-form"]');
+    const form = host.querySelector<HTMLFormElement>('[data-testid="faq-form"]')!;
     expect(form).toBeTruthy();
-    expect(form!.querySelector<HTMLInputElement>("#ff-question")!.required).toBe(true);
-    expect(form!.querySelector<HTMLTextAreaElement>("#ff-answer")!.required).toBe(true);
+    expect(form.querySelector<HTMLInputElement>("#ff-question")!.required).toBe(true);
+    expect(form.querySelector<HTMLTextAreaElement>("#ff-answer")!.required).toBe(true);
+
+    form.querySelector<HTMLInputElement>("#ff-question")!.value = "Q1";
+    form.querySelector<HTMLTextAreaElement>("#ff-answer")!.value = "A1";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await tick();
+    expect(postedBody).toEqual({ question: "Q1", answer: "A1" });
+  });
+
+  it("/faq viser feilmelding hvis backend er nede", async () => {
+    mockApiRouter([
+      {
+        match: /\/api\/admin\/cms\/faq$/,
+        method: "GET",
+        status: 500,
+        handler: () => ({
+          ok: false,
+          error: { code: "INTERNAL", message: "Server down" },
+        }),
+      },
+    ]);
+    const host = container();
+    mountCmsRoute(host, "/faq");
+    await tick();
+    expect(host.querySelector('[data-testid="faq-error-banner"]')).toBeTruthy();
   });
 });
 
@@ -292,6 +534,13 @@ describe("PR-A6 i18n-keys present in NO + EN", () => {
     "cms_placeholder_banner",
     "cms_spillvett_audit_required_title",
     "cms_spillvett_audit_required_body",
+    // BIN-676 (wired backend) + BIN-680 (regulatory lock):
+    "cms_regulatory_locked_title",
+    "cms_regulatory_locked_body",
+    "cms_locked_by_bin680_label",
+    "cms_locked_by_bin680_hint",
+    "move_up",
+    "move_down",
     "terms_of_service",
     "responsible_gaming",
     "question",

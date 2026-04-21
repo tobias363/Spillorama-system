@@ -2046,6 +2046,12 @@
   "cms_placeholder_banner": "CMS backend (BIN-A6-CMS) is not yet implemented. Changes persist locally until backend merges.",
   "cms_spillvett_audit_required_title": "Regulatory lock: Responsible-gaming text",
   "cms_spillvett_audit_required_body": "Editing responsible-gaming text requires AuditLog + version history per §11 pengespillforskriften. Backend audit (BIN-A6-SPILLVETT-AUDIT) must ship before edits are permitted.",
+  "cms_regulatory_locked_title": "Regulatory lock: Responsible-gaming text",
+  "cms_regulatory_locked_body": "Editing responsible-gaming text is locked by regulatory requirements. Version history (pengespillforskriften §11) must be in place before editing is permitted. Blocked by BIN-680.",
+  "cms_locked_by_bin680_label": "Locked — BIN-680",
+  "cms_locked_by_bin680_hint": "Locked by regulatory requirement BIN-680",
+  "move_up": "Move up",
+  "move_down": "Move down",
 
   "maintenance_management": "Maintenance Management",
   "maintenance_message": "Maintenance Message",
