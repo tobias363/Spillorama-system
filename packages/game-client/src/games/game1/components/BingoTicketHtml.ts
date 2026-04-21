@@ -1,5 +1,6 @@
 import type { PatternDefinition, Ticket } from "@spillorama/shared-types/game";
 import { getTicketThemeByName, type TicketColorTheme } from "../colors/TicketColorThemes.js";
+import { getElvisImageUrl, getElvisLabel, isElvisColor } from "../colors/ElvisAssetPaths.js";
 import { remainingForPattern } from "../logic/PatternMasks.js";
 
 /**
@@ -114,9 +115,31 @@ export class BingoTicketHtml {
   loadTicket(ticket: Ticket): void {
     this.ticket = ticket;
     this.theme = getTicketThemeByName(ticket.color, 0);
+    this.syncElvisBanner();
     this.buildCells();
     this.updateHeaderAndPrice();
     this.updateToGo();
+  }
+
+  /**
+   * Sørg for at Elvis-banneret i DOM matcher nåværende ticket.color.
+   * Kalles kun fra {@link loadTicket} — under konstruksjon renderes banneret
+   * direkte i {@link populateFront}.
+   */
+  private syncElvisBanner(): void {
+    const existing = this.front.querySelector(".ticket-elvis-banner");
+    const shouldHave = isElvisColor(this.ticket.color);
+    if (shouldHave && !existing) {
+      const banner = this.buildElvisBanner();
+      const gridWrap = this.front.querySelector(".ticket-grid");
+      this.front.insertBefore(banner, gridWrap);
+    } else if (!shouldHave && existing) {
+      existing.remove();
+    } else if (shouldHave && existing) {
+      // Refresh banner (bilde/label kan ha endret seg ved variant-swap).
+      const replacement = this.buildElvisBanner();
+      existing.replaceWith(replacement);
+    }
   }
 
   /** Mark a drawn number. Returns true if the ticket contained it. */
@@ -279,6 +302,14 @@ export class BingoTicketHtml {
 
     face.appendChild(header);
 
+    // Elvis-banner — vises kun for Elvis-bonger (BIN-688).
+    // Fargen ligger allerede i theme; bildet er egen placeholder-asset per
+    // variant (1-5) og kan byttes uten kode-endring. Ukjent Elvis-variant
+    // (f.eks. "elvis9") renderes tekst-bare uten bilde som fallback.
+    if (isElvisColor(this.ticket.color)) {
+      face.appendChild(this.buildElvisBanner());
+    }
+
     // Grid container
     const gridWrap = document.createElement("div");
     gridWrap.className = "ticket-grid";
@@ -302,6 +333,57 @@ export class BingoTicketHtml {
       height: "16px",
     });
     face.appendChild(toGo);
+  }
+
+  /**
+   * Bygg Elvis-banner-elementet som vises øverst på Elvis-bonger.
+   * Struktur: `<div class="ticket-elvis-banner">` med enten `<img>` + tekst
+   * (kjent variant) eller bare tekst (ukjent variant — fallback).
+   *
+   * Img-URL hentes via {@link getElvisImageUrl} som returnerer `null` for
+   * ukjent variant — da dropper vi `<img>`-noden og viser bare label ("ELVIS").
+   */
+  private buildElvisBanner(): HTMLDivElement {
+    const banner = document.createElement("div");
+    banner.className = "ticket-elvis-banner";
+    Object.assign(banner.style, {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: "2px",
+      padding: "4px 0 2px",
+      flex: "0 0 auto",
+    });
+
+    const url = getElvisImageUrl(this.ticket.color);
+    if (url !== null) {
+      const img = document.createElement("img");
+      img.className = "ticket-elvis-image";
+      img.src = url;
+      img.alt = getElvisLabel(this.ticket.color);
+      Object.assign(img.style, {
+        maxHeight: "64px",
+        maxWidth: "100%",
+        objectFit: "contain",
+        display: "block",
+      });
+      banner.appendChild(img);
+    }
+
+    const label = document.createElement("div");
+    label.className = "ticket-elvis-label";
+    label.textContent = getElvisLabel(this.ticket.color);
+    Object.assign(label.style, {
+      fontSize: "11px",
+      fontWeight: "800",
+      letterSpacing: "1px",
+      color: hex(this.theme.headerText),
+      textAlign: "center",
+    });
+    banner.appendChild(label);
+
+    return banner;
   }
 
   private populateBack(face: HTMLDivElement): void {
@@ -397,7 +479,11 @@ export class BingoTicketHtml {
   }
 
   private updateHeaderAndPrice(): void {
-    const label = this.ticket.color ?? "Bong";
+    // For Elvis-bonger normaliseres "elvis1"/"Elvis 1"/etc. til "ELVIS 1" i
+    // header slik at spilleren alltid ser samme format uavhengig av kilde-case.
+    const label = isElvisColor(this.ticket.color)
+      ? getElvisLabel(this.ticket.color)
+      : (this.ticket.color ?? "Bong");
     this.headerEl.textContent = label;
     this.priceEl.textContent = `${this.opts.price} kr`;
   }
