@@ -52,6 +52,10 @@ import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
 import type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
 import { ComplianceLedger } from "./ComplianceLedger.js";
 import type { LedgerGameType, LedgerChannel, LedgerEventType, ComplianceLedgerEntry, DailyComplianceReport, DailyComplianceReportRow, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionTransfer, OverskuddDistributionBatch, RevenueSummary, TimeSeriesReport, TimeSeriesGranularity, TopPlayersReport, GameSessionsReport } from "./ComplianceLedger.js";
+import type { LoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
+import { NoopLoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
+import type { SplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
+import { NoopSplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
 
 export type {
   LossLimits,
@@ -211,6 +215,18 @@ interface ComplianceOptions {
    * for deterministic integration tests; production must not set this.
    */
   drawBagFactory?: (size: number) => number[];
+  /**
+   * GAME1_SCHEDULE PR 5: valgfri loyalty-hook. Kalles fire-and-forget
+   * ved buy-in (ticket.purchase) og ved fase-win (game.win).
+   * Default: no-op — engine kan kjøre uten loyalty-integrasjon.
+   */
+  loyaltyHook?: LoyaltyPointsHookPort;
+  /**
+   * GAME1_SCHEDULE PR 5: valgfri split-rounding-audit. Kalles når
+   * floor(totalPhasePrize / winnerCount) etterlater en rest som ikke
+   * utbetales. Default: no-op.
+   */
+  splitRoundingAudit?: SplitRoundingAuditPort;
 }
 
 
@@ -240,6 +256,16 @@ export class BingoEngine {
   // BIN-615 / PR-C2: protected so Game2Engine (subclass) can access these
   // for auto-claim payout flow. Keep `readonly` — subclasses read, don't rebind.
   protected readonly compliance: ComplianceManager;
+  /**
+   * GAME1_SCHEDULE PR 5: Loyalty-hook (fire-and-forget). Initialisert fra
+   * options.loyaltyHook, default NoopLoyaltyPointsHookPort.
+   */
+  protected readonly loyaltyHook: LoyaltyPointsHookPort;
+  /**
+   * GAME1_SCHEDULE PR 5: Split-rounding-audit. Logger rest-øre når
+   * multi-winner-splittingen ikke går opp. Default no-op.
+   */
+  protected readonly splitRoundingAudit: SplitRoundingAuditPort;
   protected readonly prizePolicy: PrizePolicyManager;
   protected readonly payoutAudit: PayoutAuditTrail;
   protected readonly ledger: ComplianceLedger;
@@ -366,6 +392,12 @@ export class BingoEngine {
 
     // BIN-251: Wire external room state store if provided
     this.roomStateStore = options.roomStateStore;
+
+    // GAME1_SCHEDULE PR 5: Loyalty-hook + split-rounding-audit (optional ports).
+    // Defaults to no-op implementations so tests and loyalty-less deployments
+    // don't need to wire anything.
+    this.loyaltyHook = options.loyaltyHook ?? new NoopLoyaltyPointsHookPort();
+    this.splitRoundingAudit = options.splitRoundingAudit ?? new NoopSplitRoundingAuditPort();
   }
 
   async hydratePersistentState(): Promise<void> {
@@ -634,6 +666,30 @@ export class BingoEngine {
           }).catch(() => { /* best-effort checkpoint */ });
         }
         throw err;
+      }
+
+      // GAME1_SCHEDULE PR 5 (BIN-700 follow-up): Loyalty ticket.purchase hook
+      // per spiller (fire-and-forget). Kalles ETTER alle buy-ins er bekreftet
+      // så en hook-feil aldri utløser refund eller blokkerer spill-start.
+      for (const { player, amount } of debitedPlayers) {
+        const playerTicketCount = playerTicketCountMap.get(player.id) ?? ticketsPerPlayer;
+        try {
+          await this.loyaltyHook.onLoyaltyEvent({
+            kind: "ticket.purchase",
+            userId: player.id,
+            amount,
+            ticketCount: playerTicketCount,
+            roomCode: room.code,
+            gameId,
+            hallId: room.hallId,
+            gameSlug: room.gameSlug,
+          });
+        } catch (err) {
+          logger.warn(
+            { err, gameId, playerId: player.id },
+            "loyalty ticket.purchase hook failed — engine fortsetter uansett"
+          );
+        }
       }
     }
     const tickets = new Map<string, Ticket[]>();
@@ -981,12 +1037,62 @@ export class BingoEngine {
     // Floor division — any remainder stays in the pool (goes to next phase
     const prizePerWinner = Math.floor(totalPhasePrize / winnerPlayerIds.length);
 
+    // GAME1_SCHEDULE PR 5 (§3.7): audit rest-øre som huset beholder.
+    // Formel: totalPhasePrize - winnerCount × prizePerWinner. Positiv
+    // når splittingen ikke går opp. Fire-and-forget-audit så engine-
+    // flyten fortsetter uansett om loggen feiler.
+    const houseRetainedRest = totalPhasePrize - (winnerPlayerIds.length * prizePerWinner);
+    if (houseRetainedRest > 0) {
+      try {
+        await this.splitRoundingAudit.onSplitRoundingHouseRetained({
+          amount: houseRetainedRest,
+          winnerCount: winnerPlayerIds.length,
+          totalPhasePrize,
+          prizePerWinner,
+          patternName: activePattern.name,
+          roomCode: room.code,
+          gameId: game.id,
+          hallId: room.hallId,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, gameId: game.id, roomCode: room.code, amount: houseRetainedRest },
+          "split-rounding audit hook failed — engine fortsetter uansett"
+        );
+      }
+    }
+
     // Pay out each winner before marking the phase won — so a wallet
     // failure for one winner doesn't leave the phase half-committed.
     for (const playerId of winnerPlayerIds) {
       await this.payoutPhaseWinner(
         room, game, playerId, activePattern, activeResult, prizePerWinner,
       );
+    }
+
+    // GAME1_SCHEDULE PR 5: Loyalty game.win hook per vinner (fire-and-forget).
+    // Engine fortsetter uavhengig av loyalty-feil. Merk: amount er
+    // prizePerWinner før evt. RTP-cap i payoutPhaseWinner (cap er
+    // unntakstilstand — loyalty awardes på den faktiske vinner-pris-andelen).
+    if (prizePerWinner > 0) {
+      for (const playerId of winnerPlayerIds) {
+        try {
+          await this.loyaltyHook.onLoyaltyEvent({
+            kind: "game.win",
+            userId: playerId,
+            amount: prizePerWinner,
+            patternName: activePattern.name,
+            roomCode: room.code,
+            gameId: game.id,
+            hallId: room.hallId,
+          });
+        } catch (err) {
+          logger.warn(
+            { err, gameId: game.id, playerId },
+            "loyalty game.win hook failed — engine fortsetter uansett"
+          );
+        }
+      }
     }
 
     // Mark phase as won. For multi-winner the `winnerId` is set to the
