@@ -335,7 +335,22 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     HALL_OPERATOR/AGENT må tilhøre `game.master_hall_id` (unntatt
    *     ADMIN som er globalt scope).
    */
-  GAME1_MASTER_WRITE:      ["ADMIN", "HALL_OPERATOR", "AGENT"]
+  GAME1_MASTER_WRITE:      ["ADMIN", "HALL_OPERATOR", "AGENT"],
+  /**
+   * BIN-700: Loyalty-system (tier-CRUD + player-state + points-award +
+   * tier-override).
+   *   - LOYALTY_READ  : list tiers, detail, player-state. Alle admin-roller
+   *     (ADMIN + HALL_OPERATOR + SUPPORT). SUPPORT trenger innsyn ved
+   *     kundestøtte ("hvilken tier har spilleren? hvorfor fikk de ikke
+   *     bonus?"), HALL_OPERATOR for hall-lokal oversikt ved VIP-håndtering.
+   *   - LOYALTY_WRITE : tier-CRUD + points-award + tier-override. ADMIN-only
+   *     fordi loyalty-tier-struktur er sentralt og manuelt points-tildeling
+   *     er sensitivt (revisjons-kritisk, AuditLog). Samme mønster som
+   *     GAME_TYPE_WRITE / LEADERBOARD_TIER_WRITE. HALL_OPERATOR er bevisst
+   *     utelatt — tier-strukturen er ikke hall-lokal.
+   */
+  LOYALTY_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  LOYALTY_WRITE: ["ADMIN"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
