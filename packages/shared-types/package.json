@@ -19,6 +19,10 @@
     "./api": {
       "types": "./src/api.ts",
       "import": "./dist/api.js"
+    },
+    "./spill1-patterns": {
+      "types": "./src/spill1-patterns.ts",
+      "import": "./dist/spill1-patterns.js"
     }
   },
   "scripts": {
