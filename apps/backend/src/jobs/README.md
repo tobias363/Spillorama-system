@@ -13,6 +13,7 @@ instance runs each tick in multi-node deploys.
 | `swedbank-payment-sync` | every hour (`0 * * * *`) | every 60 min, `setInterval` | Payments | `JOB_SWEDBANK_ENABLED` |
 | `bankid-expiry-reminder` | daily 00:00 (`0 0 * * *`) | polled every 15 min, runs once after 07:00 local | KYC / auth | `JOB_BANKID_ENABLED` |
 | `self-exclusion-cleanup` | daily 00:00 (`0 0 * * *`) | polled every 15 min, runs once after 00:00 local | Responsible gaming (Spillvett) | `JOB_RG_CLEANUP_ENABLED` |
+| `game1-schedule-tick` | every 15 s (`startGameCron`) | every 15 s, `setInterval` | Game 1 / scheduling | `GAME1_SCHEDULE_TICK_ENABLED` |
 
 Master kill-switch: `JOBS_ENABLED` (default `true`).
 
@@ -46,6 +47,24 @@ audit trail; lifting the exclusion itself requires an explicit user
 action per Spillvett policy. Legacy equivalent: `updatePlayerBlockRules`
 in `legacy/unity-backend/Game/Common/Controllers/PlayerController.js:5121`.
 
+### `game1-schedule-tick` (GAME1_SCHEDULE PR 1)
+Spawns Game 1 rows into `app_game1_scheduled_games` from
+`app_daily_schedules` × schedule-mal (looked up via
+`daily_schedule.other_data.scheduleId`) × subGames, 24 h ahead. Per tick it
+also transitions `scheduled → purchase_open` when
+`scheduled_start_time - notification_start_seconds <= now`, and
+marks expired rows `cancelled` with `stop_reason='end_of_day_unreached'`.
+Legacy equivalents: `processDailySchedules` + `createGame1FromSchedule`
+in `legacy/unity-backend/Game/Game1/helpers/gameHelper.js` (15 s cron).
+
+Default **OFF** (`GAME1_SCHEDULE_TICK_ENABLED=false`) until PR 2-3 land
+the ready-flow and master-start endpoints — otherwise spawned rows would
+just sit in `scheduled` without a way to progress. Enable in staging
+after PR 3 merges.
+
+Behaviour when tables don't exist: returns 0 items + a note (matches
+swedbank-payment-sync pattern).
+
 ## Environment variables
 
 | Variable | Default | Purpose |
@@ -59,6 +78,8 @@ in `legacy/unity-backend/Game/Common/Controllers/PlayerController.js:5121`.
 | `JOB_RG_CLEANUP_ENABLED` | `true` | Toggle self-exclusion/pause cleanup job. |
 | `JOB_RG_CLEANUP_INTERVAL_MS` | `900000` (15m) | Polling tick. |
 | `JOB_RG_CLEANUP_RUN_AT_HOUR` | `0` | Local-time hour after which the daily body is allowed. |
+| `GAME1_SCHEDULE_TICK_ENABLED` | `false` | Toggle Game 1 schedule-tick (default OFF until PR 2-3 ready). |
+| `GAME1_SCHEDULE_TICK_INTERVAL_MS` | `15000` (15s) | Tick interval (legacy parity). |
 
 ## Multi-instance safety
 

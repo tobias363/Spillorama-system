@@ -48,6 +48,8 @@ import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
+import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
+import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createWalletRouter } from "./routes/wallet.js";
@@ -250,6 +252,7 @@ const {
   jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
   jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
   jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
+  jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -733,6 +736,20 @@ jobScheduler.register({
     schema: pgSchema,
     runAtHourLocal: jobRgCleanupRunAtHour,
   }),
+});
+
+// GAME1_SCHEDULE PR 1: 15s-tick som spawner Game 1-rader fra daily_schedules.
+// Default OFF — feature-flag aktiveres i staging når PR 2-3 er merget.
+const game1ScheduleTickService = new Game1ScheduleTickService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+jobScheduler.register({
+  name: "game1-schedule-tick",
+  description: "Spawn Game 1 games from daily_schedules + advance state machine (GAME1_SCHEDULE PR 1).",
+  intervalMs: jobGame1ScheduleTickIntervalMs,
+  enabled: jobGame1ScheduleTickEnabled,
+  run: createGame1ScheduleTickJob({ service: game1ScheduleTickService }),
 });
 
 // ── Mount routers ─────────────────────────────────────────────────────────────

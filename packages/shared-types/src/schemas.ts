@@ -1360,6 +1360,68 @@ export const ScheduleListResponseSchema = z.object({
 });
 export type ScheduleListResponse = z.infer<typeof ScheduleListResponseSchema>;
 
+// ── GAME1_SCHEDULE PR 1: Game 1 scheduled-games wire schemas ──────────────────
+// Mirror av migration `20260428000000_game1_scheduled_games.sql`.
+//
+// Tabellen app_game1_scheduled_games lagrer én rad per spawned Game 1-instans,
+// spawned av scheduler-ticken (15s) fra daily_schedules × schedule-mal × subGames.
+// State-maskin: scheduled → purchase_open → ready_to_start → running →
+// paused → completed | cancelled.
+//
+// PR 1 eksponerer kun schemas (ingen route-endpoints ennå); disse brukes av
+// PR 2-5 for ready-flow, master-start, exclude-hall og status-lister.
+
+export const Game1ScheduledGameStatusSchema = z.enum([
+  "scheduled",
+  "purchase_open",
+  "ready_to_start",
+  "running",
+  "paused",
+  "completed",
+  "cancelled",
+]);
+export type Game1ScheduledGameStatus = z.infer<typeof Game1ScheduledGameStatusSchema>;
+
+export const Game1GameModeSchema = z.enum(["Auto", "Manual"]);
+export type Game1GameMode = z.infer<typeof Game1GameModeSchema>;
+
+export const Game1ScheduledGameRowSchema = z.object({
+  id: z.string().min(1),
+  /** FK til app_daily_schedules.id — planen som trigget spawnen. */
+  dailyScheduleId: z.string().min(1),
+  /** FK til app_schedules.id — malen vi snapshotet ticket/jackpot-config fra. */
+  scheduleId: z.string().min(1),
+  /** Index i schedule.subGames[] (0-basert). */
+  subGameIndex: z.number().int().nonnegative(),
+  subGameName: z.string().min(1),
+  customGameName: z.string().nullable(),
+  /** 'YYYY-MM-DD' — datoen raden gjelder. */
+  scheduledDay: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  scheduledStartTime: IsoDateString,
+  scheduledEndTime: IsoDateString,
+  /** Normalisert fra legacy "5m"/"60s" — sekunder som INT. */
+  notificationStartSeconds: z.number().int().nonnegative(),
+  /** Snapshot av schedule.subGame.ticketTypesData på spawn-tidspunkt. */
+  ticketConfig: z.record(z.string(), z.unknown()),
+  /** Snapshot av schedule.subGame.jackpotData på spawn-tidspunkt. */
+  jackpotConfig: z.record(z.string(), z.unknown()),
+  gameMode: Game1GameModeSchema,
+  masterHallId: z.string().min(1),
+  groupHallId: z.string().min(1),
+  /** Snapshot av deltakende haller (array av hall-IDer). */
+  participatingHallIds: z.array(z.string().min(1)),
+  status: Game1ScheduledGameStatusSchema,
+  actualStartTime: IsoDateString.nullable(),
+  actualEndTime: IsoDateString.nullable(),
+  startedByUserId: z.string().nullable(),
+  excludedHallIds: z.array(z.string().min(1)),
+  stoppedByUserId: z.string().nullable(),
+  stopReason: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type Game1ScheduledGameRow = z.infer<typeof Game1ScheduledGameRowSchema>;
+
 // ── BIN-677: System settings + maintenance wire schemas ─────────────────────
 // Mirror av migration `20260425000500_system_settings_maintenance.sql`.
 //
