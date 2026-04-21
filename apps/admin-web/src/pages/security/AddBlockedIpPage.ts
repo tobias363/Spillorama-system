@@ -1,5 +1,4 @@
 // PR-B6 (BIN-664) — Blocked-IP add/edit modal.
-// Port of legacy/unity-backend/App/Views/security/addBlockedIP.html, but
 // as a Bootstrap modal rather than a dedicated page — matches the emails
 // pattern in PR-B4 and avoids a second route.
 //

@@ -1,6 +1,6 @@
 # cash-inout — PR-B1
 
-Port of 12 legacy pages under `legacy/unity-backend/App/Views/cash-inout/`.
+Port of 12 legacy pages under legacy refs.
 Owned by Agent B per the BIN-613 scope split. See
 `slot-B/PR-B1-PLAN.md` for the full plan + PM §7 answers.
 

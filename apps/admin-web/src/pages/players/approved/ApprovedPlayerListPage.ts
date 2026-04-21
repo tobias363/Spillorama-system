@@ -1,5 +1,4 @@
 // PR-B2: Approved players list — port of
-// legacy/unity-backend/App/Views/player/ApprovedPlayers/player.html.
 // Filter: kycStatus=VERIFIED. Uses /api/admin/players/search with query;
 // CSV-export passes kycStatus=VERIFIED.
 

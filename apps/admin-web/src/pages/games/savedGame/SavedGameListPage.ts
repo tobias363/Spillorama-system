@@ -1,4 +1,3 @@
-// /savedGameList — 1:1 port of legacy/unity-backend/App/Views/savedGame/list.html (517 lines).
 //
 // Legacy layout: panel with DataTable of saved-game snapshots, Add button,
 // per-row View / Edit / Delete actions.

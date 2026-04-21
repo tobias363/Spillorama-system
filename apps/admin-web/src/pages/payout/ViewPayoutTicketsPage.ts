@@ -1,6 +1,5 @@
 // PR-A4b (BIN-659) — /payoutTickets/view/:ticketId detail page.
 //
-// Legacy: legacy/unity-backend/App/Views/PayoutforPlayers/viewPayoutTickets.html
 // (89 lines). Read-only detail-view for one ticket-level payout. Legacy
 // only shows game name + hall + total tickets sold — we surface the same,
 // drilling via `/api/admin/unique-ids/:uniqueId/transactions` if a unique-id

@@ -2,9 +2,7 @@
  * BIN-647: Subgame drill-down report — pure aggregate builder.
  *
  * Legacy reference:
- *   legacy/unity-backend/App/Controllers/ReportsController.js:770-822
  *   (`getGame1Subgames`) renders
- *   legacy/unity-backend/App/Views/report/subgame1reports.html which expects
  *   rows with `gameNumber`, `gameMode`, `startDate`, `gameName`, `halls`,
  *   `ticketSold`, `earnedFromTickets`, `totalWinning`, `finalGameProfitAmount`
  *   and a computed `profitPercentage`.

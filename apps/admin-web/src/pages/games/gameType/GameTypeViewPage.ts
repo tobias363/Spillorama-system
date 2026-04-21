@@ -1,4 +1,3 @@
-// /gameType/view/:id — 1:1 port of legacy/unity-backend/App/Views/gameType/view.html (191 lines).
 //
 // All fields rendered read-only (matches legacy `readonly` attrs). Cancel-button
 // navigates back to list. No edit-link — the edit-button on list-page is a

@@ -1,5 +1,4 @@
 // PR-B4 (BIN-646) — Deposit-history (accepted + rejected).
-// Port av legacy/unity-backend/App/Views/TransactionManagement/depositHistory.html.
 //
 // Data: GET /api/admin/payments/requests?type=deposit&statuses=ACCEPTED,REJECTED
 // Dato-default: siste 7 dager (regulatorisk krav).

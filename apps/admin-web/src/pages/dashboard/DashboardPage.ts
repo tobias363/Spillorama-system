@@ -1,4 +1,3 @@
-// Dashboard page — legacy/unity-backend/App/Views/templates/dashboard.html 1:1.
 // Renders 4 info-boxes + 1 latest-requests table + 1 top-5-players widget +
 // 1 ongoing-games tabbed table. Auto-refreshes every 10s (matches legacy-v1).
 

@@ -1,6 +1,5 @@
 // PR-A4b (BIN-659) — /payoutPlayer list page.
 //
-// Legacy: legacy/unity-backend/App/Views/PayoutforPlayers/payoutPlayers.html
 // (586 lines). Game-select dropdown → per-player payout table filtered by
 // selected game.
 //

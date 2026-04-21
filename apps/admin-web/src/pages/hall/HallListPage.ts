@@ -1,5 +1,4 @@
 // PR-A5 (BIN-663) — /hall list.
-// Port of legacy/unity-backend/App/Views/Hall/hallManagement.html.
 //
 // Data:
 //   GET /api/admin/halls?includeInactive=true

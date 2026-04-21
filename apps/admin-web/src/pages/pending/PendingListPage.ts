@@ -1,5 +1,4 @@
 // PR-B2: Pending KYC requests list — port of
-// legacy/unity-backend/App/Views/player/PendingRequests/pendingRequests.html.
 // Source: GET /api/admin/players/pending.
 
 import { t } from "../../i18n/I18n.js";

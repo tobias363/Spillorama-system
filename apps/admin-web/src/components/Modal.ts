@@ -5,7 +5,6 @@
 //
 // Settlement/close-day flows require `backdrop: "static"` + `keyboard: false`
 // so the operator cannot dismiss the dialog by click-outside or ESC —
-// matches legacy/unity-backend/App/Views/hallAccountReport/settlement.html.
 
 import { t } from "../i18n/I18n.js";
 

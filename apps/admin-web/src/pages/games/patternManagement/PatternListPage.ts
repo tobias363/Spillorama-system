@@ -1,5 +1,4 @@
 // /patternManagement/:typeId — 1:1 port of
-// legacy/unity-backend/App/Views/patternManagement/pattern.html (345 lines).
 //
 // Legacy layout:
 //   - Content-header: "{gameName} Pattern Management" + breadcrumb

@@ -1,4 +1,3 @@
-// /gameType list page — 1:1 port of legacy/unity-backend/App/Views/gameType/list.html (220 lines).
 //
 // Legacy layout:
 //   - Content-header with title + breadcrumb (Dashboard → Spilltabell)

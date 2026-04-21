@@ -1,5 +1,4 @@
 // PR-A5 (BIN-663) — /adminUser/editRole/:id.
-// Port of legacy/unity-backend/App/Views/admin/editRole.html.
 //
 // Shows the currently-assigned static role for the admin + the permission
 // grid for the new role (read-only preview — matches static backend policy),

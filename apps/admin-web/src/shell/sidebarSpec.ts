@@ -52,7 +52,6 @@ const spilloramaLive: SidebarGroup = {
   ],
 };
 
-// Legacy 34 sidebar — matches legacy/unity-backend/App/Views/partition/navigation.html:1-710
 export const adminSidebar: SidebarNode[] = [
   { kind: "header", labelKey: "main_navigation" },
 

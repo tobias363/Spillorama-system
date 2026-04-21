@@ -4,7 +4,6 @@
  * Admin-CRUD for topp-nivå spill-typer (katalog). GameType = en stabil,
  * navngitt variant av et spill ("Game 1", "Game 3", "Databingo 60") som
  * backend-engine + admin-UI + dashboard dropper ned. Legacy Mongo-schema
- * `gameType` (legacy/unity-backend/App/Models/gameType.js) normalisert til
  * `app_game_types` med egne kolonner for aktivt-brukte felter og JSON-
  * fallback for resten.
  *
@@ -19,8 +18,6 @@
  *   - app_game_management.game_type_id (aktive spill-oppsett)
  *   - app_patterns.game_type_id (mønster-katalog, BIN-627)
  *   - app_sub_games.game_type_id (sub-game-katalog, BIN-621)
- *
- * Legacy-opphav: legacy/unity-backend/App/Controllers/GameTypeController.js
  */
 
 import { randomUUID } from "node:crypto";

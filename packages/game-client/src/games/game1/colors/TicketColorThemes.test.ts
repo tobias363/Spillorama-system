@@ -5,9 +5,7 @@ import { TICKET_THEMES, ONE_TO_GO_COLOR, getTicketTheme, getTicketThemeByName } 
  * Unity color paritet — snapshot-test for BIN-374.
  *
  * Temaene er extrahert 1:1 fra Unity inspector i
- * legacy/unity-client/Assets/_Project/_Scenes/Game.unity:418142-418203
  * og strukturen matcher Tickets_Color struct i
- * legacy/unity-client/Assets/_Project/_Scripts/Panels/Game/TicketColorManager.cs:6-11
  *
  * Endrer du en farge må du også oppdatere Unity (eller bekrefte med PM at
  * det er en bevisst differanse). Unity-kilden er source-of-truth fram til

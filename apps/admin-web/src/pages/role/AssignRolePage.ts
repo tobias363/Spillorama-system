@@ -1,5 +1,4 @@
 // PR-A5 (BIN-663) — /role/assign.
-// Port of legacy/unity-backend/App/Views/role/newEdit.html write-side.
 //
 // Lists ADMIN/SUPPORT/HALL_OPERATOR users and lets an admin reassign the
 // static role via PUT /api/admin/users/:id/role.

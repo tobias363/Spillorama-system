@@ -1,5 +1,4 @@
 // PR-B6 (BIN-664) — Blocked-IP list (admin-only).
-// Port of legacy/unity-backend/App/Views/security/blockedIP.html.
 //
 // Data:
 //   GET    /api/admin/security/blocked-ips              → ListBlockedIpsResponse

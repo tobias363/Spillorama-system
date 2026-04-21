@@ -1,5 +1,4 @@
 // PR-B2: KYC Reject-modal.
-// Port av legacy/unity-backend/App/Views/player/PendingRequests/viewPendingPlayer.html:627-714
 // (2-stegs SweetAlert: confirm → reason-input → POST /rejectPendingPlayer).
 //
 // Ny stack: Modal.open som kombinerer begge steg i ett skjema

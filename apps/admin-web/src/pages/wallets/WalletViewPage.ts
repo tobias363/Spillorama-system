@@ -1,5 +1,4 @@
 // PR-B4 (BIN-646) — Wallet detail view.
-// Port av legacy/unity-backend/App/Views/walletManagement/viewWallet.html.
 //
 // Data: GET /api/wallets/:id → { account, transactions }.
 // Read-only visning + innebygd transaksjons-ledger fra backend (brukes ikke av

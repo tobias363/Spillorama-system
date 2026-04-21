@@ -1,5 +1,4 @@
 // PR-B4 (BIN-646) — Deposit-requests queue.
-// Port av legacy/unity-backend/App/Views/TransactionManagement/depositRequests.html.
 //
 // Data: GET /api/admin/payments/requests?type=deposit&status=PENDING
 // Accept: POST /api/admin/payments/requests/:id/accept (med paymentType Cash/Card

@@ -1,5 +1,4 @@
 // PR-B2: Player list — port of
-// legacy/unity-backend/App/Views/player/player.html.
 //
 // Backend: GET /api/admin/players/search requires `query`, so for the
 // "all players"-view we default to empty-search UX: admin types a query

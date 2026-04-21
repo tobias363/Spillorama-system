@@ -1,5 +1,4 @@
 // PR-B2: KYC Approve-modal.
-// Port av legacy/unity-backend/App/Views/player/PendingRequests/viewPendingPlayer.html:561-625
 // (SweetAlert-confirm → POST /pendingRequests/approvePendingPlayer).
 //
 // Ny stack: Modal.open → POST /api/admin/players/:id/approve.

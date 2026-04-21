@@ -1,5 +1,4 @@
 // PR-B5 (BIN-660) — Category list (admin-only).
-// Port of legacy/unity-backend/App/Views/Products/category-list.html.
 //
 // Data:
 //   GET  /api/admin/product-categories?includeInactive=1

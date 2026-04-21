@@ -1,5 +1,4 @@
 // PR-B2: KYC Resubmit-modal.
-// Port av legacy/unity-backend/App/Views/player/RejectedRequests/viewRejectedPlayer.html
 // (SweetAlert-confirm → POST /rejectedRequests/resubmit).
 
 import { Modal } from "../../../components/Modal.js";

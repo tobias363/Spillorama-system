@@ -1,6 +1,4 @@
-// SavedGame state — legacy/unity-backend/App/Views/savedGame/* (5 active files, 2 bkp archived in PR-A3a).
 //
-// Legacy backend-routes (see legacy/unity-backend/src/routes/backend.js):
 //   GET  /savedGameList                        → list (DataTable ajax)
 //   GET  /savedGameDetailList/:id              → type-scoped details
 //   POST /addSavedGameManagement/:typeId/:type → add POST    ← PLACEHOLDER (BIN-624)

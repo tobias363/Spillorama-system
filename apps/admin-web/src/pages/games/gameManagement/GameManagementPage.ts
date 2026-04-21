@@ -1,4 +1,3 @@
-// /gameManagement — 1:1 port of legacy/unity-backend/App/Views/GameManagement/game.html (1457 lines).
 //
 // Legacy layout:
 //   - Top bar: "Choose a game" dropdown (game-type picker)

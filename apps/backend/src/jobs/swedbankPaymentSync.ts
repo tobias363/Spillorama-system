@@ -1,7 +1,5 @@
 /**
  * BIN-582: Swedbank payment reconciliation job (legacy hourly cron).
- *
- * Legacy origin (legacy/unity-backend/Game/Common/Controllers/PlayerController.js
  * line 3468, `swedbankpayCronToUpdateTransaction`): polls all pending
  * transactions, asks Swedbank for current status, credits wallets that
  * completed off-channel, marks expired ones as EXPIRED.

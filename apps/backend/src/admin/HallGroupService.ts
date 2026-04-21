@@ -18,8 +18,6 @@
  * Soft-delete: `deleted_at` settes + status = 'inactive'. Hard-delete
  * blokkeres hvis gruppen er referert fra `app_daily_schedules.groupHallIds`
  * (JSON array). Service sjekker dette i `remove({ hard: true })`.
- *
- * Legacy-opphav: legacy/unity-backend/App/Controllers/groupHallController.js
  */
 
 import { randomUUID } from "node:crypto";

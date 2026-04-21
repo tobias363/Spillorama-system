@@ -1,4 +1,3 @@
-// /subGame/view/:id — 1:1 port of legacy/unity-backend/App/Views/subGameList/view.html (144 lines).
 //
 // All fields rendered read-only (matches legacy `readonly disabled` attrs).
 // Cancel-button navigates back to list. No edit-link — the edit-button on the

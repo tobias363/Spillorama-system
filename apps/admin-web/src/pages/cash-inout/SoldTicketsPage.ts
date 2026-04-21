@@ -1,5 +1,4 @@
 // Sold tickets — port of
-// legacy/unity-backend/App/Views/cash-inout/sold-tickets.html.
 // DataTable with date-range filter, shift-scoped.
 
 import { t } from "../../i18n/I18n.js";

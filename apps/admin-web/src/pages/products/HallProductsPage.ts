@@ -1,5 +1,4 @@
 // PR-B5 (BIN-660) — Hall product assignment.
-// Port of legacy/unity-backend/App/Views/Products/hall-products.html.
 //
 // Flow (legacy uses a multi-select modal; we fold that into the page itself
 // for a lower-friction UX — still fail-closed on API errors):

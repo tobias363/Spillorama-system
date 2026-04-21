@@ -1,6 +1,5 @@
 // PR-A4a (BIN-645) — /reportGame5 (Color Draft range-rapport).
 //
-// Legacy: legacy/unity-backend/App/Views/report/game5reports.html (288 linjer).
 
 import { t } from "../../../i18n/I18n.js";
 import { renderGameRangeReportPage } from "../shared/GameRangeReportPage.js";

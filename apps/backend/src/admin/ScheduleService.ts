@@ -13,9 +13,6 @@
  * FK mot schedule.id. Follow-up lander med BIN-621/626-koblingen.
  *
  * Legacy-opphav:
- *   legacy/unity-backend/App/Models/schedule.js
- *   legacy/unity-backend/App/Controllers/scheduleController.js
- *   legacy/unity-backend/App/Services/scheduleServices.js
  */
 
 import { randomUUID } from "node:crypto";

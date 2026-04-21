@@ -2,8 +2,6 @@
  * BIN-647: subgame drill-down admin-endpoint.
  *
  *   GET /api/admin/reports/subgame-drill-down?parentId=&from=&to=&cursor=&limit=
- *
- * Legacy: legacy/unity-backend/App/Controllers/ReportsController.js:770-822
  * (`getGame1Subgames`) + view `report/subgame1reports.html`.
  *
  * Returns one row per sub-game (child of `parentId`) aggregated over the

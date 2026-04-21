@@ -1,5 +1,4 @@
 // /gameType/test — internal diagnostic page from
-// legacy/unity-backend/App/Views/gameType/test.html (271 lines).
 //
 // Legacy purpose: image-preview modal used during initial dev for testing
 // gameType.photo-rendering. Not production — not linked from any sidebar or

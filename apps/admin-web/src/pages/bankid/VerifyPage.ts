@@ -1,5 +1,4 @@
 // PR-B2: BankID verify — port of
-// legacy/unity-backend/App/Views/player/bankId/verify.html.
 //
 // Legacy embeds an iframe with the authUrl. We mirror that exactly.
 // Mock-mode (BankID not configured): render a warning banner instead of

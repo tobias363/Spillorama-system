@@ -1,6 +1,5 @@
 // PR-A4b (BIN-659) — /payoutPlayer/view/:userId detail page.
 //
-// Legacy: legacy/unity-backend/App/Views/PayoutforPlayers/viewPayoutPlayers.html
 // (126 lines). Read-only detail form for one payout summary: totalBetPlaced,
 // totalWinning, profit/loss.
 

@@ -1,5 +1,4 @@
 // /patternManagement/:typeId/view/:id — 1:1 port of
-// legacy/unity-backend/App/Views/patternManagement/viewPatternDetails.html (345 lines).
 //
 // All fields rendered read-only. The bitmask-grid is rendered as a static
 // visual (same boxes as the editor, but non-interactive) so an admin can see

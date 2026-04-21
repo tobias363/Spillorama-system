@@ -1,6 +1,5 @@
 // PR-A5 (BIN-663) — /role.
 // Read-only list of the five static AdminAccessPolicy roles.
-// Port of legacy/unity-backend/App/Views/role/list.html.
 //
 // Unlike legacy (which stored dynamic role documents in MongoDB), the new
 // backend uses a static enum (ADMIN|SUPPORT|HALL_OPERATOR|AGENT|PLAYER) with

@@ -5,9 +5,6 @@
  * En SavedGame er IKKE et kjørbart spill — det er en template som admin
  * lagrer for senere "load-to-game"-bruk. load-to-game-flyten kopierer
  * config_json inn i et nytt `app_game_management`-oppsett (BIN-622).
- *
- * Legacy-opphav: legacy/unity-backend/App/Controllers/GameController.js
- * (savedGame-handlers) + legacy/unity-backend/App/Services/GameService.js
  * (insertSavedGameData / getByIdSavedGames / updateSaveGameData).
  *
  * Mønster: samme struktur som SubGameService (BIN-621), GameTypeService

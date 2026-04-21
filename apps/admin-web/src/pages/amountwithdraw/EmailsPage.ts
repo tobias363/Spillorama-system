@@ -1,5 +1,4 @@
 // PR-B4 (BIN-646) — Withdraw email-allowlist side.
-// Port av legacy/unity-backend/App/Views/Amountwithdraw/emails.html + addEmails.html.
 // Menypunktet lever under /withdraw/list/emails (matcher legacy-struktur), men
 // backend-endepunktet er /api/admin/security/withdraw-emails (modulerrt etter
 // "security"-domenet).

@@ -356,8 +356,6 @@ export interface SubgameReportRow {
 /**
  * BIN-647: sub-game drill-down row for a single child (sub-game) under a
  * parent `hall_game_schedules` row.
- *
- * Legacy mapping (legacy/unity-backend/App/Views/report/subgame1reports.html):
  *   gameNumber              → subGameNumber
  *   gameMode                → gameMode
  *   startDate               → startDate

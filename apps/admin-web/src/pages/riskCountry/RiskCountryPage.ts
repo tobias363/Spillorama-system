@@ -1,5 +1,4 @@
 // PR-B6 (BIN-664) — Risk-country list + inline add modal.
-// Port of legacy/unity-backend/App/Views/riskCountry/riskCountry.html.
 //
 // Data:
 //   GET    /api/admin/security/risk-countries       → ListRiskCountriesResponse

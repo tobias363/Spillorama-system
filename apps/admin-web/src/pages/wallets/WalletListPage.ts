@@ -1,5 +1,4 @@
 // PR-B4 (BIN-646) — Wallet list.
-// Port av legacy/unity-backend/App/Views/walletManagement/walletManagement.html.
 //
 // Data: GET /api/wallets → WalletAccount[].
 // Legacy-kolonner: customerNumber, username, email, phone, nickname,

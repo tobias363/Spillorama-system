@@ -18,8 +18,6 @@
  * å peke på raden. Hard-delete blokkeres hvis mønsteret er referert fra
  * andre tabeller (app_game_management.config_json / daily_schedules
  * .subgames_json) — service sjekker dette i `remove({ hard: true })`.
- *
- * Legacy-opphav: legacy/unity-backend/App/Controllers/patternController.js
  */
 
 import { randomUUID } from "node:crypto";

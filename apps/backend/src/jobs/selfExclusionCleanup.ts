@@ -1,7 +1,5 @@
 /**
  * BIN-582: Self-exclusion / pause cleanup job (legacy daily cron).
- *
- * Legacy origin (legacy/unity-backend/Game/Common/Controllers/PlayerController.js
  * line 5121, `updatePlayerBlockRules`): removes block rules whose
  * `endDate < now()` so players are no longer held out once the period
  * has elapsed.

@@ -1,5 +1,4 @@
 // PR-A5 (BIN-663) — /user list (SUPPORT + HALL_OPERATOR roles).
-// Port of legacy/unity-backend/App/Views/user/user.html.
 //
 // Data:
 //   GET /api/admin/users?role=SUPPORT   ∪   ?role=HALL_OPERATOR

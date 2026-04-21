@@ -1,6 +1,5 @@
 // PR-A5 (BIN-663) — /role/matrix.
 // Read-only permission grid per static role.
-// Port of legacy/unity-backend/App/Views/role/add.html matrix-layout,
 // but wired to GET /api/admin/permissions so grid reflects backend truth.
 //
 // Rows: AdminPermission keys. Columns: 5 static roles. Cell: granted/denied.

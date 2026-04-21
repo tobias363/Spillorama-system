@@ -1,7 +1,6 @@
 import { t } from "../../i18n/I18n.js";
 import { forgotPassword } from "../../api/auth.js";
 
-// PR-B7 (BIN-675) — ports legacy/unity-backend/App/Views/forgot-password.html.
 //
 // Enumeration-safe UX: the backend at apps/backend/src/routes/auth.ts:227-267
 // always returns `{ sent: true }` regardless of whether the e-mail exists.

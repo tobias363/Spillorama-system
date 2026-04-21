@@ -1,5 +1,4 @@
 // Sell-physical-ticket — port of
-// legacy/unity-backend/App/Views/cash-inout/sell_ticket.html.
 // Barcode scanner binds to #finalId, extracts ticket ID, POST
 // /api/agent/physical/sell. URL: #/agent/sellPhysicalTickets?gameId=X
 

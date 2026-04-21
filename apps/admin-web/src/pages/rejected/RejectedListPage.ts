@@ -1,5 +1,4 @@
 // PR-B2: Rejected KYC list — port of
-// legacy/unity-backend/App/Views/player/RejectedRequests/rejected.html.
 // Source: GET /api/admin/players/rejected.
 
 import { t } from "../../i18n/I18n.js";

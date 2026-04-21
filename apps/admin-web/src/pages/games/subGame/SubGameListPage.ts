@@ -1,4 +1,3 @@
-// /subGame list page — 1:1 port of legacy/unity-backend/App/Views/subGameList/gamelist.html (208 lines).
 //
 // Legacy layout:
 //   - Content-header with title "Sub Game [ Game 1 ] Table" + breadcrumb

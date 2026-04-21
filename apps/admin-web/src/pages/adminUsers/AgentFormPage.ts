@@ -1,5 +1,4 @@
 // PR-A5 (BIN-663) — /agent/add + /agent/edit/:id.
-// Port of legacy/unity-backend/App/Views/agent/add.html.
 //
 // Data:
 //   POST /api/admin/agents     { email, password, displayName, surname, phone, language, hallIds[], primaryHallId }

@@ -1,5 +1,4 @@
 // PR-B4 (BIN-646) — Withdraw-requests queue page.
-// Port av legacy/unity-backend/App/Views/Amountwithdraw/bankRequests.html
 // (destinationType=bank) og hallRequests.html (destinationType=hall).
 //
 // Én renderer dekker begge variantene — forskjellen er destinationType-filter

@@ -7,8 +7,6 @@
  * nøkler om gangen.
  *
  * Legacy-opphav:
- *   legacy/unity-backend/App/Models/setting.js (Mongo singleton-dokument)
- *   legacy/unity-backend/App/Controllers/SettingsController.js
  *
  * Avgrensning (BIN-677):
  *   - IKKE per-hall Spillvett-tak (det lever i apps/backend/src/routes/adminHalls.ts).

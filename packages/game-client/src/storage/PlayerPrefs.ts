@@ -5,8 +5,6 @@
  * existing Unity keys on first access and copies them to our namespaced
  * "spillorama.prefs.*" keys — so users who migrate from Unity to web keep
  * their audio, language, marker and notification settings.
- *
- * `legacy/unity-client/Assets/_Project/_Scripts/**` via grep for
  * `PlayerPrefs\.(GetString|GetInt|GetFloat|SetString|...)` calls.
  */
 

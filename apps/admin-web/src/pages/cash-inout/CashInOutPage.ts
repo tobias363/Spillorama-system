@@ -1,5 +1,4 @@
 // Main cash-in/out page — 1:1 port of
-// legacy/unity-backend/App/Views/cash-inout/cash_in-out.html default + agent tabs.
 // "Game" tab from legacy is intentionally dropped (DRY — Agent A owns the
 // ongoing-games widget on dashboard). See PR-B1-PLAN.md §7 Q1.
 

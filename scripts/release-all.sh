@@ -17,7 +17,6 @@ RELEASE_COMMIT="${SYSTEM_RELEASE_COMMIT:-$(git -C "$ROOT_DIR" rev-parse --short 
 RELEASE_VERSION="${SYSTEM_RELEASE_VERSION:-$(date -u +"%Y%m%d-%H%M%S")-$RELEASE_COMMIT}"
 RUN_BACKEND_CHECK="${RUN_BACKEND_CHECK:-true}"
 RUN_BACKEND_DEPLOY="${RUN_BACKEND_DEPLOY:-true}"
-RUN_UNITY_BUILD="${RUN_UNITY_BUILD:-false}"
 RUN_ROOT_CHECK_ALL="${RUN_ROOT_CHECK_ALL:-false}"
 
 is_true() {
@@ -44,11 +43,6 @@ fi
 if is_true "$RUN_BACKEND_DEPLOY"; then
   echo "[release-all] Trigger backend deploy..."
   bash "$ROOT_DIR/infra/deploy-backend.sh"
-fi
-
-if is_true "$RUN_UNITY_BUILD"; then
-  echo "[release-all] Kjør Unity WebGL build..."
-  bash "$ROOT_DIR/legacy/scripts/unity-webgl-build.sh"
 fi
 
 echo "[release-all] Ferdig."

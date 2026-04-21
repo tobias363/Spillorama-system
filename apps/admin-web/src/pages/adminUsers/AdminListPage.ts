@@ -1,5 +1,4 @@
 // PR-A5 (BIN-663) — /adminUser list.
-// Port of legacy/unity-backend/App/Views/admin/admins.html (ADMIN role).
 //
 // Data:
 //   GET /api/admin/users?role=ADMIN

@@ -1,6 +1,5 @@
 // PR-A4b (BIN-659) — /hallAccountReport list page.
 //
-// Legacy: legacy/unity-backend/App/Views/hallAccountReport/list.html (169
 // lines). Presents a list of halls as a link-grid that jumps to per-hall
 // account history + settlement report.
 //

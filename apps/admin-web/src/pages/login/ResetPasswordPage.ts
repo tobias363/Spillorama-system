@@ -3,9 +3,6 @@ import { validateResetToken, resetPassword } from "../../api/auth.js";
 import { ApiError } from "../../api/client.js";
 
 // PR-B7 (BIN-675) — consolidates three legacy reset-password views:
-//   - legacy/unity-backend/App/Views/reset-password.html
-//   - legacy/unity-backend/App/Views/playerResetPassword.html
-//   - legacy/unity-backend/App/Views/importplayer-reset-password.html
 //
 // All three mapped to role-specific Unity endpoints. The modern backend
 // uses a single rolle-agnostic endpoint (apps/backend/src/routes/auth.ts:

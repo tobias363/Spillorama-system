@@ -1,4 +1,3 @@
-// Info-box widget — legacy/unity-backend/App/Views/templates/dashboard.html:60-133 (1:1).
 // Four variants: bg-blue / bg-yellow / bg-green / bg-red via icon-color.
 
 export interface InfoBoxOptions {

@@ -1,6 +1,5 @@
 // PR-A4b (BIN-659) — /hallAccountReport/:id detail page.
 //
-// Legacy: legacy/unity-backend/App/Views/hallAccountReport/hallAccount.html
 // (682 lines). Per-hall account history with date-range + gameType filter,
 // multi-agent columns (Metronia, OK Bingo, Franco, Otium, Norsk Tipping,
 // Norsk Rikstoto, Rekvisita, Kaffe-penger, Bilag, ...).

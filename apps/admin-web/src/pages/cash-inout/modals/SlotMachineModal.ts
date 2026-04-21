@@ -1,5 +1,4 @@
 // Slot-machine modal — port of
-// legacy/unity-backend/App/Views/cash-inout/slotmachine-popups.html.
 // The provider is determined upstream by SlotProviderSwitch; this modal issues
 // calls only to the resolved provider's endpoints (Metronia or OK Bingo).
 

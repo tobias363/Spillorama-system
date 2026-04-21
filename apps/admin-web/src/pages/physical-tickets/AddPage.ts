@@ -1,5 +1,4 @@
 // PR-B3 (BIN-613) — Add / manage physical-ticket batches.
-// Port of legacy/unity-backend/App/Views/physicalTickets/add.html.
 //
 // Modern mapping differs from legacy: legacy issued a single "initialId" and
 // incremented — modern backend (BIN-587 B4a) uses explicit batches with

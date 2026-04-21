@@ -22,7 +22,6 @@ import {
 import type { Ticket, RoomSnapshot } from "../../game/types.js";
 import type { PublicAppUser, HallDefinition } from "../../platform/PlatformService.js";
 import { createGameEventHandlers, type GameEventsDeps } from "../gameEvents.js";
-import { registerLegacyEventAliases } from "../legacyEventAliases.js";
 import { SocketRateLimiter } from "../../middleware/socketRateLimit.js";
 import { RoomStateManager } from "../../util/roomState.js";
 import {
@@ -333,8 +332,6 @@ export async function createTestServer(opts: CreateTestServerOptions = {}): Prom
   const registerGameEvents = createGameEventHandlers(deps);
   io.on("connection", (socket: Socket) => {
     registerGameEvents(socket);
-    // BIN-585: må registreres sist slik at canonical-handlers finnes.
-    registerLegacyEventAliases(socket);
   });
 
   // Start on random port

@@ -24,8 +24,6 @@
  *   - Idempotent ensureInitialized — trygt å kalle parallelt.
  *
  * Legacy-opphav:
- *   legacy/unity-backend/App/Models/otherGame.js (Mongo `otherGame` collection)
- *   legacy/unity-backend/App/Controllers/otherGameController.js
  *     - wheelOfFortune / editWheelOfFortune
  *     - treasureChest / editTreasureChestPostData
  *     - mystery / editMysteryPostData

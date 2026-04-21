@@ -1,6 +1,5 @@
 // PR-A4b (BIN-659) — /report/settlement/:hallId page.
 //
-// Legacy: legacy/unity-backend/App/Views/hallAccountReport/settlement.html
 // (1645 lines — daily settlement edit view for Metronia/OKBingo/OpenDay
 // agent integrations).
 //

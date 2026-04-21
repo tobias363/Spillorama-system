@@ -2,7 +2,6 @@ import { t } from "../../i18n/I18n.js";
 import { login } from "../../api/auth.js";
 import { setSession } from "../../auth/Session.js";
 
-// Matches legacy/unity-backend/App/Views/login.html:36-78 pixel-near.
 export function renderLoginPage(root: HTMLElement, onSuccess: () => void): void {
   root.removeAttribute("data-state");
   document.body.classList.remove("skin-blue", "sidebar-mini", "sidebar-collapse");

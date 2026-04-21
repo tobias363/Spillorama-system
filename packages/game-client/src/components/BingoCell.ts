@@ -124,7 +124,6 @@ export class BingoCell extends Container {
 
   /**
    * Start one-to-go blink animation.
-   * Matches Unity BingoTicketSingleCellData.Start_NumberBlink() (legacy/unity-client/
    * Assets/_Project/_Scripts/Prefabs/Bingo Tickets/BingoTicketSingleCellData.cs:212):
    *   LeanTween.scale(txtNumber, Vector3(1.5f,1.5f), 1.0f)
    *     .setEase(LeanTweenType.punch).setLoopCount(-1)

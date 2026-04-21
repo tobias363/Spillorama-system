@@ -1,5 +1,4 @@
 // /subGame/add and /subGame/edit/:id — 1:1 port of
-// legacy/unity-backend/App/Views/subGameList/add.html (242 lines).
 //
 // Renders the full legacy form read-only with a disabled Submit button and
 // "Venter på backend-endpoint — BIN-621" banner. When BIN-621 ships, flip the

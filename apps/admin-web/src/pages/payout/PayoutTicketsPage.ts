@@ -1,6 +1,5 @@
 // PR-A4b (BIN-659) — /payoutTickets list page.
 //
-// Legacy: legacy/unity-backend/App/Views/PayoutforPlayers/payoutTickets.html
 // (412 lines). Per-game ticket-level payout breakdown.
 //
 // Backend: `/api/admin/payouts/by-game/:gameId/tickets` — returns

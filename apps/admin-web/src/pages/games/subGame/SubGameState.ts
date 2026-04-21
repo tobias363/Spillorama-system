@@ -1,6 +1,4 @@
-// SubGame state — legacy/unity-backend/App/Views/subGameList/* (594 lines across 3 files).
 //
-// Legacy backend-routes this replaces (see legacy/unity-backend/src/routes/backend.js):
 //   GET  /subGame                            → list-page (DataTable ajax: /subGames/getSubGameList)
 //   GET  /addSubGame                         → add-form GET
 //   POST /addSubGameData                     → add-form POST          ← PLACEHOLDER (BIN-621)
@@ -11,7 +9,6 @@
 //   POST /checkForGameName/                  → uniqueness check        ← PLACEHOLDER (BIN-621)
 //
 // A SubGame is a named bundle of (pattern-row-ids, ticket-color-ids, status).
-// Legacy shape from `legacy/unity-backend/App/Models/subGame.js`:
 //   { _id, gameName, patternRow: [{ patternId, name }], ticketColor: [{ name }], status, createdAt }
 //
 // Write-ops are deferred to BIN-621 backend CRUD; this module intentionally
@@ -104,7 +101,6 @@ export function isGameNameLocallyValid(name: string): boolean {
 
 /**
  * Legacy ticket-color options. Mirrors the `ticketColors` variable populated
- * by `legacy/unity-backend/src/controllers/subGameController.js` — kept here
  * as a constant until BIN-621 ships a proper backend endpoint.
  *
  * Source of truth: Unity TicketColorManager (see apps/game1-unity/.../).

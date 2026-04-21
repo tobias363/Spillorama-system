@@ -1,6 +1,5 @@
 // PR-A4a (BIN-645) — /reportGame1 (Game 1 range-rapport).
 //
-// Legacy: legacy/unity-backend/App/Views/report/game1reports.html (468 linjer).
 // New implementation delegates to GameRangeReportPage with gameSlug="bingo".
 
 import { t } from "../../../i18n/I18n.js";

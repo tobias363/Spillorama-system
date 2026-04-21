@@ -1,7 +1,0 @@
-Assets/Best HTTP	socket.io transport, JSON helpers, legacy networking
-Assets/ExternalDependencyManager	Firebase/Android dependency resolution
-Assets/Firebase	Firebase Messaging SDK
-Assets/GPM	mobile/webview glue used by webViewManager
-Assets/I2	localization layer
-Assets/Plugins	native/plugin binaries used by authored scripts
-Assets/Vuplex	embedded webview SDK

@@ -1,7 +1,5 @@
 /**
  * BIN-648: physical-tickets aggregate-rapport (admin).
- *
- * Legacy-opphav: `legacy/unity-backend/App/Controllers/ReportsController.js`
  * `physicalTicketReport` aggregerer sum ticketPrice per playerTicketType.
  * Det vi leverer her er et strammere aggregat tilpasset vårt datamodell
  * (BIN-587 B4a `app_physical_tickets` + BIN-583 B3.2 `app_agent_transactions`):

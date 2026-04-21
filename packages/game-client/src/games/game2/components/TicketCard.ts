@@ -298,8 +298,6 @@ export class TicketCard extends Container {
    * _Project/_Scripts/Prefabs/Bingo Tickets/BingoTicket.cs:1011-1016) — the
    * each cell's `txtNumber`/`imgCellOneToGo`, then calls `Set_Color_Callback`
    * to restore the original color. No scale animation on reset.
-   *
-   * Game-finish handler: Game1GamePlayPanel.OnGameFinish (legacy/unity-client/
    * Assets/_Project/_Scripts/Panels/Game/Game1GamePlayPanel.SocketFlow.cs:
    * 595-616) calls Stop_Blink on every ticket.
    *
@@ -341,8 +339,6 @@ export class TicketCard extends Container {
    * Hide this card's own header/price/to-go chrome so only the BingoGrid +
    * per-mini background remain visible. Used when this card lives inside a
    * TicketGroup (Elvis/Large/Traffic) where the group owns the outer chrome.
-   *
-   * (legacy/unity-client/Assets/_Project/_Scripts/Prefabs/Bingo Tickets/
    * PrefabBingoGame1LargeTicket5x5.cs:18) sets
    *   Mini_Tickets[i].imgTicket.color = color.BG_Color
    * for EACH mini — i.e. every mini keeps its own per-theme BG image.
@@ -671,8 +667,6 @@ export class TicketCard extends Container {
 
   /**
    * Play the BINGO celebration animation when a pattern is completed.
-   *
-   * legacy/unity-client/Assets/_Project/_Scripts/Prefabs/Bingo Tickets/
    * BingoTicket.cs:1035-1056.
    *
    *   Bingo.SetActive(true)                             // overlay visible immediately

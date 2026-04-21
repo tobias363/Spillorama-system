@@ -1,5 +1,4 @@
 // PR-A5 (BIN-663) — /agent list (hall-operator CRUD).
-// Port of legacy/unity-backend/App/Views/agent/agents.html.
 //
 // Data:
 //   GET    /api/admin/agents?hallId=&status=

@@ -14,7 +14,6 @@ import type { PatternMask as SharedPatternMask } from "../../../../../../package
 
 /**
  * GameType (admin-facing catalog entry) — mirrors legacy GameType schema from
- * `legacy/unity-backend/App/Models/game.js`. The shell uses only the fields
  * exposed in the read-only port; write-ops are placeholders until backend
  * endpoints ship (BIN-620 GameType CRUD).
  */

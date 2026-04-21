@@ -1,5 +1,4 @@
 // PR-A5 (BIN-663) — /hall/add + /hall/edit/:id.
-// Port of legacy/unity-backend/App/Views/Hall/addHall.html.
 //
 // Data:
 //   POST /api/admin/halls                 create

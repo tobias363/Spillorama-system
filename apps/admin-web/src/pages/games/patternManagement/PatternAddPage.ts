@@ -1,5 +1,4 @@
 // /patternManagement/:typeId/add and /patternManagement/:typeId/edit/:id — 1:1
-// port of legacy/unity-backend/App/Views/patternManagement/addPattern.html (604 lines).
 //
 // Renders the full legacy form read-only with a disabled Submit button and
 // "Venter på backend-endpoint — BIN-627" banner. When BIN-627 ships, flip the

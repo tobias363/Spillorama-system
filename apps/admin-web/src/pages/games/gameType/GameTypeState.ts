@@ -1,7 +1,6 @@
 // GameType state — fetches from backend `/api/admin/games` and adapts the
 // platform response to the legacy-shaped GameType row used by admin-UI.
 //
-// Legacy backend-routes this replaces (see legacy/unity-backend/src/routes/backend.js):
 //   GET  /gameType                      → list-page (DataTable ajax: /gameType/getGameType)
 //   GET  /addGameType                   → add-form GET
 //   POST /addGameType                   → add-form POST        ← PLACEHOLDER (BIN-620)

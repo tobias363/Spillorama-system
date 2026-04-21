@@ -1,5 +1,4 @@
 // PR-B2: BankID response — port of
-// legacy/unity-backend/App/Views/player/bankId/reponse.html
 // (note: legacy typo kept in filename; we use "ResponsePage").
 //
 // Shows success/error/pending state after provider redirect.

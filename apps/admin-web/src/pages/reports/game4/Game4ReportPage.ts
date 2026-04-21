@@ -1,6 +1,5 @@
 // PR-A4a (BIN-645) — /reportGame4 (Wheel of Fortune range-rapport).
 //
-// Legacy: legacy/unity-backend/App/Views/report/game4reports.html (283 linjer).
 
 import { t } from "../../../i18n/I18n.js";
 import { renderGameRangeReportPage } from "../shared/GameRangeReportPage.js";

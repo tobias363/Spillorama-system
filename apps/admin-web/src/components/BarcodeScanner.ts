@@ -1,5 +1,4 @@
 // BarcodeScanner — vanilla-DOM port of the legacy `on_scanner()` helper
-// (legacy/unity-backend/App/Views/cash-inout/sell_ticket.html:216-250).
 //
 // Hall terminals have USB barcode readers configured to emit the full barcode
 // followed by ENTER. The raw string is ≥ 22 characters; the ticket ID sits at

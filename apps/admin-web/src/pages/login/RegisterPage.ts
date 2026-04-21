@@ -4,7 +4,6 @@ import { setSession } from "../../auth/Session.js";
 import { ApiError } from "../../api/client.js";
 
 // PR-B7 (BIN-675) — builds an *actual* registration form. The legacy
-// legacy/unity-backend/App/Views/register.html file was a mislabeled copy
 // of login.html (no first-name/surname/birthdate fields) — we port against
 // the contract of POST /api/auth/register at apps/backend/src/routes/auth.ts:
 // 49-75, which accepts email/password/displayName/surname/birthDate and

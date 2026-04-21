@@ -1,6 +1,4 @@
-// GameManagement state — legacy/unity-backend/App/Views/GameManagement/* (9 267 lines across 10 files).
 //
-// Legacy backend-routes this replaces (see legacy/unity-backend/src/routes/backend.js):
 //   GET  /gameManagement                              → type-picker + list
 //   GET  /gameManagementDetailList/:id                → type-scoped list (DataTable ajax)
 //   GET  /addGameManagement/:id                       → add-form GET (Game 1/2)

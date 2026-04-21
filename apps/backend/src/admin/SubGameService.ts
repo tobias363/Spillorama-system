@@ -4,7 +4,6 @@
  * Admin-CRUD for gjenbrukbare SubGame-maler (navngitte bundles av pattern-
  * ids + ticket-farger). DailySchedule (BIN-626) binder inn SubGame-ids via
  * subgames_json. Legacy Mongo-schema `subGame1`
- * (legacy/unity-backend/App/Models/subGame1.js) normalisert til
  * `app_sub_games` med egne kolonner for de feltene som brukes aktivt og
  * JSON-fallback for resten.
  *
@@ -17,8 +16,6 @@
  * Soft-delete: `deleted_at` settes + status = 'inactive'. Hard-delete
  * blokkeres hvis SubGame er referert fra:
  *   - app_daily_schedules.subgames_json (JSON array av subGame-ids)
- *
- * Legacy-opphav: legacy/unity-backend/App/Controllers/subGameController.js
  */
 
 import { randomUUID } from "node:crypto";

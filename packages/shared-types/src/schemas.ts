@@ -1069,7 +1069,6 @@ export type GameTypeListResponse = z.infer<typeof GameTypeListResponseSchema>;
 // .subgames_json — hver plan kan velge å kjøre en SubGame for å få en
 // preconfigured kombinasjon av mønstre og farger.
 //
-// Legacy: legacy/unity-backend/App/Models/subGame.js blandet admin-katalog
 // og runtime-state i samme schema. Vi splitter ut: runtime hører til
 // app_game_sessions / hall_game_schedules; admin-katalog bor i app_sub_games.
 
@@ -1210,8 +1209,6 @@ export type LeaderboardTierListResponse = z.infer<
 // siden legacy `savedGame` hadde ~50 felter som varierer per gameType;
 // GameManagement-layeret gjør semantisk validering ved load-to-game.
 //
-// Legacy: legacy/unity-backend/App/Models/savedGame.js (Mongo) + handlers
-// i legacy/unity-backend/App/Controllers/GameController.js.
 
 const SavedGameStatus = z.enum(["active", "inactive"]);
 
@@ -1278,7 +1275,6 @@ export type SavedGameLoadResponse = z.infer<typeof SavedGameLoadResponseSchema>;
 // fra DailySchedule (BIN-626) som er kalender-rader. Mirror av migration
 // `20260425000300_schedules.sql`.
 //
-// Legacy-opphav: legacy/unity-backend/App/Models/schedule.js (Mongo) —
 // "schedules"-kolleksjonen med scheduleName, scheduleType (Auto|Manual),
 // subGames[] og Innsatsen-spesifikke felter (luckyNumberPrize,
 // ticketColorTypePrice m.fl. innenfor subGames).
@@ -1527,7 +1523,6 @@ export type UpdateMaintenanceInput = z.infer<typeof UpdateMaintenanceSchema>;
 // integrasjonen i Game 1 leser i dag hardkodede arrays (BingoEngine.
 // MINIGAME_PRIZES); wiring til denne tabellen er egen PR.
 //
-// Legacy-opphav: legacy/unity-backend/App/Models/otherGame.js (Mongo
 // `otherGame`-kolleksjonen med slug-diskriminator + per-spill prizeList-
 // felt). Fire separate felter flatet ut til én discriminated tabell fordi
 // hvert spill er singleton-konfig.

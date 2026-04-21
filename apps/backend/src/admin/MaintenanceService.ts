@@ -7,7 +7,6 @@
  * deaktiverer eksisterende active-vindu før den setter nytt.
  *
  * Legacy-opphav:
- *   legacy/unity-backend/App/Controllers/SettingsController.js
  *     - maintenance / editMaintenance / updateMaintenance / DailyReportsWithMaintanace
  */
 

@@ -11,9 +11,6 @@
  * aldri har vært kjørt (status = 'active' / 'inactive' og innsatsen = 0).
  *
  * Legacy-opphav:
- *   legacy/unity-backend/App/Models/dailySchedule.js
- *   legacy/unity-backend/App/Controllers/scheduleController.js
- *   legacy/unity-backend/App/Services/scheduleServices.js
  */
 
 import { randomUUID } from "node:crypto";

@@ -1,7 +1,5 @@
 /**
  * BIN-582: BankID / ID-document expiry reminder job (legacy daily cron).
- *
- * Legacy origin (legacy/unity-backend/App/Controllers/PlayerController.js
  * line 4967, `checkBankIdAndIdCardExpiryAndSendReminders`): finds users
  * whose BankID auth or hall-verified ID-card is about to expire, sends a
  * reminder email, and marks already-expired ones as EXPIRED so the auth

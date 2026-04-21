@@ -1,5 +1,4 @@
 // /gameType/add and /gameType/edit/:id — 1:1 port of
-// legacy/unity-backend/App/Views/gameType/add.html (233 lines).
 //
 // Renders the full legacy form read-only with a disabled Submit button and
 // "Venter på backend-endpoint — BIN-620" banner. When BIN-620 ships, flip the

@@ -246,24 +246,6 @@ test("BIN-585: admin-display:screensaver reflects disabled config", async () => 
   assert.equal(r.data?.enabled, false);
 });
 
-test("BIN-585: legacy ScreenSaver alias dispatches to admin-display:screensaver via alias-map", async () => {
-  // The alias is registered in legacyEventAliases.ts — here we verify the
-  // canonical handler exists on the socket, which is what the alias
-  // re-dispatch looks up via socket.listeners("admin-display:screensaver").
-  const io = new FakeIo();
-  const register = createAdminDisplayHandlers({
-    engine: makeEngineStub([]),
-    platformService: makePlatformStub([]),
-    io: io as unknown as Server,
-    screensaverConfig: { enabled: true, timeoutMs: 300000, imageRotationMs: 10000 },
-    validateDisplayToken: async () => ({ hallId: "hall-1" }),
-  });
-  const sock = new FakeSocket();
-  register(sock as unknown as Parameters<typeof register>[0]);
-  const r = await sock.fire<{ enabled: boolean }>("admin-display:screensaver", {});
-  assert.ok(r.ok, "canonical handler must exist for alias to dispatch to");
-});
-
 test("BIN-498 state: returns fresh snapshot on demand", async () => {
   const io = new FakeIo();
   const engine = makeEngineStub([{ code: "ROOM-X", hallId: "hall-X", gameStatus: "RUNNING" }]);

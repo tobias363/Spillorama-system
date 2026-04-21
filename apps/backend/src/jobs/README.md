@@ -24,7 +24,7 @@ Queries `swedbank_payment_intents` for rows whose status is not one of
 `PAID | CREDITED | FAILED | EXPIRED | CANCELLED` and that are younger
 than 24h, then calls `SwedbankPayService.reconcileIntentForUser` on each.
 Legacy equivalent: `swedbankpayCronToUpdateTransaction` in
-`legacy/unity-backend/Game/Common/Controllers/PlayerController.js:3468`.
+legacy refs.
 
 Behaviour in dev when the table doesn't exist yet: logs a `table missing`
 note and returns 0 items (does not raise).
@@ -37,7 +37,7 @@ Expiring users get a log line (e-mail is stubbed until SMTP is signed
 off). Already-expired verifications are flipped to `kyc_status='EXPIRED'`
 so login forces re-KYC. Legacy equivalent:
 `checkBankIdAndIdCardExpiryAndSendReminders` in
-`legacy/unity-backend/App/Controllers/PlayerController.js:4967`.
+legacy refs.
 
 ### `self-exclusion-cleanup`
 Clears expired voluntary pauses (`timed_pause_until`) and lifts the
@@ -45,7 +45,7 @@ self-exclusion minimum marker (`self_exclusion_minimum_until`) when 1
 year has passed. `self_excluded_at` is left in place to preserve the
 audit trail; lifting the exclusion itself requires an explicit user
 action per Spillvett policy. Legacy equivalent: `updatePlayerBlockRules`
-in `legacy/unity-backend/Game/Common/Controllers/PlayerController.js:5121`.
+in legacy refs.
 
 ### `game1-schedule-tick` (GAME1_SCHEDULE PR 1)
 Spawns Game 1 rows into `app_game1_scheduled_games` from

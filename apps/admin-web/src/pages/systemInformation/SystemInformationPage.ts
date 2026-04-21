@@ -1,5 +1,4 @@
 // PR-A6 (BIN-674) — /system/systemInformation.
-// Port of legacy/unity-backend/App/Views/SystemInformation/systemInformation.html.
 //
 // Design-avvik: Summernote rich-text-editor (iframe + CDN) erstattet med
 // ren textarea + markdown-preview. Funksjonelt ekvivalent for ops-bruk,

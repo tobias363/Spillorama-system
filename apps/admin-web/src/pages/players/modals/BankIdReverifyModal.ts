@@ -1,5 +1,4 @@
 // PR-B2: BankID-reverify-modal.
-// Port av legacy/unity-backend/App/Views/player/ApprovedPlayers/profile.html
 // (BankID-reverify-knapp → POST /bankid-reverify).
 //
 // Flow:

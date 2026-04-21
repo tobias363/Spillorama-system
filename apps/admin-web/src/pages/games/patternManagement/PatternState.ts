@@ -1,6 +1,4 @@
-// PatternManagement state — legacy/unity-backend/App/Views/patternManagement/* (1294 lines).
 //
-// Legacy backend-routes this replaces (see legacy/unity-backend/src/routes/backend.js):
 //   POST /getPatternMenu                              → sidebar dynamic menu  ← PLACEHOLDER (BIN-627)
 //   GET  /patternGameDetailList/:id                   → list-page              ← PLACEHOLDER (BIN-627)
 //   GET  /addPattern/:id                              → add-form GET

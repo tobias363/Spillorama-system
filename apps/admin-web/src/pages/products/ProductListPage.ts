@@ -1,5 +1,4 @@
 // PR-B5 (BIN-660) — Product list (admin-only).
-// Port of legacy/unity-backend/App/Views/Products/product-list.html.
 //
 // Data:
 //   GET  /api/admin/products?categoryId=&status=   → Product[]
