@@ -2093,5 +2093,14 @@
   "reset_password_success_heading": "Password updated",
   "reset_password_success_body": "You can now sign in with your new password.",
   "reset_password_success_cta": "Go to sign in",
-  "reset_password_error": "Could not update the password. Please try again."
+  "reset_password_error": "Could not update the password. Please try again.",
+
+  "game_name_required": "Game name is required.",
+  "start_time_required_hhmm": "Start time must be in HH:MM format.",
+  "end_time_invalid_hhmm": "End time must be in HH:MM format.",
+  "notification_start_time_must_be_positive": "Notification lead time must be greater than 0 seconds.",
+  "please_select_at_least_one_ticket_color": "Select at least one ticket color.",
+  "game_type_not_found_fallback": "Game type not found.",
+  "added_successfully": "added successfully",
+  "forbidden": "Access denied."
 }

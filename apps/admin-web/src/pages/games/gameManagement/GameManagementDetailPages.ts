@@ -94,18 +94,13 @@ function baseCrumb(gt: GameType | null, typeId: string): ShellOpts["breadcrumb"]
   ];
 }
 
-/** /gameManagement/:typeId/add — legacy gameAdd.html (2 497 lines) */
-export async function renderGameManagementAddPage(container: HTMLElement, typeId: string): Promise<void> {
-  const gt = await resolveGameType(typeId);
-  container.innerHTML = renderShell({
-    title: `${t("add_game")} — ${gt?.name ?? typeId}`,
-    breadcrumb: [...baseCrumb(gt, typeId), { label: t("add_game") }],
-    issue: "BIN-622",
-    bannerText: "Venter på backend-endpoint for GameManagement CRUD.",
-    backHref: `#/gameManagement?typeId=${encodeURIComponent(typeId)}`,
-    backLabel: t("back"),
-  });
-}
+/**
+ * /gameManagement/:typeId/add — erstatning for legacy gameAdd.html (2 497 lines).
+ * Re-eksportert fra GameManagementAddForm.ts slik at dispatcheren fortsatt
+ * importerer herfra; Spill 1 får full konfigurasjon, andre typer får en
+ * "ikke wired ennå"-placeholder (se GameManagementAddForm.renderNotYetSupportedShell).
+ */
+export { renderGameManagementAddPage } from "./GameManagementAddForm.js";
 
 /** /gameManagement/:typeId/add-g3 — legacy game3Add.html (2 158 lines) */
 export async function renderGameManagementAddG3Page(container: HTMLElement, typeId: string): Promise<void> {

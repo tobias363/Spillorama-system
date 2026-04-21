@@ -2086,5 +2086,14 @@
   "reset_password_success_heading": "Passordet er oppdatert",
   "reset_password_success_body": "Du kan nå logge inn med det nye passordet ditt.",
   "reset_password_success_cta": "Gå til logg inn",
-  "reset_password_error": "Kunne ikke oppdatere passordet. Prøv igjen."
+  "reset_password_error": "Kunne ikke oppdatere passordet. Prøv igjen.",
+
+  "game_name_required": "Spillnavn er påkrevd.",
+  "start_time_required_hhmm": "Starttid må være i formatet HH:MM.",
+  "end_time_invalid_hhmm": "Slutttid må være i formatet HH:MM.",
+  "notification_start_time_must_be_positive": "Varslingstid må være større enn 0 sekunder.",
+  "please_select_at_least_one_ticket_color": "Velg minst én billett-farge.",
+  "game_type_not_found_fallback": "Spilltypen finnes ikke.",
+  "added_successfully": "opprettet",
+  "forbidden": "Tilgang nektet."
 }
