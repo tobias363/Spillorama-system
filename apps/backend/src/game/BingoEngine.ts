@@ -1031,10 +1031,17 @@ export class BingoEngine {
 
     if (winnerPlayerIds.length === 0) return;
 
-    // Compute total prize for this phase + per-winner split.
-    const phasePrizePercent = activePattern.prizePercent ?? 0;
-    const totalPhasePrize = Math.floor(game.prizePool * phasePrizePercent / 100);
-    // Floor division — any remainder stays in the pool (goes to next phase
+    // Compute total prize for this phase + per-winner split. Two modes:
+    //   - winningType "fixed" → flat kr amount from `prize1` (e.g. 100 kr for
+    //     1 Rad), independent of pool. Existing RTP / single-prize / remaining-
+    //     pool guards in payoutPhaseWinner cap against house risk when pool is
+    //     short, so this path doesn't need a separate safety net.
+    //   - default / "percent" → prizePercent of current prizePool (legacy).
+    const isFixed = activePattern.winningType === "fixed";
+    const totalPhasePrize = isFixed
+      ? Math.max(0, activePattern.prize1 ?? 0)
+      : Math.floor(game.prizePool * (activePattern.prizePercent ?? 0) / 100);
+    // Floor division — any remainder stays with the house (house-rounding).
     const prizePerWinner = Math.floor(totalPhasePrize / winnerPlayerIds.length);
 
     // GAME1_SCHEDULE PR 5 (§3.7): audit rest-øre som huset beholder.

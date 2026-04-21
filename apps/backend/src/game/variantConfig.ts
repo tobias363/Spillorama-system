@@ -190,12 +190,17 @@ export const DEFAULT_NORSK_BINGO_CONFIG: GameVariantConfig = {
     { name: "Large Yellow", type: "large", priceMultiplier: 3, ticketCount: 3 },
     { name: "Large White", type: "large", priceMultiplier: 3, ticketCount: 3 },
   ],
+  // Faste premiebeløp (2026-04-21, Tobias): 100 / 200 / 200 / 200 / 1000 kr.
+  // `winningType: "fixed"` + `prize1` overstyrer `prizePercent` i
+  // BingoEngine.evaluateActivePhase. Ved lav pool/RTP blir utbetaling capet
+  // av eksisterende `applySinglePrizeCap` + `remainingPrizePool` i
+  // payoutPhaseWinner — huset dekker ikke differansen.
   patterns: [
-    { name: "1 Rad", claimType: "LINE" as const, prizePercent: 15, design: 1 },
-    { name: "2 Rader", claimType: "LINE" as const, prizePercent: 15, design: 2 },
-    { name: "3 Rader", claimType: "LINE" as const, prizePercent: 15, design: 3 },
-    { name: "4 Rader", claimType: "LINE" as const, prizePercent: 15, design: 4 },
-    { name: "Fullt Hus", claimType: "BINGO" as const, prizePercent: 40, design: 0 },
+    { name: "1 Rad",    claimType: "LINE" as const,  prizePercent: 0, design: 1, winningType: "fixed" as const, prize1: 100 },
+    { name: "2 Rader",  claimType: "LINE" as const,  prizePercent: 0, design: 2, winningType: "fixed" as const, prize1: 200 },
+    { name: "3 Rader",  claimType: "LINE" as const,  prizePercent: 0, design: 3, winningType: "fixed" as const, prize1: 200 },
+    { name: "4 Rader",  claimType: "LINE" as const,  prizePercent: 0, design: 4, winningType: "fixed" as const, prize1: 200 },
+    { name: "Fullt Hus", claimType: "BINGO" as const, prizePercent: 0, design: 0, winningType: "fixed" as const, prize1: 1000 },
   ],
   patternEvalMode: "auto-claim-on-draw",
   autoClaimPhaseMode: true,

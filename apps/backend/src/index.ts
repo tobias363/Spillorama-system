@@ -56,6 +56,7 @@ import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
 import { Game1TicketPurchaseService } from "./game/Game1TicketPurchaseService.js";
+import { Game1DrawEngineService } from "./game/Game1DrawEngineService.js";
 import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAdapter.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
@@ -869,6 +870,18 @@ const game1RecoveryService = new Game1RecoveryService({
   pool: platformService.getPool(),
   schema: pgSchema,
 });
+
+// GAME1_SCHEDULE PR 4b: draw-engine core. Orkestreres av master-control
+// (start/pause/resume/stop), og tar over DrawBag + ticket-assignment +
+// per-kule draws for Game 1 scheduled-games. Kobles inn i master-control
+// via setDrawEngine() for å unngå sirkulær konstruksjon.
+const game1DrawEngineService = new Game1DrawEngineService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  ticketPurchaseService: game1TicketPurchaseService,
+  auditLogService,
+});
+game1MasterControlService.setDrawEngine(game1DrawEngineService);
 
 // ── Mount routers ─────────────────────────────────────────────────────────────
 

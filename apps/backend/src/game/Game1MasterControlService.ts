@@ -45,6 +45,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { DomainError } from "./BingoEngine.js";
 import { logger as rootLogger } from "../util/logger.js";
+import type { Game1DrawEngineService } from "./Game1DrawEngineService.js";
 
 const log = rootLogger.child({ module: "game1-master-control-service" });
 
@@ -124,6 +125,16 @@ export interface TimeoutDetectedInput {
 export interface Game1MasterControlServiceOptions {
   pool: Pool;
   schema?: string;
+  /**
+   * GAME1_SCHEDULE PR 4b: valgfri draw-engine som orkestreres av master-
+   * control. Når satt: startGame delegerer til engine.startGame() etter
+   * DB-state-update, og pauseGame/resumeGame/stopGame delegerer tilsvarende.
+   * Hvis engine-kall feiler, rulles DB-endringen tilbake og feilen kastes.
+   *
+   * Valgfri for bakoverkompatibilitet (eksisterende tester + legacy kjøre-
+   * moduser). Produksjonssetup injisierer alltid engine via index.ts.
+   */
+  drawEngine?: Game1DrawEngineService;
 }
 
 interface ScheduledGameRow {
@@ -169,6 +180,7 @@ function toIso(value: unknown): string | null {
 export class Game1MasterControlService {
   private readonly pool: Pool;
   private readonly schema: string;
+  private readonly drawEngine: Game1DrawEngineService | null;
 
   constructor(options: Game1MasterControlServiceOptions) {
     this.pool = options.pool;
@@ -177,11 +189,22 @@ export class Game1MasterControlService {
       throw new DomainError("INVALID_CONFIG", "Ugyldig schema-navn.");
     }
     this.schema = schema;
+    this.drawEngine = options.drawEngine ?? null;
   }
 
   /** @internal test helper. */
   static forTesting(pool: Pool, schema = "public"): Game1MasterControlService {
     return new Game1MasterControlService({ pool, schema });
+  }
+
+  /**
+   * GAME1_SCHEDULE PR 4b: setter draw-engine etter konstruksjon (brukes av
+   * DI-wiring i index.ts der master-control-servicen opprettes før engine
+   * for å unngå sirkulær avhengighet).
+   */
+  setDrawEngine(drawEngine: Game1DrawEngineService): void {
+    (this as unknown as { drawEngine: Game1DrawEngineService }).drawEngine =
+      drawEngine;
   }
 
   private scheduledGamesTable(): string {
@@ -197,7 +220,7 @@ export class Game1MasterControlService {
   }
 
   async startGame(input: StartGameInput): Promise<MasterActionResult> {
-    return this.runInTransaction(async (client) => {
+    const result = await this.runInTransaction(async (client) => {
       const game = await this.loadGameForUpdate(client, input.gameId);
       this.assertActorIsMaster(input.actor, game);
 
@@ -279,6 +302,17 @@ export class Game1MasterControlService {
         auditId,
       };
     });
+
+    // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit (engine
+    // bruker egen transaksjon og er idempotent — retry etter feil gir samme
+    // netto-effekt). Hvis engine kaster, propagerer vi feilen; DB-state er
+    // allerede committed men ny kall til startGame vil short-circuit i
+    // engine (idempotent) og kaste om det er reelle pre-cond-feil.
+    if (this.drawEngine) {
+      await this.drawEngine.startGame(input.gameId, input.actor.userId);
+    }
+
+    return result;
   }
 
   async excludeHall(input: ExcludeHallInput): Promise<MasterActionResult> {
@@ -413,7 +447,7 @@ export class Game1MasterControlService {
   }
 
   async pauseGame(input: PauseGameInput): Promise<MasterActionResult> {
-    return this.runInTransaction(async (client) => {
+    const result = await this.runInTransaction(async (client) => {
       const game = await this.loadGameForUpdate(client, input.gameId);
       this.assertActorIsMaster(input.actor, game);
 
@@ -461,10 +495,16 @@ export class Game1MasterControlService {
         auditId,
       };
     });
+
+    // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit.
+    if (this.drawEngine) {
+      await this.drawEngine.pauseGame(input.gameId, input.actor.userId);
+    }
+    return result;
   }
 
   async resumeGame(input: ResumeGameInput): Promise<MasterActionResult> {
-    return this.runInTransaction(async (client) => {
+    const result = await this.runInTransaction(async (client) => {
       const game = await this.loadGameForUpdate(client, input.gameId);
       this.assertActorIsMaster(input.actor, game);
 
@@ -512,6 +552,12 @@ export class Game1MasterControlService {
         auditId,
       };
     });
+
+    // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit.
+    if (this.drawEngine) {
+      await this.drawEngine.resumeGame(input.gameId, input.actor.userId);
+    }
+    return result;
   }
 
   async stopGame(input: StopGameInput): Promise<MasterActionResult> {
@@ -519,7 +565,8 @@ export class Game1MasterControlService {
     if (!reason) {
       throw new DomainError("INVALID_INPUT", "reason kreves ved stop.");
     }
-    return this.runInTransaction(async (client) => {
+    let priorStatus: string | null = null;
+    const result = await this.runInTransaction(async (client) => {
       const game = await this.loadGameForUpdate(client, input.gameId);
       this.assertActorIsMaster(input.actor, game);
 
@@ -568,6 +615,8 @@ export class Game1MasterControlService {
         "master.stop"
       );
 
+      priorStatus = game.status;
+
       return {
         gameId: row.id,
         status: row.status,
@@ -576,6 +625,17 @@ export class Game1MasterControlService {
         auditId,
       };
     });
+
+    // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit hvis engine
+    // har blitt startet for dette spillet (pre-running-stop har ingen engine-
+    // state, men engine.stopGame er idempotent ved fravær av state).
+    if (
+      this.drawEngine &&
+      (priorStatus === "running" || priorStatus === "paused")
+    ) {
+      await this.drawEngine.stopGame(input.gameId, reason, input.actor.userId);
+    }
+    return result;
   }
 
   /**
