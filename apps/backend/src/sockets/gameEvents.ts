@@ -835,9 +835,10 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
         }
         // BIN-615 / PR-C3b: emit Game 3 wire events for any G3 draw effects
         // stashed by Game3Engine.onDrawCompleted. No-op for non-G3 rooms.
-        // Game3Engine extends Game2Engine so the `instanceof Game2Engine`
-        // branch also fires for G3 runtimes — the two stashes are independent
-        // and G2/G3 guards are mutually exclusive, so at most one emits.
+        // Game2Engine and Game3Engine are sibling subclasses of BingoEngine
+        // — each `instanceof` branch matches exactly one engine type, and
+        // the engine concretely instantiated for a room determines which
+        // stash can be non-empty.
         if (engine instanceof Game3Engine) {
           const g3Effects = engine.getG3LastDrawEffects(roomCode);
           if (g3Effects) emitG3DrawEvents(io, g3Effects);
