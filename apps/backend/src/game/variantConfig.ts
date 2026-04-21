@@ -1,17 +1,12 @@
 /**
  * Game variant configuration — ticket types, patterns, and multipliers.
  *
- * Ports the old AIS subGame1 system where admin configures:
- * - gameName → gameType ("standard" | "elvis" | "traffic-light")
- * - ticketColor → array of {name, type} with prices
- * - winning patterns → configurable per variant
+ * Admin konfigurerer per spill:
+ * - gameType: "standard" | "elvis" | "traffic-light"
+ * - ticketColor: array av {name, type} med priser
+ * - winning patterns: konfigurerbare per variant
  *
- * Stored in hall_game_schedules.variant_config JSONB column.
- *
- * References:
- * - unity-bingo-backend/Game/Game1/Controllers/GameController-old.js:78-84
- * - unity-bingo-backend/Game/Game1/Controllers/GameController-old.js:873-1034
- * - Unity: Game1GamePlayPanel.UpcomingGames.cs:Get_Ticket_Weight()
+ * Lagres i `hall_game_schedules.variant_config` (JSONB).
  */
 
 import type { PatternDefinition } from "./types.js";
@@ -19,7 +14,7 @@ import type { PatternDefinition } from "./types.js";
 // ── Ticket type config ────────────────────────────────────────────────────────
 
 export interface TicketTypeConfig {
-  /** Display name matching Unity TicketColorManager, e.g. "Small Yellow", "Elvis 1". */
+  /** Display-navn, f.eks. "Small Yellow", "Elvis 1". */
   name: string;
   /** Type code: "small", "large", "elvis", "traffic-light". */
   type: string;
