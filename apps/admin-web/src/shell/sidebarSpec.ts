@@ -49,6 +49,9 @@ const spilloramaLive: SidebarGroup = {
     { kind: "leaf", id: "live-prize-policy", path: "/live/prize-policy", icon: "fa fa-circle-o", labelKey: "spillorama_prize_policy" },
     { kind: "leaf", id: "live-room-control", path: "/live/room-control", icon: "fa fa-circle-o", labelKey: "spillorama_room_control" },
     { kind: "leaf", id: "live-payment-requests", path: "/live/payment-requests", icon: "fa fa-circle-o", labelKey: "spillorama_payment_requests" },
+    // GAME1_SCHEDULE PR 3: master-konsoll for Game 1 (routes til /game1/master/:gameId;
+    // liste-navigasjon kommer i oppfølger, lenken her peker til placeholder).
+    { kind: "leaf", id: "game1-master-console", path: "/game1/master/placeholder", icon: "fa fa-circle-o", labelKey: "spillorama_master_console" },
   ],
 };
 

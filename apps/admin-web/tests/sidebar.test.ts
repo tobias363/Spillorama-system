@@ -43,11 +43,12 @@ describe("Sidebar spec", () => {
     document.body.innerHTML = "";
   });
 
-  it("admin spec includes Spillorama Live group with 11 leaves", () => {
+  it("admin spec includes Spillorama Live group with 12 leaves (11 native + 1 Game 1 master-konsoll)", () => {
+    // GAME1_SCHEDULE PR 3 la til master-konsoll som 12. leaf.
     const live = adminSidebar.find((n) => n.kind === "group" && n.id === "spillorama-live");
     expect(live).toBeDefined();
     if (live && live.kind === "group") {
-      expect(live.children).toHaveLength(11);
+      expect(live.children).toHaveLength(12);
     }
   });
 

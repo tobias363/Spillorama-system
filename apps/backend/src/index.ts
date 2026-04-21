@@ -51,7 +51,9 @@ import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
 import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
 import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
+import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
+import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createWalletRouter } from "./routes/wallet.js";
@@ -763,6 +765,13 @@ const game1HallReadyService = new Game1HallReadyService({
   schema: pgSchema,
 });
 
+// GAME1_SCHEDULE PR 3: master-control service. Håndterer master-start/pause/
+// resume/stop + hall-exclude/include med regulatorisk audit (app_game1_master_audit).
+const game1MasterControlService = new Game1MasterControlService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+
 // ── Mount routers ─────────────────────────────────────────────────────────────
 
 const bingoSettingsState = {
@@ -918,6 +927,17 @@ app.use(createAdminGame1ReadyRouter({
   platformService,
   auditLogService,
   hallReadyService: game1HallReadyService,
+  io,
+}));
+// GAME1_SCHEDULE PR 3: master-control router for Game 1. 7 endepunkter —
+// POST /games/:gameId/{start,exclude-hall,include-hall,pause,resume,stop}
+// + GET /games/:gameId. GAME1_MASTER_WRITE (ADMIN + HALL_OPERATOR + AGENT)
+// for writes. GAME1_GAME_READ for GET. Broadcaster `game1:master-action`
+// globalt + til group-room `group:<groupHallId>`.
+app.use(createAdminGame1MasterRouter({
+  platformService,
+  auditLogService,
+  masterControlService: game1MasterControlService,
   io,
 }));
 // BIN-627: Pattern CRUD + dynamic-menu. Aktiverer Agent A's

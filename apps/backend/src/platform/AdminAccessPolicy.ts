@@ -325,7 +325,22 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     alle"-invariant). Hall-scope håndheves i route.
    */
   GAME1_GAME_READ:         ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
-  GAME1_HALL_READY_WRITE:  ["ADMIN", "HALL_OPERATOR", "AGENT"]
+  GAME1_HALL_READY_WRITE:  ["ADMIN", "HALL_OPERATOR", "AGENT"],
+  /**
+   * GAME1_SCHEDULE PR3: master-control (start/pause/resume/stop/exclude_hall/
+   * include_hall) for Game 1.
+   *   - GAME1_MASTER_WRITE: trykke master-knapper. ADMIN + HALL_OPERATOR +
+   *     AGENT (bingovert). SUPPORT er eksplisitt utelatt — master-rollen
+   *     er drift, ikke compliance-review. Route-laget håndhever hall-scope:
+   *     HALL_OPERATOR/AGENT må tilhøre `game.master_hall_id` (unntatt
+   *     ADMIN som er globalt scope).
+   *
+   * Hvorfor AGENT inkludert? Bingovert-rollen er typisk AGENT i prod; i
+   * kontekst av master-rollen er bingoverten som står i master-hallen
+   * den som trykker START. Dette er konsistent med
+   * GAME1_HALL_READY_WRITE der AGENT kan trykke klar for egen hall.
+   */
+  GAME1_MASTER_WRITE:      ["ADMIN", "HALL_OPERATOR", "AGENT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;
