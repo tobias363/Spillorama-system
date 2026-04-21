@@ -288,19 +288,25 @@ test("resolveColorFamily (#316): red/green/orange utvidet til egne familier", ()
 
 // ── 4c-services-coverage tillegg: config-defensivity + fallback-kombinasjoner ──
 
-test("defensivity: jackpot.draw ugyldig (negativ, 0, undefined) → aldri trigget", () => {
-  // Fail-closed mot rusk fra ticket_config_json.
+test("defensivity: jackpot.draw ugyldig (negativ, 0, undefined, NaN, Infinity) → aldri trigget", () => {
+  // Regulatorisk fail-closed mot rusk fra ticket_config_json
+  // (pengespillforskriften §11).
   //
-  // - draw=undefined → `?? 0` gjør det til 0, og `drawSeq > 0` gir fail-closed.
+  // - draw=undefined → `?? 0` gjør det til 0, `drawSeq > 0` fanger.
   // - draw=0 eller negativ → samme path.
-  //
-  // MERK: draw=NaN er en KJENT ikke-fail-closed-path: `Math.floor(NaN)=NaN`,
-  // og alle sammenligninger mot NaN er `false`, så `drawSeq > maxDraw` er
-  // false og evaluatoren faller gjennom til trigget. Ikke testet her.
-  // Rapportert til PM som potensielt kode-fiks (scope-gate: test-agent
-  // fikser ikke koden). Se scope-plan-rapport.
+  // - draw=NaN → `Math.floor(NaN)=NaN`, fanget av eksplisitt
+  //   `!Number.isFinite(maxDraw)`-guard. Uten denne fanget `x > NaN` er
+  //   false → jackpot ville feilaktig utløses.
+  // - draw=Infinity → `Math.floor(Infinity)=Infinity`, fanget av samme
+  //   isFinite-guard. Uten det ville ENHVER drawSeq tillate jackpot.
   const svc = new Game1JackpotService();
-  const badDraws = [-1, 0, undefined as unknown as number];
+  const badDraws = [
+    -1,
+    0,
+    undefined as unknown as number,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ];
   for (const draw of badDraws) {
     const r = svc.evaluate({
       phase: 5,
