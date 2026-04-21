@@ -219,9 +219,21 @@ export class BallTube extends Container {
   }
 
   clear(): void {
+    // Kill tweens on EVERY ball child — not just the ones still in this.balls.
+    // The eviction path (addBall → this.balls.pop()) removes the oldest ball
+    // from the tracked array but leaves it as a child of ballContainer with
+    // its y-tween still running; a gsap.delayedCall was scheduled to destroy
+    // it after moveTime. If clear() runs before that delayedCall fires (e.g.
+    // onGameEnded → playScreen.destroy → BallTube.destroy → clear), we
+    // otherwise destroy the evicted ball via super.destroy({children:true})
+    // WITHOUT killing its tween — gsap's global ticker then tries to set .y
+    // on the destroyed Container every rAF and crashes with "Cannot set
+    // properties of null (setting 'y')" (BIN-xxx, 2026-04-21).
+    for (const child of this.ballContainer.children as Ball[]) {
+      gsap.killTweensOf(child);
+      if (child.scale) gsap.killTweensOf(child.scale);
+    }
     for (const b of this.balls) {
-      gsap.killTweensOf(b);
-      gsap.killTweensOf(b.scale);
       b.destroy({ children: true });
     }
     this.balls = [];

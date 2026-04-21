@@ -10,8 +10,25 @@
  * colour strings — BallTube derives colour from the ball number via the
  * canonical 75-ball column partition.
  */
-import { describe, it, expect } from "vitest";
-import { getBallColor, getMoveAnimationTime } from "./BallTube.js";
+import { describe, it, expect, vi } from "vitest";
+import { BallTube, getBallColor, getMoveAnimationTime } from "./BallTube.js";
+
+// Record every target passed to gsap.killTweensOf so the regression test
+// below can assert that `clear()` visits every child of ballContainer — not
+// only the ones currently in `this.balls`. Declared at module scope so it's
+// available when the BallTube module's top-level `import gsap from "gsap"`
+// is resolved via this mock factory.
+const killTweensOfCalls: unknown[] = [];
+vi.mock("gsap", () => {
+  const api = {
+    to: () => ({ kill: () => {} }),
+    from: () => ({ kill: () => {} }),
+    fromTo: () => ({ kill: () => {} }),
+    killTweensOf: (target: unknown) => { killTweensOfCalls.push(target); },
+    delayedCall: () => ({ kill: () => {} }),
+  };
+  return { default: api, ...api };
+});
 
 // Palette (hex) — reused in CalledNumbersOverlay tests to keep the two
 // surfaces visually consistent.
@@ -112,5 +129,50 @@ describe("BallTube.getMoveAnimationTime — Unity-parity move-time", () => {
     // showcaseCount=10, limit=11. Empty-tube should still be 0.5s.
     near(getMoveAnimationTime(0, 10), 0.5);
     near(getMoveAnimationTime(5, 10), (11 - 5) * 0.5 / 11); // 3/11 ≈ 0.2727
+  });
+});
+
+/**
+ * Regression (2026-04-21): `clear()` must kill gsap tweens on EVERY child
+ * of the internal ballContainer, not just the balls currently tracked in
+ * `this.balls`. The eviction path (`addBall` → `this.balls.pop()`) removes
+ * the oldest ball from the tracked array but leaves it as a child of
+ * ballContainer with its y-tween still running (a delayedCall is scheduled
+ * to destroy it after moveTime). If `BallTube.destroy()` runs before that
+ * delayedCall fires (e.g. onGameEnded → playScreen.destroy →
+ * BallTube.destroy → clear), Pixi's recursive destroy nulls the evicted
+ * ball's `_position` while the tween is still active — gsap's ticker then
+ * sets `.y` on the destroyed Container every rAF and crashes the render
+ * loop with "Cannot set properties of null (setting 'y')".
+ */
+describe("BallTube.clear — tween cleanup covers evicted balls (render-crash regression)", () => {
+  it("kills tweens on every ballContainer child, including ones popped off this.balls", () => {
+    const tube = new BallTube(600);
+    // Fill past the showcase limit so an eviction happens — 6 additions push
+    // one ball out of `this.balls` but it remains parented to ballContainer
+    // for its exit animation.
+    for (let n = 1; n <= 6; n++) {
+      tube.addBall(n);
+    }
+
+    // Snapshot the full child set BEFORE clear(). `this.balls` tracks at
+    // most showcaseCount (5); the evicted ball is the 6th child we need to
+    // cover.
+    // @ts-expect-error — private access for regression assertion.
+    const allBallChildren = [...tube.ballContainer.children];
+    expect(allBallChildren.length).toBeGreaterThan(
+      // @ts-expect-error — private access for regression assertion.
+      tube.balls.length,
+    );
+
+    killTweensOfCalls.length = 0;
+    tube.clear();
+
+    // Every child that was in ballContainer must have had its tweens killed.
+    for (const child of allBallChildren) {
+      expect(killTweensOfCalls).toContain(child);
+    }
+
+    tube.destroy({ children: true });
   });
 });
