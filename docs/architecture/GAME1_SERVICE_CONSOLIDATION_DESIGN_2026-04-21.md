@@ -1,7 +1,7 @@
 # Game1-tjeneste-konsolidering — design-dok
 
-**Status:** Forslag til PM-godkjenning (ikke implementert)
-**Dato:** 2026-04-21
+**Status:** PM-godkjent (Alternativ B) 2026-04-21. Start post-pilot.
+**Dato:** 2026-04-21 (addendum 2026-04-21)
 **Forfatter:** Agent 3 (audit-funn #2)
 **Scope:** Refactor av 6 Game1-backend-tjenester (totalt ~3661+ linjer i de 4 største)
 **Beslutning kreves:** Godkjenn plan / endre scope / utsett
@@ -228,3 +228,67 @@ Samme pattern for DrawEngine, TicketPurchase, ScheduleTick.
   - `apps/backend/src/game/Game1MasterControlService.test.ts`
   - `apps/backend/src/game/Game1DrawEngineService.test.ts`
   - `apps/backend/src/sockets/__tests__/socketIntegration.test.ts`
+
+---
+
+## Addendum 2026-04-21 — Re-vurdering mot PR 4c (#317, #319) i main
+
+PM meldte: *"PR 4c har landet — du har kanskje mindre arbeid enn du trodde."*
+**Konklusjon etter re-vurdering: Netto litt MER arbeid, ikke mindre. Men totalen forblir under 6 dager — Alternativ B står fortsatt klart bedre enn A.**
+
+### Hva PR 4c faktisk gjorde med scope
+
+| Fil | Status | Linjer | Merknad |
+|---|---|---|---|
+| Game1PayoutService | **NY** | 380 | Pattern-evaluering → winners → wallet-credit + split-rounding-audit + loyalty-hook |
+| Game1PatternEvaluator | **NY** | 243 | Ren fase-pattern-matching (5x5 + fase 2-4 kolonner etter #319) |
+| Game1JackpotService | **NY** | 187 | Per-farge-jackpot-evaluering + color-family-resolver |
+| Game1AutoDrawTickService | **NY** | 254 | Auto-draw-tick som eier `drawEngine`-instans som privat felt |
+| Game1DrawEngineService | **VOKST** | 923 → **1283** (+360) | Fikk `evaluateAndPayoutPhase` + `computePotCents` + `resolveWalletIdForUser` som privat orkestrering |
+
+**Overraskende sannhet:** DrawEngine er ikke krympet; den er blitt en **draw-side-coordinator** (Alternativ A-pattern i miniatyr). PR 4c splittet UT tre tunge fagområder (pattern, payout, jackpot) til dedikerte tjenester, men la til orkestreringskode i DrawEngine for å kople dem sammen.
+
+### Oppdatert fase 3 (DrawEngine-splitting)
+
+**Før addendum:** 1 dag (923 linjer, lav koordinasjon).
+**Etter addendum:** 1.5 dag (1283 linjer, eksisterende coordinator-pattern).
+
+**Anbefalt tilnærming endret:** Fortsett PR 4c sitt mønster — flytt **interne private DrawEngine-metoder til egne service-filer** (ikke submoduler i samme fil, som opprinnelig Alternativ B foreskrev for de andre tjenestene). Konkret:
+
+- `evaluateAndPayoutPhase` (linje 835-937, ~100 linjer) → `Game1PhaseEvaluationOrchestrator.ts` (ren orkestrering av PayoutService + PatternEvaluator + JackpotService)
+- `generateTicketAssignments` (linje 775-835, ~60 linjer) → `Game1TicketAssignmentGenerator.ts` (grid-bygging per kjøp)
+- `markBallOnAssignments` (linje 984-1021, ~37 linjer) → inn i samme assignment-generator-fil som hjelpefunksjon
+- `buildStateView` + tx-helpers → blir værende i DrawEngine (de er infra, ikke fagområde)
+
+Sluttresultat: DrawEngine krymper til ~800-850 linjer og blir tydelig orkestrerings-lag over PR 4c-tjenestene + nye assignment/evaluation-moduler.
+
+### Ny fase 5 — audit av PR 4c-tjenestene
+
+**0.5 dag**, read-only. Sjekk om PayoutService/PatternEvaluator/JackpotService/AutoDrawTickService har kryss-overlapp eller internt delbare ansvar. Første kjappe lesing antyder **NEI** (alle er godt fokuserte). Men bekreft før pilot kjøres.
+
+### Oppdatert totalestimat
+
+| Fase | Opprinnelig | Etter addendum | Kommentar |
+|---|---|---|---|
+| 1. TicketPurchase-splitting | 1.5 dag | 1.5 dag | Uendret |
+| 2. MasterControl-splitting | 1.5 dag | 1.5 dag | Uendret |
+| 3. DrawEngine-splitting | 1 dag | **1.5 dag** | Større fil, men tyngste logikk er allerede ute |
+| 4. ScheduleTick-splitting | 1 dag | 1 dag | Uendret |
+| 5. PR 4c-tjeneste-audit | — | **0.5 dag (NY)** | Bekreft ingen videre splitting nødvendig |
+| HallReady + Recovery | Skip | Skip | <500 linjer |
+| **Sum** | **5 dager** | **6 dager** | Fortsatt 2.5x raskere enn Alternativ A (15 dager) |
+
+### Parallelisering-beskrankning (oppdatert)
+
+Fase 3 (DrawEngine) må nå bemannes av én agent som forstår PR 4c-arkitekturen. Kan ikke gis til en agent som ser DrawEngine for første gang uten å lese PR 4c-tjenestene først. Ingen endring for fase 1, 2, 4.
+
+### Oppdatert anbefaling
+
+**Alternativ B står.** PR 4c bekreftet at spesialisert-tjeneste-ekstraksjon fungerer godt for dette kodebasen — det er allerede mønstret vi følger, bare ufullført på DrawEngine-siden.
+
+**Ikke bygg Game1EngineCoordinator (Alternativ A).** Hvis kryss-tjeneste-orkestrering blir nødvendig senere, eksisterer DrawEngine allerede som draw-side-coordinator og AutoDrawTickService har allerede adopter-pattern mot DrawEngine. Resten av systemet (master/schedule/purchase) kobles inn via smale offentlige API-er som allerede er godt atskilt.
+
+### Nye åpne spørsmål til PM
+
+6. **Fase 3 ny tilnærming.** OK å flytte DrawEngines private metoder til egne service-filer (fortsette PR 4c-mønster) fremfor submoduler i samme fil?
+7. **Fase 5 (PR 4c-audit).** Skal den drives av samme agent som fase 3, eller separat?
