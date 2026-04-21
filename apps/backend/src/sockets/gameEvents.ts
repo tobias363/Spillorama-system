@@ -986,7 +986,6 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     // whole bundle, for Large/Elvis/Traffic-light types). Pre-round arm
     // is not yet debited, so cancellation is free — no wallet operation.
     //
-    // Unity parity: `Game1ViewPurchaseElvisTicket.cs:17,49-76` (deleteBtn)
     // gives the player an in-place × on each ticket that removes the
     // bundle and disarms when the last bundle is dropped.
     socket.on("ticket:cancel", rateLimited("ticket:cancel", async (payload: unknown, callback: (response: AckResponse<{ removedTicketIds: string[]; remainingTicketCount: number; fullyDisarmed: boolean }>) => void) => {

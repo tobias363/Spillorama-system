@@ -8,7 +8,6 @@ const GAP = 8;
 /**
  * Animated vertical ball queue for Game 3 (Monster Bingo).
  *
- * Port of Unity's BingoNumberBalls + BallScript:
  * - FIFO queue with max 5 visible balls
  * - New balls drop in from above with acceleration (velocity + acc)
  * - When full, oldest ball fades out, all shift down, new one enters

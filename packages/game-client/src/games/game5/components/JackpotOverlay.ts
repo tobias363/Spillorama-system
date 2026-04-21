@@ -149,8 +149,6 @@ export class JackpotOverlay extends Container {
     this.spinBtnText.text = "SPINN";
     this.resultText.visible = false;
     this.visible = true;
-
-    // Idle DrumRotation — port of Unity DrumRotation.cs: wheel slowly rotates
     // while waiting for player input, so it feels alive rather than static.
     this.startIdleRotation();
 

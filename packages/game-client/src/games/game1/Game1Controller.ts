@@ -423,8 +423,6 @@ class Game1Controller implements GameController {
 
     if (this.phase === "PLAYING") {
       this.transitionTo("ENDED", state);
-
-      // Auto-dismiss EndScreen after a delay — matches Unity's immediate
       // transition to waiting mode with countdown timer.
       this.endScreenTimer = setTimeout(() => {
         this.endScreenTimer = null;
@@ -544,7 +542,6 @@ class Game1Controller implements GameController {
   private async handleClaim(type: "LINE" | "BINGO"): Promise<void> {
     // BIN-420 G26 Gap #3: Spectators have no tickets — submitting a claim is
     // a no-op server-side, but we surface a user-visible message instead of a
-    // silent return so behaviour matches Unity's claim-denied feedback.
     if (this.phase === "SPECTATING") {
       this.toast?.info("Tilskuere kan ikke gjøre claims");
       return;
@@ -706,7 +703,6 @@ class Game1Controller implements GameController {
 
   /**
    * Resume room after socket reconnect — rebuild state from server snapshot.
-   * Matches Unity's reconnect flow: call room:resume, apply snapshot,
    * deduplicate draws, and transition to the correct phase.
    */
   private async handleReconnect(): Promise<void> {

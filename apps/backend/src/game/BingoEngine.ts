@@ -979,7 +979,6 @@ export class BingoEngine {
     const phasePrizePercent = activePattern.prizePercent ?? 0;
     const totalPhasePrize = Math.floor(game.prizePool * phasePrizePercent / 100);
     // Floor division — any remainder stays in the pool (goes to next phase
-    // or is unclaimed at game end). Matches Unity behaviour.
     const prizePerWinner = Math.floor(totalPhasePrize / winnerPlayerIds.length);
 
     // Pay out each winner before marking the phase won — so a wallet

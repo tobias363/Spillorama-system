@@ -3,7 +3,6 @@ import gsap from "gsap";
 
 /**
  * G2 signature: vertical rocket that builds up one segment per draw.
- * Port of legacy Unity LeanTween rocket-stabling — see game2-canonical-spec.md §8.
  */
 export class RocketStack extends Container {
   private readonly width_: number;

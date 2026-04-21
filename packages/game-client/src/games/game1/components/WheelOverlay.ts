@@ -315,8 +315,6 @@ export class WheelOverlay extends Container {
       seg.fill(color);
       seg.stroke({ color: 0x1a0a0a, width: 0.5 });
       this.wheelInner.addChild(seg);
-
-      // Prize label (modulo prizeList — matches Unity prefab-duplicate pattern)
       const prize =
         this.prizeList.length > 0 ? this.prizeList[i % this.prizeList.length] : 0;
       const midAngle = startAngle + segmentAngleRad / 2;

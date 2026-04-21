@@ -1,6 +1,5 @@
 /**
  * Game pause overlay — shown when admin pauses the game.
- * Matches Unity's isGamePaused overlay with pauseGameMessage.
  *
  * Blocks interaction and shows a centered message.
  * Auto-hides when game is resumed (isPaused becomes false in next room:update).

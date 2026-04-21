@@ -201,8 +201,6 @@ export class CenterTopPanel {
 
       const row = document.createElement("div");
       row.style.cssText = "display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,0.15);padding:4px 0;";
-
-      // Mini-grid for the current (active) pattern only (matches Unity: only show one pattern at a time)
       if (i === currentPatternIdx) {
         const miniGrid = new PatternMiniGrid();
         miniGrid.setDesign(pattern.design);

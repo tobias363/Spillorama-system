@@ -38,7 +38,7 @@
       } else if (!state.hallId) {
         els.hostSessionState.textContent = "Velg en aktiv hall i Spillorama-lobbyen for å synkronisere riktig kundeflate.";
       } else {
-        els.hostSessionState.textContent = "Shellen viser nå Spillvett, mens Unity brukes som spillflate for valgt hall.";
+        els.hostSessionState.textContent = "Spillvett er aktivt for valgt hall.";
       }
     }
   }
@@ -429,7 +429,7 @@
       renderLimitCard("daily", "Dagsgrense", 0, 0, "Venter på data");
       renderLimitCard("monthly", "Månedsgrense", 0, 0, "Venter på data");
       els.note.textContent = state.token
-        ? "Velg hall i Unity-lobbyen for å vise riktige grenser og riktig spillregnskap i shellen."
+        ? "Velg hall i lobbyen for å vise riktige grenser og riktig spillregnskap i shellen."
         : "Logg inn i Spillorama for å hente Spillvett-data i shellen.";
       return;
     }
@@ -987,23 +987,7 @@
   };
 
   // SetShellToken — kalles av auth.js etter web-login (BIN-262).
-  // Setter token direkte uten å bli overstyrt av Unity.
   window.SetShellToken = function SetShellToken(token) {
-    state.token = token || "";
-    safeStorageSet(storageKeys.token, state.token);
-    scheduleSync();
-    render();
-  };
-
-  // SetPlayerToken — kalles av Unity etter socket-login.
-  // Ignoreres hvis web-shell allerede har et gyldig Spillorama-token,
-  // siden Unity-tokenet ikke er gyldig mot Spillorama REST-APIet.
-  window.SetPlayerToken = function SetPlayerToken(token) {
-    if (state.token) {
-      // Web-session er aktiv — ignorer Unity-tokenet for API-kall,
-      // men lagre det separat for eventuelle Fase 3-behov.
-      return;
-    }
     state.token = token || "";
     safeStorageSet(storageKeys.token, state.token);
     scheduleSync();
