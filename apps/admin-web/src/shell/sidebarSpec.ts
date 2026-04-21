@@ -193,6 +193,8 @@ export const adminSidebar: SidebarNode[] = [
     children: [
       { kind: "leaf", id: "depositRequests", path: "/deposit/requests", icon: "fa fa-circle-o", labelKey: "deposit_request" },
       { kind: "leaf", id: "depositHistory", path: "/deposit/history", icon: "fa fa-circle-o", labelKey: "deposit_history" },
+      // BIN-655 — generisk transaksjons-logg (wallet + agent + payment-requests).
+      { kind: "leaf", id: "transactionsLog", path: "/transactions/log", icon: "fa fa-circle-o", labelKey: "transactions_log" },
     ],
   },
   {
@@ -213,15 +215,16 @@ export const adminSidebar: SidebarNode[] = [
   { kind: "leaf", id: "leaderboard", path: "/leaderboard", icon: "fa fa-credit-card-alt", labelKey: "leaderboard_management" },
   { kind: "leaf", id: "voucher", path: "/voucher", icon: "fa fa-users mr-20", labelKey: "voucher_management" },
 
+  // BIN-700: tier-CRUD + spiller-liste.
   {
     kind: "group",
     id: "loyalty-management",
-    icon: "fa fa-user-secret",
+    icon: "fa fa-star",
     labelKey: "loyalty_management",
     module: "Loyalty Management",
     children: [
-      { kind: "leaf", id: "loyaltyManagement", path: "/loyaltyManagement", icon: "fa fa-circle-o", labelKey: "players_loyalty_management" },
-      { kind: "leaf", id: "loyalty", path: "/loyalty", icon: "fa fa-circle-o", labelKey: "loyalty_type" },
+      { kind: "leaf", id: "loyaltyManagement", path: "/loyaltyManagement", icon: "fa fa-circle-o", labelKey: "loyalty_tier_list_title" },
+      { kind: "leaf", id: "loyaltyPlayers", path: "/loyaltyManagement/players", icon: "fa fa-circle-o", labelKey: "loyalty_players_title" },
     ],
   },
 
@@ -229,6 +232,10 @@ export const adminSidebar: SidebarNode[] = [
   { kind: "leaf", id: "cms", path: "/cms", icon: "fa fa-users mr-20", labelKey: "cms_management", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "settings", path: "/settings", icon: "fa fa-gears mr-20", labelKey: "settings", roles: ["admin", "super-admin"] },
   { kind: "leaf", id: "system-information", path: "/system/systemInformation", icon: "fa fa-bar-chart", labelKey: "system_information", superAdminOnly: true },
+  // BIN-678 — runtime-diagnostikk (version, build-SHA, uptime, feature-flags).
+  { kind: "leaf", id: "system-diagnostics", path: "/system/info", icon: "fa fa-heartbeat", labelKey: "system_diagnostics", superAdminOnly: true },
+  // BIN-655 (alt) — audit-logg (append-only compliance-view).
+  { kind: "leaf", id: "audit-log", path: "/auditLog", icon: "fa fa-history", labelKey: "audit_log_title", superAdminOnly: true },
 ];
 
 // Agent sidebar — legacy/.../navigation.html:713-1548 (subset, permission-gated)
@@ -236,6 +243,8 @@ export const agentSidebar: SidebarNode[] = [
   { kind: "header", labelKey: "main_navigation" },
   spilloramaLive,
   { kind: "leaf", id: "dashboard", path: "/admin", icon: "fa fa-dashboard", labelKey: "dashboard" },
+  { kind: "leaf", id: "agent-dashboard", path: "/agent/dashboard", icon: "fa fa-line-chart", labelKey: "agent_dashboard", agentOnly: true },
+  { kind: "leaf", id: "agent-players", path: "/agent/players", icon: "fa fa-users", labelKey: "agent_players_title", agentOnly: true },
   {
     kind: "group",
     id: "cash-in-out",

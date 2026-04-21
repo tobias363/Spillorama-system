@@ -1198,6 +1198,107 @@ export type LeaderboardTierListResponse = z.infer<
   typeof LeaderboardTierListResponseSchema
 >;
 
+// ── BIN-700: Loyalty CRUD + player-state wire schemas ───────────────────────
+// Admin-CRUD for tier-hierarkiet (bronze/silver/gold/platinum etc.) + per-
+// spiller aggregat (current_tier, lifetime_points, month_points). Mirror av
+// migration `20260429000000_loyalty.sql`.
+//
+// Avgrensning mot BIN-668 (leaderboard_tier): leaderboard-tier er plass-basert
+// premie-mapping (runtime wins), loyalty-tier er persistent status basert på
+// akkumulert aktivitet. Systemene er uavhengige.
+
+export const LoyaltyTierRowSchema = z.object({
+  id: z.string().min(1),
+  /** Display-navn ("Bronze", "Silver", "Gold", "Platinum"). Unik. */
+  name: z.string().min(1).max(200),
+  /** Hierarkisk rang. 1 = laveste. Høyere rank = bedre tier. Unik. */
+  rank: z.number().int().positive(),
+  /** Inklusiv minimums-grense for å kvalifisere (lifetime_points >= min_points). */
+  minPoints: z.number().int().nonnegative(),
+  /** Eksklusiv maks-grense. NULL = ingen øvre grense (toppnivå). */
+  maxPoints: z.number().int().nullable(),
+  /** Fri-form benefits-payload (bonus-prosent, fri-spinn, prioritet). */
+  benefits: z.record(z.string(), z.unknown()),
+  active: z.boolean(),
+  createdByUserId: z.string().nullable(),
+  createdAt: IsoDateString,
+  updatedAt: IsoDateString,
+});
+export type LoyaltyTierRow = z.infer<typeof LoyaltyTierRowSchema>;
+
+export const CreateLoyaltyTierSchema = z.object({
+  name: z.string().min(1).max(200),
+  rank: z.number().int().positive(),
+  minPoints: z.number().int().nonnegative().optional(),
+  maxPoints: z.number().int().nonnegative().nullable().optional(),
+  benefits: z.record(z.string(), z.unknown()).optional(),
+  active: z.boolean().optional(),
+});
+export type CreateLoyaltyTierInput = z.infer<typeof CreateLoyaltyTierSchema>;
+
+export const UpdateLoyaltyTierSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    rank: z.number().int().positive().optional(),
+    minPoints: z.number().int().nonnegative().optional(),
+    maxPoints: z.number().int().nonnegative().nullable().optional(),
+    benefits: z.record(z.string(), z.unknown()).optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Ingen endringer oppgitt.",
+  });
+export type UpdateLoyaltyTierInput = z.infer<typeof UpdateLoyaltyTierSchema>;
+
+export const LoyaltyTierListResponseSchema = z.object({
+  tiers: z.array(LoyaltyTierRowSchema),
+  count: z.number().int().nonnegative(),
+});
+export type LoyaltyTierListResponse = z.infer<typeof LoyaltyTierListResponseSchema>;
+
+// Player-state wire-schema — én rad pr spiller.
+
+export const LoyaltyPlayerStateSchema = z.object({
+  userId: z.string().min(1),
+  /** Nåværende tier (null før første tildeling). Speiler app_loyalty_tiers-rad. */
+  currentTier: LoyaltyTierRowSchema.nullable(),
+  lifetimePoints: z.number().int().nonnegative(),
+  monthPoints: z.number().int().nonnegative(),
+  monthKey: z.string().nullable(),
+  /** true hvis admin har låst tier manuelt (bypass automatic assignment). */
+  tierLocked: z.boolean(),
+  lastUpdatedAt: IsoDateString,
+  createdAt: IsoDateString,
+});
+export type LoyaltyPlayerState = z.infer<typeof LoyaltyPlayerStateSchema>;
+
+export const LoyaltyAwardSchema = z.object({
+  pointsDelta: z.number().int(),
+  /** Admin-note eller event-kategori ("Bursdag", "Jubileum"). */
+  reason: z.string().min(1).max(500),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+export type LoyaltyAwardInput = z.infer<typeof LoyaltyAwardSchema>;
+
+export const LoyaltyTierOverrideSchema = z.object({
+  /** Tier-id. NULL betyr "fjern override" (låser opp så autoassign kan kjøre igjen). */
+  tierId: z.string().min(1).nullable(),
+  /** Admin-begrunnelse for audit. */
+  reason: z.string().min(1).max(500),
+});
+export type LoyaltyTierOverrideInput = z.infer<typeof LoyaltyTierOverrideSchema>;
+
+export const LoyaltyEventRowSchema = z.object({
+  id: z.string().min(1),
+  userId: z.string().min(1),
+  eventType: z.string().min(1),
+  pointsDelta: z.number().int(),
+  metadata: z.record(z.string(), z.unknown()),
+  createdByUserId: z.string().nullable(),
+  createdAt: IsoDateString,
+});
+export type LoyaltyEventRow = z.infer<typeof LoyaltyEventRowSchema>;
+
 // ── BIN-624: SavedGame CRUD wire schemas ────────────────────────────────────
 // Admin-CRUD for SavedGame-templates (gjenbrukbare GameManagement-oppsett).
 // Mirror av migration `20260425000200_saved_games.sql`.

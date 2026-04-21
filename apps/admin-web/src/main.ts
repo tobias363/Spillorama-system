@@ -27,6 +27,7 @@ import { isProductsRoute, mountProductsRoute } from "./pages/products/index.js";
 import { isSecurityRoute, mountSecurityRoute } from "./pages/security/index.js";
 import { isRiskCountryRoute, mountRiskCountryRoute } from "./pages/riskCountry/index.js";
 import { isLeaderboardRoute, mountLeaderboardRoute } from "./pages/leaderboard/index.js";
+import { isLoyaltyRoute, mountLoyaltyRoute } from "./pages/loyalty/index.js";
 import { isAdminUsersRoute, mountAdminUsersRoute } from "./pages/adminUsers/index.js";
 import { isRoleRoute, mountRoleRoute } from "./pages/role/index.js";
 import { isHallRoute, mountHallRoute } from "./pages/hall/index.js";
@@ -34,8 +35,11 @@ import { isGroupHallRoute, mountGroupHallRoute } from "./pages/groupHall/index.j
 import { isCmsRoute, mountCmsRoute } from "./pages/cms/index.js";
 import { isSettingsRoute, mountSettingsRoute } from "./pages/settings/index.js";
 import { isSystemInformationRoute, mountSystemInformationRoute } from "./pages/systemInformation/index.js";
+import { isAuditLogRoute, mountAuditLogRoute } from "./pages/auditLog/index.js";
 import { isOtherGamesRoute, mountOtherGamesRoute } from "./pages/otherGames/index.js";
 import { mountDashboard, unmountDashboard } from "./pages/dashboard/DashboardPage.js";
+import { mountAgentDashboard, unmountAgentDashboard } from "./pages/agent-dashboard/AgentDashboardPage.js";
+import { mountAgentPlayers } from "./pages/agent-players/AgentPlayersPage.js";
 
 const MAINTENANCE_MODE = false;
 
@@ -178,6 +182,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
         mountLeaderboardRoute(container, bare);
         return;
       }
+      if (isLoyaltyRoute(bare)) {
+        mountLoyaltyRoute(container, bare);
+        return;
+      }
       if (isAdminUsersRoute(bare)) {
         mountAdminUsersRoute(container, bare);
         return;
@@ -204,6 +212,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isSystemInformationRoute(bare)) {
         mountSystemInformationRoute(container, bare);
+        return;
+      }
+      if (isAuditLogRoute(bare)) {
+        mountAuditLogRoute(container, bare);
         return;
       }
       if (isOtherGamesRoute(bare)) {
@@ -256,8 +268,19 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
     return mountDashboard(container, session);
   }
   unmountDashboard();
+  if (route.path !== "/agent/dashboard") {
+    unmountAgentDashboard();
+  }
   if (isLegacySectionRoute(route.path)) {
     mountLegacySection(container, route.path);
+    return;
+  }
+  if (route.path === "/agent/dashboard") {
+    mountAgentDashboard(container);
+    return;
+  }
+  if (route.path === "/agent/players") {
+    mountAgentPlayers(container);
     return;
   }
   if (isCashInOutRoute(route.path)) {
@@ -350,6 +373,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
     mountLeaderboardRoute(container, route.path);
     return;
   }
+  if (isLoyaltyRoute(route.path)) {
+    mountLoyaltyRoute(container, route.path);
+    return;
+  }
   if (isAdminUsersRoute(route.path)) {
     mountAdminUsersRoute(container, route.path);
     return;
@@ -376,6 +403,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (isSystemInformationRoute(route.path)) {
     mountSystemInformationRoute(container, route.path);
+    return;
+  }
+  if (isAuditLogRoute(route.path)) {
+    mountAuditLogRoute(container, route.path);
     return;
   }
   if (isOtherGamesRoute(route.path)) {

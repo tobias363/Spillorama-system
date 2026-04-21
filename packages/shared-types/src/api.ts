@@ -134,3 +134,63 @@ export interface RejectPaymentRequestBody {
   type: PaymentRequestKind;
   reason: string;
 }
+
+// ── System info (BIN-678) ──────────────────────────────────────────────────
+// GET /api/admin/system/info — runtime-diagnostikk for ops-konsoll.
+
+export interface SystemInfoSnapshot {
+  version: string;
+  buildSha: string;
+  buildTime: string;
+  nodeVersion: string;
+  env: string;
+  uptime: number;
+  features: Record<string, boolean>;
+}
+
+// ── Transactions log (BIN-655) ─────────────────────────────────────────────
+// GET /api/admin/transactions — aggregert read-only transaksjonslogg
+// (wallet + agent + payment-requests).
+
+export type AdminTransactionSource =
+  | "wallet"
+  | "agent"
+  | "deposit_request"
+  | "withdraw_request";
+
+export interface AdminTransactionRow {
+  id: string;
+  source: AdminTransactionSource;
+  type: string;
+  amountCents: number;
+  timestamp: string;
+  userId: string | null;
+  hallId: string | null;
+  description: string;
+}
+
+export interface AdminTransactionsListResponse {
+  items: AdminTransactionRow[];
+  nextCursor: string | null;
+}
+
+// ── Audit log (BIN-655 alt) ────────────────────────────────────────────────
+// GET /api/admin/audit-log — cursor-paginert read-only audit-liste.
+
+export interface AdminAuditLogEvent {
+  id: string;
+  actorId: string | null;
+  actorType: string;
+  action: string;
+  resource: string;
+  resourceId: string | null;
+  details: Record<string, unknown>;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface AdminAuditLogListResponse {
+  items: AdminAuditLogEvent[];
+  nextCursor: string | null;
+}

@@ -109,8 +109,12 @@ export const routes: RouteDef[] = [
   // BIN-668 — Leaderboard tier CRUD. `/leaderboard/edit/:id` via hash-regex.
   { path: "/addLeaderboard", titleKey: "leaderboard_tier_create", module: "Leaderboard Management" },
   { path: "/voucher", titleKey: "voucher_management" },
-  { path: "/loyaltyManagement", titleKey: "players_loyalty_management", module: "Loyalty Management" },
-  { path: "/loyalty", titleKey: "loyalty_type", module: "Loyalty Management" },
+  { path: "/loyaltyManagement", titleKey: "loyalty_tier_list_title", module: "Loyalty Management" },
+  // BIN-700 — Loyalty tier CRUD + player-state. `/loyaltyManagement/edit/:id`
+  // og `/loyaltyManagement/players/:userId` via hash-regex.
+  { path: "/loyaltyManagement/new", titleKey: "loyalty_tier_create", module: "Loyalty Management" },
+  { path: "/loyaltyManagement/players", titleKey: "loyalty_players_title", module: "Loyalty Management" },
+  { path: "/loyalty", titleKey: "loyalty_tier_list_title", module: "Loyalty Management" },
 
   { path: "/sms-advertisement", titleKey: "sms_advertisement", roles: ["admin", "super-admin"] },
   { path: "/cms", titleKey: "cms_management", roles: ["admin", "super-admin"] },
@@ -127,7 +131,14 @@ export const routes: RouteDef[] = [
   { path: "/maintenance", titleKey: "maintenance_list_title", roles: ["admin", "super-admin"] },
   { path: "/maintenance/new", titleKey: "maintenance_new_window", roles: ["admin", "super-admin"] },
   { path: "/system/systemInformation", titleKey: "system_information", roles: ["admin", "super-admin"] },
+  // BIN-678 — runtime-diagnostikk (system-info-snapshot).
+  { path: "/system/info", titleKey: "system_diagnostics", roles: ["admin", "super-admin"] },
+  // BIN-655 — generisk transaksjonslogg + audit-logg.
+  { path: "/transactions/log", titleKey: "transactions_log", module: "Transactions Management" },
+  { path: "/auditLog", titleKey: "audit_log_title" },
 
+  { path: "/agent/dashboard", titleKey: "agent_dashboard", roles: ["agent"] },
+  { path: "/agent/players", titleKey: "agent_players_title", roles: ["agent"] },
   { path: "/agent/cashinout", titleKey: "cash_in_out", roles: ["agent"] },
   { path: "/agent/physicalCashOut", titleKey: "physical_cash_out", roles: ["agent"] },
   // PR-B1: cash-inout sub-pages. Exact matches only — use query string for

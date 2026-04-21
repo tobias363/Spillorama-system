@@ -44,6 +44,9 @@ export interface BingoRuntimeConfig {
   jobRgCleanupEnabled: boolean;
   jobRgCleanupIntervalMs: number;
   jobRgCleanupRunAtHour: number;
+  // BIN-700: loyalty monthly reset
+  jobLoyaltyMonthlyResetEnabled: boolean;
+  jobLoyaltyMonthlyResetIntervalMs: number;
   // GAME1_SCHEDULE PR 1: auto-scheduler-tick for Game 1
   jobGame1ScheduleTickEnabled: boolean;
   jobGame1ScheduleTickIntervalMs: number;
@@ -126,6 +129,12 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const jobRgCleanupIntervalMs = Math.max(60_000, parsePositiveIntEnv(process.env.JOB_RG_CLEANUP_INTERVAL_MS, 15 * 60 * 1000));
   const jobRgCleanupRunAtHour = Math.min(23, Math.max(0, Math.floor(parseNonNegativeNumberEnv(process.env.JOB_RG_CLEANUP_RUN_AT_HOUR, 0))));
 
+  // BIN-700: loyalty-monthly-reset-job. Nullstiller month_points for alle
+  // spillere ved månedskift. Default ON — idempotent, billig (single UPDATE).
+  // Polling-intervall 1 time (nok presisjon for "kjør én gang pr måned").
+  const jobLoyaltyMonthlyResetEnabled = parseBooleanEnv(process.env.JOB_LOYALTY_MONTHLY_RESET_ENABLED, true);
+  const jobLoyaltyMonthlyResetIntervalMs = Math.max(60_000, parsePositiveIntEnv(process.env.JOB_LOYALTY_MONTHLY_RESET_INTERVAL_MS, 60 * 60 * 1000));
+
   // GAME1_SCHEDULE PR 1: auto-scheduler-tick for Game 1. Default OFF inntil
   // ready-flow + master-start (PR 2-3) er klare, så tick-en ikke spawner
   // "hengende" rader uten håndtering. Aktiveres via env-flag i staging først.
@@ -177,6 +186,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
     jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
     jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
+    jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,

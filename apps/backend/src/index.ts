@@ -48,6 +48,7 @@ import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
+import { createLoyaltyMonthlyResetJob } from "./jobs/loyaltyMonthlyReset.js";
 import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
 import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
@@ -68,6 +69,7 @@ import { SecurityService } from "./compliance/SecurityService.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createAdminAgentsRouter } from "./routes/adminAgents.js";
 import { createAgentTransactionsRouter } from "./routes/agentTransactions.js";
+import { createAgentDashboardRouter } from "./routes/agentDashboard.js";
 import { createAgentSettlementRouter } from "./routes/agentSettlement.js";
 import { createAdminProductsRouter } from "./routes/adminProducts.js";
 import { createAgentProductsRouter } from "./routes/agentProducts.js";
@@ -125,10 +127,15 @@ import { createAdminSubGamesRouter } from "./routes/adminSubGames.js";
 import { SubGameService } from "./admin/SubGameService.js";
 import { createAdminLeaderboardTiersRouter } from "./routes/adminLeaderboardTiers.js";
 import { LeaderboardTierService } from "./admin/LeaderboardTierService.js";
+import { createAdminLoyaltyRouter } from "./routes/adminLoyalty.js";
+import { LoyaltyService } from "./compliance/LoyaltyService.js";
 import { createAdminSettingsRouter } from "./routes/adminSettings.js";
 import { SettingsService } from "./admin/SettingsService.js";
 import { createAdminMaintenanceRouter } from "./routes/adminMaintenance.js";
 import { MaintenanceService } from "./admin/MaintenanceService.js";
+import { createAdminSystemInfoRouter } from "./routes/adminSystemInfo.js";
+import { createAdminTransactionsRouter } from "./routes/adminTransactions.js";
+import { createAdminAuditLogRouter } from "./routes/adminAuditLog.js";
 import { createAdminMiniGamesRouter } from "./routes/adminMiniGames.js";
 import { MiniGamesConfigService } from "./admin/MiniGamesConfigService.js";
 import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
@@ -255,6 +262,7 @@ const {
   jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
   jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
   jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
+  jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
@@ -475,6 +483,16 @@ const subGameService = new SubGameService({
 // aggregerer prize-points fra faktiske wins og er uavhengig. Blokkerer
 // Leaderboard-admin-sider i PR-B6 (placeholder inntil dette lander).
 const leaderboardTierService = new LeaderboardTierService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-700: Loyalty-system (tier-CRUD + player-state + points-award).
+// Persistent per-spiller lojalitets-nivå basert på akkumulert aktivitet.
+// Uavhengig av BIN-668 leaderboard-tier (plass-basert premie-mapping).
+// Manuell points-award + tier-override i denne PR; automatic assignment
+// fra spill-aktivitet krever BingoEngine-integrasjon (egen follow-up).
+const loyaltyService = new LoyaltyService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -754,6 +772,17 @@ jobScheduler.register({
   }),
 });
 
+// BIN-700: nullstill month_points for alle spillere ved månedskift. Polling-
+// intervall 1 time (default). Idempotent via month_key-sammenligning i
+// service-laget — dobbel-kjøring samme måned er no-op.
+jobScheduler.register({
+  name: "loyalty-monthly-reset",
+  description: "Reset month_points on app_loyalty_player_state at month boundaries (BIN-700).",
+  intervalMs: jobLoyaltyMonthlyResetIntervalMs,
+  enabled: jobLoyaltyMonthlyResetEnabled,
+  run: createLoyaltyMonthlyResetJob({ loyaltyService }),
+});
+
 // GAME1_SCHEDULE PR 1+2: 15s-tick som spawner Game 1-rader fra daily_schedules,
 // flipper status 'scheduled' → 'purchase_open', 'purchase_open' →
 // 'ready_to_start' når alle haller klare, og cancel-er utløpte rader.
@@ -991,6 +1020,16 @@ app.use(createAdminLeaderboardTiersRouter({
   auditLogService,
   leaderboardTierService,
 }));
+// BIN-700: Loyalty-system. 9 endepunkter — tier-CRUD (5) + player-state
+// list/detail (2) + points-award + tier-override. Persistent tier-hierarki
+// (bronze/silver/gold/platinum) + per-spiller points-aggregat. Uavhengig av
+// BIN-668 leaderboard-tier (plass-basert wins → premie). LOYALTY_WRITE er
+// ADMIN-only; manuell points-award + tier-override er audit-logget.
+app.use(createAdminLoyaltyRouter({
+  platformService,
+  auditLogService,
+  loyaltyService,
+}));
 // BIN-679: MiniGames config CRUD. 8 endepunkter — GET + PUT for wheel,
 // chest, mystery, colordraft. Admin-konfig av Game 1 mini-spillene;
 // runtime-integrasjonen i Game 1 bruker hardkodede prize-arrays i dag
@@ -1027,6 +1066,25 @@ app.use(createAdminMaintenanceRouter({
   platformService,
   auditLogService,
   maintenanceService,
+}));
+// BIN-678: system-info (runtime-diagnostikk). Rolle: SETTINGS_READ. Read-only.
+app.use(createAdminSystemInfoRouter({ platformService }));
+// BIN-655: generisk transaksjons-logg (union over wallet_transactions +
+// app_agent_transactions + payment-requests). Rolle: PLAYER_KYC_READ.
+// Cursor-paginert (base64url-offset, samme mønster som BIN-647).
+app.use(createAdminTransactionsRouter({
+  platformService,
+  pool: platformService.getPool(),
+  schema: pgSchema,
+}));
+// BIN-655: audit-log UI-endpoint (read-only). Rolle: AUDIT_LOG_READ.
+// Wraps AuditLogService.list med cursor-paginering og `resource`/`action`/
+// `actorId`/`from`/`to`-filter. Separat fra /api/admin/audit/events (som
+// ligger i adminSecurity.ts fra BIN-587 B3) slik at frontend kan lene seg
+// på én stabil shape med nextCursor.
+app.use(createAdminAuditLogRouter({
+  platformService,
+  auditLogService,
 }));
 // BIN-676: CMS content + FAQ. 6 endepunkter — tekst-CRUD for fem slugs +
 // FAQ-CRUD. CMS_WRITE er ADMIN-only (CMS er globalt/regulatorisk-sensitivt,
@@ -1123,6 +1181,16 @@ app.use(createAgentTransactionsRouter({
   platformService,
   agentService,
   agentTransactionService,
+  auditLogService,
+}));
+
+// Agent dashboard + player-list + CSV-eksport. Samme AGENT_TX_READ-rbac
+// som `agentTransactions.ts` — kun AGENT-rollen kan bruke disse endepunktene.
+app.use(createAgentDashboardRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  agentTransactionStore,
   auditLogService,
 }));
 

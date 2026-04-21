@@ -1,25 +1,28 @@
+// GameManagement state — legacy/unity-backend/App/Views/GameManagement/* (9 267 lines across 10 files).
 //
-//   GET  /gameManagement                              → type-picker + list
-//   GET  /gameManagementDetailList/:id                → type-scoped list (DataTable ajax)
-//   GET  /addGameManagement/:id                       → add-form GET (Game 1/2)
-//   GET  /addGameManagement/:id  (game3 mode)         → add-form GET (Game 3 — game3Add.html)
-//   POST /addGameManagement/:typeId/:type             → add POST           ← PLACEHOLDER (BIN-622)
-//   GET  /viewGameManagement/:typeId/:id              → view-only page
-//   GET  /viewsubGamesManagement/:typeId/:id          → nested sub-games
-//   GET  /viewGameTickets/:typeId/:id                 → ticket-view list
-//   GET  /closeDayGameManagement/:typeId/:id/:type    → close-day page
-//   POST /closeDayGameManagement/...                  → close POST         ← PLACEHOLDER (BIN-623)
-//   POST /repeatGame/...                              → repeat-game POST   ← PLACEHOLDER (BIN-622)
+// BIN-684 wire-up (bolk 1): erstatter BIN-622 placeholders med live
+// apiRequest-calls mot `/api/admin/game-management/*`. Se
+// `apps/admin-web/src/api/admin-game-management.ts` for kontrakt.
 //
-// Write-ops are deferred to BIN-622 (CRUD + repeat) and BIN-623 (close-day);
-// this module intentionally does NOT call fetch() for POST/PUT/DELETE in PR-A3b.
-//
-// The list endpoint itself (GET) is gated on BIN-622 — legacy joined 4 Mongo
-// collections (Game, SubGame, GameType, HallGroup) which we cannot reproduce
-// without the new-backend endpoint. Until then fetch returns [] and the UI
-// surfaces the same "awaiting backend" banner as the sub-game stack.
+// Ikke-merget ennå — fortsatt placeholders:
+//   - BIN-623 closeDay endpoint → `closeDay()` returnerer BACKEND_MISSING
+//   - tickets-per-game endpoint → `fetchGameTickets()` returnerer []
+//     (legacy hadde 4-tabell join; backend har ingen rute ennå — se GM
+//      Detail tickets-side for placeholder-banner.)
 
 import type { GameType } from "../common/types.js";
+import {
+  listGameManagement,
+  getGameManagement as apiGetGameManagement,
+  createGameManagement,
+  updateGameManagement,
+  deleteGameManagement as apiDeleteGameManagement,
+  repeatGameManagement,
+  type AdminGameManagement,
+  type GameManagementStatus,
+  type GameManagementTicketType,
+} from "../../../api/admin-game-management.js";
+import { ApiError } from "../../../api/client.js";
 
 /** List-row shape for the main /gameManagement/:typeId/list table. */
 export interface GameManagementRow {
@@ -30,12 +33,12 @@ export interface GameManagementRow {
   childId?: string;
   name: string;
   /** "Large" ticket = 5x5 classic, "Small" = 3x5 databingo-60. Legacy had this. */
-  ticketType: "Large" | "Small" | null;
+  ticketType: GameManagementTicketType | null;
   ticketPrice: number;
   startDate: string;
   endDate?: string;
   /** Legacy had "active" (pre-start), "running", "closed" — we preserve it. */
-  status: "active" | "running" | "closed" | "inactive";
+  status: GameManagementStatus;
   /** Tickets sold from unique-id channels + digital sales (summed in legacy). */
   totalSold?: number;
   /** Sum of sold-ticket earnings (currency amount). */
@@ -47,14 +50,15 @@ export interface GameManagementRow {
 export interface GameManagementFormPayload {
   gameTypeId: string;
   name: string;
-  ticketType: "Large" | "Small";
+  ticketType: GameManagementTicketType;
   ticketPrice: number;
   startDate: string;
   endDate?: string;
-  // Legacy has ~50 more fields (prize tiers, hall-group visibility, sub-game
-  // composition, ticket-color lists). They're modelled as opaque key→value
-  // until BIN-622 backend lands and we can negotiate the exact schema.
-  extra?: Record<string, unknown>;
+  status?: GameManagementStatus;
+  // Legacy har ~50 flere felt (prize tiers, hall-group visibility, sub-game
+  // komposisjon, ticket-color lists). Disse sendes opaque i `config` og
+  // normaliseres av backend `config_json`-kolonnen.
+  config?: Record<string, unknown>;
 }
 
 /** Repeat-game payload — legacy "Repeat"-modal rebinds startDate/endDate. */
@@ -62,68 +66,176 @@ export interface RepeatGamePayload {
   sourceGameId: string;
   startDate: string;
   endDate?: string;
+  /** Idempotens — samme token returnerer samme nye rad ved retry. */
+  repeatToken?: string;
+  /** Valgfritt overstyrt navn (ellers gjenbruker backend source-name). */
+  name?: string;
 }
 
-/** Close-day payload — confirms day-end cut-off for a running game. */
+/** Close-day payload — BIN-623 (ikke levert ennå). */
 export interface CloseDayPayload {
   gameTypeId: string;
   gameId: string;
   closeDate: string;
 }
 
-/** Unified write-result contract — matches GameType/SubGame placeholder shape. */
-export type WriteResult =
-  | { ok: false; reason: "BACKEND_MISSING"; issue: "BIN-622" | "BIN-623" };
-
 /**
- * PLACEHOLDER — list endpoint not yet ported. Returns empty array so the
- * DataTable still renders (with the empty-state message from the legacy
- * shell). Tracked in BIN-622.
- *
- * When BIN-622 lands, call apiRequest(`/api/admin/game-management?typeId=${typeId}`).
+ * Unified write-result contract. Success → ok:true med oppdatert row.
+ * Feil-varianter:
+ *   - PERMISSION_DENIED (HTTP 403)  — admin mangler GAME_MGMT_WRITE
+ *   - NOT_FOUND (HTTP 404)          — spill finnes ikke
+ *   - BACKEND_ERROR (HTTP 500-ish)  — transient / retry
+ *   - BACKEND_MISSING (BIN-623)     — closeDay-endpoint ikke levert
  */
-export async function fetchGameManagementList(_typeId: string): Promise<GameManagementRow[]> {
-  return [];
+export type WriteResult =
+  | { ok: true; row: GameManagementRow }
+  | { ok: false; reason: "PERMISSION_DENIED"; message: string }
+  | { ok: false; reason: "NOT_FOUND"; message: string }
+  | { ok: false; reason: "BACKEND_ERROR"; message: string }
+  | { ok: false; reason: "BACKEND_MISSING"; issue: "BIN-623" };
+
+/** Map backend-wire-shape til Row-formen UI-en bruker. */
+function toRow(gm: AdminGameManagement): GameManagementRow {
+  return {
+    _id: gm.id,
+    gameTypeId: gm.gameTypeId,
+    childId: gm.parentId ?? undefined,
+    name: gm.name,
+    ticketType: gm.ticketType,
+    ticketPrice: gm.ticketPrice,
+    startDate: gm.startDate,
+    endDate: gm.endDate ?? undefined,
+    status: gm.status,
+    totalSold: gm.totalSold,
+    totalEarning: gm.totalEarning,
+    createdAt: gm.createdAt,
+  };
 }
 
-/** PLACEHOLDER — single fetch for view/:id. Returns null until BIN-622. */
-export async function fetchGameManagement(_typeId: string, _id: string): Promise<GameManagementRow | null> {
-  return null;
+/** Sentinel-kastet av wrappers når API returnerer ApiError — for testing. */
+export { ApiError };
+
+/** Map ApiError til normalisert WriteResult. */
+function apiErrorToWriteResult(err: unknown): WriteResult {
+  if (err instanceof ApiError) {
+    if (err.status === 403) {
+      return { ok: false, reason: "PERMISSION_DENIED", message: err.message };
+    }
+    if (err.status === 404) {
+      return { ok: false, reason: "NOT_FOUND", message: err.message };
+    }
+    return { ok: false, reason: "BACKEND_ERROR", message: err.message };
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return { ok: false, reason: "BACKEND_ERROR", message: msg };
+}
+
+/** GET /api/admin/game-management?gameTypeId=X — BIN-622 live. */
+export async function fetchGameManagementList(typeId: string): Promise<GameManagementRow[]> {
+  const result = await listGameManagement({ gameTypeId: typeId });
+  return result.games.map(toRow);
+}
+
+/** GET /api/admin/game-management/:typeId/:id — BIN-622 live. */
+export async function fetchGameManagement(
+  typeId: string,
+  id: string
+): Promise<GameManagementRow | null> {
+  try {
+    const gm = await apiGetGameManagement(typeId, id);
+    return toRow(gm);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
 /**
- * PLACEHOLDER — tickets-for-a-game. Legacy opened a nested modal/table with the
- * list of physical + digital tickets bought for a specific game; it also shows
- * running-game ball-draw. Returns [] until BIN-622.
+ * Tickets-per-game. Legacy slo sammen 4 Mongo-kolleksjoner; det finnes enda
+ * ingen ekvivalent backend-endpoint. Returnerer [] inntil utstedt.
  */
 export async function fetchGameTickets(_typeId: string, _id: string): Promise<GameManagementRow[]> {
   return [];
 }
 
-/** PLACEHOLDER — save not yet backed. Tracked in BIN-622. */
+/** POST/PATCH /api/admin/game-management — BIN-622 live. */
 export async function saveGameManagement(
-  _payload: GameManagementFormPayload,
-  _existingId?: string
+  payload: GameManagementFormPayload,
+  existingId?: string
 ): Promise<WriteResult> {
-  return { ok: false, reason: "BACKEND_MISSING", issue: "BIN-622" };
+  try {
+    const gm = existingId
+      ? await updateGameManagement(existingId, {
+          name: payload.name,
+          ticketType: payload.ticketType,
+          ticketPrice: payload.ticketPrice,
+          startDate: payload.startDate,
+          endDate: payload.endDate ?? null,
+          status: payload.status,
+          config: payload.config,
+        })
+      : await createGameManagement({
+          gameTypeId: payload.gameTypeId,
+          name: payload.name,
+          ticketType: payload.ticketType,
+          ticketPrice: payload.ticketPrice,
+          startDate: payload.startDate,
+          endDate: payload.endDate ?? null,
+          status: payload.status,
+          config: payload.config,
+        });
+    return { ok: true, row: toRow(gm) };
+  } catch (err) {
+    return apiErrorToWriteResult(err);
+  }
 }
 
-/** PLACEHOLDER — repeat-game endpoint (BIN-622). */
-export async function repeatGame(_payload: RepeatGamePayload): Promise<WriteResult> {
-  return { ok: false, reason: "BACKEND_MISSING", issue: "BIN-622" };
+/** POST /api/admin/game-management/:id/repeat — BIN-622 live (idempotent via repeatToken). */
+export async function repeatGame(payload: RepeatGamePayload): Promise<WriteResult> {
+  try {
+    const gm = await repeatGameManagement(payload.sourceGameId, {
+      startDate: payload.startDate,
+      endDate: payload.endDate ?? null,
+      name: payload.name ?? null,
+      repeatToken: payload.repeatToken ?? null,
+    });
+    return { ok: true, row: toRow(gm) };
+  } catch (err) {
+    return apiErrorToWriteResult(err);
+  }
 }
 
-/** PLACEHOLDER — close-day endpoint (BIN-623). */
+/** BIN-623 closeDay endpoint — IKKE levert ennå. */
 export async function closeDay(_payload: CloseDayPayload): Promise<WriteResult> {
   return { ok: false, reason: "BACKEND_MISSING", issue: "BIN-623" };
 }
 
-/** PLACEHOLDER — delete (BIN-622). */
+/** DELETE /api/admin/game-management/:id — BIN-622 live (soft-delete default). */
 export async function deleteGameManagement(
   _typeId: string,
-  _id: string
+  id: string,
+  hard = false
 ): Promise<WriteResult> {
-  return { ok: false, reason: "BACKEND_MISSING", issue: "BIN-622" };
+  try {
+    await apiDeleteGameManagement(id, hard);
+    // Soft-delete fortsatt har rad — men UI trenger ikke oppdatert row-data,
+    // så vi returnerer en dummy-row. Caller bruker bare ok-flag.
+    return {
+      ok: true,
+      row: {
+        _id: id,
+        gameTypeId: "",
+        name: "",
+        ticketType: null,
+        ticketPrice: 0,
+        startDate: "",
+        status: "inactive",
+        createdAt: "",
+      },
+    };
+  } catch (err) {
+    return apiErrorToWriteResult(err);
+  }
 }
 
 /**
