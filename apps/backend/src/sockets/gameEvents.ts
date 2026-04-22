@@ -21,27 +21,20 @@ import { metrics as promMetrics } from "./../util/metrics.js";
 import { Game2Engine } from "./../game/Game2Engine.js";
 import { Game3Engine } from "./../game/Game3Engine.js";
 import type { RoomSnapshot } from "./../game/types.js";
-import {
-  mustBeNonEmptyString,
-  parseOptionalNonNegativeNumber,
-  parseTicketsPerPlayerInput,
-} from "./../util/httpHelpers.js";
-import { assertTicketsPerPlayerWithinHallLimit } from "./../game/compliance.js";
 import { buildRegistryContext, buildSocketContext } from "./gameEvents/context.js";
 import { emitG2DrawEvents, emitG3DrawEvents } from "./gameEvents/drawEmits.js";
 import { registerRoomEvents } from "./gameEvents/roomEvents.js";
+import { registerGameLifecycleEvents } from "./gameEvents/gameLifecycleEvents.js";
 import type {
   AckResponse,
   ChatMessage,
   ChatSendPayload,
   ClaimPayload,
-  EndGamePayload,
   ExtraDrawPayload,
   LeaderboardEntry,
   LeaderboardPayload,
   MarkPayload,
   RoomActionPayload,
-  StartGamePayload,
 } from "./gameEvents/types.js";
 import type { BingoSchedulerSettings, GameEventsDeps } from "./gameEvents/deps.js";
 
@@ -77,62 +70,7 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     const { rateLimited, requireAuthenticatedPlayerAction } = sctx;
 
     registerRoomEvents(sctx);
-
-
-    socket.on("game:start", rateLimited("game:start", async (payload: StartGamePayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
-      try {
-        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
-        const requestedTicketsPerPlayer =
-          payload?.ticketsPerPlayer === undefined || payload?.ticketsPerPlayer === null
-            ? undefined
-            : parseTicketsPerPlayerInput(payload.ticketsPerPlayer);
-        const hallGameConfig = await resolveBingoHallGameConfigForRoom(roomCode);
-        const ticketsPerPlayer =
-          requestedTicketsPerPlayer ??
-          Math.min(hallGameConfig.maxTicketsPerPlayer, runtimeBingoSettings.autoRoundTicketsPerPlayer);
-        assertTicketsPerPlayerWithinHallLimit(ticketsPerPlayer, hallGameConfig.maxTicketsPerPlayer);
-        const variantInfo = deps.getVariantConfig?.(roomCode);
-        // BIN-690: snapshot the display-ticket cache BEFORE startGame so
-        // we can pass it in — the cache is cleared below, and startGame
-        // itself pushes `emitRoomUpdate` which would re-populate the
-        // cache with new random grids if we read it after.
-        const preRoundTicketsByPlayerId = deps.getPreRoundTicketsByPlayerId?.(roomCode);
-        await engine.startGame({
-          roomCode,
-          actorPlayerId: playerId,
-          entryFee: payload?.entryFee ?? getRoomConfiguredEntryFee(roomCode),
-          ticketsPerPlayer,
-          payoutPercent: runtimeBingoSettings.payoutPercent,
-          armedPlayerIds: getArmedPlayerIds(roomCode),
-          armedPlayerTicketCounts: deps.getArmedPlayerTicketCounts(roomCode),
-          armedPlayerSelections: deps.getArmedPlayerSelections(roomCode),
-          gameType: variantInfo?.gameType,
-          variantConfig: variantInfo?.config,
-          preRoundTicketsByPlayerId,
-        });
-        disarmAllPlayers(roomCode);
-        clearDisplayTicketCache(roomCode);
-        const snapshot = await emitRoomUpdate(roomCode);
-        ackSuccess(callback, { snapshot });
-      } catch (error) {
-        ackFailure(callback, error);
-      }
-    }));
-
-    socket.on("game:end", rateLimited("game:end", async (payload: EndGamePayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
-      try {
-        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
-        await engine.endGame({
-          roomCode,
-          actorPlayerId: playerId,
-          reason: payload?.reason
-        });
-        const snapshot = await emitRoomUpdate(roomCode);
-        ackSuccess(callback, { snapshot });
-      } catch (error) {
-        ackFailure(callback, error);
-      }
-    }));
+    registerGameLifecycleEvents(sctx);
 
     socket.on("draw:next", rateLimited("draw:next", async (payload: RoomActionPayload, callback: (response: AckResponse<{ number: number; snapshot: RoomSnapshot }>) => void) => {
       try {
