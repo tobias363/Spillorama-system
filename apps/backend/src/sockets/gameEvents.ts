@@ -971,7 +971,6 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     }));
 
     // BIN-585: ticket:swap — free pre-round ticket swap for Game 5 (Spillorama).
-    // Legacy parity with `SwapTicket` (unity-backend Game5 GameController.swapTicket).
     // Shares the display-cache mechanic with ticket:replace but skips the wallet
     // debit — Game 5 tickets are slot-style cosmetic, so legacy gives a free
     // re-roll in the Waiting phase. Gated by gameSlug === "spillorama" so paid

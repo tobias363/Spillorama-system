@@ -338,8 +338,7 @@ export class RoomStateManager {
    * Bundle semantics: ticket-types with `ticketCount > 1` (Large = 3
    * brett, Elvis = 2, Traffic-light = 3) are purchased as one unit.
    * Clicking × on ANY brett in that bundle removes ALL brett in the
-   * bundle — Unity parity with `Game1ViewPurchaseElvisTicket.cs:17,49-76`
-   * deleteBtn.
+   * bundle (matches the bundled ticket UX in the web client).
    *
    * Returns `null` when the ticketId isn't in the display cache (stale
    * client or double-click race) — caller should treat as a no-op.

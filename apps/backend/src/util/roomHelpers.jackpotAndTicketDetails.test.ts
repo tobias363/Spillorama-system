@@ -1,10 +1,6 @@
 /**
  * roomHelpers — F3 jackpot propagation + G15 ticket-detail enrichment.
  *
- * Unity refs:
- *   - F3: Game1GamePlayPanel.SocketFlow.cs:518-520 (jackpot label)
- *   - G15: BingoTicket.cs:374-399 (ticket-detail fields on flip)
- *
  * Exercised paths:
  *   1. variantConfig.jackpot flows into gameVariant.jackpot on the payload.
  *   2. getHallName + supplierName enrich both in-game and pre-round tickets.

@@ -48,8 +48,8 @@ export function makeShuffledBallBag(maxNumber = 60): number[] {
  * Single source of truth — referenced by every site that picks ticket format,
  * so the choice can never drift out of sync.
  *
- * Game 1 ("bingo") is the canonical 75-ball game per Unity reference. The
- * "game_1" alias is kept because some legacy callers send the numeric form.
+ * Game 1 ("bingo") is the canonical 75-ball game. The "game_1" alias is kept
+ * because some legacy callers send the numeric form.
  */
 export const BINGO75_SLUGS: ReadonlySet<string> = new Set(["bingo", "game_1"]);
 

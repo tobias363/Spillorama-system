@@ -33,37 +33,6 @@ sessions/
 # Raw source assets (already imported into Assets/)
 assets spingo/
 
-# ---------------------------------------------------------------------------
-# Legacy Unity project (quarantined in legacy/ — see legacy/README.md)
-# Track authored Unity source, but keep generated/editor/build folders out of git.
-# ---------------------------------------------------------------------------
-legacy/unity-client/*
-!legacy/unity-client/Assets/
-legacy/unity-client/Assets/*
-!legacy/unity-client/Assets/_Project/
-!legacy/unity-client/Assets/_Project/**
-!legacy/unity-client/Assets/WebGLTemplates/
-!legacy/unity-client/Assets/WebGLTemplates/**
-!legacy/unity-client/Packages/
-!legacy/unity-client/Packages/**
-!legacy/unity-client/ProjectSettings/
-!legacy/unity-client/ProjectSettings/**
-legacy/unity-client/.DS_Store
-legacy/unity-client/**/.DS_Store
-legacy/unity-client/WebBuild/
-legacy/unity-client/WebGLBuild/
-SpilloramaBuilds/
-*.csproj
-*.sln
-*.suo
-*.user
-
-# Local Unity vendor SDK bundles
-unity-vendor-bundles/
-
-# Legacy AIS backend recovery dumps
-legacy/unity-backend/recovery-backups/
-
 # BIN-614 admin-web
 apps/admin-web/node_modules/
 apps/admin-web/dist/

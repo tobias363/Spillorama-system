@@ -118,7 +118,6 @@ export type RoomUpdatePayload = RoomSnapshot & {
     /**
      * F3 (BIN-431): Jackpot header info. Propagated from variant config;
      * client shows `{drawThreshold} Jackpot : {prize} kr` when isDisplay=true.
-     * Unity: Game1GamePlayPanel.SocketFlow.cs:518-520.
      */
     jackpot?: {
       drawThreshold: number;
@@ -267,10 +266,11 @@ export function buildRoomUpdatePayload(
   };
 
   // ── G15 (BIN-431): Enrich tickets with detail fields for flip-to-details ───
-  // Unity BingoTicket.cs:374-399 displays ticketNumber, hallName, supplierName,
-  // price on tap/flip. Fields are all optional/non-breaking — we populate them
-  // here (display-only; not persisted to the adapter) so every emitted tickets
-  // payload carries them without touching BingoEngine's ticket-creation flow.
+  // Web-klienten viser ticketNumber, hallName, supplierName og price når
+  // spilleren tapper / snur et brett. Fields are all optional/non-breaking
+  // — we populate them here (display-only; not persisted to the adapter) so
+  // every emitted tickets payload carries them without touching BingoEngine's
+  // ticket-creation flow.
   const hallName = opts.getHallName?.(snapshot.hallId) ?? snapshot.hallId;
   const supplierName = opts.supplierName ?? "Spillorama";
   const boughtAtIso = new Date(nowMs).toISOString();

@@ -89,7 +89,7 @@ const SAMPLE_HALL = {
   region: "Oslo",
   address: "",
   isActive: true,
-  clientVariant: "unity",
+  clientVariant: "web",
   createdAt: "2026-04-19T00:00:00Z",
   updatedAt: "2026-04-19T00:00:00Z",
 };
