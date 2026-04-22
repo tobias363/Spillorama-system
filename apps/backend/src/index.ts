@@ -164,6 +164,7 @@ import { createAdminPlayerActivityRouter } from "./routes/adminPlayerActivity.js
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { createGame1ScheduledEventHandlers } from "./sockets/game1ScheduledEvents.js";
+import { createAdminGame1Namespace } from "./sockets/adminGame1Namespace.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { errorReporter } from "./middleware/errorReporter.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
@@ -1740,6 +1741,14 @@ io.on("connection", (socket: Socket) => {
   registerAdminHallEvents(socket);
   registerGame1ScheduledEvents(socket);
 });
+
+// GAME1_SCHEDULE PR 4d.3: `/admin-game1`-namespace for master-konsoll
+// real-time subscribe. Opprettes etter `io` finnes. Broadcaster-porten
+// injisieres late via setAdminBroadcaster slik at service-laget kan
+// konstrueres tidligere uten å kjenne socket-siden.
+const adminGame1Handle = createAdminGame1Namespace({ io, platformService });
+game1MasterControlService.setAdminBroadcaster(adminGame1Handle.broadcaster);
+game1DrawEngineService.setAdminBroadcaster(adminGame1Handle.broadcaster);
 
 // ── Debug/test endpoint — room gap detection (localhost-only) ─────────────────
 app.get("/api/room-gap/:code", (req, res) => {
