@@ -197,7 +197,7 @@ const VALID_PAYLOAD = {
 test("4d.2: happy path — room_code NULL → createRoom + assignRoomCode", async () => {
   const stubs = makeStubs();
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -220,7 +220,7 @@ test("4d.2: happy path — eksisterende room_code → joinRoom (reconnect)", asy
     },
   });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -238,7 +238,7 @@ test("4d.2: race — assignRoomCode returnerer annen kode → destroyRoom + join
     engineCreateRoomCode: "ROOM-LOSER",
   });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -259,7 +259,7 @@ test("4d.2: multi-hall — hallId ikke i participating_halls → HALL_NOT_ALLOWE
     },
   });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -277,7 +277,7 @@ test("4d.2: multi-hall — tom participating_halls-array → HALL_NOT_ALLOWED", 
     },
   });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -295,7 +295,7 @@ test("4d.2: status-gate — scheduled → GAME_NOT_JOINABLE", async () => {
     },
   });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -313,7 +313,7 @@ test("4d.2: status-gate — completed → GAME_NOT_JOINABLE", async () => {
     },
   });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -324,7 +324,7 @@ test("4d.2: status-gate — completed → GAME_NOT_JOINABLE", async () => {
 test("4d.2: ukjent scheduledGameId → GAME_NOT_FOUND", async () => {
   const stubs = makeStubs({ scheduledGameExists: false });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -335,7 +335,7 @@ test("4d.2: ukjent scheduledGameId → GAME_NOT_FOUND", async () => {
 test("4d.2: invalid payload (manglende scheduledGameId) → INVALID_INPUT", async () => {
   const stubs = makeStubs();
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", {
     accessToken: "tok",
@@ -350,7 +350,7 @@ test("4d.2: invalid payload (manglende scheduledGameId) → INVALID_INPUT", asyn
 test("4d.2: invalid payload (tom playerName) → INVALID_INPUT", async () => {
   const stubs = makeStubs();
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", {
     ...VALID_PAYLOAD,
@@ -364,7 +364,7 @@ test("4d.2: invalid payload (tom playerName) → INVALID_INPUT", async () => {
 test("4d.2: rate-limit blokkerer → RATE_LIMITED uten DB-oppslag", async () => {
   const stubs = makeStubs({ rateLimitAllow: false });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
@@ -383,7 +383,7 @@ test("4d.2: participating_halls med ikke-string-entry → HALL_NOT_ALLOWED", asy
     },
   });
   const sock = mockSocket();
-  stubs.factory(sock);
+  stubs.factory(sock as never);
 
   const resp = await callHandler(sock, "game1:join-scheduled", VALID_PAYLOAD);
 
