@@ -60,6 +60,8 @@ export const routes: RouteDef[] = [
   { path: "/hall/add", titleKey: "add_hall", roles: ["admin", "super-admin"] },
   { path: "/groupHall", titleKey: "group_of_halls_management", roles: ["admin", "super-admin"] },
   { path: "/groupHall/add", titleKey: "create_group_of_halls", roles: ["admin", "super-admin"] },
+  // PR 4e.1 — /groupHall/edit/:id og /groupHall/view/:id resolves via hash-regex
+  // i isGroupHallRoute (se apps/admin-web/src/pages/groupHall/index.ts).
 
   { path: "/productList", titleKey: "product_list", module: "Product Management" },
   { path: "/categoryList", titleKey: "category_list", module: "Product Management" },

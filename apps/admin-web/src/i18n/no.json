@@ -2481,5 +2481,11 @@
   "gm_prize_mode_percent": "% av pot",
   "gm_prize_mode_fixed": "Fast kr",
   "gm_prize_cell_percent_hint": "Prosent av pot (0-100).",
-  "gm_prize_cell_fixed_hint": "Fast kroner (kan kappes av RTP-grenser om pot er for liten)."
+  "gm_prize_cell_fixed_hint": "Fast kroner (kan kappes av RTP-grenser om pot er for liten).",
+  "no_data": "Ingen data",
+  "select_halls_hint": "Hold Ctrl (Cmd på Mac) for å velge flere haller. Inaktive medlemmer vises som valgt for å unngå utilsiktet fjerning.",
+  "name_too_long": "Navnet er for langt (maks 200 tegn).",
+  "tv_id_invalid": "TV-ID må være et ikke-negativt heltall.",
+  "hall_id_invalid": "Ugyldig hall-ID i valg.",
+  "no_changes": "Ingen endringer å lagre."
 }

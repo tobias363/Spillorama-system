@@ -318,18 +318,30 @@ describe("HallListPage toggle", () => {
   });
 });
 
-describe("GroupHall placeholder", () => {
-  it("all 4 paths render placeholder banner without any fetch", async () => {
-    const api = mockApi([]);
-    for (const path of ["/groupHall", "/groupHall/add", "/groupHall/edit/x", "/groupHall/view/x"]) {
-      const root = document.createElement("div");
-      document.body.appendChild(root);
-      mountGroupHallRoute(root, path);
-      expect(root.querySelector('[data-testid="group-halls-placeholder-banner"]')).toBeTruthy();
-      expect(root.querySelector('[data-testid="group-halls-placeholder-body"]')).toBeTruthy();
-    }
-    // No API call made by placeholder
-    expect(api.mock.calls.length).toBe(0);
+describe("GroupHall dispatcher (PR 4e.1 wire-up, replaces BIN-663 placeholder)", () => {
+  it("isGroupHallRoute matches list, add, edit and legacy view paths", () => {
+    expect(isGroupHallRoute("/groupHall")).toBe(true);
+    expect(isGroupHallRoute("/groupHall/add")).toBe(true);
+    expect(isGroupHallRoute("/groupHall/edit/x")).toBe(true);
+    expect(isGroupHallRoute("/groupHall/view/x")).toBe(true);
+    expect(isGroupHallRoute("/hall")).toBe(false);
+  });
+
+  it("mountGroupHallRoute triggers GET /api/admin/hall-groups (no placeholder banner)", async () => {
+    const api = mockApi([
+      {
+        match: /\/api\/admin\/hall-groups(\?|$)/,
+        handler: () => ({ groups: [], count: 0 }),
+      },
+    ]);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    mountGroupHallRoute(root, "/groupHall");
+    await tick();
+    expect(root.querySelector('[data-testid="group-halls-placeholder-banner"]')).toBeNull();
+    expect(root.querySelector('[data-testid="gh-list-table"]')).toBeTruthy();
+    expect(root.querySelector('[data-testid="gh-add-btn"]')).toBeTruthy();
+    expect(api.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 });
 
