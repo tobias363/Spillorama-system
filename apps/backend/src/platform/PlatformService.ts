@@ -69,11 +69,10 @@ export interface UpdateGameInput {
 }
 
 /**
- * Historically a per-hall rollback switch between Unity and web clients
- * (BIN-540). Unity is no longer shipped (2026-04-21); the only valid value
- * is "web". The type + endpoint + DB column are kept for shape-compat —
- * admin UI still lists the field, existing rows stay as-is, and the
- * endpoint always answers "web".
+ * Per-hall klient-variant. Kun "web" er gyldig nå — det finnes bare én
+ * klient-stack. Type + endpoint + DB-kolonne beholdes som navngitte
+ * shape-kompatibilitets-felter så eldre admin-UI ikke krasjer på
+ * field-presence; settere er no-ops og GET returnerer alltid "web".
  */
 export type HallClientVariant = "web";
 export const HALL_CLIENT_VARIANTS: readonly HallClientVariant[] = ["web"] as const;
@@ -89,10 +88,9 @@ export interface HallDefinition {
   invoiceMethod?: string;
   isActive: boolean;
   /**
-   * Historically a BIN-540 rollback flag (`unity` | `web` | `unity-fallback`).
-   * Unity is no longer shipped — the only valid value is `"web"`. DB-kolonnen
-   * er droppet (migrasjon 20260429000000). Feltet beholdes i API-shapen slik
-   * at eksisterende admin-UI ikke krasjer ved deploy, men verdien er alltid
+   * Klient-variant. Bare "web" er gyldig. DB-kolonnen er droppet
+   * (migrasjon 20260429000000); feltet beholdes i API-shapen slik at
+   * eksisterende admin-UI ikke krasjer ved deploy, men verdien er alltid
    * "web" og settere er no-ops.
    */
   clientVariant: HallClientVariant;
@@ -124,7 +122,7 @@ export interface UpdateHallInput {
   isActive?: boolean;
   /**
    * Legacy BIN-540 felt. Aksepteres for shape-compat men ignoreres —
-   * verdien er alltid "web" (Unity er avviklet).
+   * verdien er alltid "web".
    */
   clientVariant?: HallClientVariant;
 }
@@ -1075,20 +1073,18 @@ export class PlatformService {
     return hall;
   }
 
-  // ── Hall client-variant (post-Unity) ─────────────────────────────────────
-  // Historically a BIN-540 rollback flag between Unity and web clients with
-  // a 60 s read-through cache. Unity is no longer shipped (2026-04-21); the
-  // only valid answer is "web". Kept as a method for shape-compat with
-  // admin-web and the `/api/halls/:slug/client-variant` endpoint.
+  // ── Hall client-variant ─────────────────────────────────────────────────
+  // Returnerer alltid "web" — det finnes bare én klient-stack. Metoden
+  // beholdes som shape-compat for admin-web og
+  // `/api/halls/:slug/client-variant`-endepunktet.
   async getHallClientVariant(_hallReference: string): Promise<HallClientVariant> {
     return "web";
   }
 
   /** Test-only: no-op retained for backwards source-compat (cache is gone). */
   clearClientVariantCache(): void {
-    // Intentionally empty — the BIN-540 read-through cache was removed with
-    // the Unity client (2026-04-21). Method kept so tests that still call it
-    // don't error.
+    // Intentionally empty — BIN-540 read-through-cachen er fjernet; metoden
+    // beholdes så tester som fortsatt kaller den ikke feiler.
   }
 
   async createHall(input: CreateHallInput): Promise<HallDefinition> {
@@ -3204,8 +3200,8 @@ export class PlatformService {
       settlementAccount: row.settlement_account ?? undefined,
       invoiceMethod: row.invoice_method ?? undefined,
       isActive: row.is_active,
-      // Post-Unity (2026-04-21): DB-kolonnen er droppet. Feltet beholdes i
-      // API-shapen (alltid "web") så eksisterende admin-UI ikke krasjer.
+      // DB-kolonnen er droppet (migrasjon 20260429000000). Feltet beholdes
+      // i API-shapen (alltid "web") så eksisterende admin-UI ikke krasjer.
       clientVariant: "web",
       tvUrl: row.tv_url ?? undefined,
       createdAt: asIso(row.created_at),
@@ -3719,10 +3715,9 @@ export class PlatformService {
       );
 
       const gameSeeds: Array<[string, string, string, string, boolean, number, object]> = [
-        // BIN shell-routing fix: clientEngine="web" routes bingo through the
-        // PixiJS game-client instead of the (un-deployed) Unity WebGL build.
-        // See migration 20260421000100_set_bingo_client_engine_web.sql and
-        // apps/backend/public/web/lobby.js `shouldUseWebClient`.
+        // BIN shell-routing: clientEngine="web" ruter bingo gjennom PixiJS
+        // game-client. Se migration 20260421000100_set_bingo_client_engine_web.sql
+        // og apps/backend/public/web/lobby.js `shouldUseWebClient`.
         ["bingo",        "Bingo",        "75-kulsbingo med flere spillvarianter",    "/bingo",        true, 1, { gameNumber: 1, clientEngine: "web" }],
         ["rocket",       "Rocket",       "Tallspill med 3x3 brett og Lucky Number",  "/rocket",       true, 2, { gameNumber: 2 }],
         ["monsterbingo", "Mønsterbingo", "Bingo med mønstergevinster",               "/monsterbingo", true, 3, { gameNumber: 3 }],

@@ -18,8 +18,8 @@ import { apiRequest } from "./client.js";
 
 // ── Kjerne-typer (speiler backend PlatformService HallDefinition) ────────────
 
-// Post-Unity (2026-04-21): only "web" is valid. Kept as a type alias so
-// the HallFormPage dropdown still type-checks.
+// Kun "web" er gyldig. Beholdt som type-alias så HallFormPage-dropdownen
+// fortsatt type-sjekker; dropdownen viser bare én valgbar verdi.
 export type HallClientVariant = "web";
 
 export interface AdminHall {
