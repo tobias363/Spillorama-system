@@ -1840,3 +1840,47 @@ export const Game1JoinScheduledAckDataSchema = z.object({
   snapshot: RoomSnapshotSchema,
 });
 export type Game1JoinScheduledAckData = z.infer<typeof Game1JoinScheduledAckDataSchema>;
+
+// ── GAME1_SCHEDULE PR 4d.3: admin-namespace real-time broadcast ─────────────
+// Spec: docs/architecture/GAME1_PR4D_SOCKET_REALTIME_DESIGN_2026-04-21.md §3.4/§3.5.
+// Admin-socket mottar sanntids-events for schedulerte spill i stedet for
+// REST-polling. Namespace: `/admin-game1`.
+
+/**
+ * Ack-struktur for `game1:subscribe` — admin-klient abonnerer på gameId-
+ * spesifikke events. Returnerer dagens state-snapshot slik at initial-
+ * render er umiddelbar uten ekstra REST-kall.
+ */
+export const Game1AdminSubscribePayloadSchema = z.object({
+  gameId: z.string().min(1),
+});
+export type Game1AdminSubscribePayload = z.infer<typeof Game1AdminSubscribePayloadSchema>;
+
+/**
+ * `game1:status-update` — emittes etter hver state-change i
+ * Game1MasterControlService (start/pause/resume/stop/exclude-hall/
+ * include-hall). Admin-UI speiler DB-status uten REST-polling.
+ */
+export const Game1AdminStatusUpdatePayloadSchema = z.object({
+  gameId: z.string().min(1),
+  status: z.string().min(1),
+  action: z.string().min(1),
+  auditId: z.string().min(1),
+  actorUserId: z.string().min(1),
+  at: z.number().int().nonnegative(),
+});
+export type Game1AdminStatusUpdatePayload = z.infer<typeof Game1AdminStatusUpdatePayloadSchema>;
+
+/**
+ * `game1:draw-progressed` — emittes etter hver draw i Game1DrawEngineService.
+ * Admin-UI oppdaterer draws-counter uten polling. Ball-nummer eksponeres
+ * for sanntids-visning på master-konsoll.
+ */
+export const Game1AdminDrawProgressedPayloadSchema = z.object({
+  gameId: z.string().min(1),
+  ballNumber: z.number().int().min(1),
+  drawIndex: z.number().int().min(1),
+  currentPhase: z.number().int().min(1).max(5),
+  at: z.number().int().nonnegative(),
+});
+export type Game1AdminDrawProgressedPayload = z.infer<typeof Game1AdminDrawProgressedPayloadSchema>;

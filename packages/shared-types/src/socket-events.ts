@@ -45,6 +45,18 @@ export type {
   Game1JoinScheduledPayload,
   Game1JoinScheduledAckData,
 } from "./schemas.js";
+
+// GAME1_SCHEDULE PR 4d.3: admin-namespace real-time events.
+export {
+  Game1AdminSubscribePayloadSchema,
+  Game1AdminStatusUpdatePayloadSchema,
+  Game1AdminDrawProgressedPayloadSchema,
+} from "./schemas.js";
+export type {
+  Game1AdminSubscribePayload,
+  Game1AdminStatusUpdatePayload,
+  Game1AdminDrawProgressedPayload,
+} from "./schemas.js";
 import type {
   RoomUpdatePayload as RoomUpdatePayloadT,
   DrawNewPayload as DrawNewPayloadT,
