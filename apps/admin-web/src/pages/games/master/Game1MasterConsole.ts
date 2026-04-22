@@ -1,11 +1,15 @@
 // GAME1_SCHEDULE PR 3: master-konsoll for Game 1.
+// GAME1_SCHEDULE PR 4d.3b: socket-live-oppdatering + polling-fallback.
 //
-// Backend: apps/backend/src/routes/adminGame1Master.ts.
+// Backend: apps/backend/src/routes/adminGame1Master.ts + /admin-game1
+// socket-namespace.
 // API-adapter: apps/admin-web/src/api/admin-game1-master.ts.
 //
 // Viser ett spills ready-status per hall + master-actions (START / PAUSE /
-// RESUME / STOP / EXCLUDE). Polling hver 5. sekund er fall-back når socket-
-// laget ikke er tilgjengelig (socket-wiring på admin-web-nivå er TBD).
+// RESUME / STOP / EXCLUDE). Primær flyt er socket-subscription mot
+// `/admin-game1`-namespacet — status-update/draw-progressed trigger
+// umiddelbar refresh. REST-polling (5s) er fallback som starter hvis
+// socket er frakoblet > 10s, og stopper automatisk ved reconnect.
 
 import { t } from "../../../i18n/I18n.js";
 import { escapeHtml } from "../common/escape.js";
@@ -22,34 +26,69 @@ import {
   type Game1GameDetail,
   type Game1HallDetail,
 } from "../../../api/admin-game1-master.js";
+import { AdminGame1Socket } from "./adminGame1Socket.js";
 
 const POLL_INTERVAL_MS = 5000;
 
 let activePoll: ReturnType<typeof setInterval> | null = null;
+let activeSocket: AdminGame1Socket | null = null;
 
 export async function renderGame1MasterConsole(
   container: HTMLElement,
   gameId: string
 ): Promise<void> {
   stopPolling();
+  disposeSocket();
   container.innerHTML = renderShell(gameId);
   await refresh(container, gameId);
-  activePoll = setInterval(() => {
-    void refresh(container, gameId);
-  }, POLL_INTERVAL_MS);
+
+  // PR 4d.3b: abonnér på socket-events. Polling er fallback — den starter
+  // kun hvis socket er frakoblet > 10s.
+  activeSocket = new AdminGame1Socket({
+    onStatusUpdate: () => {
+      void refresh(container, gameId);
+    },
+    onDrawProgressed: () => {
+      void refresh(container, gameId);
+    },
+    onFallbackActive: (active) => {
+      if (active) {
+        startPolling(container, gameId);
+      } else {
+        stopPolling();
+      }
+    },
+  });
+  activeSocket.subscribe(gameId);
+
   const observer = new MutationObserver(() => {
     if (!document.body.contains(container)) {
       stopPolling();
+      disposeSocket();
       observer.disconnect();
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
 }
 
+function startPolling(container: HTMLElement, gameId: string): void {
+  if (activePoll) return;
+  activePoll = setInterval(() => {
+    void refresh(container, gameId);
+  }, POLL_INTERVAL_MS);
+}
+
 function stopPolling(): void {
   if (activePoll) {
     clearInterval(activePoll);
     activePoll = null;
+  }
+}
+
+function disposeSocket(): void {
+  if (activeSocket) {
+    activeSocket.dispose();
+    activeSocket = null;
   }
 }
 
