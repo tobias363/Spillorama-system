@@ -49,7 +49,14 @@ class InMemoryWalletAdapter implements WalletAdapter {
       return { ...existing };
     }
     const now = new Date().toISOString();
-    const account: WalletAccount = { id: accountId, balance: initialBalance, createdAt: now, updatedAt: now };
+    const account: WalletAccount = {
+      id: accountId,
+      balance: initialBalance,
+      depositBalance: initialBalance,
+      winningsBalance: 0,
+      createdAt: now,
+      updatedAt: now
+    };
     this.accounts.set(accountId, account);
     return { ...account };
   }
@@ -67,6 +74,12 @@ class InMemoryWalletAdapter implements WalletAdapter {
 
   async listAccounts(): Promise<WalletAccount[]> { return [...this.accounts.values()]; }
   async getBalance(accountId: string): Promise<number> { return (await this.getAccount(accountId)).balance; }
+  async getDepositBalance(accountId: string): Promise<number> { return (await this.getAccount(accountId)).depositBalance; }
+  async getWinningsBalance(accountId: string): Promise<number> { return (await this.getAccount(accountId)).winningsBalance; }
+  async getBothBalances(accountId: string): Promise<{ deposit: number; winnings: number; total: number }> {
+    const a = await this.getAccount(accountId);
+    return { deposit: a.depositBalance, winnings: a.winningsBalance, total: a.balance };
+  }
 
   async debit(accountId: string, amount: number, reason: string): Promise<WalletTransaction> {
     return this.adjustBalance(accountId, -Math.abs(amount), "DEBIT", reason);
@@ -97,7 +110,13 @@ class InMemoryWalletAdapter implements WalletAdapter {
     const account = await this.ensureAccount(id);
     const nextBalance = account.balance + delta;
     if (nextBalance < 0) throw new WalletError("INSUFFICIENT_FUNDS", "");
-    const updated = { ...account, balance: nextBalance, updatedAt: new Date().toISOString() };
+    const updated = {
+      ...account,
+      balance: nextBalance,
+      depositBalance: nextBalance,
+      winningsBalance: 0,
+      updatedAt: new Date().toISOString()
+    };
     this.accounts.set(id, updated);
     const tx: WalletTransaction = {
       id: `tx-${++this.txCounter}`, accountId: id, type, amount: Math.abs(delta),

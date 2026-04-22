@@ -350,14 +350,17 @@ test("invariant 4b: wallet med dedup sikrer at replay ikke dobbelt-utbetaler", a
     }
     listAccounts(): Promise<WalletAccount[]> { return this.base.listAccounts(); }
     getBalance(accountId: string): Promise<number> { return this.base.getBalance(accountId); }
+    getDepositBalance(accountId: string): Promise<number> { return this.base.getDepositBalance(accountId); }
+    getWinningsBalance(accountId: string): Promise<number> { return this.base.getWinningsBalance(accountId); }
+    getBothBalances(accountId: string) { return this.base.getBothBalances(accountId); }
     // Delegat-metoder: InMemoryWalletAdapter (base) implementerer ikke
     // options-parameteren, så vi dropper det ved delegering. Dedup-logikken
     // lever helt i `transfer`-wrapperen.
     debit(accountId: string, amount: number, reason: string, _options?: TransactionOptions) {
       return this.base.debit(accountId, amount, reason);
     }
-    credit(accountId: string, amount: number, reason: string, _options?: TransactionOptions) {
-      return this.base.credit(accountId, amount, reason);
+    credit(accountId: string, amount: number, reason: string, options?: TransactionOptions & { to?: "deposit" | "winnings" }) {
+      return this.base.credit(accountId, amount, reason, options);
     }
     topUp(accountId: string, amount: number, reason?: string, _options?: TransactionOptions) {
       return this.base.topUp(accountId, amount, reason);

@@ -192,7 +192,7 @@ function makeMockWallet(options: { failNextOp?: WalletError } = {}): {
       throw new Error("not implemented");
     },
     async ensureAccount() {
-      return { id: "x", balance: 0, createdAt: "", updatedAt: "" };
+      return { id: "x", balance: 0, depositBalance: 0, winningsBalance: 0, createdAt: "", updatedAt: "" };
     },
     async getAccount() {
       throw new Error("not implemented");
@@ -202,6 +202,15 @@ function makeMockWallet(options: { failNextOp?: WalletError } = {}): {
     },
     async getBalance() {
       return 0;
+    },
+    async getDepositBalance() {
+      return 0;
+    },
+    async getWinningsBalance() {
+      return 0;
+    },
+    async getBothBalances() {
+      return { deposit: 0, winnings: 0, total: 0 };
     },
     async debit(accountId, amount, reason, opts) {
       if (options.failNextOp) {

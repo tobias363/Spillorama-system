@@ -75,6 +75,15 @@ function makeFakeWallet(opts: { failWithCode?: string; failReason?: "wallet-erro
     async getBalance() {
       return 0;
     },
+    async getDepositBalance() {
+      return 0;
+    },
+    async getWinningsBalance() {
+      return 0;
+    },
+    async getBothBalances() {
+      return { deposit: 0, winnings: 0, total: 0 };
+    },
     async debit() {
       throw new Error("not implemented");
     },
@@ -468,6 +477,9 @@ test("partial-failure: wallet feiler på 2. av 3 vinnere → vinner 1 er allered
     async getAccount() { throw new Error("n/a"); },
     async listAccounts() { return []; },
     async getBalance() { return 0; },
+    async getDepositBalance() { return 0; },
+    async getWinningsBalance() { return 0; },
+    async getBothBalances() { return { deposit: 0, winnings: 0, total: 0 }; },
     async debit() { throw new Error("n/a"); },
     async credit(walletId, amount, reason) {
       callCount++;

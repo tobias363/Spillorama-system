@@ -52,7 +52,14 @@ class InMemoryWalletAdapter implements WalletAdapter {
       return { ...this.accounts.get(accountId)! };
     }
     const now = new Date().toISOString();
-    const account: WalletAccount = { id: accountId, balance: initialBalance, createdAt: now, updatedAt: now };
+    const account: WalletAccount = {
+      id: accountId,
+      balance: initialBalance,
+      depositBalance: initialBalance,
+      winningsBalance: 0,
+      createdAt: now,
+      updatedAt: now
+    };
     this.accounts.set(accountId, account);
     return { ...account };
   }
@@ -67,6 +74,12 @@ class InMemoryWalletAdapter implements WalletAdapter {
   }
   async listAccounts(): Promise<WalletAccount[]> { return [...this.accounts.values()].map((a) => ({ ...a })); }
   async getBalance(id: string): Promise<number> { return (await this.getAccount(id)).balance; }
+  async getDepositBalance(id: string): Promise<number> { return (await this.getAccount(id)).depositBalance; }
+  async getWinningsBalance(id: string): Promise<number> { return (await this.getAccount(id)).winningsBalance; }
+  async getBothBalances(id: string): Promise<{ deposit: number; winnings: number; total: number }> {
+    const a = await this.getAccount(id);
+    return { deposit: a.depositBalance, winnings: a.winningsBalance, total: a.balance };
+  }
   async debit(id: string, amount: number, reason: string): Promise<WalletTransaction> {
     return this.adjust(id, -Math.abs(amount), "DEBIT", reason);
   }
@@ -91,7 +104,13 @@ class InMemoryWalletAdapter implements WalletAdapter {
     const acc = await this.ensureAccount(id);
     const next = acc.balance + delta;
     if (next < 0) throw new WalletError("INSUFFICIENT_FUNDS", "");
-    this.accounts.set(id, { ...acc, balance: next, updatedAt: new Date().toISOString() });
+    this.accounts.set(id, {
+      ...acc,
+      balance: next,
+      depositBalance: next,
+      winningsBalance: 0,
+      updatedAt: new Date().toISOString()
+    });
     const tx: WalletTransaction = {
       id: `tx-${++this.txCounter}`, accountId: id, type, amount: Math.abs(delta),
       reason, createdAt: new Date().toISOString(), relatedAccountId: related,

@@ -38,11 +38,24 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     const account: WalletAccount = {
       id: accountId,
       balance: initialBalance,
+      depositBalance: initialBalance,
+      winningsBalance: 0,
       createdAt: now,
       updatedAt: now
     };
     this.accounts.set(accountId, account);
     return this.cloneAccount(account);
+  }
+
+  async getDepositBalance(accountId: string): Promise<number> {
+    return (await this.getAccount(accountId)).depositBalance;
+  }
+  async getWinningsBalance(accountId: string): Promise<number> {
+    return (await this.getAccount(accountId)).winningsBalance;
+  }
+  async getBothBalances(accountId: string): Promise<{ deposit: number; winnings: number; total: number }> {
+    const a = await this.getAccount(accountId);
+    return { deposit: a.depositBalance, winnings: a.winningsBalance, total: a.balance };
   }
 
   async ensureAccount(accountId: string): Promise<WalletAccount> {
@@ -82,7 +95,9 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     return this.adjustBalance(accountId, -Math.abs(amount), "DEBIT", reason);
   }
 
-  async credit(accountId: string, amount: number, reason: string): Promise<WalletTransaction> {
+  async credit(accountId: string, amount: number, reason: string, _options?: { idempotencyKey?: string; to?: "deposit" | "winnings" }): Promise<WalletTransaction> {
+    // PR-W1: `to`-parameter ignoreres i denne test-mocken (hele saldo holdes i
+    // deposit-feltet). BingoEngine test-dekning trenger ikke split-oppførsel.
     return this.adjustBalance(accountId, Math.abs(amount), "CREDIT", reason);
   }
 
@@ -137,6 +152,8 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     const updated: WalletAccount = {
       ...account,
       balance: nextBalance,
+      depositBalance: nextBalance,
+      winningsBalance: 0,
       updatedAt: new Date().toISOString()
     };
     this.accounts.set(normalizedAccountId, updated);
@@ -1420,8 +1437,11 @@ test("KRITISK-4: BINGO_ALREADY_CLAIMED guard prevents double payout during race"
     getAccount: (id) => realWallet.getAccount(id),
     listAccounts: () => realWallet.listAccounts(),
     getBalance: (id) => realWallet.getBalance(id),
+    getDepositBalance: (id) => realWallet.getDepositBalance(id),
+    getWinningsBalance: (id) => realWallet.getWinningsBalance(id),
+    getBothBalances: (id) => realWallet.getBothBalances(id),
     debit: (id, amount, reason) => realWallet.debit(id, amount, reason),
-    credit: (id, amount, reason) => realWallet.credit(id, amount, reason),
+    credit: (id, amount, reason, options) => realWallet.credit(id, amount, reason, options),
     topUp: (id, amount, reason) => realWallet.topUp(id, amount, reason),
     withdraw: (id, amount, reason) => realWallet.withdraw(id, amount, reason),
     transfer: async (from, to, amount, reason) => {
@@ -1560,8 +1580,11 @@ test("HOEY-4: wallet failure during buy-in refunds already-debited players", asy
     getAccount: (id) => realWallet.getAccount(id),
     listAccounts: () => realWallet.listAccounts(),
     getBalance: (id) => realWallet.getBalance(id),
+    getDepositBalance: (id) => realWallet.getDepositBalance(id),
+    getWinningsBalance: (id) => realWallet.getWinningsBalance(id),
+    getBothBalances: (id) => realWallet.getBothBalances(id),
     debit: (id, amount, reason) => realWallet.debit(id, amount, reason),
-    credit: (id, amount, reason) => realWallet.credit(id, amount, reason),
+    credit: (id, amount, reason, options) => realWallet.credit(id, amount, reason, options),
     topUp: (id, amount, reason) => realWallet.topUp(id, amount, reason),
     withdraw: (id, amount, reason) => realWallet.withdraw(id, amount, reason),
     transfer: async (from, to, amount, reason) => {

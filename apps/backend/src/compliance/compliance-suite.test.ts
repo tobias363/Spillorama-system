@@ -40,11 +40,32 @@ class InMemoryWalletAdapter implements WalletAdapter {
     const account: WalletAccount = {
       id: accountId,
       balance: initialBalance,
+      depositBalance: initialBalance,
+      winningsBalance: 0,
       createdAt: now,
       updatedAt: now
     };
     this.accounts.set(accountId, account);
     return this.cloneAccount(account);
+  }
+
+  async getDepositBalance(accountId: string): Promise<number> {
+    const account = await this.getAccount(accountId);
+    return account.depositBalance;
+  }
+
+  async getWinningsBalance(accountId: string): Promise<number> {
+    const account = await this.getAccount(accountId);
+    return account.winningsBalance;
+  }
+
+  async getBothBalances(accountId: string): Promise<{ deposit: number; winnings: number; total: number }> {
+    const account = await this.getAccount(accountId);
+    return {
+      deposit: account.depositBalance,
+      winnings: account.winningsBalance,
+      total: account.balance
+    };
   }
 
   async ensureAccount(accountId: string): Promise<WalletAccount> {
@@ -138,6 +159,10 @@ class InMemoryWalletAdapter implements WalletAdapter {
     const updated: WalletAccount = {
       ...account,
       balance: nextBalance,
+      // PR-W1 test-mock: hele saldoen holdes i deposit — matcher produksjons-
+      // mock-strategi (ingen split-logikk i test-in-memory-adapter).
+      depositBalance: nextBalance,
+      winningsBalance: 0,
       updatedAt: new Date().toISOString()
     };
     this.accounts.set(normalizedAccountId, updated);

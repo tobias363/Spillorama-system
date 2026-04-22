@@ -1,9 +1,12 @@
 import type {
   CreateWalletAccountInput,
+  CreditOptions,
   TransactionOptions,
   WalletAccount,
   WalletAdapter,
+  WalletBalance,
   WalletTransaction,
+  WalletTransactionSplit,
   WalletTransferResult
 } from "./WalletAdapter.js";
 import { WalletError } from "./WalletAdapter.js";
@@ -71,7 +74,12 @@ function toWalletAccount(payload: unknown): WalletAccount {
   if (!id || balance === null) {
     throw new WalletError("INVALID_WALLET_RESPONSE", "Mangler id eller balance i wallet account.");
   }
-  return { id, balance, createdAt, updatedAt };
+  // PR-W1: splitt-felter er opt-in fra HTTP-API. Hvis API ikke returnerer dem
+  // (legacy wallet-service), faller vi tilbake til: hele balance = deposit,
+  // winnings = 0. Dette matcher migration-strategy for eksisterende data.
+  const depositBalance = asFiniteNumber(raw.depositBalance) ?? balance;
+  const winningsBalance = asFiniteNumber(raw.winningsBalance) ?? 0;
+  return { id, balance, depositBalance, winningsBalance, createdAt, updatedAt };
 }
 
 function toWalletTransaction(payload: unknown): WalletTransaction {
@@ -95,6 +103,19 @@ function toWalletTransaction(payload: unknown): WalletTransaction {
     throw new WalletError("INVALID_WALLET_RESPONSE", "Mangler felter i wallet transaction.");
   }
 
+  // PR-W1: split-felt er opsjonelt fra HTTP-API. Hvis wallet-service ikke
+  // returnerer det, forblir `split` undefined (legacy-oppførsel).
+  let split: WalletTransactionSplit | undefined;
+  const splitPayload = raw.split;
+  if (splitPayload && typeof splitPayload === "object") {
+    const splitRaw = splitPayload as Record<string, unknown>;
+    const fromDeposit = asFiniteNumber(splitRaw.fromDeposit);
+    const fromWinnings = asFiniteNumber(splitRaw.fromWinnings);
+    if (fromDeposit !== null && fromWinnings !== null) {
+      split = { fromDeposit, fromWinnings };
+    }
+  }
+
   return {
     id,
     accountId,
@@ -102,7 +123,8 @@ function toWalletTransaction(payload: unknown): WalletTransaction {
     amount,
     reason,
     createdAt,
-    relatedAccountId: relatedAccountId ?? undefined
+    relatedAccountId: relatedAccountId ?? undefined,
+    split
   };
 }
 
@@ -217,6 +239,25 @@ export class HttpWalletAdapter implements WalletAdapter {
     return account.balance;
   }
 
+  async getDepositBalance(accountId: string): Promise<number> {
+    const account = await this.getAccount(accountId);
+    return account.depositBalance;
+  }
+
+  async getWinningsBalance(accountId: string): Promise<number> {
+    const account = await this.getAccount(accountId);
+    return account.winningsBalance;
+  }
+
+  async getBothBalances(accountId: string): Promise<WalletBalance> {
+    const account = await this.getAccount(accountId);
+    return {
+      deposit: account.depositBalance,
+      winnings: account.winningsBalance,
+      total: account.balance
+    };
+  }
+
   async debit(accountId: string, amount: number, reason: string, options?: TransactionOptions): Promise<WalletTransaction> {
     const id = accountId.trim();
     const payload = await this.request<unknown>("POST", `/wallets/${encodeURIComponent(id)}/debit`, {
@@ -227,12 +268,16 @@ export class HttpWalletAdapter implements WalletAdapter {
     return toWalletTransaction(payload);
   }
 
-  async credit(accountId: string, amount: number, reason: string, options?: TransactionOptions): Promise<WalletTransaction> {
+  async credit(accountId: string, amount: number, reason: string, options?: CreditOptions): Promise<WalletTransaction> {
     const id = accountId.trim();
+    // PR-W1: send `to` i HTTP-payload hvis gitt. Legacy wallet-service som ikke
+    // gjenkjenner feltet ignorerer det og kreder default (deposit) — matcher vår
+    // default-oppførsel.
     const payload = await this.request<unknown>("POST", `/wallets/${encodeURIComponent(id)}/credit`, {
       amount,
       reason,
-      idempotencyKey: options?.idempotencyKey
+      idempotencyKey: options?.idempotencyKey,
+      to: options?.to
     });
     return toWalletTransaction(payload);
   }

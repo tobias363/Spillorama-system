@@ -86,6 +86,9 @@ function makeFakeWallet(): {
     async getAccount() { throw new Error("ni"); },
     async listAccounts() { return []; },
     async getBalance() { return 0; },
+    async getDepositBalance() { return 0; },
+    async getWinningsBalance() { return 0; },
+    async getBothBalances() { return { deposit: 0, winnings: 0, total: 0 }; },
     async debit() { throw new Error("ni"); },
     async credit(accountId, amount, reason, options) {
       credits.push({ accountId, amount, idempotencyKey: options?.idempotencyKey });

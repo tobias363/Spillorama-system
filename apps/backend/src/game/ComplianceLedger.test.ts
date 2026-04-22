@@ -31,9 +31,27 @@ class InMemoryWalletAdapter implements WalletAdapter {
       return { ...existing };
     }
     const now = new Date().toISOString();
-    const account: WalletAccount = { id: accountId, balance: initialBalance, createdAt: now, updatedAt: now };
+    const account: WalletAccount = {
+      id: accountId,
+      balance: initialBalance,
+      depositBalance: initialBalance,
+      winningsBalance: 0,
+      createdAt: now,
+      updatedAt: now
+    };
     this.accounts.set(accountId, account);
     return { ...account };
+  }
+
+  async getDepositBalance(accountId: string): Promise<number> {
+    return (await this.getAccount(accountId)).depositBalance;
+  }
+  async getWinningsBalance(accountId: string): Promise<number> {
+    return (await this.getAccount(accountId)).winningsBalance;
+  }
+  async getBothBalances(accountId: string): Promise<{ deposit: number; winnings: number; total: number }> {
+    const a = await this.getAccount(accountId);
+    return { deposit: a.depositBalance, winnings: a.winningsBalance, total: a.balance };
   }
 
   async ensureAccount(accountId: string): Promise<WalletAccount> {
@@ -107,7 +125,13 @@ class InMemoryWalletAdapter implements WalletAdapter {
     if (nextBalance < 0) {
       throw new WalletError("INSUFFICIENT_FUNDS", "Ikke nok saldo.");
     }
-    const updated: WalletAccount = { ...account, balance: nextBalance, updatedAt: new Date().toISOString() };
+    const updated: WalletAccount = {
+      ...account,
+      balance: nextBalance,
+      depositBalance: nextBalance,
+      winningsBalance: 0,
+      updatedAt: new Date().toISOString()
+    };
     this.accounts.set(normalized, updated);
     const tx: WalletTransaction = {
       id: `tx-${++this.txCounter}`,
