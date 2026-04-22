@@ -20,6 +20,7 @@ import {
   Game1MiniGameOrchestrator,
   type Game1MiniGameOrchestratorOptions,
 } from "./Game1MiniGameOrchestrator.js";
+import { MiniGameOddsenEngine } from "./MiniGameOddsenEngine.js";
 import type { Game1TicketPurchaseService } from "../Game1TicketPurchaseService.js";
 import {
   AuditLogService,
@@ -100,4 +101,38 @@ test("BIN-690 M1 wire-up: miniGameOrchestrator kan passes via options", () => {
 
   // Smoke: ingen exception fra constructor = pass.
   assert.ok(drawEngine);
+});
+
+test("BIN-690 M5 wire-up: setOddsenEngine finnes på drawEngine + options aksepteres", () => {
+  const pool = makeStubPool();
+  const auditLogService = new AuditLogService(new InMemoryAuditLogStore());
+  const ticketPurchaseService = makeStubTicketPurchaseService();
+
+  const oddsenEngine = new MiniGameOddsenEngine({
+    pool,
+    walletAdapter: makeStubWalletAdapter(),
+    auditLog: auditLogService,
+  });
+
+  // Via options
+  const drawEngineA = new Game1DrawEngineService({
+    pool,
+    ticketPurchaseService,
+    auditLogService,
+    oddsenEngine,
+  } as Game1DrawEngineServiceOptions);
+  assert.ok(drawEngineA);
+
+  // Via setter
+  const drawEngineB = new Game1DrawEngineService({
+    pool,
+    ticketPurchaseService,
+    auditLogService,
+  } as Game1DrawEngineServiceOptions);
+  assert.equal(
+    typeof drawEngineB.setOddsenEngine,
+    "function",
+    "setOddsenEngine må være eksportert på public API",
+  );
+  drawEngineB.setOddsenEngine(oddsenEngine);
 });

@@ -62,6 +62,12 @@ import type { Game1PayoutService, Game1WinningAssignment } from "./Game1PayoutSe
 import type { Game1JackpotService, Game1JackpotConfig } from "./Game1JackpotService.js";
 import type { AdminGame1Broadcaster } from "./AdminGame1Broadcaster.js";
 import type { Game1MiniGameOrchestrator } from "./minigames/Game1MiniGameOrchestrator.js";
+import {
+  parseOddsenConfig,
+  type MiniGameOddsenEngine,
+  type OddsenConfig,
+  type OddsenResolveResult,
+} from "./minigames/MiniGameOddsenEngine.js";
 import type { PhysicalTicketPayoutService } from "../compliance/PhysicalTicketPayoutService.js";
 import { evaluatePhase, TOTAL_PHASES } from "./Game1PatternEvaluator.js";
 import {
@@ -134,6 +140,14 @@ export interface Game1DrawEngineServiceOptions {
    * deaktiveres helt per miljø).
    */
   miniGameOrchestrator?: Game1MiniGameOrchestrator;
+  /**
+   * BIN-690 M5: valgfri Oddsen-engine for cross-round resolve. Når satt vil
+   * `drawNext()` ved terskel-draw (default #57) slå opp aktiv
+   * `app_game1_oddsen_state` for spillet og utbetale pot ved hit. Default
+   * unset = ingen Oddsen-resolve (M2/M3/M4 virker uendret, Oddsen-state
+   * forblir unresolved men uten regulatorisk risiko).
+   */
+  oddsenEngine?: MiniGameOddsenEngine;
   /**
    * PT4: valgfri tjeneste for fysisk-bong vinn-flyt. Når satt vil engine
    * også evaluere `app_static_tickets` mot aktiv fase og opprette
@@ -327,6 +341,7 @@ export class Game1DrawEngineService {
   private readonly jackpotService: Game1JackpotService | null;
   private adminBroadcaster: AdminGame1Broadcaster | null;
   private miniGameOrchestrator: Game1MiniGameOrchestrator | null;
+  private oddsenEngine: MiniGameOddsenEngine | null;
   private physicalTicketPayoutService: PhysicalTicketPayoutService | null;
 
   constructor(options: Game1DrawEngineServiceOptions) {
@@ -346,6 +361,7 @@ export class Game1DrawEngineService {
     this.jackpotService = options.jackpotService ?? null;
     this.adminBroadcaster = options.adminBroadcaster ?? null;
     this.miniGameOrchestrator = options.miniGameOrchestrator ?? null;
+    this.oddsenEngine = options.oddsenEngine ?? null;
     this.physicalTicketPayoutService = options.physicalTicketPayoutService ?? null;
   }
 
@@ -357,6 +373,17 @@ export class Game1DrawEngineService {
   /** BIN-690 M1: late-binding for mini-game orchestrator. */
   setMiniGameOrchestrator(orchestrator: Game1MiniGameOrchestrator): void {
     this.miniGameOrchestrator = orchestrator;
+  }
+
+  /**
+   * BIN-690 M5: late-binding for Oddsen-engine. Brukes av drawNext() ved
+   * terskel-draw for å resolve aktiv Oddsen-state fra forrige spill.
+   * Separat fra miniGameOrchestrator fordi Oddsen-resolve er ATOMISK med
+   * draw (inne i samme transaksjon), mens orchestrator.maybeTriggerFor er
+   * fire-and-forget POST-commit.
+   */
+  setOddsenEngine(engine: MiniGameOddsenEngine): void {
+    this.oddsenEngine = engine;
   }
 
   /** PR 4d.3: late-binding for admin-broadcaster (io må finnes først). */
@@ -764,6 +791,31 @@ export class Game1DrawEngineService {
         );
       }
 
+      // BIN-690 M5: Oddsen-resolve. Hvis draw-sekvensen når terskelen (default
+      // 57) OG det finnes aktiv Oddsen-state for dette spillet, gjennomfør
+      // resolve INNE i transaksjonen. Atomisk ift draw-persistens slik at en
+      // payout-feil ruller tilbake BÅDE draw OG oddsen_state-update.
+      //
+      // Engine er valgfri: hvis ikke wired opp (test-scenarier uten oddsen),
+      // hopper vi over. Fail-closed: hvis resolve kaster (wallet-feil, osv.)
+      // ruller hele drawet tilbake — ingen half-committed state.
+      if (this.oddsenEngine) {
+        try {
+          await this.maybeResolveOddsen(
+            client,
+            scheduledGameId,
+            nextSequence,
+            isFinished
+          );
+        } catch (err) {
+          log.error(
+            { err, scheduledGameId, drawSequence: nextSequence },
+            "[BIN-690 M5] Oddsen resolveForGame kastet inne i draw-transaksjon — rull tilbake"
+          );
+          throw err;
+        }
+      }
+
       // Audit.
       this.fireAudit({
         actorId: null,
@@ -929,6 +981,99 @@ export class Game1DrawEngineService {
         "[BIN-690] resolveWalletAndHallForUser feilet"
       );
       return null;
+    }
+  }
+
+  /**
+   * BIN-690 M5: Oddsen cross-round resolve. Kalles fra drawNext() inne i
+   * draw-transaksjonen når draw-sekvensen når terskelen eller spillet
+   * fullfører. Leser oddsen-config (fra `app_mini_games_config`) for å
+   * bestemme resolveAtDraw-terskel + pot-størrelse, og delegerer selve
+   * resolve-logikken til `MiniGameOddsenEngine.resolveForGame()`.
+   *
+   * Fail-closed: hvis engine kaster → drawNext ruller tilbake, ingen
+   * half-committed state. Hvis ingen oddsen_state finnes for spillet →
+   * return uten feil (normalflyt for spill uten Oddsen-kontekst).
+   *
+   * Resolve-trigger-strategi:
+   *   a) drawSequence === config.resolveAtDraw (typisk 57) — main path,
+   *      evaluerer alle drawn ball-verdier mot chosen_number.
+   *   b) isFinished OG drawSequence < resolveAtDraw — spillet fullførte
+   *      før terskel (Fullt Hus tidlig eller maxDraws lavere). Vi resolver
+   *      med de tall som faktisk er trukket. Hvis chosen_number ikke er
+   *      blant dem → miss (ikke expired — spilleren fikk full sjans).
+   */
+  private async maybeResolveOddsen(
+    client: PoolClient,
+    scheduledGameId: string,
+    drawSequence: number,
+    isFinished: boolean
+  ): Promise<void> {
+    const engine = this.oddsenEngine;
+    if (!engine) return;
+
+    // Hent config-snapshot for oddsen. Fall-back til default ved mangel.
+    const oddsenConfig = await this.fetchOddsenConfig();
+
+    // Resolve trigger-strategi: terskel-draw eller game-end.
+    const atThreshold = drawSequence >= oddsenConfig.resolveAtDraw;
+    const gameEndedBeforeThreshold = isFinished && !atThreshold;
+    if (!atThreshold && !gameEndedBeforeThreshold) return;
+
+    // Hent drawn numbers for dette spillet (inkludert den vi akkurat
+    // trakk — den er persistert i samme transaksjon via INSERT ovenfor).
+    const { rows } = await client.query<{ ball_value: number }>(
+      `SELECT ball_value FROM ${this.drawsTable()}
+        WHERE scheduled_game_id = $1
+        ORDER BY draw_sequence ASC`,
+      [scheduledGameId]
+    );
+    const drawnNumbers = rows.map((r) => Number(r.ball_value));
+
+    const result: OddsenResolveResult | null = await engine.resolveForGame(
+      scheduledGameId,
+      drawnNumbers,
+      oddsenConfig,
+      client
+    );
+    if (result) {
+      log.info(
+        {
+          scheduledGameId,
+          drawSequence,
+          outcome: result.outcome,
+          potAmountCents: result.potAmountCents,
+          chosenNumber: result.chosenNumber,
+        },
+        "[BIN-690 M5] Oddsen resolved"
+      );
+    }
+  }
+
+  /**
+   * BIN-690 M5: hent oddsen-config fra `app_mini_games_config`. Bruker default
+   * hvis ingen rad finnes (samme pattern som orchestrator.fetchConfigSnapshot).
+   * Leser via pool (ikke transaksjon) for enkelhet — config-changes er
+   * eventual consistent ift drawNext-transaksjonen, som er akseptabel
+   * siden oddsenConfig er nesten-statisk.
+   */
+  private async fetchOddsenConfig(): Promise<OddsenConfig> {
+    try {
+      const { rows } = await this.pool.query<{
+        config_json: Record<string, unknown> | null;
+      }>(
+        `SELECT config_json FROM "${this.schema}"."app_mini_games_config"
+          WHERE game_type = 'oddsen' AND active = true LIMIT 1`
+      );
+      const snapshot: Readonly<Record<string, unknown>> =
+        rows.length > 0 && rows[0]!.config_json ? rows[0]!.config_json : {};
+      return parseOddsenConfig(snapshot);
+    } catch (err) {
+      log.warn(
+        { err },
+        "[BIN-690 M5] fetchOddsenConfig feilet — faller tilbake til default"
+      );
+      return parseOddsenConfig({});
     }
   }
 
