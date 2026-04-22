@@ -1491,12 +1491,16 @@ export class BingoEngine {
     game.claims.push(claim);
 
     if (payout > 0) {
+      // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
       const transfer = await this.walletAdapter.transfer(
         houseAccountId,
         player.walletId,
         payout,
         `${pattern.name} prize ${room.code}`,
-        { idempotencyKey: `phase-${patternResult.patternId}-${game.id}-${player.id}` },
+        {
+          idempotencyKey: `phase-${patternResult.patternId}-${game.id}-${player.id}`,
+          targetSide: "winnings",
+        },
       );
       player.balance += payout;
       game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
@@ -1976,12 +1980,13 @@ export class BingoEngine {
       );
       if (payout > 0) {
         // BIN-239: idempotencyKey prevents double payout if client retries.
+        // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
         const transfer = await this.walletAdapter.transfer(
           houseAccountId,
           player.walletId,
           payout,
           `Line prize ${room.code}`,
-          { idempotencyKey: `line-prize-${game.id}-${claim.id}` }
+          { idempotencyKey: `line-prize-${game.id}-${claim.id}`, targetSide: "winnings" }
         );
         player.balance += payout;
         game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
@@ -2074,12 +2079,13 @@ export class BingoEngine {
       );
       if (payout > 0) {
         // BIN-239: idempotencyKey prevents double payout if client retries.
+        // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
         const transfer = await this.walletAdapter.transfer(
           houseAccountId,
           player.walletId,
           payout,
           `Bingo prize ${room.code}`,
-          { idempotencyKey: `bingo-prize-${game.id}-${claim.id}` }
+          { idempotencyKey: `bingo-prize-${game.id}-${claim.id}`, targetSide: "winnings" }
         );
         player.balance += payout;
         await this.compliance.recordLossEntry(player.walletId, room.hallId, {
@@ -2245,12 +2251,16 @@ export class BingoEngine {
       const channel = "INTERNET" as const;
       const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
+      // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
       const transfer = await this.walletAdapter.transfer(
         houseAccountId,
         player.walletId,
         prizeAmount,
         `Jackpot prize ${room.code}`,
-        { idempotencyKey: `jackpot-${game.id}-spin-${jackpot.playedSpins}` },
+        {
+          idempotencyKey: `jackpot-${game.id}-spin-${jackpot.playedSpins}`,
+          targetSide: "winnings",
+        },
       );
       player.balance += prizeAmount;
 
@@ -2368,12 +2378,13 @@ export class BingoEngine {
       const channel = "INTERNET" as const;
       const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
 
+      // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
       const transfer = await this.walletAdapter.transfer(
         houseAccountId,
         player.walletId,
         prizeAmount,
         `Mini-game ${miniGame.type} prize ${room.code}`,
-        { idempotencyKey: `minigame-${game.id}-${miniGame.type}` },
+        { idempotencyKey: `minigame-${game.id}-${miniGame.type}`, targetSide: "winnings" },
       );
       player.balance += prizeAmount;
 
@@ -2632,12 +2643,17 @@ export class BingoEngine {
     const channel: LedgerChannel = "INTERNET";
     const sourceAccountId = this.ledger.makeHouseAccountId(hallId, gameType, channel);
     const extraPrizeId = randomUUID();
+    // PR-W3 wallet-split: ekstrapremie er en gameplay-gevinst (passerer
+    // prize-policy-gate som singlePrizeCap + dailyExtraPrizeCap), og krediteres
+    // derfor winnings-siden på samme måte som line/bingo/jackpot-prize.
+    // Admin-gate forhindrer manuelle winnings-kredit (se adminWallet.ts),
+    // men `awardExtraPrize` er en regulert prize-mekanisme via BingoEngine.
     const transfer = await this.walletAdapter.transfer(
       sourceAccountId,
       walletId,
       amount,
       input.reason?.trim() || `Extra prize ${hallId}/${linkId}`,
-      { idempotencyKey: `extra-prize-${extraPrizeId}` }
+      { idempotencyKey: `extra-prize-${extraPrizeId}`, targetSide: "winnings" }
     );
     await this.compliance.recordLossEntry(walletId, hallId, {
       type: "PAYOUT",

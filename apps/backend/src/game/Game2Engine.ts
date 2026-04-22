@@ -343,12 +343,13 @@ export class Game2Engine extends BingoEngine {
       });
       return 0;
     }
+    // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
     const transfer = await this.walletAdapter.transfer(
       houseAccountId,
       player.walletId,
       payout,
       `G2 jackpot prize ${room.code}`,
-      { idempotencyKey: `g2-jackpot-${game.id}-${claim.id}` }
+      { idempotencyKey: `g2-jackpot-${game.id}-${claim.id}`, targetSide: "winnings" }
     );
     player.balance = roundCurrency(player.balance + payout);
     game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
@@ -439,12 +440,13 @@ export class Game2Engine extends BingoEngine {
     const afterPoolCap = Math.min(capped.cappedAmount, game.remainingPrizePool);
     const payout = Math.max(0, Math.min(afterPoolCap, game.remainingPayoutBudget));
     if (payout <= 0) return 0;
+    // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
     const transfer = await this.walletAdapter.transfer(
       houseAccountId,
       player.walletId,
       payout,
       `G2 lucky bonus ${room.code}`,
-      { idempotencyKey: `g2-lucky-${game.id}-${claim.id}` }
+      { idempotencyKey: `g2-lucky-${game.id}-${claim.id}`, targetSide: "winnings" }
     );
     player.balance = roundCurrency(player.balance + payout);
     game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));

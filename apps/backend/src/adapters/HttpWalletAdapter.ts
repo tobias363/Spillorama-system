@@ -2,6 +2,7 @@ import type {
   CreateWalletAccountInput,
   CreditOptions,
   TransactionOptions,
+  TransferOptions,
   WalletAccount,
   WalletAdapter,
   WalletBalance,
@@ -307,14 +308,18 @@ export class HttpWalletAdapter implements WalletAdapter {
     toAccountId: string,
     amount: number,
     reason = "Wallet transfer",
-    options?: TransactionOptions
+    options?: TransferOptions
   ): Promise<WalletTransferResult> {
+    // PR-W3: send `targetSide` i HTTP-payload hvis gitt. Legacy wallet-service
+    // som ikke gjenkjenner feltet ignorerer det og lander på deposit — matcher
+    // vår default-oppførsel (bakoverkompat).
     const payload = await this.request<unknown>("POST", "/wallets/transfer", {
       fromWalletId: fromAccountId,
       toWalletId: toAccountId,
       amount,
       reason,
-      idempotencyKey: options?.idempotencyKey
+      idempotencyKey: options?.idempotencyKey,
+      targetSide: options?.targetSide
     });
     return toWalletTransferResult(payload);
   }

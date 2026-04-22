@@ -5,6 +5,7 @@ import type {
   CreateWalletAccountInput,
   CreditOptions,
   TransactionOptions,
+  TransferOptions,
   WalletAccount,
   WalletAccountSide,
   WalletAdapter,
@@ -367,7 +368,7 @@ export class PostgresWalletAdapter implements WalletAdapter {
     toAccountId: string,
     amount: number,
     reason = "Wallet transfer",
-    _options?: TransactionOptions
+    options?: TransferOptions
   ): Promise<WalletTransferResult> {
     await this.ensureInitialized();
     const fromId = this.normalizeUserWalletId(fromAccountId);
@@ -379,6 +380,10 @@ export class PostgresWalletAdapter implements WalletAdapter {
 
     await this.ensureAccount(fromId);
     await this.ensureAccount(toId);
+
+    // PR-W3: targetSide styrer hvilken side CREDIT-siden lander på. Hvis
+    // mottaker er systemkonto ignoreres feltet (CHECK-constraint winnings=0).
+    const requestedTarget: WalletAccountSide = options?.targetSide ?? "deposit";
 
     const client = await this.pool.connect();
     try {
@@ -393,6 +398,10 @@ export class PostgresWalletAdapter implements WalletAdapter {
       if (!fromAccount) {
         throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${fromId} finnes ikke.`);
       }
+      const toAccount = await this.selectAccountForUpdate(client, toId);
+      if (!toAccount) {
+        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${toId} finnes ikke.`);
+      }
       const fromState: InternalAccountState = {
         id: fromAccount.id,
         balance: asMoney(fromAccount.balance),
@@ -400,39 +409,64 @@ export class PostgresWalletAdapter implements WalletAdapter {
         winningsBalance: asMoney(fromAccount.winnings_balance),
         isSystem: fromAccount.is_system
       };
-      const fromSplit = splitDebitFromAccount(fromState, amount);
 
-      // Mottaker får alt på deposit-siden (bakover-kompat for interne overføringer).
-      const toSplit: WalletTransactionSplit = { fromDeposit: amount, fromWinnings: 0 };
+      // PR-W3: system-konto som avsender bruker deposit-siden (winnings = 0).
+      // For brukerkonto: winnings-first-split.
+      const fromSplit: WalletTransactionSplit = fromState.isSystem
+        ? { fromDeposit: amount, fromWinnings: 0 }
+        : splitDebitFromAccount(fromState, amount);
+
+      // PR-W3: effektivt target — system-konto som mottaker tvinger deposit
+      // (CHECK-constraint winnings_balance=0 for system).
+      const effectiveTarget: WalletAccountSide = toAccount.is_system ? "deposit" : requestedTarget;
+
+      const toSplit: WalletTransactionSplit =
+        effectiveTarget === "winnings"
+          ? { fromDeposit: 0, fromWinnings: amount }
+          : { fromDeposit: amount, fromWinnings: 0 };
 
       const entries: LedgerEntryInput[] = [];
-      if (fromSplit.fromWinnings > 0) {
+      // DEBIT-siden: avsender
+      if (fromState.isSystem) {
+        // System: alt på deposit (winnings er alltid 0).
         entries.push({
           operationId,
           accountId: fromId,
           side: "DEBIT",
-          amount: fromSplit.fromWinnings,
-          transactionId: fromTxId,
-          accountSide: "winnings"
-        });
-      }
-      if (fromSplit.fromDeposit > 0) {
-        entries.push({
-          operationId,
-          accountId: fromId,
-          side: "DEBIT",
-          amount: fromSplit.fromDeposit,
+          amount,
           transactionId: fromTxId,
           accountSide: "deposit"
         });
+      } else {
+        if (fromSplit.fromWinnings > 0) {
+          entries.push({
+            operationId,
+            accountId: fromId,
+            side: "DEBIT",
+            amount: fromSplit.fromWinnings,
+            transactionId: fromTxId,
+            accountSide: "winnings"
+          });
+        }
+        if (fromSplit.fromDeposit > 0) {
+          entries.push({
+            operationId,
+            accountId: fromId,
+            side: "DEBIT",
+            amount: fromSplit.fromDeposit,
+            transactionId: fromTxId,
+            accountSide: "deposit"
+          });
+        }
       }
+      // CREDIT-siden: mottaker — alt lander på effectiveTarget.
       entries.push({
         operationId,
         accountId: toId,
         side: "CREDIT",
         amount,
         transactionId: toTxId,
-        accountSide: "deposit"
+        accountSide: effectiveTarget
       });
 
       const txRows = await this.executeLedger(client, {
@@ -445,6 +479,7 @@ export class PostgresWalletAdapter implements WalletAdapter {
             amount,
             reason,
             relatedAccountId: toId,
+            idempotencyKey: options?.idempotencyKey,
             split: fromSplit
           },
           {

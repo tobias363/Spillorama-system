@@ -113,6 +113,31 @@ export interface CreditOptions extends TransactionOptions {
 }
 
 /**
+ * PR-W3 wallet-split: options for `transfer()` — target account-side for
+ * CREDIT-siden av transferen (mottaker-kontoen).
+ *
+ * `targetSide` styrer hvilken side mottakeren får beløpet på:
+ * - `"deposit"`  — refund (house → player refund), default-oppførsel.
+ * - `"winnings"` — payout (house → player gevinst), brukes av BingoEngine,
+ *                  Game2Engine, Game3Engine når de gjør `transfer(house → player)`
+ *                  for premier.
+ *
+ * System-kontoer (`is_system=true`) ignorerer `targetSide` og lander alltid på
+ * deposit-siden — systemkontoer har ingen winnings-saldo (CHECK-constraint i
+ * wallet_accounts.winnings_balance = 0 for system-kontoer).
+ *
+ * Default: `"deposit"` for bakover-kompat — eksisterende callers som ikke vet
+ * om split treffer samme konto som før PR-W3.
+ *
+ * **Regulatorisk:** `targetSide: "winnings"` skal KUN brukes av game-engine
+ * for payout. Admin-ruter for manuelle korrigeringer må aldri sende `"winnings"` —
+ * samme prinsipp som `CreditOptions.to`. Se adminWallet.ts for gate-implementasjon.
+ */
+export interface TransferOptions extends TransactionOptions {
+  targetSide?: WalletAccountSide;
+}
+
+/**
  * PR-W1 wallet-split: saldo-breakdown for split-bevisst kode.
  *
  * `total = deposit + winnings`. Bakover-kompatibelt med `WalletAccount.balance`.
@@ -157,6 +182,19 @@ export interface WalletAdapter {
   topUp(accountId: string, amount: number, reason?: string, options?: TransactionOptions): Promise<WalletTransaction>;
   /** Withdraw — winnings-first-policy (PM-beslutning). */
   withdraw(accountId: string, amount: number, reason?: string, options?: TransactionOptions): Promise<WalletTransaction>;
-  transfer(fromAccountId: string, toAccountId: string, amount: number, reason?: string, options?: TransactionOptions): Promise<WalletTransferResult>;
+  /**
+   * Transfer — flytter beløp mellom to wallets.
+   *
+   * Avsender-siden bruker winnings-first-policy (som debit). Mottaker-siden
+   * lander som default på deposit-konto. `options.targetSide` kan overstyre
+   * til winnings — brukes av game-engine for payout-transfer (house → player).
+   *
+   * System-kontoer ignorerer `targetSide` (systemkontoer har ingen winnings).
+   *
+   * **Regulatorisk:** `targetSide: "winnings"` er kun tillatt fra game-engine
+   * (payout-flyt). Admin-routes kan aldri sende `"winnings"` — se
+   * TransferOptions-JSDoc.
+   */
+  transfer(fromAccountId: string, toAccountId: string, amount: number, reason?: string, options?: TransferOptions): Promise<WalletTransferResult>;
   listTransactions(accountId: string, limit?: number): Promise<WalletTransaction[]>;
 }
