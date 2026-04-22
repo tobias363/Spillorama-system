@@ -1941,3 +1941,33 @@ export const Game1AdminPhaseWonPayloadSchema = z.object({
   at: z.number().int().nonnegative(),
 });
 export type Game1AdminPhaseWonPayload = z.infer<typeof Game1AdminPhaseWonPayloadSchema>;
+
+/**
+ * PT4: `game1:physical-ticket-won` — emittes av `Game1DrawEngineService` når
+ * en fysisk bong (sold_to_scheduled_game_id satt) treffer pattern for aktiv
+ * fase. Mottaker: `/admin-game1`-namespace. Bingovert-skjerm bruker eventet
+ * for å varsle vakten om at bong må kontrolleres før kontant-utbetaling.
+ *
+ * Payload er PER BONG (ikke aggregert per fase) — flere fysiske bonger i
+ * samme fase genererer flere events. `pendingPayoutId` kan brukes mot
+ * REST-endepunkt `POST /api/admin/physical-ticket-payouts/:id/verify`.
+ *
+ * **Ingen wallet-info** — fysisk utbetaling er kontanter, kun
+ * `expectedPayoutCents` speiler forventet beløp.
+ */
+export const Game1AdminPhysicalTicketWonPayloadSchema = z.object({
+  gameId: z.string().min(1),
+  phase: z.number().int().min(1).max(5),
+  patternName: z.string().min(1),
+  pendingPayoutId: z.string().min(1),
+  ticketId: z.string().min(1),
+  hallId: z.string().min(1),
+  responsibleUserId: z.string().min(1),
+  expectedPayoutCents: z.number().int().nonnegative(),
+  color: z.string().min(1),
+  adminApprovalRequired: z.boolean(),
+  at: z.number().int().nonnegative(),
+});
+export type Game1AdminPhysicalTicketWonPayload = z.infer<
+  typeof Game1AdminPhysicalTicketWonPayloadSchema
+>;

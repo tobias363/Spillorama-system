@@ -120,9 +120,11 @@ import { createAdminPhysicalTicketCheckBingoRouter } from "./routes/adminPhysica
 import { createAdminPhysicalTicketsRewardAllRouter } from "./routes/adminPhysicalTicketsRewardAll.js";
 import { createAdminStaticTicketsRouter } from "./routes/adminStaticTickets.js";
 import { createAdminAgentTicketRangesRouter } from "./routes/adminAgentTicketRanges.js";
+import { createAdminPhysicalTicketPayoutsRouter } from "./routes/adminPhysicalTicketPayouts.js";
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { StaticTicketService } from "./compliance/StaticTicketService.js";
 import { AgentTicketRangeService } from "./compliance/AgentTicketRangeService.js";
+import { PhysicalTicketPayoutService } from "./compliance/PhysicalTicketPayoutService.js";
 import { createAdminReportsPhysicalTicketsRouter } from "./routes/adminReportsPhysicalTickets.js";
 import { createAdminReportsRedFlagCategoriesRouter } from "./routes/adminReportsRedFlagCategories.js";
 import { PhysicalTicketsAggregateService } from "./admin/PhysicalTicketsAggregate.js";
@@ -435,6 +437,14 @@ const staticTicketService = new StaticTicketService({
 // og reserverer bonger via `app_static_tickets.reserved_by_range_id`. PT3
 // batch-salg vil dekrementere `current_top_serial` når bonger selges.
 const agentTicketRangeService = new AgentTicketRangeService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// PT4: fysisk-bong vinn-flyt. Eier `app_physical_ticket_pending_payouts`
+// og håndterer verifisering + utbetaling. Kobles inn i draw-engine via
+// `setPhysicalTicketPayoutService` nedenfor.
+const physicalTicketPayoutService = new PhysicalTicketPayoutService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -947,6 +957,7 @@ const game1DrawEngineService = new Game1DrawEngineService({
   auditLogService,
   payoutService: game1PayoutService,
   jackpotService: game1JackpotService,
+  physicalTicketPayoutService,
 });
 game1MasterControlService.setDrawEngine(game1DrawEngineService);
 // GAME1_SCHEDULE PR 4d.4: inject ticket-purchase-service slik at stopGame()
@@ -1098,6 +1109,17 @@ app.use(createAdminAgentTicketRangesRouter({
   platformService,
   auditLogService,
   agentTicketRangeService,
+}));
+// PT4: fysisk-bong vinn-verifisering og utbetaling:
+//   GET  /api/admin/physical-ticket-payouts/pending?gameId=&userId=
+//   POST /api/admin/physical-ticket-payouts/:id/verify
+//   POST /api/admin/physical-ticket-payouts/:id/admin-approve
+//   POST /api/admin/physical-ticket-payouts/:id/confirm-payout
+//   POST /api/admin/physical-ticket-payouts/:id/reject
+app.use(createAdminPhysicalTicketPayoutsRouter({
+  platformService,
+  auditLogService,
+  physicalTicketPayoutService,
 }));
 // BIN-641: POST /api/admin/physical-tickets/:uniqueId/check-bingo
 app.use(createAdminPhysicalTicketCheckBingoRouter({

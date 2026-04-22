@@ -17,6 +17,7 @@ import {
   type AdminGame1StatusChangeEvent,
   type AdminGame1DrawProgressedEvent,
   type AdminGame1PhaseWonEvent,
+  type AdminGame1PhysicalTicketWonEvent,
 } from "./AdminGame1Broadcaster.js";
 
 test("4d.3: NoopAdminGame1Broadcaster.onStatusChange er trygg no-op", () => {
@@ -48,10 +49,12 @@ test("4d.3+4: broadcaster-port — events har forventet shape (compile + runtime
   const statusEvents: AdminGame1StatusChangeEvent[] = [];
   const drawEvents: AdminGame1DrawProgressedEvent[] = [];
   const phaseEvents: AdminGame1PhaseWonEvent[] = [];
+  const physicalEvents: AdminGame1PhysicalTicketWonEvent[] = [];
   const recording: AdminGame1Broadcaster = {
     onStatusChange: (e) => statusEvents.push(e),
     onDrawProgressed: (e) => drawEvents.push(e),
     onPhaseWon: (e) => phaseEvents.push(e),
+    onPhysicalTicketWon: (e) => physicalEvents.push(e),
   };
 
   recording.onStatusChange({
@@ -78,6 +81,19 @@ test("4d.3+4: broadcaster-port — events har forventet shape (compile + runtime
     drawIndex: 5,
     at: 2000,
   });
+  recording.onPhysicalTicketWon({
+    gameId: "g1",
+    phase: 1,
+    patternName: "1 Rad",
+    pendingPayoutId: "pp-1",
+    ticketId: "100-1001",
+    hallId: "hall-a",
+    responsibleUserId: "op-a",
+    expectedPayoutCents: 10_000,
+    color: "small",
+    adminApprovalRequired: false,
+    at: 2500,
+  });
 
   assert.equal(statusEvents.length, 1);
   assert.equal(statusEvents[0]!.action, "pause");
@@ -86,6 +102,27 @@ test("4d.3+4: broadcaster-port — events har forventet shape (compile + runtime
   assert.equal(phaseEvents.length, 1);
   assert.equal(phaseEvents[0]!.patternName, "1 Rad");
   assert.deepEqual(phaseEvents[0]!.winnerIds, ["u-a", "u-b"]);
+  assert.equal(physicalEvents.length, 1);
+  assert.equal(physicalEvents[0]!.ticketId, "100-1001");
+  assert.equal(physicalEvents[0]!.expectedPayoutCents, 10_000);
+});
+
+test("PT4: NoopAdminGame1Broadcaster.onPhysicalTicketWon er trygg no-op", () => {
+  assert.doesNotThrow(() =>
+    NoopAdminGame1Broadcaster.onPhysicalTicketWon({
+      gameId: "g1",
+      phase: 1,
+      patternName: "1 Rad",
+      pendingPayoutId: "pp-1",
+      ticketId: "100-1001",
+      hallId: "hall-a",
+      responsibleUserId: "op-a",
+      expectedPayoutCents: 10_000,
+      color: "small",
+      adminApprovalRequired: false,
+      at: Date.now(),
+    })
+  );
 });
 
 test("4d.4: NoopAdminGame1Broadcaster.onPhaseWon er trygg no-op", () => {

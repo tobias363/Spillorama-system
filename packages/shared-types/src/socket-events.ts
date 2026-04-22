@@ -61,6 +61,10 @@ export type {
 // GAME1_SCHEDULE PR 4d.4: admin phase-won broadcast (fra drawNext).
 export { Game1AdminPhaseWonPayloadSchema } from "./schemas.js";
 export type { Game1AdminPhaseWonPayload } from "./schemas.js";
+
+// PT4: admin physical-ticket-won broadcast (fra drawNext + PhysicalTicketPayoutService).
+export { Game1AdminPhysicalTicketWonPayloadSchema } from "./schemas.js";
+export type { Game1AdminPhysicalTicketWonPayload } from "./schemas.js";
 import type {
   RoomUpdatePayload as RoomUpdatePayloadT,
   DrawNewPayload as DrawNewPayloadT,

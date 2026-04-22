@@ -34,12 +34,14 @@ import {
   type Game1AdminStatusUpdatePayload,
   type Game1AdminDrawProgressedPayload,
   type Game1AdminPhaseWonPayload,
+  type Game1AdminPhysicalTicketWonPayload,
 } from "@spillorama/shared-types/socket-events";
 import type {
   AdminGame1Broadcaster,
   AdminGame1StatusChangeEvent,
   AdminGame1DrawProgressedEvent,
   AdminGame1PhaseWonEvent,
+  AdminGame1PhysicalTicketWonEvent,
 } from "../game/AdminGame1Broadcaster.js";
 import { logger as rootLogger } from "../util/logger.js";
 
@@ -208,6 +210,41 @@ export function createAdminGame1Namespace(
       } catch (err) {
         log.warn(
           { err, event: "game1:phase-won", gameId: event.gameId },
+          "admin broadcast failed — service fortsetter uansett"
+        );
+      }
+    },
+    /**
+     * PT4: fysisk-bong vinn-broadcast (én per bong). Bingovert-skjerm
+     * bruker eventet for å varsle om at fysisk bong må kontrolleres før
+     * kontant-utbetaling.
+     */
+    onPhysicalTicketWon(event: AdminGame1PhysicalTicketWonEvent): void {
+      try {
+        const payload: Game1AdminPhysicalTicketWonPayload = {
+          gameId: event.gameId,
+          phase: event.phase,
+          patternName: event.patternName,
+          pendingPayoutId: event.pendingPayoutId,
+          ticketId: event.ticketId,
+          hallId: event.hallId,
+          responsibleUserId: event.responsibleUserId,
+          expectedPayoutCents: event.expectedPayoutCents,
+          color: event.color,
+          adminApprovalRequired: event.adminApprovalRequired,
+          at: event.at,
+        };
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:physical-ticket-won", payload);
+      } catch (err) {
+        log.warn(
+          {
+            err,
+            event: "game1:physical-ticket-won",
+            gameId: event.gameId,
+            ticketId: event.ticketId,
+          },
           "admin broadcast failed — service fortsetter uansett"
         );
       }

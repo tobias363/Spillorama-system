@@ -52,10 +52,36 @@ export interface AdminGame1PhaseWonEvent {
   at: number;
 }
 
+/**
+ * PT4: fysisk-bong vinn-broadcast. Sendes til `/admin-game1`-namespace når
+ * draw-engine detekterer at en fysisk bong (sold_to_scheduled_game_id satt)
+ * treffer pattern for aktiv fase. Mottaker: bingovert-skjerm som viser
+ * "Bong X vant Y — kontrollér". Ingen auto-payout.
+ *
+ * Forskjell fra `AdminGame1PhaseWonEvent`: PhaseWon rapporterer digital-
+ * vinnere aggregert per fase; PhysicalTicketWon er per-bong og krever manuell
+ * verifikasjon (scan) + utbetaling.
+ */
+export interface AdminGame1PhysicalTicketWonEvent {
+  gameId: string;
+  phase: number;
+  patternName: string;
+  pendingPayoutId: string;
+  ticketId: string;
+  hallId: string;
+  responsibleUserId: string;
+  expectedPayoutCents: number;
+  color: string;
+  adminApprovalRequired: boolean;
+  at: number;
+}
+
 export interface AdminGame1Broadcaster {
   onStatusChange(event: AdminGame1StatusChangeEvent): void;
   onDrawProgressed(event: AdminGame1DrawProgressedEvent): void;
   onPhaseWon(event: AdminGame1PhaseWonEvent): void;
+  /** PT4: fysisk-bong vinn-broadcast. */
+  onPhysicalTicketWon(event: AdminGame1PhysicalTicketWonEvent): void;
 }
 
 /** No-op fallback — brukes i tester uten socket-miljø + ved manglende injeksjon. */
@@ -63,4 +89,5 @@ export const NoopAdminGame1Broadcaster: AdminGame1Broadcaster = {
   onStatusChange: () => undefined,
   onDrawProgressed: () => undefined,
   onPhaseWon: () => undefined,
+  onPhysicalTicketWon: () => undefined,
 };
