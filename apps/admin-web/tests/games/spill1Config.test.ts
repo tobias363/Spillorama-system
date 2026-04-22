@@ -758,3 +758,146 @@ describe("validateSpill1Config — column-specific-modus (Super-NILS)", () => {
     expect(validateSpill1Config(c, "Test")).toEqual({ ok: true });
   });
 });
+
+// ── PR-P4: ball-value-multiplier-modus (Ball × 10) ─────────────────────────
+
+describe("validateSpill1Config — ball-value-multiplier-modus (Ball × 10)", () => {
+  it("godtar full_house ball-value-multiplier med base + multiplier", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "percent", amount: 10 },
+      full_house: {
+        mode: "ball-value-multiplier",
+        amount: 0,
+        baseFullHousePrizeNok: 1250,
+        ballValueMultiplier: 10,
+      },
+    };
+    expect(validateSpill1Config(c, "Ball × 10")).toEqual({ ok: true });
+  });
+
+  it("avviser ball-value-multiplier på ikke-full_house-pattern", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: {
+        mode: "ball-value-multiplier",
+        amount: 0,
+        baseFullHousePrizeNok: 1250,
+        ballValueMultiplier: 10,
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(
+        r.errors.some((e) =>
+          /ball_value_multiplier_only_on_full_house/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("avviser manglende baseFullHousePrizeNok", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      full_house: {
+        mode: "ball-value-multiplier",
+        amount: 0,
+        ballValueMultiplier: 10,
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(
+        r.errors.some((e) => /ball_value_base_must_be_non_negative/.test(e.message)),
+      ).toBe(true);
+    }
+  });
+
+  it("avviser manglende ballValueMultiplier", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      full_house: {
+        mode: "ball-value-multiplier",
+        amount: 0,
+        baseFullHousePrizeNok: 1250,
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(
+        r.errors.some((e) =>
+          /ball_value_multiplier_must_be_positive/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("avviser negativ baseFullHousePrizeNok", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      full_house: {
+        mode: "ball-value-multiplier",
+        amount: 0,
+        baseFullHousePrizeNok: -100,
+        ballValueMultiplier: 10,
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+  });
+
+  it("avviser multiplier = 0", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      full_house: {
+        mode: "ball-value-multiplier",
+        amount: 0,
+        baseFullHousePrizeNok: 1250,
+        ballValueMultiplier: 0,
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(
+        r.errors.some((e) =>
+          /ball_value_multiplier_must_be_positive/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("avviser NaN multiplier", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      full_house: {
+        mode: "ball-value-multiplier",
+        amount: 0,
+        baseFullHousePrizeNok: 1250,
+        ballValueMultiplier: Number.NaN,
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+  });
+
+  it("ball-value-multiplier full_house + percent row_1-4 OK", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "percent", amount: 5 },
+      row_2: { mode: "percent", amount: 5 },
+      row_3: { mode: "percent", amount: 5 },
+      row_4: { mode: "percent", amount: 5 },
+      full_house: {
+        mode: "ball-value-multiplier",
+        amount: 0,
+        baseFullHousePrizeNok: 1250,
+        ballValueMultiplier: 10,
+      },
+    };
+    expect(validateSpill1Config(c, "Test")).toEqual({ ok: true });
+  });
+});

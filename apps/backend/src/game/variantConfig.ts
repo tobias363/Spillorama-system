@@ -61,8 +61,16 @@ export interface PatternConfig {
    *   - "column-specific"    (PR-P3 Super-NILS): Fullt-Hus-prize fra
    *       `columnPrizesNok[col]` der col = kolonne for siste trukne ball.
    *       Kun gyldig på full-house-pattern (claimType === "BINGO").
+   *   - "ball-value-multiplier" (PR-P4 Ball × 10):
+   *       Fullt-Hus-prize = baseFullHousePrizeNok + lastBall × ballValueMultiplier.
+   *       Bruker rå ball-verdi (ikke kolonne). Kun full-house.
    */
-  winningType?: "percent" | "fixed" | "multiplier-chain" | "column-specific";
+  winningType?:
+    | "percent"
+    | "fixed"
+    | "multiplier-chain"
+    | "column-specific"
+    | "ball-value-multiplier";
   /**
    * BIN-687 / PR-P2: multiplier of phase-1 base prize. Only used when
    * `winningType === "multiplier-chain"` AND pattern is NOT phase 1.
@@ -89,6 +97,17 @@ export interface PatternConfig {
     G: number;
     O: number;
   };
+  /**
+   * PR-P4 (Ball × 10): base Fullt-Hus premie i kr når
+   * `winningType === "ball-value-multiplier"`. Finalpremie =
+   * baseFullHousePrizeNok + lastBall × ballValueMultiplier.
+   */
+  baseFullHousePrizeNok?: number;
+  /**
+   * PR-P4 (Ball × 10): kr per ball-verdi. Ved lastBall=45, multiplier=10 →
+   * 450 kr legges til base. Må være > 0. Fail-closed hvis mangler.
+   */
+  ballValueMultiplier?: number;
 }
 
 // ── Full variant config ───────────────────────────────────────────────────────
@@ -485,7 +504,8 @@ export function patternConfigToDefinitions(patterns: PatternConfig[]): PatternDe
       p.winningType === "percent" ||
       p.winningType === "fixed" ||
       p.winningType === "multiplier-chain" ||
-      p.winningType === "column-specific"
+      p.winningType === "column-specific" ||
+      p.winningType === "ball-value-multiplier"
     ) {
       def.winningType = p.winningType;
     }
@@ -497,6 +517,13 @@ export function patternConfigToDefinitions(patterns: PatternConfig[]): PatternDe
     // PR-P3: propagate column-specific matrix for Super-NILS full-house.
     if (p.columnPrizesNok) {
       def.columnPrizesNok = { ...p.columnPrizesNok };
+    }
+    // PR-P4: propagate ball-value-multiplier-felt for Ball × 10 full-house.
+    if (typeof p.baseFullHousePrizeNok === "number") {
+      def.baseFullHousePrizeNok = p.baseFullHousePrizeNok;
+    }
+    if (typeof p.ballValueMultiplier === "number") {
+      def.ballValueMultiplier = p.ballValueMultiplier;
     }
     return def;
   });

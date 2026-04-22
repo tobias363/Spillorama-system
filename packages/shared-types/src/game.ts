@@ -86,7 +86,12 @@ export interface PatternDefinition {
    * wire. Clients may read this to render expected prize amounts in the
    * pattern banner before the game starts.
    */
-  winningType?: "percent" | "fixed" | "multiplier-chain" | "column-specific";
+  winningType?:
+    | "percent"
+    | "fixed"
+    | "multiplier-chain"
+    | "column-specific"
+    | "ball-value-multiplier";
   /**
    * Fixed prize amount in kr when `winningType === "fixed"`. Ignored for
    * "percent" mode. Legacy field name: prize1.
@@ -133,6 +138,21 @@ export interface PatternDefinition {
     G: number;
     O: number;
   };
+  /**
+   * PR-P4 (Ball × 10): base prize for Fullt Hus when
+   * `winningType === "ball-value-multiplier"`. Final payout is
+   * `baseFullHousePrizeNok + lastBall × ballValueMultiplier`.
+   * Only meaningful on full-house. Validator rejects non-full-house.
+   * Unit: kr.
+   */
+  baseFullHousePrizeNok?: number;
+  /**
+   * PR-P4 (Ball × 10): per-ball multiplier in kr. Combined with the
+   * raw numeric value of the last drawn ball (NOT mapped to column).
+   * Must be > 0. Missing field → engine fail-closed with
+   * `DomainError("BALL_VALUE_FIELDS_MISSING")`.
+   */
+  ballValueMultiplier?: number;
 }
 
 export interface PatternResult {

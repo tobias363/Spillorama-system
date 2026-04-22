@@ -61,7 +61,8 @@ export type PatternPrizeMode =
   | "percent"
   | "fixed"
   | "multiplier-chain"
-  | "column-specific";
+  | "column-specific"
+  | "ball-value-multiplier";
 
 /**
  * Admin-konfigurert gevinst for én fase på én farge.
@@ -81,6 +82,11 @@ export type PatternPrizeMode =
  *   `columnPrizesNok` angir 5 kolonne-spesifikke premier (B/I/N/G/O),
  *   der kolonnen til siste trukne ball avgjør payout. Validator avviser
  *   mode på alle andre patterns enn full_house.
+ * - `mode: "ball-value-multiplier"` (PR-P4 Ball × 10):
+ *   Kun lovlig på `full_house`. `amount` er ubrukt.
+ *   Final premie = `baseFullHousePrizeNok + lastBall × ballValueMultiplier`.
+ *   Bruker rå ball-verdi (ikke kolonne). Begge felt er påkrevde; validator
+ *   avviser på alle andre patterns enn full_house.
  */
 export interface PatternPrize {
   mode: PatternPrizeMode;
@@ -116,6 +122,15 @@ export interface PatternPrize {
     G: number;
     O: number;
   };
+  /**
+   * PR-P4 (Ball × 10): base premie i NOK for Fullt Hus når
+   * `mode === "ball-value-multiplier"`. Må være ≥ 0.
+   */
+  baseFullHousePrizeNok?: number;
+  /**
+   * PR-P4 (Ball × 10): multiplier per ball-verdi (NOK). Må være > 0.
+   */
+  ballValueMultiplier?: number;
 }
 
 /** Per-farge pris + gevinst-fordeling per pattern. */
@@ -369,6 +384,35 @@ export function validateSpill1Config(config: Spill1Config, baseName: string): Va
       }
       if (prize.mode === "percent") {
         percentTotal += prize.amount;
+      }
+      // PR-P4: ball-value-multiplier-modus (Ball × 10) validering.
+      if (prize.mode === "ball-value-multiplier") {
+        if (pattern !== "full_house") {
+          errors.push({
+            path: `ticketColors[${i}].prizePerPattern.${pattern}.mode`,
+            message: "ball_value_multiplier_only_on_full_house",
+          });
+        }
+        if (
+          typeof prize.baseFullHousePrizeNok !== "number" ||
+          !Number.isFinite(prize.baseFullHousePrizeNok) ||
+          prize.baseFullHousePrizeNok < 0
+        ) {
+          errors.push({
+            path: `ticketColors[${i}].prizePerPattern.${pattern}.baseFullHousePrizeNok`,
+            message: "ball_value_base_must_be_non_negative",
+          });
+        }
+        if (
+          typeof prize.ballValueMultiplier !== "number" ||
+          !Number.isFinite(prize.ballValueMultiplier) ||
+          prize.ballValueMultiplier <= 0
+        ) {
+          errors.push({
+            path: `ticketColors[${i}].prizePerPattern.${pattern}.ballValueMultiplier`,
+            message: "ball_value_multiplier_must_be_positive",
+          });
+        }
       }
       // PR-P3: column-specific-modus (Super-NILS) validering.
       if (prize.mode === "column-specific") {

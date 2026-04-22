@@ -39,8 +39,15 @@ export interface PatternDefinition {
    *                          phase N = phase1Base × phase1Multiplier with floor.
    *   - "column-specific"    (PR-P3 Super-NILS): Fullt-Hus prize decided by
    *                          column of last drawn ball (B/I/N/G/O).
+   *   - "ball-value-multiplier" (PR-P4 Ball × 10): Fullt-Hus-prize =
+   *                          baseFullHousePrizeNok + lastBall × multiplier.
    */
-  winningType?: "percent" | "fixed" | "multiplier-chain" | "column-specific";
+  winningType?:
+    | "percent"
+    | "fixed"
+    | "multiplier-chain"
+    | "column-specific"
+    | "ball-value-multiplier";
   /** BIN-687 / PR-P2: multiplier of phase-1 base prize. Only on phase > 1. */
   phase1Multiplier?: number;
   /** BIN-687 / PR-P2: minimum phase prize in kr (gulv). */
@@ -59,6 +66,10 @@ export interface PatternDefinition {
     G: number;
     O: number;
   };
+  /** PR-P4 (Ball × 10): base Fullt-Hus prize in kr. */
+  baseFullHousePrizeNok?: number;
+  /** PR-P4 (Ball × 10): kr per ball-value. Must be > 0. */
+  ballValueMultiplier?: number;
 }
 
 export interface PatternResult {

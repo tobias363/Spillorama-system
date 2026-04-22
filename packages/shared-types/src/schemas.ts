@@ -84,7 +84,13 @@ export const PatternDefinitionSchema = z.object({
    *   own minPrizeCents floor.
    */
   winningType: z
-    .enum(["percent", "fixed", "multiplier-chain", "column-specific"])
+    .enum([
+      "percent",
+      "fixed",
+      "multiplier-chain",
+      "column-specific",
+      "ball-value-multiplier",
+    ])
     .optional(),
   /** Flat kr amount when winningType === "fixed". */
   prize1: z.number().optional(),
@@ -112,6 +118,10 @@ export const PatternDefinitionSchema = z.object({
       O: z.number().nonnegative(),
     })
     .optional(),
+  /** PR-P4 (Ball × 10): base prize for Fullt Hus. */
+  baseFullHousePrizeNok: z.number().nonnegative().optional(),
+  /** PR-P4 (Ball × 10): multiplier per ball-value (kr). Must be > 0. */
+  ballValueMultiplier: z.number().positive().optional(),
 });
 
 export const PatternResultSchema = z.object({

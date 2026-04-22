@@ -1091,7 +1091,12 @@ export class BingoEngine {
 
       // Resolve prize for this color. flat-path bruker activePattern direkte.
       const prizeSource: {
-        winningType?: "percent" | "fixed" | "multiplier-chain" | "column-specific";
+        winningType?:
+          | "percent"
+          | "fixed"
+          | "multiplier-chain"
+          | "column-specific"
+          | "ball-value-multiplier";
         prize1?: number;
         prizePercent: number;
         name: string;
@@ -1099,6 +1104,8 @@ export class BingoEngine {
         minPrize?: number;
         columnPrizesNok?: { B: number; I: number; N: number; G: number; O: number };
         claimType?: "LINE" | "BINGO";
+        baseFullHousePrizeNok?: number;
+        ballValueMultiplier?: number;
       } =
         hasPerColorMatrix && group.patternForColor
           ? group.patternForColor
@@ -1164,6 +1171,47 @@ export class BingoEngine {
           );
         }
         totalPhasePrize = Math.max(0, prizeForCol);
+      } else if (prizeSource.winningType === "ball-value-multiplier") {
+        // PR-P4 (Ball × 10): Fullt-Hus-premie = base + lastBall × multiplier.
+        // Bruker rå ball-verdi (ikke kolonne-mapping som P3). Admin-validator
+        // avviser på ikke-full-house-pattern; engine dobbeltsjekker for
+        // defense-in-depth og fail-closed ved manglende felt.
+        if (
+          prizeSource.claimType !== "BINGO" &&
+          activePattern.claimType !== "BINGO"
+        ) {
+          throw new DomainError(
+            "BALL_VALUE_INVALID_PATTERN",
+            "ball-value-multiplier kan kun brukes på Fullt Hus-patterns.",
+          );
+        }
+        const base = prizeSource.baseFullHousePrizeNok;
+        const mult = prizeSource.ballValueMultiplier;
+        if (
+          typeof base !== "number" ||
+          !Number.isFinite(base) ||
+          base < 0 ||
+          typeof mult !== "number" ||
+          !Number.isFinite(mult) ||
+          mult <= 0
+        ) {
+          throw new DomainError(
+            "BALL_VALUE_FIELDS_MISSING",
+            "ball-value-multiplier krever baseFullHousePrizeNok ≥ 0 og ballValueMultiplier > 0.",
+          );
+        }
+        const lastBall = game.drawnNumbers[game.drawnNumbers.length - 1];
+        if (
+          typeof lastBall !== "number" ||
+          !Number.isFinite(lastBall) ||
+          lastBall < 1
+        ) {
+          throw new DomainError(
+            "BALL_VALUE_FIELDS_MISSING",
+            "Ingen gyldig siste-ball tilgjengelig for ball-value-beregning.",
+          );
+        }
+        totalPhasePrize = Math.max(0, base + lastBall * mult);
       } else {
         totalPhasePrize = Math.floor(
           game.prizePool * (prizeSource.prizePercent ?? 0) / 100
