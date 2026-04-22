@@ -1,15 +1,18 @@
 /**
- * PT2 — Admin-router for agent (bingovert) range-registrering.
+ * PT2+PT3 — Admin-router for agent (bingovert) range-registrering og batch-salg.
  *
  * Spec: docs/architecture/PHYSICAL_TICKETS_FINAL_SPEC_2026-04-22.md
  *       (§ "Fase 2: Vakt-start + range-registrering", linje 48-69)
+ *       (§ "Fase 4: Batch-oppdatering (returnering til stativ)", linje 76-104)
  *
  * Endpoints:
- *   POST   /api/admin/physical-tickets/ranges/register
+ *   POST   /api/admin/physical-tickets/ranges/register            (PT2)
  *          body: { agentId, hallId, ticketColor, firstScannedSerial, count }
- *   POST   /api/admin/physical-tickets/ranges/:id/close
+ *   POST   /api/admin/physical-tickets/ranges/:id/close           (PT2)
  *          body: {} — agentId utledes fra authed user
- *   GET    /api/admin/physical-tickets/ranges?agentId=&hallId=
+ *   GET    /api/admin/physical-tickets/ranges?agentId=&hallId=    (PT2)
+ *   POST   /api/admin/physical-tickets/ranges/:id/record-batch-sale (PT3)
+ *          body: { newTopSerial: string, scheduledGameId?: string }
  *
  * Permission: `PHYSICAL_TICKET_WRITE` (ADMIN + HALL_OPERATOR) — matcher PT1.
  * HALL_OPERATOR må selv-validere at hallId matcher eget hall-scope.
@@ -77,11 +80,13 @@ function actorTypeFromRole(
 
 /**
  * Mapper DomainError-koder til HTTP-status. Admin-konvensjonen er at feil
- * returneres som 200 med `{ ok: false }`; men for PT2 eksponerer vi
+ * returneres som 200 med `{ ok: false }`; men for PT2+PT3 eksponerer vi
  * semantiske statuser (200/403/409) for scan-feil siden klienten er en
  * bingovert-app som bruker native HTTP-semantikk for varsel-typer.
  *
  * - TICKET_* / RANGE_* / INSUFFICIENT_INVENTORY → 409 CONFLICT
+ * - PT3: NO_TICKETS_SOLD / NO_UPCOMING_GAME_FOR_HALL /
+ *        INVALID_NEW_TOP / SERIAL_NOT_IN_RANGE / SCHEDULED_GAME_* → 409
  * - FORBIDDEN / UNAUTHORIZED                     → 403
  * - alt annet (inkl. INVALID_INPUT)             → 400
  */
@@ -96,6 +101,13 @@ function statusForDomainCode(code: string): number {
     || code === "RANGE_NOT_FOUND"
     || code === "RANGE_ALREADY_CLOSED"
     || code === "INSUFFICIENT_INVENTORY"
+    || code === "NO_TICKETS_SOLD"
+    || code === "NO_UPCOMING_GAME_FOR_HALL"
+    || code === "INVALID_NEW_TOP"
+    || code === "SERIAL_NOT_IN_RANGE"
+    || code === "SCHEDULED_GAME_NOT_FOUND"
+    || code === "SCHEDULED_GAME_HALL_MISMATCH"
+    || code === "SCHEDULED_GAME_NOT_JOINABLE"
   ) {
     return 409;
   }
@@ -328,6 +340,86 @@ export function createAdminAgentTicketRangesRouter(
       replyFailure(res, error);
     }
   });
+
+  // PT3 — POST /api/admin/physical-tickets/ranges/:id/record-batch-sale
+  // Body: { newTopSerial: string, scheduledGameId?: string }
+  // Response: { ok: true, data: { soldCount, scheduledGameId, gameStartTime,
+  //            newTopSerial, previousTopSerial, soldSerials, rangeId } }
+  //        eller { ok: false, error: { code, message } } med 400/403/409.
+  router.post(
+    "/api/admin/physical-tickets/ranges/:id/record-batch-sale",
+    async (req, res) => {
+      try {
+        const user = await requirePermission(req, "PHYSICAL_TICKET_WRITE");
+        const rangeId = mustBeNonEmptyString(req.params.id, "id");
+
+        if (!isRecordObject(req.body)) {
+          throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+        }
+        const newTopSerial = mustBeNonEmptyString(
+          req.body.newTopSerial,
+          "newTopSerial",
+        );
+        const scheduledGameId = typeof req.body.scheduledGameId === "string"
+          && req.body.scheduledGameId.trim()
+          ? req.body.scheduledGameId.trim()
+          : undefined;
+
+        // Hent rangen for hall-scope-validering før vi kaller service.
+        // Dette lar HALL_OPERATOR-valideringen skje uten at servicen trenger
+        // å kjenne til hallens ID på forhånd.
+        const existing = await agentTicketRangeService.getRangeById(rangeId);
+        if (!existing) {
+          throw new DomainError(
+            "RANGE_NOT_FOUND",
+            `Range '${rangeId}' finnes ikke.`,
+          );
+        }
+        assertUserHallScope(user, existing.hallId);
+
+        // ADMIN kan kjøre batch-salg på vegne av bingovert. Ellers må caller
+        // være rangens eier.
+        const adminOverride = user.role === "ADMIN";
+        const effectiveUserId = adminOverride ? existing.agentId : user.id;
+
+        const result = await agentTicketRangeService.recordBatchSale({
+          rangeId,
+          newTopSerial,
+          userId: effectiveUserId,
+          adminOverride,
+          scheduledGameId,
+        });
+
+        fireAudit({
+          actorId: user.id,
+          actorType: actorTypeFromRole(user.role),
+          action: "physical_ticket.batch_sold",
+          resource: "agent_ticket_range",
+          resourceId: rangeId,
+          details: {
+            agentId: existing.agentId,
+            hallId: existing.hallId,
+            ticketColor: existing.ticketColor,
+            rangeId,
+            scheduledGameId: result.scheduledGameId,
+            gameStartTime: result.gameStartTime,
+            soldCount: result.soldCount,
+            fromSerial: result.soldSerials[0] ?? null,
+            toSerial: result.soldSerials[result.soldSerials.length - 1] ?? null,
+            previousTopSerial: result.previousTopSerial,
+            newTopSerial: result.newTopSerial,
+            onBehalf: adminOverride && user.id !== existing.agentId,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgentHeader(req),
+        });
+
+        apiSuccess(res, result);
+      } catch (error) {
+        replyFailure(res, error);
+      }
+    },
+  );
 
   return router;
 }

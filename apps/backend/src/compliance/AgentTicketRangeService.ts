@@ -84,6 +84,44 @@ export interface CloseRangeResult {
   closedAt: string;
 }
 
+export interface RecordBatchSaleInput {
+  /** ID på rangen (åpen). */
+  rangeId: string;
+  /**
+   * Barcode/serial på nye top-bongen — scannet av bingovert når han kommer
+   * tilbake til stativet. Alle bonger mellom (newTopSerial, currentTopSerial]
+   * registreres som solgt.
+   */
+  newTopSerial: string;
+  /** Bingoverten som utfører batch-oppdateringen. */
+  userId: string;
+  /**
+   * ADMIN kan utføre batch-salg på vegne av en bingovert. Default false.
+   * Hvis true må caller først ha verifisert ADMIN-rolle på route-laget.
+   */
+  adminOverride?: boolean;
+  /**
+   * Planlagt spill bongene selges inn til. Hvis undefined finner tjenesten
+   * neste spill for rangens hall automatisk (fra `app_game1_scheduled_games`).
+   */
+  scheduledGameId?: string;
+}
+
+export interface RecordBatchSaleResult {
+  rangeId: string;
+  /** Serials som ble oppdatert til is_purchased = true. */
+  soldSerials: string[];
+  soldCount: number;
+  /** Scheduled game bongene ble bundet til. */
+  scheduledGameId: string;
+  /** ISO-timestamp for scheduled-game-start. */
+  gameStartTime: string;
+  /** Nye `current_top_serial` etter oppdatering. */
+  newTopSerial: string;
+  /** Forrige `current_top_serial` (før oppdatering) — for audit/UI. */
+  previousTopSerial: string;
+}
+
 export interface AgentTicketRangeServiceOptions {
   connectionString: string;
   schema?: string;
@@ -450,6 +488,364 @@ export class AgentTicketRangeService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * PT3 — Batch-salg: bingovert scanner nye top-bong etter å ha solgt N bonger.
+   *
+   * Spec: docs/architecture/PHYSICAL_TICKETS_FINAL_SPEC_2026-04-22.md
+   *       (§ "Fase 4: Batch-oppdatering", linje 76-104)
+   *
+   * Flyt (atomisk transaksjon + FOR UPDATE-lås):
+   *   1. Hent rangen med FOR UPDATE (blokkerer parallelle batch-salg).
+   *   2. Valider at den ikke er lukket (RANGE_ALREADY_CLOSED).
+   *   3. Valider eierskap (userId = range.agent_id, med mindre adminOverride).
+   *   4. Valider at newTopSerial er innenfor rangen (SERIAL_NOT_IN_RANGE).
+   *   5. Valider at newTopSerial < currentTopSerial (topp har beveget seg ned).
+   *      - newTopSerial == currentTopSerial → NO_TICKETS_SOLD (idempotent-safe).
+   *      - newTopSerial > currentTopSerial → INVALID_NEW_TOP.
+   *   6. Beregn soldSerials = alle i rangen mellom (newTop, currentTop].
+   *   7. Finn scheduledGameId hvis ikke oppgitt (neste planlagte spill for
+   *      rangens hall i status 'scheduled'/'purchase_open'/'ready_to_start').
+   *      Ingen treff → NO_UPCOMING_GAME_FOR_HALL.
+   *   8. Batch-UPDATE `app_static_tickets`: is_purchased=true, sold_*-felter.
+   *      Kun rader som fortsatt har `reserved_by_range_id = rangeId` og
+   *      `is_purchased = false` oppdateres — sikrer idempotens.
+   *   9. Oppdater `range.current_top_serial = newTopSerial`.
+   *  10. COMMIT. Retur: { soldCount, soldSerials, scheduledGameId, ... }.
+   *
+   * Fail-closed: enhver feil → ROLLBACK, ingen partial updates.
+   *
+   * Audit-log skrives IKKE her — caller (route-laget) ansvarlig for å skrive
+   * `physical_ticket.batch_sold` med `{ count, fromSerial, toSerial, rangeId,
+   * scheduledGameId }` etter vellykket retur.
+   */
+  async recordBatchSale(input: RecordBatchSaleInput): Promise<RecordBatchSaleResult> {
+    const rangeId = assertNonEmpty(input.rangeId, "rangeId");
+    const newTopSerial = assertNonEmpty(input.newTopSerial, "newTopSerial");
+    const userId = assertNonEmpty(input.userId, "userId");
+    const adminOverride = input.adminOverride === true;
+    const explicitScheduledGameId = input.scheduledGameId?.trim() || null;
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // 1. Hent rangen med FOR UPDATE-lås.
+      const { rows: rangeRows } = await client.query<{
+        id: string;
+        agent_id: string;
+        hall_id: string;
+        ticket_color: StaticTicketColor;
+        initial_serial: string;
+        final_serial: string;
+        serials: string[] | string;
+        current_top_serial: string | null;
+        closed_at: Date | string | null;
+      }>(
+        `SELECT id, agent_id, hall_id, ticket_color,
+                initial_serial, final_serial, serials,
+                current_top_serial, closed_at
+         FROM ${this.rangesTable()}
+         WHERE id = $1
+         FOR UPDATE`,
+        [rangeId],
+      );
+      if (rangeRows.length === 0) {
+        throw new DomainError(
+          "RANGE_NOT_FOUND",
+          `Range '${rangeId}' finnes ikke.`,
+        );
+      }
+      const range = rangeRows[0]!;
+
+      // 2. Lukket?
+      if (range.closed_at !== null) {
+        throw new DomainError(
+          "RANGE_ALREADY_CLOSED",
+          `Range '${rangeId}' er lukket — kan ikke registrere nytt batch-salg.`,
+        );
+      }
+
+      // 3. Eierskap.
+      if (!adminOverride && range.agent_id !== userId) {
+        throw new DomainError(
+          "FORBIDDEN",
+          `Bruker '${userId}' eier ikke range '${rangeId}'.`,
+        );
+      }
+
+      // Parse serials fra JSONB.
+      const rangeSerials = Array.isArray(range.serials)
+        ? (range.serials as string[])
+        : typeof range.serials === "string"
+          ? (JSON.parse(range.serials) as string[])
+          : [];
+      if (rangeSerials.length === 0) {
+        throw new DomainError(
+          "INTERNAL_ERROR",
+          `Range '${rangeId}' har ingen serials registrert.`,
+        );
+      }
+
+      const currentTopSerial = range.current_top_serial ?? range.initial_serial;
+
+      // 4. SERIAL_NOT_IN_RANGE — newTopSerial må være en del av rangen.
+      // Merk: "newTop" betyr etter salget, dvs. ny topp av usolgte bonger.
+      // Siden rangen har serials DESC, må newTopSerial finnes i arrayet.
+      // Edge-case: hele rangen er solgt → newTop kan være "under" final_serial,
+      // men da støter vi mot rangens siste bong. Vi krever at newTopSerial
+      // enten er i rangens serials ELLER er < final_serial (for å tillate
+      // "hele rangen er solgt" — men da må soldCount = resterende).
+      const newTopIndex = rangeSerials.indexOf(newTopSerial);
+      if (newTopIndex === -1) {
+        throw new DomainError(
+          "SERIAL_NOT_IN_RANGE",
+          `Serial '${newTopSerial}' er ikke en del av range '${rangeId}'.`,
+        );
+      }
+
+      // 5. Top-progression.
+      const currentTopIndex = rangeSerials.indexOf(currentTopSerial);
+      if (currentTopIndex === -1) {
+        throw new DomainError(
+          "INTERNAL_ERROR",
+          `Range '${rangeId}' har current_top_serial '${currentTopSerial}' utenfor serials.`,
+        );
+      }
+      if (newTopIndex === currentTopIndex) {
+        throw new DomainError(
+          "NO_TICKETS_SOLD",
+          `newTopSerial '${newTopSerial}' er lik nåværende top — ingen bonger å selge.`,
+        );
+      }
+      if (newTopIndex < currentTopIndex) {
+        // newTop er høyere opp i DESC-listen enn currentTop → newTop > currentTop.
+        throw new DomainError(
+          "INVALID_NEW_TOP",
+          `newTopSerial '${newTopSerial}' er høyere enn nåværende top '${currentTopSerial}'. Top må bevege seg nedover.`,
+        );
+      }
+
+      // 6. soldSerials = alle i rangen mellom (currentTopIndex, newTopIndex]
+      // (dvs. indekser currentTopIndex .. newTopIndex - 1, pga. DESC-orden).
+      // serials[0] er høyest, serials[length-1] er lavest.
+      // Eksempel: serials = ["100","99","98","97","96","95"],
+      //   currentTop = "100" (idx 0), newTop = "95" (idx 5)
+      //   soldSerials = ["100","99","98","97","96"] (indekser 0-4).
+      const soldSerials = rangeSerials.slice(currentTopIndex, newTopIndex);
+      if (soldSerials.length === 0) {
+        // Skal ikke skje pga. NO_TICKETS_SOLD-sjekken over, men defensivt.
+        throw new DomainError(
+          "NO_TICKETS_SOLD",
+          "Ingen bonger å selge i beregnet intervall.",
+        );
+      }
+
+      // 7. Finn scheduledGameId + gameStartTime.
+      let scheduledGameId: string;
+      let gameStartTime: string;
+      if (explicitScheduledGameId) {
+        const resolved = await this.findScheduledGameById(
+          client,
+          explicitScheduledGameId,
+          range.hall_id,
+        );
+        scheduledGameId = resolved.id;
+        gameStartTime = resolved.scheduledStartTime;
+      } else {
+        const next = await this.findNextScheduledGameForHall(client, range.hall_id);
+        if (!next) {
+          throw new DomainError(
+            "NO_UPCOMING_GAME_FOR_HALL",
+            `Ingen planlagte spill funnet for hall '${range.hall_id}'.`,
+          );
+        }
+        scheduledGameId = next.id;
+        gameStartTime = next.scheduledStartTime;
+      }
+
+      // 8. Batch-UPDATE app_static_tickets.
+      // Merk: `purchased_at` er PT1-kolonnen som fyller rollen til spec'ens
+      // "sold_at" på `app_static_tickets`. `sold_at`-kolonnen eksisterer kun
+      // på `app_physical_tickets` (separate tabell).
+      const { rowCount: updatedCount } = await client.query(
+        `UPDATE ${this.staticTicketsTable()}
+            SET is_purchased = true,
+                purchased_at = now(),
+                sold_to_scheduled_game_id = $1,
+                sold_by_user_id = $2,
+                sold_from_range_id = $3,
+                responsible_user_id = $2
+          WHERE hall_id = $4
+            AND ticket_serial = ANY($5::text[])
+            AND reserved_by_range_id = $3
+            AND is_purchased = false`,
+        [
+          scheduledGameId,
+          userId,
+          rangeId,
+          range.hall_id,
+          soldSerials,
+        ],
+      );
+
+      if ((updatedCount ?? 0) !== soldSerials.length) {
+        // Uventet avvik — bonger har mistet sin reservasjon eller er solgt
+        // utenfor normal flyt. Rull tilbake for å unngå partial update.
+        throw new DomainError(
+          "INTERNAL_ERROR",
+          `Batch-salg forventet ${soldSerials.length} oppdateringer, fikk ${updatedCount ?? 0}. Ruller tilbake.`,
+        );
+      }
+
+      // 9. Oppdater range.current_top_serial.
+      const { rowCount: rangeUpdated } = await client.query(
+        `UPDATE ${this.rangesTable()}
+            SET current_top_serial = $1
+          WHERE id = $2`,
+        [newTopSerial, rangeId],
+      );
+      if ((rangeUpdated ?? 0) !== 1) {
+        throw new DomainError(
+          "INTERNAL_ERROR",
+          `Kunne ikke oppdatere range current_top_serial (rowCount=${rangeUpdated ?? 0}).`,
+        );
+      }
+
+      await client.query("COMMIT");
+
+      logger.info(
+        {
+          rangeId,
+          userId,
+          soldCount: soldSerials.length,
+          fromSerial: soldSerials[0],
+          toSerial: soldSerials[soldSerials.length - 1],
+          previousTopSerial: currentTopSerial,
+          newTopSerial,
+          scheduledGameId,
+          adminOverride,
+        },
+        "[PT3] batch-salg registrert",
+      );
+
+      return {
+        rangeId,
+        soldSerials,
+        soldCount: soldSerials.length,
+        scheduledGameId,
+        gameStartTime,
+        newTopSerial,
+        previousTopSerial: currentTopSerial,
+      };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {
+        // ignorer rollback-feil
+      });
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Finner neste planlagte Spill 1-instans for en gitt hall. En hall deltar
+   * hvis den er `master_hall_id` eller forekommer i `participating_halls_json`.
+   *
+   * Brukes av `recordBatchSale` når caller ikke spesifiserer scheduledGameId.
+   * Returnerer `null` hvis ingen passende spill finnes.
+   *
+   * "Neste" = status ∈ {scheduled, purchase_open, ready_to_start, running,
+   * paused} AND scheduled_end_time > now(), sortert på scheduled_start_time ASC
+   * (eldste først — dvs. det som starter snarest/allerede pågår).
+   */
+  private async findNextScheduledGameForHall(
+    client: { query: Pool["query"] } | Pool,
+    hallId: string,
+  ): Promise<{ id: string; scheduledStartTime: string } | null> {
+    const { rows } = await client.query<{
+      id: string;
+      scheduled_start_time: Date | string;
+    }>(
+      `SELECT id, scheduled_start_time
+       FROM "${this.schema}"."app_game1_scheduled_games"
+       WHERE status IN ('scheduled','purchase_open','ready_to_start','running','paused')
+         AND scheduled_end_time > now()
+         AND (master_hall_id = $1
+              OR participating_halls_json @> to_jsonb($1::text))
+       ORDER BY scheduled_start_time ASC
+       LIMIT 1`,
+      [hallId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      scheduledStartTime: asIso(row.scheduled_start_time),
+    };
+  }
+
+  /**
+   * Validerer at en eksplisitt oppgitt scheduledGameId finnes, er joinable,
+   * og at rangens hall er med i deltaker-listen. Kaster hvis ikke.
+   */
+  private async findScheduledGameById(
+    client: { query: Pool["query"] } | Pool,
+    scheduledGameId: string,
+    hallId: string,
+  ): Promise<{ id: string; scheduledStartTime: string }> {
+    const { rows } = await client.query<{
+      id: string;
+      status: string;
+      scheduled_start_time: Date | string;
+      scheduled_end_time: Date | string;
+      master_hall_id: string;
+      participating_halls_json: unknown;
+    }>(
+      `SELECT id, status, scheduled_start_time, scheduled_end_time,
+              master_hall_id, participating_halls_json
+       FROM "${this.schema}"."app_game1_scheduled_games"
+       WHERE id = $1`,
+      [scheduledGameId],
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError(
+        "SCHEDULED_GAME_NOT_FOUND",
+        `Planlagt spill '${scheduledGameId}' finnes ikke.`,
+      );
+    }
+    // Hallen må være med — enten som master eller i participating-listen.
+    const halls = Array.isArray(row.participating_halls_json)
+      ? (row.participating_halls_json as unknown[])
+      : [];
+    const hallMatches = row.master_hall_id === hallId
+      || halls.some((h) => typeof h === "string" && h === hallId);
+    if (!hallMatches) {
+      throw new DomainError(
+        "SCHEDULED_GAME_HALL_MISMATCH",
+        `Planlagt spill '${scheduledGameId}' inkluderer ikke hall '${hallId}'.`,
+      );
+    }
+    // Status må være levende (ikke avsluttet).
+    const validStatuses = new Set([
+      "scheduled",
+      "purchase_open",
+      "ready_to_start",
+      "running",
+      "paused",
+    ]);
+    if (!validStatuses.has(row.status)) {
+      throw new DomainError(
+        "SCHEDULED_GAME_NOT_JOINABLE",
+        `Planlagt spill '${scheduledGameId}' har status '${row.status}' — ikke tilgjengelig for batch-salg.`,
+      );
+    }
+    return {
+      id: row.id,
+      scheduledStartTime: asIso(row.scheduled_start_time),
+    };
   }
 
   /**

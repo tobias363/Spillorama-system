@@ -1,10 +1,12 @@
 /**
- * PT2 — enhetstester for AgentTicketRangeService.
+ * PT2+PT3 — enhetstester for AgentTicketRangeService.
  *
  * Spec: docs/architecture/PHYSICAL_TICKETS_FINAL_SPEC_2026-04-22.md
  *       (§ "Fase 2: Vakt-start + range-registrering")
+ *       (§ "Fase 4: Batch-oppdatering (returnering til stativ)")
  *
- * Dekker (≥15 tester):
+ * Dekker (≥20 tester):
+ *   PT2:
  *   1. Input-validering (agentId/hallId/ticketColor/count).
  *   2. registerRange happy path.
  *   3. TICKET_WRONG_HALL.
@@ -23,6 +25,28 @@
  *  16. Transaksjonell rollback ved reservation-mismatch.
  *  17. count = 1 (minimum).
  *  18. count over MAX_RANGE_COUNT avvises.
+ *
+ *   PT3 (recordBatchSale):
+ *  19. Happy-path (soldCount = currentTopIdx → newTopIdx; auto scheduledGame).
+ *  20. newTop == currentTop → NO_TICKETS_SOLD.
+ *  21. newTop > currentTop → INVALID_NEW_TOP.
+ *  22. newTop utenfor range.serials → SERIAL_NOT_IN_RANGE.
+ *  23. Range lukket → RANGE_ALREADY_CLOSED.
+ *  24. Wrong agent → FORBIDDEN.
+ *  25. Ingen planlagt spill → NO_UPCOMING_GAME_FOR_HALL.
+ *  26. scheduledGameId eksplisitt (hall-match).
+ *  27. scheduledGameId eksplisitt (hall mismatch) → SCHEDULED_GAME_HALL_MISMATCH.
+ *  28. scheduledGameId eksplisitt (ukjent id) → SCHEDULED_GAME_NOT_FOUND.
+ *  29. scheduledGameId eksplisitt (completed/cancelled) → SCHEDULED_GAME_NOT_JOINABLE.
+ *  30. adminOverride = true → tillater batch-salg på annens range.
+ *  31. Race: to parallelle batch-salg — kun én vinner.
+ *  32. range.current_top_serial oppdateres etter happy-path.
+ *  33. app_static_tickets oppdateres med is_purchased=true + sold_to_scheduled_game_id.
+ *  34. Rollback ved batch-update-mismatch (færre rader oppdatert enn forventet).
+ *  35. Tomt newTopSerial → INVALID_INPUT.
+ *  36. RANGE_NOT_FOUND når rangeId ukjent.
+ *  37. Partial sale: flere sekvensielle batch-salg dekrementerer top stegvis.
+ *  38. participating_halls_json matching (hall er ikke master).
  */
 
 import assert from "node:assert/strict";
@@ -58,9 +82,19 @@ interface MockRange {
   handover_from_range_id: string | null;
 }
 
+interface MockScheduledGame {
+  id: string;
+  status: string;
+  master_hall_id: string;
+  participating_halls: string[];
+  scheduled_start_time: Date;
+  scheduled_end_time: Date;
+}
+
 interface MockStore {
   tickets: Map<string, MockTicket>; // key: ticket id
   ranges: Map<string, MockRange>; // key: range id
+  scheduledGames: Map<string, MockScheduledGame>;
   txActive: number;
   commitCount: number;
   rollbackCount: number;
@@ -74,18 +108,45 @@ interface MockStore {
    * reservation-mismatch-test).
    */
   forceReservationMismatch: boolean;
+  /**
+   * PT3: Inject færre rader oppdatert i batch-UPDATE app_static_tickets.
+   */
+  forceBatchUpdateMismatch: boolean;
+  /**
+   * PT3: Hook som kjøres rett før UPDATE av app_static_tickets (emulere race).
+   */
+  onBeforeBatchUpdateHook: (() => void) | null;
 }
 
 function newStore(): MockStore {
   return {
     tickets: new Map(),
     ranges: new Map(),
+    scheduledGames: new Map(),
     txActive: 0,
     commitCount: 0,
     rollbackCount: 0,
     onScannedSelectHook: null,
     forceReservationMismatch: false,
+    forceBatchUpdateMismatch: false,
+    onBeforeBatchUpdateHook: null,
   };
+}
+
+function seedScheduledGame(
+  store: MockStore,
+  spec: Partial<MockScheduledGame> & { id: string; master_hall_id: string },
+): MockScheduledGame {
+  const now = new Date();
+  const full: MockScheduledGame = {
+    status: spec.status ?? "scheduled",
+    participating_halls: spec.participating_halls ?? [],
+    scheduled_start_time: spec.scheduled_start_time ?? new Date(now.getTime() + 60_000),
+    scheduled_end_time: spec.scheduled_end_time ?? new Date(now.getTime() + 3_600_000),
+    ...spec,
+  };
+  store.scheduledGames.set(full.id, full);
+  return full;
 }
 
 function seedTickets(
@@ -258,7 +319,12 @@ function makeMockPool(store: MockStore): Pool {
       return { rows: [], rowCount: count };
     }
 
-    // SELECT range FOR UPDATE (close-flow)
+    // SELECT range FOR UPDATE (close-flow OR batch-sale-flow).
+    // Differentiate basert på hvor mange kolonner som ønskes:
+    //   - close: SELECT id, agent_id, closed_at
+    //   - batch-sale: SELECT id, agent_id, hall_id, ticket_color,
+    //                        initial_serial, final_serial, serials,
+    //                        current_top_serial, closed_at
     if (
       sql.includes("FROM")
       && sql.includes("app_agent_ticket_ranges")
@@ -268,6 +334,23 @@ function makeMockPool(store: MockStore): Pool {
       const [id] = params as [string];
       const r = store.ranges.get(id);
       if (!r) return { rows: [], rowCount: 0 };
+      const wantsBatch = sql.includes("serials");
+      if (wantsBatch) {
+        return {
+          rows: [{
+            id: r.id,
+            agent_id: r.agent_id,
+            hall_id: r.hall_id,
+            ticket_color: r.ticket_color,
+            initial_serial: r.initial_serial,
+            final_serial: r.final_serial,
+            serials: r.serials,
+            current_top_serial: r.current_top_serial,
+            closed_at: r.closed_at,
+          }],
+          rowCount: 1,
+        };
+      }
       return {
         rows: [{
           id: r.id,
@@ -276,6 +359,107 @@ function makeMockPool(store: MockStore): Pool {
         }],
         rowCount: 1,
       };
+    }
+
+    // PT3: SELECT scheduled_game by id (findScheduledGameById)
+    if (
+      sql.includes("FROM")
+      && sql.includes("app_game1_scheduled_games")
+      && sql.includes("WHERE id = $1")
+    ) {
+      const [id] = params as [string];
+      const g = store.scheduledGames.get(id);
+      if (!g) return { rows: [], rowCount: 0 };
+      return {
+        rows: [{
+          id: g.id,
+          status: g.status,
+          scheduled_start_time: g.scheduled_start_time,
+          scheduled_end_time: g.scheduled_end_time,
+          master_hall_id: g.master_hall_id,
+          participating_halls_json: g.participating_halls,
+        }],
+        rowCount: 1,
+      };
+    }
+
+    // PT3: SELECT next scheduled_game for hall (findNextScheduledGameForHall)
+    if (
+      sql.includes("FROM")
+      && sql.includes("app_game1_scheduled_games")
+      && sql.includes("status IN")
+      && sql.includes("master_hall_id = $1")
+    ) {
+      const [hallId] = params as [string];
+      const now = Date.now();
+      const validStatuses = new Set([
+        "scheduled",
+        "purchase_open",
+        "ready_to_start",
+        "running",
+        "paused",
+      ]);
+      const candidates = [...store.scheduledGames.values()]
+        .filter((g) => validStatuses.has(g.status)
+          && g.scheduled_end_time.getTime() > now
+          && (g.master_hall_id === hallId
+            || g.participating_halls.includes(hallId)))
+        .sort((a, b) => a.scheduled_start_time.getTime() - b.scheduled_start_time.getTime())
+        .slice(0, 1);
+      const rows = candidates.map((g) => ({
+        id: g.id,
+        scheduled_start_time: g.scheduled_start_time,
+      }));
+      return { rows, rowCount: rows.length };
+    }
+
+    // PT3: UPDATE app_static_tickets SET is_purchased = true (batch-sale)
+    if (
+      sql.includes("UPDATE")
+      && sql.includes("app_static_tickets")
+      && sql.includes("SET is_purchased = true")
+    ) {
+      if (store.onBeforeBatchUpdateHook) {
+        const hook = store.onBeforeBatchUpdateHook;
+        store.onBeforeBatchUpdateHook = null;
+        hook();
+      }
+      const [scheduledGameId, userId, rangeId, hallId, serials] = params as [
+        string, string, string, string, string[],
+      ];
+      let count = 0;
+      for (const t of store.tickets.values()) {
+        if (
+          t.hall_id === hallId
+          && serials.includes(t.ticket_serial)
+          && t.reserved_by_range_id === rangeId
+          && !t.is_purchased
+        ) {
+          t.is_purchased = true;
+          (t as unknown as { sold_to_scheduled_game_id: string }).sold_to_scheduled_game_id = scheduledGameId;
+          (t as unknown as { sold_by_user_id: string }).sold_by_user_id = userId;
+          (t as unknown as { sold_from_range_id: string }).sold_from_range_id = rangeId;
+          (t as unknown as { responsible_user_id: string }).responsible_user_id = userId;
+          count += 1;
+        }
+      }
+      if (store.forceBatchUpdateMismatch) {
+        count = Math.max(0, count - 1);
+      }
+      return { rows: [], rowCount: count };
+    }
+
+    // PT3: UPDATE range SET current_top_serial = $1
+    if (
+      sql.includes("UPDATE")
+      && sql.includes("app_agent_ticket_ranges")
+      && sql.includes("SET current_top_serial = $1")
+    ) {
+      const [newTop, id] = params as [string, string];
+      const r = store.ranges.get(id);
+      if (!r) return { rows: [], rowCount: 0 };
+      r.current_top_serial = newTop;
+      return { rows: [], rowCount: 1 };
     }
 
     // UPDATE range SET closed_at = now()
@@ -904,4 +1088,481 @@ test("PT2 getRangeById: returnerer range eller null", async () => {
   assert.equal(found!.id, "r1");
   const missing = await svc.getRangeById("nope");
   assert.equal(missing, null);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// PT3 — recordBatchSale
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Helper: setter opp en åpen range "range-1" for agent-1 i hall-a med
+ * serials ["100","99","98","97","96","95"] (DESC). Toppen er "100".
+ * Ticket-rader seedes med reserved_by_range_id = "range-1".
+ */
+function seedBatchSaleScenario(store: MockStore): void {
+  const serials = ["100", "99", "98", "97", "96", "95"];
+  seedRange(store, {
+    id: "range-1",
+    agent_id: "agent-1",
+    hall_id: "hall-a",
+    ticket_color: "small",
+    initial_serial: "100",
+    final_serial: "95",
+    serials,
+    current_top_serial: "100",
+  });
+  const reservedBy: Record<string, string> = {};
+  for (const s of serials) reservedBy[s] = "range-1";
+  seedTickets(store, {
+    hallId: "hall-a",
+    color: "small",
+    serials,
+    reservedBy,
+  });
+  // Ett planlagt spill i hallen — starter om 1 min, varer 1 time.
+  seedScheduledGame(store, {
+    id: "sched-game-1",
+    master_hall_id: "hall-a",
+    participating_halls: ["hall-a"],
+    status: "scheduled",
+  });
+}
+
+test("PT3 recordBatchSale: happy-path — 5 bonger solgt, top går fra 100 til 95", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  const res = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "95",
+    userId: "agent-1",
+  });
+
+  assert.equal(res.soldCount, 5);
+  assert.equal(res.previousTopSerial, "100");
+  assert.equal(res.newTopSerial, "95");
+  assert.equal(res.scheduledGameId, "sched-game-1");
+  assert.ok(res.gameStartTime);
+  assert.deepEqual(res.soldSerials, ["100", "99", "98", "97", "96"]);
+
+  // Range-oppdatering: current_top_serial = "95".
+  const range = store.ranges.get("range-1")!;
+  assert.equal(range.current_top_serial, "95");
+
+  // app_static_tickets: 5 solgt, 1 gjenstår.
+  const sold = [...store.tickets.values()].filter((t) => t.is_purchased);
+  const unsold = [...store.tickets.values()].filter((t) => !t.is_purchased);
+  assert.equal(sold.length, 5);
+  assert.equal(unsold.length, 1);
+  assert.equal(unsold[0]!.ticket_serial, "95");
+
+  // COMMIT ble kalt, ingen rollback.
+  assert.equal(store.commitCount, 1);
+  assert.equal(store.rollbackCount, 0);
+});
+
+test("PT3 recordBatchSale: newTop == currentTop → NO_TICKETS_SOLD", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "100", // samme som current
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "NO_TICKETS_SOLD",
+  );
+
+  // Rollback — ingen oppdateringer.
+  assert.equal(store.rollbackCount, 1);
+  assert.equal(store.commitCount, 0);
+  const range = store.ranges.get("range-1")!;
+  assert.equal(range.current_top_serial, "100");
+});
+
+test("PT3 recordBatchSale: newTop > currentTop → INVALID_NEW_TOP", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  // Flytt current ned til 97 først slik at 100 blir "over" current.
+  const range = store.ranges.get("range-1")!;
+  range.current_top_serial = "97";
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "100", // høyere opp i DESC-listen
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_NEW_TOP",
+  );
+});
+
+test("PT3 recordBatchSale: newTopSerial utenfor range.serials → SERIAL_NOT_IN_RANGE", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "80", // ikke i ["100"..."95"]
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "SERIAL_NOT_IN_RANGE",
+  );
+});
+
+test("PT3 recordBatchSale: RANGE_ALREADY_CLOSED", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  store.ranges.get("range-1")!.closed_at = new Date();
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "RANGE_ALREADY_CLOSED",
+  );
+});
+
+test("PT3 recordBatchSale: annen agent uten adminOverride → FORBIDDEN", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-2", // ikke eier
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "FORBIDDEN",
+  );
+});
+
+test("PT3 recordBatchSale: adminOverride tillater batch-salg på annens range", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  const res = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "95",
+    userId: "admin-1", // ikke eier, men override
+    adminOverride: true,
+  });
+  assert.equal(res.soldCount, 5);
+});
+
+test("PT3 recordBatchSale: ingen planlagt spill → NO_UPCOMING_GAME_FOR_HALL", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  store.scheduledGames.clear(); // ingen spill
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-1",
+    }),
+    (err: unknown) =>
+      err instanceof DomainError
+      && err.code === "NO_UPCOMING_GAME_FOR_HALL",
+  );
+  assert.equal(store.rollbackCount, 1);
+});
+
+test("PT3 recordBatchSale: completed scheduled_game filtreres ut → NO_UPCOMING_GAME_FOR_HALL", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  // Endre spillet til completed → skal ikke plukkes.
+  store.scheduledGames.get("sched-game-1")!.status = "completed";
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-1",
+    }),
+    (err: unknown) =>
+      err instanceof DomainError
+      && err.code === "NO_UPCOMING_GAME_FOR_HALL",
+  );
+});
+
+test("PT3 recordBatchSale: eksplisitt scheduledGameId matcher hall", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  // Legg til et annet spill som skal velges først (starter tidligere).
+  seedScheduledGame(store, {
+    id: "sched-preferred",
+    master_hall_id: "hall-a",
+    participating_halls: ["hall-a"],
+    status: "scheduled",
+    scheduled_start_time: new Date(Date.now() - 30_000), // tidligere = ville blitt valgt
+    scheduled_end_time: new Date(Date.now() + 3_600_000),
+  });
+
+  const svc = makeService(store);
+  const res = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "95",
+    userId: "agent-1",
+    scheduledGameId: "sched-game-1", // eksplisitt valg overstyrer auto
+  });
+  assert.equal(res.scheduledGameId, "sched-game-1");
+});
+
+test("PT3 recordBatchSale: eksplisitt scheduledGameId med feil hall → SCHEDULED_GAME_HALL_MISMATCH", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  seedScheduledGame(store, {
+    id: "sched-other-hall",
+    master_hall_id: "hall-b", // annen hall
+    participating_halls: ["hall-b"],
+    status: "scheduled",
+  });
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-1",
+      scheduledGameId: "sched-other-hall",
+    }),
+    (err: unknown) =>
+      err instanceof DomainError
+      && err.code === "SCHEDULED_GAME_HALL_MISMATCH",
+  );
+});
+
+test("PT3 recordBatchSale: eksplisitt scheduledGameId ukjent → SCHEDULED_GAME_NOT_FOUND", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-1",
+      scheduledGameId: "no-such-game",
+    }),
+    (err: unknown) =>
+      err instanceof DomainError
+      && err.code === "SCHEDULED_GAME_NOT_FOUND",
+  );
+});
+
+test("PT3 recordBatchSale: eksplisitt scheduledGameId status completed → SCHEDULED_GAME_NOT_JOINABLE", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  store.scheduledGames.get("sched-game-1")!.status = "completed";
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-1",
+      scheduledGameId: "sched-game-1",
+    }),
+    (err: unknown) =>
+      err instanceof DomainError
+      && err.code === "SCHEDULED_GAME_NOT_JOINABLE",
+  );
+});
+
+test("PT3 recordBatchSale: RANGE_NOT_FOUND ved ukjent rangeId", async () => {
+  const store = newStore();
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "nope",
+      newTopSerial: "95",
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "RANGE_NOT_FOUND",
+  );
+});
+
+test("PT3 recordBatchSale: tomt newTopSerial → INVALID_INPUT", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "",
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT",
+  );
+});
+
+test("PT3 recordBatchSale: tomt rangeId → INVALID_INPUT", async () => {
+  const svc = makeService(newStore());
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "",
+      newTopSerial: "95",
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT",
+  );
+});
+
+test("PT3 recordBatchSale: rollback når batch-update treffer færre rader enn forventet", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  store.forceBatchUpdateMismatch = true;
+  const svc = makeService(store);
+
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "INTERNAL_ERROR",
+  );
+  assert.equal(store.rollbackCount, 1);
+  assert.equal(store.commitCount, 0);
+
+  // Range skal IKKE være oppdatert.
+  const range = store.ranges.get("range-1")!;
+  assert.equal(range.current_top_serial, "100");
+});
+
+test("PT3 recordBatchSale: sekvensielle batch-salg dekrementerer top stegvis", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  // Første batch: 100 → 97 (3 solgt).
+  const r1 = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "97",
+    userId: "agent-1",
+  });
+  assert.equal(r1.soldCount, 3);
+  assert.deepEqual(r1.soldSerials, ["100", "99", "98"]);
+  assert.equal(store.ranges.get("range-1")!.current_top_serial, "97");
+
+  // Andre batch: 97 → 95 (2 solgt).
+  const r2 = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "95",
+    userId: "agent-1",
+  });
+  assert.equal(r2.soldCount, 2);
+  assert.deepEqual(r2.soldSerials, ["97", "96"]);
+  assert.equal(store.ranges.get("range-1")!.current_top_serial, "95");
+
+  // Alle 5 bonger solgt (mellom 100 og 95 eksklusivt, altså 100,99,98,97,96).
+  const sold = [...store.tickets.values()].filter((t) => t.is_purchased);
+  assert.equal(sold.length, 5);
+});
+
+test("PT3 recordBatchSale: race — to parallelle batch-salg på samme range, kun én vinner", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  // Første kallet lykkes: 100 → 97.
+  const r1 = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "97",
+    userId: "agent-1",
+  });
+  assert.equal(r1.soldCount, 3);
+
+  // Andre kallet forsøker å ta topp fra 100 → 95, men siden range nå står på
+  // 97 må 100-targeting feile — 100 ligger "over" nåværende top (97).
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "100",
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_NEW_TOP",
+  );
+});
+
+test("PT3 recordBatchSale: happy-path — hall er participating, ikke master", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  // Endre spillet: hall-a er deltaker, men ikke master.
+  store.scheduledGames.clear();
+  seedScheduledGame(store, {
+    id: "sched-participating",
+    master_hall_id: "hall-MASTER",
+    participating_halls: ["hall-MASTER", "hall-a"],
+    status: "purchase_open",
+  });
+  const svc = makeService(store);
+
+  const res = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "95",
+    userId: "agent-1",
+  });
+  assert.equal(res.scheduledGameId, "sched-participating");
+});
+
+test("PT3 recordBatchSale: selger hele rangen (newTop = final_serial)", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  // newTop = "95" = siste serial i rangen (= final_serial).
+  // Siden newTopIndex = serials.length - 1 = 5 og currentTopIndex = 0,
+  // slicer vi [0, 5) → alle bortsett fra "95" (selv = ny top).
+  // "95" blir stående som usolgt topp.
+  const res = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "95",
+    userId: "agent-1",
+  });
+  assert.equal(res.soldCount, 5);
+  assert.equal(res.soldSerials[res.soldSerials.length - 1], "96");
+
+  // Den siste bongen "95" står fortsatt som usolgt.
+  const t95 = [...store.tickets.values()].find((t) => t.ticket_serial === "95")!;
+  assert.equal(t95.is_purchased, false);
+});
+
+test("PT3 recordBatchSale: dobbeltkall med samme newTop → andre kall NO_TICKETS_SOLD", async () => {
+  const store = newStore();
+  seedBatchSaleScenario(store);
+  const svc = makeService(store);
+
+  const r1 = await svc.recordBatchSale({
+    rangeId: "range-1",
+    newTopSerial: "95",
+    userId: "agent-1",
+  });
+  assert.equal(r1.soldCount, 5);
+
+  // Andre kall med samme newTop → NO_TICKETS_SOLD (idempotent-safe).
+  await assert.rejects(
+    () => svc.recordBatchSale({
+      rangeId: "range-1",
+      newTopSerial: "95",
+      userId: "agent-1",
+    }),
+    (err: unknown) => err instanceof DomainError && err.code === "NO_TICKETS_SOLD",
+  );
 });
