@@ -61,6 +61,7 @@ import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { Game1PayoutService, Game1WinningAssignment } from "./Game1PayoutService.js";
 import type { Game1JackpotService, Game1JackpotConfig } from "./Game1JackpotService.js";
 import type { AdminGame1Broadcaster } from "./AdminGame1Broadcaster.js";
+import type { Game1MiniGameOrchestrator } from "./minigames/Game1MiniGameOrchestrator.js";
 import { evaluatePhase, TOTAL_PHASES } from "./Game1PatternEvaluator.js";
 import {
   buildVariantConfigFromSpill1Config,
@@ -124,6 +125,14 @@ export interface Game1DrawEngineServiceOptions {
    * Feil i broadcaster loggres men påvirker ikke draw-flyten.
    */
   adminBroadcaster?: AdminGame1Broadcaster;
+  /**
+   * BIN-690 M1: valgfri orchestrator for mini-games etter Fullt Hus.
+   * Fire-and-forget — engine kaller `maybeTriggerFor` POST-commit slik
+   * at mini-game-feil IKKE ruller tilbake bingo-payout. Default unset
+   * = ingen mini-game-trigger (M1-framework kan wires opp senere eller
+   * deaktiveres helt per miljø).
+   */
+  miniGameOrchestrator?: Game1MiniGameOrchestrator;
 }
 
 // ── Internal row shapes ─────────────────────────────────────────────────────
@@ -307,6 +316,7 @@ export class Game1DrawEngineService {
   private readonly payoutService: Game1PayoutService | null;
   private readonly jackpotService: Game1JackpotService | null;
   private adminBroadcaster: AdminGame1Broadcaster | null;
+  private miniGameOrchestrator: Game1MiniGameOrchestrator | null;
 
   constructor(options: Game1DrawEngineServiceOptions) {
     this.pool = options.pool;
@@ -324,6 +334,12 @@ export class Game1DrawEngineService {
     this.payoutService = options.payoutService ?? null;
     this.jackpotService = options.jackpotService ?? null;
     this.adminBroadcaster = options.adminBroadcaster ?? null;
+    this.miniGameOrchestrator = options.miniGameOrchestrator ?? null;
+  }
+
+  /** BIN-690 M1: late-binding for mini-game orchestrator. */
+  setMiniGameOrchestrator(orchestrator: Game1MiniGameOrchestrator): void {
+    this.miniGameOrchestrator = orchestrator;
   }
 
   /** PR 4d.3: late-binding for admin-broadcaster (io må finnes først). */
@@ -538,6 +554,15 @@ export class Game1DrawEngineService {
       phase: number;
     } | null = null;
 
+    // BIN-690 M1: capture for POST-commit mini-game-trigger. Populert kun
+    // hvis Fullt Hus (fase 5) vunnet og orchestrator er wired opp. Hver
+    // vinner får sin egen mini-game (typisk kun én vinner per Fullt Hus).
+    let capturedFullHouseInfo: {
+      winnerIds: string[];
+      drawSequenceAtWin: number;
+      gameConfigJson: unknown;
+    } | null = null;
+
     return this.runInTransaction(async (client) => {
       const state = await this.loadGameStateForUpdate(client, scheduledGameId);
       if (!state) {
@@ -623,6 +648,17 @@ export class Game1DrawEngineService {
       const bingoWon = phaseResult.phaseWon && state.current_phase === TOTAL_PHASES;
       const maxDrawsReached = nextSequence >= maxDraws;
       const isFinished = bingoWon || maxDrawsReached;
+
+      // BIN-690 M1: hvis Fullt Hus vunnet → capture for POST-commit
+      // mini-game-trigger. Orchestrator er fire-and-forget (krasher ikke
+      // denne transaksjonen).
+      if (bingoWon && phaseResult.winnerIds.length > 0) {
+        capturedFullHouseInfo = {
+          winnerIds: phaseResult.winnerIds,
+          drawSequenceAtWin: nextSequence,
+          gameConfigJson: game.game_config_json,
+        };
+      }
       const newPhase = phaseResult.phaseWon && !bingoWon
         ? state.current_phase + 1
         : state.current_phase;
@@ -702,8 +738,102 @@ export class Game1DrawEngineService {
           view.drawsCompleted
         );
       }
+      // BIN-690 M1: fire-and-forget mini-game-trigger for Fullt Hus-vinnere.
+      // Kjøres POST-commit slik at mini-game-feil IKKE kan rulle tilbake
+      // bingo-payout. Orchestrator kaster aldri mot caller.
+      if (capturedFullHouseInfo && this.miniGameOrchestrator) {
+        this.triggerMiniGamesForFullHouse(
+          scheduledGameId,
+          capturedFullHouseInfo.winnerIds,
+          capturedFullHouseInfo.drawSequenceAtWin,
+          capturedFullHouseInfo.gameConfigJson
+        );
+      }
       return view;
     });
+  }
+
+  /**
+   * BIN-690 M1: fire-and-forget trigger for mini-game etter Fullt Hus.
+   * Kalles POST-commit fra drawNext. Hver vinner får sin egen mini-game
+   * via orchestrator. Feil logges men krasher ikke draw-flyten.
+   */
+  private triggerMiniGamesForFullHouse(
+    scheduledGameId: string,
+    winnerIds: string[],
+    drawSequenceAtWin: number,
+    gameConfigJson: unknown
+  ): void {
+    const orchestrator = this.miniGameOrchestrator;
+    if (!orchestrator) return;
+    for (const winnerId of winnerIds) {
+      // Lookup wallet + hall for vinneren. Orchestrator gjør dette internt
+      // men for trigger-pathway må vi sende inn hall slik at admin-config
+      // snapshot kan caches per hall hvis nødvendig i M2+. For M1 bruker
+      // vi minimal metadata; orchestrator henter resten internt når
+      // handleChoice kommer inn.
+      void this.resolveWalletAndHallForUser(winnerId)
+        .then((resolved) => {
+          if (!resolved) {
+            log.warn(
+              { scheduledGameId, winnerId },
+              "[BIN-690] Kunne ikke resolve wallet/hall for Fullt Hus-vinner — skipper mini-game"
+            );
+            return;
+          }
+          return orchestrator.maybeTriggerFor({
+            scheduledGameId,
+            winnerUserId: winnerId,
+            winnerWalletId: resolved.walletId,
+            hallId: resolved.hallId,
+            drawSequenceAtWin,
+            gameConfigJson,
+          });
+        })
+        .catch((err) => {
+          log.error(
+            { err, scheduledGameId, winnerId },
+            "[BIN-690] maybeTriggerFor kastet — fire-and-forget, ignorert"
+          );
+        });
+    }
+  }
+
+  /**
+   * BIN-690 M1: hent walletId + hallId for en vinner etter Fullt Hus.
+   * Bruker phase_winners-tabellen (skrevet av payoutService i samme
+   * transaksjon som draw) for å finne hall, og app_users for wallet.
+   */
+  private async resolveWalletAndHallForUser(
+    userId: string
+  ): Promise<{ walletId: string; hallId: string } | null> {
+    try {
+      const { rows } = await this.pool.query<{
+        wallet_id: string | null;
+        hall_id: string | null;
+      }>(
+        `SELECT u.wallet_id,
+                (SELECT pw.hall_id
+                   FROM "${this.schema}"."app_game1_phase_winners" pw
+                  WHERE pw.winner_user_id = u.id
+                  ORDER BY pw.created_at DESC
+                  LIMIT 1) AS hall_id
+           FROM "${this.schema}"."app_users" u
+          WHERE u.id = $1
+          LIMIT 1`,
+        [userId]
+      );
+      if (rows.length === 0) return null;
+      const { wallet_id, hall_id } = rows[0]!;
+      if (!wallet_id || !hall_id) return null;
+      return { walletId: wallet_id, hallId: hall_id };
+    } catch (err) {
+      log.warn(
+        { err, userId },
+        "[BIN-690] resolveWalletAndHallForUser feilet"
+      );
+      return null;
+    }
   }
 
   /**

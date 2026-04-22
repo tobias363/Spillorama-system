@@ -61,6 +61,7 @@ import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
 import { Game1TicketPurchaseService } from "./game/Game1TicketPurchaseService.js";
 import { Game1DrawEngineService } from "./game/Game1DrawEngineService.js";
+import { Game1MiniGameOrchestrator } from "./game/minigames/Game1MiniGameOrchestrator.js";
 import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAdapter.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
@@ -939,6 +940,18 @@ game1MasterControlService.setDrawEngine(game1DrawEngineService);
 // stop. Late-binding fordi ticketPurchaseService konstrueres etter
 // masterControl (sirkulær avhengighet ellers).
 game1MasterControlService.setTicketPurchaseService(game1TicketPurchaseService);
+
+// BIN-690 M1: mini-game orchestrator (framework-foundation). Ingen konkrete
+// spill registrert i M1 — M2-M5 legger dem til via registerMiniGame().
+// Late-bound på drawEngine slik at Game1DrawEngineService kan konstrueres
+// uten sirkulær avhengighet.
+const game1MiniGameOrchestrator = new Game1MiniGameOrchestrator({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  auditLog: auditLogService,
+  walletAdapter,
+});
+game1DrawEngineService.setMiniGameOrchestrator(game1MiniGameOrchestrator);
 
 // GAME1_SCHEDULE PR 4c Bolk 4: auto-draw-tick (global 1s tick, fixed
 // seconds-intervall per spill). Default OFF til PR 4d socket-flyt aktiveres.

@@ -52,7 +52,6 @@ import type { MiniGame, MiniGameTriggerContext, MiniGameType } from "./types.js"
 import { MINI_GAME_TYPES } from "./types.js";
 import type { AuditLogService } from "../../compliance/AuditLogService.js";
 import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
-import type { ComplianceLedger } from "../ComplianceLedger.js";
 import { logger as rootLogger } from "../../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-mini-game-orchestrator" });
@@ -138,7 +137,6 @@ export interface Game1MiniGameOrchestratorOptions {
   readonly schema?: string;
   readonly auditLog: AuditLogService;
   readonly walletAdapter: WalletAdapter;
-  readonly complianceLedger: ComplianceLedger;
   /**
    * Map av konkrete mini-game-implementasjoner. M1 leveres med tom map;
    * M2-M5 registrerer hver sin implementasjon via `registerMiniGame()`.
@@ -206,7 +204,6 @@ export class Game1MiniGameOrchestrator {
   private readonly schema: string;
   private readonly auditLog: AuditLogService;
   private readonly walletAdapter: WalletAdapter;
-  private readonly ledger: ComplianceLedger;
   private readonly miniGames: Map<MiniGameType, MiniGame>;
   private broadcaster: MiniGameBroadcaster;
 
@@ -215,7 +212,6 @@ export class Game1MiniGameOrchestrator {
     this.schema = assertSchemaName(options.schema ?? "public");
     this.auditLog = options.auditLog;
     this.walletAdapter = options.walletAdapter;
-    this.ledger = options.complianceLedger;
     this.miniGames = new Map(options.miniGames ?? []);
     this.broadcaster = options.broadcaster ?? NoopMiniGameBroadcaster;
   }
@@ -459,12 +455,7 @@ export class Game1MiniGameOrchestrator {
       // Utbetal payout hvis > 0. Idempotency-key forhindrer dobbel-betaling
       // selv hvis completedAt-UPDATE rulles tilbake og vi retry-er.
       if (result.payoutCents > 0) {
-        await this.creditPayoutInTransaction(
-          client,
-          context,
-          miniGameType,
-          result.payoutCents,
-        );
+        await this.creditPayout(context, miniGameType, result.payoutCents);
       }
 
       // UPDATE: sett choice + result + payout + completed_at.
@@ -653,39 +644,27 @@ export class Game1MiniGameOrchestrator {
     };
   }
 
-  private async creditPayoutInTransaction(
-    _client: PoolClient,
+  /**
+   * Utbetal mini-game-premie. Bruker samme wallet.credit-pattern som
+   * Game1PayoutService for konsistens (én felles wallet-adapter med
+   * idempotency-key; regulatorisk ledger er ikke i scope her — følger
+   * samme mønster som fase-payouts).
+   *
+   * `payoutCents` konverteres til kroner for wallet.credit (legacy API
+   * forventer kroner). Idempotency-key er resultId-scoped.
+   */
+  private async creditPayout(
     context: MiniGameTriggerContext,
     miniGameType: MiniGameType,
     payoutCents: number,
   ): Promise<void> {
-    const gameType = "DATABINGO" as const;
-    const channel = "INTERNET" as const;
-    const houseAccountId = this.ledger.makeHouseAccountId(context.hallId, gameType, channel);
-    const idempotencyKey = `g1-minigame-${context.resultId}`;
-
-    const transfer = await this.walletAdapter.transfer(
-      houseAccountId,
+    const amountKroner = payoutCents / 100;
+    await this.walletAdapter.credit(
       context.winnerWalletId,
-      payoutCents,
+      amountKroner,
       `Mini-game ${miniGameType} premie`,
-      { idempotencyKey },
+      { idempotencyKey: `g1-minigame-${context.resultId}` },
     );
-
-    await this.ledger.recordComplianceLedgerEvent({
-      hallId: context.hallId,
-      gameType,
-      channel,
-      eventType: "PRIZE",
-      amount: payoutCents,
-      gameId: context.scheduledGameId,
-      claimId: idempotencyKey,
-      playerId: context.winnerUserId,
-      walletId: context.winnerWalletId,
-      sourceAccountId: transfer.fromTx.accountId,
-      targetAccountId: transfer.toTx.accountId,
-      policyVersion: `minigame-${miniGameType}-v1`,
-    });
   }
 
   private async runInTransaction<T>(
