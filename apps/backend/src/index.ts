@@ -65,6 +65,7 @@ import { Game1MiniGameOrchestrator } from "./game/minigames/Game1MiniGameOrchest
 import { MiniGameWheelEngine } from "./game/minigames/MiniGameWheelEngine.js";
 import { MiniGameChestEngine } from "./game/minigames/MiniGameChestEngine.js";
 import { MiniGameColordraftEngine } from "./game/minigames/MiniGameColordraftEngine.js";
+import { MiniGameOddsenEngine } from "./game/minigames/MiniGameOddsenEngine.js";
 import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAdapter.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
@@ -998,7 +999,27 @@ game1MiniGameOrchestrator.registerMiniGame(new MiniGameChestEngine());
 // winPrize; mismatch ⇒ consolationPrizeNok (ofte 0).
 game1MiniGameOrchestrator.registerMiniGame(new MiniGameColordraftEngine());
 
+// BIN-690 M5: registrer Oddsen-implementasjon. Admin config
+// (game_type='oddsen') overstyrer DEFAULT_ODDSEN_CONFIG (validNumbers
+// [55,56,57], potSmall 1500, potLarge 3000, resolveAtDraw 57). Oddsen er
+// unik fordi payout er CROSS-ROUND: handleChoice persisterer state i
+// `app_game1_oddsen_state` med referanse til neste planlagte spill i hallen,
+// og payout skjer ved terskel-draw i det neste spillet via resolveForGame().
+// Derfor krever Oddsen egen walletAdapter + pool + auditLog (til forskjell
+// fra M2/M3/M4 som er stateless og bruker orchestrator.creditPayout).
+const miniGameOddsenEngine = new MiniGameOddsenEngine({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+  walletAdapter,
+  auditLog: auditLogService,
+});
+game1MiniGameOrchestrator.registerMiniGame(miniGameOddsenEngine);
+
 game1DrawEngineService.setMiniGameOrchestrator(game1MiniGameOrchestrator);
+// BIN-690 M5: late-bind oddsen-engine til draw-engine slik at
+// Game1DrawEngineService.drawNext kan kalle resolveForGame() ved terskel-draw
+// i spill som har aktiv Oddsen-state fra forrige runde.
+game1DrawEngineService.setOddsenEngine(miniGameOddsenEngine);
 
 // GAME1_SCHEDULE PR 4c Bolk 4: auto-draw-tick (global 1s tick, fixed
 // seconds-intervall per spill). Default OFF til PR 4d socket-flyt aktiveres.
