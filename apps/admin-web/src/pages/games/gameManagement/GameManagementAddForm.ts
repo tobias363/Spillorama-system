@@ -33,11 +33,13 @@ import type { GameType } from "../common/types.js";
 import {
   SPILL1_TICKET_COLORS,
   SPILL1_SUB_VARIANTS,
+  SPILL1_MINI_GAME_TYPES,
   emptySpill1Config,
   patternsForSubVariant,
   validateSpill1Config,
   buildSpill1Payload,
   type Spill1Config,
+  type Spill1MiniGameType,
   type Spill1TicketColor,
   type Spill1Pattern,
   type Spill1SubVariant,
@@ -182,6 +184,7 @@ function renderFormShell(s: FormState): string {
                 ${renderSectionJackpot(s)}
                 ${renderSectionElvis(s)}
                 ${renderSectionLuckyNumber(s)}
+                ${renderSectionMiniGames(s)}
                 <div id="gm-field-errors" data-testid="gm-field-errors"></div>
                 <div style="padding-top:16px;">
                   <button type="submit" id="gm-submit" data-testid="gm-submit"
@@ -483,6 +486,39 @@ function renderSectionLuckyNumber(s: FormState): string {
     </fieldset>`;
 }
 
+/**
+ * BIN-690 M1: mini-games seksjon — checkboxes for hvilke minispill som
+ * trigges etter Fullt Hus. Framework er registrert i M1; konkrete
+ * implementasjoner (M2-M5) leveres separat. Admin kan velge alle
+ * typer uansett — backend orchestrator skipper typer som mangler
+ * implementasjon (logger warn + audit-event).
+ */
+function renderSectionMiniGames(s: FormState): string {
+  const selectedSet = new Set(s.spill1.miniGames);
+  const items = SPILL1_MINI_GAME_TYPES.map((mg) => {
+    const checked = selectedSet.has(mg);
+    const label = t(`gm_minigame_${mg}`);
+    return `
+      <div class="gm-minigame-row" data-testid="gm-minigame-row-${escapeHtml(mg)}"
+        style="padding:4px 0;">
+        <label>
+          <input type="checkbox" class="gm-minigame-check"
+            data-testid="gm-minigame-check-${escapeHtml(mg)}"
+            data-type="${escapeHtml(mg)}"${checked ? " checked" : ""}>
+          ${escapeHtml(label)}
+        </label>
+      </div>`;
+  }).join("");
+  return `
+    <fieldset class="form-group" data-testid="gm-section-mini-games" style="border:1px solid #eee;padding:12px;margin-bottom:12px;">
+      ${sectionHeader(t("gm_section_mini_games"))}
+      <p class="text-muted" style="margin-bottom:8px;">
+        ${escapeHtml(t("gm_minigames_help"))}
+      </p>
+      <div id="gm-mini-games">${items}</div>
+    </fieldset>`;
+}
+
 /** Wire events + submit-handler. */
 export function wireForm(container: HTMLElement, state: FormState): void {
   wireBasics(container, state);
@@ -492,6 +528,7 @@ export function wireForm(container: HTMLElement, state: FormState): void {
   wirePatternPrizeCells(container, state);
   wireJackpot(container, state);
   wireElvisAndLucky(container, state);
+  wireMiniGames(container, state);
   wireSubmit(container, state);
 }
 
@@ -516,6 +553,24 @@ function wireSubVariant(container: HTMLElement, state: FormState): void {
       }
       refreshPatternPrizeTable(container, state);
     }
+  });
+}
+
+/** BIN-690 M1: wire mini-games checkbox-state i form. */
+function wireMiniGames(container: HTMLElement, state: FormState): void {
+  container.querySelectorAll<HTMLInputElement>(".gm-minigame-check").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const type = cb.dataset.type as Spill1MiniGameType | undefined;
+      if (!type) return;
+      const set = new Set(state.spill1.miniGames);
+      if (cb.checked) {
+        set.add(type);
+      } else {
+        set.delete(type);
+      }
+      // Bevar kanonisk rekkefølge fra SPILL1_MINI_GAME_TYPES.
+      state.spill1.miniGames = SPILL1_MINI_GAME_TYPES.filter((mg) => set.has(mg));
+    });
   });
 }
 

@@ -112,6 +112,32 @@ export interface ElvisConfig {
   replaceTicketPriceNok: number;
 }
 
+/**
+ * BIN-690 M1: Minispill (mini-games) som skal trigges etter Fullt Hus.
+ *
+ * Admin velger hvilke spill som skal være aktive for dette Spill 1-spillet.
+ * Orchestrator (Game1MiniGameOrchestrator) plukker første aktive type i
+ * rotasjonen etter Fullt Hus. Tom array = ingen mini-game.
+ *
+ * Framework-typer (må matche backend MiniGameType i
+ * apps/backend/src/game/minigames/types.ts):
+ *   - "wheel"      — Lykkehjulet (M2)
+ *   - "chest"      — Skattekisten (M3)
+ *   - "colordraft" — Fargekladden, 12-luker (M4)
+ *   - "oddsen"     — Oddsen, cross-round ball-number-bet (M5)
+ *
+ * M1-framework støtter alle typer; konkrete implementasjoner lander i M2-M5.
+ */
+export type Spill1MiniGameType = "wheel" | "chest" | "colordraft" | "oddsen";
+
+/** Alle tilgjengelige mini-game-typer (for UI-iterasjon). */
+export const SPILL1_MINI_GAME_TYPES: readonly Spill1MiniGameType[] = [
+  "wheel",
+  "chest",
+  "colordraft",
+  "oddsen",
+] as const;
+
 /** Timing-felter — sekunder mellom trekninger. */
 export interface Spill1Timing {
   /** Minimum sekunder per kule-trekning. */
@@ -145,6 +171,12 @@ export interface Spill1Config {
   elvis: ElvisConfig;
   /** Lucky number-premie i NOK (hele kroner). */
   luckyNumberPrizeNok: number;
+  /**
+   * BIN-690 M1: valgte mini-game-typer som trigges etter Fullt Hus.
+   * Tom array = ingen mini-game. Backend orchestrator plukker første aktive
+   * type i rotasjonen. Se `SPILL1_MINI_GAME_TYPES` for tilgjengelige verdier.
+   */
+  miniGames: Spill1MiniGameType[];
 }
 
 /** Valideringsresultat fra `validateSpill1Config`. */
@@ -179,6 +211,7 @@ export function emptySpill1Config(): Spill1Config {
     },
     elvis: { replaceTicketPriceNok: 0 },
     luckyNumberPrizeNok: 0,
+    miniGames: [],
   };
 }
 
@@ -323,6 +356,22 @@ export function validateSpill1Config(config: Spill1Config, baseName: string): Va
         message: "jackpot_prize_must_between_5k_50k",
       });
     }
+  }
+
+  // BIN-690 M1: mini-games. Valgfritt (tom array er OK). Valider at hver
+  // entry er en kjent type — ingen begrensninger på antall eller kombinasjon.
+  if (!Array.isArray(config.miniGames)) {
+    errors.push({ path: "miniGames", message: "mini_games_invalid" });
+  } else {
+    const allowed = new Set<string>(SPILL1_MINI_GAME_TYPES);
+    config.miniGames.forEach((mg, i) => {
+      if (!allowed.has(mg)) {
+        errors.push({
+          path: `miniGames[${i}]`,
+          message: "mini_games_unknown_type",
+        });
+      }
+    });
   }
 
   if (errors.length > 0) return { ok: false, errors };

@@ -9,6 +9,8 @@ import {
   SPILL1_TICKET_COLORS,
   SPILL1_PATTERNS,
   SPILL1_SUB_VARIANTS,
+  SPILL1_MINI_GAME_TYPES,
+  type Spill1MiniGameType,
 } from "../../src/pages/games/gameManagement/Spill1Config.js";
 
 function validConfig() {
@@ -438,5 +440,88 @@ describe("buildSpill1Payload with Kvikkis", () => {
       spill1: c,
     });
     expect(p.config.spill1.subVariant).toBe("kvikkis");
+  });
+});
+
+// ── BIN-690 M1: mini-games config ───────────────────────────────────────────
+
+describe("SPILL1_MINI_GAME_TYPES", () => {
+  it("inkluderer alle 4 mini-game-typer for M1 framework", () => {
+    expect(SPILL1_MINI_GAME_TYPES).toEqual([
+      "wheel",
+      "chest",
+      "colordraft",
+      "oddsen",
+    ]);
+  });
+});
+
+describe("validateSpill1Config: miniGames", () => {
+  it("accepterer tom miniGames-array", () => {
+    const c = validConfig();
+    c.miniGames = [];
+    const res = validateSpill1Config(c, "Test");
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepterer alle kjente mini-game-typer", () => {
+    const c = validConfig();
+    c.miniGames = ["wheel", "chest", "colordraft", "oddsen"];
+    const res = validateSpill1Config(c, "Test");
+    expect(res.ok).toBe(true);
+  });
+
+  it("avviser ukjent mini-game-type", () => {
+    const c = validConfig();
+    c.miniGames = ["wheel", "bogus" as Spill1MiniGameType];
+    const res = validateSpill1Config(c, "Test");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.errors.some((e) => e.path === "miniGames[1]")).toBe(true);
+    }
+  });
+
+  it("avviser miniGames som ikke er array", () => {
+    const c = validConfig();
+    // Bypass type for å simulere korrupt config fra API.
+    (c as unknown as { miniGames: unknown }).miniGames = "wheel";
+    const res = validateSpill1Config(c, "Test");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.errors.some((e) => e.path === "miniGames")).toBe(true);
+    }
+  });
+});
+
+describe("emptySpill1Config: miniGames default", () => {
+  it("starter med tom miniGames-array", () => {
+    const c = emptySpill1Config();
+    expect(c.miniGames).toEqual([]);
+  });
+});
+
+describe("buildSpill1Payload: miniGames passerer gjennom", () => {
+  it("bevarer valgte mini-games i config.spill1.miniGames", () => {
+    const c = validConfig();
+    c.miniGames = ["wheel", "colordraft"];
+    const p = buildSpill1Payload({
+      gameTypeId: "bingo",
+      name: "Test",
+      isoDate: "2026-05-15",
+      spill1: c,
+    });
+    expect(p.config.spill1.miniGames).toEqual(["wheel", "colordraft"]);
+  });
+
+  it("bevarer tom miniGames-array", () => {
+    const c = validConfig();
+    c.miniGames = [];
+    const p = buildSpill1Payload({
+      gameTypeId: "bingo",
+      name: "Test",
+      isoDate: "2026-05-15",
+      spill1: c,
+    });
+    expect(p.config.spill1.miniGames).toEqual([]);
   });
 });
