@@ -3,14 +3,17 @@
 // Pattern: export both the schema (for .parse/.safeParse) and the z.infer<>-
 // derived type (for compile-time use). Interfaces elsewhere remain unchanged —
 // this file is the starting point; broader rollout is tracked separately.
+//
+// PR-R3 (2026-04-23): primitive re-usables er ekstrahert til
+// ./schemas/_shared.ts slik at domene-subfiler kan dele dem under
+// overgangen. Resten av filen flyttes i etterfølgende commits.
 
 import { z } from "zod";
+import { IsoDateString, ClaimType, GameStatus } from "./schemas/_shared.js";
 
-// ── Primitive re-usables ────────────────────────────────────────────────────
-
-const IsoDateString = z.string().min(1);
-const ClaimType = z.enum(["LINE", "BINGO"]);
-const GameStatus = z.enum(["WAITING", "RUNNING", "ENDED"]);
+// Re-eksporter fra schemas/-undermappen. Barrel-en er tom i dette commit;
+// innhold legges til etterhvert som domener flyttes.
+export * from "./schemas/index.js";
 
 // ── BIN-646 (PR-B4): payment-request (deposit/withdraw-kø) ─────────────────
 
