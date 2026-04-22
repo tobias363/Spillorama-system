@@ -7,7 +7,6 @@ Tom plassholder for Windows-native shell (.exe) som skal pakke `packages/game-cl
 Vurder:
 - **Tauri** (Rust + WebView2) — lite footprint, moderne, samme web-UI som mobil
 - **Electron** — bredere økosystem, større footprint
-- **Unity WebGL-eksport** — kun hvis vi må beholde Unity-rendering (lite sannsynlig)
 
 Beslutning tas når mobil-appene (android/ios) har stabilisert seg.
 

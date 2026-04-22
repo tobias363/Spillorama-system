@@ -40,13 +40,6 @@ Det eier ikke Candy demo-login, Candy demo-admin eller Candy demo-settings.
 │   ├── operations/          # Runbooks, incident response
 │   └── archive/             # Utdatert/historisk
 │
-├── legacy/                  # Karantene — gammelt system under utfasing
-│   ├── unity-client/        # Tidligere Spillorama/ (Unity-prosjekt)
-│   ├── unity-backend/       # Tidligere unity-bingo-backend/ (AIS)
-│   ├── scripts/             # Tidligere scripts/unity-*.sh
-│   ├── docs/                # Utdatert Unity-dokumentasjon
-│   └── README.md            # Plan for uttrekking til eget repo
-│
 ├── .github/workflows/       # CI + compliance gate
 ├── docker-compose.yml       # Lokal stack (backend + postgres + redis) — må ligge i rot
 ├── render.yaml              # Render.com Blueprint — må ligge i rot
@@ -58,10 +51,9 @@ Det eier ikke Candy demo-login, Candy demo-admin eller Candy demo-settings.
 - `apps/` = deployables. Alt som kjører i produksjon mot sluttbruker eller drift.
 - `packages/` = delte bibliotek. Ingen deploy — konsumeres av apps.
 - `infra/` = deploy-scripts og infra-kode.
-- `legacy/` = karantene. Ikke i aktiv utvikling, planlagt uttrekking til eget repo.
 - Best practice holdes: én tydelig kilde per modul, ingen blanding av deployables og delt kode, én dokumentasjonsgren.
 
-Se [apps/README.md](apps/README.md), [legacy/README.md](legacy/README.md) for detaljer.
+Se [apps/README.md](apps/README.md) for detaljer.
 
 ## Tre kodebaser
 
@@ -91,7 +83,6 @@ Samme route-navn på to forskjellige domener betyr ikke samme system.
 | Live wallet, auth eller compliance | `Spillorama-system` | jobb i `apps/backend/src/` |
 | Web-native spill (Spill 1–5) | `Spillorama-system` | jobb i `packages/game-client/src/games/` |
 | iOS / Android / Windows-klient | `Spillorama-system` | jobb i `apps/{ios,android,windows}/` |
-| Gammel Unity-lobby eller Unity-spill | `Spillorama-system` | jobb i `legacy/unity-client/` (under utfasing) |
 | Candy gameplay, UI eller assets | `Candy` | jobb i Candy-repoet |
 | Candy demo-login, demo-admin eller demo-settings | `demo-backend` | jobb i `demo-backend`-repoet |
 
@@ -147,10 +138,6 @@ Det betyr ikke at `Spillorama-system` skal eie Candy gameplay eller Candy-backen
 Repo og Blueprint bruker navnet `Spillorama-system` / `spillorama-system`.
 
 Live host er `https://spillorama-system.onrender.com/`.
-
-## Legacy Unity-tooling
-
-Unity-prosjektet og tilhørende scripts/dokumenter ligger i karantene under [legacy/](legacy/README.md) og er planlagt trukket ut i eget repo. For daglig verifisering av tracket Unity-kilde, bruk skriptene i `legacy/scripts/` (f.eks. `bash legacy/scripts/unity-test-suite.sh`).
 
 ## Kort regel
 
