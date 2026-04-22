@@ -42,6 +42,11 @@ export const routes: RouteDef[] = [
   { path: "/physicalTicketManagement", titleKey: "physical_ticket_management", module: "Physical Tickets" },
   { path: "/physical/cash-out", titleKey: "physical_cash_out", module: "Physical Tickets" },
   { path: "/physical/check-bingo", titleKey: "check_bingo_stamp", module: "Physical Tickets" },
+  // PR-PT6 — PT1-PT5 admin-UI.
+  { path: "/physical/import", titleKey: "pt_import_csv_title", module: "Physical Tickets" },
+  { path: "/physical/ranges/register", titleKey: "pt_range_register_title", module: "Physical Tickets" },
+  { path: "/physical/ranges", titleKey: "pt_active_ranges_title", module: "Physical Tickets" },
+  { path: "/physical/payouts", titleKey: "pt_pending_payouts_title", module: "Physical Tickets" },
   { path: "/sold-tickets", titleKey: "sold_tickets" },
 
   { path: "/uniqueId", titleKey: "generate_unique_id", module: "Unique ID Modules" },
