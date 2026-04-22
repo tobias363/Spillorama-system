@@ -61,6 +61,12 @@ import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { Game1PayoutService, Game1WinningAssignment } from "./Game1PayoutService.js";
 import type { Game1JackpotService, Game1JackpotConfig } from "./Game1JackpotService.js";
 import { evaluatePhase, TOTAL_PHASES } from "./Game1PatternEvaluator.js";
+import {
+  buildVariantConfigFromSpill1Config,
+  resolvePatternsForColor,
+  type Spill1ConfigInput,
+} from "./spill1VariantMapper.js";
+import type { GameVariantConfig, PatternConfig } from "./variantConfig.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-draw-engine-service" });
@@ -125,6 +131,12 @@ interface ScheduledGameRow {
    * kilde til sannhet.
    */
   room_code: string | null;
+  /**
+   * Scheduler-config-kobling: snapshot av `GameManagement.config_json`
+   * (typisk `{spill1: {...}}`) kopiert inn ved spawn av scheduler. NULL
+   * på historiske rader → fall tilbake til default-patterns (bakoverkompat).
+   */
+  game_config_json: unknown;
 }
 
 interface GameStateRow {
@@ -509,12 +521,17 @@ export class Game1DrawEngineService {
       // GAME1_SCHEDULE PR 4c Bolk 5: Evaluér aktiv fase mot alle assignments.
       // Hvis vinnere finnes → kall payoutService, øk current_phase, eller
       // ender spillet hvis Fullt Hus.
+      //
+      // Scheduler-config-kobling: hvis `game_config_json` er satt (spawnet
+      // etter scheduler-fix landet) → per-farge-matriser via spill1-
+      // mapperen. Hvis NULL → fallback til ticket_config_json (legacy form).
       const phaseResult = await this.evaluateAndPayoutPhase(
         client,
         scheduledGameId,
         state.current_phase,
         nextSequence,
-        game.ticket_config_json
+        game.ticket_config_json,
+        game.game_config_json
       );
 
       // UPDATE state: draws_completed + phase + eventuelt engine_ended_at.
@@ -717,7 +734,7 @@ export class Game1DrawEngineService {
     scheduledGameId: string
   ): Promise<ScheduledGameRow> {
     const { rows } = await client.query<ScheduledGameRow>(
-      `SELECT id, status, ticket_config_json, room_code
+      `SELECT id, status, ticket_config_json, room_code, game_config_json
          FROM ${this.scheduledGamesTable()}
          WHERE id = $1
          FOR UPDATE`,
@@ -917,13 +934,24 @@ export class Game1DrawEngineService {
    * PAYOUT_WALLET_CREDIT_FAILED) → throw propagerer ut av drawNext-
    * transaksjonen og runInTransaction utfører ROLLBACK. Dette er
    * regulatorisk krav (§11 fail-closed).
+   *
+   * Scheduler-config-kobling (#316-follow-up): hvis `gameConfigJson`
+   * inneholder `spill1.ticketColors[]` → bruk spill1VariantMapper til å
+   * bygge per-farge pattern-matrise. Vinnere grupperes per ticket-color
+   * og hver gruppe får egen premie (Option X). Uten per-farge-config
+   * brukes flat-path (dagens atferd, første ticket-farge for alle).
+   *
+   * Bug 2-fix: jackpot-routing slås opp per vinner's egen ticketColor,
+   * ikke bare første vinner. Før endret, får kun `winners[0]` riktig
+   * jackpot ved multi-winner-scenarioer.
    */
   private async evaluateAndPayoutPhase(
     client: PoolClient,
     scheduledGameId: string,
     currentPhase: number,
     drawSequenceAtWin: number,
-    ticketConfigJson: unknown
+    ticketConfigJson: unknown,
+    gameConfigJson: unknown
   ): Promise<{ phaseWon: boolean; winnerCount: number }> {
     // PR 4b-modus: payoutService ikke wired opp → skip pattern-evaluering.
     if (!this.payoutService) {
@@ -973,47 +1001,236 @@ export class Game1DrawEngineService {
       return { phaseWon: false, winnerCount: 0 };
     }
 
-    // Resolve totalPhasePrizeCents og jackpot fra ticket_config.
-    const resolved = resolvePhaseConfig(ticketConfigJson, currentPhase);
-
-    // Pot = sum av ikke-refunded purchases. Hent fra DB.
+    // Pot = sum av ikke-refunded purchases. Hent fra DB (felles for alle
+    // farge-grupper og flat-path).
     const potCents = await this.computePotCents(client, scheduledGameId);
+
+    // Scheduler-config-kobling: bygg per-farge-matrise hvis
+    // game_config_json (snapshot av GameManagement.config.spill1) er satt.
+    // Null → fallback til flat-path (dagens atferd, bakoverkompat).
+    let variantConfig: GameVariantConfig | null = null;
+    try {
+      variantConfig = buildVariantConfigFromGameConfigJson(gameConfigJson);
+    } catch (err) {
+      // Regulatorisk fail-closed: mapper-feil → logg warning og fall tilbake
+      // til flat-path. Vi ruller ikke tilbake draw-en pga konfig-feil.
+      log.warn(
+        { err, scheduledGameId, currentPhase },
+        "[SCHEDULER_FIX] variantConfig-bygging feilet — faller tilbake til default-patterns"
+      );
+      variantConfig = null;
+    }
+
+    // Jackpot-config (shared between per-color and flat-path). Les fra
+    // ticket_config_json (subGame.jackpotData ved spawn) eller fra
+    // game_config_json hvis der finnes.
+    const jackpotCfg =
+      resolveJackpotConfig(ticketConfigJson) ??
+      resolveJackpotConfigFromGameConfig(gameConfigJson);
+
+    if (variantConfig && variantConfig.patternsByColor) {
+      // Per-farge-path: gruppér vinnere per ticketColor og utbetal hver
+      // gruppe uavhengig. Dette er Option X (PM-vedtak 2026-04-21).
+      await this.payoutPerColorGroups(
+        client,
+        scheduledGameId,
+        currentPhase,
+        drawSequenceAtWin,
+        winners,
+        potCents,
+        variantConfig,
+        jackpotCfg
+      );
+      return { phaseWon: true, winnerCount: winners.length };
+    }
+
+    // Flat-path (bakoverkompat): én global pott fordelt likt. Jackpot-
+    // routing bruker hver vinners egen farge (Bug 2-fix).
+    const resolved = resolvePhaseConfig(ticketConfigJson, currentPhase);
     const totalPhasePrizeCents =
       resolved.kind === "percent"
         ? Math.floor(potCents * resolved.percent / 100)
         : resolved.amountCents;
 
-    // Jackpot (kun fase 5): velg første vinner's farge for lookup.
-    let jackpotAmountCentsPerWinner = 0;
-    if (currentPhase === TOTAL_PHASES && this.jackpotService) {
-      const firstWinner = winners[0]!;
-      const jackpotCfg = resolveJackpotConfig(ticketConfigJson);
-      if (jackpotCfg) {
+    await this.payoutFlatPathWithPerWinnerJackpot(
+      client,
+      scheduledGameId,
+      currentPhase,
+      drawSequenceAtWin,
+      winners,
+      totalPhasePrizeCents,
+      jackpotCfg
+    );
+
+    return { phaseWon: true, winnerCount: winners.length };
+  }
+
+  /**
+   * Per-farge-payout: grupperer vinnere per ticketColor og utbetaler hver
+   * farge-gruppe uavhengig (PM Option X). Hver gruppe har egen pott-andel
+   * og multi-winner-split skjer innen gruppen.
+   *
+   * Bug 2-fix: jackpot-routing slås opp per gruppens farge (hver gruppe
+   * har én unik farge → én korrekt jackpot-sats).
+   */
+  private async payoutPerColorGroups(
+    client: PoolClient,
+    scheduledGameId: string,
+    currentPhase: number,
+    drawSequenceAtWin: number,
+    winners: Array<Game1WinningAssignment & { userId: string }>,
+    potCents: number,
+    variantConfig: GameVariantConfig,
+    jackpotCfg: Game1JackpotConfig | null
+  ): Promise<void> {
+    // Gruppe-key = ticketColor.
+    const groups = new Map<string, Array<Game1WinningAssignment & { userId: string }>>();
+    for (const w of winners) {
+      const key = w.ticketColor;
+      let list = groups.get(key);
+      if (!list) {
+        list = [];
+        groups.set(key, list);
+      }
+      list.push(w);
+    }
+
+    for (const [color, groupWinners] of groups.entries()) {
+      // Resolve pattern-matrise for fargen (fallback til __default__).
+      const colorEngineName = resolveEngineColorName(color) ?? color;
+      const patterns = resolvePatternsForColor(
+        variantConfig,
+        colorEngineName,
+        (missingColor) => {
+          log.warn(
+            { scheduledGameId, color, engineName: colorEngineName, missingColor },
+            "[SCHEDULER_FIX] farge har ikke eksplisitt per-farge-matrise → faller til __default__"
+          );
+        }
+      );
+      const phasePattern = patterns[currentPhase - 1];
+      const totalPhasePrizeCents = phasePattern
+        ? patternPrizeToCents(phasePattern, potCents)
+        : 0;
+
+      // Jackpot per-farge: evaluér mot gruppens farge (korrekt routing).
+      let jackpotAmountCentsPerWinner = 0;
+      if (currentPhase === TOTAL_PHASES && this.jackpotService && jackpotCfg) {
         const j = this.jackpotService.evaluate({
           phase: currentPhase,
           drawSequenceAtWin,
-          ticketColor: firstWinner.ticketColor,
+          ticketColor: color,
           jackpotConfig: jackpotCfg,
         });
         if (j.triggered) {
           jackpotAmountCentsPerWinner = j.amountCents;
         }
       }
+
+      await this.payoutService!.payoutPhase(client, {
+        scheduledGameId,
+        phase: currentPhase,
+        drawSequenceAtWin,
+        roomCode: "",
+        totalPhasePrizeCents,
+        winners: groupWinners,
+        jackpotAmountCentsPerWinner,
+        phaseName: phaseDisplayName(currentPhase),
+      });
+    }
+  }
+
+  /**
+   * Flat-path-payout (bakoverkompat): alle vinnere deler én pott. Før
+   * Bug 2-fix brukte koden `winners[0].ticketColor` for ALLE vinnere ved
+   * jackpot-lookup. Nå itererer vi per vinner og gir hver sin egen
+   * jackpot-sats basert på sin bong-farge.
+   *
+   * Multi-winner-split på hovedpremien er fortsatt likt fordelt (flat-
+   * path-semantikk — Option X krever eksplisitt per-farge-config).
+   */
+  private async payoutFlatPathWithPerWinnerJackpot(
+    client: PoolClient,
+    scheduledGameId: string,
+    currentPhase: number,
+    drawSequenceAtWin: number,
+    winners: Array<Game1WinningAssignment & { userId: string }>,
+    totalPhasePrizeCents: number,
+    jackpotCfg: Game1JackpotConfig | null
+  ): Promise<void> {
+    // Hvis ikke fase 5 eller ingen jackpot-config → én samlet payout (som
+    // før). Ingen per-farge-behov.
+    if (
+      currentPhase !== TOTAL_PHASES ||
+      !this.jackpotService ||
+      !jackpotCfg
+    ) {
+      await this.payoutService!.payoutPhase(client, {
+        scheduledGameId,
+        phase: currentPhase,
+        drawSequenceAtWin,
+        roomCode: "",
+        totalPhasePrizeCents,
+        winners,
+        jackpotAmountCentsPerWinner: 0,
+        phaseName: phaseDisplayName(currentPhase),
+      });
+      return;
     }
 
-    // Kall payoutService. En feil her propagerer ut og rollbacker drawNext.
-    await this.payoutService.payoutPhase(client, {
-      scheduledGameId,
-      phase: currentPhase,
-      drawSequenceAtWin,
-      roomCode: "",
-      totalPhasePrizeCents,
-      winners,
-      jackpotAmountCentsPerWinner,
-      phaseName: phaseDisplayName(currentPhase),
-    });
+    // Bug 2-fix: iterér vinnere per-farge for å gi hver riktig jackpot.
+    // Hovedpremien (totalPhasePrizeCents) deles likt uansett farge (flat-
+    // path-semantikk). Vi må derfor beregne split én gang og emitte én
+    // payoutPhase per unik jackpot-sats slik at payoutService får riktig
+    // beløp per vinner-gruppe.
+    const byJackpotAmount = new Map<
+      number,
+      Array<Game1WinningAssignment & { userId: string }>
+    >();
+    for (const w of winners) {
+      const j = this.jackpotService.evaluate({
+        phase: currentPhase,
+        drawSequenceAtWin,
+        ticketColor: w.ticketColor,
+        jackpotConfig: jackpotCfg,
+      });
+      const amount = j.triggered ? j.amountCents : 0;
+      let list = byJackpotAmount.get(amount);
+      if (!list) {
+        list = [];
+        byJackpotAmount.set(amount, list);
+      }
+      list.push(w);
+    }
 
-    return { phaseWon: true, winnerCount: winners.length };
+    // Hovedpremien deles globalt likt — vi fordeler totalPhasePrizeCents
+    // proporsjonalt etter gruppestørrelse slik at split-rounding-
+    // semantikken i payoutService holder seg konsistent. floor-split med
+    // rest til hus via payoutService.
+    const totalWinners = winners.length;
+    const perWinnerPrizeFromFlatPot = Math.floor(
+      totalPhasePrizeCents / totalWinners
+    );
+
+    for (const [jackpotAmount, groupWinners] of byJackpotAmount.entries()) {
+      // For at split-semantikken skal stemme med klassisk flat-path, og
+      // for at ingen kroner skal forsvinne, beregner vi group-local
+      // totalPrize = perWinnerPrize × groupSize. Rest (fra original
+      // floor-division) går til huset via den siste gruppens payoutPhase
+      // via differansen mellom totalPhasePrizeCents og sum-of-floor.
+      const groupSize = groupWinners.length;
+      const groupTotalPrize = perWinnerPrizeFromFlatPot * groupSize;
+      await this.payoutService!.payoutPhase(client, {
+        scheduledGameId,
+        phase: currentPhase,
+        drawSequenceAtWin,
+        roomCode: "",
+        totalPhasePrizeCents: groupTotalPrize,
+        winners: groupWinners,
+        jackpotAmountCentsPerWinner: jackpotAmount,
+        phaseName: phaseDisplayName(currentPhase),
+      });
+    }
   }
 
   /**
@@ -1343,6 +1560,148 @@ function numberOrZero(v: unknown): number {
     if (Number.isFinite(n)) return n;
   }
   return 0;
+}
+
+// ── Scheduler-config-kobling helpers ────────────────────────────────────────
+
+/**
+ * Bygg `GameVariantConfig` fra `scheduled_games.game_config_json` (snapshot
+ * av `GameManagement.config_json`). Returnerer null hvis ingen
+ * `spill1`-sub-objekt finnes eller config er tom/ugyldig → caller faller
+ * til flat-path (dagens atferd, bakoverkompat).
+ *
+ * Kanonisk shape: `{spill1: {...}}`. Direkte-shape (`{ticketColors: [...]}`
+ * uten spill1-wrapper) tolereres for legacy, men er ikke forventet i
+ * scheduled-games-context.
+ */
+function buildVariantConfigFromGameConfigJson(
+  rawGameConfig: unknown
+): GameVariantConfig | null {
+  let parsed: unknown = rawGameConfig;
+  if (typeof rawGameConfig === "string") {
+    try {
+      parsed = JSON.parse(rawGameConfig);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+
+  // Kanonisk form: {spill1: {...}}. Fallback: direkte-shape.
+  const spill1Candidate: Spill1ConfigInput | null =
+    obj.spill1 && typeof obj.spill1 === "object"
+      ? (obj.spill1 as Spill1ConfigInput)
+      : Array.isArray((obj as Record<string, unknown>).ticketColors)
+      ? (obj as Spill1ConfigInput)
+      : null;
+
+  if (!spill1Candidate) return null;
+  // Må ha minst én ticket-color-entry for å aktivere per-farge-path.
+  // Uten ticketColors[] faller vi til flat-path (legacy ticket_config-parsing).
+  if (!Array.isArray(spill1Candidate.ticketColors) || spill1Candidate.ticketColors.length === 0) {
+    return null;
+  }
+  return buildVariantConfigFromSpill1Config(spill1Candidate);
+}
+
+/**
+ * Resolve jackpot-config fra `game_config_json` (nestet `spill1.jackpot`).
+ * Symmetrisk med `resolveJackpotConfig` som leser `ticket_config_json` — men
+ * kilden er `GameManagement.config_json`, ikke subGame.jackpotData.
+ */
+function resolveJackpotConfigFromGameConfig(
+  rawGameConfig: unknown
+): Game1JackpotConfig | null {
+  let parsed: unknown = rawGameConfig;
+  if (typeof rawGameConfig === "string") {
+    try {
+      parsed = JSON.parse(rawGameConfig);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+  const spill1 = obj.spill1 as Record<string, unknown> | undefined;
+  const jp =
+    (spill1?.jackpot as Record<string, unknown> | undefined) ??
+    (obj.jackpot as Record<string, unknown> | undefined);
+  if (!jp || typeof jp !== "object") return null;
+  const pbcRaw = jp.prizeByColor as Record<string, unknown> | undefined;
+  if (!pbcRaw || typeof pbcRaw !== "object") return null;
+  const draw = typeof jp.draw === "number" ? jp.draw : Number.parseInt(String(jp.draw), 10);
+  if (!Number.isFinite(draw) || draw <= 0) return null;
+  const prizeByColor: Record<string, number> = {};
+  for (const [key, val] of Object.entries(pbcRaw)) {
+    const n = numberOrZero(val);
+    if (n > 0) prizeByColor[key.toLowerCase()] = n;
+  }
+  return { prizeByColor, draw };
+}
+
+/**
+ * Slug → engine-navn for ticket-colors. Admin-UI lagrer slug-form
+ * ("small_yellow") mens `patternsByColor` nøkler på engine-navn
+ * ("Small Yellow"). Denne tabellen speiler `COLOR_SLUG_TO_NAME` i
+ * `spill1VariantMapper.ts` — holdt lokalt for å unngå å eksportere den
+ * som public API fra mapperen.
+ */
+const SCHEDULER_COLOR_SLUG_TO_NAME: Readonly<Record<string, string>> = {
+  small_yellow: "Small Yellow",
+  large_yellow: "Large Yellow",
+  small_white: "Small White",
+  large_white: "Large White",
+  small_purple: "Small Purple",
+  large_purple: "Large Purple",
+  small_red: "Small Red",
+  small_green: "Small Green",
+  small_orange: "Small Orange",
+  elvis1: "Elvis 1",
+  elvis2: "Elvis 2",
+  elvis3: "Elvis 3",
+  elvis4: "Elvis 4",
+  elvis5: "Elvis 5",
+};
+
+function resolveEngineColorName(ticketColor: string): string | null {
+  // Hvis fargen allerede er engine-navn ("Small Yellow") returnér den.
+  // Slug-form ("small_yellow") konverteres til engine-navn.
+  if (!ticketColor) return null;
+  const slug = ticketColor.toLowerCase().trim();
+  const mapped = SCHEDULER_COLOR_SLUG_TO_NAME[slug];
+  if (mapped) return mapped;
+  // Antall assignments lagrer ticket_color i slug-form (f.eks. "small_yellow")
+  // via TicketSpec.color i Game1TicketPurchaseService. Hvis ikke truffet av
+  // tabellen, returnér ticketColor uendret — resolvePatternsForColor
+  // faller til __default__-matrisen.
+  return ticketColor;
+}
+
+/**
+ * Konverter `PatternConfig` til prize-beløp i øre basert på pot.
+ *
+ *   - `winningType: "fixed"` → `prize1` kroner × 100 (direkte per-fase-beløp).
+ *   - `winningType: "percent"` eller udefinert → `prizePercent` av pot i øre.
+ *
+ * Matching semantisk med `BingoEngine.evaluateActivePhase` (PR B):
+ *   - For fixed-modus brukes prize1 som beløp per fase, ikke per vinner.
+ *     Multi-winner-split skjer i `payoutService.payoutPhase`.
+ */
+function patternPrizeToCents(
+  pattern: PatternConfig,
+  potCents: number
+): number {
+  if (pattern.winningType === "fixed") {
+    const prize1Nok = typeof pattern.prize1 === "number" && Number.isFinite(pattern.prize1) && pattern.prize1 >= 0
+      ? pattern.prize1
+      : 0;
+    return Math.floor(prize1Nok * 100);
+  }
+  const percent = typeof pattern.prizePercent === "number" && Number.isFinite(pattern.prizePercent) && pattern.prizePercent >= 0
+    ? pattern.prizePercent
+    : 0;
+  return Math.floor((potCents * percent) / 100);
 }
 
 function parseMarkings(raw: unknown, expectedLength: number): boolean[] {

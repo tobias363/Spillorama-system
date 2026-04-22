@@ -10,12 +10,12 @@
  *      `jackpotAmountCentsPerWinner` → wallet.credit får totalt
  *      (phasePrize + jackpot) i kroner.
  *
- *   2. 2 vinnere på Fullt Hus med ULIKE farger: dagens kode bruker
- *      KUN første-vinner's farge for jackpot-oppslag (se
- *      Game1DrawEngineService.ts:903 `firstWinner.ticketColor`). Alle
- *      vinnere får derfor samme jackpot. Dokumenterer denne
- *      routing-quirken for Agent 3 (Fase 5 konsolidering kan forbedre
- *      til per-farge-jackpot hvis PM-spec endres).
+ *   2. 2 vinnere på Fullt Hus med ULIKE farger: BUG 2-FIX (2026-04-22):
+ *      DrawEngine evaluerer nå jackpot per vinners egen ticketColor — ikke
+ *      kun `winners[0].ticketColor`. Hver vinner får derfor jackpot matchet
+ *      med sin egen farge. Testen speiler ny flat-path-atferd der
+ *      `Game1DrawEngineService.payoutFlatPathWithPerWinnerJackpot`
+ *      itererer unik-jackpot-grupper.
  *
  * Scope-gate: 2 tester per PM-direktiv. Ikke en erstatning for
  * payoutWire.test.ts (som tester DB-level integrasjon).
@@ -201,27 +201,30 @@ test("integrasjon: Fullt Hus full-house-with-jackpot — både phase-prize og ja
   }
 });
 
-// ── Test 2: Multi-winner med ulike farger — routing-logikk dokumentert ─────
+// ── Test 2: Multi-winner med ulike farger — Bug 2-fix per-farge-jackpot ────
 
-test("integrasjon: 2 vinnere på Fullt Hus med ulike farger → alle får jackpot basert på FØRSTE vinners farge (dagens DrawEngine-atferd)", async () => {
+test("integrasjon: 2 vinnere på Fullt Hus med ulike farger → HVER vinner får jackpot basert på EGEN farge (Bug 2-fix)", async () => {
   // Alice (small_yellow) + Bob (small_white). Fullt Hus på draw 40.
   // Config: yellow=10000 kr, white=3000 kr.
   //
-  // Dagens DrawEngine-kode (Game1DrawEngineService.ts:903):
+  // Før Bug 2-fix (Game1DrawEngineService.ts:~903):
   //   `jackpotService.evaluate({ ticketColor: firstWinner.ticketColor, ... })`
-  // bruker KUN første-vinner's farge. Alle vinnere får da samme
-  // `jackpotAmountCentsPerWinner`. Testen dokumenterer denne routing-
-  // logikken — hvis Agent 3 i Fase 5 endrer til per-farge-jackpot, MÅ
-  // denne testen oppdateres.
+  // brukte KUN første-vinner's farge. Alle vinnere fikk da samme
+  // jackpot (10000 kr).
   //
-  // Total split: 2000 kr pool / 2 = 1000 kr hver. Jackpot = 10000 kr
-  // (yellow, fra første-vinner Alice) → begge får 10000 kr jackpot.
-  // Hver vinner: 1000 + 10000 = 11000 kr.
-  const result = await runFullHusPayoutIntegration({
+  // Etter Bug 2-fix (2026-04-22):
+  //   `payoutFlatPathWithPerWinnerJackpot` evaluerer jackpotService per
+  //   vinners EGEN ticketColor og emitter én payoutPhase-call per unik
+  //   jackpot-sats. Hver vinner får derfor matchet sin egen farge.
+  //
+  // Total split: 2000 kr pool / 2 vinnere = 1000 kr hver (flat-path).
+  //   - Alice (yellow): 1000 + 10000 = 11000 kr.
+  //   - Bob   (white):  1000 +  3000 =  4000 kr.
+  const result = await runFlatPathPerWinnerJackpotIntegration({
     winners: [
       {
         assignmentId: "a-alice", walletId: "w-alice", userId: "u-alice",
-        hallId: "hall-a", ticketColor: "small_yellow", // <-- denne styrer jackpot
+        hallId: "hall-a", ticketColor: "small_yellow",
       },
       {
         assignmentId: "a-bob", walletId: "w-bob", userId: "u-bob",
@@ -234,27 +237,101 @@ test("integrasjon: 2 vinnere på Fullt Hus med ulike farger → alle får jackpo
       prizeByColor: { yellow: 10000, white: 3000 },
       draw: 50,
     },
-    jackpotLookupColorFromFirstWinner: true,
   });
 
-  assert.equal(
-    result.resolvedJackpotAmountCents, 10000 * 100,
-    "jackpot beregnet via Alice's farge (yellow=10000 kr)",
-  );
-
   assert.equal(result.credits.length, 2);
-  // Alice: 1000 (split) + 10000 (jackpot via egen farge) = 11000 kr.
+
+  // Alice: 1000 (split) + 10000 (jackpot via egen farge yellow) = 11000 kr.
   const alice = result.credits.find((c) => c.walletId === "w-alice");
   assert.ok(alice);
-  assert.equal(alice!.amountKroner, 11000);
+  assert.equal(alice!.amountKroner, 11000, "Alice (yellow): split + yellow jackpot");
 
-  // Bob: 1000 (split) + 10000 (jackpot via Alices farge, IKKE egen white=3000) = 11000 kr.
-  // Dette dokumenterer routing-quirken: Bob får 10000 kr jackpot selv om
-  // hans egen farge (white) er konfigurert til 3000 kr.
+  // Bob: 1000 (split) + 3000 (jackpot via EGEN farge white, ikke Alices) = 4000 kr.
+  // Dette er Bug 2-fiksen: hver vinner får routet til sin egen farges jackpot.
   const bob = result.credits.find((c) => c.walletId === "w-bob");
   assert.ok(bob);
   assert.equal(
-    bob!.amountKroner, 11000,
-    "Bob får SAMME jackpot som Alice (yellow=10000), selv om Bob er white=3000 — first-winner-color-routing",
+    bob!.amountKroner, 4000,
+    "Bob (white) får EGEN farges jackpot (3000 kr), ikke Alices yellow (10000 kr)",
   );
+
+  // phase_winners-rader: én per vinner, med korrekt per-vinner jackpot.
+  // params-layout (1-basert i SQL, 0-basert i array): id=[0], scheduledGame=[1],
+  // assignmentId=[2], userId=[3], hallId=[4], phase=[5], drawSeq=[6],
+  // prize=[7], totalPhase=[8], winnerCount=[9], ticketColor=[10],
+  // walletTxId=[11], jackpotCents=[12].
+  const phaseInserts = result.queries.filter(
+    (q) => q.sql.includes("INSERT INTO") && q.sql.includes("app_game1_phase_winners"),
+  );
+  assert.equal(phaseInserts.length, 2, "én phase_winners-rad per vinner");
+  const aliceRow = phaseInserts.find((q) => q.params[10] === "small_yellow");
+  const bobRow = phaseInserts.find((q) => q.params[10] === "small_white");
+  assert.ok(aliceRow, "Alice's phase_winner-rad med ticketColor=small_yellow");
+  assert.ok(bobRow, "Bob's phase_winner-rad med ticketColor=small_white");
+  assert.equal(aliceRow!.params[12], 10000 * 100, "Alice's jackpot_amount_cents=yellow");
+  assert.equal(bobRow!.params[12], 3000 * 100, "Bob's jackpot_amount_cents=white");
 });
+
+/**
+ * Wire'r flat-path-logikken fra `Game1DrawEngineService.payoutFlatPathWithPerWinnerJackpot`:
+ * splitter flat-pott likt mellom alle vinnere, grupperer vinnere per unik
+ * jackpot-sats (evaluert per vinner's egen farge) og kaller
+ * `PayoutService.payoutPhase` én gang per gruppe. Dette er nøyaktig samme
+ * kontrakt som DrawEngine bruker ved evaluateAndPayoutPhase.
+ */
+async function runFlatPathPerWinnerJackpotIntegration(input: {
+  winners: Array<Game1WinningAssignment>;
+  totalPhasePrizeCents: number;
+  drawSequenceAtWin: number;
+  jackpotConfig: Game1JackpotConfig;
+}): Promise<{
+  credits: Array<{ walletId: string; amountKroner: number }>;
+  queries: RecordedQuery[];
+}> {
+  const walletCtx = makeCreditCapturingWallet();
+  const auditLog = new AuditLogService(new InMemoryAuditLogStore());
+  const payoutService = new Game1PayoutService({
+    walletAdapter: walletCtx.adapter,
+    auditLogService: auditLog,
+  });
+  const jackpotService = new Game1JackpotService();
+  const { client, queries } = makeFakeClient();
+
+  // Per-vinner-jackpot-grupping (speiler DrawEngine.payoutFlatPathWithPerWinnerJackpot).
+  const totalWinners = input.winners.length;
+  const perWinnerPrizeFromFlatPot = Math.floor(input.totalPhasePrizeCents / totalWinners);
+
+  const byJackpotAmount = new Map<number, Array<Game1WinningAssignment>>();
+  for (const w of input.winners) {
+    const j = jackpotService.evaluate({
+      phase: 5,
+      drawSequenceAtWin: input.drawSequenceAtWin,
+      ticketColor: w.ticketColor,
+      jackpotConfig: input.jackpotConfig,
+    });
+    const amount = j.triggered ? j.amountCents : 0;
+    let list = byJackpotAmount.get(amount);
+    if (!list) {
+      list = [];
+      byJackpotAmount.set(amount, list);
+    }
+    list.push(w);
+  }
+
+  for (const [jackpotAmount, groupWinners] of byJackpotAmount.entries()) {
+    const groupSize = groupWinners.length;
+    const groupTotalPrize = perWinnerPrizeFromFlatPot * groupSize;
+    await payoutService.payoutPhase(client as never, {
+      scheduledGameId: "g-integration",
+      phase: 5,
+      drawSequenceAtWin: input.drawSequenceAtWin,
+      roomCode: "",
+      totalPhasePrizeCents: groupTotalPrize,
+      winners: groupWinners,
+      jackpotAmountCentsPerWinner: jackpotAmount,
+      phaseName: "Fullt Hus",
+    });
+  }
+
+  return { credits: walletCtx.credits, queries };
+}

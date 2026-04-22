@@ -101,6 +101,13 @@ interface DailyScheduleRow {
   status: string;
   stop_game: boolean;
   other_data_json: unknown;
+  /**
+   * Scheduler-config-kobling: FK til `app_game_management.id`. NULL tillatt
+   * for planer som ikke har assosiert GameManagement (stop_game-dager etc.).
+   * Brukes for å kopiere `config_json.spill1` inn i
+   * `scheduled_games.game_config_json` ved spawn.
+   */
+  game_management_id: string | null;
 }
 
 interface ScheduleRow {
@@ -325,7 +332,8 @@ export class Game1ScheduleTickService {
     // 1) Hent alle kandidat-daily_schedules i vinduet.
     const { rows: dailyRows } = await this.pool.query<DailyScheduleRow>(
       `SELECT id, name, hall_ids_json, week_days, start_date, end_date,
-              start_time, end_time, status, stop_game, other_data_json
+              start_time, end_time, status, stop_game, other_data_json,
+              game_management_id
        FROM ${this.dailySchedulesTable()}
        WHERE status = 'running'
          AND stop_game = false
@@ -406,6 +414,43 @@ export class Game1ScheduleTickService {
     const schedulesById = new Map<string, ScheduleRow>();
     for (const row of scheduleRows) {
       schedulesById.set(row.id, row);
+    }
+
+    // 3b) Scheduler-config-kobling: last GameManagement.config_json for alle
+    // daily-schedules som har game_management_id. Dette brukes til å bygge
+    // `game_config_json`-snapshot ved spawn slik at spill1-varianten (admin-
+    // UI) følger med på scheduled-games-path.
+    const gameManagementIdsNeeded = new Set<string>();
+    for (const entry of dailyWith) {
+      if (entry.daily.game_management_id) {
+        gameManagementIdsNeeded.add(entry.daily.game_management_id);
+      }
+    }
+    const gameManagementConfigById = new Map<string, Record<string, unknown>>();
+    if (gameManagementIdsNeeded.size > 0) {
+      try {
+        const { rows: gmRows } = await this.pool.query<{
+          id: string;
+          config_json: unknown;
+        }>(
+          `SELECT id, config_json
+             FROM "${this.schema}"."app_game_management"
+            WHERE id = ANY($1::text[])
+              AND deleted_at IS NULL`,
+          [Array.from(gameManagementIdsNeeded)]
+        );
+        for (const row of gmRows) {
+          gameManagementConfigById.set(row.id, parseJsonObject(row.config_json));
+        }
+      } catch (err) {
+        // Manglende tabell/kolonne → fall tilbake til spawn uten config-snapshot
+        // (bakoverkompat). Regulatorisk fail-closed: logg warning, ikke kast.
+        const code = (err as { code?: string } | null)?.code ?? "";
+        log.warn(
+          { err, code },
+          "scheduler-config-kobling: kunne ikke lese app_game_management.config_json — faller tilbake til default-patterns"
+        );
+      }
     }
 
     // 4) Hent eksisterende rader for å være idempotent (i tillegg til
@@ -557,6 +602,19 @@ export class Game1ScheduleTickService {
             sg.notificationStartTime
           );
 
+          // Scheduler-config-kobling: hvis daily har game_management_id →
+          // kopi-snapshot av GameManagement.config_json inn i
+          // scheduled_games.game_config_json. NULL hvis ikke tilgjengelig
+          // (bakoverkompat → Game1PayoutService bruker default-patterns).
+          const gameConfigJson: string | null = daily.game_management_id
+            ? (() => {
+                const gmConfig = gameManagementConfigById.get(
+                  daily.game_management_id!
+                );
+                return gmConfig ? JSON.stringify(gmConfig) : null;
+              })()
+            : null;
+
           try {
             await this.pool.query(
               `INSERT INTO ${this.scheduledGamesTable()}
@@ -565,10 +623,10 @@ export class Game1ScheduleTickService {
                   scheduled_end_time, notification_start_seconds,
                   ticket_config_json, jackpot_config_json, game_mode,
                   master_hall_id, group_hall_id, participating_halls_json,
-                  status)
+                  status, game_config_json)
                VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8::timestamptz,
                        $9::timestamptz, $10, $11::jsonb, $12::jsonb, $13,
-                       $14, $15, $16::jsonb, 'scheduled')
+                       $14, $15, $16::jsonb, 'scheduled', $17::jsonb)
                ON CONFLICT (daily_schedule_id, scheduled_day, sub_game_index)
                  DO NOTHING`,
               [
@@ -588,6 +646,7 @@ export class Game1ScheduleTickService {
                 hallIds.masterHallId,
                 groupHallId,
                 JSON.stringify(hallIds.hallIds),
+                gameConfigJson,
               ]
             );
             result.spawned += 1;
