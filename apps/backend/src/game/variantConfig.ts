@@ -58,8 +58,11 @@ export interface PatternConfig {
    *   - "multiplier-chain"   (BIN-687 / PR-P2 Spillernes spill):
    *       phase 1 = pool × prizePercent / 100 (min `minPrize`)
    *       phase N = phase1Base × phase1Multiplier (min `minPrize`)
+   *   - "column-specific"    (PR-P3 Super-NILS): Fullt-Hus-prize fra
+   *       `columnPrizesNok[col]` der col = kolonne for siste trukne ball.
+   *       Kun gyldig på full-house-pattern (claimType === "BINGO").
    */
-  winningType?: "percent" | "fixed" | "multiplier-chain";
+  winningType?: "percent" | "fixed" | "multiplier-chain" | "column-specific";
   /**
    * BIN-687 / PR-P2: multiplier of phase-1 base prize. Only used when
    * `winningType === "multiplier-chain"` AND pattern is NOT phase 1.
@@ -72,6 +75,20 @@ export interface PatternConfig {
    * brukes minPrize. Matcher enhet med `prize1` og `prizePool`.
    */
   minPrize?: number;
+  /**
+   * PR-P3 (Super-NILS): per-kolonne premie-matrise for Fullt Hus. Kun brukt
+   * når `winningType === "column-specific"` AND pattern er full-house.
+   * Kolonne = B/I/N/G/O basert på siste trukne ball (1-15/16-30/31-45/
+   * 46-60/61-75). Verdier i kr. Engine kaster
+   * `DomainError("COLUMN_PRIZE_MISSING")` hvis mangler.
+   */
+  columnPrizesNok?: {
+    B: number;
+    I: number;
+    N: number;
+    G: number;
+    O: number;
+  };
 }
 
 // ── Full variant config ───────────────────────────────────────────────────────
@@ -467,7 +484,8 @@ export function patternConfigToDefinitions(patterns: PatternConfig[]): PatternDe
     if (
       p.winningType === "percent" ||
       p.winningType === "fixed" ||
-      p.winningType === "multiplier-chain"
+      p.winningType === "multiplier-chain" ||
+      p.winningType === "column-specific"
     ) {
       def.winningType = p.winningType;
     }
@@ -476,6 +494,10 @@ export function patternConfigToDefinitions(patterns: PatternConfig[]): PatternDe
     // without re-resolving the variantConfig at payout time.
     if (typeof p.phase1Multiplier === "number") def.phase1Multiplier = p.phase1Multiplier;
     if (typeof p.minPrize === "number") def.minPrize = p.minPrize;
+    // PR-P3: propagate column-specific matrix for Super-NILS full-house.
+    if (p.columnPrizesNok) {
+      def.columnPrizesNok = { ...p.columnPrizesNok };
+    }
     return def;
   });
 }

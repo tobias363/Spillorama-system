@@ -1091,12 +1091,14 @@ export class BingoEngine {
 
       // Resolve prize for this color. flat-path bruker activePattern direkte.
       const prizeSource: {
-        winningType?: "percent" | "fixed" | "multiplier-chain";
+        winningType?: "percent" | "fixed" | "multiplier-chain" | "column-specific";
         prize1?: number;
         prizePercent: number;
         name: string;
         phase1Multiplier?: number;
         minPrize?: number;
+        columnPrizesNok?: { B: number; I: number; N: number; G: number; O: number };
+        claimType?: "LINE" | "BINGO";
       } =
         hasPerColorMatrix && group.patternForColor
           ? group.patternForColor
@@ -1129,6 +1131,39 @@ export class BingoEngine {
                 prizeSource.phase1Multiplier!
             );
         totalPhasePrize = Math.max(basePrize, prizeSource.minPrize ?? 0);
+      } else if (prizeSource.winningType === "column-specific") {
+        // PR-P3 (Super-NILS): Fullt-Hus-premie avgjøres av kolonne (B/I/N/G/O)
+        // for siste trukne ball — dvs. ballen som fullførte bingoen. Admin-
+        // valideringen avviser column-specific på ikke-full-house-patterns,
+        // men engine dobbeltsjekker for defense-in-depth.
+        if (prizeSource.claimType !== "BINGO" && activePattern.claimType !== "BINGO") {
+          throw new DomainError(
+            "COLUMN_PRIZE_INVALID_PATTERN",
+            "column-specific winning type kan kun brukes på Fullt Hus-patterns.",
+          );
+        }
+        if (!prizeSource.columnPrizesNok) {
+          throw new DomainError(
+            "COLUMN_PRIZE_MISSING",
+            "columnPrizesNok mangler for column-specific-pattern.",
+          );
+        }
+        const lastBall = game.drawnNumbers[game.drawnNumbers.length - 1];
+        const col = ballToColumn(lastBall);
+        if (!col) {
+          throw new DomainError(
+            "COLUMN_PRIZE_MISSING",
+            `Siste ball ${lastBall} mapper ikke til B/I/N/G/O (krever 75-ball).`,
+          );
+        }
+        const prizeForCol = prizeSource.columnPrizesNok[col];
+        if (typeof prizeForCol !== "number" || !Number.isFinite(prizeForCol)) {
+          throw new DomainError(
+            "COLUMN_PRIZE_MISSING",
+            `columnPrizesNok.${col} mangler eller er ikke et tall.`,
+          );
+        }
+        totalPhasePrize = Math.max(0, prizeForCol);
       } else {
         totalPhasePrize = Math.floor(
           game.prizePool * (prizeSource.prizePercent ?? 0) / 100
@@ -3444,6 +3479,24 @@ export class BingoEngine {
       structuredMarks,
     };
   }
+}
+
+/**
+ * PR-P3 (Super-NILS): Map 75-ball bingo-tall til B/I/N/G/O-kolonne.
+ *   B = 1-15, I = 16-30, N = 31-45, G = 46-60, O = 61-75.
+ * Returns null for out-of-range (1-75) — engine kaster da COLUMN_PRIZE_MISSING.
+ * Eksportert for test + potensielt delt bruk med admin-UI preview.
+ */
+export function ballToColumn(
+  ball: number | undefined,
+): "B" | "I" | "N" | "G" | "O" | null {
+  if (typeof ball !== "number" || !Number.isFinite(ball)) return null;
+  if (ball >= 1 && ball <= 15) return "B";
+  if (ball >= 16 && ball <= 30) return "I";
+  if (ball >= 31 && ball <= 45) return "N";
+  if (ball >= 46 && ball <= 60) return "G";
+  if (ball >= 61 && ball <= 75) return "O";
+  return null;
 }
 
 export function toPublicError(error: unknown): { code: string; message: string } {

@@ -83,7 +83,9 @@ export const PatternDefinitionSchema = z.object({
    *   minPrizeCents floor; phase N = phase1Base × phase1Multiplier with
    *   own minPrizeCents floor.
    */
-  winningType: z.enum(["percent", "fixed", "multiplier-chain"]).optional(),
+  winningType: z
+    .enum(["percent", "fixed", "multiplier-chain", "column-specific"])
+    .optional(),
   /** Flat kr amount when winningType === "fixed". */
   prize1: z.number().optional(),
   /**
@@ -96,6 +98,20 @@ export const PatternDefinitionSchema = z.object({
    * and prizePool unit).
    */
   minPrize: z.number().nonnegative().optional(),
+  /**
+   * PR-P3 (Super-NILS): per-column prize matrix for full-house. Column of
+   * last drawn ball determines payout. B=1-15, I=16-30, N=31-45, G=46-60,
+   * O=61-75. Values in kr. Only meaningful for full-house pattern.
+   */
+  columnPrizesNok: z
+    .object({
+      B: z.number().nonnegative(),
+      I: z.number().nonnegative(),
+      N: z.number().nonnegative(),
+      G: z.number().nonnegative(),
+      O: z.number().nonnegative(),
+    })
+    .optional(),
 });
 
 export const PatternResultSchema = z.object({

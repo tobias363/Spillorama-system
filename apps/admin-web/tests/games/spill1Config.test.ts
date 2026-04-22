@@ -656,3 +656,105 @@ describe("validateSpill1Config — multiplier-chain-modus", () => {
     expect(validateSpill1Config(c, "Test")).toEqual({ ok: true });
   });
 });
+
+// ── PR-P3: column-specific-modus (Super-NILS Fullt Hus) ────────────────────
+
+describe("validateSpill1Config — column-specific-modus (Super-NILS)", () => {
+  it("godtar full_house column-specific med alle 5 kolonner satt", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "percent", amount: 10 },
+      full_house: {
+        mode: "column-specific",
+        amount: 0,
+        columnPrizesNok: { B: 500, I: 700, N: 1000, G: 700, O: 500 },
+      },
+    };
+    expect(validateSpill1Config(c, "Super-NILS")).toEqual({ ok: true });
+  });
+
+  it("avviser column-specific på ikke-full_house-pattern (f.eks. row_1)", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: {
+        mode: "column-specific",
+        amount: 0,
+        columnPrizesNok: { B: 100, I: 100, N: 100, G: 100, O: 100 },
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(
+        r.errors.some((e) => /column_specific_only_on_full_house/.test(e.message)),
+      ).toBe(true);
+    }
+  });
+
+  it("avviser column-specific uten columnPrizesNok-felt", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      full_house: { mode: "column-specific", amount: 0 },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(
+        r.errors.some((e) =>
+          /column_specific_requires_all_five_columns/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("avviser negativ kolonne-premie (B=-10)", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      full_house: {
+        mode: "column-specific",
+        amount: 0,
+        columnPrizesNok: { B: -10, I: 700, N: 1000, G: 700, O: 500 },
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(
+        r.errors.some((e) =>
+          /column_specific_prize_must_be_non_negative/.test(e.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("avviser NaN-verdi i kolonne-premie", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      full_house: {
+        mode: "column-specific",
+        amount: 0,
+        columnPrizesNok: { B: Number.NaN, I: 700, N: 1000, G: 700, O: 500 },
+      },
+    };
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+  });
+
+  it("column-specific full_house + percent-based row_1-4 OK (ikke overlap)", () => {
+    const c = validConfig();
+    c.ticketColors[0]!.prizePerPattern = {
+      row_1: { mode: "percent", amount: 5 },
+      row_2: { mode: "percent", amount: 5 },
+      row_3: { mode: "percent", amount: 5 },
+      row_4: { mode: "percent", amount: 5 },
+      full_house: {
+        mode: "column-specific",
+        amount: 0,
+        columnPrizesNok: { B: 500, I: 700, N: 1000, G: 700, O: 500 },
+      },
+    };
+    // Percent-totalen er 20 % — innenfor 100 %-grensen. column-specific
+    // bidrar ikke til percent-sum (kolonne-premier bæres av house).
+    expect(validateSpill1Config(c, "Test")).toEqual({ ok: true });
+  });
+});

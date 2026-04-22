@@ -37,12 +37,28 @@ export interface PatternDefinition {
    *   - "fixed":             prize1 is flat kr.
    *   - "multiplier-chain"   (BIN-687 / PR-P2): phase 1 = percent with floor;
    *                          phase N = phase1Base × phase1Multiplier with floor.
+   *   - "column-specific"    (PR-P3 Super-NILS): Fullt-Hus prize decided by
+   *                          column of last drawn ball (B/I/N/G/O).
    */
-  winningType?: "percent" | "fixed" | "multiplier-chain";
+  winningType?: "percent" | "fixed" | "multiplier-chain" | "column-specific";
   /** BIN-687 / PR-P2: multiplier of phase-1 base prize. Only on phase > 1. */
   phase1Multiplier?: number;
   /** BIN-687 / PR-P2: minimum phase prize in kr (gulv). */
   minPrize?: number;
+  /**
+   * PR-P3 (Super-NILS): per-column prize matrix for full-house. Only used
+   * when `winningType === "column-specific"` AND pattern is full-house.
+   * Column of last drawn ball (B=1-15, I=16-30, N=31-45, G=46-60, O=61-75)
+   * picks the entry. Values in kr. Engine throws
+   * `DomainError("COLUMN_PRIZE_MISSING")` if missing.
+   */
+  columnPrizesNok?: {
+    B: number;
+    I: number;
+    N: number;
+    G: number;
+    O: number;
+  };
 }
 
 export interface PatternResult {

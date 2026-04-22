@@ -57,7 +57,11 @@ export function patternsForSubVariant(subVariant: Spill1SubVariant): ReadonlyArr
 }
 
 /** Hvordan en admin-konfigurert pattern-gevinst tolkes. */
-export type PatternPrizeMode = "percent" | "fixed" | "multiplier-chain";
+export type PatternPrizeMode =
+  | "percent"
+  | "fixed"
+  | "multiplier-chain"
+  | "column-specific";
 
 /**
  * Admin-konfigurert gevinst for én fase på én farge.
@@ -72,6 +76,11 @@ export type PatternPrizeMode = "percent" | "fixed" | "multiplier-chain";
  *   `minPrizeNok` er gulvet.
  *   Backend mapper til `PatternConfig.winningType = "multiplier-chain"` +
  *   `phase1Multiplier` + `minPrize` (kr).
+ * - `mode: "column-specific"` (PR-P3 Super-NILS):
+ *   Kun lovlig på `full_house`-pattern. `amount` er ubrukt.
+ *   `columnPrizesNok` angir 5 kolonne-spesifikke premier (B/I/N/G/O),
+ *   der kolonnen til siste trukne ball avgjør payout. Validator avviser
+ *   mode på alle andre patterns enn full_house.
  */
 export interface PatternPrize {
   mode: PatternPrizeMode;
@@ -80,6 +89,7 @@ export interface PatternPrize {
    * fixed-mode: kr-beløp ≥ 0.
    * multiplier-chain fase 1: prosent 0-100 av pot (samme som percent-mode).
    * multiplier-chain fase N>1: ubrukt (0), ignoreres av mapper.
+   * column-specific: ubrukt (0), ignoreres av mapper.
    */
   amount: number;
   /**
@@ -93,6 +103,19 @@ export interface PatternPrize {
    * mode-er men typisk mest relevant for percent + multiplier-chain.
    */
   minPrizeNok?: number;
+  /**
+   * PR-P3 (Super-NILS): per-kolonne premie-matrise for Fullt Hus. Kun
+   * brukt i `mode: "column-specific"` på `full_house`-pattern. Alle 5
+   * kolonne-verdier må være ≥ 0. Validator avviser negative verdier og
+   * bruk på ikke-full_house-patterns.
+   */
+  columnPrizesNok?: {
+    B: number;
+    I: number;
+    N: number;
+    G: number;
+    O: number;
+  };
 }
 
 /** Per-farge pris + gevinst-fordeling per pattern. */
@@ -346,6 +369,33 @@ export function validateSpill1Config(config: Spill1Config, baseName: string): Va
       }
       if (prize.mode === "percent") {
         percentTotal += prize.amount;
+      }
+      // PR-P3: column-specific-modus (Super-NILS) validering.
+      if (prize.mode === "column-specific") {
+        // Kun gyldig på full_house.
+        if (pattern !== "full_house") {
+          errors.push({
+            path: `ticketColors[${i}].prizePerPattern.${pattern}.mode`,
+            message: "column_specific_only_on_full_house",
+          });
+        }
+        // columnPrizesNok påkrevd og alle 5 verdier må være ≥ 0.
+        if (!prize.columnPrizesNok) {
+          errors.push({
+            path: `ticketColors[${i}].prizePerPattern.${pattern}.columnPrizesNok`,
+            message: "column_specific_requires_all_five_columns",
+          });
+        } else {
+          for (const col of ["B", "I", "N", "G", "O"] as const) {
+            const v = prize.columnPrizesNok[col];
+            if (!Number.isFinite(v) || v < 0) {
+              errors.push({
+                path: `ticketColors[${i}].prizePerPattern.${pattern}.columnPrizesNok.${col}`,
+                message: "column_specific_prize_must_be_non_negative",
+              });
+            }
+          }
+        }
       }
       // BIN-687 / PR-P2 validering for multiplier-chain-modus.
       if (prize.mode === "multiplier-chain") {

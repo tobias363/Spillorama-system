@@ -86,7 +86,7 @@ export interface PatternDefinition {
    * wire. Clients may read this to render expected prize amounts in the
    * pattern banner before the game starts.
    */
-  winningType?: "percent" | "fixed" | "multiplier-chain";
+  winningType?: "percent" | "fixed" | "multiplier-chain" | "column-specific";
   /**
    * Fixed prize amount in kr when `winningType === "fixed"`. Ignored for
    * "percent" mode. Legacy field name: prize1.
@@ -109,6 +109,30 @@ export interface PatternDefinition {
    * Admin-UI accepts NOK input and writes kr directly.
    */
   minPrize?: number;
+  /**
+   * PR-P3 (Super-NILS): Column-specific prize matrix for Fullt Hus. The
+   * column of the LAST drawn ball (the ball that completed the full-house)
+   * determines which prize is paid. Mapping (75-ball bingo):
+   *   B = 1-15, I = 16-30, N = 31-45, G = 46-60, O = 61-75.
+   *
+   * Only meaningful for the full-house pattern (claimType === "BINGO").
+   * Ignored for other patterns. Validator rejects column-specific on
+   * non-full-house patterns.
+   *
+   * Unit: kr (matches prize1 / minPrize).
+   *
+   * If `winningType === "column-specific"` and this field is missing or
+   * the resolved column has no entry, engine fails closed with
+   * `DomainError("COLUMN_PRIZE_MISSING")` — admin must configure all
+   * five columns explicitly.
+   */
+  columnPrizesNok?: {
+    B: number;
+    I: number;
+    N: number;
+    G: number;
+    O: number;
+  };
 }
 
 export interface PatternResult {
