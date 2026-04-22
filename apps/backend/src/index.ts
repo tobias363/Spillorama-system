@@ -920,6 +920,11 @@ const game1DrawEngineService = new Game1DrawEngineService({
   jackpotService: game1JackpotService,
 });
 game1MasterControlService.setDrawEngine(game1DrawEngineService);
+// GAME1_SCHEDULE PR 4d.4: inject ticket-purchase-service slik at stopGame()
+// kan kalle refundAllForGame() POST-commit for automatisk refund ved master-
+// stop. Late-binding fordi ticketPurchaseService konstrueres etter
+// masterControl (sirkulær avhengighet ellers).
+game1MasterControlService.setTicketPurchaseService(game1TicketPurchaseService);
 
 // GAME1_SCHEDULE PR 4c Bolk 4: auto-draw-tick (global 1s tick, fixed
 // seconds-intervall per spill). Default OFF til PR 4d socket-flyt aktiveres.

@@ -121,6 +121,30 @@ export interface Game1RefundInput {
   refundedByActorType?: AuditActorType;
 }
 
+/** PR 4d.4: input til massrefund ved stopGame. */
+export interface Game1RefundAllForGameInput {
+  scheduledGameId: string;
+  reason: string;
+  refundedByUserId: string;
+  refundedByActorType?: AuditActorType;
+}
+
+/** PR 4d.4: sammendrag av massrefund — én rad per purchase. */
+export interface Game1RefundAllForGameResult {
+  scheduledGameId: string;
+  totalConsidered: number;
+  /** Purchases som ble refundert i dette kallet. */
+  succeeded: string[];
+  /** Purchases som allerede var refundert (idempotent hit). */
+  skippedAlreadyRefunded: string[];
+  /** Purchases som feilet — hver isolert, ikke transaksjonell rollback. */
+  failed: Array<{
+    purchaseId: string;
+    errorCode: string;
+    errorMessage: string;
+  }>;
+}
+
 export interface Game1TicketPurchaseServiceOptions {
   pool: Pool;
   schema?: string;
@@ -446,6 +470,85 @@ export class Game1TicketPurchaseService {
         refundTransactionId,
       },
     });
+  }
+
+  /**
+   * PR 4d.4: massrefund av alle non-refunded purchases for et schedulert
+   * spill. Brukes av Game1MasterControlService.stopGame() slik at master-
+   * stop automatisk tilbakebetaler spillere uten manuell oppfølging.
+   *
+   * Feil-isolering (regulatorisk fail-closed per rad, ikke per batch):
+   *   - Hver refundPurchase-call wrappes i egen try/catch.
+   *   - Én feilet rad stopper IKKE resten — vi fortsetter loopen og
+   *     returnerer `failed`-liste for oppfølging.
+   *   - Idempotent purchase (allerede `refunded_at IS NOT NULL`) telles
+   *     i `skippedAlreadyRefunded` og regnes ikke som feil.
+   *   - Audit-entry per refund håndteres av `refundPurchase` selv.
+   *
+   * Caller (MasterControlService) logger warn + markerer stop_reason ved
+   * partial failure. Ingen automatisk retry i 4d.4 (per PM-vedtak).
+   */
+  async refundAllForGame(
+    input: Game1RefundAllForGameInput
+  ): Promise<Game1RefundAllForGameResult> {
+    const purchases = await this.listPurchasesForGame(input.scheduledGameId);
+    const result: Game1RefundAllForGameResult = {
+      scheduledGameId: input.scheduledGameId,
+      totalConsidered: purchases.length,
+      succeeded: [],
+      skippedAlreadyRefunded: [],
+      failed: [],
+    };
+
+    for (const purchase of purchases) {
+      if (purchase.refundedAt) {
+        result.skippedAlreadyRefunded.push(purchase.id);
+        continue;
+      }
+      try {
+        await this.refundPurchase({
+          purchaseId: purchase.id,
+          reason: input.reason,
+          refundedByUserId: input.refundedByUserId,
+          refundedByActorType: input.refundedByActorType,
+        });
+        result.succeeded.push(purchase.id);
+      } catch (err) {
+        const code =
+          err instanceof DomainError
+            ? err.code
+            : "REFUND_FAILED_UNEXPECTED";
+        const message =
+          err instanceof Error ? err.message : "ukjent refund-feil";
+        log.warn(
+          {
+            purchaseId: purchase.id,
+            scheduledGameId: input.scheduledGameId,
+            errorCode: code,
+            err,
+          },
+          "[PR 4d.4] refundAllForGame — rad isolert feil"
+        );
+        result.failed.push({
+          purchaseId: purchase.id,
+          errorCode: code,
+          errorMessage: message,
+        });
+      }
+    }
+
+    log.info(
+      {
+        scheduledGameId: input.scheduledGameId,
+        totalConsidered: result.totalConsidered,
+        succeededCount: result.succeeded.length,
+        skippedCount: result.skippedAlreadyRefunded.length,
+        failedCount: result.failed.length,
+      },
+      "[PR 4d.4] refundAllForGame fullført"
+    );
+
+    return result;
   }
 
   // ── Public API: list helpers + cutoff-helper ──────────────────────────────

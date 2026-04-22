@@ -37,13 +37,30 @@ export interface AdminGame1DrawProgressedEvent {
   at: number;
 }
 
+/**
+ * PR 4d.4: fase-fullføring. Bevarer Agent 4-kontrakten på default namespace
+ * — spiller-rettet `pattern:won` er urørt. Dette er admin-speiling med
+ * aggregert winner-info (ingen wallet-detaljer).
+ */
+export interface AdminGame1PhaseWonEvent {
+  gameId: string;
+  patternName: string;
+  phase: number;
+  winnerIds: string[];
+  winnerCount: number;
+  drawIndex: number;
+  at: number;
+}
+
 export interface AdminGame1Broadcaster {
   onStatusChange(event: AdminGame1StatusChangeEvent): void;
   onDrawProgressed(event: AdminGame1DrawProgressedEvent): void;
+  onPhaseWon(event: AdminGame1PhaseWonEvent): void;
 }
 
 /** No-op fallback — brukes i tester uten socket-miljø + ved manglende injeksjon. */
 export const NoopAdminGame1Broadcaster: AdminGame1Broadcaster = {
   onStatusChange: () => undefined,
   onDrawProgressed: () => undefined,
+  onPhaseWon: () => undefined,
 };

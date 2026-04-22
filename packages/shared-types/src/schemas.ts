@@ -1884,3 +1884,20 @@ export const Game1AdminDrawProgressedPayloadSchema = z.object({
   at: z.number().int().nonnegative(),
 });
 export type Game1AdminDrawProgressedPayload = z.infer<typeof Game1AdminDrawProgressedPayloadSchema>;
+
+/**
+ * `game1:phase-won` — emittes i drawNext når en fase fullføres (PR 4d.4).
+ * Admin-UI viser sanntids fase-fullføring + vinner-antall.
+ * Bevarer Agent 4-kontrakten på default namespace: spiller-rettet
+ * `pattern:won` er urørt — dette er admin-speiling uten wallet-detaljer.
+ */
+export const Game1AdminPhaseWonPayloadSchema = z.object({
+  gameId: z.string().min(1),
+  patternName: z.string().min(1),
+  phase: z.number().int().min(1).max(5),
+  winnerIds: z.array(z.string().min(1)).min(1),
+  winnerCount: z.number().int().min(1),
+  drawIndex: z.number().int().min(1),
+  at: z.number().int().nonnegative(),
+});
+export type Game1AdminPhaseWonPayload = z.infer<typeof Game1AdminPhaseWonPayloadSchema>;

@@ -47,6 +47,10 @@ import { DomainError } from "./BingoEngine.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { Game1DrawEngineService } from "./Game1DrawEngineService.js";
 import type { AdminGame1Broadcaster } from "./AdminGame1Broadcaster.js";
+import type {
+  Game1TicketPurchaseService,
+  Game1RefundAllForGameResult,
+} from "./Game1TicketPurchaseService.js";
 
 const log = rootLogger.child({ module: "game1-master-control-service" });
 
@@ -117,6 +121,12 @@ export interface MasterActionResult {
   actualStartTime: string | null;
   actualEndTime: string | null;
   auditId: string;
+  /**
+   * PR 4d.4: kun satt etter `stopGame`. Inneholder sammendrag av
+   * automatisk refund-loop. Null hvis ticketPurchaseService ikke er
+   * injisert (legacy-modus).
+   */
+  refundSummary?: Game1RefundAllForGameResult | null;
 }
 
 export interface TimeoutDetectedInput {
@@ -143,6 +153,13 @@ export interface Game1MasterControlServiceOptions {
    * service-flyten.
    */
   adminBroadcaster?: AdminGame1Broadcaster;
+  /**
+   * GAME1_SCHEDULE PR 4d.4: valgfri ticket-purchase-service. Når satt
+   * utløser stopGame automatisk `refundAllForGame` POST-commit + engine.
+   * Feilet refund per rad isoleres (fail-closed), summary loggres. Null
+   * = legacy-mode uten automatisk refund (eksisterende tester passerer).
+   */
+  ticketPurchaseService?: Game1TicketPurchaseService;
 }
 
 interface ScheduledGameRow {
@@ -190,6 +207,7 @@ export class Game1MasterControlService {
   private readonly schema: string;
   private drawEngine: Game1DrawEngineService | null;
   private adminBroadcaster: AdminGame1Broadcaster | null;
+  private ticketPurchaseService: Game1TicketPurchaseService | null;
 
   constructor(options: Game1MasterControlServiceOptions) {
     this.pool = options.pool;
@@ -200,6 +218,7 @@ export class Game1MasterControlService {
     this.schema = schema;
     this.drawEngine = options.drawEngine ?? null;
     this.adminBroadcaster = options.adminBroadcaster ?? null;
+    this.ticketPurchaseService = options.ticketPurchaseService ?? null;
   }
 
   /**
@@ -208,6 +227,17 @@ export class Game1MasterControlService {
    */
   setAdminBroadcaster(broadcaster: AdminGame1Broadcaster): void {
     this.adminBroadcaster = broadcaster;
+  }
+
+  /**
+   * PR 4d.4: late-binding for ticket-purchase-service. Brukes av index.ts
+   * for å unngå circular import — ticketPurchase konstrueres senere enn
+   * masterControl.
+   */
+  setTicketPurchaseService(
+    ticketPurchaseService: Game1TicketPurchaseService
+  ): void {
+    this.ticketPurchaseService = ticketPurchaseService;
   }
 
   /**
@@ -689,6 +719,32 @@ export class Game1MasterControlService {
     ) {
       await this.drawEngine.stopGame(input.gameId, reason, input.actor.userId);
     }
+
+    // PR 4d.4: automatisk refund av alle purchases POST-commit. Feilet
+    // refund per rad isoleres (regulatorisk fail-closed per rad, ikke
+    // per batch). Sammendrag returneres til caller og loggres; MasterUI
+    // viser partial failure slik at operations kan følge opp manuelt.
+    if (this.ticketPurchaseService) {
+      const refundSummary = await this.ticketPurchaseService.refundAllForGame({
+        scheduledGameId: input.gameId,
+        reason: `master_stop: ${reason}`,
+        refundedByUserId: input.actor.userId,
+        refundedByActorType:
+          input.actor.role === "ADMIN" ? "ADMIN" : "HALL_OPERATOR",
+      });
+      if (refundSummary.failed.length > 0) {
+        log.warn(
+          {
+            gameId: input.gameId,
+            failedCount: refundSummary.failed.length,
+            succeededCount: refundSummary.succeeded.length,
+          },
+          "[PR 4d.4] master.stop — partial refund failure, krever manuell oppfølging"
+        );
+      }
+      (result as MasterActionResult).refundSummary = refundSummary;
+    }
+
     this.notifyStatusChange(result, "stop", input.actor.userId);
     return result;
   }

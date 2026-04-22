@@ -355,6 +355,33 @@ export class Game1DrawEngineService {
     }
   }
 
+  /** PR 4d.4: fire-and-forget admin-broadcast for phase-won. */
+  private notifyPhaseWon(
+    scheduledGameId: string,
+    patternName: string,
+    phase: number,
+    winnerIds: string[],
+    drawIndex: number
+  ): void {
+    if (!this.adminBroadcaster) return;
+    try {
+      this.adminBroadcaster.onPhaseWon({
+        gameId: scheduledGameId,
+        patternName,
+        phase,
+        winnerIds,
+        winnerCount: winnerIds.length,
+        drawIndex,
+        at: Date.now(),
+      });
+    } catch (err) {
+      log.warn(
+        { err, scheduledGameId, patternName },
+        "adminBroadcaster.onPhaseWon kastet — ignorert"
+      );
+    }
+  }
+
   // ── Table helpers ─────────────────────────────────────────────────────────
 
   private scheduledGamesTable(): string {
@@ -502,6 +529,15 @@ export class Game1DrawEngineService {
    * Pattern-evaluering + fase-progresjon implementeres i PR 4c.
    */
   async drawNext(scheduledGameId: string): Promise<Game1GameStateView> {
+    // PR 4d.4: fanget i closure fra transaksjonen så notifyPhaseWon kan
+    // kalles POST-commit. Ingen broadcast hvis transaksjonen ruller tilbake.
+    let capturedPhaseResult: {
+      phaseWon: boolean;
+      winnerIds: string[];
+      patternName: string;
+      phase: number;
+    } | null = null;
+
     return this.runInTransaction(async (client) => {
       const state = await this.loadGameStateForUpdate(client, scheduledGameId);
       if (!state) {
@@ -573,6 +609,16 @@ export class Game1DrawEngineService {
         game.game_config_json
       );
 
+      // PR 4d.4: capture for post-commit admin-broadcast.
+      if (phaseResult.phaseWon && phaseResult.winnerIds.length > 0) {
+        capturedPhaseResult = {
+          phaseWon: true,
+          winnerIds: phaseResult.winnerIds,
+          patternName: phaseDisplayName(state.current_phase),
+          phase: state.current_phase,
+        };
+      }
+
       // UPDATE state: draws_completed + phase + eventuelt engine_ended_at.
       const bingoWon = phaseResult.phaseWon && state.current_phase === TOTAL_PHASES;
       const maxDrawsReached = nextSequence >= maxDraws;
@@ -642,6 +688,18 @@ export class Game1DrawEngineService {
           view.lastDrawnBall,
           view.drawsCompleted,
           view.currentPhase
+        );
+      }
+      // PR 4d.4: admin phase-won-broadcast. Rekkefølge matcher default-
+      // namespace-kontrakten (draw:new → pattern:won → room:update) så
+      // admin-UI ser phase-won etter draw-progressed.
+      if (capturedPhaseResult) {
+        this.notifyPhaseWon(
+          scheduledGameId,
+          capturedPhaseResult.patternName,
+          capturedPhaseResult.phase,
+          capturedPhaseResult.winnerIds,
+          view.drawsCompleted
         );
       }
       return view;
@@ -1004,10 +1062,10 @@ export class Game1DrawEngineService {
     drawSequenceAtWin: number,
     ticketConfigJson: unknown,
     gameConfigJson: unknown
-  ): Promise<{ phaseWon: boolean; winnerCount: number }> {
+  ): Promise<{ phaseWon: boolean; winnerCount: number; winnerIds: string[] }> {
     // PR 4b-modus: payoutService ikke wired opp → skip pattern-evaluering.
     if (!this.payoutService) {
-      return { phaseWon: false, winnerCount: 0 };
+      return { phaseWon: false, winnerCount: 0, winnerIds: [] };
     }
 
     // Les alle assignments etter markings-oppdatering.
@@ -1027,7 +1085,7 @@ export class Game1DrawEngineService {
     );
 
     if (rows.length === 0) {
-      return { phaseWon: false, winnerCount: 0 };
+      return { phaseWon: false, winnerCount: 0, winnerIds: [] };
     }
 
     // Find alle assignments som oppfyller current_phase.
@@ -1050,8 +1108,12 @@ export class Game1DrawEngineService {
     }
 
     if (winners.length === 0) {
-      return { phaseWon: false, winnerCount: 0 };
+      return { phaseWon: false, winnerCount: 0, winnerIds: [] };
     }
+
+    // PR 4d.4: dedupliser winnerIds (én spiller kan ha flere tickets som
+    // vinner samtidig — broadcast én gang per user).
+    const winnerIds = Array.from(new Set(winners.map((w) => w.userId)));
 
     // Pot = sum av ikke-refunded purchases. Hent fra DB (felles for alle
     // farge-grupper og flat-path).
@@ -1093,7 +1155,7 @@ export class Game1DrawEngineService {
         variantConfig,
         jackpotCfg
       );
-      return { phaseWon: true, winnerCount: winners.length };
+      return { phaseWon: true, winnerCount: winners.length, winnerIds };
     }
 
     // Flat-path (bakoverkompat): én global pott fordelt likt. Jackpot-
@@ -1114,7 +1176,7 @@ export class Game1DrawEngineService {
       jackpotCfg
     );
 
-    return { phaseWon: true, winnerCount: winners.length };
+    return { phaseWon: true, winnerCount: winners.length, winnerIds };
   }
 
   /**

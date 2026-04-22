@@ -33,11 +33,13 @@ import {
   Game1AdminSubscribePayloadSchema,
   type Game1AdminStatusUpdatePayload,
   type Game1AdminDrawProgressedPayload,
+  type Game1AdminPhaseWonPayload,
 } from "@spillorama/shared-types/socket-events";
 import type {
   AdminGame1Broadcaster,
   AdminGame1StatusChangeEvent,
   AdminGame1DrawProgressedEvent,
+  AdminGame1PhaseWonEvent,
 } from "../game/AdminGame1Broadcaster.js";
 import { logger as rootLogger } from "../util/logger.js";
 
@@ -185,6 +187,27 @@ export function createAdminGame1Namespace(
             event: "game1:draw-progressed",
             gameId: event.gameId,
           },
+          "admin broadcast failed — service fortsetter uansett"
+        );
+      }
+    },
+    onPhaseWon(event: AdminGame1PhaseWonEvent): void {
+      try {
+        const payload: Game1AdminPhaseWonPayload = {
+          gameId: event.gameId,
+          patternName: event.patternName,
+          phase: event.phase,
+          winnerIds: event.winnerIds,
+          winnerCount: event.winnerCount,
+          drawIndex: event.drawIndex,
+          at: event.at,
+        };
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:phase-won", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:phase-won", gameId: event.gameId },
           "admin broadcast failed — service fortsetter uansett"
         );
       }
