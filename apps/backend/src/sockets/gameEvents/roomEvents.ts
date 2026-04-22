@@ -1,0 +1,369 @@
+/**
+ * PR-R4: Room-lifecycle + pre-round arming/lucky-number socket handlers.
+ *
+ * Cluster inneholder:
+ *   - room:create   (oppretter rom eller attacher til kanonisk hall-rom)
+ *   - room:join     (joine eksisterende rom, med BINGO1-alias)
+ *   - room:resume   (reconnect — attach player-socket)
+ *   - room:configure (oppdater entryFee)
+ *   - room:state    (snapshot-query — tillater ROOM_NOT_FOUND for SPA auto-create)
+ *   - bet:arm       (pre-round ticket-valg, additiv merge)
+ *   - lucky:set     (pre-round lykketall 1..60)
+ *
+ * Hvorfor sammen: alle mutterer / leser "room state før game running". `bet:arm`
+ * og `lucky:set` er pre-round-operasjoner som logisk hører til rommet, ikke
+ * tickets (de endrer ikke Ticket-objektet selv).
+ *
+ * Uendret fra opprinnelig `gameEvents.ts`:
+ *   - Event-navn og payload-typer
+ *   - try/catch-strukturen rundt hvert handler-kall
+ *   - Rate-limit + auth via `ctx.rateLimited` / `ctx.requireAuthenticatedPlayerAction`
+ */
+import { DomainError, toPublicError } from "../../game/BingoEngine.js";
+import {
+  mustBeNonEmptyString,
+  parseOptionalNonNegativeNumber,
+} from "../../util/httpHelpers.js";
+import type { SocketContext } from "./context.js";
+import type {
+  AckResponse,
+  ConfigureRoomPayload,
+  CreateRoomPayload,
+  JoinRoomPayload,
+  LuckyNumberPayload,
+  ResumeRoomPayload,
+  RoomActionPayload,
+  RoomStatePayload,
+} from "./types.js";
+import type { RoomSnapshot } from "../../game/types.js";
+
+export function registerRoomEvents(ctx: SocketContext): void {
+  const {
+    socket,
+    deps,
+    engine,
+    logger,
+    ackSuccess,
+    ackFailure,
+    setLuckyNumber,
+    getAuthenticatedSocketUser,
+    assertUserCanAccessRoom,
+    rateLimited,
+    requireAuthenticatedPlayerAction,
+    resolveIdentityFromPayload,
+  } = ctx;
+  const {
+    emitRoomUpdate,
+    buildRoomUpdatePayload,
+    enforceSingleRoomPerHall,
+    getPrimaryRoomForHall,
+    findPlayerInRoomByWallet,
+    armPlayer,
+    disarmPlayer,
+  } = deps;
+
+  socket.on("room:create", rateLimited("room:create", async (payload: CreateRoomPayload, callback: (response: AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>) => void) => {
+    logger.debug({ hallId: payload?.hallId, hasAccessToken: !!payload?.accessToken }, "BIN-134: room:create received");
+    try {
+      const identity = await resolveIdentityFromPayload(payload);
+      logger.debug({ hallId: identity.hallId }, "BIN-134: room:create identity resolved");
+      if (enforceSingleRoomPerHall) {
+        const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
+        if (canonicalRoom) {
+          const canonicalSnapshot = engine.getRoomSnapshot(canonicalRoom.code);
+          const existingPlayer = findPlayerInRoomByWallet(canonicalSnapshot, identity.walletId);
+
+          let playerId = existingPlayer?.id ?? "";
+          if (existingPlayer) {
+            engine.attachPlayerSocket(canonicalRoom.code, existingPlayer.id, socket.id);
+          } else {
+            const joined = await engine.joinRoom({
+              roomCode: canonicalRoom.code,
+              hallId: identity.hallId,
+              playerName: identity.playerName,
+              walletId: identity.walletId,
+              socketId: socket.id
+            });
+            playerId = joined.playerId;
+          }
+
+          socket.join(canonicalRoom.code);
+          const snapshot = await emitRoomUpdate(canonicalRoom.code);
+          logger.debug({ roomCode: canonicalRoom.code }, "BIN-134: room:create → existing canonical");
+          ackSuccess(callback, { roomCode: canonicalRoom.code, playerId, snapshot });
+          return;
+        }
+      }
+
+      const requestedGameSlug = typeof payload?.gameSlug === "string" ? payload.gameSlug : undefined;
+      const { roomCode, playerId } = await engine.createRoom({
+        playerName: identity.playerName,
+        hallId: identity.hallId,
+        walletId: identity.walletId,
+        socketId: socket.id,
+        // BIN-134: Use "BINGO1" as actual room code so SPA alias = real code
+        roomCode: enforceSingleRoomPerHall ? "BINGO1" : undefined,
+        gameSlug: requestedGameSlug
+      });
+      // BIN-694: wire DEFAULT variantConfig (5-fase Norsk bingo for Game 1)
+      // immediately after room-creation. Before this, `setVariantConfig`
+      // was only called in tests — production rooms had no variant bound,
+      // so `meetsPhaseRequirement` fell back to the legacy 1-line rule and
+      // triggered every LINE phase on the first completed row. Defaulting
+      // the gameSlug to "bingo" matches `BingoEngine.createRoom` which
+      // does the same fallback on RoomState.gameSlug.
+      // PR C: foretrekk den nye async-binderen som kan lese admin-config
+      // fra GameManagement når `gameManagementId` er tilgjengelig. I dag
+      // sender ingen caller ID-en — faller gjennom til default-path.
+      if (deps.bindVariantConfigForRoom) {
+        await deps.bindVariantConfigForRoom(roomCode, {
+          gameSlug: requestedGameSlug?.trim() || "bingo",
+        });
+      } else {
+        deps.bindDefaultVariantConfig?.(roomCode, requestedGameSlug?.trim() || "bingo");
+      }
+      socket.join(roomCode);
+      const snapshot = await emitRoomUpdate(roomCode);
+      logger.debug({ roomCode }, "BIN-134: room:create SUCCESS");
+      ackSuccess(callback, { roomCode, playerId, snapshot });
+    } catch (error) {
+      logger.error({ err: error, code: (error as Record<string, unknown>).code }, "BIN-134: room:create FAILED");
+      ackFailure(callback, error);
+    }
+  }));
+
+  socket.on("room:join", rateLimited("room:join", async (payload: JoinRoomPayload, callback: (response: AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>) => void) => {
+    try {
+      let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+      const identity = await resolveIdentityFromPayload(payload);
+      if (enforceSingleRoomPerHall) {
+        // BIN-134: resolve BINGO1 alias
+        if (roomCode === "BINGO1") {
+          const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
+          if (canonicalRoom) {
+            roomCode = canonicalRoom.code;
+          } else {
+            // Auto-create room for this hall if none exists
+            logger.debug({ hallId: identity.hallId }, "room:join auto-creating room for hall");
+            const newRoom = await engine.createRoom({
+              hallId: identity.hallId,
+              playerName: identity.playerName,
+              walletId: identity.walletId,
+              socketId: socket.id,
+            });
+            roomCode = newRoom.roomCode;
+            // BIN-694 + PR C: wire variantConfig for the auto-created room.
+            // Uses new async binder if available (forbereder admin-config
+            // wire-up), falls back til default-binder ellers.
+            if (deps.bindVariantConfigForRoom) {
+              await deps.bindVariantConfigForRoom(roomCode, { gameSlug: "bingo" });
+            } else {
+              deps.bindDefaultVariantConfig?.(roomCode, "bingo");
+            }
+          }
+        }
+        const canonicalRoom = getPrimaryRoomForHall(identity.hallId);
+        if (canonicalRoom && canonicalRoom.code !== roomCode) {
+          throw new DomainError(
+            "SINGLE_ROOM_ONLY",
+            `Kun ett bingo-rom er aktivt per hall. Bruk rom ${canonicalRoom.code}.`
+          );
+        }
+      }
+
+      const roomSnapshot = engine.getRoomSnapshot(roomCode);
+      const existingPlayer = findPlayerInRoomByWallet(roomSnapshot, identity.walletId);
+      if (existingPlayer) {
+        engine.attachPlayerSocket(roomCode, existingPlayer.id, socket.id);
+        socket.join(roomCode);
+        const snapshot = await emitRoomUpdate(roomCode);
+        ackSuccess(callback, { roomCode, playerId: existingPlayer.id, snapshot });
+        return;
+      }
+
+      const { playerId } = await engine.joinRoom({
+        roomCode,
+        hallId: identity.hallId,
+        playerName: identity.playerName,
+        walletId: identity.walletId,
+        socketId: socket.id
+      });
+      socket.join(roomCode);
+      const snapshot = await emitRoomUpdate(roomCode);
+      ackSuccess(callback, { roomCode, playerId, snapshot });
+    } catch (error) {
+      console.error("[room:join] FAILED:", toPublicError(error));
+      ackFailure(callback, error);
+    }
+  }));
+
+  socket.on("room:resume", rateLimited("room:resume", async (payload: ResumeRoomPayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
+    try {
+      const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+      engine.attachPlayerSocket(roomCode, playerId, socket.id);
+      socket.join(roomCode);
+      const snapshot = await emitRoomUpdate(roomCode);
+      ackSuccess(callback, { snapshot });
+    } catch (error) {
+      ackFailure(callback, error);
+    }
+  }));
+
+  socket.on("room:configure", rateLimited("room:configure", async (
+    payload: ConfigureRoomPayload,
+    callback: (response: AckResponse<{ snapshot: RoomSnapshot; entryFee: number }>) => void
+  ) => {
+    try {
+      const { roomCode } = await requireAuthenticatedPlayerAction(payload);
+      engine.getRoomSnapshot(roomCode);
+
+      const requestedEntryFee = parseOptionalNonNegativeNumber(payload?.entryFee, "entryFee");
+      if (requestedEntryFee === undefined) {
+        throw new DomainError("INVALID_INPUT", "entryFee må oppgis.");
+      }
+
+      // setRoomConfiguredEntryFee
+      const normalized = Math.max(0, Math.round(requestedEntryFee * 100) / 100);
+      deps.roomConfiguredEntryFeeByRoom.set(roomCode, normalized);
+      const entryFee = normalized;
+
+      const updatedSnapshot = await emitRoomUpdate(roomCode);
+      ackSuccess(callback, { snapshot: updatedSnapshot, entryFee });
+    } catch (error) {
+      ackFailure(callback, error);
+    }
+  }));
+
+  socket.on("room:state", rateLimited("room:state", async (payload: RoomStatePayload, callback: (response: AckResponse<{ snapshot: RoomSnapshot }>) => void) => {
+    try {
+      const user = await getAuthenticatedSocketUser(payload);
+      let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
+
+      // BIN-134: SPA sends "BINGO1" as canonical room code.
+      // Map it to the actual canonical room for the hall.
+      if (roomCode === "BINGO1" && enforceSingleRoomPerHall) {
+        const hallId = (payload as unknown as Record<string, unknown>)?.hallId || "default-hall";
+        const canonicalRoom = getPrimaryRoomForHall(hallId as string);
+        if (canonicalRoom) {
+          roomCode = canonicalRoom.code;
+          logger.debug({ roomCode }, "BIN-134: room:state BINGO1 → canonical room");
+        }
+        // If no canonical room exists, fall through — ROOM_NOT_FOUND triggers SPA auto-create
+      }
+
+      assertUserCanAccessRoom(user, roomCode);
+      const snapshot = buildRoomUpdatePayload(engine.getRoomSnapshot(roomCode));
+      ackSuccess(callback, { snapshot });
+    } catch (error) {
+      ackFailure(callback, error);
+    }
+  }));
+
+  socket.on("bet:arm", rateLimited("bet:arm", async (
+    payload: RoomActionPayload & { armed?: boolean; ticketCount?: number; ticketSelections?: Array<{ type: string; qty: number; name?: string }> },
+    callback: (response: AckResponse<{ snapshot: RoomSnapshot; armed: boolean }>) => void
+  ) => {
+    try {
+      const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+      const wantArmed = payload.armed !== false;
+      if (wantArmed) {
+        // New path: per-type selections
+        if (Array.isArray(payload.ticketSelections) && payload.ticketSelections.length > 0) {
+          // BIN-688: preserve `name` so pre-round tickets can be coloured
+          // per the player's specific pick (Small Yellow vs Small Purple
+          // both have type="small").
+          const selections = payload.ticketSelections
+            .filter((s) => s && typeof s.type === "string" && typeof s.qty === "number" && s.qty > 0)
+            .map((s) => ({
+              type: s.type,
+              qty: Math.max(1, Math.round(s.qty)),
+              ...(typeof s.name === "string" && s.name.length > 0 ? { name: s.name } : {}),
+            }));
+
+          if (selections.length === 0) {
+            throw new DomainError("INVALID_INPUT", "Ingen gyldige billettvalg.");
+          }
+
+          // Additive arm: each bet:arm call MERGES the new selections into
+          // the player's existing armed set. Reductions happen via `ticket:cancel`
+          // (× on individual brett). Product decision 2026-04-20 — the buy
+          // popup opens at qty=0 on every re-open, so replace-semantics would
+          // mean re-armed brett vanish every time the player clicks Kjøp.
+          const existing = deps.getArmedPlayerSelections(roomCode)?.[playerId] ?? [];
+          const merged: Array<{ type: string; qty: number; name?: string }> = existing.map((s) => ({
+            type: s.type,
+            qty: s.qty,
+            ...(s.name ? { name: s.name } : {}),
+          }));
+          for (const incoming of selections) {
+            const matchIdx = merged.findIndex((m) =>
+              m.type === incoming.type && (m.name ?? null) === (incoming.name ?? null),
+            );
+            if (matchIdx >= 0) {
+              merged[matchIdx] = { ...merged[matchIdx], qty: merged[matchIdx].qty + incoming.qty };
+            } else {
+              merged.push(incoming);
+            }
+          }
+
+          // Validate combined total weighted count <= 30.
+          const variantInfo = deps.getVariantConfig?.(roomCode);
+          const ticketTypes = variantInfo?.config?.ticketTypes ?? [];
+          let totalWeighted = 0;
+          for (const sel of merged) {
+            // BIN-693 lesson: prefer name-match for weight resolution too —
+            // two small-typed entries with different names share a weight of
+            // 1, but for Large/Elvis (same type, distinct names) the weight
+            // lives on the matching row, not the first one.
+            const tt =
+              (sel.name ? ticketTypes.find((t) => t.name === sel.name) : undefined) ??
+              ticketTypes.find((t) => t.type === sel.type);
+            const weight = tt?.ticketCount ?? 1;
+            totalWeighted += sel.qty * weight;
+          }
+          if (totalWeighted > 30) {
+            throw new DomainError(
+              "INVALID_INPUT",
+              `Totalt antall brett (${totalWeighted}) overstiger maks 30.`,
+            );
+          }
+          if (totalWeighted < 1) {
+            throw new DomainError("INVALID_INPUT", "Du må velge minst 1 brett.");
+          }
+          armPlayer(roomCode, playerId, totalWeighted, merged);
+        } else {
+          // Backward compat: flat ticketCount
+          const ticketCount = Math.min(30, Math.max(1, Math.round(payload.ticketCount ?? 1)));
+          armPlayer(roomCode, playerId, ticketCount);
+        }
+      } else {
+        disarmPlayer(roomCode, playerId);
+      }
+      const snapshot = await emitRoomUpdate(roomCode);
+      ackSuccess(callback, { snapshot, armed: wantArmed });
+    } catch (error) {
+      ackFailure(callback, error);
+    }
+  }));
+
+  // ── Lucky number ──────────────────────────────────────────────────────────
+  socket.on("lucky:set", rateLimited("lucky:set", async (payload: LuckyNumberPayload, callback: (response: AckResponse<{ luckyNumber: number }>) => void) => {
+    try {
+      const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
+      const num = payload?.luckyNumber;
+      if (!Number.isInteger(num) || num < 1 || num > 60) {
+        throw new DomainError("INVALID_INPUT", "luckyNumber må være mellom 1 og 60.");
+      }
+      // Only allow setting before game starts or during waiting
+      const snapshot = engine.getRoomSnapshot(roomCode);
+      if (snapshot.currentGame?.status === "RUNNING") {
+        throw new DomainError("GAME_IN_PROGRESS", "Kan ikke endre lykketall mens spillet pågår.");
+      }
+      setLuckyNumber(roomCode, playerId, num);
+      await emitRoomUpdate(roomCode);
+      ackSuccess(callback, { luckyNumber: num });
+    } catch (error) {
+      ackFailure(callback, error);
+    }
+  }));
+}
