@@ -116,8 +116,10 @@ import { createAdminPhysicalTicketsRouter } from "./routes/adminPhysicalTickets.
 import { createAdminPhysicalTicketCheckBingoRouter } from "./routes/adminPhysicalTicketCheckBingo.js";
 import { createAdminPhysicalTicketsRewardAllRouter } from "./routes/adminPhysicalTicketsRewardAll.js";
 import { createAdminStaticTicketsRouter } from "./routes/adminStaticTickets.js";
+import { createAdminAgentTicketRangesRouter } from "./routes/adminAgentTicketRanges.js";
 import { PhysicalTicketService } from "./compliance/PhysicalTicketService.js";
 import { StaticTicketService } from "./compliance/StaticTicketService.js";
+import { AgentTicketRangeService } from "./compliance/AgentTicketRangeService.js";
 import { createAdminReportsPhysicalTicketsRouter } from "./routes/adminReportsPhysicalTickets.js";
 import { createAdminReportsRedFlagCategoriesRouter } from "./routes/adminReportsRedFlagCategories.js";
 import { PhysicalTicketsAggregateService } from "./admin/PhysicalTicketsAggregate.js";
@@ -422,6 +424,14 @@ const physicalTicketService = new PhysicalTicketService({
 // CSV-import-flyt. Lever parallelt med PhysicalTicketService — de eier
 // separate tabeller (app_static_tickets vs app_physical_tickets).
 const staticTicketService = new StaticTicketService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// PT2: agent (bingovert) range-registrering. Eier `app_agent_ticket_ranges`
+// og reserverer bonger via `app_static_tickets.reserved_by_range_id`. PT3
+// batch-salg vil dekrementere `current_top_serial` når bonger selges.
+const agentTicketRangeService = new AgentTicketRangeService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -1061,6 +1071,15 @@ app.use(createAdminStaticTicketsRouter({
   platformService,
   auditLogService,
   staticTicketService,
+}));
+// PT2: agent (bingovert) range-registrering:
+//   POST /api/admin/physical-tickets/ranges/register
+//   POST /api/admin/physical-tickets/ranges/:id/close
+//   GET  /api/admin/physical-tickets/ranges?agentId=&hallId=
+app.use(createAdminAgentTicketRangesRouter({
+  platformService,
+  auditLogService,
+  agentTicketRangeService,
 }));
 // BIN-641: POST /api/admin/physical-tickets/:uniqueId/check-bingo
 app.use(createAdminPhysicalTicketCheckBingoRouter({
