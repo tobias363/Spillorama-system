@@ -19,6 +19,7 @@ import { registerGameLifecycleEvents } from "./gameEvents/gameLifecycleEvents.js
 import { registerDrawEvents } from "./gameEvents/drawEvents.js";
 import { registerTicketEvents } from "./gameEvents/ticketEvents.js";
 import { registerClaimEvents } from "./gameEvents/claimEvents.js";
+import { registerMiniGameEvents } from "./gameEvents/miniGameEvents.js";
 import type {
   AckResponse,
   ChatMessage,
@@ -65,29 +66,7 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     registerDrawEvents(sctx);
     registerTicketEvents(sctx);
     registerClaimEvents(sctx);
-
-    // ── Jackpot (Game 5 Free Spin) ─────────────────────────────────────────
-    socket.on("jackpot:spin", rateLimited("jackpot:spin", async (payload: RoomActionPayload, callback: (response: AckResponse<unknown>) => void) => {
-      try {
-        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
-        const result = await engine.spinJackpot(roomCode, playerId);
-        ackSuccess(callback, result);
-      } catch (error) {
-        ackFailure(callback, error);
-      }
-    }));
-
-    // ── Mini-game (Game 1 — Wheel of Fortune / Treasure Chest) ─────────────
-    socket.on("minigame:play", rateLimited("minigame:play", async (payload: RoomActionPayload & { selectedIndex?: number }, callback: (response: AckResponse<unknown>) => void) => {
-      try {
-        const { roomCode, playerId } = await requireAuthenticatedPlayerAction(payload);
-        const selectedIndex = typeof payload?.selectedIndex === "number" ? payload.selectedIndex : undefined;
-        const result = await engine.playMiniGame(roomCode, playerId, selectedIndex);
-        ackSuccess(callback, result);
-      } catch (error) {
-        ackFailure(callback, error);
-      }
-    }));
+    registerMiniGameEvents(sctx);
 
     // ── Chat ─────────────────────────────────────────────────────────────────
     socket.on("chat:send", rateLimited("chat:send", async (payload: ChatSendPayload, callback: (response: AckResponse<{ message: ChatMessage }>) => void) => {
