@@ -280,13 +280,16 @@ describe("BIN-626 admin-daily-schedules API client", () => {
 // ── BIN-666 / BIN-665: admin-hall-groups API client ────────────────────────
 
 describe("BIN-666 admin-hall-groups API client", () => {
-  it("listHallGroups GET /api/admin/hall-groups", async () => {
+  it("listHallGroups GET /api/admin/hall-groups (server-side filter: status + hallId)", async () => {
     const fetchMock = installFetch(() => successResponse({ groups: [], count: 0 }));
-    await listHallGroups({ status: "active", search: "nord" });
+    // PR 4e.1: backend eksponerer kun status + hallId som server-side filter.
+    // `search` er klient-side (i GroupHallListPage), ikke query-param.
+    await listHallGroups({ status: "active", hallId: "hall-1" });
     const url = fetchMock.mock.calls[0]![0] as string;
     expect(url).toContain("/api/admin/hall-groups");
     expect(url).toContain("status=active");
-    expect(url).toContain("search=nord");
+    expect(url).toContain("hallId=hall-1");
+    expect(url).not.toContain("search=");
   });
 
   it("createHallGroup POSTer payload", async () => {

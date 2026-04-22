@@ -1,18 +1,20 @@
-// PR-A5 (BIN-663) — GroupHall dispatcher (placeholder bolk).
+// PR 4e.1 (2026-04-22) — GroupHall dispatcher.
 //
-// All four GroupHall routes stub to the same placeholder with banner
-// pointing at Linear BIN-665 (blocker: backend har ingen CRUD-endpoints
-// for hall-grupper ennå — `groupHallIds` finnes som schedule-felt, men
-// ingen POST /api/admin/hall-groups). Når BIN-665 lander, erstattes
-// placeholder med live-sider + oppdaterer også BIN-617 dashboard-widget.
+// Erstatter placeholder-banneret fra BIN-663 med ekte sider nå som backend
+// (BIN-665) har full CRUD. Ref. apps/backend/src/routes/adminHallGroups.ts.
+//
+// Routes:
+//   /groupHall              → GroupHallListPage (list + inline add-modal)
+//   /groupHall/add          → GroupHallListPage + auto-åpnet add-modal
+//   /groupHall/edit/:id     → GroupHallListPage + auto-åpnet edit-modal
+//
+// Legacy view-route (/groupHall/view/:id) er ikke portert — edit-modalen
+// har all data (read-only er overkill for en 5-felt form). Route-handler
+// aksepterer dem likevel for bakoverkompat.
 
-import { t } from "../../i18n/I18n.js";
-import {
-  boxClose,
-  boxOpen,
-  contentHeader,
-  escapeHtml,
-} from "../adminUsers/shared.js";
+import { renderGroupHallListPage } from "./GroupHallListPage.js";
+import { openGroupHallEditorModal } from "./GroupHallEditorModal.js";
+import { fetchHallGroup } from "./GroupHallState.js";
 
 const GROUP_HALL_STATIC = new Set<string>(["/groupHall", "/groupHall/add"]);
 const GROUP_HALL_EDIT_RE = /^\/groupHall\/edit\/[^/]+$/;
@@ -25,31 +27,36 @@ export function isGroupHallRoute(path: string): boolean {
 
 export function mountGroupHallRoute(container: HTMLElement, path: string): void {
   container.innerHTML = "";
-  const titleKey = pageTitleKey(path);
-  container.innerHTML = `
-    ${contentHeader(titleKey, "group_of_halls_management")}
-    <section class="content">
-      <div class="callout callout-warning" data-testid="group-halls-placeholder-banner">
-        <i class="fa fa-clock-o"></i>
-        ${escapeHtml(t("group_halls_placeholder_banner"))}
-      </div>
-      ${boxOpen(titleKey, "default")}
-        <p class="text-muted" data-testid="group-halls-placeholder-body">
-          <i class="fa fa-info-circle"></i>
-          ${escapeHtml(t("coming_post_pilot"))}
-        </p>
-        <p>
-          <a class="btn btn-default" href="#/hall" data-action="go-to-halls">
-            <i class="fa fa-arrow-right"></i> ${escapeHtml(t("go_to_hall_list"))}
-          </a>
-        </p>
-      ${boxClose()}
-    </section>`;
-}
+  renderGroupHallListPage(container);
 
-function pageTitleKey(path: string): string {
-  if (path === "/groupHall/add") return "create_group_of_halls";
-  if (GROUP_HALL_EDIT_RE.test(path)) return "edit_group_of_halls";
-  if (GROUP_HALL_VIEW_RE.test(path)) return "group_of_halls_management";
-  return "hall_groups_list";
+  if (path === "/groupHall/add") {
+    openGroupHallEditorModal({
+      mode: "create",
+      onSaved: () => {
+        window.location.hash = "#/groupHall";
+      },
+    });
+    return;
+  }
+
+  const editMatch = path.match(/^\/groupHall\/edit\/([^/]+)$/);
+  const viewMatch = path.match(/^\/groupHall\/view\/([^/]+)$/);
+  const targetId = editMatch ? decodeURIComponent(editMatch[1]!) : viewMatch ? decodeURIComponent(viewMatch[1]!) : null;
+
+  if (targetId) {
+    void (async () => {
+      const row = await fetchHallGroup(targetId);
+      if (!row) {
+        window.location.hash = "#/groupHall";
+        return;
+      }
+      openGroupHallEditorModal({
+        mode: "edit",
+        existing: row,
+        onSaved: () => {
+          window.location.hash = "#/groupHall";
+        },
+      });
+    })();
+  }
 }

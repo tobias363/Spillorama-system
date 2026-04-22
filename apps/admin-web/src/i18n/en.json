@@ -2488,5 +2488,11 @@
   "gm_prize_mode_percent": "% of pot",
   "gm_prize_mode_fixed": "Fixed kr",
   "gm_prize_cell_percent_hint": "Percent of pot (0-100).",
-  "gm_prize_cell_fixed_hint": "Flat kr amount (may be capped by RTP guards if pool is too small)."
+  "gm_prize_cell_fixed_hint": "Flat kr amount (may be capped by RTP guards if pool is too small).",
+  "no_data": "No data",
+  "select_halls_hint": "Hold Ctrl (Cmd on Mac) to select multiple halls. Inactive members stay pre-selected to prevent accidental removal.",
+  "name_too_long": "Name is too long (max 200 characters).",
+  "tv_id_invalid": "TV-ID must be a non-negative integer.",
+  "hall_id_invalid": "Invalid hall ID in selection.",
+  "no_changes": "No changes to save."
 }
