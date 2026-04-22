@@ -192,6 +192,36 @@ export interface GameVariantConfig {
    * og default-konfig.
    */
   patternsByColor?: Record<string, PatternConfig[]>;
+  /**
+   * PR-P5 (Extra-variant): egendefinerte concurrent patterns.
+   *
+   * Når `customPatterns` er satt og ikke-tom, ignoreres `patterns` og
+   * `patternsByColor` fullstendig. Evaluerings-semantikken endrer seg:
+   *   - Standard-flyt: første unwon pattern per draw (sekvensiell faser)
+   *   - Custom-flyt: ALLE customPatterns evalueres per draw. Et bong kan
+   *     samtidig oppfylle flere → flere payouts i én draw.
+   *
+   * Mutually exclusive: hvis både customPatterns (ikke-tom) OG
+   * patternsByColor er satt i samme config, valideringen kaster
+   * DomainError("CUSTOM_AND_STANDARD_EXCLUSIVE") ved startGame.
+   */
+  customPatterns?: CustomPatternDefinition[];
+}
+
+/**
+ * PR-P5 (Extra-variant): egendefinert concurrent pattern.
+ *
+ * Gjenbruker winningType/prize1/columnPrizesNok osv. fra PatternConfig
+ * (via inheritance) så admin kan konfigurere en egendefinert pattern med
+ * f.eks. multiplier-chain eller column-specific payout-regler.
+ */
+export interface CustomPatternDefinition extends PatternConfig {
+  /** Unik ID innen config, f.eks. "bilde", "ramme", "full_bong". */
+  patternId: string;
+  /** 25-bit bitmask for 5×5 grid (row-major). Min 1 celle satt. */
+  mask: number;
+  /** Opt-in concurrent-semantikk — må være `true`. */
+  concurrent: true;
 }
 
 /** Spesialnøkkel i `patternsByColor` for fallback-matrise (ukjent farge). */
@@ -485,6 +515,50 @@ export function parseVariantConfig(json: unknown, gameType: string): GameVariant
 }
 
 /** Convert PatternConfig[] to PatternDefinition[] (adds id and order). */
+/**
+ * PR-P5 (Extra-variant): map customPatterns til PatternDefinition[].
+ *
+ * Bruker `patternId` som canonical id (i stedet for `pattern-{i}`), og
+ * propagerer `mask` + alle payout-felter (prize1, winningType,
+ * columnPrizesNok osv. — arvet fra PatternConfig).
+ *
+ * `design` defaulter til 0 (custom mask) siden custom patterns IKKE er
+ * bundet til row/column-shape.
+ */
+export function customPatternsToDefinitions(
+  patterns: CustomPatternDefinition[],
+): PatternDefinition[] {
+  return patterns.map((p, i) => {
+    const def: PatternDefinition = {
+      id: p.patternId,
+      name: p.name,
+      claimType: p.claimType,
+      prizePercent: p.prizePercent,
+      order: i,
+      design: p.design,
+      mask: p.mask,
+    };
+    if (p.patternDataList) def.patternDataList = [...p.patternDataList];
+    if (typeof p.ballNumberThreshold === "number") def.ballNumberThreshold = p.ballNumberThreshold;
+    if (typeof p.prize1 === "number") def.prize1 = p.prize1;
+    if (
+      p.winningType === "percent" ||
+      p.winningType === "fixed" ||
+      p.winningType === "multiplier-chain" ||
+      p.winningType === "column-specific" ||
+      p.winningType === "ball-value-multiplier"
+    ) {
+      def.winningType = p.winningType;
+    }
+    if (typeof p.phase1Multiplier === "number") def.phase1Multiplier = p.phase1Multiplier;
+    if (typeof p.minPrize === "number") def.minPrize = p.minPrize;
+    if (p.columnPrizesNok) def.columnPrizesNok = { ...p.columnPrizesNok };
+    if (typeof p.baseFullHousePrizeNok === "number") def.baseFullHousePrizeNok = p.baseFullHousePrizeNok;
+    if (typeof p.ballValueMultiplier === "number") def.ballValueMultiplier = p.ballValueMultiplier;
+    return def;
+  });
+}
+
 export function patternConfigToDefinitions(patterns: PatternConfig[]): PatternDefinition[] {
   return patterns.map((p, i) => {
     const def: PatternDefinition = {

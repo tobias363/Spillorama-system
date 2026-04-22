@@ -24,6 +24,11 @@ import {
 import { buildDrawBag, resolveDrawBagConfig } from "./DrawBagStrategy.js";
 import { resolvePatternsForColor } from "./spill1VariantMapper.js";
 import type { PatternConfig } from "./variantConfig.js";
+// PR-P5: Gjenbruker bitmask-matcher for custom concurrent patterns.
+import {
+  buildTicketMask as patternMatcherBuildTicketMask,
+  matchesPattern as patternMatcherMatches,
+} from "./PatternMatcher.js";
 
 /** PR B: Sentinel-nøkkel for flat-path vinner-gruppen (én gruppe, ingen farge-skille). */
 const FLAT_GROUP_KEY = "__flat__";
@@ -837,11 +842,30 @@ export class BingoEngine {
     // Prize pool = sum of all per-player buy-ins
     const prizePool = roundCurrency(debitedPlayers.reduce((sum, d) => sum + d.amount, 0) || (entryFee * eligiblePlayers.length));
     const maxPayoutBudget = roundCurrency((prizePool * normalizedPayoutPercent) / 100);
-    // BIN-448: Use patterns from variant config if available, else explicit input, else defaults.
+
+    // PR-P5 (Extra-variant): validator — customPatterns og patternsByColor
+    // er mutually exclusive. Admin-UI skal også enforce dette, men engine
+    // dobbeltsjekker for defense-in-depth + forward-compat med direkte
+    // config-input som bypass-er UI.
+    const hasCustomP5 =
+      Array.isArray(variantConfig.customPatterns) &&
+      variantConfig.customPatterns.length > 0;
+    if (hasCustomP5 && variantConfig.patternsByColor) {
+      throw new DomainError(
+        "CUSTOM_AND_STANDARD_EXCLUSIVE",
+        "customPatterns kan ikke kombineres med patternsByColor — fjern én.",
+      );
+    }
+
+    // BIN-448 / PR-P5: Use patterns from variant config if available, else explicit input, else defaults.
+    // For customPatterns-mode brukes custom-array som patterns-kilde (concurrent
+    // semantikk). For standard mode fortsetter eksisterende flyt uendret.
     const patterns = input.patterns
-      ?? (variantConfig.patterns.length > 0
-        ? variantConfigModule.patternConfigToDefinitions(variantConfig.patterns)
-        : DEFAULT_PATTERNS);
+      ?? (hasCustomP5
+        ? variantConfigModule.customPatternsToDefinitions(variantConfig.customPatterns!)
+        : variantConfig.patterns.length > 0
+          ? variantConfigModule.patternConfigToDefinitions(variantConfig.patterns)
+          : DEFAULT_PATTERNS);
     const patternResults: PatternResult[] = patterns.map((p) => ({
       patternId: p.id,
       patternName: p.name,
@@ -1012,6 +1036,20 @@ export class BingoEngine {
    */
   private async evaluateActivePhase(room: RoomState, game: GameState): Promise<void> {
     if (!game.patternResults || game.status !== "RUNNING") return;
+
+    // PR-P5 (Extra-variant): custom concurrent patterns har egen evaluator.
+    // Hvis variantConfig.customPatterns er satt og ikke-tom, delegeres til
+    // parallell-evaluator. Validator i startGame avviser kombinasjon med
+    // patternsByColor (CUSTOM_AND_STANDARD_EXCLUSIVE), så her kan vi stole
+    // på at én mode gjelder av gangen.
+    const variantConfigForCustomCheck = this.variantConfigByRoom.get(room.code);
+    const hasCustomPatterns =
+      Array.isArray(variantConfigForCustomCheck?.customPatterns) &&
+      variantConfigForCustomCheck!.customPatterns!.length > 0;
+    if (hasCustomPatterns) {
+      await this.evaluateConcurrentPatterns(room, game);
+      return;
+    }
 
     // Find next unwon phase in `order` (patternResults preserves config order).
     const activeResult = game.patternResults.find((r) => !r.isWon);
@@ -1328,6 +1366,180 @@ export class BingoEngine {
 
     // Rare: same ball won two phases simultaneously — recurse.
     await this.evaluateActivePhase(room, game);
+  }
+
+  /**
+   * PR-P5 (Extra-variant): concurrent pattern-evaluator.
+   *
+   * Semantikken er fundamentalt annerledes enn `evaluateActivePhase`:
+   *   - Sekvensiell flyt: første unwon pattern per draw; neste trinn
+   *     aktiveres når forrige er vunnet.
+   *   - Concurrent flyt: ALLE unwon customPatterns evalueres parallelt
+   *     per draw. Ett bong kan samtidig oppfylle flere patterns og
+   *     få betalt på alle.
+   *
+   * Payout-rekkefølge matcher `customPatterns.config`-rekkefølge slik at
+   * `pattern:won`-events emittes stabilt (Agent 4-kontrakten bevares —
+   * én event per vunnet pattern, sekvensielt innenfor draw).
+   *
+   * Idempotency: hvert pattern har egen `patternResults[i].isWon`-flag.
+   * Allerede-vunne patterns hoppes over ved re-evaluering. Payout er
+   * dermed idempotent mot samme draw (eksisterende pattern-level guard).
+   *
+   * Game avsluttes kun når ALLE customPatterns er vunnet (alle
+   * `isWon === true`), ELLER når full-house-pattern (mask === 0x1FFFFFF)
+   * vinnes.
+   */
+  private async evaluateConcurrentPatterns(
+    room: RoomState,
+    game: GameState,
+  ): Promise<void> {
+    if (!game.patternResults || game.status !== "RUNNING") return;
+    const drawnSet = new Set(game.drawnNumbers);
+
+    // Iterer alle unwon patterns i config-rekkefølge.
+    for (const result of game.patternResults) {
+      if (result.isWon) continue;
+      const pattern = game.patterns?.find((p) => p.id === result.patternId);
+      if (!pattern || !pattern.mask) continue;
+
+      // Finn vinnere for DENNE patternen. Concurrent semantikk:
+      // flat-path (uten per-farge-matrise — som er garantert fravær siden
+      // startGame-validator avviser kombinasjon). Én spiller = én vinner-slot
+      // per pattern (uavhengig av antall bong).
+      const winnerIds: string[] = [];
+      const uniqueWinners = new Set<string>();
+      const patternMask = pattern.mask;
+      if (typeof patternMask !== "number") continue;
+      for (const [playerId, tickets] of game.tickets) {
+        if (uniqueWinners.has(playerId)) continue;
+        const playerMarksAll = game.marks.get(playerId);
+        for (let ticketIdx = 0; ticketIdx < tickets.length; ticketIdx += 1) {
+          const ticket = tickets[ticketIdx];
+          const playerMarks = playerMarksAll?.[ticketIdx];
+          const marksSet: Set<number> =
+            playerMarks && playerMarks.size > 0
+              ? playerMarks
+              : drawnSet;
+          const ticketMask = patternMatcherBuildTicketMask(ticket, marksSet);
+          if (patternMatcherMatches(ticketMask, patternMask)) {
+            uniqueWinners.add(playerId);
+            winnerIds.push(playerId);
+            break;
+          }
+        }
+      }
+
+      if (winnerIds.length === 0) continue;
+
+      // Beregn payout per pattern. Gjenbruker eksisterende winning-types
+      // (fixed/percent/multiplier-chain/column-specific/ball-value-multiplier)
+      // via samme utregning som evaluateActivePhase. Custom patterns har
+      // ikke per-farge-matrise i P5 (mutually exclusive), så flat-path.
+      const lastBall = game.drawnNumbers[game.drawnNumbers.length - 1];
+      const totalPhasePrize = this.computeCustomPatternPrize(
+        pattern,
+        game.prizePool,
+        lastBall,
+      );
+      const prizePerWinner = Math.floor(totalPhasePrize / winnerIds.length);
+
+      const houseRetainedRest = totalPhasePrize - (winnerIds.length * prizePerWinner);
+      if (houseRetainedRest > 0) {
+        try {
+          await this.splitRoundingAudit.onSplitRoundingHouseRetained({
+            amount: houseRetainedRest,
+            winnerCount: winnerIds.length,
+            totalPhasePrize,
+            prizePerWinner,
+            patternName: pattern.name,
+            roomCode: room.code,
+            gameId: game.id,
+            hallId: room.hallId,
+          });
+        } catch (err) {
+          logger.warn(
+            { err, gameId: game.id, roomCode: room.code, amount: houseRetainedRest },
+            "split-rounding audit hook failed — engine fortsetter uansett",
+          );
+        }
+      }
+
+      // Payout per vinner. Idempotency: payoutPhaseWinner har allerede
+      // duplicate-guard via patternResult.isWon + claim-id sammensetning.
+      // PR-P5 idempotency-key: custom-pattern-{gameId}-{patternId}-{playerId}
+      // inngår i claim.id via patternId-del av ledger-key.
+      for (const playerId of winnerIds) {
+        await this.payoutPhaseWinner(
+          room, game, playerId, pattern, result, prizePerWinner,
+        );
+      }
+
+      // Mark pattern som vunnet + broadcast-kompatibelt snapshot.
+      result.isWon = true;
+      result.winnerIds = [...winnerIds];
+      result.winnerId = winnerIds[0];
+      result.winnerCount = winnerIds.length;
+      result.wonAtDraw = game.drawnNumbers.length;
+      result.payoutAmount = prizePerWinner;
+    }
+
+    // Spillet avsluttes når alle customPatterns er vunnet. Full-house-
+    // pattern (mask === 0x1FFFFFF) kan også trigge tidlig avslutning, men
+    // scope-bekreftelsen sa "alle unwon = ferdig" — enkleste semantikken.
+    const allDone = game.patternResults.every((r) => r.isWon);
+    if (allDone) {
+      const endedAtMs = Date.now();
+      game.status = "ENDED";
+      game.endedAt = new Date(endedAtMs).toISOString();
+      game.endedReason = "BINGO_CLAIMED";
+      await this.finishPlaySessionsForGame(room, game, endedAtMs);
+      await this.writeGameEndCheckpoint(room, game);
+    }
+  }
+
+  /**
+   * PR-P5: compute prize for custom pattern. Gjenbruker winning-type-
+   * logikken fra evaluateActivePhase i forenklet flat-path form (ingen
+   * per-farge-matrise for custom).
+   */
+  private computeCustomPatternPrize(
+    pattern: PatternDefinition,
+    prizePool: number,
+    lastBall: number | undefined,
+  ): number {
+    if (pattern.winningType === "fixed") {
+      return Math.max(0, pattern.prize1 ?? 0);
+    }
+    if (pattern.winningType === "column-specific") {
+      if (!pattern.columnPrizesNok || typeof lastBall !== "number") {
+        throw new DomainError(
+          "COLUMN_PRIZE_MISSING",
+          "columnPrizesNok mangler eller lastBall udefinert.",
+        );
+      }
+      const col = ballToColumn(lastBall);
+      if (!col) throw new DomainError("COLUMN_PRIZE_MISSING", `Ball ${lastBall} utenfor B/I/N/G/O.`);
+      return Math.max(0, pattern.columnPrizesNok[col]);
+    }
+    if (pattern.winningType === "ball-value-multiplier") {
+      const base = pattern.baseFullHousePrizeNok;
+      const mult = pattern.ballValueMultiplier;
+      if (
+        typeof base !== "number" || base < 0 ||
+        typeof mult !== "number" || mult <= 0 ||
+        typeof lastBall !== "number"
+      ) {
+        throw new DomainError(
+          "BALL_VALUE_FIELDS_MISSING",
+          "base/multiplier/lastBall mangler for ball-value.",
+        );
+      }
+      return Math.max(0, base + lastBall * mult);
+    }
+    // multiplier-chain i concurrent-path er ikke meningsfylt (fase-1-basis
+    // er en sekvens-konsept). Fall tilbake til percent-beregning.
+    return Math.floor(prizePool * (pattern.prizePercent ?? 0) / 100);
   }
 
   /**

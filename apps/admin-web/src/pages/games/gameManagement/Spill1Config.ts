@@ -237,6 +237,55 @@ export interface Spill1Config {
    * type i rotasjonen. Se `SPILL1_MINI_GAME_TYPES` for tilgjengelige verdier.
    */
   miniGames: Spill1MiniGameType[];
+  /**
+   * PR-P5 (Extra-variant): egendefinerte concurrent patterns.
+   *
+   * MVP-scope: admin redigerer dette feltet via config-JSON foreløpig.
+   * Full mask-editor-UI + per-farge-payout-matrise kommer i PR-P5b
+   * (post-pilot). Foreløpig validerer vi bare strukturen.
+   *
+   * Mutually exclusive med standard pattern-flyt: når `customPatterns` er
+   * satt og ikke-tom, må admin bruke egendefinerte mønstre og ikke
+   * `prizePerPattern` (row_1-4+full_house). Backend-validator i
+   * startGame enforcer dette med DomainError("CUSTOM_AND_STANDARD_EXCLUSIVE")
+   * hvis `patternsByColor` samtidig er satt.
+   *
+   * TODO (PR-P5b): bygg mask-editor widget (gjenbruker `wireGrid` fra
+   * apps/admin-web/src/pages/games/patternManagement/PatternAddPage.ts)
+   * og per-farge-payout-matrise per custom pattern.
+   */
+  customPatterns?: AdminCustomPattern[];
+}
+
+/**
+ * PR-P5 (Extra-variant): admin-konfigurert concurrent pattern.
+ * Speiler `CustomPatternDefinition` i backend `variantConfig.ts`.
+ */
+export interface AdminCustomPattern {
+  /** Unik ID innen config, f.eks. "bilde", "ramme", "full_bong". */
+  patternId: string;
+  /** Display-navn vist i UI og popup. */
+  name: string;
+  /** 25-bit bitmask for 5×5 grid. Min 1 celle satt. */
+  mask: number;
+  /** claimType: "LINE" for del-patterns, "BINGO" for full-house-lignende. */
+  claimType: "LINE" | "BINGO";
+  /** Gevinst-modus. Gjenbruker eksisterende winning-types fra P2/P3/P4. */
+  winningType?: PatternPrizeMode;
+  /** Payout-felter — brukes avhengig av winningType (samme som PatternPrize). */
+  prizePercent?: number;
+  prize1Nok?: number;
+  phase1Multiplier?: number;
+  minPrizeNok?: number;
+  columnPrizesNok?: {
+    B: number;
+    I: number;
+    N: number;
+    G: number;
+    O: number;
+  };
+  baseFullHousePrizeNok?: number;
+  ballValueMultiplier?: number;
 }
 
 /** Valideringsresultat fra `validateSpill1Config`. */
@@ -526,6 +575,74 @@ export function validateSpill1Config(config: Spill1Config, baseName: string): Va
         });
       }
     });
+  }
+
+  // PR-P5: customPatterns-validering (Extra-variant).
+  if (config.customPatterns && config.customPatterns.length > 0) {
+    const seenIds = new Set<string>();
+    const seenMasks = new Set<number>();
+    config.customPatterns.forEach((cp, idx) => {
+      // patternId må være unik innen config.
+      if (!cp.patternId || typeof cp.patternId !== "string" || cp.patternId.trim() === "") {
+        errors.push({
+          path: `customPatterns[${idx}].patternId`,
+          message: "custom_pattern_id_required",
+        });
+      } else if (seenIds.has(cp.patternId)) {
+        errors.push({
+          path: `customPatterns[${idx}].patternId`,
+          message: "custom_pattern_id_duplicate",
+        });
+      } else {
+        seenIds.add(cp.patternId);
+      }
+      // name påkrevd.
+      if (!cp.name || typeof cp.name !== "string" || cp.name.trim() === "") {
+        errors.push({
+          path: `customPatterns[${idx}].name`,
+          message: "custom_pattern_name_required",
+        });
+      }
+      // mask: 25-bit, min 1 celle satt, max 0x1FFFFFF.
+      if (
+        typeof cp.mask !== "number" ||
+        !Number.isFinite(cp.mask) ||
+        cp.mask <= 0 ||
+        cp.mask > 0x1ffffff
+      ) {
+        errors.push({
+          path: `customPatterns[${idx}].mask`,
+          message: "custom_pattern_mask_invalid",
+        });
+      } else if (seenMasks.has(cp.mask)) {
+        errors.push({
+          path: `customPatterns[${idx}].mask`,
+          message: "custom_pattern_mask_duplicate",
+        });
+      } else {
+        seenMasks.add(cp.mask);
+      }
+      // winningType-spesifikk validering:
+      if (cp.winningType === "fixed" && (typeof cp.prize1Nok !== "number" || cp.prize1Nok < 0)) {
+        errors.push({
+          path: `customPatterns[${idx}].prize1Nok`,
+          message: "custom_pattern_fixed_requires_prize1",
+        });
+      }
+      if (
+        cp.winningType === "percent" &&
+        (typeof cp.prizePercent !== "number" || cp.prizePercent < 0 || cp.prizePercent > 100)
+      ) {
+        errors.push({
+          path: `customPatterns[${idx}].prizePercent`,
+          message: "custom_pattern_percent_0_to_100",
+        });
+      }
+    });
+    // Minst 1 pattern (redundant med length > 0, men eksplisitt melding hvis
+    // admin setter customPatterns til []-liste ved feil — hmm, i det tilfellet
+    // faller vi uansett tilbake til standard-flyt per regresjonstesten.
+    // Så her aksepterer vi length > 0 uten ytterligere min-check.
   }
 
   if (errors.length > 0) return { ok: false, errors };

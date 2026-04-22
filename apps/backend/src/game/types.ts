@@ -22,6 +22,12 @@ export interface PatternDefinition {
    */
   patternDataList?: number[];
   /**
+   * PR-P5: 25-bit bitmask for custom concurrent patterns (Extra-variant).
+   * Satt fra CustomPatternDefinition.mask. Brukes av evaluateConcurrentPatterns
+   * via PatternMatcher.matchesPattern.
+   */
+  mask?: number;
+  /**
    * BIN-615 / PR-C1: G3 — pattern deactivates after this many balls drawn without a winner.
    * Used by PR-C3 pattern-cycler (evaluatePatternsAndUpdateGameData in legacy).
    */
@@ -88,6 +94,8 @@ export interface PatternResult {
    * compat og peker til første vinner.
    */
   winnerIds?: string[];
+  /** PR-P5: antall vinnere på samme draw. Speiler `winnerIds.length`. */
+  winnerCount?: number;
 }
 
 export interface Player {

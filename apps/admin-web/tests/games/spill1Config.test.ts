@@ -901,3 +901,147 @@ describe("validateSpill1Config — ball-value-multiplier-modus (Ball × 10)", ()
     expect(validateSpill1Config(c, "Test")).toEqual({ ok: true });
   });
 });
+
+// ── PR-P5: customPatterns-validering (Extra-variant) ──────────────────────
+
+describe("validateSpill1Config — customPatterns (Extra-variant)", () => {
+  it("godtar gyldig customPatterns-array med unike IDs + masks", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      {
+        patternId: "bilde",
+        name: "Bilde",
+        mask: 0x1104411, // 4 hjørner + center (cell 0, 4, 12, 20, 24)
+        claimType: "LINE",
+        winningType: "fixed",
+        prize1Nok: 500,
+      },
+      {
+        patternId: "full_bong",
+        name: "Full bong",
+        mask: 0x1ffffff,
+        claimType: "BINGO",
+        winningType: "fixed",
+        prize1Nok: 3000,
+      },
+    ];
+    expect(validateSpill1Config(c, "Extra")).toEqual({ ok: true });
+  });
+
+  it("avviser duplikat patternId", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      { patternId: "bilde", name: "A", mask: 0x1104411, claimType: "LINE" },
+      { patternId: "bilde", name: "B", mask: 0x1ffffff, claimType: "BINGO" },
+    ];
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => /custom_pattern_id_duplicate/.test(e.message))).toBe(true);
+    }
+  });
+
+  it("avviser duplikat mask", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      { patternId: "a", name: "A", mask: 0x1104411, claimType: "LINE" },
+      { patternId: "b", name: "B", mask: 0x1104411, claimType: "LINE" },
+    ];
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => /custom_pattern_mask_duplicate/.test(e.message))).toBe(true);
+    }
+  });
+
+  it("avviser tom mask (0 — ingen celler)", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      { patternId: "a", name: "A", mask: 0, claimType: "LINE" },
+    ];
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => /custom_pattern_mask_invalid/.test(e.message))).toBe(true);
+    }
+  });
+
+  it("avviser for stor mask (> 0x1FFFFFF)", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      { patternId: "a", name: "A", mask: 0x2000000, claimType: "LINE" },
+    ];
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => /custom_pattern_mask_invalid/.test(e.message))).toBe(true);
+    }
+  });
+
+  it("avviser manglende patternId", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      { patternId: "", name: "A", mask: 0x1ffffff, claimType: "LINE" },
+    ];
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => /custom_pattern_id_required/.test(e.message))).toBe(true);
+    }
+  });
+
+  it("avviser manglende name", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      { patternId: "a", name: "", mask: 0x1ffffff, claimType: "LINE" },
+    ];
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => /custom_pattern_name_required/.test(e.message))).toBe(true);
+    }
+  });
+
+  it("avviser fixed-mode uten prize1Nok", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      {
+        patternId: "a",
+        name: "A",
+        mask: 0x1ffffff,
+        claimType: "BINGO",
+        winningType: "fixed",
+      },
+    ];
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => /custom_pattern_fixed_requires_prize1/.test(e.message))).toBe(true);
+    }
+  });
+
+  it("avviser percent-mode med prizePercent > 100", () => {
+    const c = validConfig();
+    c.customPatterns = [
+      {
+        patternId: "a",
+        name: "A",
+        mask: 0x1ffffff,
+        claimType: "BINGO",
+        winningType: "percent",
+        prizePercent: 150,
+      },
+    ];
+    const r = validateSpill1Config(c, "Test");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => /custom_pattern_percent_0_to_100/.test(e.message))).toBe(true);
+    }
+  });
+
+  it("customPatterns undefined → ingen validator-feil (regresjon)", () => {
+    const c = validConfig();
+    // customPatterns ikke satt
+    expect(validateSpill1Config(c, "Test")).toEqual({ ok: true });
+  });
+});
