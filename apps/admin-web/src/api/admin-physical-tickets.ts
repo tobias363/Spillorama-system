@@ -470,3 +470,254 @@ export function listSoldTicketsForGame(
     { auth: true }
   );
 }
+
+// ── PT2/PT3/PT5 — agent-range-registrering + batch-salg + handover/extend ───
+
+export type StaticTicketColor = "small" | "large" | "traffic-light";
+
+export interface AgentTicketRangeRow {
+  id: string;
+  agentId: string;
+  hallId: string;
+  ticketColor: StaticTicketColor;
+  initialSerial: string;
+  finalSerial: string;
+  serials: string[];
+  currentTopSerial: string | null;
+  nextAvailableIndex: number;
+  registeredAt: string;
+  closedAt: string | null;
+  handoverFromRangeId: string | null;
+  handedOffToRangeId: string | null;
+}
+
+export interface RegisterRangeRequest {
+  agentId: string;
+  hallId: string;
+  ticketColor: StaticTicketColor;
+  firstScannedSerial: string;
+  count: number;
+}
+
+export interface RegisterRangeResult {
+  rangeId: string;
+  initialTopSerial: string;
+  finalSerial: string;
+  reservedCount: number;
+}
+
+export function registerAgentTicketRange(
+  body: RegisterRangeRequest
+): Promise<RegisterRangeResult> {
+  return apiRequest<RegisterRangeResult>(
+    "/api/admin/physical-tickets/ranges/register",
+    { method: "POST", body, auth: true }
+  );
+}
+
+export interface CloseRangeResult {
+  rangeId: string;
+  closedAt: string;
+}
+
+export function closeAgentTicketRange(rangeId: string): Promise<CloseRangeResult> {
+  return apiRequest<CloseRangeResult>(
+    `/api/admin/physical-tickets/ranges/${encodeURIComponent(rangeId)}/close`,
+    { method: "POST", body: {}, auth: true }
+  );
+}
+
+export interface ListRangesResponse {
+  ranges: AgentTicketRangeRow[];
+}
+
+export function listAgentTicketRanges(
+  params: { agentId?: string; hallId?: string } = {}
+): Promise<ListRangesResponse> {
+  const q = new URLSearchParams();
+  if (params.agentId) q.set("agentId", params.agentId);
+  if (params.hallId) q.set("hallId", params.hallId);
+  const qs = q.toString();
+  return apiRequest<ListRangesResponse>(
+    `/api/admin/physical-tickets/ranges${qs ? `?${qs}` : ""}`,
+    { auth: true }
+  );
+}
+
+export interface RecordBatchSaleRequest {
+  newTopSerial: string;
+  scheduledGameId?: string;
+}
+
+export interface RecordBatchSaleResult {
+  rangeId: string;
+  soldSerials: string[];
+  soldCount: number;
+  scheduledGameId: string;
+  gameStartTime: string;
+  newTopSerial: string;
+  previousTopSerial: string;
+}
+
+export function recordBatchSale(
+  rangeId: string,
+  body: RecordBatchSaleRequest
+): Promise<RecordBatchSaleResult> {
+  return apiRequest<RecordBatchSaleResult>(
+    `/api/admin/physical-tickets/ranges/${encodeURIComponent(rangeId)}/record-batch-sale`,
+    { method: "POST", body, auth: true }
+  );
+}
+
+export interface HandoverRangeRequest {
+  toUserId: string;
+}
+
+export interface HandoverRangeResult {
+  newRangeId: string;
+  fromRangeId: string;
+  unsoldCount: number;
+  soldPendingCount: number;
+  handoverAt: string;
+  fromUserId: string;
+  toUserId: string;
+  hallId: string;
+  ticketColor: StaticTicketColor;
+  newInitialSerial: string;
+  newFinalSerial: string;
+}
+
+export function handoverAgentTicketRange(
+  rangeId: string,
+  body: HandoverRangeRequest
+): Promise<HandoverRangeResult> {
+  return apiRequest<HandoverRangeResult>(
+    `/api/admin/physical-tickets/ranges/${encodeURIComponent(rangeId)}/handover`,
+    { method: "POST", body, auth: true }
+  );
+}
+
+export interface ExtendRangeRequest {
+  additionalCount: number;
+}
+
+export interface ExtendRangeResult {
+  rangeId: string;
+  addedCount: number;
+  newFinalSerial: string;
+  newTopOfAddedSerial: string;
+  newSerials: string[];
+  totalSerialsAfter: number;
+}
+
+export function extendAgentTicketRange(
+  rangeId: string,
+  body: ExtendRangeRequest
+): Promise<ExtendRangeResult> {
+  return apiRequest<ExtendRangeResult>(
+    `/api/admin/physical-tickets/ranges/${encodeURIComponent(rangeId)}/extend`,
+    { method: "POST", body, auth: true }
+  );
+}
+
+// ── PT4 — pending-payouts (vinn-verifisering + utbetaling) ──────────────────
+
+export type PendingPayoutPattern = "row_1" | "row_2" | "row_3" | "row_4" | "full_house";
+
+export interface PhysicalTicketPendingPayoutRow {
+  id: string;
+  ticketId: string;
+  hallId: string;
+  scheduledGameId: string;
+  patternPhase: PendingPayoutPattern;
+  expectedPayoutCents: number;
+  responsibleUserId: string;
+  color: string;
+  detectedAt: string;
+  verifiedAt: string | null;
+  verifiedByUserId: string | null;
+  paidOutAt: string | null;
+  paidOutByUserId: string | null;
+  adminApprovalRequired: boolean;
+  adminApprovedAt: string | null;
+  adminApprovedByUserId: string | null;
+  rejectedAt: string | null;
+  rejectedByUserId: string | null;
+  rejectedReason: string | null;
+}
+
+export interface ListPendingPayoutsResponse {
+  pending: PhysicalTicketPendingPayoutRow[];
+}
+
+export function listPendingPayouts(
+  params: { gameId?: string; userId?: string } = {}
+): Promise<ListPendingPayoutsResponse> {
+  const q = new URLSearchParams();
+  if (params.gameId) q.set("gameId", params.gameId);
+  if (params.userId) q.set("userId", params.userId);
+  const qs = q.toString();
+  return apiRequest<ListPendingPayoutsResponse>(
+    `/api/admin/physical-ticket-payouts/pending${qs ? `?${qs}` : ""}`,
+    { auth: true }
+  );
+}
+
+export interface VerifyWinRequest {
+  scannedTicketId: string;
+}
+
+export interface VerifyWinResult {
+  ticketId: string;
+  pattern: PendingPayoutPattern;
+  color: string;
+  expectedPayoutCents: number;
+  needsAdminApproval: boolean;
+}
+
+export function verifyPendingPayout(
+  pendingPayoutId: string,
+  body: VerifyWinRequest
+): Promise<VerifyWinResult> {
+  return apiRequest<VerifyWinResult>(
+    `/api/admin/physical-ticket-payouts/${encodeURIComponent(pendingPayoutId)}/verify`,
+    { method: "POST", body, auth: true }
+  );
+}
+
+export function adminApprovePendingPayout(
+  pendingPayoutId: string
+): Promise<PhysicalTicketPendingPayoutRow> {
+  return apiRequest<PhysicalTicketPendingPayoutRow>(
+    `/api/admin/physical-ticket-payouts/${encodeURIComponent(pendingPayoutId)}/admin-approve`,
+    { method: "POST", body: {}, auth: true }
+  );
+}
+
+export interface ConfirmPayoutResult {
+  ticketId: string;
+  paidOutAmountCents: number;
+}
+
+export function confirmPendingPayout(
+  pendingPayoutId: string
+): Promise<ConfirmPayoutResult> {
+  return apiRequest<ConfirmPayoutResult>(
+    `/api/admin/physical-ticket-payouts/${encodeURIComponent(pendingPayoutId)}/confirm-payout`,
+    { method: "POST", body: {}, auth: true }
+  );
+}
+
+export interface RejectPayoutRequest {
+  reason: string;
+}
+
+export function rejectPendingPayout(
+  pendingPayoutId: string,
+  body: RejectPayoutRequest
+): Promise<{ ok: true }> {
+  return apiRequest<{ ok: true }>(
+    `/api/admin/physical-ticket-payouts/${encodeURIComponent(pendingPayoutId)}/reject`,
+    { method: "POST", body, auth: true }
+  );
+}

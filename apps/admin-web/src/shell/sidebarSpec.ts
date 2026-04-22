@@ -97,6 +97,22 @@ export const adminSidebar: SidebarNode[] = [
   { kind: "leaf", id: "physicalTicketManagement", path: "/physicalTicketManagement", icon: "fa fa-gears mr-20", labelKey: "physical_ticket_management", module: "Physical Tickets" },
   { kind: "leaf", id: "physicalCashOut", path: "/physical/cash-out", icon: "fa fa-money", labelKey: "physical_cash_out", module: "Physical Tickets" },
   { kind: "leaf", id: "physicalCheckBingo", path: "/physical/check-bingo", icon: "fa fa-check-circle-o", labelKey: "check_bingo_stamp", module: "Physical Tickets" },
+  // PR-PT6 — PT1-PT5 admin-UI (CSV-import, range-registrering, aktive ranges,
+  // pending payouts). Egen undergruppe under "Fysiske bonger" for å gruppere
+  // de nye sidene uten å bryte layout-et for eksisterende leaf-entries.
+  {
+    kind: "group",
+    id: "physical-tickets-live",
+    icon: "fa fa-ticket",
+    labelKey: "pt_nav_group_title",
+    module: "Physical Tickets",
+    children: [
+      { kind: "leaf", id: "physical-import", path: "/physical/import", icon: "fa fa-upload", labelKey: "pt_import_csv_title", module: "Physical Tickets" },
+      { kind: "leaf", id: "physical-range-register", path: "/physical/ranges/register", icon: "fa fa-plus-square", labelKey: "pt_range_register_title", module: "Physical Tickets" },
+      { kind: "leaf", id: "physical-active-ranges", path: "/physical/ranges", icon: "fa fa-list", labelKey: "pt_active_ranges_title", module: "Physical Tickets" },
+      { kind: "leaf", id: "physical-pending-payouts", path: "/physical/payouts", icon: "fa fa-money", labelKey: "pt_pending_payouts_title", module: "Physical Tickets" },
+    ],
+  },
   { kind: "leaf", id: "sold-tickets", path: "/sold-tickets", icon: "fa fa-ticket mr-20", labelKey: "sold_tickets" },
 
   {
