@@ -1,310 +1,81 @@
-import { randomUUID } from "node:crypto";
-import type { Server, Socket } from "socket.io";
-import { ClaimSubmitPayloadSchema, TicketReplacePayloadSchema, TicketSwapPayloadSchema, TicketCancelPayloadSchema } from "@spillorama/shared-types/socket-events";
-import { DomainError, toPublicError } from "../game/BingoEngine.js";
-import { addBreadcrumb, captureError } from "../observability/sentry.js";
-import { metrics as promMetrics } from "../util/metrics.js";
-import type { BingoEngine } from "../game/BingoEngine.js";
-import { Game2Engine, type G2DrawEffects } from "../game/Game2Engine.js";
-import { Game3Engine, type G3DrawEffects } from "../game/Game3Engine.js";
-import type { PlatformService, PublicAppUser } from "../platform/PlatformService.js";
-import type { SocketRateLimiter } from "../middleware/socketRateLimit.js";
-import type { RoomSnapshot, Ticket, ClaimType } from "../game/types.js";
-import type { RoomUpdatePayload } from "../util/roomHelpers.js";
-import { getAccessTokenFromSocketPayload, mustBeNonEmptyString, parseOptionalNonNegativeNumber, parseTicketsPerPlayerInput } from "../util/httpHelpers.js";
-import { assertTicketsPerPlayerWithinHallLimit } from "../game/compliance.js";
-import { logger as rootLogger } from "../util/logger.js";
-
-const logger = rootLogger.child({ module: "gameEvents" });
-
 /**
- * BIN-615 / PR-C2: Emit Game 2 wire-contract events from a single draw's
- * stashed side-effects. Legacy parity:
- *   - g2:jackpot:list-update → always (every G2 draw, legacy game2JackpotUpdate)
- *   - g2:rocket:launch       → broadcast when the round ends with winners
- *   - g2:ticket:completed    → broadcast per winner (legacy TicketCompleted;
- *                              legacy emitted to socketId only, we broadcast
- *                              so all viewers see completions)
- */
-function emitG2DrawEvents(io: Server, effects: G2DrawEffects): void {
-  // Per-draw jackpot list — emitted on every G2 draw regardless of winners.
-  // Legacy ref: Game2/Controllers/GameController.js:873-891 (game2JackpotUpdate).
-  io.to(effects.roomCode).emit("g2:jackpot:list-update", {
-    roomCode: effects.roomCode,
-    gameId: effects.gameId,
-    jackpotList: effects.jackpotList,
-    currentDraw: effects.drawIndex,
-  });
-
-  if (effects.winners.length === 0) return;
-
-  // Rocket-launch celebratory broadcast — one per round at terminal draw.
-  // Legacy emitted Game2RocketLaunch at round-start; PM Q2 decision: reuse for
-  // ticket-completion semantics (matches the C1-reserved payload shape).
-  for (const winner of effects.winners) {
-    io.to(effects.roomCode).emit("g2:rocket:launch", {
-      roomCode: effects.roomCode,
-      gameId: effects.gameId,
-      playerId: winner.playerId,
-      ticketId: winner.ticketId,
-      drawIndex: effects.drawIndex,
-      totalDraws: effects.drawIndex,
-    });
-    // Per-winner ticket-completed — legacy Game2/GameProcess.js:343-354.
-    io.to(effects.roomCode).emit("g2:ticket:completed", {
-      roomCode: effects.roomCode,
-      gameId: effects.gameId,
-      playerId: winner.playerId,
-      ticketId: winner.ticketId,
-      drawIndex: effects.drawIndex,
-    });
-  }
-}
-
-/**
- * BIN-615 / PR-C3b: Emit Game 3 wire-contract events from a single draw's
- * stashed side-effects (`Game3Engine.getG3LastDrawEffects`). Legacy parity:
- *   - g3:pattern:changed  → emit only when `effects.patternsChanged === true`
- *                           (cycler.step returned changed=true on this draw).
- *   - g3:pattern:auto-won → emit once per winning pattern batch after the
- *                           auto-claim has paid all (ticket, pattern) winners.
+ * PR-R4: fasade for socket-event-handlerne.
  *
- * Emission order: `g3:pattern:changed` first (so clients update pattern UI
- * before win banners), then one `g3:pattern:auto-won` per winning pattern.
+ * Denne filen er igang med å splittes per event-cluster under
+ * `sockets/gameEvents/`. Offentlige eksporter (`createGameEventHandlers`,
+ * `GameEventsDeps`, `BingoSchedulerSettings`, `emitG3DrawEvents`) bevares
+ * for bakoverkompatibilitet — eksisterende importer i
+ * `apps/backend/src/index.ts` og `__tests__/` påvirkes ikke.
  */
-export function emitG3DrawEvents(io: Server, effects: G3DrawEffects): void {
-  // Pattern list mutation: fire before any winner event so listeners can
-  // refresh active-pattern UI before a winner banner references it.
-  if (effects.patternsChanged) {
-    io.to(effects.roomCode).emit("g3:pattern:changed", {
-      roomCode: effects.roomCode,
-      gameId: effects.gameId,
-      activePatterns: effects.patternSnapshot
-        .filter((p) => !p.isWon)
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          design: p.design,
-          patternDataList: p.patternDataList,
-          ballNumberThreshold: p.ballThreshold,
-        })),
-      drawIndex: effects.drawIndex,
-    });
-  }
+import { randomUUID } from "node:crypto";
+import type { Socket } from "socket.io";
+import {
+  ClaimSubmitPayloadSchema,
+  TicketReplacePayloadSchema,
+  TicketSwapPayloadSchema,
+  TicketCancelPayloadSchema,
+} from "@spillorama/shared-types/socket-events";
+import { DomainError, toPublicError } from "./../game/BingoEngine.js";
+import { addBreadcrumb } from "./../observability/sentry.js";
+import { metrics as promMetrics } from "./../util/metrics.js";
+import { Game2Engine } from "./../game/Game2Engine.js";
+import { Game3Engine } from "./../game/Game3Engine.js";
+import type { RoomSnapshot } from "./../game/types.js";
+import {
+  mustBeNonEmptyString,
+  parseOptionalNonNegativeNumber,
+  parseTicketsPerPlayerInput,
+} from "./../util/httpHelpers.js";
+import { assertTicketsPerPlayerWithinHallLimit } from "./../game/compliance.js";
+import { buildRegistryContext, buildSocketContext } from "./gameEvents/context.js";
+import { emitG2DrawEvents, emitG3DrawEvents } from "./gameEvents/drawEmits.js";
+import type {
+  AckResponse,
+  ChatMessage,
+  ChatSendPayload,
+  ClaimPayload,
+  ConfigureRoomPayload,
+  CreateRoomPayload,
+  EndGamePayload,
+  ExtraDrawPayload,
+  JoinRoomPayload,
+  LeaderboardEntry,
+  LeaderboardPayload,
+  LuckyNumberPayload,
+  MarkPayload,
+  ResumeRoomPayload,
+  RoomActionPayload,
+  RoomStatePayload,
+  StartGamePayload,
+} from "./gameEvents/types.js";
+import type { BingoSchedulerSettings, GameEventsDeps } from "./gameEvents/deps.js";
 
-  // One g3:pattern:auto-won per winning pattern batch — legacy parity with
-  // processPatternWinners broadcasting one PatternWon per pattern.
-  for (const winner of effects.winners) {
-    if (winner.ticketWinners.length === 0) continue;
-    io.to(effects.roomCode).emit("g3:pattern:auto-won", {
-      roomCode: effects.roomCode,
-      gameId: effects.gameId,
-      patternId: winner.patternId,
-      patternName: winner.patternName,
-      winnerPlayerIds: winner.ticketWinners.map((t) => t.playerId),
-      prizePerWinner: winner.pricePerWinner,
-      drawIndex: effects.drawIndex,
-    });
-  }
-}
-
-// ── Socket payload types ──────────────────────────────────────────────────────
-
-interface AckResponse<T> {
-  ok: boolean;
-  data?: T;
-  error?: {
-    code: string;
-    message: string;
-  };
-}
-
-interface AuthenticatedSocketPayload {
-  accessToken?: string;
-}
-
-interface RoomActionPayload extends AuthenticatedSocketPayload {
-  roomCode: string;
-  playerId?: string;
-}
-
-interface CreateRoomPayload extends AuthenticatedSocketPayload {
-  playerName?: string;
-  walletId?: string;
-  hallId?: string;
-  gameSlug?: string;
-}
-
-interface JoinRoomPayload extends CreateRoomPayload {
-  roomCode: string;
-}
-
-interface ResumeRoomPayload extends RoomActionPayload {}
-
-interface StartGamePayload extends RoomActionPayload {
-  entryFee?: number;
-  ticketsPerPlayer?: number;
-}
-
-interface ConfigureRoomPayload extends RoomActionPayload {
-  entryFee?: number;
-}
-
-interface EndGamePayload extends RoomActionPayload {
-  reason?: string;
-}
-
-interface MarkPayload extends RoomActionPayload {
-  number: number;
-}
-
-interface ClaimPayload extends RoomActionPayload {
-  type: ClaimType;
-}
-
-interface RoomStatePayload extends AuthenticatedSocketPayload {
-  roomCode: string;
-}
-
-interface ExtraDrawPayload extends RoomActionPayload {
-  requestedCount?: number;
-  packageId?: string;
-}
-
-interface ChatSendPayload extends RoomActionPayload {
-  message: string;
-  emojiId?: number;
-}
-
-interface ChatMessage {
-  id: string;
-  playerId: string;
-  playerName: string;
-  message: string;
-  emojiId: number;
-  createdAt: string;
-}
-
-interface LuckyNumberPayload extends RoomActionPayload {
-  luckyNumber: number;
-}
-
-interface LeaderboardPayload extends AuthenticatedSocketPayload {
-  roomCode?: string;
-}
-
-interface LeaderboardEntry {
-  nickname: string;
-  points: number;
-}
-
-// ── Deps ──────────────────────────────────────────────────────────────────────
-
-export interface BingoSchedulerSettings {
-  autoRoundStartEnabled: boolean;
-  autoRoundStartIntervalMs: number;
-  autoRoundMinPlayers: number;
-  autoRoundTicketsPerPlayer: number;
-  autoRoundEntryFee: number;
-  payoutPercent: number;
-  autoDrawEnabled: boolean;
-  autoDrawIntervalMs: number;
-}
-
-export interface GameEventsDeps {
-  engine: BingoEngine;
-  platformService: PlatformService;
-  io: Server;
-  socketRateLimiter: SocketRateLimiter;
-  emitRoomUpdate: (roomCode: string) => Promise<RoomUpdatePayload>;
-  emitManyRoomUpdates: (roomCodes: Iterable<string>) => Promise<void>;
-  buildRoomUpdatePayload: (snapshot: RoomSnapshot) => RoomUpdatePayload;
-  enforceSingleRoomPerHall: boolean;
-  runtimeBingoSettings: BingoSchedulerSettings;
-  chatHistoryByRoom: Map<string, ChatMessage[]>;
-  luckyNumbersByRoom: Map<string, Map<string, number>>;
-  armedPlayerIdsByRoom: Map<string, Map<string, number>>;
-  roomConfiguredEntryFeeByRoom: Map<string, number>;
-  displayTicketCache: Map<string, Ticket[]>;
-  getPrimaryRoomForHall: (hallId: string) => { code: string; hallId: string } | null;
-  findPlayerInRoomByWallet: (snapshot: RoomSnapshot, walletId: string) => RoomSnapshot["players"][number] | null;
-  getRoomConfiguredEntryFee: (roomCode: string) => number;
-  getArmedPlayerIds: (roomCode: string) => string[];
-  armPlayer: (roomCode: string, playerId: string, ticketCount?: number, selections?: Array<{ type: string; qty: number; name?: string }>) => void;
-  getArmedPlayerTicketCounts: (roomCode: string) => Record<string, number>;
-  getArmedPlayerSelections: (roomCode: string) => Record<string, Array<{ type: string; qty: number; name?: string }>>;
-  disarmPlayer: (roomCode: string, playerId: string) => void;
-  disarmAllPlayers: (roomCode: string) => void;
-  clearDisplayTicketCache: (roomCode: string) => void;
-  /**
-   * BIN-690: snapshot the per-player display-ticket cache so engine.startGame
-   * can adopt the exact grids the player saw while arming. Returns
-   * `{ playerId: Ticket[] }` with a shallow copy so engine mutations don't
-   * leak back into the cache between `startGame` and `clearDisplayTicketCache`.
-   */
-  getPreRoundTicketsByPlayerId?: (roomCode: string) => Record<string, Ticket[]>;
-  /** BIN-509: swap one pre-round ticket in place; returns null if ticketId is unknown. */
-  /** BIN-672: gameSlug required — see roomState.replaceDisplayTicket doc. */
-  replaceDisplayTicket?: (roomCode: string, playerId: string, ticketId: string, gameSlug: string) => Ticket | null;
-  /**
-   * BIN-692: cancel a single pre-round ticket (or its whole bundle).
-   * See RoomStateManager.cancelPreRoundTicket for bundle semantics.
-   * Returns null when the ticketId is not in the cache (stale client).
-   */
-  cancelPreRoundTicket?: (
-    roomCode: string,
-    playerId: string,
-    ticketId: string,
-    variantConfig: import("../game/variantConfig.js").GameVariantConfig,
-  ) => { removedTicketIds: string[]; remainingTicketCount: number; fullyDisarmed: boolean } | null;
-  /**
-   * BIN-516: optional chat persistence. When provided, chat:send writes through
-   * to the store and chat:history reads from it (falls back to in-memory cache
-   * if absent or returns empty).
-   */
-  chatMessageStore?: import("../store/ChatMessageStore.js").ChatMessageStore;
-  resolveBingoHallGameConfigForRoom: (roomCode: string) => Promise<{ hallId: string; maxTicketsPerPlayer: number }>;
-  requireActiveHallIdFromInput: (input: unknown) => Promise<string>;
-  buildLeaderboard: (roomCode?: string) => LeaderboardEntry[];
-  /** BIN-445: Get active variant config for a room (from schedule or default). */
-  getVariantConfig?: (roomCode: string) => { gameType: string; config: import("../game/variantConfig.js").GameVariantConfig } | null;
-  /**
-   * BIN-694: Bind the default variant config for a freshly created or
-   * restored room, keyed on `gameSlug`. Idempotent — no-op when a
-   * variant is already set. Callers invoke this right after
-   * `engine.createRoom(...)` so `BingoEngine.meetsPhaseRequirement`
-   * sees the correct Norsk-bingo pattern names (1 Rad / 2 Rader / …).
-   */
-  bindDefaultVariantConfig?: (roomCode: string, gameSlug: string) => void;
-  /**
-   * PR C: Async variant-config binder som leser admin-UI-config fra
-   * GameManagement.config_json.spill1 når `gameManagementId` er gitt,
-   * og faller tilbake til default ellers. Kallsteder kan sende
-   * `gameManagementId: undefined` for dagens default-path og få samme
-   * effekt som `bindDefaultVariantConfig` — plumbing-en forbereder
-   * fremtidig scope der `gameManagementId` kommer inn på wire.
-   */
-  bindVariantConfigForRoom?: (
-    roomCode: string,
-    opts: { gameSlug: string; gameManagementId?: string | null },
-  ) => Promise<void>;
-}
+export { emitG3DrawEvents } from "./gameEvents/drawEmits.js";
+export type { BingoSchedulerSettings, GameEventsDeps } from "./gameEvents/deps.js";
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
 export function createGameEventHandlers(deps: GameEventsDeps) {
+  const ctx = buildRegistryContext(deps);
   const {
     engine,
     platformService,
     io,
-    socketRateLimiter,
+    logger,
+    ackSuccess,
+    ackFailure,
+    appendChatMessage,
+    setLuckyNumber,
+    getAuthenticatedSocketUser,
+    assertUserCanAccessRoom,
+  } = ctx;
+  const {
+    socketRateLimiter: _socketRateLimiter,
     emitRoomUpdate,
     buildRoomUpdatePayload,
     enforceSingleRoomPerHall,
     runtimeBingoSettings,
     chatHistoryByRoom,
-    luckyNumbersByRoom,
-    armedPlayerIdsByRoom,
     getPrimaryRoomForHall,
     findPlayerInRoomByWallet,
     getRoomConfiguredEntryFee,
@@ -314,164 +85,12 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     disarmAllPlayers,
     clearDisplayTicketCache,
     resolveBingoHallGameConfigForRoom,
-    requireActiveHallIdFromInput,
     buildLeaderboard,
   } = deps;
 
-  function ackSuccess<T>(callback: (response: AckResponse<T>) => void, data: T): void {
-    callback({ ok: true, data });
-  }
-
-  function ackFailure<T>(callback: (response: AckResponse<T>) => void, error: unknown, eventName?: string): void {
-    const publicErr = toPublicError(error);
-    // BIN-539: DomainError is an expected validation outcome — don't spam
-    // Sentry with client-input issues. Capture everything else.
-    if (!(error instanceof DomainError)) {
-      captureError(error, { event: eventName, errCode: publicErr.code });
-    } else {
-      addBreadcrumb("socket.domain_error", { event: eventName, code: publicErr.code }, "warning");
-    }
-    callback({ ok: false, error: publicErr });
-  }
-
-  const MAX_CHAT_MESSAGES_PER_ROOM = 100;
-
-  function appendChatMessage(roomCode: string, msg: ChatMessage): void {
-    let history = chatHistoryByRoom.get(roomCode);
-    if (!history) {
-      history = [];
-      chatHistoryByRoom.set(roomCode, history);
-    }
-    history.push(msg);
-    if (history.length > MAX_CHAT_MESSAGES_PER_ROOM) {
-      history.splice(0, history.length - MAX_CHAT_MESSAGES_PER_ROOM);
-    }
-  }
-
-  function setLuckyNumber(roomCode: string, playerId: string, number: number): void {
-    let roomMap = luckyNumbersByRoom.get(roomCode);
-    if (!roomMap) {
-      roomMap = new Map();
-      luckyNumbersByRoom.set(roomCode, roomMap);
-    }
-    roomMap.set(playerId, number);
-  }
-
-  async function getAuthenticatedSocketUser(payload: AuthenticatedSocketPayload | undefined): Promise<PublicAppUser> {
-    const accessToken = getAccessTokenFromSocketPayload(payload);
-    return platformService.getUserFromAccessToken(accessToken);
-  }
-
-  function assertUserCanActAsPlayer(user: PublicAppUser, roomCode: string, playerId: string): void {
-    const snapshot = engine.getRoomSnapshot(roomCode);
-    const player = snapshot.players.find((entry) => entry.id === playerId);
-    if (!player) {
-      throw new DomainError("PLAYER_NOT_FOUND", "Spiller finnes ikke i rommet.");
-    }
-    if (user.role === "ADMIN") {
-      return;
-    }
-    if (player.walletId !== user.walletId) {
-      throw new DomainError("FORBIDDEN", "Du kan bare utføre handlinger for egen spiller.");
-    }
-  }
-
-  function assertUserCanAccessRoom(user: PublicAppUser, roomCode: string): void {
-    if (user.role === "ADMIN") {
-      return;
-    }
-    const snapshot = engine.getRoomSnapshot(roomCode);
-    const inRoom = snapshot.players.some((player) => player.walletId === user.walletId);
-    if (!inRoom) {
-      throw new DomainError("FORBIDDEN", "Du har ikke tilgang til dette rommet.");
-    }
-  }
-
-  async function requireAuthenticatedPlayerAction(
-    payload: RoomActionPayload
-  ): Promise<{ roomCode: string; playerId: string }> {
-    const user = await getAuthenticatedSocketUser(payload);
-    platformService.assertUserEligibleForGameplay(user);
-    engine.assertWalletAllowedForGameplay(user.walletId);
-    let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
-
-    // BIN-134: SPA sends "BINGO1" as canonical room alias.
-    if (roomCode === "BINGO1" && enforceSingleRoomPerHall) {
-      const hallId = (payload as unknown as Record<string, unknown>)?.hallId || "default-hall";
-      const canonicalRoom = getPrimaryRoomForHall(hallId as string);
-      if (canonicalRoom) {
-        roomCode = canonicalRoom.code;
-        logger.debug({ roomCode }, "BIN-134: requireAuthenticatedPlayerAction BINGO1 → canonical room");
-      }
-    }
-
-    // BIN-46: Derive playerId from token, NOT from client payload.
-    // The player's walletId from the authenticated token is the source of truth.
-    // We find the player in the room by matching walletId, preventing spoofing.
-    if (user.role !== "ADMIN") {
-      const snapshot = engine.getRoomSnapshot(roomCode);
-      const player = snapshot.players.find((p) => p.walletId === user.walletId);
-      if (!player) {
-        throw new DomainError("PLAYER_NOT_FOUND", "Du er ikke med i dette rommet.");
-      }
-      // Warn if client sent a mismatching playerId (potential spoofing attempt)
-      const clientPlayerId = typeof payload?.playerId === "string" ? payload.playerId.trim() : "";
-      if (clientPlayerId && clientPlayerId !== player.id) {
-        console.warn(
-          `SECURITY: playerId mismatch — client sent "${clientPlayerId}" but token resolves to "${player.id}" (user ${user.id}, room ${roomCode})`
-        );
-      }
-      return { roomCode, playerId: player.id };
-    }
-
-    // Admin: still accept payload playerId but verify it exists
-    const playerId = mustBeNonEmptyString(payload?.playerId, "playerId");
-    assertUserCanActAsPlayer(user, roomCode, playerId);
-    return { roomCode, playerId };
-  }
-
   return function registerGameEvents(socket: Socket): void {
-    /** BIN-164/BIN-247: Wrap a socket handler with rate limiting.
-     * Checks both by socket.id (unauthenticated events) and by walletId when available
-     * so reconnects don't reset rate limit counters for authenticated players. */
-    function rateLimited<P, R>(
-      eventName: string,
-      handler: (payload: P, callback: (response: AckResponse<R>) => void) => Promise<void>
-    ): (payload: P, callback: (response: AckResponse<R>) => void) => void {
-      return (payload, callback) => {
-        // Always check by socket.id
-        if (!socketRateLimiter.check(socket.id, eventName)) {
-          ackFailure(callback, new DomainError("RATE_LIMITED", "For mange foresporsler. Vent litt."));
-          return;
-        }
-        // BIN-247: Also check by walletId when authenticated — reconnects get a new socket.id
-        // but must not bypass rate limits by simply reconnecting
-        const walletId = socket.data.user?.walletId;
-        if (walletId && !socketRateLimiter.checkByKey(walletId, eventName)) {
-          ackFailure(callback, new DomainError("RATE_LIMITED", "For mange foresporsler. Vent litt."));
-          return;
-        }
-        handler(payload, callback).catch((err) => {
-          console.error(`[socket] unhandled error in ${eventName}:`, err);
-        });
-      };
-    }
-
-    async function resolveIdentityFromPayload(payload: CreateRoomPayload): Promise<{
-      playerName: string;
-      walletId: string;
-      hallId: string;
-    }> {
-      const user = await getAuthenticatedSocketUser(payload);
-      platformService.assertUserEligibleForGameplay(user);
-      engine.assertWalletAllowedForGameplay(user.walletId);
-      const hallId = await requireActiveHallIdFromInput(payload?.hallId);
-      return {
-        playerName: user.displayName,
-        walletId: user.walletId,
-        hallId
-      };
-    }
+    const sctx = buildSocketContext(socket, ctx);
+    const { rateLimited, requireAuthenticatedPlayerAction, resolveIdentityFromPayload } = sctx;
 
     socket.on("room:create", rateLimited("room:create", async (payload: CreateRoomPayload, callback: (response: AckResponse<{ roomCode: string; playerId: string; snapshot: RoomSnapshot }>) => void) => {
       logger.debug({ hallId: payload?.hallId, hasAccessToken: !!payload?.accessToken }, "BIN-134: room:create received");
@@ -1273,7 +892,7 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
 
     socket.on("disconnect", (reason: string) => {
       engine.detachSocket(socket.id);
-      socketRateLimiter.cleanup(socket.id);
+      _socketRateLimiter.cleanup(socket.id);
       // BIN-539: Every disconnect rolls into reconnect/retry dashboards. The
       // `reason` label is bounded (Socket.IO enumerates it), so cardinality
       // stays safe for Prometheus.
