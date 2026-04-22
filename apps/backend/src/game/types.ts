@@ -120,16 +120,16 @@ export interface Ticket {
    * user-addressable (replacement is disallowed once a game is RUNNING).
    */
   id?: string;
-  /** Display color name matching Unity TicketColorManager, e.g. "Small Yellow", "Elvis 1". */
+  /** Display color name, e.g. "Small Yellow", "Elvis 1". Match the web-klient fargevalg. */
   color?: string;
   /** Ticket type code for variant logic: "small", "large", "elvis", "traffic-red", etc. */
   type?: string;
   /**
    * G15 (BIN-431): ticket-detail fields rendered on flip.
-   * Mirrors Unity BingoTicket.cs:374-399 — ticketNumber, hallName, supplierName,
-   * ticketPrice, plus a web-only boughtAt timestamp. Populated in
-   * buildRoomUpdatePayload (display-only; not persisted by BingoEngine).
-   * All optional / non-breaking — clients falls back to placeholders.
+   * Populated in buildRoomUpdatePayload (display-only; not persisted by
+   * BingoEngine). Felter: ticketNumber, hallName, supplierName, ticketPrice +
+   * web-only boughtAt timestamp. All optional / non-breaking — klienten
+   * faller tilbake til placeholdere.
    */
   ticketNumber?: string;
   hallName?: string;

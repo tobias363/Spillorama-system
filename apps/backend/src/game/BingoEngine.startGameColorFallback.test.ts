@@ -124,7 +124,7 @@ test("BIN-693: legacy client without `name` still resolves via type fallback (ba
     armedPlayerIds: [hostPlayerId],
     armedPlayerTicketCounts: { [hostPlayerId]: 2 },
     armedPlayerSelections: {
-      // No `name` field — legacy Unity-fallback client path.
+      // No `name` field — legacy client path that only sends `type`.
       [hostPlayerId]: [{ type: "small", qty: 2 }],
     },
     gameType: "standard",

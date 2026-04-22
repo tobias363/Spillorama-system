@@ -103,9 +103,8 @@ export function isGameNameLocallyValid(name: string): boolean {
  * Legacy ticket-color options. Mirrors the `ticketColors` variable populated
  * as a constant until BIN-621 ships a proper backend endpoint.
  *
- * Source of truth: Unity TicketColorManager (see apps/game1-unity/.../).
- * These legacy names remain the user-facing labels in admin even though
- * Unity runtime uses different internal keys.
+ * De historiske farge-etikettene (Yellow, Blue, …) beholdes som
+ * user-facing labels i admin — web-klienten mapper dem internt.
  */
 export const LEGACY_TICKET_COLOR_OPTIONS = [
   "Yellow",

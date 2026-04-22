@@ -2,10 +2,9 @@
  * BIN-700: Loyalty-system — admin-CRUD for tiers + per-spiller aggregat-state
  * + event-log.
  *
- * Port av legacy `legacy/unity-backend/App/Controllers/LoyaltyController.js`
- * (7 metoder) + `App/Services/LoyaltyService.js`. Legacy var en enkel
- * navn/points-liste; vi porter et tier-basert system med spiller-aggregat,
- * events, og hooks for framtidig automatic assignment.
+ * Vi implementerer et tier-basert system med spiller-aggregat, events, og
+ * hooks for framtidig automatic assignment (utvider den historiske enkle
+ * navn/points-lista).
  *
  * Scope i denne PR-en:
  *   - Tier-CRUD (list/detail/create/update/delete, soft-delete default)

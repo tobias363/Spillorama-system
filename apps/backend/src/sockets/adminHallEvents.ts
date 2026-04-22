@@ -1,17 +1,16 @@
 /**
  * BIN-515: Admin hall-event socket handlers.
  *
- * Gives hall operators a live socket channel for the controls that used
- * to live in the Unity admin client:
+ * Gives hall operators a live socket channel for the controls exposed
+ * through the web admin (apps/admin-web):
  *   - `admin:login`      — authenticates the socket via JWT access-token.
  *                          Pins the socket to the admin user and their
  *                          ROOM_CONTROL_WRITE permission. Must be called
  *                          before any hall-event emits are accepted.
  *   - `admin:room-ready` — broadcasts a host-ready signal to everyone in
- *                          the room code (matches legacy
- *                          Game1RoomReady). No engine state change —
- *                          this is a pure notification so clients can
- *                          start a countdown or flash a "klart"-banner.
+ *                          the room code. No engine state change — this
+ *                          is a pure notification so clients can start a
+ *                          countdown or flash a "klart"-banner.
  *   - `admin:pause-game` — wraps `engine.pauseGame` (regulatorisk
  *                          emergency-stop mellom draws).
  *   - `admin:resume-game` — wraps `engine.resumeGame`.

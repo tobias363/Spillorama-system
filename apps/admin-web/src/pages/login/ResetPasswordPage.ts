@@ -4,10 +4,11 @@ import { ApiError } from "../../api/client.js";
 
 // PR-B7 (BIN-675) — consolidates three legacy reset-password views:
 //
-// All three mapped to role-specific Unity endpoints. The modern backend
-// uses a single rolle-agnostic endpoint (apps/backend/src/routes/auth.ts:
-// 269-294): token is validated against user-id, not role. resetPasswordSuc.html
-// was an email template and is inlined here as a success panel.
+// All three historically mapped to role-specific endpoints. The modern
+// backend uses a single rolle-agnostic endpoint (apps/backend/src/routes/
+// auth.ts:269-294): token is validated against user-id, not role.
+// resetPasswordSuc.html var en e-post-template og inlines here as a
+// success panel.
 //
 // 3-state machine:
 //   1. "validating" — GET /api/auth/reset-password/:token; never touch form

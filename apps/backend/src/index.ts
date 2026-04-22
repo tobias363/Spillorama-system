@@ -212,7 +212,6 @@ const app = express();
 // trust-proxy Express resolves `req.ip` to the proxy's address, which means
 // every client shares one bucket in the HTTP rate-limiter and legitimate admin
 // traffic (dashboard polling + navigation) trips a shared 120 req/min cap.
-// Matches the legacy backend (legacy/unity-backend/Boot/Server.js:208).
 app.set("trust proxy", true);
 
 // BIN-49: CORS — require explicit origins in production, never allow wildcard "*"
@@ -260,8 +259,11 @@ const io = new Server(server, {
   allowEIO3: true,
   cors: { origin: corsOrigins, credentials: true },
   maxHttpBufferSize: 100 * 1024, // LAV-3: 100 KB — prevents oversized payloads
-  pingInterval: 60000,  // 60s — Unity WebGL WebSocket needs longer heartbeat window
-  pingTimeout: 60000,   // 60s — total 120s before disconnect
+  // Socket.IO default pingInterval=25s / pingTimeout=20s. Web-klientene tåler
+  // hyppigere heartbeats; vi holder oss tett på default-verdiene for rask
+  // disconnect-detection mot ustabile TV-displayer og mobil-shells.
+  pingInterval: 25000,  // 25s — Socket.IO default
+  pingTimeout: 20000,   // 20s — Socket.IO default; total 45s før disconnect
 });
 
 const walletRuntime = createWalletAdapter(projectDir);

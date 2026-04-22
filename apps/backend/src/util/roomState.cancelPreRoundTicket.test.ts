@@ -1,8 +1,6 @@
 /**
  * roomState.cancelPreRoundTicket — BIN-692.
  *
- * Unity parity: `Game1ViewPurchaseElvisTicket.cs:17,49-76` deleteBtn.
- *
  * Covers:
  *   1. Single small ticket (ticketCount=1): removes exactly one from
  *      cache, decrements qty by 1, disarms player if it was the last.
