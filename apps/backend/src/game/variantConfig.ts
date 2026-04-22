@@ -229,6 +229,56 @@ export const DEFAULT_NORSK_BINGO_CONFIG: GameVariantConfig = {
   drawBagSize: 75,
 };
 
+/**
+ * BIN-689: Kvikkis — hurtig-bingo-variant.
+ *
+ * Papir-plan ("VÅRE SPILL", Teknobingo): "Førstemann med full bong
+ * vinner 1000 kr". Single-fase variant — ingen 5-fase-progresjon.
+ *
+ * Arkitektonisk valg (PM-vedtak 2026-04-22):
+ *   - Egen `gameType: "quickbingo"` → egen default-config (denne).
+ *   - Gjenbruker hele 75-ball-drawbag + BingoEngine-infrastruktur;
+ *     endringen ligger KUN i patterns-listen (1 entry vs 5).
+ *   - Fast premie 1000 kr som default (overstyrbar via admin-UI).
+ *   - `patternEvalMode: "auto-claim-on-draw"` — server evaluerer
+ *     Fullt Hus etter hver trekning (samme som norsk 5-fase bingo).
+ *   - `autoClaimPhaseMode: true` — aktiverer `evaluateActivePhase`-
+ *     pathen i BingoEngine som deler premien likt mellom samtidige
+ *     vinnere via eksisterende split-rounding-logikk.
+ *
+ * Kvikkis påvirker IKKE norsk 5-fase-flyten: rom med `gameType:
+ * "bingo"` / `"game_1"` / `"norsk-bingo"` får fortsatt
+ * DEFAULT_NORSK_BINGO_CONFIG. Ingen eksisterende konfig eller test
+ * er endret av denne variantet.
+ */
+export const DEFAULT_QUICKBINGO_CONFIG: GameVariantConfig = {
+  ticketTypes: [
+    ...DEFAULT_TICKET_COLORS.map((name) => ({
+      name, type: "small", priceMultiplier: 1, ticketCount: 1,
+    })),
+    { name: "Large Yellow", type: "large", priceMultiplier: 3, ticketCount: 3 },
+    { name: "Large White", type: "large", priceMultiplier: 3, ticketCount: 3 },
+  ],
+  // Én pattern: Fullt Hus. Navnet matcher classifyPhaseFromPatternName-
+  // regex for "full" slik at BingoEngine håndterer det konsistent med
+  // norsk 5-fase sin siste fase. Fast 1000 kr-premie — overstyrbar av
+  // admin-UI via GameManagement.config_json.spill1.
+  patterns: [
+    {
+      name: "Fullt Hus",
+      claimType: "BINGO" as const,
+      prizePercent: 0,
+      design: 0,
+      winningType: "fixed" as const,
+      prize1: 1000,
+    },
+  ],
+  patternEvalMode: "auto-claim-on-draw",
+  autoClaimPhaseMode: true,
+  maxBallValue: 75,
+  drawBagSize: 75,
+};
+
 export const DEFAULT_ELVIS_CONFIG: GameVariantConfig = {
   ticketTypes: [
     { name: "Elvis 1", type: "elvis", priceMultiplier: 2, ticketCount: 2 },
@@ -328,6 +378,12 @@ export function getDefaultVariantConfig(gameType: string): GameVariantConfig {
     case "bingo":
     case "norsk-bingo":
       return DEFAULT_NORSK_BINGO_CONFIG;
+    // BIN-689: Kvikkis hurtig-bingo — kun Fullt Hus, 1000 kr fastpremie.
+    // `"quickbingo"` er kanonisk slug; `"kvikkis"` beholdes som alias for
+    // symmetri med PlatformService.MAIN_GAME_TYPES.
+    case "quickbingo":
+    case "kvikkis":
+      return DEFAULT_QUICKBINGO_CONFIG;
     // BIN-694: `"standard"` beholdt for eldre tester + legacy rom.
     // Nye G1-rom bruker `gameType: "bingo"` → DEFAULT_NORSK_BINGO_CONFIG.
     default: return DEFAULT_STANDARD_CONFIG;
