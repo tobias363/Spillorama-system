@@ -55,9 +55,9 @@ function makeFakeClient(): {
 
 function makeFakeWallet(opts: { failWithCode?: string; failReason?: "wallet-error" | "plain-error" } = {}): {
   adapter: WalletAdapter;
-  credits: Array<{ accountId: string; amount: number; reason: string; idempotencyKey?: string }>;
+  credits: Array<{ accountId: string; amount: number; reason: string; idempotencyKey?: string; to?: "deposit" | "winnings" }>;
 } {
-  const credits: Array<{ accountId: string; amount: number; reason: string; idempotencyKey?: string }> = [];
+  const credits: Array<{ accountId: string; amount: number; reason: string; idempotencyKey?: string; to?: "deposit" | "winnings" }> = [];
   let txCounter = 0;
   const adapter: WalletAdapter = {
     async createAccount() {
@@ -88,11 +88,14 @@ function makeFakeWallet(opts: { failWithCode?: string; failReason?: "wallet-erro
       throw new Error("not implemented");
     },
     async credit(accountId, amount, reason, options) {
+      // PR-W2: capture `to`-option så payout-tester kan verifisere at
+      // Game1PayoutService eksplisitt sender `to: "winnings"` (regulatorisk).
       credits.push({
         accountId,
         amount,
         reason,
         idempotencyKey: options?.idempotencyKey,
+        to: options?.to,
       });
       if (opts.failWithCode) {
         if (opts.failReason === "plain-error") {
@@ -213,6 +216,9 @@ test("payoutPhase: single winner får hele potten", async () => {
   assert.equal(wallet.credits[0]!.amount, 500);
   assert.equal(wallet.credits[0]!.accountId, "w-1");
   assert.ok(wallet.credits[0]!.idempotencyKey?.includes("g1"));
+  // PR-W2 wallet-split: payout skal eksplisitt sende `to: "winnings"`
+  // (pengespillforskriften §11 — game-engine er eneste lovlige kilde).
+  assert.equal(wallet.credits[0]!.to, "winnings");
 
   // phase_winners INSERT skjedde.
   const phaseInsert = queries.find(
@@ -470,7 +476,7 @@ test("partial-failure: wallet feiler på 2. av 3 vinnere → vinner 1 er allered
   // Testen låser at 1-indexed failure-winner etterlater partial state
   // slik at vi kan dokumentere rollback-behovet.
   let callCount = 0;
-  const credits: Array<{ walletId: string; amount: number }> = [];
+  const credits: Array<{ walletId: string; amount: number; to?: "deposit" | "winnings" }> = [];
   const adapter: WalletAdapter = {
     async createAccount() { throw new Error("n/a"); },
     async ensureAccount() { throw new Error("n/a"); },
@@ -481,12 +487,12 @@ test("partial-failure: wallet feiler på 2. av 3 vinnere → vinner 1 er allered
     async getWinningsBalance() { return 0; },
     async getBothBalances() { return { deposit: 0, winnings: 0, total: 0 }; },
     async debit() { throw new Error("n/a"); },
-    async credit(walletId, amount, reason) {
+    async credit(walletId, amount, reason, options) {
       callCount++;
       if (callCount === 2) {
         throw new WalletError("INSUFFICIENT_FUNDS", "simulert feil på vinner 2");
       }
-      credits.push({ walletId, amount });
+      credits.push({ walletId, amount, to: options?.to });
       return {
         id: `wtx-${callCount}`, accountId: walletId, type: "CREDIT",
         amount, reason, createdAt: new Date().toISOString(),
@@ -522,6 +528,9 @@ test("partial-failure: wallet feiler på 2. av 3 vinnere → vinner 1 er allered
   // Vinner 1 har allerede fått wallet.credit og phase_winners-INSERT.
   assert.equal(credits.length, 1, "vinner 1 ble kreditert før feilen");
   assert.equal(credits[0]!.walletId, "w-1");
+  // PR-W2: verifisér at selv vinner-1-kreditten (før feilen) bruker
+  // `to: "winnings"` — regulatorisk invariant må holde på hver enkelt call.
+  assert.equal(credits[0]!.to, "winnings");
   const inserts = queries.filter(
     (q) => q.sql.includes("INSERT INTO") && q.sql.includes("app_game1_phase_winners"),
   );
@@ -692,6 +701,41 @@ test("loyalty-event-shape: alle påkrevde felt satt (userId, hallId, gameId, pat
     assert.equal(ev.roomCode, "room-42");
     assert.equal(ev.gameId, "game-xyz");
     assert.equal(ev.hallId, "hall-north");
+  }
+});
+
+// ── PR-W2 wallet-split: payout credit → winnings-siden ─────────────────────
+
+test("PR-W2: payout-credit sendes eksplisitt med `to: \"winnings\"` for ALLE vinnere (multi + jackpot)", async () => {
+  // Regulatorisk låsing: payout-path må ALDRI defaulte til deposit.
+  // Dette er pengespillforskriften §11 — admin kan ikke kreditere til
+  // winnings, men game-engine MÅ bruke winnings for loss-limit-logikken.
+  // Samme kontrakt for multi-winner + jackpot-kombinasjoner.
+  const { service, wallet } = makeService();
+  const { client } = makeFakeClient();
+
+  await service.payoutPhase(client as never, {
+    scheduledGameId: "g1",
+    phase: 5,
+    drawSequenceAtWin: 45,
+    roomCode: "",
+    totalPhasePrizeCents: 30000,
+    winners: [
+      winner({ assignmentId: "a-1", walletId: "w-1", userId: "u-1" }),
+      winner({ assignmentId: "a-2", walletId: "w-2", userId: "u-2" }),
+      winner({ assignmentId: "a-3", walletId: "w-3", userId: "u-3" }),
+    ],
+    jackpotAmountCentsPerWinner: 100000,
+    phaseName: "Fullt Hus",
+  });
+
+  assert.equal(wallet.credits.length, 3);
+  for (const c of wallet.credits) {
+    assert.equal(
+      c.to,
+      "winnings",
+      "ALLE payout-credits må være `to: \"winnings\"` (pengespillforskriften §11)",
+    );
   }
 });
 

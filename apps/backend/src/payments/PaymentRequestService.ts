@@ -450,8 +450,13 @@ export class PaymentRequestService {
       try {
         const tx =
           kind === "deposit"
-            ? await this.walletAdapter.credit(current.walletId, amountMajor, reason, {
+            ? // PR-W2 wallet-split: manuell innskudd (BIN-586 deposit-kø)
+              // er brukerens egne penger → lander alltid på deposit-siden.
+              // Matcher topUp()-oppførsel (som er hardkodet til deposit i
+              // adapteret). Se WALLET_SPLIT_DESIGN_2026-04-22.md §3.2.
+              await this.walletAdapter.credit(current.walletId, amountMajor, reason, {
                 idempotencyKey,
+                to: "deposit",
               })
             : await this.walletAdapter.debit(current.walletId, amountMajor, reason, {
                 idempotencyKey,

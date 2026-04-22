@@ -207,12 +207,17 @@ export class Game1PayoutService {
 
       if (totalCreditCents > 0) {
         try {
+          // PR-W2 wallet-split: payout er gevinst fra spill → krediter til
+          // winnings-siden (ikke deposit). Game-engine er eneste lovlige
+          // kilde for `to: "winnings"` per pengespillforskriften §11 —
+          // admin-routes har eget forbud mot denne verdien (se adminWallet.ts).
           const tx = await this.wallet.credit(
             winner.walletId,
             centsToKroner(totalCreditCents),
             `Spill 1 ${input.phaseName} — spill ${input.scheduledGameId}`,
             {
               idempotencyKey: `g1-phase-${input.scheduledGameId}-${input.phase}-${winner.assignmentId}`,
+              to: "winnings",
             }
           );
           walletTxId = tx.id;
