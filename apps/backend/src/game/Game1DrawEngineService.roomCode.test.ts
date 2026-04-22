@@ -170,6 +170,85 @@ test("4d.1: getRoomCodeForScheduledGame kaster GAME_NOT_FOUND når rad ikke finn
   );
 });
 
+// ── assignRoomCode (PR 4d.2) ────────────────────────────────────────────────
+
+test("4d.2: assignRoomCode persisterer kolonnen atomisk når NULL", async () => {
+  const { service, queries } = makeService({
+    poolResponses: [
+      { match: (sql) => /^BEGIN/i.test(sql), rows: [] },
+      {
+        match: (sql) =>
+          /SELECT\s+room_code[\s\S]+FOR UPDATE/i.test(sql),
+        rows: [{ room_code: null }],
+      },
+      {
+        match: (sql) => /UPDATE[\s\S]+SET\s+room_code/i.test(sql),
+        rows: [],
+        rowCount: 1,
+      },
+      { match: (sql) => /^COMMIT/i.test(sql), rows: [] },
+    ],
+  });
+
+  const result = await service.assignRoomCode("g1", "ROOM-NEW");
+  assert.equal(result, "ROOM-NEW");
+
+  // Verifiser at både SELECT FOR UPDATE og UPDATE ble kjørt.
+  const updates = queries.filter((q) =>
+    /UPDATE[\s\S]+SET\s+room_code/i.test(q.sql)
+  );
+  assert.equal(updates.length, 1, "én UPDATE ... SET room_code = $2 forventet");
+  assert.deepEqual(updates[0]!.params, ["g1", "ROOM-NEW"]);
+});
+
+test("4d.2: assignRoomCode returnerer eksisterende kode ved race (ikke overskriver)", async () => {
+  const { service, queries } = makeService({
+    poolResponses: [
+      { match: (sql) => /^BEGIN/i.test(sql), rows: [] },
+      {
+        match: (sql) =>
+          /SELECT\s+room_code[\s\S]+FOR UPDATE/i.test(sql),
+        rows: [{ room_code: "ROOM-WINNER" }],
+      },
+      { match: (sql) => /^COMMIT/i.test(sql), rows: [] },
+    ],
+  });
+
+  const result = await service.assignRoomCode("g1", "ROOM-LOSER");
+  assert.equal(result, "ROOM-WINNER", "vinneren beholdes");
+
+  // Ingen UPDATE skal ha skjedd.
+  const updates = queries.filter((q) =>
+    /UPDATE[\s\S]+SET\s+room_code/i.test(q.sql)
+  );
+  assert.equal(updates.length, 0, "ingen UPDATE når kolonnen allerede er satt");
+});
+
+test("4d.2: assignRoomCode kaster GAME_NOT_FOUND når scheduled_game ikke finnes", async () => {
+  const { service } = makeService({
+    poolResponses: [
+      { match: (sql) => /^BEGIN/i.test(sql), rows: [] },
+      {
+        match: (sql) =>
+          /SELECT\s+room_code[\s\S]+FOR UPDATE/i.test(sql),
+        rows: [],
+      },
+      { match: (sql) => /^ROLLBACK/i.test(sql), rows: [] },
+    ],
+  });
+
+  await assert.rejects(
+    () => service.assignRoomCode("ukjent", "ROOM-X"),
+    (err: unknown) => {
+      assert.ok(err instanceof DomainError);
+      assert.equal((err as DomainError).code, "GAME_NOT_FOUND");
+      return true;
+    }
+  );
+});
+
+// ── Tilbake til resten av 4d.1-testene ──────────────────────────────────────
+
 test("4d.1: getRoomCodeForScheduledGame sender scheduledGameId som parameter", async () => {
   const { service, queries } = makeService({
     poolResponses: [

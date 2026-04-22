@@ -765,6 +765,53 @@ export class Game1DrawEngineService {
     return row.room_code;
   }
 
+  /**
+   * PR 4d.2: Persister `room_code`-tildeling for en schedulert økt atomisk.
+   *
+   * Race-sikring: FOR UPDATE-lås hindrer at to samtidige `joinScheduled`-
+   * handlere begge skriver hver sin room_code. Første vinner, andre får
+   * returnert vinnerens kode slik at caller kan destroy sitt BingoEngine-
+   * rom og `joinRoom` inn i det faktiske.
+   *
+   * Unique-constraint `idx_app_game1_scheduled_games_room_code` (PR 4d.1)
+   * fanger også kollisjon på tvers av scheduled_games (~0% sjanse med
+   * `makeRoomCode`-alfabet, men cheap safety-net).
+   *
+   * Returverdi: faktisk `room_code` i DB etter commit. Hvis satt før kallet
+   * ble dette det, ellers `roomCode`-parameteren. Kaster
+   * `DomainError("GAME_NOT_FOUND")` når `scheduledGameId` ikke finnes.
+   */
+  async assignRoomCode(
+    scheduledGameId: string,
+    roomCode: string
+  ): Promise<string> {
+    return this.runInTransaction(async (client) => {
+      const { rows } = await client.query<{ room_code: string | null }>(
+        `SELECT room_code
+           FROM ${this.scheduledGamesTable()}
+          WHERE id = $1
+          FOR UPDATE`,
+        [scheduledGameId]
+      );
+      const row = rows[0];
+      if (!row) {
+        throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke.");
+      }
+      if (row.room_code !== null) {
+        // Annen request vant racen. Returner eksisterende kode uten UPDATE.
+        return row.room_code;
+      }
+      await client.query(
+        `UPDATE ${this.scheduledGamesTable()}
+            SET room_code  = $2,
+                updated_at = now()
+          WHERE id = $1 AND room_code IS NULL`,
+        [scheduledGameId, roomCode]
+      );
+      return roomCode;
+    });
+  }
+
   private async loadGameState(
     client: PoolClient,
     scheduledGameId: string
