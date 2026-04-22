@@ -5,6 +5,7 @@ import type {
   CreateWalletAccountInput,
   CreditOptions,
   TransactionOptions,
+  TransferOptions,
   WalletAccount,
   WalletAccountSide,
   WalletAdapter,
@@ -277,7 +278,7 @@ export class FileWalletAdapter implements WalletAdapter {
     toAccountId: string,
     amount: number,
     reason = "Wallet transfer",
-    _options?: TransactionOptions
+    options?: TransferOptions
   ): Promise<WalletTransferResult> {
     return this.withLock(async () => {
       await this.load();
@@ -306,8 +307,17 @@ export class FileWalletAdapter implements WalletAdapter {
       from.winningsBalance -= fromSplit.fromWinnings;
       from.updatedAt = new Date().toISOString();
 
-      const toSplit: WalletTransactionSplit = { fromDeposit: amount, fromWinnings: 0 };
-      to.depositBalance += amount;
+      // PR-W3: CREDIT-siden bruker `targetSide` (default deposit).
+      const targetSide: WalletAccountSide = options?.targetSide ?? "deposit";
+      const toSplit: WalletTransactionSplit =
+        targetSide === "winnings"
+          ? { fromDeposit: 0, fromWinnings: amount }
+          : { fromDeposit: amount, fromWinnings: 0 };
+      if (targetSide === "winnings") {
+        to.winningsBalance += amount;
+      } else {
+        to.depositBalance += amount;
+      }
       to.updatedAt = new Date().toISOString();
 
       const fromTx = this.recordTx(from.id, "TRANSFER_OUT", amount, reason, to.id, fromSplit);

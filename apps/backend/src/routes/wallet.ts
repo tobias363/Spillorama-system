@@ -347,6 +347,24 @@ export function createWalletRouter(deps: WalletRouterDeps): express.Router {
       const toWalletId = mustBeNonEmptyString(req.body?.toWalletId, "toWalletId");
       const amount = mustBePositiveAmount(req.body?.amount);
       const reason = typeof req.body?.reason === "string" ? req.body.reason : "Wallet transfer";
+      // PR-W3 regulatorisk gate: denne generiske transfer-endepunktet (ikke
+      // admin, men brukt via UI/API) skal ALDRI kunne lande beløp på
+      // winnings-siden. Eneste lovlige kilde for targetSide='winnings' er
+      // game-engine (BingoEngine/Game2/Game3 payout-path), som ikke går
+      // gjennom HTTP-routeren. Vi leser IKKE targetSide fra body i det hele
+      // tatt — hard-lock til default (deposit). Eksplisitt 403 hvis noen
+      // sender det, for å matche W2 admin-credit-gate.
+      if (req.body?.targetSide === "winnings") {
+        res.status(403).json({
+          ok: false,
+          error: {
+            code: "ADMIN_WINNINGS_TRANSFER_FORBIDDEN",
+            message:
+              "Transfer til winnings-siden er kun tillatt fra game-engine (pengespillforskriften §11). Bruk default (deposit) eller fjern targetSide-feltet.",
+          },
+        });
+        return;
+      }
       const transfer = await walletAdapter.transfer(fromWalletId, toWalletId, amount, reason);
       await emitWalletRoomUpdates([fromWalletId, toWalletId]);
       apiSuccess(res, transfer);

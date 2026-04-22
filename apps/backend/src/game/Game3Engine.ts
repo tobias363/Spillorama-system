@@ -500,12 +500,13 @@ export class Game3Engine extends BingoEngine {
       });
       return 0;
     }
+    // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
     const transfer = await this.walletAdapter.transfer(
       houseAccountId,
       player.walletId,
       payout,
       label,
-      { idempotencyKey },
+      { idempotencyKey, targetSide: "winnings" },
     );
     player.balance = roundCurrency(player.balance + payout);
     game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));

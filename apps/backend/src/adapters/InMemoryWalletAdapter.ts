@@ -3,6 +3,7 @@ import type {
   CreateWalletAccountInput,
   CreditOptions,
   TransactionOptions,
+  TransferOptions,
   WalletAccount,
   WalletAccountSide,
   WalletAdapter,
@@ -189,8 +190,29 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     toAccountId: string,
     amount: number,
     reason = "Wallet transfer",
-    _options?: TransactionOptions
+    options?: TransferOptions
   ): Promise<WalletTransferResult> {
+    const existing = this.findByIdempotencyKey(options?.idempotencyKey);
+    if (existing) {
+      // Returner et dummy-par for idempotens. I praksis vil caller pricesjekke
+      // på fromTx.id fremfor at vi rekonstruerer toTx fra bare én lookup.
+      // Enkel tilnærming: finn motparten i ledger via createdAt-nærhet.
+      const partner = this.ledger.find(
+        (tx) =>
+          tx.id !== existing.id &&
+          ((existing.type === "TRANSFER_OUT" && tx.type === "TRANSFER_IN") ||
+            (existing.type === "TRANSFER_IN" && tx.type === "TRANSFER_OUT")) &&
+          tx.relatedAccountId === existing.accountId &&
+          tx.amount === existing.amount &&
+          tx.createdAt === existing.createdAt
+      );
+      if (partner) {
+        const fromTx = existing.type === "TRANSFER_OUT" ? existing : partner;
+        const toTx = existing.type === "TRANSFER_IN" ? existing : partner;
+        return { fromTx: { ...fromTx }, toTx: { ...toTx } };
+      }
+    }
+
     const fromId = this.assertAccountId(fromAccountId);
     const toId = this.assertAccountId(toAccountId);
     if (fromId === toId) {
@@ -206,22 +228,30 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     }
 
     // PR-W1: transfer følger samme winnings-first-policy som debit på avsender-
-    // side, og krediterer deposit-siden på mottaker-side. Dette matcher den
-    // konservative default — callers som trenger winnings-payout skal bruke
-    // `credit(..., { to: "winnings" })` (game-engine) i stedet for transfer.
+    // side. PR-W3: CREDIT-side bruker `targetSide` (default deposit). InMemory-
+    // adapter har ikke system-konto-markering — hvis det var viktig i prod,
+    // måtte det dekkes i Postgres-adapter i stedet.
     const fromSplit = this.splitDebit(from, amount);
     from.depositBalance -= fromSplit.fromDeposit;
     from.winningsBalance -= fromSplit.fromWinnings;
     from.updatedAt = new Date().toISOString();
 
-    const toSplit: WalletTransactionSplit = { fromDeposit: amount, fromWinnings: 0 };
-    to.depositBalance += amount;
+    const targetSide: WalletAccountSide = options?.targetSide ?? "deposit";
+    const toSplit: WalletTransactionSplit =
+      targetSide === "winnings"
+        ? { fromDeposit: 0, fromWinnings: amount }
+        : { fromDeposit: amount, fromWinnings: 0 };
+    if (targetSide === "winnings") {
+      to.winningsBalance += amount;
+    } else {
+      to.depositBalance += amount;
+    }
     to.updatedAt = new Date().toISOString();
 
     this.accounts.set(from.id, from);
     this.accounts.set(to.id, to);
 
-    const fromTx = this.recordTx(from.id, "TRANSFER_OUT", amount, reason, to.id, undefined, fromSplit);
+    const fromTx = this.recordTx(from.id, "TRANSFER_OUT", amount, reason, to.id, options?.idempotencyKey, fromSplit);
     const toTx = this.recordTx(to.id, "TRANSFER_IN", amount, reason, from.id, undefined, toSplit);
     return { fromTx, toTx };
   }
