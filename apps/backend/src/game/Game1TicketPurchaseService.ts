@@ -411,11 +411,16 @@ export class Game1TicketPurchaseService {
       try {
         const buyer = await this.platform.getUserById(purchase.buyerUserId);
         const amountNok = centsToAmount(purchase.totalAmountCents);
+        // PR-W2 wallet-split: refund går tilbake til deposit-siden
+        // (ikke winnings). Kjøp trekkes winnings-first i debit-flyten,
+        // men refund av avbestilt kjøp anses som re-innskudd og skal
+        // telle mot loss-limit på vanlig måte — derfor `to: "deposit"`.
+        // Se WALLET_SPLIT_DESIGN_2026-04-22.md §3.2.
         const walletTx = await this.wallet.credit(
           buyer.walletId,
           amountNok,
           `game1_refund:${purchase.id}`,
-          { idempotencyKey: `game1-refund:${purchase.id}:credit` }
+          { idempotencyKey: `game1-refund:${purchase.id}:credit`, to: "deposit" }
         );
         refundTransactionId = walletTx.id;
       } catch (err) {

@@ -721,6 +721,11 @@ test("refundPurchase() digital_wallet: wallet.credit + refund-felter settes", as
   // Etter refund: wallet kreditert med 40 NOK (4000 cents).
   const after = await wallet.getBalance("wallet-p1");
   assert.equal(after - before, 40);
+  // PR-W2 wallet-split: refund skal lande på deposit-siden (ikke winnings).
+  // Sjekk at HELE beløpet er på deposit og INGENTING på winnings.
+  const balances = await wallet.getBothBalances("wallet-p1");
+  assert.equal(balances.deposit - (before /* seeded */), 40, "refund treffer deposit-siden");
+  assert.equal(balances.winnings, 0, "refund må ALDRI lande på winnings");
   await new Promise((r) => setTimeout(r, 5));
   const events = await audit.list();
   assert.ok(

@@ -664,6 +664,8 @@ export class Game1MiniGameOrchestrator {
     payoutCents: number,
   ): Promise<void> {
     const amountKroner = payoutCents / 100;
+    // PR-W2 wallet-split: mini-game-payout er gevinst fra spill → krediter
+    // til winnings-siden. Samme regel som Game1PayoutService.payoutPhase.
     await this.walletAdapter.credit(
       context.winnerWalletId,
       amountKroner,

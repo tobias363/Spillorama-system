@@ -70,6 +70,7 @@ import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createWalletRouter } from "./routes/wallet.js";
+import { createAdminWalletRouter } from "./routes/adminWallet.js";
 import { createPaymentsRouter } from "./routes/payments.js";
 import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
 import { createPlayersRouter } from "./routes/players.js";
@@ -1591,6 +1592,9 @@ app.use(createAdminRouter({
 }));
 
 app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPayService, emitWalletRoomUpdates }));
+// PR-W2 wallet-split: admin-correction-endepunkt med regulatorisk gate
+// mot winnings-kredit (pengespillforskriften §11).
+app.use(createAdminWalletRouter({ platformService, walletAdapter, emitWalletRoomUpdates }));
 app.use(createPaymentsRouter({
   platformService,
   swedbankPayService,
