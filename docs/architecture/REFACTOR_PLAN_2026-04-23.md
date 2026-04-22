@@ -31,16 +31,39 @@ Etter 62 PR-er landet i løpet av Bølge 2-7 (#313-#376) er pilot-funksjonalitet
 
 ## PM-beslutninger
 
-### P1.1 Spill 1 pattern-evaluator: in-memory vs schedule — hvem vinner?
+### P1.1 Spill 1 engine-arkitektur — AVKLART (Scenario C+)
 
-**Bakgrunn:**
-- `BingoEngine.evaluateActivePhase` + `meetsPhaseRequirement` (L1013, L1276) er in-memory-sporet
-- `Game1DrawEngineService.evaluateAndPayoutPhase` + `Game1PatternEvaluator.evaluatePhase` er schedule-sporet
-- Begge aktive i prod i dag
+**Avklaring etter kode-research + PM-dialog 2026-04-23:**
 
-**Spørsmål til Tobias:** er alle Spill 1-spill nå schedule-basert i prod? Eller finnes det fortsatt in-memory-rom?
+Det er IKKE to parallelle draw-engines for samme spill. Rolledelingen er:
 
-**Status:** ⏸ ÅPEN — trenger PM-svar før PR-C1 kan starte
+- **`Game1DrawEngineService`** er den autoritative live-engine for Spill 1:
+  - Eier draw-bag (pre-shuffled i `app_game1_game_state.draw_bag_json`)
+  - Draw-sekvens + pattern-evaluering (via `Game1PatternEvaluator`)
+  - State-maskin `running → completed`
+  - Payout-orkestrering (`Game1PayoutService`)
+  - Mini-game-trigger
+
+- **`BingoEngine.Room`** er KUN "player-registry + snapshot-broadcast" for schedulerte Spill 1:
+  - `createRoom/joinRoom` holder player-listen (socket-id-mapping)
+  - `getRoomSnapshot` leverer UI-state til klient
+  - `BingoEngine.startGame/drawNextNumber/evaluateActivePhase` kalles **ALDRI** for scheduled Spill 1
+
+- **Spill 2 / Spill 3** (`Game2Engine extends BingoEngine`, `Game3Engine extends BingoEngine`) bruker fortsatt host-player-room-modellen:
+  - Ad-hoc lobbies (ingen scheduled_games-tabell)
+  - BingoEngine.startGame/drawNextNumber/evaluateActivePhase ER kritisk API for disse
+  - **PM-beslutning 2026-04-23: Spill 2/3 forblir host-room — ingen forhåndskjøp**
+
+**Refaktor-konklusjon (Scenario C+):**
+
+Behold teknisk arkitektur som er, men rydd ansvarslinjer:
+
+- **PR-C1 (modifisert)**: Behold `BingoEngine.evaluateActivePhase/meetsPhaseRequirement` — brukes av Spill 2/3. **IKKE slett.**
+- **PR-C1b (NY)**: Wire `BingoEngine.destroyRoom()` til å kalles når `app_game1_scheduled_games.status='completed'` → fikser memory-leak.
+- **PR-C4**: Bekreft/fiks socket-broadcast av trekning til spiller-default-namespace fra `Game1DrawEngineService.drawNext()`. Research fant broadcast til `/admin-game1`-namespace, men usikkert om spiller-klient får oppdatering.
+- **PR-C5 (NY)**: Arkitektur-doc som tydelig forklarer rolledelingen ("BingoEngine.Room = player-registry for Spill 1, live-engine for Spill 2/3").
+
+**Status:** ✅ AVKLART, refaktor-arbeid initiert
 
 ---
 
@@ -103,16 +126,22 @@ Det finnes to adskilte "legacy"-kategorier:
 
 ---
 
-### P1.3 Dev-artifacts vs prod-kode
+### P1.3 Dev-artifacts vs prod-kode — AVKLART
 
-**Bakgrunn:**
-- `apps/backend/src/adapters/FileWalletAdapter.ts` (341 LOC) — er dette dev-only eller prod?
-- `autoClaimPhaseMode` på variantConfig — permanent på, eller aktiv feature-switch?
-- Andre mulige dev-artefakter: `MockPatternSeeder`, test-only endepunkter aktivert i prod?
+**PM-avgjørelse (Tobias 2026-04-23):** PM kan ta beslutningen direkte.
 
-**Spørsmål til Tobias:** vil du at jeg sjekker hver kandidat og foreslår sletting/beholde før vi begynner?
+**Beslutning P1.3a — `FileWalletAdapter.ts` (341 LOC): BEHOLD**
+- Aktiv i `.env.example` som default (`WALLET_PROVIDER=file`)
+- `createWalletAdapter.ts` L38 faller tilbake til "file" hvis env-var ikke satt
+- Brukes som dev/demo-standard — sletting brekker dev-setup
+- Lav-prio forbedring: endre default til `memory` i `.env.example` (post-pilot)
 
-**Status:** ⏸ ÅPEN — trenger PM-svar eller delegert avklaring
+**Beslutning P1.3b — `autoClaimPhaseMode`: BEHOLD som aktiv bryter**
+- `DEFAULT_STANDARD_CONFIG.autoClaimPhaseMode = undefined` — default AV
+- 4+ test-filer setter eksplisitt `true` for å enable
+- Brukes bevisst per variant-type — ikke dødkode
+
+**Status:** ✅ AVKLART — ingen refaktor-handling nødvendig
 
 ---
 
