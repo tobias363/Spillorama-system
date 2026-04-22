@@ -43,9 +43,23 @@ export function renderWalletListPage(container: HTMLElement): void {
     tableHost.textContent = t("loading_ellipsis");
     try {
       const wallets = await listWallets();
+      // PR-W4 wallet-split: list viser egne kolonner for deposit og winnings.
+      // `balance` (total) beholdes for kompatibilitet + sum-validering.
       DataTable.mount<WalletAccount>(tableHost, {
         columns: [
           { key: "id", title: t("transaction_id"), render: (r) => escapeHtml(r.id) },
+          {
+            key: "depositBalance",
+            title: t("wallet_deposit_label"),
+            align: "right",
+            render: (r) => formatAmountCents(r.depositBalance ?? r.balance),
+          },
+          {
+            key: "winningsBalance",
+            title: t("wallet_winnings_label"),
+            align: "right",
+            render: (r) => formatAmountCents(r.winningsBalance ?? 0),
+          },
           {
             key: "balance",
             title: t("balance"),

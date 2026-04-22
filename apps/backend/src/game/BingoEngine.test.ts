@@ -5,8 +5,11 @@ import type { BingoSystemAdapter, CheckpointInput, CreateTicketInput } from "../
 import {
   type CreateWalletAccountInput,
   type WalletAccount,
+  type WalletAccountSide,
   type WalletAdapter,
   type WalletTransaction,
+  type WalletTransactionSplit,
+  type TransferOptions,
   WalletError,
   type WalletTransferResult
 } from "../adapters/WalletAdapter.js";
@@ -113,11 +116,36 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     fromAccountId: string,
     toAccountId: string,
     amount: number,
-    reason = "Transfer"
+    reason = "Transfer",
+    options?: TransferOptions
   ): Promise<WalletTransferResult> {
     const normalizedAmount = Math.abs(amount);
-    const fromTx = await this.adjustBalance(fromAccountId, -normalizedAmount, "TRANSFER_OUT", reason, toAccountId);
-    const toTx = await this.adjustBalance(toAccountId, normalizedAmount, "TRANSFER_IN", reason, fromAccountId);
+    // PR-W4: winnings-first debit-split på avsender (som Postgres/InMemory-
+    // adapter ellers gjør). Vi beregner split FØR adjustBalance slik at
+    // TRANSFER_OUT får korrekt split-metadata — viktig for loss-limit-fix.
+    const fromAccount = await this.ensureAccount(fromAccountId.trim());
+    const fromSplit = this.splitDebit(fromAccount, normalizedAmount);
+    const fromTx = await this.adjustBalance(
+      fromAccountId,
+      -normalizedAmount,
+      "TRANSFER_OUT",
+      reason,
+      toAccountId,
+      { fromDeposit: fromSplit.fromDeposit, fromWinnings: fromSplit.fromWinnings },
+      options?.targetSide
+    );
+    const toTx = await this.adjustBalance(
+      toAccountId,
+      normalizedAmount,
+      "TRANSFER_IN",
+      reason,
+      fromAccountId,
+      // Mottaker-side: bruk targetSide (default deposit — W3-semantikk).
+      options?.targetSide === "winnings"
+        ? { fromDeposit: 0, fromWinnings: normalizedAmount }
+        : { fromDeposit: normalizedAmount, fromWinnings: 0 },
+      options?.targetSide
+    );
     return { fromTx, toTx };
   }
 
@@ -128,12 +156,25 @@ export class InMemoryWalletAdapter implements WalletAdapter {
       .map((tx) => ({ ...tx }));
   }
 
+  /**
+   * PR-W4: winnings-first-split for debit/transfer-avsender. Matcher
+   * PostgresWalletAdapter-semantikken. Brukes for å fylle `WalletTransaction.split`
+   * så loss-limit-logikken i BingoEngine kan identifisere deposit-delen.
+   */
+  private splitDebit(account: WalletAccount, amount: number): WalletTransactionSplit {
+    const fromWinnings = Math.min(account.winningsBalance ?? 0, amount);
+    const fromDeposit = amount - fromWinnings;
+    return { fromWinnings, fromDeposit };
+  }
+
   private async adjustBalance(
     accountId: string,
     delta: number,
     type: WalletTransaction["type"],
     reason: string,
-    relatedAccountId?: string
+    relatedAccountId?: string,
+    split?: WalletTransactionSplit,
+    targetSide?: WalletAccountSide
   ): Promise<WalletTransaction> {
     const normalizedAccountId = accountId.trim();
     if (!normalizedAccountId) {
@@ -149,11 +190,32 @@ export class InMemoryWalletAdapter implements WalletAdapter {
       throw new WalletError("INSUFFICIENT_FUNDS", "Ikke nok saldo.");
     }
 
+    // PR-W4: oppdater deposit/winnings-kolonner korrekt slik at split-aware tester
+    // kan verifisere post-kjøps-saldo. `delta < 0` er en debit/transfer-out —
+    // trekk split fra deposit/winnings. `delta > 0` er credit/transfer-in —
+    // målkonto via targetSide (default deposit).
+    let nextDeposit = account.depositBalance ?? nextBalance;
+    let nextWinnings = account.winningsBalance ?? 0;
+    if (delta < 0 && split) {
+      nextDeposit = Math.max(0, nextDeposit - split.fromDeposit);
+      nextWinnings = Math.max(0, nextWinnings - split.fromWinnings);
+    } else if (delta > 0) {
+      const absDelta = Math.abs(delta);
+      if (targetSide === "winnings") {
+        nextWinnings += absDelta;
+      } else {
+        nextDeposit += absDelta;
+      }
+    } else if (delta < 0) {
+      // Debit uten split (legacy-path) — trekk alt fra deposit for bakoverkompat.
+      nextDeposit = Math.max(0, nextDeposit + delta);
+    }
+
     const updated: WalletAccount = {
       ...account,
-      balance: nextBalance,
-      depositBalance: nextBalance,
-      winningsBalance: 0,
+      balance: nextDeposit + nextWinnings,
+      depositBalance: nextDeposit,
+      winningsBalance: nextWinnings,
       updatedAt: new Date().toISOString()
     };
     this.accounts.set(normalizedAccountId, updated);
@@ -165,7 +227,8 @@ export class InMemoryWalletAdapter implements WalletAdapter {
       amount: Math.abs(delta),
       reason,
       createdAt: new Date().toISOString(),
-      relatedAccountId
+      relatedAccountId,
+      split
     };
     this.transactions.push(tx);
     return { ...tx };

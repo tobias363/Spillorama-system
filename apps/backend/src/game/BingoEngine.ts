@@ -63,6 +63,45 @@ import type {
   PlayerComplianceSnapshot,
   GameplayBlockType
 } from "./ComplianceManager.js";
+import type { WalletTransaction } from "../adapters/WalletAdapter.js";
+
+/**
+ * PR-W4 wallet-split: returnerer beløpet som skal telles mot tapsgrense for et
+ * buy-in-trekk (`compliance.recordLossEntry({type:"BUYIN", amount})`).
+ *
+ * **Regulatorisk regel (pengespillforskriften §11):** kun deposit-delen av et
+ * kjøp skal telle som tap. Gevinst-konto-bruk skal IKKE øke netto-tap — ellers
+ * ville vi straffet spilleren for å spille med eksisterende gevinster.
+ *
+ * **Fail-closed-fallback:** hvis `split` mangler (TRANSFER_OUT-tx fra legacy
+ * adapter før W1, eller test-mock som ikke populerer split), bruker vi `total`
+ * som amount. Dette bevarer eksisterende semantikk (alt teller som tap) så
+ * ingen tester brekker, og nye entries fra split-aware adaptere bruker riktig
+ * deposit-del. Design-dok § 3.4 + § 9.3.
+ *
+ * @param fromTx TRANSFER_OUT-transaksjonen fra wallet.transfer — har `split`
+ *   populert av split-aware adaptere (PostgresWalletAdapter post-W1,
+ *   InMemoryWalletAdapter post-W1).
+ * @param total Full beløpet som ble trukket — fallback hvis split mangler.
+ * @returns Beløpet i kroner som skal telle mot loss-limit. Alltid ≥ 0.
+ */
+export function lossLimitAmountFromTransfer(
+  fromTx: WalletTransaction,
+  total: number,
+): number {
+  const split = fromTx.split;
+  if (!split) {
+    // Legacy/test-path uten split — bevar gammel oppførsel (alt er deposit).
+    logger.debug(
+      { txId: fromTx.id, total },
+      "[PR-W4] wallet-tx mangler split — bruker full beløp som loss-amount (fallback)",
+    );
+    return total;
+  }
+  // split.fromDeposit er i kroner (per WalletTransactionSplit-kontrakt).
+  const fromDeposit = Number.isFinite(split.fromDeposit) ? split.fromDeposit : 0;
+  return Math.max(0, roundCurrency(fromDeposit));
+}
 import { PrizePolicyManager } from "./PrizePolicyManager.js";
 import type { PrizeGameType, PrizePolicySnapshot, PrizePolicyVersion, ExtraPrizeEntry, ExtraDrawDenialAudit } from "./PrizePolicyManager.js";
 import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
@@ -648,9 +687,13 @@ export class BingoEngine {
           );
           debitedPlayers.push({ player, fromAccountId: transfer.fromTx.accountId, toAccountId: transfer.toTx.accountId, amount: playerBuyIn });
           player.balance -= playerBuyIn;
+          // PR-W4 wallet-split: kun deposit-delen av buy-in teller mot loss-limit
+          // (pengespillforskriften §11). Winnings-bruk skal IKKE øke netto-tap.
+          // Fallback til full beløp hvis split mangler (legacy entries før W1).
+          const buyInLossAmount = lossLimitAmountFromTransfer(transfer.fromTx, playerBuyIn);
           await this.compliance.recordLossEntry(player.walletId, room.hallId, {
             type: "BUYIN",
-            amount: playerBuyIn,
+            amount: buyInLossAmount,
             createdAtMs: nowMs
           });
           await this.compliance.incrementSessionGameCount(player.walletId);
@@ -1996,7 +2039,7 @@ export class BingoEngine {
     const channel: LedgerChannel = "INTERNET";
     const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
     await this.walletAdapter.ensureAccount(houseAccountId);
-    await this.walletAdapter.transfer(
+    const replaceTransfer = await this.walletAdapter.transfer(
       player.walletId,
       houseAccountId,
       debit,
@@ -2004,9 +2047,13 @@ export class BingoEngine {
       { idempotencyKey },
     );
     player.balance -= debit;
+    // PR-W4 wallet-split: kun deposit-delen av ticket-replace-kjøpet teller mot
+    // loss-limit. Samme regel som buy-in (pengespillforskriften §11). Fallback
+    // til full beløp hvis split mangler.
+    const replaceLossAmount = lossLimitAmountFromTransfer(replaceTransfer.fromTx, debit);
     await this.compliance.recordLossEntry(player.walletId, room.hallId, {
       type: "BUYIN",
-      amount: debit,
+      amount: replaceLossAmount,
       createdAtMs: nowMs,
     });
     await this.ledger.recordComplianceLedgerEvent({

@@ -161,3 +161,156 @@ describe("WalletViewPage", () => {
     expect(api).not.toHaveBeenCalled();
   });
 });
+
+// PR-W4 wallet-split: header-UI rendrer deposit + winnings separat.
+describe("WalletViewPage — PR-W4 split-header", () => {
+  it("rendrer deposit + winnings som separate linjer med ARIA-labels", async () => {
+    window.location.hash = "#/wallet/view?id=w-split";
+    mockApiRouter([
+      {
+        match: /\/api\/wallets\/w-split$/,
+        handler: () => ({
+          account: {
+            id: "w-split",
+            balance: 150000,
+            depositBalance: 50000,
+            winningsBalance: 100000,
+            createdAt: "2026-04-22T00:00:00Z",
+            updatedAt: "2026-04-22T00:00:00Z",
+          },
+          transactions: [],
+        }),
+      },
+    ]);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    mountWalletRoute(root, "/wallet/view");
+    await tick();
+
+    // 500 kr (deposit) + 1000 kr (winnings) + 1500 kr (total)
+    const depositNode = root.querySelector(".wallet-deposit");
+    const winningsNode = root.querySelector(".wallet-winnings");
+    const totalNode = root.querySelector(".wallet-total");
+
+    expect(depositNode).toBeTruthy();
+    expect(winningsNode).toBeTruthy();
+    expect(totalNode).toBeTruthy();
+
+    // ARIA-label for skjermleser-tilgjengelighet
+    expect(depositNode!.getAttribute("aria-label")).toMatch(/innskudd/i);
+    expect(winningsNode!.getAttribute("aria-label")).toMatch(/gevinst/i);
+    expect(totalNode!.getAttribute("aria-label")).toMatch(/total/i);
+
+    // Verdier riktig format (formatAmountCents deler på 100)
+    expect(depositNode!.textContent).toContain("500.00");
+    expect(winningsNode!.textContent).toContain("1000.00");
+    expect(totalNode!.textContent).toContain("1500.00");
+  });
+
+  it("bakoverkompat: account uten split-felter viser kun total balance", async () => {
+    window.location.hash = "#/wallet/view?id=w-legacy";
+    mockApiRouter([
+      {
+        match: /\/api\/wallets\/w-legacy$/,
+        handler: () => ({
+          account: {
+            id: "w-legacy",
+            balance: 100000,
+            // ingen depositBalance / winningsBalance — legacy response
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+          },
+          transactions: [],
+        }),
+      },
+    ]);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    mountWalletRoute(root, "/wallet/view");
+    await tick();
+
+    // Split-felter ikke rendret
+    expect(root.querySelector(".wallet-deposit")).toBeNull();
+    expect(root.querySelector(".wallet-winnings")).toBeNull();
+    // Fortsatt en total balance synlig
+    expect(root.textContent).toContain("1000.00");
+  });
+
+  it("transaksjons-tabell viser split-fordeling for DEBIT med winnings+deposit", async () => {
+    window.location.hash = "#/wallet/view?id=w-tx";
+    mockApiRouter([
+      {
+        match: /\/api\/wallets\/w-tx$/,
+        handler: () => ({
+          account: {
+            id: "w-tx",
+            balance: 0,
+            depositBalance: 0,
+            winningsBalance: 0,
+            createdAt: "2026-04-22T00:00:00Z",
+            updatedAt: "2026-04-22T00:00:00Z",
+          },
+          transactions: [
+            {
+              id: "tx-split",
+              accountId: "w-tx",
+              type: "TRANSFER_OUT",
+              amount: 15000, // 150 kr
+              reason: "Bingo buy-in",
+              createdAt: "2026-04-22T10:00:00Z",
+              split: { fromDeposit: 10000, fromWinnings: 5000 }, // 100 kr + 50 kr
+            },
+            {
+              id: "tx-legacy",
+              accountId: "w-tx",
+              type: "TOPUP",
+              amount: 10000,
+              reason: "Legacy top-up",
+              createdAt: "2026-04-22T09:00:00Z",
+              // ingen split-felt
+            },
+          ],
+        }),
+      },
+    ]);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    mountWalletRoute(root, "/wallet/view");
+    await tick();
+
+    // TRANSFER_OUT med split skal vise begge deler
+    expect(root.textContent).toMatch(/100\.00.*innskudd/i);
+    expect(root.textContent).toMatch(/50\.00.*gevinst/i);
+  });
+});
+
+// PR-W4: WalletListPage viser deposit + winnings som separate kolonner.
+describe("WalletListPage — PR-W4 split-kolonner", () => {
+  it("rendrer Deposit + Winnings + Balance som separate kolonner", async () => {
+    mockApiRouter([
+      {
+        match: /\/api\/wallets$/,
+        handler: () => [
+          {
+            id: "w1",
+            balance: 75000,
+            depositBalance: 50000,
+            winningsBalance: 25000,
+            createdAt: "2026-04-22T00:00:00Z",
+            updatedAt: "2026-04-22T00:00:00Z",
+          },
+        ],
+      },
+    ]);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    mountWalletRoute(root, "/wallet");
+    await tick();
+
+    const text = root.textContent ?? "";
+    // 500.00 = deposit, 250.00 = winnings, 750.00 = balance
+    expect(text).toContain("500.00");
+    expect(text).toContain("250.00");
+    expect(text).toContain("750.00");
+  });
+});
