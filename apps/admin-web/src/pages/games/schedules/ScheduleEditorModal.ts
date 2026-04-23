@@ -1,16 +1,20 @@
 // BIN-625: Schedule create/edit modal.
 //
 // Kjerne-felter (scheduleName, scheduleType, luckyNumberPrize, manualStart/End,
-// subGames[]). subGames serialiseres som JSON-array inntil den fulle
-// nested builderen (legacy create.html = 5 382L) portes som follow-up.
+// subGames[]). subGames redigeres som strukturert rad-liste
+// (SubGamesListEditor) som default — power-brukere kan fortsatt hoppe til
+// rå JSON-textarea via "Vis JSON"-toggle. Begge moder serialiserer til
+// samme shape før POST, så backend-kontrakten er uendret.
 //
 // Feil fra backend (INVALID_INPUT, FORBIDDEN, NOT_FOUND) overflates via
 // ApiError.message.
 //
-// PR 4e.2 (2026-04-22): lagt til "Eksempel"-knapp som fyller inn minimal
-// JSON-skjema for subGames + "Valider JSON"-knapp som kjører JSON.parse
-// og viser feil/OK-indikator inline. Full strukturert subgames-editor er
-// post-pilot scope (legacy create.html = 5 382L).
+// PR 4e.2 (2026-04-22): lagt til "Eksempel"-knapp og "Valider JSON"-knapp
+// som hjelp for JSON-fallback-modus.
+//
+// Fix/schedule-structured-subgames (2026-04-23): bytt default fra rå JSON-
+// textarea til strukturert rad-liste. "Vis JSON"-toggle beholder fallback
+// for power-brukere.
 
 import { Modal, type ModalInstance } from "../../../components/Modal.js";
 import { Toast } from "../../../components/Toast.js";
@@ -26,6 +30,10 @@ import {
   type ScheduleType,
   type ScheduleStatus,
 } from "./ScheduleState.js";
+import {
+  mountSubGamesListEditor,
+  type SubGamesListEditorHandle,
+} from "./SubGamesListEditor.js";
 
 export interface OpenScheduleEditorModalOptions {
   mode: "create" | "edit";
@@ -107,7 +115,84 @@ export async function openScheduleEditorModal(
   const body = document.createElement("div");
   body.innerHTML = renderForm(existing);
 
-  // PR 4e.2: event-handlers for subGames JSON-hjelpe-knapper.
+  const initialSubGames: ScheduleSubgame[] = existing?.subGames ?? [];
+
+  // Mount strukturert liste-editor i #sch-subgames-list.
+  const listHost = body.querySelector<HTMLElement>("#sch-subgames-list");
+  let listHandle: SubGamesListEditorHandle | null = null;
+  if (listHost) {
+    listHandle = mountSubGamesListEditor(listHost, initialSubGames);
+  }
+
+  // Fyll JSON-textarea med samme initial-data slik at toggle funker fra start.
+  const jsonTextarea = body.querySelector<HTMLTextAreaElement>("#sch-subgames");
+  if (jsonTextarea) {
+    jsonTextarea.value = JSON.stringify(initialSubGames, null, 2);
+  }
+
+  // "Vis JSON"-toggle: veksler mellom strukturert liste og rå JSON-textarea.
+  // Når vi bytter retning sync'er vi dataene så brukeren ikke mister input.
+  // "json" = power-user JSON-textarea, "list" = strukturert (default).
+  let mode: "list" | "json" = "list";
+  const listPanel = body.querySelector<HTMLElement>("#sch-subgames-list-panel");
+  const jsonPanel = body.querySelector<HTMLElement>("#sch-subgames-json-panel");
+  const toggleBtn = body.querySelector<HTMLButtonElement>("#sch-subgames-toggle");
+
+  function updateToggleLabel(): void {
+    if (!toggleBtn) return;
+    toggleBtn.textContent =
+      mode === "list"
+        ? t("schedule_subgames_show_json_btn")
+        : t("schedule_subgames_show_list_btn");
+  }
+
+  function setPanelVisibility(): void {
+    if (listPanel) listPanel.style.display = mode === "list" ? "block" : "none";
+    if (jsonPanel) jsonPanel.style.display = mode === "json" ? "block" : "none";
+  }
+  setPanelVisibility();
+  updateToggleLabel();
+
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      if (mode === "list") {
+        // Bytt til JSON: hent fra liste → skriv til textarea.
+        try {
+          const list = listHandle?.getSubGames() ?? [];
+          if (jsonTextarea) jsonTextarea.value = JSON.stringify(list, null, 2);
+        } catch (err) {
+          // Hvis list-state er ugyldig, vis feil men la brukeren bytte
+          // til JSON så de kan fikse der.
+          const msg = err instanceof Error ? err.message : String(err);
+          setSubgamesStatus(body, "error", msg);
+        }
+        mode = "json";
+      } else {
+        // Bytt til liste: parse JSON → populer liste.
+        if (jsonTextarea) {
+          const parsed = parseSubGames(jsonTextarea.value);
+          if (parsed === null) {
+            setSubgamesStatus(body, "error", t("invalid_subgames_json"));
+            return;
+          }
+          listHandle?.setSubGames(parsed);
+        }
+        mode = "list";
+        setSubgamesStatus(body, "info", "");
+        // Clear status ved vellykket bytte tilbake.
+        const statusHost = body.querySelector<HTMLElement>("#sch-subgames-status");
+        if (statusHost) {
+          statusHost.textContent = "";
+          statusHost.style.display = "none";
+        }
+      }
+      setPanelVisibility();
+      updateToggleLabel();
+    });
+  }
+
+  // PR 4e.2: event-handlers for subGames JSON-hjelpe-knapper (kun JSON-modus).
   const exampleBtn = body.querySelector<HTMLButtonElement>("#sch-subgames-example");
   if (exampleBtn) {
     exampleBtn.addEventListener("click", (ev) => {
@@ -189,12 +274,31 @@ export async function openScheduleEditorModal(
       setError(body, t("invalid_schedule_status"));
       return null;
     }
-    const subRaw = readField(body, "sch-subgames");
-    const subGames = parseSubGames(subRaw);
-    if (subGames === null) {
-      setError(body, t("invalid_subgames_json"));
-      return null;
+
+    // Sub-games: hent fra aktiv modus (list eller JSON) og valider.
+    let subGames: ScheduleSubgame[];
+    if (mode === "list" && listHandle) {
+      const listError = listHandle.validate();
+      if (listError) {
+        setError(body, listError);
+        return null;
+      }
+      try {
+        subGames = listHandle.getSubGames();
+      } catch (err) {
+        setError(body, err instanceof Error ? err.message : String(err));
+        return null;
+      }
+    } else {
+      const subRaw = readField(body, "sch-subgames");
+      const parsed = parseSubGames(subRaw);
+      if (parsed === null) {
+        setError(body, t("invalid_subgames_json"));
+        return null;
+      }
+      subGames = parsed;
     }
+
     return {
       scheduleName,
       scheduleType,
@@ -246,7 +350,8 @@ function renderForm(existing: ScheduleRow | null): string {
   const start = existing?.manualStartTime ?? "";
   const end = existing?.manualEndTime ?? "";
   const status: ScheduleStatus = existing?.status ?? "active";
-  const subgamesJson = existing?.subGames ? JSON.stringify(existing.subGames, null, 2) : "[]";
+  // JSON-textarea tømmes initielt — fylles programmatic fra
+  // openScheduleEditorModal så samme kilde brukes for liste og JSON.
   return `
     <form id="schedule-editor-form" novalidate>
       <div class="form-group">
@@ -288,20 +393,31 @@ function renderForm(existing: ScheduleRow | null): string {
         </div>
       </div>
       <div class="form-group">
-        <label for="sch-subgames">${escapeHtml(t("sub_games"))} (JSON)</label>
-        <textarea id="sch-subgames" class="form-control" rows="5"
-                  spellcheck="false" style="font-family:monospace;font-size:12px;">${escapeHtml(subgamesJson)}</textarea>
-        <div style="margin-top:4px;">
-          <button type="button" id="sch-subgames-example" class="btn btn-xs btn-default">
-            ${escapeHtml(t("schedule_subgames_example_btn"))}
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <label>${escapeHtml(t("sub_games"))}</label>
+          <button type="button" id="sch-subgames-toggle" class="btn btn-xs btn-link"
+                  style="padding:0;">
+            ${escapeHtml(t("schedule_subgames_show_json_btn"))}
           </button>
-          <button type="button" id="sch-subgames-validate" class="btn btn-xs btn-default">
-            ${escapeHtml(t("schedule_subgames_validate_btn"))}
-          </button>
+        </div>
+        <div id="sch-subgames-list-panel">
+          <div id="sch-subgames-list"></div>
+        </div>
+        <div id="sch-subgames-json-panel" style="display:none;">
+          <textarea id="sch-subgames" class="form-control" rows="5"
+                    spellcheck="false" style="font-family:monospace;font-size:12px;"></textarea>
+          <div style="margin-top:4px;">
+            <button type="button" id="sch-subgames-example" class="btn btn-xs btn-default">
+              ${escapeHtml(t("schedule_subgames_example_btn"))}
+            </button>
+            <button type="button" id="sch-subgames-validate" class="btn btn-xs btn-default">
+              ${escapeHtml(t("schedule_subgames_validate_btn"))}
+            </button>
+          </div>
+          <p class="help-block" style="margin-top:4px;">${escapeHtml(t("subgames_json_hint"))}</p>
         </div>
         <p id="sch-subgames-status" class="help-block"
            style="display:none;margin-top:4px;font-size:12px;"></p>
-        <p class="help-block">${escapeHtml(t("subgames_json_hint"))}</p>
       </div>
       <p id="schedule-editor-error" class="help-block"
          style="color:#a94442;display:none;margin-top:4px;"></p>
