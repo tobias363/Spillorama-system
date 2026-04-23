@@ -87,6 +87,14 @@ import {
   destroyRoomForScheduledGameFromDb,
 } from "./Game1DrawEngineCleanup.js";
 import {
+  emitPlayerDrawNew,
+  emitPlayerPatternWon,
+  emitPlayerRoomUpdate,
+  emitAdminDrawProgressed,
+  emitAdminPhaseWon,
+  emitAdminPhysicalTicketWon,
+} from "./Game1DrawEngineBroadcast.js";
+import {
   buildVariantConfigFromSpill1Config,
   resolvePatternsForColor,
   type Spill1ConfigInput,
@@ -548,9 +556,8 @@ export class Game1DrawEngineService {
   }
 
   /**
-   * PR-C4: fire-and-forget broadcast av `draw:new` til spiller-klient via
-   * default-namespace. Kalles POST-commit fra drawNext() med 0-basert
-   * drawIndex (matcher `GameBridge.lastAppliedDrawIndex`-kontrakten).
+   * PR-C4: Delegate-wrapper mot `emitPlayerDrawNew` i
+   * `Game1DrawEngineBroadcast.ts`. Byte-identisk atferd.
    */
   private notifyPlayerDrawNew(
     roomCode: string,
@@ -558,26 +565,17 @@ export class Game1DrawEngineService {
     ballNumber: number,
     drawIndex0Based: number
   ): void {
-    if (!this.playerBroadcaster) return;
-    try {
-      this.playerBroadcaster.onDrawNew({
-        roomCode,
-        number: ballNumber,
-        drawIndex: drawIndex0Based,
-        gameId: scheduledGameId,
-      });
-    } catch (err) {
-      log.warn(
-        { err, scheduledGameId, roomCode, drawIndex: drawIndex0Based },
-        "playerBroadcaster.onDrawNew kastet — ignorert"
-      );
-    }
+    emitPlayerDrawNew(
+      this.playerBroadcaster,
+      roomCode,
+      scheduledGameId,
+      ballNumber,
+      drawIndex0Based
+    );
   }
 
   /**
-   * PR-C4: fire-and-forget broadcast av `pattern:won` til spiller-klient
-   * via default-namespace. Matcher admin phase-won-event men sendes til
-   * `roomCode` istedenfor admin-rommet.
+   * PR-C4: Delegate-wrapper mot `emitPlayerPatternWon`.
    */
   private notifyPlayerPatternWon(
     roomCode: string,
@@ -587,67 +585,41 @@ export class Game1DrawEngineService {
     winnerIds: string[],
     drawIndex0Based: number
   ): void {
-    if (!this.playerBroadcaster) return;
-    try {
-      this.playerBroadcaster.onPatternWon({
-        roomCode,
-        gameId: scheduledGameId,
-        patternName,
-        phase,
-        winnerIds,
-        winnerCount: winnerIds.length,
-        drawIndex: drawIndex0Based,
-      });
-    } catch (err) {
-      log.warn(
-        { err, scheduledGameId, roomCode, patternName },
-        "playerBroadcaster.onPatternWon kastet — ignorert"
-      );
-    }
+    emitPlayerPatternWon(
+      this.playerBroadcaster,
+      roomCode,
+      scheduledGameId,
+      patternName,
+      phase,
+      winnerIds,
+      drawIndex0Based
+    );
   }
 
   /**
-   * PR-C4: fire-and-forget push av oppdatert `room:update`-snapshot til
-   * spiller-klient. Tynn adapter — kaller på eksisterende `emitRoomUpdate`-
-   * infrastruktur i index.ts.
+   * PR-C4: Delegate-wrapper mot `emitPlayerRoomUpdate`.
    */
   private notifyPlayerRoomUpdate(roomCode: string): void {
-    if (!this.playerBroadcaster) return;
-    try {
-      this.playerBroadcaster.onRoomUpdate(roomCode);
-    } catch (err) {
-      log.warn(
-        { err, roomCode },
-        "playerBroadcaster.onRoomUpdate kastet — ignorert"
-      );
-    }
+    emitPlayerRoomUpdate(this.playerBroadcaster, roomCode);
   }
 
-  /** PR 4d.3: fire-and-forget admin-broadcast for draw-progress. */
+  /** PR 4d.3: Delegate-wrapper mot `emitAdminDrawProgressed`. */
   private notifyDrawProgressed(
     scheduledGameId: string,
     ballNumber: number,
     drawIndex: number,
     currentPhase: number
   ): void {
-    if (!this.adminBroadcaster) return;
-    try {
-      this.adminBroadcaster.onDrawProgressed({
-        gameId: scheduledGameId,
-        ballNumber,
-        drawIndex,
-        currentPhase,
-        at: Date.now(),
-      });
-    } catch (err) {
-      log.warn(
-        { err, scheduledGameId, drawIndex },
-        "adminBroadcaster.onDrawProgressed kastet — ignorert"
-      );
-    }
+    emitAdminDrawProgressed(
+      this.adminBroadcaster,
+      scheduledGameId,
+      ballNumber,
+      drawIndex,
+      currentPhase
+    );
   }
 
-  /** PR 4d.4: fire-and-forget admin-broadcast for phase-won. */
+  /** PR 4d.4: Delegate-wrapper mot `emitAdminPhaseWon`. */
   private notifyPhaseWon(
     scheduledGameId: string,
     patternName: string,
@@ -655,29 +627,18 @@ export class Game1DrawEngineService {
     winnerIds: string[],
     drawIndex: number
   ): void {
-    if (!this.adminBroadcaster) return;
-    try {
-      this.adminBroadcaster.onPhaseWon({
-        gameId: scheduledGameId,
-        patternName,
-        phase,
-        winnerIds,
-        winnerCount: winnerIds.length,
-        drawIndex,
-        at: Date.now(),
-      });
-    } catch (err) {
-      log.warn(
-        { err, scheduledGameId, patternName },
-        "adminBroadcaster.onPhaseWon kastet — ignorert"
-      );
-    }
+    emitAdminPhaseWon(
+      this.adminBroadcaster,
+      scheduledGameId,
+      patternName,
+      phase,
+      winnerIds,
+      drawIndex
+    );
   }
 
   /**
-   * PT4: fire-and-forget admin-broadcast for fysisk-bong-vinn.
-   * Kalles POST-commit slik at broadcast IKKE sendes hvis transaksjonen
-   * ruller tilbake.
+   * PT4: Delegate-wrapper mot `emitAdminPhysicalTicketWon`.
    */
   private notifyPhysicalTicketWon(evt: {
     gameId: string;
@@ -691,32 +652,7 @@ export class Game1DrawEngineService {
     color: string;
     adminApprovalRequired: boolean;
   }): void {
-    if (!this.adminBroadcaster) return;
-    try {
-      this.adminBroadcaster.onPhysicalTicketWon({
-        gameId: evt.gameId,
-        phase: evt.phase,
-        patternName: evt.patternName,
-        pendingPayoutId: evt.pendingPayoutId,
-        ticketId: evt.ticketId,
-        hallId: evt.hallId,
-        responsibleUserId: evt.responsibleUserId,
-        expectedPayoutCents: evt.expectedPayoutCents,
-        color: evt.color,
-        adminApprovalRequired: evt.adminApprovalRequired,
-        at: Date.now(),
-      });
-    } catch (err) {
-      log.warn(
-        {
-          err,
-          scheduledGameId: evt.gameId,
-          ticketId: evt.ticketId,
-          pendingPayoutId: evt.pendingPayoutId,
-        },
-        "adminBroadcaster.onPhysicalTicketWon kastet — ignorert"
-      );
-    }
+    emitAdminPhysicalTicketWon(this.adminBroadcaster, evt);
   }
 
   // ── Table helpers ─────────────────────────────────────────────────────────
