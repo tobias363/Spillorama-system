@@ -22,6 +22,12 @@ import type {
   ComplianceManagerConfig,
   ComplianceHydrationSnapshot
 } from "./ComplianceManagerTypes.js";
+import {
+  startOfLocalDayMs,
+  startOfNextLocalDayMs,
+  startOfLocalMonthMs,
+  startOfNextLocalMonthMs
+} from "./ComplianceDateHelpers.js";
 
 export type {
   LossLimits,
@@ -983,24 +989,24 @@ export class ComplianceManager {
   }
 
   // ── Date helpers ─────────────────────────────────────────────────
+  //
+  // Implementasjonene finnes som pure funksjoner i ComplianceDateHelpers.ts.
+  // Public-metoden startOfLocalDayMs beholdes på klassen fordi BingoEngine
+  // kaller compliance.startOfLocalDayMs(...) eksternt.
 
   startOfLocalDayMs(referenceMs: number): number {
-    const reference = new Date(referenceMs);
-    return new Date(reference.getFullYear(), reference.getMonth(), reference.getDate()).getTime();
+    return startOfLocalDayMs(referenceMs);
   }
 
   private startOfNextLocalDayMs(referenceMs: number): number {
-    const reference = new Date(referenceMs);
-    return new Date(reference.getFullYear(), reference.getMonth(), reference.getDate() + 1).getTime();
+    return startOfNextLocalDayMs(referenceMs);
   }
 
   private startOfLocalMonthMs(referenceMs: number): number {
-    const reference = new Date(referenceMs);
-    return new Date(reference.getFullYear(), reference.getMonth(), 1).getTime();
+    return startOfLocalMonthMs(referenceMs);
   }
 
   private startOfNextLocalMonthMs(referenceMs: number): number {
-    const reference = new Date(referenceMs);
-    return new Date(reference.getFullYear(), reference.getMonth() + 1, 1).getTime();
+    return startOfNextLocalMonthMs(referenceMs);
   }
 }
