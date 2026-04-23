@@ -26,12 +26,14 @@ export class LeftInfoPanel {
   constructor(overlay: HtmlOverlayManager, bridge?: PauseAwareBridge) {
     this.bridge = bridge ?? null;
     this.root = overlay.createElement("left-panel", {
+      pointerEvents: "auto",
       flexShrink: "0",
       alignSelf: "flex-start",
       display: "flex",
       flexDirection: "column",
       gap: "10px",
       paddingTop: "35px",
+      paddingRight: "21px",
       minWidth: "120px",
       marginLeft: "20px",
     });

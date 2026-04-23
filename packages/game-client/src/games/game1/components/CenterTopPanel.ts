@@ -70,6 +70,8 @@ export class CenterTopPanel {
       flexDirection: "column",
       justifyContent: "center",
       width: "376px",
+      borderLeft: "1px solid rgba(255, 120, 50, 0.2)",
+      boxShadow: "inset 10px 0 20px rgba(0, 0, 0, 0.15)",
     });
 
     const comboBody = document.createElement("div");
@@ -115,6 +117,11 @@ export class CenterTopPanel {
       borderLeft: "1px solid rgba(255, 120, 50, 0.2)",
       boxShadow: "inset 10px 0 20px rgba(0, 0, 0, 0.15)",
       justifyContent: "flex-start",
+      // Fast bredde så kolonnen ikke krymper når "Forhåndskjøp til dagens
+      // spill" byttes ut med kortere "Kjøp flere brett"-tekst.
+      width: "245px",
+      boxSizing: "border-box",
+      flexShrink: "0",
     });
 
     // Game name (e.g. "GAME 2: KOMBINERTINNSATS")
@@ -217,8 +224,19 @@ export class CenterTopPanel {
   private lastPatternsSignature: string | null = null;
 
   updatePatterns(patterns: PatternDefinition[], patternResults: PatternResult[], prizePool = 0): void {
+    // Pre-game (ingen aktiv game) → serverens `patterns` er tom. Vis likevel
+    // 5 placeholder-pills (Rad 1-4 + Full Hus, 0 kr) + mini-grid med Rad 1-
+    // design, så combo-panelet aldri er tomt mens spilleren venter på start.
+    if (patterns.length === 0) {
+      patterns = CenterTopPanel.placeholderPatterns();
+      patternResults = [];
+    }
     const signature = this.computePatternsSignature(patterns, patternResults, prizePool);
     if (signature === this.lastPatternsSignature) return;
+    console.debug("[blink] CenterTop.updatePatterns sig-change", {
+      prev: this.lastPatternsSignature,
+      next: signature,
+    });
     this.lastPatternsSignature = signature;
 
     this.prizeListEl.innerHTML = "";
@@ -232,6 +250,11 @@ export class CenterTopPanel {
 
     // Swap the mini-grid to the active pattern's design.
     if (currentPattern && currentPattern.id !== this.activePatternId) {
+      console.debug("[blink] CenterTop.miniGrid swap", {
+        fromId: this.activePatternId,
+        toId: currentPattern.id,
+        toDesign: currentPattern.design,
+      });
       if (this.activeGrid) this.activeGrid.destroy();
       this.activeGrid = new PatternMiniGrid();
       this.activeGrid.setDesign(currentPattern.design);
@@ -385,10 +408,11 @@ export class CenterTopPanel {
   }
 
   setGameRunning(running: boolean): void {
-    // Buy-more only makes sense during a running round; pre-buy only
-    // makes sense between rounds.
-    this.buyMoreBtn.style.display = running ? "" : "none";
-    this.preBuyBtn.style.display = running ? "none" : "";
+    // "Kjøp flere brett" kjøper bonger til NESTE trekning — vises mellom
+    // runder (når ingen trekning pågår). "Forhåndskjøp til dagens spill"
+    // kjøper til planlagte spill — vises mens nåværende trekning pågår.
+    this.buyMoreBtn.style.display = running ? "none" : "";
+    this.preBuyBtn.style.display = running ? "" : "none";
   }
 
   setCanStartNow(canStart: boolean, gameRunning: boolean): void {
@@ -404,6 +428,19 @@ export class CenterTopPanel {
   /** Game-name header text — e.g. "HOVEDSPILL 1". */
   setBadge(text: string): void {
     this.gameNameEl.textContent = text.toUpperCase();
+  }
+
+  /** Pre-game placeholder — 5 dummy-patterns så combo-panelet alltid viser
+   *  Rad 1-4 + Full Hus (0 kr) + mini-grid med Rad 1-design. */
+  private static placeholderPatterns(): PatternDefinition[] {
+    const base = { claimType: "LINE" as const, prizePercent: 0, winningType: "fixed" as const, prize1: 0 };
+    return [
+      { id: "placeholder-rad1", name: "Rad 1", order: 0, design: 1, ...base },
+      { id: "placeholder-rad2", name: "Rad 2", order: 1, design: 2, ...base },
+      { id: "placeholder-rad3", name: "Rad 3", order: 2, design: 3, ...base },
+      { id: "placeholder-rad4", name: "Rad 4", order: 3, design: 4, ...base },
+      { id: "placeholder-fullhus", name: "Full House", order: 4, design: 5, claimType: "BINGO" as const, prizePercent: 0, winningType: "fixed" as const, prize1: 0 },
+    ];
   }
 
   private computePatternsSignature(

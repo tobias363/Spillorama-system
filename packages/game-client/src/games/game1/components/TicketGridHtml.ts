@@ -57,13 +57,16 @@ export class TicketGridHtml {
       scrollbarWidth: "thin",
       scrollbarColor: "rgba(255,255,255,0.25) transparent",
     });
+    // Dynamisk fade-maske: ingen fade når skrollet helt opp / helt ned;
+    // 16px fade når det er mer innhold i den retningen.
+    this.scrollArea.addEventListener("scroll", () => this.updateScrollMask());
     this.root.appendChild(this.scrollArea);
 
     this.gridEl = document.createElement("div");
     Object.assign(this.gridEl.style, {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-      gap: "10px",
+      gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+      gap: "18px",
       alignContent: "start",
     });
     this.scrollArea.appendChild(this.gridEl);
@@ -89,6 +92,26 @@ export class TicketGridHtml {
       width: `${width}px`,
       height: `${height}px`,
     });
+    // Bounds-endring kan endre hvorvidt innhold overflower → oppdater maske.
+    this.updateScrollMask();
+  }
+
+  /** Oppdater fade-maske basert på scroll-posisjon. Ingen fade i topp når
+   *  scrollTop==0; ingen fade i bunn når scrollet helt ned. 16px fade-zone.
+   *  Kun skriv til DOM hvis masken faktisk endrer seg (unngå re-paint-blink). */
+  private lastMaskStr: string | null = null;
+  private updateScrollMask(): void {
+    const el = this.scrollArea;
+    const atTop = el.scrollTop <= 1;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+    const topStop = atTop ? "0" : "16px";
+    const bottomStop = atBottom ? "100%" : "calc(100% - 16px)";
+    const mask = `linear-gradient(to bottom, transparent 0, #000 ${topStop}, #000 ${bottomStop}, transparent 100%)`;
+    if (mask === this.lastMaskStr) return;
+    console.debug("[blink] TicketGrid.scrollMask change", { atTop, atBottom });
+    this.lastMaskStr = mask;
+    el.style.maskImage = mask;
+    el.style.webkitMaskImage = mask;
   }
 
   /**
@@ -121,6 +144,7 @@ export class TicketGridHtml {
     // lastSignature, so setting it beforehand gets overwritten.
     this.lastSignature = signature;
     this.applyMarks(opts.state, liveCount);
+    this.updateScrollMask();
   }
 
   /** Mark a newly-drawn number across every ticket in the grid. Returns true
@@ -172,6 +196,12 @@ export class TicketGridHtml {
     opts: { cancelable: boolean; entryFee: number; state: GameState },
     liveCount: number,
   ): void {
+    console.debug("[blink] TicketGrid.rebuild", {
+      count: tickets.length,
+      cancelable: opts.cancelable,
+      liveCount,
+      prevSig: this.lastSignature,
+    });
     this.clear();
     for (let i = 0; i < tickets.length; i++) {
       const ticket = tickets[i];

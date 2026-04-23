@@ -40,10 +40,10 @@ export function enableMipmaps(texture: Texture): void {
  */
 
 const TUBE_WIDTH = 108; // mockup .balls-tube width
-const BALL_SIZE = 81;   // mockup .drawn-ball width/height
-const BALL_GAP = 4;     // mockup .balls-tube gap
+const BALL_SIZE = 70;   // +2px så ballene ser større ut
+const BALL_GAP = 0;     // tett pakket for å få plass til én ekstra ball
 const BALL_DISTANCE = BALL_SIZE + BALL_GAP;
-const PAD_TOP = 14;     // mockup .balls-tube padding-top
+const PAD_TOP = 4;      // redusert fra 14 for å spare topp-plass
 const HIGHLIGHT_SCALE = 1.0;
 const NORMAL_SCALE = 1.0;
 const MOVE_TIME = 0.5;
@@ -101,6 +101,9 @@ export class BallTube extends Container {
   private ballContainer: Container;
 
   private showcaseCount: number;
+  /** Faktisk distanse mellom ball-sentre — stretched så nederste ball sitter
+   *  på bunn av røret (jevn fordeling topp→bunn). */
+  private effectiveDistance: number;
   /** Newest first: balls[0] is the just-drawn ball at the top of the stack. */
   private balls: Ball[] = [];
 
@@ -108,6 +111,16 @@ export class BallTube extends Container {
     super();
     this.tubeHeight = tubeHeight;
     this.showcaseCount = Math.max(1, Math.floor((tubeHeight - PAD_TOP) / BALL_DISTANCE));
+
+    // Fordel ballene jevnt fra topp til bunn: første ball ved PAD_TOP,
+    // siste ball's senter ved tubeHeight - BALL_SIZE/2 - PAD_BOTTOM.
+    const PAD_BOTTOM = 4;
+    if (this.showcaseCount > 1) {
+      this.effectiveDistance =
+        (tubeHeight - PAD_TOP - PAD_BOTTOM - BALL_SIZE) / (this.showcaseCount - 1);
+    } else {
+      this.effectiveDistance = BALL_DISTANCE;
+    }
 
     // Transparent backdrop — new design (2026-04-23) removes the glass tube
     // and relies purely on the stack of PNG balls over the dark-red bg.
@@ -214,7 +227,7 @@ export class BallTube extends Container {
   }
 
   private slotY(idx: number): number {
-    return PAD_TOP + BALL_SIZE / 2 + idx * BALL_DISTANCE;
+    return PAD_TOP + BALL_SIZE / 2 + idx * this.effectiveDistance;
   }
 
   private createBall(number: number): Ball {
@@ -249,7 +262,7 @@ export class BallTube extends Container {
       text: String(number),
       style: {
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-        fontSize: 25,
+        fontSize: 22,
         fill: 0x1a0a0a,
         fontWeight: "800",
         align: "center",

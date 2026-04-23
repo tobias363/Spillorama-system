@@ -2661,9 +2661,13 @@
     document.getElementById('profile-backdrop').addEventListener('click', function () {
       document.getElementById('profile-overlay').classList.remove('is-open');
     });
-    document.getElementById('spillvett-fab').addEventListener('click', function () {
-      window.ShowSpillvettPanel();
-    });
+    // #spillvett-fab fjernet i 6f7cee1e — behold no-op hvis det kommer tilbake.
+    var spillvettFab = document.getElementById('spillvett-fab');
+    if (spillvettFab) {
+      spillvettFab.addEventListener('click', function () {
+        window.ShowSpillvettPanel();
+      });
+    }
 
     /* ── Info panel system ───────────────────────────────────────────── */
 

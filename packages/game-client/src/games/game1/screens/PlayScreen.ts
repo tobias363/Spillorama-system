@@ -39,16 +39,24 @@ import { TicketGridHtml } from "../components/TicketGridHtml.js";
  * behind their respective spacer children. `OVERLAY_ROW_GAP` is the
  * single source of truth for the spacing between containers.
  */
-const TUBE_COLUMN_WIDTH = 140;
+const TUBE_COLUMN_WIDTH = 155;
 const RING_COLUMN_WIDTH = 200;  // 170 ring + 30 breathing room
-const OVERLAY_ROW_GAP = 69;     // flex gap between top-level containers
-const CALL_GROUP_GAP = 10;      // gap inside callGroup (ring ↔ clover)
+const OVERLAY_ROW_GAP = 0;      // base flex gap between top-level containers (per-container spacing under)
+/** Gap til høyre for den store ballen (ring) — mellom ringen og firkløveren. */
+const GAP_RIGHT_OF_BALL = 68;
+/** Gap til høyre for firkløver-kolonnen — mellom "Velg lykketall" og HOVEDSPILL-panelet. */
+const GAP_RIGHT_OF_CLOVER = 91;
 // Kept in sync with CHAT_OPEN_WIDTH_PX / CHAT_COLLAPSED_WIDTH_PX in ChatPanelV2.
 const CHAT_WIDTH = 265;
 const CHAT_COLLAPSED_WIDTH = 110;
-const TICKET_TOP = 230;
-/** Y offset below the ticket grid for the LINE/BINGO claim buttons. */
-const CLAIM_AREA = 60;
+const TICKET_TOP = 239;
+/** Fast x-posisjon for ticket-grid + claim-buttons (frakoblet fra top-radens posisjon). */
+const TICKET_LEFT = 155;
+/** Y offset below the ticket grid for the LINE/BINGO claim buttons.
+ *  0 = ticket-grid bruker full skjermhøyde; fade-masken i TicketGridHtml
+ *  tonar bunnen ut slik at evt. claim-knapper (vanligvis skjult) fortsatt
+ *  ser naturlige ut når de dukker opp. */
+const CLAIM_AREA = 0;
 const RING_SIZE = 170;
 const RING_TOP_Y = 18;
 /** Clover "Velg lykketall"-knapp right-of-ring inside callGroup. */
@@ -178,6 +186,12 @@ export class PlayScreen extends Container {
     tubeSpacer.style.cssText = `width:${TUBE_COLUMN_WIDTH}px;flex-shrink:0;pointer-events:none;`;
     overlayRoot.appendChild(tubeSpacer);
 
+    // Glass-tube-overlay — dekorasjon som legger seg over Pixi-ballkolonnen
+    // (rundet topp, rett bunn, mørk tinted fyll, høylys-striper, bunnskygge).
+    // Portert 1:1 fra GlassTube.jsx (PM 2026-04-23). Pixi-ballene rendres
+    // bak HTML-laget og vises gjennom den semi-transparente glass-effekten.
+    this.buildGlassTubeOverlay(overlayRoot, screenHeight);
+
     // ── Container 1: big ring + "Velg lykketall" firkløver-knapp ──────────
     // One logical unit (PM 2026-04-23: "ene containeren styrer stor ball
     // og lykketall"). Pixi ring renders behind ringSpacer, the clover is
@@ -188,7 +202,7 @@ export class PlayScreen extends Container {
       "display:flex",
       "flex-direction:row",
       "align-items:flex-start",
-      `gap:${CALL_GROUP_GAP}px`,
+      `gap:${GAP_RIGHT_OF_BALL}px`,
       "flex-shrink:0",
       "pointer-events:none",
     ].join(";");
@@ -198,7 +212,7 @@ export class PlayScreen extends Container {
     callGroup.appendChild(ringSpacer);
 
     const cloverColumn = document.createElement("div");
-    cloverColumn.style.cssText = "display:flex;flex-direction:column;align-items:center;padding-top:40px;gap:6px;flex-shrink:0;pointer-events:auto;";
+    cloverColumn.style.cssText = "display:flex;flex-direction:column;align-items:center;padding-top:51px;gap:6px;flex-shrink:0;pointer-events:auto;";
 
     const cloverBtn = document.createElement("button");
     cloverBtn.type = "button";
@@ -280,7 +294,8 @@ export class PlayScreen extends Container {
       "align-items:stretch",
       "align-self:flex-start",
       "flex-shrink:0",
-      "margin-top:15px",
+      "margin-top:18px",
+      `margin-left:${GAP_RIGHT_OF_CLOVER}px`,
       "background:radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45))",
       "border:1px solid rgba(255, 120, 50, 0.35)",
       "border-radius:14px",
@@ -612,6 +627,96 @@ export class PlayScreen extends Container {
     return this.chatPanel?.isCollapsed() ? CHAT_COLLAPSED_WIDTH : CHAT_WIDTH;
   }
 
+  /** Build the glass-tube HTML overlay that sits over the Pixi ball-column.
+   *  Pure decoration — pointer-events:none, no balls inside (Pixi owns those).
+   *  Styles portert 1:1 fra GlassTube.jsx. */
+  private buildGlassTubeOverlay(overlayRoot: HTMLElement, screenHeight: number): void {
+    // Pixi ball tube: 108px wide at x=(TUBE_COLUMN_WIDTH-108)/2, y=21.
+    // Glass wraps den med 6px buffer på hver side.
+    const ballTubeX = (TUBE_COLUMN_WIDTH - 108) / 2;
+    const glassW = 96;  // 20% smalere enn tidligere (120)
+    const glassX = ballTubeX - (glassW - 108) / 2;
+    const glassTop = 13;
+    const glassH = screenHeight - glassTop; // helt ned til bunn
+    const radius = glassW / 2;
+
+    const glass = document.createElement("div");
+    Object.assign(glass.style, {
+      position: "absolute",
+      left: `${glassX}px`,
+      top: `${glassTop}px`,
+      width: `${glassW}px`,
+      height: `${glassH}px`,
+      borderRadius: `${radius}px ${radius}px 0 0`,
+      background: [
+        "linear-gradient(180deg, rgba(0,0,0,0.22) 0%, rgba(0,0,0,0.12) 50%, rgba(0,0,0,0.28) 100%)",
+        "linear-gradient(90deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 18%, rgba(255,255,255,0) 42%, rgba(255,255,255,0) 58%, rgba(255,255,255,0.08) 80%, rgba(255,255,255,0.18) 100%)",
+      ].join(","),
+      borderTop: "1px solid rgba(255,255,255,0.18)",
+      borderLeft: "1px solid rgba(255,255,255,0.18)",
+      borderRight: "1px solid rgba(255,255,255,0.18)",
+      borderBottom: "none",
+      boxShadow: [
+        "inset 0 2px 6px rgba(0,0,0,0.6)",
+        "inset 3px 0 6px rgba(0,0,0,0.35)",
+        "inset -3px 0 6px rgba(0,0,0,0.35)",
+        "0 -8px 24px rgba(0,0,0,0.45)",
+      ].join(","),
+      overflow: "hidden",
+      pointerEvents: "none",
+      zIndex: "2",
+    });
+
+    // Venstre høylys-stripe
+    const leftHi = document.createElement("div");
+    Object.assign(leftHi.style, {
+      position: "absolute",
+      left: "4px",
+      top: "8px",
+      bottom: "4px",
+      width: "3px",
+      borderRadius: "3px",
+      background: "linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.35))",
+      filter: "blur(0.5px)",
+    });
+    glass.appendChild(leftHi);
+
+    // Høyre høylys-stripe (tynnere)
+    const rightHi = document.createElement("div");
+    Object.assign(rightHi.style, {
+      position: "absolute",
+      right: "3px",
+      top: "12px",
+      bottom: "4px",
+      width: "2px",
+      borderRadius: "2px",
+      background: "linear-gradient(180deg, rgba(255,255,255,0.25), rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.18))",
+      filter: "blur(0.5px)",
+    });
+    glass.appendChild(rightHi);
+
+    // Topp-glans
+    const topGloss = document.createElement("div");
+    Object.assign(topGloss.style, {
+      position: "absolute",
+      top: "3px",
+      left: "18%",
+      right: "18%",
+      height: "4px",
+      borderRadius: "4px",
+      background: "radial-gradient(ellipse, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 70%)",
+    });
+    glass.appendChild(topGloss);
+
+    // Bunn-åpning — mask fade ut tint + høylys-striper de siste 28px så
+    // glasset ser åpent ut. Ballene (Pixi) er bak laget og forblir synlige
+    // helt ned — virker som om de faller ut av røret.
+    glass.style.maskImage = "linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%)";
+    glass.style.webkitMaskImage = "linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%)";
+
+    overlayRoot.appendChild(glass);
+  }
+
   /** x-coord where the ring's flex column starts (inside callGroup). */
   private ringCenterColumnLeft(): number {
     return TUBE_COLUMN_WIDTH + OVERLAY_ROW_GAP;
@@ -625,7 +730,7 @@ export class PlayScreen extends Container {
 
   /** Re-pin the LINE/BINGO claim buttons over the current ticket area. */
   private positionClaimButtons(): void {
-    const ticketAreaLeft = this.ringLeftEdge();
+    const ticketAreaLeft = TICKET_LEFT;
     const ticketAreaWidth = this.screenW - ticketAreaLeft - this.chatWidth() - 20;
     const btnY = this.screenH - 55;
     const btnCentreX = ticketAreaLeft + ticketAreaWidth / 2;
@@ -658,8 +763,9 @@ export class PlayScreen extends Container {
   }
 
   private positionTicketGrid(): void {
-    // Tickets align to ring's left edge — see ringLeftEdge() doc.
-    const left = this.ringLeftEdge();
+    // Frakoblet fra ring-posisjon (TUBE_COLUMN_WIDTH) — tickets beholder
+    // opprinnelig plassering selv om top-raden flyttes.
+    const left = TICKET_LEFT;
     const top = TICKET_TOP;
     const width = this.screenW - left - this.chatWidth() - 20;
     const height = this.screenH - TICKET_TOP - CLAIM_AREA;
