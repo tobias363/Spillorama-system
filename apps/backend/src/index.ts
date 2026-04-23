@@ -112,6 +112,7 @@ import { createAdminHallReportsRouter } from "./routes/adminHallReports.js";
 import { AgentOpenDayService } from "./agent/AgentOpenDayService.js";
 import { HallAccountReportService } from "./compliance/HallAccountReportService.js";
 import { createAgentOkBingoRouter } from "./routes/agentOkBingo.js";
+import { createAgentBingoRouter } from "./routes/agentBingo.js";
 import { OkBingoTicketService } from "./agent/OkBingoTicketService.js";
 import { SqlServerOkBingoApiClient } from "./integration/okbingo/SqlServerOkBingoApiClient.js";
 import { StubOkBingoApiClient } from "./integration/okbingo/StubOkBingoApiClient.js";
@@ -1761,6 +1762,20 @@ app.use(createAgentOkBingoRouter({
   agentService,
   okBingoTicketService,
   auditLogService,
+}));
+
+// Agent-portal Check-for-Bingo + Physical Cashout (P0 pilot-blokker).
+//   POST /api/agent/bingo/check              — sjekk billett mot game-state
+//   GET  /api/agent/physical/pending         — liste stemplede vinnere (ikke utbetalt)
+//   POST /api/agent/physical/reward-all      — bulk-utbetaling
+//   POST /api/agent/physical/:uniqueId/reward — per-billett utbetaling
+app.use(createAgentBingoRouter({
+  platformService,
+  physicalTicketService,
+  agentService,
+  agentShiftService,
+  auditLogService,
+  engine,
 }));
 
 // BIN-582: Metronia/OK-Bingo auto-close-cron. Registeres her fordi den
