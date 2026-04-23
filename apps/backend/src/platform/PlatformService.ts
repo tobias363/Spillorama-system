@@ -108,6 +108,13 @@ export interface HallDefinition {
    * skriving utenfor ledger er ikke tillatt.
    */
   cashBalance?: number;
+  /**
+   * TV Screen public token (URL-embedded) — auto-generert pr. hall, unik.
+   * Brukes av `/api/tv/:hallId/:tvToken/state` + `/api/tv/:hallId/:tvToken/winners`
+   * for å autentisere TV-kiosk-skjermer uten login.
+   * Separat fra BIN-503 display-tokens (som er socket-handshake, hash-lagret).
+   */
+  tvToken: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -346,6 +353,8 @@ interface HallRow {
   hall_number: number | null;
   /** BIN-583 B3.3: running cash-balanse (tilgjengelig saldo). */
   cash_balance: string | number | null;
+  /** TV Screen public token — backfilt til uuid i migration 20260423000100. */
+  tv_token: string;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -1068,7 +1077,7 @@ export class PlatformService {
     const { rows } = await this.pool.query<HallRow>(
       `SELECT id, slug, name, region, address,
               organization_number, settlement_account, invoice_method,
-              is_active, tv_url, hall_number, cash_balance,
+              is_active, tv_url, hall_number, cash_balance, tv_token,
               created_at, updated_at
        FROM ${this.hallsTable()}
        ${includeInactive ? "" : "WHERE is_active = true"}
@@ -1090,6 +1099,35 @@ export class PlatformService {
     const hall = await this.getHall(hallReference);
     if (!hall.isActive) {
       throw new DomainError("HALL_INACTIVE", "Hallen er ikke aktiv.");
+    }
+    return hall;
+  }
+
+  /**
+   * TV Screen: valider (hallId, tvToken) fra public URL. Throws
+   * TV_TOKEN_INVALID ved mismatch — caller (route-handler) mapper dette
+   * til 404 slik at angripere ikke kan probe gyldige hall-IDer.
+   */
+  async verifyHallTvToken(hallReference: string, tvToken: string): Promise<HallDefinition> {
+    const normalizedToken = (tvToken ?? "").trim();
+    if (!normalizedToken) {
+      throw new DomainError("TV_TOKEN_INVALID", "TV-token ugyldig.");
+    }
+    let hall: HallDefinition;
+    try {
+      hall = await this.getHall(hallReference);
+    } catch {
+      // Uniform 404 ved både ukjent hall og gal token — ingen hall-enumeration.
+      throw new DomainError("TV_TOKEN_INVALID", "TV-token ugyldig.");
+    }
+    // Constant-time-ish compare: length-mismatch shortcut + Buffer-compare.
+    const expected = Buffer.from(hall.tvToken);
+    const got = Buffer.from(normalizedToken);
+    if (expected.length !== got.length || !timingSafeEqual(expected, got)) {
+      throw new DomainError("TV_TOKEN_INVALID", "TV-token ugyldig.");
+    }
+    if (!hall.isActive) {
+      throw new DomainError("TV_TOKEN_INVALID", "TV-token ugyldig.");
     }
     return hall;
   }
@@ -3340,6 +3378,7 @@ export class PlatformService {
       tvUrl: row.tv_url ?? undefined,
       hallNumber: row.hall_number ?? null,
       cashBalance: Number.isFinite(cashBalance) ? cashBalance : 0,
+      tvToken: row.tv_token,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
@@ -3546,7 +3585,7 @@ export class PlatformService {
     const { rows } = await this.pool.query<HallRow>(
       `SELECT id, slug, name, region, address,
               organization_number, settlement_account, invoice_method,
-              is_active, tv_url, hall_number, cash_balance,
+              is_active, tv_url, hall_number, cash_balance, tv_token,
               created_at, updated_at
        FROM ${this.hallsTable()}
        WHERE id = $1
@@ -3738,6 +3777,26 @@ export class PlatformService {
           `ALTER TABLE ${this.hallsTable()} ADD COLUMN IF NOT EXISTS ${col}`
         ).catch(() => {});
       }
+      // TV Screen public token (migrasjon 20260423000100). Idempotent fallback
+      // for test-schema boot + fresh installs: sikrer at default + UNIQUE-
+      // indeks også er på plass uten at migrations har kjørt.
+      await client.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto`).catch(() => {});
+      await client.query(
+        `ALTER TABLE ${this.hallsTable()} ADD COLUMN IF NOT EXISTS tv_token TEXT`
+      ).catch(() => {});
+      await client.query(
+        `UPDATE ${this.hallsTable()} SET tv_token = gen_random_uuid()::text WHERE tv_token IS NULL`
+      ).catch(() => {});
+      await client.query(
+        `ALTER TABLE ${this.hallsTable()} ALTER COLUMN tv_token SET DEFAULT gen_random_uuid()::text`
+      ).catch(() => {});
+      await client.query(
+        `ALTER TABLE ${this.hallsTable()} ALTER COLUMN tv_token SET NOT NULL`
+      ).catch(() => {});
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ix_${this.schema}_app_halls_tv_token
+         ON ${this.hallsTable()} (tv_token)`
+      ).catch(() => {});
 
       // BIN-591: HALL_OPERATOR hall-scope. Added AFTER halls table exists
       // so the FK target is valid on a fresh schema.

@@ -26,6 +26,7 @@ function makeHall(slug = "hall-oslo", id = `id-${slug}`): HallDefinition {
     address: "",
     isActive: true,
     clientVariant: "web",
+    tvToken: `tv-${id}`,
     createdAt: "2026-04-18T00:00:00Z",
     updatedAt: "2026-04-18T00:00:00Z",
   };

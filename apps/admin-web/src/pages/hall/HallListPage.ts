@@ -75,6 +75,15 @@ export function renderHallListPage(container: HTMLElement): void {
             align: "center",
             render: (r) => activeBadge(r.isActive),
           },
+          // TV URL — public display-lenke som bingoverten åpner på hall-TV.
+          // URL-en er offentlig ment (hall-token i URL er hele auth), men vi
+          // short'er display-stringen for lesbarhet i tabellen.
+          {
+            key: "tvToken",
+            title: t("tv_url"),
+            align: "left",
+            render: (r) => renderTvUrlCell(r),
+          },
           {
             key: "id",
             title: t("action"),
@@ -113,6 +122,82 @@ function formatMoney(amount: number): string {
     maximumFractionDigits: 2,
   });
   return `kr ${formatted}`;
+}
+
+/**
+ * Bygg en kopierbar TV URL-celle for hall-listen. Full URL format:
+ *   `${origin}/admin/#/tv/<hallId>/<tvToken>`
+ * Bingoverten kopierer denne, åpner i nettleseren på hall-TV-skjermen og
+ * lar stå (ingen login).
+ */
+function renderTvUrlCell(row: AdminHall): Node {
+  const wrap = document.createElement("div");
+  wrap.style.display = "flex";
+  wrap.style.alignItems = "center";
+  wrap.style.gap = "6px";
+  wrap.style.maxWidth = "320px";
+
+  const url = buildTvUrl(row);
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.readOnly = true;
+  input.value = url;
+  input.setAttribute("data-testid", "tv-url-input");
+  input.setAttribute("data-hall-id", row.id);
+  input.title = url;
+  input.style.flex = "1";
+  input.style.fontFamily = "monospace";
+  input.style.fontSize = "11px";
+  input.style.padding = "2px 6px";
+  input.addEventListener("click", () => input.select());
+  wrap.append(input);
+
+  const openBtn = document.createElement("a");
+  openBtn.href = url;
+  openBtn.target = "_blank";
+  openBtn.rel = "noopener noreferrer";
+  openBtn.className = "btn btn-default btn-xs";
+  openBtn.innerHTML = `<i class="fa fa-external-link"></i>`;
+  openBtn.title = "Åpne TV URL i ny fane";
+  openBtn.setAttribute("data-testid", "tv-url-open");
+  wrap.append(openBtn);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "btn btn-default btn-xs";
+  copyBtn.innerHTML = `<i class="fa fa-clipboard"></i>`;
+  copyBtn.title = "Kopier URL";
+  copyBtn.setAttribute("data-testid", "tv-url-copy");
+  copyBtn.addEventListener("click", () => {
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        Toast.success(t("success"));
+      } catch {
+        input.select();
+        try {
+          document.execCommand("copy");
+          Toast.success(t("success"));
+        } catch {
+          Toast.error(t("something_went_wrong"));
+        }
+      }
+    })();
+  });
+  wrap.append(copyBtn);
+
+  return wrap;
+}
+
+/** Bygg full absolute TV URL for en hall. */
+function buildTvUrl(row: AdminHall): string {
+  const origin = window.location.origin;
+  // Admin-web er base-mounted på `/admin/` (se vite.config.ts base). Full URL
+  // er derfor origin + /admin/ + hash-route.
+  const hid = encodeURIComponent(row.id);
+  const tok = encodeURIComponent(row.tvToken);
+  return `${origin}/admin/#/tv/${hid}/${tok}`;
 }
 
 function rowActions(row: AdminHall, onChange: () => void): Node {

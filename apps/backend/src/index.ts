@@ -186,6 +186,8 @@ import { errorReporter } from "./middleware/errorReporter.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
 import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
 import { createAdminHallHandlers } from "./sockets/adminHallEvents.js";
+import { TvScreenService } from "./game/TvScreenService.js";
+import { createTvScreenRouter } from "./routes/tvScreen.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1113,6 +1115,15 @@ app.use(async (req, res, next) => {
   }
   next();
 });
+
+// TV Screen + Winners public display. Ingen auth-middleware — kun
+// tvToken-sjekk i route-handler. Mountes før alle auth-gated routere
+// slik at CORS + body-parser er på, men ingen JWT-krav gjelder.
+const tvScreenService = new TvScreenService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+app.use(createTvScreenRouter({ platformService, tvScreenService }));
 
 app.use(createAuthRouter({
   platformService,

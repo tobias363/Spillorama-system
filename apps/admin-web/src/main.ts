@@ -51,14 +51,40 @@ import { mountAgentGames } from "./pages/agent-portal/AgentGamesPage.js";
 import { mountAgentCashInOut } from "./pages/agent-portal/AgentCashInOutPage.js";
 import { mountAgentUniqueId } from "./pages/agent-portal/AgentUniqueIdPage.js";
 import { mountAgentPhysicalCashout } from "./pages/agent-portal/AgentPhysicalCashoutPage.js";
+import { isTvRoute, mountTvRoute } from "./pages/tv/index.js";
 
 const MAINTENANCE_MODE = false;
 
 async function bootstrap(): Promise<void> {
   initI18n();
-  const state = await bootstrapAuth();
   const root = document.getElementById("app");
   if (!root) throw new Error("Missing #app element");
+
+  // TV Screen + Winners: public routes utenfor auth-gate. Bingoverten åpner
+  // `/admin/#/tv/<hallId>/<tvToken>` på hall-TV-skjermen; siden skal kunne
+  // bootstrappe uten login. Dispatcheren re-kjører på hashchange så
+  // WinnersPage↔TVScreenPage-switching fungerer uten reload.
+  const dispatchTv = (): boolean => {
+    const hashPath = window.location.hash.replace(/^#/, "") || "/";
+    if (isTvRoute(hashPath)) {
+      mountTvRoute(root, hashPath);
+      return true;
+    }
+    return false;
+  };
+  if (dispatchTv()) {
+    window.addEventListener("hashchange", () => {
+      if (!dispatchTv()) {
+        // Brukeren navigerte ut av TV-flyten — gi oppførselen videre til
+        // normal bootstrap (reload er enklest siden vi aldri har løftet
+        // auth-staten). Dette treffer kun hvis noen manuelt endrer hashen.
+        window.location.reload();
+      }
+    });
+    return;
+  }
+
+  const state = await bootstrapAuth();
 
   if (state !== "authenticated") {
     showLogin(root);

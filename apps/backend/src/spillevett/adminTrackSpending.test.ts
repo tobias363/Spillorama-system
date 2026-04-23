@@ -32,6 +32,7 @@ function hall(id: string, name: string, isActive = true): HallDefinition {
     address: "",
     isActive,
     clientVariant: "web",
+    tvToken: `tv-${id}`,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };

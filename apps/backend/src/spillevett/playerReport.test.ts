@@ -74,6 +74,7 @@ test("buildPlayerReport groups stakes and prizes by hall and play", () => {
         address: "",
         isActive: true,
         clientVariant: "web" as const,
+        tvToken: "tv-hall-default",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       },
@@ -85,6 +86,7 @@ test("buildPlayerReport groups stakes and prizes by hall and play", () => {
         address: "",
         isActive: true,
         clientVariant: "web" as const,
+        tvToken: "tv-hall-east",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }

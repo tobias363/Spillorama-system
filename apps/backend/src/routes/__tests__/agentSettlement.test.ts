@@ -82,7 +82,7 @@ async function startServer(): Promise<Ctx> {
     async getHall(hallId: string): Promise<HallDefinition> {
       return {
         id: hallId, slug: hallId, name: `Hall ${hallId}`, region: "NO", address: "",
-        isActive: true, clientVariant: "web", createdAt: "", updatedAt: "",
+        isActive: true, clientVariant: "web", tvToken: `tv-${hallId}`, createdAt: "", updatedAt: "",
       };
     },
   };
