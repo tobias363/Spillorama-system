@@ -443,7 +443,18 @@ export class BingoTicketHtml {
           borderRadius: "6px",
           transition: "background 0.12s, color 0.12s, transform 0.12s",
         });
-        cell.textContent = n === 0 ? "F" : String(n);
+        if (n === 0) {
+          // Free-space marker (same icon as PatternMiniGrid center cell —
+          // Asset 4: roulette + clover). Placed inside the cell so the
+          // background colour from `paintCell` still shows around it.
+          const icon = document.createElement("img");
+          icon.src = "/web/games/assets/game1/design/center-free.png";
+          icon.alt = "F";
+          icon.style.cssText = "width:78%;height:78%;object-fit:contain;pointer-events:none;";
+          cell.appendChild(icon);
+        } else {
+          cell.textContent = String(n);
+        }
         gridWrap.appendChild(cell);
         this.cellNodes.push(cell);
       }

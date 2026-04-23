@@ -4,6 +4,11 @@ import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 
 const MAX_MESSAGES = 80;
 
+/** Width of the panel when collapsed — fits "Vis chat <" toggle label.
+ *  Must stay in sync with CHAT_COLLAPSED_WIDTH in PlayScreen.ts. */
+export const CHAT_COLLAPSED_WIDTH_PX = 110;
+export const CHAT_OPEN_WIDTH_PX = 265;
+
 /**
  * Pure HTML chat panel (right sidebar, 265px).
  *
@@ -24,13 +29,22 @@ export class ChatPanelV2 {
   private body: HTMLDivElement;
   private onToggle: ((collapsed: boolean) => void) | null = null;
 
-  constructor(overlay: HtmlOverlayManager, socket: SpilloramaSocket, roomCode: string) {
+  constructor(
+    overlay: HtmlOverlayManager,
+    socket: SpilloramaSocket,
+    roomCode: string,
+    opts?: { initialCollapsed?: boolean },
+  ) {
     this.socket = socket;
     this.roomCode = roomCode;
 
     this.root = overlay.createElement("chat-panel", {
       width: "265px",
       flexShrink: "0",
+      // PM 2026-04-23: pin chat to the right edge of the overlay row so
+      // it sits "helt til høyre" regardless of how wide the middle flex
+      // items (centerTop etc.) grow.
+      marginLeft: "auto",
       display: "flex",
       flexDirection: "column",
       background: "rgba(10,2,2,0.55)",
@@ -180,6 +194,35 @@ export class ChatPanelV2 {
     this.root.appendChild(this.body);
 
     this.loadHistory();
+
+    if (opts?.initialCollapsed) {
+      // Mirror the collapsed end-state without animating — onToggle handlers
+      // (PlayScreen layout sync) fire during the first setOnToggle call so
+      // Pixi offsets apply from frame 1.
+      this.collapsed = true;
+      this.body.style.display = "none";
+      this.body.style.opacity = "0";
+      this.root.style.width = `${CHAT_COLLAPSED_WIDTH_PX}px`;
+      this.renderToggleBtn();
+    }
+  }
+
+  /**
+   * Render the toggle button content — when collapsed we show "Vis chat <"
+   * (text + left-pointing chevron), when expanded "Skjul chat >" (text +
+   * right-pointing chevron). The collapsed layout tells the player the
+   * panel can be opened by clicking.
+   */
+  private renderToggleBtn(): void {
+    if (this.collapsed) {
+      this.toggleBtn.innerHTML = `Vis chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 6l1.41 1.41L10.83 12l4.58 4.59L14 18l-6-6z"/></svg>`;
+      this.toggleBtn.setAttribute("aria-label", "Vis chat");
+      this.toggleBtn.title = "Vis chat";
+    } else {
+      this.toggleBtn.innerHTML = `Skjul chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>`;
+      this.toggleBtn.setAttribute("aria-label", "Skjul chat");
+      this.toggleBtn.title = "";
+    }
   }
 
   subscribeToBridge(
@@ -235,22 +278,19 @@ export class ChatPanelV2 {
       // Collapse: hide body content, shrink width (animated via CSS transition)
       this.body.style.opacity = "0";
       this.body.style.transition = "opacity 0.15s ease-out";
-      this.root.style.width = "48px";
+      this.root.style.width = `${CHAT_COLLAPSED_WIDTH_PX}px`;
       setTimeout(() => { this.body.style.display = "none"; }, 250);
     } else {
       // Expand: show body content, restore width (animated via CSS transition)
       this.body.style.display = "flex";
-      this.root.style.width = "265px";
+      this.root.style.width = `${CHAT_OPEN_WIDTH_PX}px`;
       requestAnimationFrame(() => {
         this.body.style.opacity = "1";
         this.body.style.transition = "opacity 0.2s ease-in 0.1s";
       });
     }
 
-    this.toggleBtn.innerHTML = this.collapsed
-      ? `Vis chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 6l1.41 1.41L10.83 12l4.58 4.59L14 18l-6-6z"/></svg>`
-      : `Skjul chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>`;
-
+    this.renderToggleBtn();
     this.onToggle?.(this.collapsed);
   }
 

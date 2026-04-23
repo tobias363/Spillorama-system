@@ -147,10 +147,10 @@ describe("BallTube.getMoveAnimationTime — Unity-parity move-time", () => {
  */
 describe("BallTube.clear — tween cleanup covers evicted balls (render-crash regression)", () => {
   it("kills tweens on every ballContainer child, including ones popped off this.balls", () => {
-    const tube = new BallTube(600);
-    // Fill past the showcase limit so an eviction happens — 6 additions push
-    // one ball out of `this.balls` but it remains parented to ballContainer
-    // for its exit animation.
+    // 2026-04-23 redesign: ball size shrunk from 90/100 to 81/85, so a 600-px
+    // tube now fits 6 balls. Use a height that still produces showcase=5 so
+    // a 6-ball fill triggers the eviction path this test guards.
+    const tube = new BallTube(450);
     for (let n = 1; n <= 6; n++) {
       tube.addBall(n);
     }

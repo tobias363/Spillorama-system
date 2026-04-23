@@ -23,6 +23,13 @@ import { Assets } from "pixi.js";
  */
 const GAME1_CRITICAL_ASSETS = [
   "/web/games/assets/game1/center-ball.png",
+  "/web/games/assets/game1/design/background.png",
+  "/web/games/assets/game1/design/balls/blue.png",
+  "/web/games/assets/game1/design/balls/red.png",
+  "/web/games/assets/game1/design/balls/purple.png",
+  "/web/games/assets/game1/design/balls/green.png",
+  "/web/games/assets/game1/design/balls/yellow.png",
+  "/web/games/assets/game1/design/balls/orange.png",
 ];
 
 /**
