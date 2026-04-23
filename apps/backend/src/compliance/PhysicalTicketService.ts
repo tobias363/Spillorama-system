@@ -72,17 +72,18 @@ export type {
 } from "./PhysicalTicketTypes.js";
 
 import {
-  parseNumbersJson,
-  parsePattern,
-  asJsonObject,
   asIso,
-  asIsoOrNull,
   assertSchemaName,
   assertBatchStatus,
   assertPositiveInt,
   assertBatchName,
   isUniqueViolation,
 } from "./PhysicalTicketValidators.js";
+import {
+  mapBatch,
+  mapCashout,
+  mapTicket,
+} from "./PhysicalTicketMappers.js";
 
 const logger = rootLogger.child({ module: "physical-ticket-service" });
 
@@ -141,7 +142,7 @@ export class PhysicalTicketService {
        LIMIT $${params.length}`,
       params
     );
-    return rows.map((r) => this.mapBatch(r));
+    return rows.map((r) => mapBatch(r));
   }
 
   async getBatch(batchId: string): Promise<PhysicalTicketBatch> {
@@ -160,7 +161,7 @@ export class PhysicalTicketService {
     if (!row) {
       throw new DomainError("PHYSICAL_BATCH_NOT_FOUND", "Batch finnes ikke.");
     }
-    return this.mapBatch(row);
+    return mapBatch(row);
   }
 
   async createBatch(input: CreateBatchInput): Promise<PhysicalTicketBatch> {
@@ -219,7 +220,7 @@ export class PhysicalTicketService {
                    game_slug, assigned_game_id, status, created_by, created_at, updated_at`,
         [id, hallId, batchName, rangeStart, rangeEnd, defaultPriceCents, gameSlug, assignedGameId, input.createdBy]
       );
-      return this.mapBatch(rows[0]!);
+      return mapBatch(rows[0]!);
     } catch (err) {
       const msg = (err as { message?: string })?.message ?? "";
       if (/duplicate key|unique/i.test(msg) && /batch_name/i.test(msg)) {
@@ -272,7 +273,7 @@ export class PhysicalTicketService {
       );
       const row = rows[0];
       if (!row) throw new DomainError("PHYSICAL_BATCH_NOT_FOUND", "Batch finnes ikke.");
-      return this.mapBatch(row);
+      return mapBatch(row);
     } catch (err) {
       const msg = (err as { message?: string })?.message ?? "";
       if (/duplicate key|unique/i.test(msg) && /batch_name/i.test(msg)) {
@@ -410,7 +411,7 @@ export class PhysicalTicketService {
         [batch.id, trimmed]
       );
       await client.query("COMMIT");
-      return this.mapBatch(batch);
+      return mapBatch(batch);
     } catch (err) {
       await client.query("ROLLBACK");
       if (err instanceof DomainError) throw err;
@@ -446,7 +447,7 @@ export class PhysicalTicketService {
        LIMIT $${params.length}`,
       params
     );
-    return rows.map((r) => this.mapTicket(r));
+    return rows.map((r) => mapTicket(r));
   }
 
   /**
@@ -502,7 +503,7 @@ export class PhysicalTicketService {
        LIMIT $${params.length}`,
       params
     );
-    return rows.map((r) => this.mapTicket(r));
+    return rows.map((r) => mapTicket(r));
   }
 
   /**
@@ -587,7 +588,7 @@ export class PhysicalTicketService {
        LIMIT $${limitParam} OFFSET $${offsetParam}`,
       params
     );
-    return rows.map((r) => this.mapTicket(r));
+    return rows.map((r) => mapTicket(r));
   }
 
   /**
@@ -609,7 +610,7 @@ export class PhysicalTicketService {
        WHERE unique_id = $1`,
       [uniqueId.trim()]
     );
-    return rows[0] ? this.mapTicket(rows[0]) : null;
+    return rows[0] ? mapTicket(rows[0]) : null;
   }
 
   /**
@@ -672,7 +673,7 @@ export class PhysicalTicketService {
       // Idempotens: allerede stemplet → returner uten mutasjon.
       if (existing.numbers_json !== null && existing.numbers_json !== undefined) {
         await client.query("COMMIT");
-        return this.mapTicket(existing);
+        return mapTicket(existing);
       }
 
       const { rows } = await client.query<TicketRow>(
@@ -690,7 +691,7 @@ export class PhysicalTicketService {
         [uniqueId, JSON.stringify(input.numbers), input.patternWon]
       );
       await client.query("COMMIT");
-      return this.mapTicket(rows[0]!);
+      return mapTicket(rows[0]!);
     } catch (err) {
       await client.query("ROLLBACK");
       if (err instanceof DomainError) throw err;
@@ -782,7 +783,7 @@ export class PhysicalTicketService {
         [uniqueId, soldBy, buyerUserId, priceCents]
       );
       await client.query("COMMIT");
-      return this.mapTicket(rows[0]!);
+      return mapTicket(rows[0]!);
     } catch (err) {
       await client.query("ROLLBACK");
       if (err instanceof DomainError) throw err;
@@ -940,7 +941,7 @@ export class PhysicalTicketService {
        LIMIT 1`,
       [trimmed]
     );
-    return rows[0] ? this.mapCashout(rows[0]) : null;
+    return rows[0] ? mapCashout(rows[0]) : null;
   }
 
   /**
@@ -1025,8 +1026,8 @@ export class PhysicalTicketService {
       );
       await client.query("COMMIT");
       return {
-        cashout: this.mapCashout(inserted[0]!),
-        ticket: this.mapTicket(ticketRow),
+        cashout: mapCashout(inserted[0]!),
+        ticket: mapTicket(ticketRow),
       };
     } catch (err) {
       await client.query("ROLLBACK");
@@ -1275,67 +1276,6 @@ export class PhysicalTicketService {
   }
 
   // ── Private helpers ────────────────────────────────────────────────────
-
-  private mapBatch(row: BatchRow): PhysicalTicketBatch {
-    return {
-      id: row.id,
-      hallId: row.hall_id,
-      batchName: row.batch_name,
-      rangeStart: Number(row.range_start),
-      rangeEnd: Number(row.range_end),
-      defaultPriceCents: Number(row.default_price_cents),
-      gameSlug: row.game_slug,
-      assignedGameId: row.assigned_game_id,
-      status: row.status,
-      createdBy: row.created_by,
-      createdAt: asIso(row.created_at),
-      updatedAt: asIso(row.updated_at),
-    };
-  }
-
-  private mapCashout(row: CashoutRow): PhysicalTicketCashout {
-    return {
-      id: row.id,
-      ticketUniqueId: row.ticket_unique_id,
-      hallId: row.hall_id,
-      gameId: row.game_id,
-      payoutCents: Number(row.payout_cents),
-      paidBy: row.paid_by,
-      paidAt: asIso(row.paid_at),
-      notes: row.notes,
-      otherData: asJsonObject(row.other_data),
-    };
-  }
-
-  private mapTicket(row: TicketRow): PhysicalTicket {
-    return {
-      id: row.id,
-      batchId: row.batch_id,
-      uniqueId: row.unique_id,
-      hallId: row.hall_id,
-      status: row.status,
-      priceCents: row.price_cents === null ? null : Number(row.price_cents),
-      assignedGameId: row.assigned_game_id,
-      soldAt: asIsoOrNull(row.sold_at),
-      soldBy: row.sold_by,
-      buyerUserId: row.buyer_user_id,
-      voidedAt: asIsoOrNull(row.voided_at),
-      voidedBy: row.voided_by,
-      voidedReason: row.voided_reason,
-      createdAt: asIso(row.created_at),
-      updatedAt: asIso(row.updated_at),
-      // ── BIN-698: win-data
-      numbersJson: parseNumbersJson(row.numbers_json),
-      patternWon: parsePattern(row.pattern_won ?? null),
-      wonAmountCents:
-        row.won_amount_cents === null || row.won_amount_cents === undefined
-          ? null
-          : Number(row.won_amount_cents),
-      evaluatedAt: asIsoOrNull(row.evaluated_at ?? null),
-      isWinningDistributed: row.is_winning_distributed === true,
-      winningDistributedAt: asIsoOrNull(row.winning_distributed_at ?? null),
-    };
-  }
 
   private async ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
