@@ -208,6 +208,7 @@ export class PlayScreen extends Container {
     this.positionTicketGrid();
 
     this.setupChatLayoutSync();
+    this.registerTopNavActions();
 
     // Opt-in blink-diagnostic (kun aktivert med ?diag=blink i URL-en).
     if (shouldInstallBlinkDiagnostic()) {
@@ -512,6 +513,7 @@ export class PlayScreen extends Container {
     this.headerShiftTween = null;
     this.headerBar.destroy();
     this.overlayManager.destroy();
+    this.unregisterTopNavActions();
     super.destroy({ children: true });
   }
 
@@ -531,6 +533,27 @@ export class PlayScreen extends Container {
     const width = this.screenW - left - this.chatWidth() - 20;
     const height = this.screenH - TICKET_TOP - CLAIM_AREA;
     this.ticketGrid.setBounds(left, top, Math.max(200, width), Math.max(100, height));
+  }
+
+  /**
+   * Register "Se oppleste tall" + "Bytt bakgrunn og markør" handlers on
+   * `window.__gameActions` so the web-shell topnav buttons can invoke them.
+   * The shell toggles `body.has-game-actions` to show the buttons only
+   * while a game that owns these actions is mounted. Cleared in destroy().
+   */
+  private registerTopNavActions(): void {
+    const w = window as unknown as { __gameActions?: Record<string, () => void> };
+    w.__gameActions = {
+      showCalledNumbers: () => this.calledNumbers.toggle(),
+      openMarkerBg: () => this.callbacks.onOpenMarkerBg?.(),
+    };
+    document.body.classList.add("has-game-actions");
+  }
+
+  private unregisterTopNavActions(): void {
+    const w = window as unknown as { __gameActions?: unknown };
+    delete w.__gameActions;
+    document.body.classList.remove("has-game-actions");
   }
 
   /** Resize ticket grid + re-pin claim buttons when the chat panel
