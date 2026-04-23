@@ -297,3 +297,27 @@ test("BIN-591: resolveHallScopeFilter fail-closed for HALL_OPERATOR uten tildelt
     /ikke tildelt en hall/
   );
 });
+
+// ── Role Management (per-agent permission-matrix) ────────────────────────────
+
+test("AGENT_PERMISSION_READ tillatt for ADMIN + SUPPORT, ikke HALL_OPERATOR/PLAYER/AGENT", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "AGENT_PERMISSION_READ"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "AGENT_PERMISSION_READ"), true);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "AGENT_PERMISSION_READ"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "AGENT_PERMISSION_READ"), false);
+  assert.equal(canAccessAdminPermission("AGENT", "AGENT_PERMISSION_READ"), false);
+});
+
+test("AGENT_PERMISSION_WRITE kun ADMIN", () => {
+  assert.equal(canAccessAdminPermission("ADMIN", "AGENT_PERMISSION_WRITE"), true);
+  assert.equal(canAccessAdminPermission("SUPPORT", "AGENT_PERMISSION_WRITE"), false);
+  assert.equal(canAccessAdminPermission("HALL_OPERATOR", "AGENT_PERMISSION_WRITE"), false);
+  assert.equal(canAccessAdminPermission("PLAYER", "AGENT_PERMISSION_WRITE"), false);
+  assert.equal(canAccessAdminPermission("AGENT", "AGENT_PERMISSION_WRITE"), false);
+});
+
+test("assertAdminPermission kaster for SUPPORT på AGENT_PERMISSION_WRITE", () => {
+  assert.throws(() => assertAdminPermission("SUPPORT", "AGENT_PERMISSION_WRITE"));
+  assert.throws(() => assertAdminPermission("HALL_OPERATOR", "AGENT_PERMISSION_READ"));
+  assert.throws(() => assertAdminPermission("AGENT", "AGENT_PERMISSION_READ"));
+});

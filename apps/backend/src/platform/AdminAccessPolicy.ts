@@ -365,7 +365,23 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     utelatt — tier-strukturen er ikke hall-lokal.
    */
   LOYALTY_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
-  LOYALTY_WRITE: ["ADMIN"]
+  LOYALTY_WRITE: ["ADMIN"],
+  /**
+   * Role Management — per-agent permission-matrix (Admin CR 21.02.2024 side 5
+   * + Agent V1.0 permissions). Admin konfigurerer hvilke moduler + actions
+   * (Create/Edit/View/Delete + Block/Unblock for Player Management) en agent
+   * har tilgang til.
+   *   - AGENT_PERMISSION_READ : hent matrix for én agent. ADMIN + SUPPORT
+   *     (SUPPORT trenger innsyn for kundestøtte/compliance — "hvorfor kan
+   *     ikke agent X gjøre Y?"). HALL_OPERATOR er bevisst utelatt — hall-
+   *     operator styrer IKKE agent-permissions (det er admin-domain per
+   *     legacy-spec).
+   *   - AGENT_PERMISSION_WRITE: PUT full matrix. ADMIN-only. Agent-
+   *     permissions er sentralt admin-ansvar (samme mønster som USER_ROLE_
+   *     WRITE / GAME_TYPE_WRITE).
+   */
+  AGENT_PERMISSION_READ:  ["ADMIN", "SUPPORT"],
+  AGENT_PERMISSION_WRITE: ["ADMIN"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

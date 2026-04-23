@@ -76,6 +76,7 @@ export const routes: RouteDef[] = [
   { path: "/role", titleKey: "role_management", roles: ["admin", "super-admin"] },
   { path: "/role/matrix", titleKey: "role_management_table", roles: ["admin", "super-admin"] },
   { path: "/role/assign", titleKey: "assign_role_to_agent", roles: ["admin", "super-admin"] },
+  { path: "/role/agent", titleKey: "agent_role_permissions_title", roles: ["admin", "super-admin"] },
 
   { path: "/reportGame1", titleKey: "game1", module: "Report Management" },
   { path: "/reportManagement/game1", titleKey: "report_management_game1", module: "Report Management" },
