@@ -91,3 +91,22 @@ export interface LeaderboardEntry {
   nickname: string;
   points: number;
 }
+
+/**
+ * BIN-587 B4b follow-up: player-side voucher redemption.
+ *
+ * Spilleren sender en kode + pris hen forsøker å bruke rabatten på.
+ * `roomCode` og `scheduledGameId` er begge valgfrie — ad-hoc G2/G3
+ * bruker roomCode, scheduled G1 bruker scheduledGameId, en fremtidig
+ * pre-lobby-innløsning kan sende ingen av delene (vouchere som
+ * "lommebok-credit" kommer i et senere scope).
+ */
+export interface VoucherRedeemPayload extends AuthenticatedSocketPayload {
+  code: string;
+  gameSlug: string;
+  ticketPriceCents: number;
+  scheduledGameId?: string | null;
+  roomCode?: string | null;
+  /** Når true: bare validér uten å innløse (ingen state-endring). */
+  validateOnly?: boolean;
+}

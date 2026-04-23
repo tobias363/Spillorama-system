@@ -175,6 +175,8 @@ import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRed
 import { createAdminPlayersTopRouter } from "./routes/adminPlayersTop.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
 import { VoucherService } from "./compliance/VoucherService.js";
+import { VoucherRedemptionService } from "./compliance/VoucherRedemptionService.js";
+import { createVoucherRouter } from "./routes/voucher.js";
 import { createAdminUniqueIdsAndPayoutsRouter } from "./routes/adminUniqueIdsAndPayouts.js";
 import { createAdminUsersRouter } from "./routes/adminUsers.js";
 import { createAdminPlayerActivityRouter } from "./routes/adminPlayerActivity.js";
@@ -479,6 +481,13 @@ const physicalTicketsGamesInHallService = new PhysicalTicketsGamesInHallService(
 // BIN-587 B4b: voucher admin-CRUD (redemption-flow i G2/G3 er follow-up).
 const voucherService = new VoucherService({
   connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// BIN-587 B4b follow-up: spiller-side voucher-innløsning. Deler pg-pool med
+// PlatformService så schema-init er garantert når første redeem kommer inn.
+const voucherRedemptionService = new VoucherRedemptionService({
+  pool: platformService.getPool(),
   schema: pgSchema,
 });
 
@@ -1231,6 +1240,11 @@ app.use(createAdminVouchersRouter({
   auditLogService,
   voucherService,
 }));
+// BIN-587 B4b follow-up: player-side voucher-innløsning (HTTP fallback).
+app.use(createVoucherRouter({
+  platformService,
+  voucherRedemptionService,
+}));
 app.use(createAdminGameManagementRouter({
   platformService,
   auditLogService,
@@ -1884,6 +1898,8 @@ const registerGameEvents = createGameEventHandlers({
       fetchGameManagementConfig: fetchGameManagementConfigForRoomState,
     }),
   chatMessageStore,
+  // BIN-587 B4b follow-up: dep for socket-event `voucher:redeem`.
+  voucherRedemptionService,
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.

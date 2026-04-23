@@ -98,4 +98,11 @@ export interface GameEventsDeps {
     roomCode: string,
     opts: { gameSlug: string; gameManagementId?: string | null },
   ) => Promise<void>;
+  /**
+   * BIN-587 B4b follow-up: spiller-side voucher-innløsning. Koblet via socket-
+   * event `voucher:redeem` (og `voucher:validate` hvis `validateOnly=true`).
+   * Valgfri dep så eksisterende test-harnesses ikke må wire den opp — handleren
+   * returnerer `NOT_SUPPORTED` hvis den mangler.
+   */
+  voucherRedemptionService?: import("../../compliance/VoucherRedemptionService.js").VoucherRedemptionService;
 }

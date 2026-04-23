@@ -17,6 +17,7 @@
  *   - miniGameEvents.ts      — jackpot:spin / minigame:play
  *   - chatEvents.ts          — chat:send / chat:history
  *   - lifecycleEvents.ts     — leaderboard:get / disconnect
+ *   - voucherEvents.ts       — voucher:redeem (+ voucher:redeemed / voucher:rejected emits)
  */
 import type { Socket } from "socket.io";
 import { buildRegistryContext, buildSocketContext } from "./gameEvents/context.js";
@@ -28,6 +29,7 @@ import { registerClaimEvents } from "./gameEvents/claimEvents.js";
 import { registerMiniGameEvents } from "./gameEvents/miniGameEvents.js";
 import { registerChatEvents } from "./gameEvents/chatEvents.js";
 import { registerLifecycleEvents } from "./gameEvents/lifecycleEvents.js";
+import { registerVoucherEvents } from "./gameEvents/voucherEvents.js";
 import type { GameEventsDeps } from "./gameEvents/deps.js";
 
 export { emitG3DrawEvents } from "./gameEvents/drawEmits.js";
@@ -47,5 +49,6 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     registerMiniGameEvents(sctx);
     registerChatEvents(sctx);
     registerLifecycleEvents(sctx);
+    registerVoucherEvents(sctx);
   };
 }
