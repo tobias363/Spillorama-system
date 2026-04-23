@@ -109,4 +109,69 @@ describe("RejectedListPage", () => {
     expect(api).toHaveBeenCalledTimes(1);
     expect(api.mock.calls[0]![0]).toContain("/api/admin/players/rejected");
   });
+
+  it("renders rejected_by and rejection_reason from complianceData", async () => {
+    mockApi({
+      players: [
+        {
+          id: "u-rej",
+          email: "rej@ex.no",
+          displayName: "Rejectee",
+          surname: null,
+          phone: null,
+          kycStatus: "REJECTED",
+          birthDate: null,
+          kycVerifiedAt: null,
+          kycProviderRef: null,
+          hallId: null,
+          createdAt: "2026-04-01T00:00:00Z",
+          updatedAt: "2026-04-01T10:00:00Z",
+          complianceData: {
+            kycRejectionReason: "Ugyldig ID",
+            kycRejectedBy: "admin-7",
+            kycRejectedAt: "2026-04-01T09:30:00Z",
+          },
+        },
+      ],
+      count: 1,
+    });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    renderRejectedListPage(root);
+    await tick();
+    expect(root.textContent).toContain("Ugyldig ID");
+    expect(root.textContent).toContain("admin-7");
+    // Delete-button should be present
+    expect(root.querySelector('button[data-action="delete"]')).toBeTruthy();
+  });
+
+  it("falls back to — when complianceData is missing rejection fields", async () => {
+    mockApi({
+      players: [
+        {
+          id: "u-old",
+          email: "old@ex.no",
+          displayName: "Old",
+          surname: null,
+          phone: null,
+          kycStatus: "REJECTED",
+          birthDate: null,
+          kycVerifiedAt: null,
+          kycProviderRef: null,
+          hallId: null,
+          createdAt: "2024-01-01T00:00:00Z",
+          updatedAt: "2024-01-01T10:00:00Z",
+          complianceData: null,
+        },
+      ],
+      count: 1,
+    });
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    renderRejectedListPage(root);
+    await tick();
+    // Three "—" at minimum: rejected_by, rejection_reason, (phone+hall already absent)
+    const dashCount = (root.textContent ?? "").split("—").length - 1;
+    expect(dashCount).toBeGreaterThanOrEqual(2);
+  });
 });
