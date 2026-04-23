@@ -32,7 +32,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 ---
 
-## 2. Game 1 — Classic Bingo / Databingo
+## 2. Game 1 — Hovedspill (Classic Bingo)
 
 **Canonical spec:** [`game1-canonical-spec.md`](game1-canonical-spec.md)
 **Slug:** `bingo` / `game_1`
@@ -218,7 +218,7 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 | Spill | Rader | ✅ | 🟡 | ❌ | Release-klar % |
 |-------|------:|---:|---:|---:|---------------:|
-| Game 1 (Databingo) | 41 | 17 | 24 | 0 | 41 % |
+| Game 1 (Hovedspill) | 41 | 17 | 24 | 0 | 41 % |
 | Game 2 (Rocket) | 15 | 0 | 13 | 2 | 0 % |
 | Game 3 (Monster) | 16 | 0 | 13 | 3 | 0 % |
 | Game 5 (Spillorama) | 19 | 0 | 11 | 8 | 0 % |

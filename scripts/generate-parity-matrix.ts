@@ -62,7 +62,7 @@ interface GameSection {
 }
 
 const GAME_CONFIGS: Record<string, { shortName: string; gameKey: GameSection["gameKey"] }> = {
-  "Game 1 — Classic Bingo / Databingo": { shortName: "Game 1 (Databingo)", gameKey: "game1" },
+  "Game 1 — Hovedspill (Classic Bingo)": { shortName: "Game 1 (Hovedspill)", gameKey: "game1" },
   "Game 2 — Rocket Bingo": { shortName: "Game 2 (Rocket)", gameKey: "game2" },
   "Game 3 — Monster Bingo / Mønsterbingo": { shortName: "Game 3 (Monster)", gameKey: "game3" },
   "Game 5 — Spillorama Bingo": { shortName: "Game 5 (Spillorama)", gameKey: "game5" },

@@ -1,6 +1,6 @@
 ---
 game: game1
-name: Classic Bingo / Databingo
+name: Hovedspill (Classic Bingo)
 slug: bingo
 altSlug: game_1
 ticketGrid: 5x5
@@ -60,7 +60,7 @@ spillvettLimits:
 commitRef: d78ea214c7693e5f3181cef807cfcc85a65f347b
 ---
 
-# Game 1 Canonical Spec — Classic Bingo (Databingo)
+# Game 1 Canonical Spec — Hovedspill (Classic Bingo)
 
 **Formål:** Frosset spesifikasjon av Game 1 sin faktiske oppførsel i `apps/backend/` + `packages/game-client/` per 2026-04-17. Brukes som referansepunkt for paritet-arbeid (BIN-525 parity matrix) og som mal for Game 2/3/5 canonical specs (BIN-529/530/531).
 
@@ -72,7 +72,7 @@ commitRef: d78ea214c7693e5f3181cef807cfcc85a65f347b
 
 | Felt | Verdi |
 |------|-------|
-| Navn (NO) | Classic Bingo / Databingo |
+| Navn (NO) | Hovedspill (Classic Bingo) |
 | Backend-slug | `bingo` (og legacy-alias `game_1`) |
 | Frontend-pakke | `packages/game-client/src/games/game1/` |
 | Backend-logikk | `apps/backend/src/game/BingoEngine.ts` (delt med andre varianter) |
