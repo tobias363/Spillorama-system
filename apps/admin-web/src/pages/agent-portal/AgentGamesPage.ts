@@ -1,13 +1,18 @@
-// Agent-portal skeleton: Game Management (placeholder).
-// Fylles inn i oppfølger-PR (Next Game-panel, Start Next Game,
-// PAUSE/Check Bingo-flyt per legacy V1.0).
+// Agent-portal — Game Management landing.
+//
+// Monterer Next-Game-panel direkte — "Game Management" i legacy V1.0-
+// wireframe er i praksis Next-Game-panelet (Start Next Game, PAUSE/Resume,
+// Force End, Ready/Not-Ready popup, 2-min countdown, Jackpot-confirm).
+//
+// Videre sub-flows (Register More Tickets, Register Sold Tickets, Check
+// for Bingo ticket-popup) kommer i oppfølger-PR-er under samme route-tre.
 
-import { mountAgentPortalPlaceholder } from "./AgentPortalPlaceholder.js";
+import { mountNextGamePanel, unmountNextGamePanel } from "./NextGamePanel.js";
 
 export function mountAgentGames(container: HTMLElement): void {
-  mountAgentPortalPlaceholder(container, {
-    titleKey: "agent_game_management",
-    path: "/agent/games",
-    descriptionKey: "agent_games_description",
-  });
+  mountNextGamePanel(container);
+}
+
+export function unmountAgentGames(): void {
+  unmountNextGamePanel();
 }
