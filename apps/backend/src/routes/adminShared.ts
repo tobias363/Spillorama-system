@@ -16,6 +16,7 @@ import type { RoomSnapshot } from "../game/types.js";
 import type { RoomUpdatePayload } from "../util/roomHelpers.js";
 import type { AuditLogService, AuditActorType } from "../compliance/AuditLogService.js";
 import type { EmailService } from "../integration/EmailService.js";
+import type { HallCashLedger } from "../agent/HallCashLedger.js";
 
 // ── BIN-588 wire-up helpers ───────────────────────────────────────────────────
 
@@ -138,6 +139,12 @@ export interface AdminRouterDeps {
   auditLogService: AuditLogService;
   emailService: EmailService;
   supportEmail?: string;
+  /**
+   * Hall cash-balanse ledger. Brukes av admin "Add Money"-endpointet for å
+   * kreditere available balance atomisk + skrive tx-rad (immutable audit).
+   * Gjenbruker samme ledger som `AgentSettlementService`.
+   */
+  hallCashLedger: HallCashLedger;
 }
 
 // ── Shared helpers factory ────────────────────────────────────────────────────

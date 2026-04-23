@@ -96,6 +96,18 @@ export interface HallDefinition {
   clientVariant: HallClientVariant;
   /** BIN-498: optional embed URL shown on the hall TV-display between rounds. */
   tvUrl?: string;
+  /**
+   * Legacy Hall Number (101, 102, ...). Brukes for IP→hall-mapping og for
+   * Import Player Excel-mapping. Migrasjon 20260701000000: unique-per-hall
+   * når ikke null.
+   */
+  hallNumber?: number | null;
+  /**
+   * BIN-583: nåværende cash-balanse hallen selv disponerer ("Available
+   * Balance"). Muteres atomisk via HallCashLedger.applyCashTx — direkte
+   * skriving utenfor ledger er ikke tillatt.
+   */
+  cashBalance?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -109,6 +121,7 @@ export interface CreateHallInput {
   settlementAccount?: string;
   invoiceMethod?: string;
   isActive?: boolean;
+  hallNumber?: number | null;
 }
 
 export interface UpdateHallInput {
@@ -125,6 +138,7 @@ export interface UpdateHallInput {
    * verdien er alltid "web".
    */
   clientVariant?: HallClientVariant;
+  hallNumber?: number | null;
 }
 
 /** BIN-503: DB-backed TV-display tokens. Plaintext never stored or read back. */
@@ -328,6 +342,10 @@ interface HallRow {
   is_active: boolean;
   /** BIN-498. */
   tv_url: string | null;
+  /** Migrasjon 20260701000000: legacy Hall Number (101, 102, ...). */
+  hall_number: number | null;
+  /** BIN-583 B3.3: running cash-balanse (tilgjengelig saldo). */
+  cash_balance: string | number | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -1048,7 +1066,10 @@ export class PlatformService {
     await this.ensureInitialized();
     const includeInactive = options?.includeInactive ?? false;
     const { rows } = await this.pool.query<HallRow>(
-      `SELECT id, slug, name, region, address, is_active, tv_url, created_at, updated_at
+      `SELECT id, slug, name, region, address,
+              organization_number, settlement_account, invoice_method,
+              is_active, tv_url, hall_number, cash_balance,
+              created_at, updated_at
        FROM ${this.hallsTable()}
        ${includeInactive ? "" : "WHERE is_active = true"}
        ORDER BY name ASC, slug ASC`
@@ -1097,6 +1118,7 @@ export class PlatformService {
     const settlementAccount = input.settlementAccount?.trim() || null;
     const invoiceMethod = input.invoiceMethod?.trim() || null;
     const isActive = input.isActive ?? true;
+    const hallNumber = this.normalizeHallNumber(input.hallNumber);
     const hallId = randomUUID();
 
     const client = await this.pool.connect();
@@ -1109,12 +1131,24 @@ export class PlatformService {
       if (existingRows[0]) {
         throw new DomainError("HALL_SLUG_EXISTS", "Hall med samme slug finnes allerede.");
       }
+      if (hallNumber !== null) {
+        const { rows: numberConflict } = await client.query<{ id: string }>(
+          `SELECT id FROM ${this.hallsTable()} WHERE hall_number = $1`,
+          [hallNumber]
+        );
+        if (numberConflict[0]) {
+          throw new DomainError("HALL_NUMBER_EXISTS", "Hall-nummer er allerede i bruk.");
+        }
+      }
 
       const { rows } = await client.query<HallRow>(
-        `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, organization_number, settlement_account, invoice_method, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING *`,
-        [hallId, slug, name, region, address, organizationNumber, settlementAccount, invoiceMethod, isActive]
+        `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, organization_number, settlement_account, invoice_method, is_active, hall_number)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING id, slug, name, region, address,
+                   organization_number, settlement_account, invoice_method,
+                   is_active, tv_url, hall_number, cash_balance,
+                   created_at, updated_at`,
+        [hallId, slug, name, region, address, organizationNumber, settlementAccount, invoiceMethod, isActive, hallNumber]
       );
       await this.seedHallGameConfigForHall(client, hallId);
       await client.query("COMMIT");
@@ -1143,6 +1177,9 @@ export class PlatformService {
     const nextSettlementAccount = update.settlementAccount !== undefined ? (update.settlementAccount?.trim() || null) : (current.settlementAccount ?? null);
     const nextInvoiceMethod = update.invoiceMethod !== undefined ? (update.invoiceMethod?.trim() || null) : (current.invoiceMethod ?? null);
     const nextIsActive = update.isActive !== undefined ? Boolean(update.isActive) : current.isActive;
+    const nextHallNumber = update.hallNumber !== undefined
+      ? this.normalizeHallNumber(update.hallNumber)
+      : (current.hallNumber ?? null);
 
     if (nextSlug !== current.slug) {
       const { rows: conflictRows } = await this.pool.query<{ id: string }>(
@@ -1151,6 +1188,16 @@ export class PlatformService {
       );
       if (conflictRows[0]) {
         throw new DomainError("HALL_SLUG_EXISTS", "Hall med samme slug finnes allerede.");
+      }
+    }
+
+    if (nextHallNumber !== null && nextHallNumber !== (current.hallNumber ?? null)) {
+      const { rows: numberConflict } = await this.pool.query<{ id: string }>(
+        `SELECT id FROM ${this.hallsTable()} WHERE hall_number = $1 AND id <> $2`,
+        [nextHallNumber, current.id]
+      );
+      if (numberConflict[0]) {
+        throw new DomainError("HALL_NUMBER_EXISTS", "Hall-nummer er allerede i bruk.");
       }
     }
 
@@ -1164,13 +1211,33 @@ export class PlatformService {
            settlement_account = $7,
            invoice_method = $8,
            is_active = $9,
+           hall_number = $10,
            updated_at = now()
        WHERE id = $1
-       RETURNING *`,
-      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive]
+       RETURNING id, slug, name, region, address,
+                 organization_number, settlement_account, invoice_method,
+                 is_active, tv_url, hall_number, cash_balance,
+                 created_at, updated_at`,
+      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive, nextHallNumber]
     );
 
     return this.mapHall(rows[0]);
+  }
+
+  /**
+   * Legacy Hall Number-felt: heltall > 0 eller null (ikke satt).
+   * Tom-streng / undefined / null → null. Ugyldige verdier gir DomainError.
+   */
+  private normalizeHallNumber(raw: number | null | undefined): number | null {
+    if (raw === null || raw === undefined) return null;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      throw new DomainError("INVALID_INPUT", "Hall-nummer må være et positivt heltall.");
+    }
+    const integer = Math.trunc(raw);
+    if (integer !== raw || integer <= 0) {
+      throw new DomainError("INVALID_INPUT", "Hall-nummer må være et positivt heltall.");
+    }
+    return integer;
   }
 
   // ── BIN-503: TV-display tokens ──────────────────────────────────────────
@@ -3251,6 +3318,12 @@ export class PlatformService {
   }
 
   private mapHall(row: HallRow): HallDefinition {
+    const cashBalance =
+      row.cash_balance === null || row.cash_balance === undefined
+        ? 0
+        : typeof row.cash_balance === "number"
+          ? row.cash_balance
+          : Number(row.cash_balance);
     return {
       id: row.id,
       slug: row.slug,
@@ -3265,6 +3338,8 @@ export class PlatformService {
       // i API-shapen (alltid "web") så eksisterende admin-UI ikke krasjer.
       clientVariant: "web",
       tvUrl: row.tv_url ?? undefined,
+      hallNumber: row.hall_number ?? null,
+      cashBalance: Number.isFinite(cashBalance) ? cashBalance : 0,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
@@ -3469,7 +3544,10 @@ export class PlatformService {
     const normalizedReference = this.assertEntityReference(hallReference, "hallId");
     const normalizedSlug = normalizedReference.toLowerCase();
     const { rows } = await this.pool.query<HallRow>(
-      `SELECT id, slug, name, region, address, is_active, tv_url, created_at, updated_at
+      `SELECT id, slug, name, region, address,
+              organization_number, settlement_account, invoice_method,
+              is_active, tv_url, hall_number, cash_balance,
+              created_at, updated_at
        FROM ${this.hallsTable()}
        WHERE id = $1
           OR slug = $2
@@ -3644,7 +3722,18 @@ export class PlatformService {
         )`
       );
       // Add columns if upgrading from older schema
-      for (const col of ["organization_number TEXT", "settlement_account TEXT", "invoice_method TEXT"]) {
+      for (const col of [
+        "organization_number TEXT",
+        "settlement_account TEXT",
+        "invoice_method TEXT",
+        // Migrasjon 20260701000000 (Hall Number): legacy heltall (101, 102, ...).
+        "hall_number INT",
+        // BIN-583 migrasjon 20260418250200: running cash-balanse per hall.
+        "cash_balance NUMERIC(14, 2) NOT NULL DEFAULT 0",
+        "dropsafe_balance NUMERIC(14, 2) NOT NULL DEFAULT 0",
+        // BIN-498 migrasjon 20260418140000: TV-display embed URL.
+        "tv_url TEXT",
+      ]) {
         await client.query(
           `ALTER TABLE ${this.hallsTable()} ADD COLUMN IF NOT EXISTS ${col}`
         ).catch(() => {});
