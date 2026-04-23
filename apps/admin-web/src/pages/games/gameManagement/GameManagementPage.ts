@@ -35,7 +35,8 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
   const tableHost = container.querySelector<HTMLElement>("#gm-list-table");
   const headerHost = container.querySelector<HTMLElement>("#gm-list-header");
   const addBtnHost = container.querySelector<HTMLElement>("#gm-add-btn-host");
-  if (!selectEl || !tableHost || !headerHost || !addBtnHost) return;
+  const hintHost = container.querySelector<HTMLElement>("#gm-choose-type-hint");
+  if (!selectEl || !tableHost || !headerHost || !addBtnHost || !hintHost) return;
 
   let types: GameType[] = [];
   try {
@@ -56,10 +57,12 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
   // Pre-select from typeId query param.
   if (typeId) {
     selectEl.value = typeId;
+    hintHost.style.display = "none";
     renderAddButton(addBtnHost, typeId, types);
     await renderList(typeId, types, headerHost, tableHost);
   } else {
     addBtnHost.innerHTML = "";
+    hintHost.style.display = "";
   }
 
   selectEl.addEventListener("change", () => {
@@ -80,6 +83,11 @@ function renderShell(): string {
         <div class="choose-game">
           <label>${escapeHtml(t("choose_a_game"))}:-</label>
           <select id="gm-type-picker" name="gamesList"></select>
+        </div>
+        <div id="gm-choose-type-hint" class="alert alert-info" data-testid="gm-choose-type-hint"
+             style="margin-top:12px;display:none;">
+          <i class="fa fa-info-circle"></i>
+          ${escapeHtml(t("gm_choose_type_hint"))}
         </div>
       </div>
       <section class="content-header" id="gm-list-header"></section>

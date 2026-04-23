@@ -199,6 +199,7 @@
   "total_winnings": "Totale gevinster",
   "jackpot_roulette_winning": "Jackpot/Roulett Vinner",
   "choose_game_type": "Velg Spilltype",
+  "gm_choose_type_hint": "Velg et spilltype først for å opprette eller redigere spill.",
   "start_date_time": "Startdato og klokkeslett",
   "player_delete_successfully": "Spiller slettet vellykket",
   "player_status_update_successfully": "Spillerstatus oppdatert vellykket",

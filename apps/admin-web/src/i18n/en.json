@@ -200,6 +200,7 @@
   "total_winnings": "Total Winnings",
   "jackpot_roulette_winning": "Jackpot/Roulette Winning",
   "choose_game_type": " Choose Game Type",
+  "gm_choose_type_hint": "Choose a game type first to create or edit games.",
   "player_delete_successfully": "Player deleted successfully",
   "player_status_update_successfully": "Player status updated successfully",
   "player_status_not_update": "Player status not updated",
