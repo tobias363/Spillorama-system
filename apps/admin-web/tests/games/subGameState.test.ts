@@ -180,8 +180,19 @@ describe("isGameNameLocallyValid", () => {
 });
 
 describe("LEGACY_TICKET_COLOR_OPTIONS", () => {
-  it("exposes the 8 legacy color labels", () => {
+  it("exposes canonical 9-color codes first, legacy strings last", () => {
+    // feat/schedule-8-colors-mystery (2026-04-23): de 9 canonical TICKET_COLORS
+    // er prepended, de 8 legacy-navnene beholdes for bakoverkompat.
     expect(LEGACY_TICKET_COLOR_OPTIONS).toEqual([
+      "SMALL_YELLOW",
+      "LARGE_YELLOW",
+      "SMALL_WHITE",
+      "LARGE_WHITE",
+      "SMALL_PURPLE",
+      "LARGE_PURPLE",
+      "RED",
+      "GREEN",
+      "BLUE",
       "Yellow",
       "Blue",
       "Green",
@@ -195,6 +206,6 @@ describe("LEGACY_TICKET_COLOR_OPTIONS", () => {
 
   it("is a readonly tuple (cannot push)", () => {
     expect(Array.isArray(LEGACY_TICKET_COLOR_OPTIONS)).toBe(true);
-    expect(LEGACY_TICKET_COLOR_OPTIONS.length).toBe(8);
+    expect(LEGACY_TICKET_COLOR_OPTIONS.length).toBe(17);
   });
 });

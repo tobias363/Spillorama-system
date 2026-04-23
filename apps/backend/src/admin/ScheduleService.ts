@@ -17,6 +17,12 @@
 
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import {
+  validateMysteryConfig,
+  validateRowPrizesByColor,
+  SUB_GAME_TYPES,
+  type SubGameType,
+} from "@spillorama/shared-types";
 import { DomainError } from "../game/BingoEngine.js";
 import { getPoolTuning } from "../util/pgPool.js";
 import { logger as rootLogger } from "../util/logger.js";
@@ -50,6 +56,12 @@ export interface ScheduleSubgame {
   jackpotData?: Record<string, unknown>;
   elvisData?: Record<string, unknown>;
   extra?: Record<string, unknown>;
+  /**
+   * feat/schedule-8-colors-mystery: sub-game-type-diskriminant.
+   * "STANDARD" (default) = pattern + ticket-colors som tidligere.
+   * "MYSTERY" = Mystery Game-variant (Admin V1.0 s. 5, rev. 2023-10-05).
+   */
+  subGameType?: SubGameType;
 }
 
 export interface Schedule {
@@ -307,6 +319,52 @@ function assertSubgames(value: unknown): ScheduleSubgame[] {
     if (eData !== undefined) slot.elvisData = eData;
     const extra = assertOptionalObject(r.extra, `subGames[${i}].extra`);
     if (extra !== undefined) slot.extra = extra;
+
+    // feat/schedule-8-colors-mystery: validér sub-game-type + ekstra-felter.
+    // Lagres på wire som eget felt på subgame-objektet, ikke inne i `extra`,
+    // slik at service-laget kan diskriminere uten å pakke opp JSON.
+    if (r.subGameType !== undefined) {
+      if (typeof r.subGameType !== "string") {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `subGames[${i}].subGameType må være en streng.`
+        );
+      }
+      const sgType = r.subGameType as SubGameType;
+      if (!(SUB_GAME_TYPES as readonly string[]).includes(sgType)) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `subGames[${i}].subGameType må være én av ${SUB_GAME_TYPES.join(", ")}.`
+        );
+      }
+      slot.subGameType = sgType;
+    }
+
+    // rowPrizesByColor + mysteryConfig: lagres i `extra` for bakoverkompat
+    // (unormalisert JSONB). Valideres her hvis satt.
+    if (slot.extra) {
+      const rp = (slot.extra as Record<string, unknown>).rowPrizesByColor;
+      if (rp !== undefined) {
+        const err = validateRowPrizesByColor(rp);
+        if (err) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            `subGames[${i}].extra.${err}`
+          );
+        }
+      }
+      const mc = (slot.extra as Record<string, unknown>).mysteryConfig;
+      if (mc !== undefined) {
+        const err = validateMysteryConfig(mc);
+        if (err) {
+          throw new DomainError(
+            "INVALID_INPUT",
+            `subGames[${i}].extra.${err}`
+          );
+        }
+      }
+    }
+
     return slot;
   });
 }
@@ -651,6 +709,12 @@ export class ScheduleService {
         }
         if (s.extra && typeof s.extra === "object" && !Array.isArray(s.extra)) {
           slot.extra = s.extra as Record<string, unknown>;
+        }
+        if (typeof s.subGameType === "string") {
+          const sgType = s.subGameType as SubGameType;
+          if ((SUB_GAME_TYPES as readonly string[]).includes(sgType)) {
+            slot.subGameType = sgType;
+          }
         }
         return slot;
       });

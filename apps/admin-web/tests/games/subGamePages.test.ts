@@ -111,14 +111,22 @@ describe("SubGameAddEditPage", () => {
     expect(submit?.disabled).toBe(false);
   });
 
-  it("add-page includes ticket-color select with 8 legacy options", async () => {
+  it("add-page includes ticket-color select with 9 canonical + 8 legacy options", async () => {
     const c = document.createElement("div");
     await renderSubGameAddPage(c);
     const colorSelect = c.querySelector<HTMLSelectElement>('select[name="selectTicketColor"]');
     expect(colorSelect).not.toBeNull();
-    // Enabled for BIN-621 wire-up
+    // Enabled for BIN-621 wire-up.
     expect(colorSelect?.disabled).toBe(false);
-    expect(colorSelect?.querySelectorAll("option").length).toBe(8);
+    // feat/schedule-8-colors-mystery: 9 canonical TICKET_COLORS + 8 legacy strings = 17.
+    expect(colorSelect?.querySelectorAll("option").length).toBe(17);
+    // Canonical codes er blant valgene.
+    const values = Array.from(colorSelect!.querySelectorAll("option")).map(
+      (o) => o.getAttribute("value")
+    );
+    expect(values).toContain("SMALL_YELLOW");
+    expect(values).toContain("LARGE_PURPLE");
+    expect(values).toContain("BLUE");
   });
 
   it("add-page includes status select with active/inactive", async () => {

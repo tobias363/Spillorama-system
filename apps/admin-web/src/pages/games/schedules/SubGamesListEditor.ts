@@ -24,8 +24,36 @@
 import { t } from "../../../i18n/I18n.js";
 import { escapeHtml } from "../common/escape.js";
 import type { ScheduleSubgame } from "./ScheduleState.js";
+import {
+  TICKET_COLORS,
+  SUB_GAME_TYPES,
+  validateMysteryConfig,
+  validateRowPrizesByColor,
+  type TicketColor,
+  type RowPrizesByColor,
+  type TicketColorRowPrizes,
+  type MysterySubGameConfig,
+  type SubGameType,
+} from "../../../../../../packages/shared-types/src/ticket-colors.js";
 
 const TIME_RE = /^$|^[0-9]{2}:[0-9]{2}$/;
+
+/**
+ * Map fra canonical ticket-color-kode til i18n-nøkkel for display-navn.
+ * i18n-oppslaget gjøres ved render-tid slik at admin kan bytte språk
+ * uten å refreshe UI-state.
+ */
+const COLOR_I18N_KEY: Record<TicketColor, string> = {
+  SMALL_YELLOW: "ticket_color_small_yellow",
+  LARGE_YELLOW: "ticket_color_large_yellow",
+  SMALL_WHITE: "ticket_color_small_white",
+  LARGE_WHITE: "ticket_color_large_white",
+  SMALL_PURPLE: "ticket_color_small_purple",
+  LARGE_PURPLE: "ticket_color_large_purple",
+  RED: "ticket_color_red",
+  GREEN: "ticket_color_green",
+  BLUE: "ticket_color_blue",
+};
 
 /**
  * Intern row-state: matcher ScheduleSubgame, men beholder JSON-strenger
@@ -45,6 +73,20 @@ interface SubGameRowState {
   jackpotDataJson: string;
   elvisDataJson: string;
   extraJson: string;
+  /**
+   * feat/schedule-8-colors-mystery: STANDARD (pattern-sub-game) eller
+   * MYSTERY (priceOptions-sub-game). Rendrer forskjellig UI.
+   */
+  subGameType: SubGameType;
+  /** Valgte farger (subset av TICKET_COLORS). Stables i samme rekkefølge. */
+  selectedColors: Set<TicketColor>;
+  /** Per-farge rad-pris-innputt (alle som strings for å kunne være tomme). */
+  rowPrizesByColor: Partial<
+    Record<TicketColor, { ticketPrice: string; row1: string; row2: string; row3: string; row4: string; fullHouse: string }>
+  >;
+  /** Komma-separert liste av Mystery-priser ("1000,1500,2000"). */
+  mysteryPriceOptions: string;
+  mysteryYellowDoubles: boolean;
 }
 
 function emptyRow(): SubGameRowState {
@@ -61,10 +103,71 @@ function emptyRow(): SubGameRowState {
     jackpotDataJson: "",
     elvisDataJson: "",
     extraJson: "",
+    subGameType: "STANDARD",
+    selectedColors: new Set(),
+    rowPrizesByColor: {},
+    mysteryPriceOptions: "",
+    mysteryYellowDoubles: false,
   };
 }
 
+/** Tom pris-oppføring per farge — admin fyller ut progressivt. */
+function emptyColorPrize(): {
+  ticketPrice: string;
+  row1: string;
+  row2: string;
+  row3: string;
+  row4: string;
+  fullHouse: string;
+} {
+  return { ticketPrice: "", row1: "", row2: "", row3: "", row4: "", fullHouse: "" };
+}
+
 function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
+  // Pakk ut per-color + Mystery-config fra extra hvis de er satt.
+  // Ikke-genkjente farger ignoreres (fail-open for legacy data).
+  const selectedColors = new Set<TicketColor>();
+  const rowPrizesByColor: Partial<
+    Record<TicketColor, { ticketPrice: string; row1: string; row2: string; row3: string; row4: string; fullHouse: string }>
+  > = {};
+  let mysteryPriceOptions = "";
+  let mysteryYellowDoubles = false;
+  let extraForJson: Record<string, unknown> | undefined = sg.extra;
+
+  if (sg.extra) {
+    const rp = sg.extra.rowPrizesByColor as RowPrizesByColor | undefined;
+    if (rp && typeof rp === "object" && !Array.isArray(rp)) {
+      for (const color of TICKET_COLORS) {
+        const p = rp[color];
+        if (!p) continue;
+        selectedColors.add(color);
+        rowPrizesByColor[color] = {
+          ticketPrice: p.ticketPrice !== undefined ? String(p.ticketPrice) : "",
+          row1: p.row1 !== undefined ? String(p.row1) : "",
+          row2: p.row2 !== undefined ? String(p.row2) : "",
+          row3: p.row3 !== undefined ? String(p.row3) : "",
+          row4: p.row4 !== undefined ? String(p.row4) : "",
+          fullHouse: p.fullHouse !== undefined ? String(p.fullHouse) : "",
+        };
+      }
+    }
+    const mc = sg.extra.mysteryConfig as MysterySubGameConfig | undefined;
+    if (mc && typeof mc === "object" && !Array.isArray(mc)) {
+      if (Array.isArray(mc.priceOptions)) {
+        mysteryPriceOptions = mc.priceOptions.join(",");
+      }
+      if (typeof mc.yellowDoubles === "boolean") {
+        mysteryYellowDoubles = mc.yellowDoubles;
+      }
+    }
+    // Ekstra-JSON-visning skal ikke duplisere strukturerte felter.
+    // Lag en kopi uten rowPrizesByColor + mysteryConfig.
+    const rest: Record<string, unknown> = { ...sg.extra };
+    delete rest.rowPrizesByColor;
+    delete rest.mysteryConfig;
+    extraForJson = Object.keys(rest).length > 0 ? rest : undefined;
+  }
+
   return {
     name: sg.name ?? "",
     customGameName: sg.customGameName ?? "",
@@ -87,9 +190,14 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
         ? JSON.stringify(sg.elvisData, null, 2)
         : "",
     extraJson:
-      sg.extra && Object.keys(sg.extra).length > 0
-        ? JSON.stringify(sg.extra, null, 2)
+      extraForJson && Object.keys(extraForJson).length > 0
+        ? JSON.stringify(extraForJson, null, 2)
         : "",
+    subGameType: sg.subGameType === "MYSTERY" ? "MYSTERY" : "STANDARD",
+    selectedColors,
+    rowPrizesByColor,
+    mysteryPriceOptions,
+    mysteryYellowDoubles,
   };
 }
 
@@ -169,6 +277,93 @@ function rowStateToSubgame(
   parseJsonObj(state.elvisDataJson, "elvisData");
   parseJsonObj(state.extraJson, "extra");
 
+  // feat/schedule-8-colors-mystery: strukturert subGameType + per-color
+  // rad-premier + Mystery-konfig. Disse merges inn i `extra` slik at
+  // backend-kontrakten (fri-form extra JSONB) ikke brytes. subGameType
+  // settes som top-level-felt (speiles av ScheduleService).
+  slot.subGameType = state.subGameType;
+
+  const rowPrizesByColor: Partial<Record<TicketColor, TicketColorRowPrizes>> = {};
+  for (const color of state.selectedColors) {
+    const entry = state.rowPrizesByColor[color];
+    if (!entry) continue;
+    const prize: TicketColorRowPrizes = {};
+    const assignNum = (
+      raw: string,
+      field: keyof TicketColorRowPrizes
+    ): void => {
+      const trimmed = raw.trim();
+      if (!trimmed) return;
+      const n = Number(trimmed);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new Error(
+          `${t("schedule_subgames_row_label")} ${rowIndex + 1}: ${color} — ${t("schedule_subgames_invalid_amount")} (${field})`
+        );
+      }
+      prize[field] = n;
+    };
+    assignNum(entry.ticketPrice, "ticketPrice");
+    assignNum(entry.row1, "row1");
+    assignNum(entry.row2, "row2");
+    assignNum(entry.row3, "row3");
+    assignNum(entry.row4, "row4");
+    assignNum(entry.fullHouse, "fullHouse");
+    if (Object.keys(prize).length > 0) {
+      rowPrizesByColor[color] = prize;
+    }
+  }
+  const hasColorPrizes = Object.keys(rowPrizesByColor).length > 0;
+
+  // Mystery-konfig bygges kun når subGameType = MYSTERY (UI skjuler feltet
+  // ellers). Validering via shared helper.
+  let mysteryConfig: MysterySubGameConfig | undefined;
+  if (state.subGameType === "MYSTERY") {
+    const raw = state.mysteryPriceOptions.trim();
+    if (!raw) {
+      throw new Error(
+        `${t("schedule_subgames_row_label")} ${rowIndex + 1}: ${t("mystery_price_options_required")}`
+      );
+    }
+    const parts = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const nums: number[] = [];
+    for (const part of parts) {
+      const n = Number(part);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+        throw new Error(
+          `${t("schedule_subgames_row_label")} ${rowIndex + 1}: ${t("mystery_price_options_invalid")} (${part})`
+        );
+      }
+      nums.push(n);
+    }
+    mysteryConfig = { priceOptions: nums, yellowDoubles: state.mysteryYellowDoubles };
+    const err = validateMysteryConfig(mysteryConfig);
+    if (err) {
+      throw new Error(
+        `${t("schedule_subgames_row_label")} ${rowIndex + 1}: ${err}`
+      );
+    }
+  }
+
+  if (hasColorPrizes || mysteryConfig) {
+    const merged: Record<string, unknown> = { ...(slot.extra ?? {}) };
+    if (hasColorPrizes) merged.rowPrizesByColor = rowPrizesByColor;
+    if (mysteryConfig) merged.mysteryConfig = mysteryConfig;
+    slot.extra = merged;
+    // Bruk shared validator for å fail-fast før POST — gir sam e feilmelding
+    // som backend ville gitt.
+    if (hasColorPrizes) {
+      const err = validateRowPrizesByColor(rowPrizesByColor);
+      if (err) {
+        throw new Error(
+          `${t("schedule_subgames_row_label")} ${rowIndex + 1}: ${err}`
+        );
+      }
+    }
+  }
+
   return slot;
 }
 
@@ -213,6 +408,129 @@ export function mountSubGamesListEditor(
         </div>`;
     }
     wire();
+  }
+
+  /**
+   * feat/schedule-8-colors-mystery: sub-game-type-select + 9-color multi-
+   * select med per-color rad-premier. Rendrer forskjellig UI når type=MYSTERY.
+   * Bruker `data-sg-color`/`data-sg-color-field` for event-bindings.
+   */
+  function renderSubGameTypeAndColors(row: SubGameRowState, index: number): string {
+    const typeOptions = SUB_GAME_TYPES.map((tp) => {
+      const selected = row.subGameType === tp ? " selected" : "";
+      const label =
+        tp === "MYSTERY"
+          ? escapeHtml(t("sub_game_type_mystery"))
+          : escapeHtml(t("sub_game_type_standard"));
+      return `<option value="${tp}"${selected}>${label}</option>`;
+    }).join("");
+
+    const colorsPanel =
+      row.subGameType === "STANDARD"
+        ? renderColorsPanel(row, index)
+        : renderMysteryPanel(row, index);
+
+    return `
+      <div class="row" style="margin-top:6px;">
+        <div class="form-group col-sm-4">
+          <label for="sg-type-${index}">${escapeHtml(t("schedule_subgames_field_type"))}</label>
+          <select id="sg-type-${index}" class="form-control input-sm" data-sg-field="subGameType">
+            ${typeOptions}
+          </select>
+        </div>
+      </div>
+      <div class="sg-colors-panel" data-sg-index="${index}">
+        ${colorsPanel}
+      </div>`;
+  }
+
+  function renderColorsPanel(row: SubGameRowState, index: number): string {
+    const checkboxes = TICKET_COLORS.map((color) => {
+      const checked = row.selectedColors.has(color) ? " checked" : "";
+      const label = escapeHtml(t(COLOR_I18N_KEY[color]));
+      return `
+        <label class="sg-color-toggle"
+               style="display:inline-flex;align-items:center;gap:4px;margin:2px 8px 2px 0;font-size:12px;">
+          <input type="checkbox" data-sg-color="${color}"${checked}>
+          <span>${label}</span>
+        </label>`;
+    }).join("");
+
+    const rowsForColors = Array.from(row.selectedColors)
+      .map((color) => renderColorPriceRow(row, index, color))
+      .join("");
+
+    return `
+      <fieldset style="border:1px solid #e8e8e8;border-radius:3px;padding:6px 8px;margin-top:4px;background:#fff;">
+        <legend style="font-size:12px;padding:0 4px;color:#333;">
+          ${escapeHtml(t("schedule_subgames_colors_legend"))}
+        </legend>
+        <div class="sg-color-toggles">${checkboxes}</div>
+        ${rowsForColors ? `<div class="sg-color-prices" style="margin-top:6px;">${rowsForColors}</div>` : ""}
+      </fieldset>`;
+  }
+
+  function renderColorPriceRow(
+    row: SubGameRowState,
+    _index: number,
+    color: TicketColor
+  ): string {
+    const prize = row.rowPrizesByColor[color] ?? emptyColorPrize();
+    const label = escapeHtml(t(COLOR_I18N_KEY[color]));
+    const fields: Array<[keyof typeof prize, string]> = [
+      ["ticketPrice", t("schedule_subgames_field_ticket_price")],
+      ["row1", t("schedule_subgames_field_row1_prize")],
+      ["row2", t("schedule_subgames_field_row2_prize")],
+      ["row3", t("schedule_subgames_field_row3_prize")],
+      ["row4", t("schedule_subgames_field_row4_prize")],
+      ["fullHouse", t("schedule_subgames_field_full_house_prize")],
+    ];
+    const inputs = fields
+      .map(
+        ([key, placeholder]) => `
+        <input type="number" class="form-control input-sm"
+               data-sg-color="${color}"
+               data-sg-color-field="${key}"
+               min="0" step="1"
+               placeholder="${escapeHtml(placeholder)}"
+               value="${escapeHtml(prize[key])}"
+               style="display:inline-block;width:100px;margin-right:4px;margin-bottom:4px;"
+               aria-label="${escapeHtml(label)} ${escapeHtml(placeholder)}">`
+      )
+      .join("");
+    return `
+      <div class="sg-color-row" style="padding:4px 0;border-top:1px dashed #eee;">
+        <strong style="font-size:12px;">${label}</strong>
+        <div style="margin-top:2px;">${inputs}</div>
+      </div>`;
+  }
+
+  function renderMysteryPanel(row: SubGameRowState, index: number): string {
+    const checked = row.mysteryYellowDoubles ? " checked" : "";
+    return `
+      <fieldset style="border:1px solid #e8e8e8;border-radius:3px;padding:6px 8px;margin-top:4px;background:#fff;">
+        <legend style="font-size:12px;padding:0 4px;color:#333;">
+          ${escapeHtml(t("schedule_subgames_mystery_legend"))}
+        </legend>
+        <div class="form-group">
+          <label for="sg-mp-${index}" style="font-size:12px;">
+            ${escapeHtml(t("mystery_price_options_label"))}
+          </label>
+          <input type="text" id="sg-mp-${index}" class="form-control input-sm"
+                 data-sg-field="mysteryPriceOptions"
+                 placeholder="1000,1500,2000,2500,3000,4000"
+                 value="${escapeHtml(row.mysteryPriceOptions)}">
+          <p class="help-block" style="margin-top:2px;font-size:11px;">
+            ${escapeHtml(t("mystery_price_options_hint"))}
+          </p>
+        </div>
+        <div class="form-group">
+          <label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;">
+            <input type="checkbox" data-sg-field="mysteryYellowDoubles"${checked}>
+            <span>${escapeHtml(t("mystery_yellow_doubles_label"))}</span>
+          </label>
+        </div>
+      </fieldset>`;
   }
 
   function renderRow(row: SubGameRowState, index: number): string {
@@ -284,6 +602,7 @@ export function mountSubGamesListEditor(
                    value="${escapeHtml(row.seconds)}">
           </div>
         </div>
+        ${renderSubGameTypeAndColors(row, index)}
         <details class="sg-advanced" style="margin-top:4px;">
           <summary style="cursor:pointer;font-size:12px;color:#555;">
             ${escapeHtml(t("schedule_subgames_advanced_toggle"))}
@@ -351,21 +670,95 @@ export function mountSubGamesListEditor(
       });
     });
     host
-      .querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-sg-field]")
+      .querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+        "[data-sg-field]"
+      )
       .forEach((el) => {
         const onChange = (): void => {
           const container = el.closest(".sg-row");
           if (!container) return;
           const idx = Number(container.getAttribute("data-sg-index") ?? "-1");
           if (idx < 0 || idx >= rows.length) return;
-          const field = el.getAttribute("data-sg-field") as
-            | keyof SubGameRowState
-            | null;
+          const field = el.getAttribute("data-sg-field");
           if (!field) return;
-          rows[idx]![field] = el.value;
+          const row = rows[idx]!;
+          // feat/8-colors: typed fields som ikke er strings.
+          if (field === "subGameType") {
+            const v = (el as HTMLSelectElement).value;
+            row.subGameType = v === "MYSTERY" ? "MYSTERY" : "STANDARD";
+            render(); // re-rendre for å bytte panel (farger <-> mystery)
+            return;
+          }
+          if (field === "mysteryYellowDoubles") {
+            row.mysteryYellowDoubles = (el as HTMLInputElement).checked;
+            return;
+          }
+          // Default: string-field.
+          (row as unknown as Record<string, string>)[field] = (
+            el as HTMLInputElement
+          ).value;
         };
         el.addEventListener("input", onChange);
         el.addEventListener("change", onChange);
+      });
+
+    // feat/8-colors: farge-toggle-checkboxes (legg til / fjern farge fra
+    // selectedColors). Må re-rendre slik at per-color-prisinput vises.
+    host
+      .querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"][data-sg-color]:not([data-sg-color-field])'
+      )
+      .forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const container = cb.closest(".sg-row");
+          if (!container) return;
+          const idx = Number(container.getAttribute("data-sg-index") ?? "-1");
+          if (idx < 0 || idx >= rows.length) return;
+          const color = cb.getAttribute("data-sg-color") as TicketColor | null;
+          if (!color || !(TICKET_COLORS as readonly string[]).includes(color)) return;
+          const row = rows[idx]!;
+          if (cb.checked) {
+            row.selectedColors.add(color);
+            if (!row.rowPrizesByColor[color]) {
+              row.rowPrizesByColor[color] = emptyColorPrize();
+            }
+          } else {
+            row.selectedColors.delete(color);
+            delete row.rowPrizesByColor[color];
+          }
+          render();
+        });
+      });
+
+    // feat/8-colors: per-color pris-input (ticketPrice, row1..row4, fullHouse).
+    host
+      .querySelectorAll<HTMLInputElement>(
+        "input[data-sg-color][data-sg-color-field]"
+      )
+      .forEach((input) => {
+        const onChange = (): void => {
+          const container = input.closest(".sg-row");
+          if (!container) return;
+          const idx = Number(container.getAttribute("data-sg-index") ?? "-1");
+          if (idx < 0 || idx >= rows.length) return;
+          const color = input.getAttribute("data-sg-color") as TicketColor | null;
+          const field = input.getAttribute("data-sg-color-field") as
+            | "ticketPrice"
+            | "row1"
+            | "row2"
+            | "row3"
+            | "row4"
+            | "fullHouse"
+            | null;
+          if (!color || !field) return;
+          const row = rows[idx]!;
+          if (!row.rowPrizesByColor[color]) {
+            row.rowPrizesByColor[color] = emptyColorPrize();
+          }
+          row.rowPrizesByColor[color]![field] = input.value;
+        };
+        input.addEventListener("input", onChange);
+        input.addEventListener("change", onChange);
       });
   }
 

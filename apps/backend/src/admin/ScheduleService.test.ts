@@ -437,6 +437,157 @@ test("BIN-625 service: update() avviser allerede slettet rad", async () => {
   );
 });
 
+// ── feat/schedule-8-colors-mystery: 9-color + Mystery validation ──────────
+
+test("feat/8-colors: create() avviser ukjent subGameType", async () => {
+  const svc = makeService(throwingPool());
+  await expectDomainError(
+    "bad subGameType",
+    () =>
+      svc.create({
+        scheduleName: "bad",
+        subGames: [{ name: "x", subGameType: "BONUS" as unknown as "STANDARD" }],
+        createdBy: "u1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("feat/8-colors: create() avviser rowPrizesByColor med negativ verdi", async () => {
+  const svc = makeService(throwingPool());
+  await expectDomainError(
+    "negative rowPrize",
+    () =>
+      svc.create({
+        scheduleName: "bad rowPrize",
+        subGames: [
+          {
+            name: "x",
+            extra: {
+              rowPrizesByColor: {
+                SMALL_YELLOW: { ticketPrice: 30, row1: -5 },
+              },
+            },
+          },
+        ],
+        createdBy: "u1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("feat/8-colors: create() avviser Mystery-konfig uten priceOptions", async () => {
+  const svc = makeService(throwingPool());
+  await expectDomainError(
+    "missing priceOptions",
+    () =>
+      svc.create({
+        scheduleName: "bad mystery",
+        subGames: [
+          {
+            name: "mystery-slot",
+            subGameType: "MYSTERY",
+            extra: { mysteryConfig: { yellowDoubles: true } as unknown as Record<string, unknown> },
+          },
+        ],
+        createdBy: "u1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("feat/8-colors: create() avviser Mystery priceOptions > 10", async () => {
+  const svc = makeService(throwingPool());
+  await expectDomainError(
+    "too many priceOptions",
+    () =>
+      svc.create({
+        scheduleName: "bad mystery",
+        subGames: [
+          {
+            name: "mystery-slot",
+            subGameType: "MYSTERY",
+            extra: {
+              mysteryConfig: {
+                priceOptions: [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100],
+              },
+            },
+          },
+        ],
+        createdBy: "u1",
+      }),
+    "INVALID_INPUT"
+  );
+});
+
+test("feat/8-colors: create() godkjenner full 9-color + Mystery payload", async () => {
+  const captured: Array<{ sql: string; params?: unknown[] }> = [];
+  const pool: StubPool = {
+    query: async (sql, params) => {
+      captured.push({ sql, params });
+      if (/INSERT/.test(sql)) {
+        // params[9] er JSON-stringen vi sendte inn via JSON.stringify(subGames).
+        // Mock-repoet speiler den tilbake som sub_games_json (JSONB-echo).
+        const raw = (params as unknown[])[9];
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        return {
+          rows: [
+            mockRow({
+              sub_games_json: parsed,
+            }),
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+    connect: async () => ({}),
+  };
+  const svc = makeService(pool);
+  const row = await svc.create({
+    scheduleName: "Full 8-color",
+    subGames: [
+      {
+        name: "Standard med farger",
+        subGameType: "STANDARD",
+        extra: {
+          rowPrizesByColor: {
+            SMALL_YELLOW: { ticketPrice: 30, row1: 20, row2: 50, fullHouse: 200 },
+            LARGE_YELLOW: { ticketPrice: 80, fullHouse: 600 },
+            SMALL_WHITE: { ticketPrice: 30, row1: 15 },
+            LARGE_WHITE: { ticketPrice: 80 },
+            SMALL_PURPLE: { ticketPrice: 30 },
+            LARGE_PURPLE: { ticketPrice: 80 },
+            RED: { ticketPrice: 50, fullHouse: 400 },
+            GREEN: { ticketPrice: 50 },
+            BLUE: { ticketPrice: 50 },
+          },
+        },
+      },
+      {
+        name: "Mystery Slot",
+        subGameType: "MYSTERY",
+        extra: {
+          mysteryConfig: {
+            priceOptions: [1000, 1500, 2000, 2500, 3000, 4000],
+            yellowDoubles: true,
+          },
+        },
+      },
+    ],
+    createdBy: "admin-1",
+  });
+  const stored = row.subGames;
+  assert.equal(stored.length, 2);
+  assert.equal(stored[0]!.subGameType, "STANDARD");
+  assert.equal(stored[1]!.subGameType, "MYSTERY");
+  const mystery = stored[1]!.extra?.mysteryConfig as {
+    priceOptions: number[];
+    yellowDoubles: boolean;
+  };
+  assert.deepEqual(mystery.priceOptions, [1000, 1500, 2000, 2500, 3000, 4000]);
+  assert.equal(mystery.yellowDoubles, true);
+});
+
 test("BIN-625 service: map() parser subGames defensivt", async () => {
   const pool: StubPool = {
     query: async () => ({

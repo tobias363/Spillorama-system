@@ -843,6 +843,12 @@ export const ScheduleSubgameSchema = z.object({
   jackpotData: z.record(z.string(), z.unknown()).optional(),
   elvisData: z.record(z.string(), z.unknown()).optional(),
   extra: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * feat/schedule-8-colors-mystery: Sub-game-type-diskriminant.
+   * "STANDARD" (default) = pattern + ticket-colors; "MYSTERY" =
+   * Mystery Game-sub-game med priceOptions i `extra.mysteryConfig`.
+   */
+  subGameType: z.enum(["STANDARD", "MYSTERY"]).optional(),
 });
 export type ScheduleSubgame = z.infer<typeof ScheduleSubgameSchema>;
 

@@ -502,6 +502,327 @@ describe("SubGamesListEditor (fix/schedule-structured-subgames)", () => {
     expect(status!.style.display).toBe("block");
   });
 
+  // ── feat/schedule-8-colors-mystery (2026-04-23): 9 farger + Mystery ─────
+
+  it("8-colors: type-select default STANDARD viser farge-fieldset med 9 farger", async () => {
+    installFetch(() => successResponse({}));
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    const row = document.querySelector<HTMLElement>(".sg-row")!;
+    const typeSelect = row.querySelector<HTMLSelectElement>(
+      '[data-sg-field="subGameType"]'
+    );
+    expect(typeSelect).not.toBeNull();
+    expect(typeSelect!.value).toBe("STANDARD");
+
+    const colorCheckboxes = row.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"][data-sg-color]:not([data-sg-color-field])'
+    );
+    expect(colorCheckboxes.length).toBe(9);
+    const codes = Array.from(colorCheckboxes).map(
+      (cb) => cb.getAttribute("data-sg-color") ?? ""
+    );
+    expect(codes).toEqual([
+      "SMALL_YELLOW",
+      "LARGE_YELLOW",
+      "SMALL_WHITE",
+      "LARGE_WHITE",
+      "SMALL_PURPLE",
+      "LARGE_PURPLE",
+      "RED",
+      "GREEN",
+      "BLUE",
+    ]);
+  });
+
+  it("8-colors: velge farge viser per-color pris-input; POST inneholder rowPrizesByColor", async () => {
+    const fetchMock = installFetch((_url, init) => {
+      if (init && init.method === "POST") {
+        const body = JSON.parse(init.body as string);
+        return successResponse({
+          id: "sch-new",
+          scheduleName: body.scheduleName,
+          scheduleNumber: "SID_X",
+          scheduleType: "Auto",
+          luckyNumberPrize: 0,
+          status: "active",
+          isAdminSchedule: true,
+          manualStartTime: "",
+          manualEndTime: "",
+          subGames: body.subGames ?? [],
+          createdBy: null,
+          createdAt: "",
+          updatedAt: "",
+        });
+      }
+      return successResponse({});
+    });
+
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+
+    document.querySelector<HTMLInputElement>("#sch-name")!.value = "Med farger";
+
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    // Huk av Small Yellow og Red.
+    const syCb = document.querySelector<HTMLInputElement>(
+      'input[type="checkbox"][data-sg-color="SMALL_YELLOW"]'
+    )!;
+    syCb.checked = true;
+    syCb.dispatchEvent(new Event("change"));
+    await flush();
+
+    const redCb = document.querySelector<HTMLInputElement>(
+      'input[type="checkbox"][data-sg-color="RED"]'
+    )!;
+    redCb.checked = true;
+    redCb.dispatchEvent(new Event("change"));
+    await flush();
+
+    // Per-color pris-input skal nå vises for disse to.
+    const syTicketPrice = document.querySelector<HTMLInputElement>(
+      'input[data-sg-color="SMALL_YELLOW"][data-sg-color-field="ticketPrice"]'
+    );
+    expect(syTicketPrice).not.toBeNull();
+    syTicketPrice!.value = "30";
+    syTicketPrice!.dispatchEvent(new Event("input"));
+
+    const syFullHouse = document.querySelector<HTMLInputElement>(
+      'input[data-sg-color="SMALL_YELLOW"][data-sg-color-field="fullHouse"]'
+    )!;
+    syFullHouse.value = "200";
+    syFullHouse.dispatchEvent(new Event("input"));
+
+    const redTicketPrice = document.querySelector<HTMLInputElement>(
+      'input[data-sg-color="RED"][data-sg-color-field="ticketPrice"]'
+    )!;
+    redTicketPrice.value = "50";
+    redTicketPrice.dispatchEvent(new Event("input"));
+
+    getConfirmButton().click();
+    await flush();
+
+    const postCall = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall).toBeTruthy();
+    const body = JSON.parse((postCall![1] as RequestInit).body as string);
+    expect(body.subGames[0].subGameType).toBe("STANDARD");
+    expect(body.subGames[0].extra.rowPrizesByColor).toEqual({
+      SMALL_YELLOW: { ticketPrice: 30, fullHouse: 200 },
+      RED: { ticketPrice: 50 },
+    });
+  });
+
+  it("8-colors: Mystery-type viser price-options felt; POST inneholder mysteryConfig", async () => {
+    const fetchMock = installFetch((_url, init) => {
+      if (init && init.method === "POST") {
+        const body = JSON.parse(init.body as string);
+        return successResponse({
+          id: "sch-new",
+          scheduleName: body.scheduleName,
+          scheduleNumber: "SID_X",
+          scheduleType: "Auto",
+          luckyNumberPrize: 0,
+          status: "active",
+          isAdminSchedule: true,
+          manualStartTime: "",
+          manualEndTime: "",
+          subGames: body.subGames ?? [],
+          createdBy: null,
+          createdAt: "",
+          updatedAt: "",
+        });
+      }
+      return successResponse({});
+    });
+
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+
+    document.querySelector<HTMLInputElement>("#sch-name")!.value = "Mystery-kveld";
+
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    // Bytt til Mystery
+    const typeSelect = document.querySelector<HTMLSelectElement>(
+      '[data-sg-field="subGameType"]'
+    )!;
+    typeSelect.value = "MYSTERY";
+    typeSelect.dispatchEvent(new Event("change"));
+    await flush();
+
+    // Mystery-fieldset erstatter farge-fieldset.
+    expect(
+      document.querySelectorAll<HTMLInputElement>(
+        'input[type="checkbox"][data-sg-color]'
+      ).length
+    ).toBe(0);
+
+    const priceInput = document.querySelector<HTMLInputElement>(
+      '[data-sg-field="mysteryPriceOptions"]'
+    )!;
+    priceInput.value = "1000,1500,2000,2500,3000,4000";
+    priceInput.dispatchEvent(new Event("input"));
+
+    const doublesCb = document.querySelector<HTMLInputElement>(
+      '[data-sg-field="mysteryYellowDoubles"]'
+    )!;
+    doublesCb.checked = true;
+    doublesCb.dispatchEvent(new Event("change"));
+
+    getConfirmButton().click();
+    await flush();
+
+    const postCall = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall).toBeTruthy();
+    const body = JSON.parse((postCall![1] as RequestInit).body as string);
+    expect(body.subGames[0].subGameType).toBe("MYSTERY");
+    expect(body.subGames[0].extra.mysteryConfig).toEqual({
+      priceOptions: [1000, 1500, 2000, 2500, 3000, 4000],
+      yellowDoubles: true,
+    });
+  });
+
+  it("8-colors: Mystery uten priceOptions → feilmelding og ingen POST", async () => {
+    const fetchMock = installFetch(() => successResponse({}));
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+
+    document.querySelector<HTMLInputElement>("#sch-name")!.value = "Bad mystery";
+
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    const typeSelect = document.querySelector<HTMLSelectElement>(
+      '[data-sg-field="subGameType"]'
+    )!;
+    typeSelect.value = "MYSTERY";
+    typeSelect.dispatchEvent(new Event("change"));
+    await flush();
+
+    getConfirmButton().click();
+    await flush();
+
+    const err = document.querySelector<HTMLElement>("#schedule-editor-error");
+    expect(err).not.toBeNull();
+    expect(err!.style.display).toBe("block");
+    expect(
+      fetchMock.mock.calls.some(
+        (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+      )
+    ).toBe(false);
+  });
+
+  it("8-colors: edit-modus round-trip henter rowPrizesByColor + subGameType", async () => {
+    installFetch((url, init) => {
+      const u = String(url);
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      if (method === "GET" && u.includes("/api/admin/schedules/sch-rt")) {
+        return successResponse({
+          id: "sch-rt",
+          scheduleName: "Round-trip",
+          scheduleNumber: "SID_RT",
+          scheduleType: "Auto",
+          luckyNumberPrize: 0,
+          status: "active",
+          isAdminSchedule: true,
+          manualStartTime: "",
+          manualEndTime: "",
+          subGames: [
+            {
+              name: "Standard",
+              subGameType: "STANDARD",
+              extra: {
+                rowPrizesByColor: {
+                  SMALL_YELLOW: { ticketPrice: 30, fullHouse: 200 },
+                  BLUE: { ticketPrice: 50 },
+                },
+              },
+            },
+            {
+              name: "Mystery",
+              subGameType: "MYSTERY",
+              extra: {
+                mysteryConfig: {
+                  priceOptions: [1000, 2000, 3000],
+                  yellowDoubles: false,
+                },
+              },
+            },
+          ],
+          createdBy: null,
+          createdAt: "",
+          updatedAt: "",
+        });
+      }
+      return successResponse({});
+    });
+
+    await openScheduleEditorModal({ mode: "edit", scheduleId: "sch-rt" });
+    await flush();
+
+    const rows = document.querySelectorAll<HTMLElement>(".sg-row");
+    expect(rows.length).toBe(2);
+
+    // Rad 1 (STANDARD): Small Yellow + BLUE avhuket, andre ikke.
+    const r1 = rows[0]!;
+    const r1Type = r1.querySelector<HTMLSelectElement>(
+      '[data-sg-field="subGameType"]'
+    )!;
+    expect(r1Type.value).toBe("STANDARD");
+    const syCb = r1.querySelector<HTMLInputElement>(
+      'input[type="checkbox"][data-sg-color="SMALL_YELLOW"]'
+    )!;
+    expect(syCb.checked).toBe(true);
+    const blueCb = r1.querySelector<HTMLInputElement>(
+      'input[type="checkbox"][data-sg-color="BLUE"]'
+    )!;
+    expect(blueCb.checked).toBe(true);
+    const redCb = r1.querySelector<HTMLInputElement>(
+      'input[type="checkbox"][data-sg-color="RED"]'
+    )!;
+    expect(redCb.checked).toBe(false);
+
+    // Pris-input for SMALL_YELLOW skal være pre-fylt.
+    const syPrice = r1.querySelector<HTMLInputElement>(
+      'input[data-sg-color="SMALL_YELLOW"][data-sg-color-field="ticketPrice"]'
+    )!;
+    expect(syPrice.value).toBe("30");
+    const syFh = r1.querySelector<HTMLInputElement>(
+      'input[data-sg-color="SMALL_YELLOW"][data-sg-color-field="fullHouse"]'
+    )!;
+    expect(syFh.value).toBe("200");
+
+    // Rad 2 (MYSTERY): price-options pre-fylt.
+    const r2 = rows[1]!;
+    const r2Type = r2.querySelector<HTMLSelectElement>(
+      '[data-sg-field="subGameType"]'
+    )!;
+    expect(r2Type.value).toBe("MYSTERY");
+    const mp = r2.querySelector<HTMLInputElement>(
+      '[data-sg-field="mysteryPriceOptions"]'
+    )!;
+    expect(mp.value).toBe("1000,2000,3000");
+  });
+
   it("JSON-fallback: submit fra JSON-modus sender samme shape som listen", async () => {
     const fetchMock = installFetch((_url, init) => {
       if (init && init.method === "POST") {

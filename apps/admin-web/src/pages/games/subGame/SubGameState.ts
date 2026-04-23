@@ -186,10 +186,27 @@ export function isGameNameLocallyValid(name: string): boolean {
 }
 
 /**
- * Legacy ticket-color options. Mirrors the `ticketColors` variable populated
- * as a constant. Backend validates the color names sent by the UI.
+ * Ticket-color options for the SubGame multi-select.
+ *
+ * feat/schedule-8-colors-mystery (2026-04-23): listen nå er en union av:
+ *   1. De 9 canonical TICKET_COLORS-kodene (Admin V1.0 s. 4, Tobias-godkjent
+ *      2026-04-23). Disse brukes av Schedule-editor og nye Game 1-flows.
+ *   2. Legacy fri-form-strenger ("Yellow", "Blue", ...) beholdt for
+ *      bakoverkompat inntil alle SubGame-maler er migrert.
+ *
+ * Backend `SubGameService.assertTicketColors` tillater begge skjemaene
+ * (string-dedup, fail-open på ukjente koder).
  */
 export const LEGACY_TICKET_COLOR_OPTIONS = [
+  "SMALL_YELLOW",
+  "LARGE_YELLOW",
+  "SMALL_WHITE",
+  "LARGE_WHITE",
+  "SMALL_PURPLE",
+  "LARGE_PURPLE",
+  "RED",
+  "GREEN",
+  "BLUE",
   "Yellow",
   "Blue",
   "Green",
