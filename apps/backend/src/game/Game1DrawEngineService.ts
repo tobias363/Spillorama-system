@@ -77,6 +77,12 @@ import type { PhysicalTicketPayoutService } from "../compliance/PhysicalTicketPa
 import type { PotDailyAccumulationTickService } from "./pot/PotDailyAccumulationTickService.js";
 import { evaluatePhase, TOTAL_PHASES } from "./Game1PatternEvaluator.js";
 import {
+  evaluatePhysicalTicketsForPhase,
+  loadDrawnBallsSet as loadDrawnBallsSetHelper,
+  type PhysicalTicketWinInfo,
+} from "./Game1DrawEnginePhysicalTickets.js";
+export type { PhysicalTicketWinInfo } from "./Game1DrawEnginePhysicalTickets.js";
+import {
   buildVariantConfigFromSpill1Config,
   resolvePatternsForColor,
   type Spill1ConfigInput,
@@ -1991,23 +1997,12 @@ export class Game1DrawEngineService {
   }
 
   /**
-   * PT4: Evaluér fysiske bonger for aktiv fase. Returnerer liste over
-   * fysisk-bong-vinnere med opprettet pending-row pr bong. Transaksjonsbruk:
+   * PT4: Delegate-wrapper mot `evaluatePhysicalTicketsForPhase` (helper-
+   * modul i `Game1DrawEnginePhysicalTickets.ts`). Wrapperen gjør PT4-
+   * service-sjekken og sender inn alle avhengigheter som narrow deps-port.
    *
-   *   - Selecter `app_static_tickets` (samme client som draw-en kjører i
-   *     slik at lesingen ser konsistent state etter markings-oppdatering).
-   *     Men merk: `app_static_tickets` har ikke `markings_json` — vi må
-   *     bygge markings fra trukne kuler i `app_game1_draws`.
-   *   - Kaller `PhysicalTicketPayoutService.createPendingPayout` for hver
-   *     vinner (idempotent ON CONFLICT DO NOTHING, men det gjøres IKKE via
-   *     `client` → ny pool-tilkobling). Dette er OK fordi pending-tabellen
-   *     er uavhengig av draw-state — en rollback av draw-en skal IKKE slette
-   *     pending-rader som er opprettet, men det er heller ikke kritisk
-   *     siden draw-en er idempotent (neste kjøring finner samme match).
-   *
-   * Fail-closed: hvis service kaster → logg warning og returnér tom liste.
-   * Fysisk-bong-vinn-flyt SKAL IKKE blokkere draw-en (viktig: vi bryter ikke
-   * digital wallet-payout). Fysisk-bong-feil er manuelle gjenopprettinger.
+   * Byte-identisk atferd: `physicalTicketPayoutService` null → returner
+   * tom liste (bakoverkompat), ellers full PT4-evaluering.
    */
   private async evaluatePhysicalTickets(
     client: PoolClient,
@@ -2020,190 +2015,39 @@ export class Game1DrawEngineService {
     if (!this.physicalTicketPayoutService) {
       return [];
     }
-
-    let staticRows: StaticTicketForEvaluation[];
-    try {
-      const { rows } = await client.query<StaticTicketForEvaluation>(
-        `SELECT id,
-                ticket_serial,
-                hall_id,
-                ticket_color,
-                card_matrix,
-                responsible_user_id,
-                sold_by_user_id,
-                paid_out_at
-           FROM ${this.staticTicketsTable()}
-          WHERE sold_to_scheduled_game_id = $1
-            AND is_purchased = true
-            AND paid_out_at IS NULL`,
-        [scheduledGameId]
-      );
-      staticRows = rows;
-    } catch (err) {
-      log.warn(
-        { err, scheduledGameId, currentPhase },
-        "[PT4] Feil ved lesing av fysiske bonger — skipper fysisk-pattern-match"
-      );
-      return [];
-    }
-
-    if (staticRows.length === 0) {
-      return [];
-    }
-
-    // Last trukne kuler i rekkefølge (inkluderer den akkurat trukne — som
-    // draws-INSERT skjedde før denne funksjonen kalles).
-    const drawnBalls = await this.loadDrawnBallsSet(client, scheduledGameId);
-
-    // Pot + variantConfig for å beregne expected_payout per farge-gruppe.
-    // Samme kildedata som digital-path — konsistens er viktig.
-    const potCents = await this.computePotCents(client, scheduledGameId);
-    let variantConfig: GameVariantConfig | null = null;
-    try {
-      variantConfig = buildVariantConfigFromGameConfigJson(gameConfigJson);
-    } catch {
-      variantConfig = null;
-    }
-
-    const perColor = Boolean(variantConfig?.patternsByColor);
-    let flatPrizeCents = 0;
-    if (!perColor) {
-      const resolved = resolvePhaseConfig(ticketConfigJson, currentPhase);
-      flatPrizeCents =
-        resolved.kind === "percent"
-          ? Math.floor((potCents * resolved.percent) / 100)
-          : resolved.amountCents;
-    }
-
-    const results: PhysicalTicketWinInfo[] = [];
-    const patternKey = phaseToConfigKey(currentPhase);
-
-    for (const row of staticRows) {
-      const grid = parsePhysicalCardMatrix(row.card_matrix);
-      if (grid.length !== 25) continue;
-      const markings = buildMarkingsFromGrid(grid, drawnBalls);
-      const eval_ = evaluatePhase(grid, markings, currentPhase);
-      if (!eval_.isWinner) continue;
-
-      // Beregn expected payout. Per farge → slå opp pattern for bongens
-      // farge; flat → bruk beregnet flat-pris. Physical bonger bruker
-      // family-farge (small/large/traffic-light); matcher digital
-      // `ticketColor` på legacy-path.
-      let expectedCents: number;
-      if (perColor && variantConfig) {
-        const engineColorName = resolveEngineColorName(row.ticket_color) ?? row.ticket_color;
-        const patterns = resolvePatternsForColor(
-          variantConfig,
-          engineColorName,
-          undefined // ikke logg — vi har allerede loggit for digital
-        );
-        const phasePattern = patterns[currentPhase - 1];
-        expectedCents = phasePattern
-          ? patternPrizeToCents(phasePattern, potCents)
-          : 0;
-      } else {
-        expectedCents = flatPrizeCents;
-      }
-
-      // Responsible user: handover kan ha flyttet ansvar fra sold_by til
-      // handover-to-user. Fall tilbake til sold_by_user_id hvis
-      // responsible_user_id mangler (defensivt — ikke alle legacy-rader
-      // har begge satt).
-      const responsibleUserId =
-        row.responsible_user_id?.trim()
-          ? row.responsible_user_id
-          : row.sold_by_user_id?.trim()
-            ? row.sold_by_user_id
-            : null;
-      if (!responsibleUserId) {
-        log.warn(
-          {
-            scheduledGameId,
-            ticketSerial: row.ticket_serial,
-            hallId: row.hall_id,
-            phase: currentPhase,
-          },
-          "[PT4] Fysisk bong mangler responsible_user_id+sold_by_user_id — skipper vinn-registrering"
-        );
-        continue;
-      }
-
-      try {
-        const pending = await this.physicalTicketPayoutService.createPendingPayout({
-          ticketId: row.ticket_serial,
-          hallId: row.hall_id,
-          scheduledGameId,
-          patternPhase: patternKey,
-          expectedPayoutCents: expectedCents,
-          responsibleUserId,
-          color: row.ticket_color,
-        });
-
-        results.push({
-          pendingPayoutId: pending.id,
-          ticketId: pending.ticketId,
-          hallId: pending.hallId,
-          phase: currentPhase,
-          patternName: phaseDisplayName(currentPhase),
-          responsibleUserId: pending.responsibleUserId,
-          expectedPayoutCents: pending.expectedPayoutCents,
-          color: pending.color,
-          adminApprovalRequired: pending.adminApprovalRequired,
-        });
-
-        // Audit-log detect (fire-and-forget).
-        this.fireAudit({
-          actorId: null,
-          action: "physical_ticket.pending_detected",
-          resourceId: scheduledGameId,
-          details: {
-            pendingPayoutId: pending.id,
-            ticketId: pending.ticketId,
-            hallId: pending.hallId,
-            pattern: patternKey,
-            phase: currentPhase,
-            expectedPayoutCents: pending.expectedPayoutCents,
-            responsibleUserId: pending.responsibleUserId,
-            color: pending.color,
-            adminApprovalRequired: pending.adminApprovalRequired,
-          },
-        });
-      } catch (err) {
-        log.warn(
-          {
-            err,
-            scheduledGameId,
-            ticketSerial: row.ticket_serial,
-            phase: currentPhase,
-          },
-          "[PT4] createPendingPayout feilet — skipper denne bongen"
-        );
-      }
-    }
-
-    return results;
+    return evaluatePhysicalTicketsForPhase(
+      {
+        physicalTicketPayoutService: this.physicalTicketPayoutService,
+        staticTicketsTable: this.staticTicketsTable(),
+        computePotCents: (c, sid) => this.computePotCents(c, sid),
+        loadDrawnBallsSet: (c, sid) => this.loadDrawnBallsSet(c, sid),
+        fireAudit: (evt) => this.fireAudit(evt),
+        buildVariantConfigFromGameConfigJson,
+        resolvePhaseConfig,
+        phaseToConfigKey,
+        phaseDisplayName,
+        resolveEngineColorName,
+        patternPrizeToCents,
+      },
+      client,
+      scheduledGameId,
+      currentPhase,
+      ticketConfigJson,
+      gameConfigJson
+    );
   }
 
   /**
-   * PT4: Last alle trukne kuler for spillet som Set<number>. Brukes for å
-   * bygge markings mot fysiske kort på evaluering-tidspunkt.
+   * PT4: Last alle trukne kuler for spillet som Set<number>. Tynn wrapper
+   * mot helper-funksjonen i `Game1DrawEnginePhysicalTickets.ts` — beholdt
+   * som service-metode fordi `evaluatePhysicalTickets` trenger den via
+   * `deps.loadDrawnBallsSet`-callback (service har `drawsTable()`).
    */
   private async loadDrawnBallsSet(
     client: PoolClient,
     scheduledGameId: string
   ): Promise<Set<number>> {
-    const { rows } = await client.query<{ ball_value: number }>(
-      `SELECT ball_value
-         FROM ${this.drawsTable()}
-        WHERE scheduled_game_id = $1`,
-      [scheduledGameId]
-    );
-    const out = new Set<number>();
-    for (const r of rows) {
-      const n = Number(r.ball_value);
-      if (Number.isInteger(n)) out.add(n);
-    }
-    return out;
+    return loadDrawnBallsSetHelper(client, this.drawsTable(), scheduledGameId);
   }
 
   /**
@@ -2868,88 +2712,7 @@ function parseMarkings(raw: unknown, expectedLength: number): boolean[] {
   return out;
 }
 
-// ── PT4 helpers ─────────────────────────────────────────────────────────────
-
-/**
- * PT4: Internal shape for static ticket-query i `evaluatePhysicalTickets`.
- */
-interface StaticTicketForEvaluation {
-  id: string;
-  ticket_serial: string;
-  hall_id: string;
-  ticket_color: string;
-  card_matrix: unknown;
-  responsible_user_id: string | null;
-  sold_by_user_id: string | null;
-  paid_out_at: Date | string | null;
-}
-
-/**
- * PT4: Utfall per fysisk vinner — returnert fra `evaluateAndPayoutPhase` i
- * `physicalWinners`, brukt av drawNext for post-commit broadcast og audit.
- */
-export interface PhysicalTicketWinInfo {
-  pendingPayoutId: string;
-  ticketId: string;
-  hallId: string;
-  phase: number;
-  patternName: string;
-  responsibleUserId: string;
-  expectedPayoutCents: number;
-  color: string;
-  adminApprovalRequired: boolean;
-}
-
-/**
- * PT4: Parser `card_matrix`-JSONB fra `app_static_tickets`. Legacy-format
- * (CSV-import) er 25 integer (5x5 row-major, ingen free-centre i dataen —
- * men bingo-evaluatoren tolker `0` som free centre).
- *
- * Fysisk bong har IKKE free-centre i CSV-en — men legacy-tradisjon er at
- * midten teller som markert. For sikkerhet: ikke injiser 0 (vi lar 0
- * behandles av buildTicketMask / evaluatePhase som free centre).
- */
-function parsePhysicalCardMatrix(raw: unknown): Array<number | null> {
-  let parsed: unknown = raw;
-  if (typeof raw === "string") {
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return [];
-    }
-  }
-  if (!Array.isArray(parsed)) return [];
-  return parsed.map((v) => {
-    if (v === null || v === undefined) return null;
-    if (typeof v === "number" && Number.isInteger(v)) return v;
-    if (typeof v === "string") {
-      const n = Number.parseInt(v, 10);
-      if (Number.isInteger(n)) return n;
-    }
-    return null;
-  });
-}
-
-/**
- * PT4: Bygg markings-array (length === grid.length, typisk 25) ut fra grid-
- * verdier og mengden trukne kuler. En celle er markert hvis dens tall er
- * trukket. Celle-verdi 0 regnes som free centre og eksplisitt markert
- * (matcher `evaluatePhase`-semantikken). null-celler forblir umarkert.
- */
-function buildMarkingsFromGrid(
-  grid: ReadonlyArray<number | null>,
-  drawnBalls: Set<number>
-): boolean[] {
-  const out = Array(grid.length).fill(false) as boolean[];
-  for (let i = 0; i < grid.length; i++) {
-    const cell = grid[i];
-    if (cell === 0) {
-      out[i] = true; // free-centre
-      continue;
-    }
-    if (typeof cell === "number" && drawnBalls.has(cell)) {
-      out[i] = true;
-    }
-  }
-  return out;
-}
+// PT4-helpers er flyttet til `./Game1DrawEnginePhysicalTickets.ts` i
+// refactor/s4-draw-engine-split. `PhysicalTicketWinInfo` re-eksporteres
+// fra toppen av filen slik at eksisterende importer (tester, broadcast-
+// kall) forblir uendret.
