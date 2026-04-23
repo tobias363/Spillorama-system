@@ -18,7 +18,8 @@ type FetchCall = { url: string; init: RequestInit };
 function mockApi(): { fetchFn: ReturnType<typeof vi.fn>; calls: FetchCall[]; queue: Array<{ body: unknown; status?: number }> } {
   const calls: FetchCall[] = [];
   const queue: Array<{ body: unknown; status?: number }> = [];
-  const fn: ReturnType<typeof vi.fn> = vi.fn(async (url: string, init?: RequestInit) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fn: any = vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, init: init ?? {} });
     const next = queue.shift();
     if (!next) {
