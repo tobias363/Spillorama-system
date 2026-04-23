@@ -189,6 +189,20 @@ export class PlayScreen extends Container {
       onStartGame: () => this.callbacks.onStartGame?.(),
     });
 
+    // Wrap player-info + combo-panel in a shared container so the whole
+    // top-row group can be repositioned together (PM-ask 2026-04-23:
+    // "fiks også sånn at elementene blir i samme container så man kan
+    // flytte den slik man vil"). Both were flex children of overlayRoot
+    // — now both are children of `topGroupWrapper`, which is the flex
+    // child in overlayRoot's place.
+    const topGroupWrapper = document.createElement("div");
+    topGroupWrapper.id = "top-group-wrapper";
+    topGroupWrapper.style.cssText = "display:flex;flex-direction:row;align-items:flex-start;flex-shrink:0;pointer-events:none;";
+    // Re-parent the two roots (createElement appended them to overlayRoot).
+    topGroupWrapper.appendChild(this.leftInfo.rootEl);
+    topGroupWrapper.appendChild(this.centerTop.rootEl);
+    overlayRoot.appendChild(topGroupWrapper);
+
     // Chat on the RIGHT edge (flex-row last child), default collapsed so
     // players land in the game without the chat panel expanded.
     this.chatPanel = new ChatPanelV2(this.overlayManager, socket, roomCode, {

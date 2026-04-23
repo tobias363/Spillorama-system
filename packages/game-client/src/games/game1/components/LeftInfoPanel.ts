@@ -31,10 +31,8 @@ export class LeftInfoPanel {
       display: "flex",
       flexDirection: "column",
       gap: "10px",
-      paddingTop: "18px",
+      paddingTop: "35px",
       minWidth: "120px",
-      // Ball tube + ring each have their own flex-row spacer column
-      // ahead of this panel, so no manual left margin is needed.
       marginLeft: "20px",
     });
 
@@ -90,6 +88,12 @@ export class LeftInfoPanel {
     // "Gevinst" = this player's accumulated winnings this round (see PlayScreen
     // summation) — not the full prize pool (2026-04-21 Tobias-report).
     this.prizeEl.textContent = `Gevinst: ${myWinnings} kr`;
+  }
+
+  /** Expose the root element so PlayScreen can re-parent it into the
+   *  shared top-row wrapper (player-info + combo-panel). */
+  get rootEl(): HTMLDivElement {
+    return this.root;
   }
 
   /** No-op — CenterBall owns the countdown display in the new design. */

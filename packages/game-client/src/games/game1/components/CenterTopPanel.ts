@@ -55,7 +55,7 @@ export class CenterTopPanel {
       flexDirection: "row",
       alignItems: "stretch",
       alignSelf: "flex-start",
-      marginTop: "30px",
+      marginTop: "15px",
       marginLeft: "30px",
       background: "radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45))",
       border: "1px solid rgba(255, 120, 50, 0.35)",
@@ -396,6 +396,12 @@ export class CenterTopPanel {
 
   setCanStartNow(canStart: boolean, gameRunning: boolean): void {
     this.startGameBtn.style.display = canStart && !gameRunning ? "" : "none";
+  }
+
+  /** Expose the root element so PlayScreen can re-parent it into the
+   *  shared top-row wrapper (player-info + combo-panel). */
+  get rootEl(): HTMLDivElement {
+    return this.root;
   }
 
   /** Game-name header text — e.g. "HOVEDSPILL 1". */
