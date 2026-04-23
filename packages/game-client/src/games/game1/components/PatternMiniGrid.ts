@@ -17,11 +17,15 @@
 
 const GRID_SIZE = 5;
 const CELL_COUNT = GRID_SIZE * GRID_SIZE;
-const CELL_SIZE = 10;
+// Mockup `.bingo-grid` is 136px wide, 5 cols, 2px gap → ~25.6px per cell.
+const CELL_SIZE = 25;
 const CELL_GAP = 2;
 const TOTAL_SIZE = GRID_SIZE * CELL_SIZE + (GRID_SIZE - 1) * CELL_GAP;
-const FILL_COLOR = "#ffe83d";
-const NORMAL_COLOR = "rgba(255,255,255,0.15)";
+const FILL_BG = "linear-gradient(135deg, #f1c40f, #d35400)";
+const FILL_BORDER = "#ffcc00";
+const FILL_SHADOW = "inset 0 0 4px rgba(255,255,255,0.4), 0 0 4px rgba(255,150,0,0.5)";
+const NORMAL_BG = "rgba(100,20,20,0.4)";
+const NORMAL_BORDER = "1px solid rgba(255,80,80,0.2)";
 const CENTER_INDEX = 12; // row 2, col 2 — free space
 
 /** Axis-tag for en linje i combinasjonen. */
@@ -48,8 +52,9 @@ export class PatternMiniGrid {
         width: `${CELL_SIZE}px`,
         height: `${CELL_SIZE}px`,
         borderRadius: "2px",
-        background: NORMAL_COLOR,
-        transition: "background 0.2s ease",
+        background: NORMAL_BG,
+        border: NORMAL_BORDER,
+        transition: "background 0.2s ease, box-shadow 0.2s ease",
       });
       this.cells.push(cell);
       this.root.appendChild(cell);
@@ -79,8 +84,20 @@ export class PatternMiniGrid {
   private showCustomMask(mask: number[]): void {
     for (let i = 0; i < this.cells.length; i++) {
       const filled = i < mask.length && mask[i] === 1 && i !== CENTER_INDEX;
-      this.cells[i].style.background = filled ? FILL_COLOR : NORMAL_COLOR;
+      this.applyCellState(this.cells[i], filled);
       if (filled) this.pulseCell(this.cells[i]);
+    }
+  }
+
+  private applyCellState(cell: HTMLDivElement, hit: boolean): void {
+    if (hit) {
+      cell.style.background = FILL_BG;
+      cell.style.borderColor = FILL_BORDER;
+      cell.style.boxShadow = FILL_SHADOW;
+    } else {
+      cell.style.background = NORMAL_BG;
+      cell.style.borderColor = "rgba(255,80,80,0.2)";
+      cell.style.boxShadow = "";
     }
   }
 
@@ -122,7 +139,7 @@ export class PatternMiniGrid {
   /** Farg alle celler i de gitte linjene (rader eller kolonner), minus center. */
   private highlightLines(lines: Line[]): void {
     for (const cell of this.cells) {
-      cell.style.background = NORMAL_COLOR;
+      this.applyCellState(cell, false);
       cell.style.transform = "scale(1)";
     }
     for (const line of lines) {
@@ -131,7 +148,7 @@ export class PatternMiniGrid {
         : colCellIndices(line.index);
       for (const idx of cellsInLine) {
         if (idx === CENTER_INDEX) continue;
-        this.cells[idx].style.background = FILL_COLOR;
+        this.applyCellState(this.cells[idx], true);
         this.pulseCell(this.cells[idx]);
       }
     }
@@ -143,7 +160,7 @@ export class PatternMiniGrid {
 
   private clearAll(): void {
     for (const cell of this.cells) {
-      cell.style.background = NORMAL_COLOR;
+      this.applyCellState(cell, false);
       cell.style.transform = "scale(1)";
       cell.style.animation = "";
     }

@@ -51,12 +51,13 @@ export class Game1BuyPopup {
   }> = [];
 
   constructor(private overlay: HtmlOverlayManager) {
-    // Full-screen backdrop (transparent — game visible behind)
+    // Full-screen backdrop — mockup uses a blurred dark overlay.
     this.backdrop = document.createElement("div");
     Object.assign(this.backdrop.style, {
       position: "absolute",
       inset: "0",
-      background: "rgba(0,0,0,0.35)",
+      background: "rgba(0, 0, 0, 0.65)",
+      backdropFilter: "blur(3px)",
       display: "none",
       alignItems: "center",
       justifyContent: "center",
@@ -68,38 +69,46 @@ export class Game1BuyPopup {
     });
     overlay.getRoot().appendChild(this.backdrop);
 
-    // Popup card
+    // Popup card — mockup `.modal-buy` radial gradient + subtle border.
     this.card = document.createElement("div");
     Object.assign(this.card.style, {
-      background: "linear-gradient(180deg, #3a0a0a 0%, #1a0000 100%)",
-      border: "2px solid #790001",
-      borderRadius: "16px",
-      padding: "24px 20px",
+      background: "radial-gradient(ellipse at top, rgba(60, 15, 15, 0.95), rgba(20, 5, 5, 0.97))",
+      border: "1px solid rgba(255, 100, 100, 0.35)",
+      borderRadius: "18px",
+      padding: "26px 30px 24px",
       boxSizing: "border-box",
-      minWidth: "340px",
-      maxWidth: "540px",
-      width: "94%",
-      maxHeight: "85vh",
+      width: "min(760px, 92vw)",
+      maxHeight: "90vh",
       overflowY: "auto",
-      boxShadow: "0 8px 32px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)",
+      boxShadow: "0 20px 60px rgba(0, 0, 0, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.08)",
+      position: "relative",
     });
     this.backdrop.appendChild(this.card);
 
-    // Title
-    const title = document.createElement("h2");
-    title.textContent = "Kjøp billetter";
+    // Header (title + subtitle) — mockup `.modal-buy-header`.
+    const header = document.createElement("div");
+    header.style.cssText = "margin-bottom:18px;";
+    const title = document.createElement("div");
+    title.textContent = "Neste spill";
     Object.assign(title.style, {
-      margin: "0 0 20px 0",
       fontSize: "22px",
-      fontWeight: "700",
-      color: "#ffe83d",
-      textAlign: "center",
+      fontWeight: "800",
+      color: "#ffcc00",
+      marginBottom: "4px",
     });
-    this.card.appendChild(title);
+    header.appendChild(title);
+    const subtitle = document.createElement("div");
+    subtitle.textContent = "standard";
+    Object.assign(subtitle.style, {
+      fontSize: "13px",
+      color: "rgba(255, 255, 255, 0.55)",
+    });
+    header.appendChild(subtitle);
+    this.card.appendChild(header);
 
-    // 3-column grid for ticket types
+    // 2-column grid for ticket types — matches mockup `.product-grid`.
     this.typesContainer = document.createElement("div");
-    this.typesContainer.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;";
+    this.typesContainer.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;";
     this.card.appendChild(this.typesContainer);
 
     // Separator

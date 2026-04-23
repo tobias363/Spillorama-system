@@ -19,9 +19,15 @@ import { checkClaims } from "../../game2/logic/ClaimDetector.js";
 import { stakeFromState } from "../logic/StakeCalculator.js";
 import { TicketGridHtml } from "../components/TicketGridHtml.js";
 
-const TUBE_COLUMN_WIDTH = 130;
+/**
+ * Redesign 2026-04-23 — mockup `.balls-column-wrap` is 140px wide,
+ * `.chat-panel` 265px, `.game-number-ring` 170×170 sits just right of the
+ * tube column inside `.left-panel`.
+ */
+const TUBE_COLUMN_WIDTH = 140;
 const CHAT_WIDTH = 265;
-const TICKET_TOP = 170;
+const RING_COLUMN_WIDTH = 180; // 170px ring + a bit of breathing room
+const TICKET_TOP = 230;        // below the center-top combo panel
 /** Y offset below the ticket grid for the LINE/BINGO claim buttons. */
 const CLAIM_AREA = 60;
 
@@ -112,14 +118,17 @@ export class PlayScreen extends Container {
     this.loadBackground(screenWidth, screenHeight);
 
     // ── Pixi components (ball animation + center ball) ────────────────────
-    this.ballTube = new BallTube(screenHeight - 16);
-    this.ballTube.x = (TUBE_COLUMN_WIDTH - 96) / 2 + 10;
-    this.ballTube.y = 8;
+    // Mockup `.balls-column-wrap`: 140px column with 108px tube inside.
+    this.ballTube = new BallTube(screenHeight - 22);
+    this.ballTube.x = (TUBE_COLUMN_WIDTH - 108) / 2;
+    this.ballTube.y = 21;
     this.addChild(this.ballTube);
 
+    // Mockup `.game-number-ring` (170×170) sits inside `.left-panel` just
+    // right of the ball tube, with a slight offset into the center column.
     this.centerBall = new CenterBall(pauseAwareBridge);
-    this.centerBall.x = TUBE_COLUMN_WIDTH + (screenWidth - TUBE_COLUMN_WIDTH - CHAT_WIDTH) / 2 - 60;
-    this.centerBall.y = 20;
+    this.centerBall.x = TUBE_COLUMN_WIDTH - 10;
+    this.centerBall.y = 40;
     this.addChild(this.centerBall);
     this.centerBall.showWaiting();
 
@@ -147,9 +156,9 @@ export class PlayScreen extends Container {
     overlayRoot.style.display = "flex";
     overlayRoot.style.flexDirection = "row";
 
-    // Spacer for ball tube column (PixiJS renders behind the HTML).
+    // Spacer for ball tube + game-number-ring (both are Pixi-rendered behind the HTML).
     const tubeSpacer = document.createElement("div");
-    tubeSpacer.style.cssText = `width:${TUBE_COLUMN_WIDTH}px;flex-shrink:0;pointer-events:none;`;
+    tubeSpacer.style.cssText = `width:${TUBE_COLUMN_WIDTH + RING_COLUMN_WIDTH}px;flex-shrink:0;pointer-events:none;`;
     overlayRoot.appendChild(tubeSpacer);
 
     this.leftInfo = new LeftInfoPanel(this.overlayManager, pauseAwareBridge ?? undefined);
@@ -293,7 +302,8 @@ export class PlayScreen extends Container {
     this.centerTop.setGameRunning(running);
     this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool);
     this.centerTop.setCanStartNow(state.canStartNow, running);
-    this.headerBar.update(state.jackpot);
+    this.centerTop.updateJackpot(state.jackpot);
+    this.headerBar.update(state.jackpot); // kept for API parity (no-op render)
 
     // Auto-open the buy popup on entry so the player doesn't have to hunt for
     // the "Forhåndskjøp" button. One-shot per screen-session (see
@@ -447,12 +457,13 @@ export class PlayScreen extends Container {
       this.bgSprite.width = width;
       this.bgSprite.height = height;
     }
-    this.centerBall.x = TUBE_COLUMN_WIDTH + (width - TUBE_COLUMN_WIDTH - CHAT_WIDTH) / 2 - 60;
+    // Ring stays pinned to the tube — it's part of `.left-panel`, not
+    // the center area, so resizing the viewport doesn't move it.
     this.positionTicketGrid();
-    // Re-pin the claim buttons.
-    const ticketAreaWidth = width - TUBE_COLUMN_WIDTH - (this.chatPanel.isCollapsed() ? 48 : CHAT_WIDTH) - 20;
+    const chatW = this.chatPanel.isCollapsed() ? 48 : CHAT_WIDTH;
+    const ticketAreaWidth = width - TUBE_COLUMN_WIDTH - RING_COLUMN_WIDTH - chatW - 20;
     const btnY = height - 55;
-    const btnCentreX = TUBE_COLUMN_WIDTH + ticketAreaWidth / 2;
+    const btnCentreX = TUBE_COLUMN_WIDTH + RING_COLUMN_WIDTH + ticketAreaWidth / 2;
     this.lineBtn.x = btnCentreX - 140;
     this.lineBtn.y = btnY;
     this.bingoBtn.x = btnCentreX + 10;
@@ -482,9 +493,9 @@ export class PlayScreen extends Container {
 
   private positionTicketGrid(): void {
     const chatW = this.chatPanel?.isCollapsed() ? 48 : CHAT_WIDTH;
-    const left = TUBE_COLUMN_WIDTH;
+    const left = TUBE_COLUMN_WIDTH + RING_COLUMN_WIDTH;
     const top = TICKET_TOP;
-    const width = this.screenW - TUBE_COLUMN_WIDTH - chatW - 20;
+    const width = this.screenW - left - chatW - 20;
     const height = this.screenH - TICKET_TOP - CLAIM_AREA;
     this.ticketGrid.setBounds(left, top, Math.max(200, width), Math.max(100, height));
   }
@@ -543,7 +554,8 @@ export class PlayScreen extends Container {
   }
 
   private loadBackground(width: number, height: number): void {
-    Assets.load("/web/games/assets/bg-game.png")
+    // Nytt design (2026-04-23): mørk-rød bakgrunn fra spillorama-ui-mockup.
+    Assets.load("/web/games/assets/game1/design/background.png")
       .then((texture) => {
         if (!texture) return;
         this.bgSprite = new Sprite(texture);
