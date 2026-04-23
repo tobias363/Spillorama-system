@@ -49,8 +49,6 @@ import type {
   LoyaltyEventRow,
 } from "./LoyaltyTypes.js";
 import {
-  asIso,
-  asIsoOrNull,
   assertSchemaName,
   assertNonEmptyString,
   assertPositiveInt,
@@ -62,6 +60,11 @@ import {
   isUniqueViolation,
 } from "./LoyaltyValidators.js";
 import { initializeLoyaltySchema } from "./LoyaltySchema.js";
+import {
+  mapTierRow,
+  mapStateRow,
+  mapEventRow,
+} from "./LoyaltyMappers.js";
 
 // Re-export for backward-compat (eksisterende imports fra denne modulen).
 export type {
@@ -155,7 +158,7 @@ export class LoyaltyService {
        LIMIT $${params.length}`,
       params
     );
-    return rows.map((row) => this.mapTierRow(row));
+    return rows.map((row) => mapTierRow(row));
   }
 
   async getTier(id: string): Promise<LoyaltyTier> {
@@ -174,7 +177,7 @@ export class LoyaltyService {
     if (!row) {
       throw new DomainError("LOYALTY_TIER_NOT_FOUND", "Loyalty-tier finnes ikke.");
     }
-    return this.mapTierRow(row);
+    return mapTierRow(row);
   }
 
   async createTier(input: CreateLoyaltyTierInput): Promise<LoyaltyTier> {
@@ -476,7 +479,7 @@ export class LoyaltyService {
       const eventRow = eventInsert.rows[0]!;
       return {
         state,
-        event: this.mapEventRow(eventRow),
+        event: mapEventRow(eventRow),
         tierChanged,
       };
     } catch (err) {
@@ -566,7 +569,7 @@ export class LoyaltyService {
       }
 
       await client.query("COMMIT");
-      return this.mapEventRow(eventInsert.rows[0]!);
+      return mapEventRow(eventInsert.rows[0]!);
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
       throw err;
@@ -709,7 +712,7 @@ export class LoyaltyService {
        LIMIT $2`,
       [uid, lim]
     );
-    return rows.map((row) => this.mapEventRow(row));
+    return rows.map((row) => mapEventRow(row));
   }
 
   /** List alle player-states (paginert, tier-filter). */
@@ -776,36 +779,6 @@ export class LoyaltyService {
     return rows[0]?.id ?? null;
   }
 
-  private mapTierRow(row: LoyaltyTierRow): LoyaltyTier {
-    return {
-      id: row.id,
-      name: row.name,
-      rank: Number(row.rank),
-      minPoints: Number(row.min_points),
-      maxPoints: row.max_points === null ? null : Number(row.max_points),
-      benefits: (row.benefits_json ?? {}) as Record<string, unknown>,
-      active: Boolean(row.active),
-      createdByUserId: row.created_by_user_id,
-      createdAt: asIso(row.created_at),
-      updatedAt: asIso(row.updated_at),
-      deletedAt: asIsoOrNull(row.deleted_at),
-    };
-  }
-
-  private mapStateRow(row: LoyaltyPlayerStateRow): LoyaltyPlayerState {
-    return {
-      userId: row.user_id,
-      // currentTier hentes inn av mapStateRowAsync ved behov.
-      currentTier: null,
-      lifetimePoints: Number(row.lifetime_points),
-      monthPoints: Number(row.month_points),
-      monthKey: row.month_key,
-      tierLocked: Boolean(row.tier_locked),
-      lastUpdatedAt: asIso(row.last_updated_at),
-      createdAt: asIso(row.created_at),
-    };
-  }
-
   /**
    * Samme som mapStateRow men beriker currentTier via separat SELECT.
    * Brukt av getPlayerState og listPlayerStates hvor vi vil vise tier-info.
@@ -813,7 +786,7 @@ export class LoyaltyService {
   private async mapStateRowAsync(
     row: LoyaltyPlayerStateRow
   ): Promise<LoyaltyPlayerState> {
-    const state = this.mapStateRow(row);
+    const state = mapStateRow(row);
     if (row.current_tier_id) {
       try {
         state.currentTier = await this.getTier(row.current_tier_id);
@@ -827,18 +800,6 @@ export class LoyaltyService {
       }
     }
     return state;
-  }
-
-  private mapEventRow(row: LoyaltyEventRow): LoyaltyEvent {
-    return {
-      id: row.id,
-      userId: row.user_id,
-      eventType: row.event_type,
-      pointsDelta: Number(row.points_delta),
-      metadata: (row.metadata_json ?? {}) as Record<string, unknown>,
-      createdByUserId: row.created_by_user_id,
-      createdAt: asIso(row.created_at),
-    };
   }
 
   private async ensureInitialized(): Promise<void> {
