@@ -36,6 +36,10 @@ export class ChatPanelV2 {
     this.root = overlay.createElement("chat-panel", {
       width: "265px",
       flexShrink: "0",
+      // PM 2026-04-23: pin chat to the right edge of the overlay row so
+      // it sits "helt til høyre" regardless of how wide the middle flex
+      // items (centerTop etc.) grow.
+      marginLeft: "auto",
       display: "flex",
       flexDirection: "column",
       background: "rgba(10,2,2,0.55)",
