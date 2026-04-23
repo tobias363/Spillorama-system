@@ -2766,5 +2766,7 @@
   "game_type_deleted": "Spill-type slettet",
   "sub_game_deleted": "Underspill slettet",
   "pattern_deleted": "Mønster slettet",
-  "saved_game_deleted": "Lagret spill slettet"
+  "saved_game_deleted": "Lagret spill slettet",
+  "activate_daily_schedule": "Aktiver daglig tidsplan",
+  "deactivate_daily_schedule": "Deaktiver daglig tidsplan"
 }

@@ -2773,5 +2773,7 @@
   "game_type_deleted": "Game type deleted",
   "sub_game_deleted": "Sub game deleted",
   "pattern_deleted": "Pattern deleted",
-  "saved_game_deleted": "Saved game deleted"
+  "saved_game_deleted": "Saved game deleted",
+  "activate_daily_schedule": "Activate daily schedule",
+  "deactivate_daily_schedule": "Deactivate daily schedule"
 }

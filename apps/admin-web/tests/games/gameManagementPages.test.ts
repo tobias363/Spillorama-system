@@ -257,6 +257,21 @@ describe("GameManagementPage (list/picker) — BIN-684 wired", () => {
     // Tidsluke: "09:00 - 23:00"
     expect(c.textContent).toContain("09:00 - 23:00");
   });
+
+  it("DS-tabell viser row-actions (view/edit/toggle/delete)", async () => {
+    mockMultiFetch({ games: [sampleRow], schedules: [sampleDs] });
+    const c = document.createElement("div");
+    await renderGameManagementPage(c, "bingo");
+    expect(c.querySelector("[data-testid='gm-ds-view']")).not.toBeNull();
+    expect(c.querySelector("[data-testid='gm-ds-edit']")).not.toBeNull();
+    expect(c.querySelector("[data-testid='gm-ds-toggle']")).not.toBeNull();
+    expect(c.querySelector("[data-testid='gm-ds-delete']")).not.toBeNull();
+    // View-knappen peker til detaljesiden for schedule.
+    const view = c.querySelector<HTMLAnchorElement>("[data-testid='gm-ds-view']");
+    expect(view?.getAttribute("href")).toContain(
+      `/dailySchedule/subgame/view/${encodeURIComponent(sampleDs.id)}`
+    );
+  });
 });
 
 describe("GameManagement detail pages — BIN-684 wired", () => {

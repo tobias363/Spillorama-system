@@ -28,6 +28,7 @@
 
 import { t } from "../../../i18n/I18n.js";
 import { DataTable } from "../../../components/DataTable.js";
+import { Modal } from "../../../components/Modal.js";
 import { Toast } from "../../../components/Toast.js";
 import { escapeHtml } from "../common/escape.js";
 import { fetchGameTypeList } from "../gameType/GameTypeState.js";
@@ -41,6 +42,8 @@ import {
 import { ApiError } from "../../../api/client.js";
 import {
   fetchDailyScheduleList,
+  patchDailySchedule,
+  deleteDailySchedule as deleteDailyScheduleApi,
   type DailyScheduleRow,
 } from "../dailySchedules/DailyScheduleState.js";
 import { openDailyScheduleEditorModal } from "../dailySchedules/DailyScheduleEditorModal.js";
@@ -394,7 +397,7 @@ async function reloadDailySchedules(typeId: string, host: HTMLElement): Promise<
       if (ds.gameManagementId && gmIds.has(ds.gameManagementId)) return true;
       return false;
     });
-    renderDsTable(host, rows);
+    renderDsTable(host, typeId, rows);
   } catch (err) {
     const msg =
       err instanceof ApiError
@@ -408,7 +411,11 @@ async function reloadDailySchedules(typeId: string, host: HTMLElement): Promise<
   }
 }
 
-function renderDsTable(host: HTMLElement, rows: DailyScheduleRow[]): void {
+function renderDsTable(
+  host: HTMLElement,
+  typeId: string,
+  rows: DailyScheduleRow[]
+): void {
   DataTable.mount(host, {
     className: "gm-ds-list pb-30",
     emptyMessage: t("no_data_available"),
@@ -445,7 +452,43 @@ function renderDsTable(host: HTMLElement, rows: DailyScheduleRow[]): void {
         title: t("status"),
         render: (r) => renderDsStatusBadge(r.status),
       },
+      {
+        key: "_id",
+        title: t("action"),
+        align: "center",
+        render: (r) => renderDsRowActions(r),
+      },
     ],
+  });
+  // Wire row actions via event delegation.
+  host.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement | null;
+    const btn = target?.closest<HTMLElement>("[data-action^='ds-']");
+    if (!btn) return;
+    const id = btn.getAttribute("data-id");
+    if (!id) return;
+    const action = btn.getAttribute("data-action");
+    if (action === "ds-edit") {
+      e.preventDefault();
+      openDailyScheduleEditorModal({
+        mode: "edit",
+        dailyScheduleId: id,
+        onSaved: () => {
+          Toast.success(t("daily_schedule_updated_success"));
+          void reloadDailySchedules(typeId, host);
+        },
+      });
+    } else if (action === "ds-delete") {
+      e.preventDefault();
+      const name = btn.getAttribute("data-name") ?? id;
+      confirmDsDelete(host, typeId, id, name);
+    } else if (action === "ds-toggle") {
+      e.preventDefault();
+      const currentStatus = btn.getAttribute("data-status");
+      const nextStatus =
+        currentStatus === "active" || currentStatus === "running" ? "inactive" : "active";
+      void toggleDsStatus(host, typeId, id, nextStatus);
+    }
   });
 }
 
@@ -460,6 +503,95 @@ function renderDsStatusBadge(status: string): string {
     case "inactive":
     default:
       return `<span class="label label-danger">${escapeHtml(t("inactive"))}</span>`;
+  }
+}
+
+/**
+ * Row-actions for DS-tabellen: view (ekstern route) + edit/delete/toggle
+ * (intern modal + API). Klikk-håndtering går via event delegation i
+ * renderDsTable.
+ */
+function renderDsRowActions(row: DailyScheduleRow): string {
+  const viewHref = `#/dailySchedule/subgame/view/${encodeURIComponent(row._id)}`;
+  const toggleTitle =
+    row.status === "active" || row.status === "running"
+      ? t("deactivate_daily_schedule")
+      : t("activate_daily_schedule");
+  const toggleIcon =
+    row.status === "active" || row.status === "running" ? "fa-toggle-on" : "fa-toggle-off";
+  return `
+    <a href="${viewHref}" class="btn btn-info btn-xs btn-rounded"
+       title="${escapeHtml(t("view"))}" data-testid="gm-ds-view">
+      <i class="fa fa-eye"></i>
+    </a>
+    <button type="button" class="btn btn-warning btn-xs btn-rounded m-lr-3"
+      data-action="ds-edit" data-id="${escapeHtml(row._id)}"
+      title="${escapeHtml(t("edit_daily_schedule"))}"
+      data-testid="gm-ds-edit">
+      <i class="fa fa-edit"></i>
+    </button>
+    <button type="button" class="btn btn-default btn-xs btn-rounded m-lr-3"
+      data-action="ds-toggle" data-id="${escapeHtml(row._id)}"
+      data-status="${escapeHtml(row.status)}"
+      title="${escapeHtml(toggleTitle)}"
+      data-testid="gm-ds-toggle">
+      <i class="fa ${toggleIcon}"></i>
+    </button>
+    <button type="button" class="btn btn-danger btn-xs btn-rounded"
+      data-action="ds-delete" data-id="${escapeHtml(row._id)}"
+      data-name="${escapeHtml(row.name)}"
+      title="${escapeHtml(t("delete"))}"
+      data-testid="gm-ds-delete">
+      <i class="fa fa-trash"></i>
+    </button>`;
+}
+
+function confirmDsDelete(host: HTMLElement, typeId: string, id: string, name: string): void {
+  const body = document.createElement("div");
+  body.innerHTML = `
+    <p>${escapeHtml(t("confirm_delete_daily_schedule_body"))}</p>
+    <p><strong>${escapeHtml(name)}</strong></p>`;
+  Modal.open({
+    title: t("delete"),
+    content: body,
+    backdrop: "static",
+    keyboard: false,
+    buttons: [
+      { label: t("no_cancle"), variant: "default", action: "cancel" },
+      {
+        label: t("delete"),
+        variant: "danger",
+        action: "confirm",
+        dismiss: false,
+        onClick: async (instance) => {
+          try {
+            await deleteDailyScheduleApi(id);
+            Toast.success(t("daily_schedule_deleted_success"));
+            instance.close("button");
+            void reloadDailySchedules(typeId, host);
+          } catch (err) {
+            const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
+            Toast.error(msg);
+          }
+        },
+      },
+    ],
+  });
+}
+
+async function toggleDsStatus(
+  host: HTMLElement,
+  typeId: string,
+  id: string,
+  nextStatus: "active" | "inactive"
+): Promise<void> {
+  try {
+    await patchDailySchedule(id, { status: nextStatus });
+    Toast.success(t("daily_schedule_updated_success"));
+    void reloadDailySchedules(typeId, host);
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : t("something_went_wrong");
+    Toast.error(msg);
   }
 }
 
