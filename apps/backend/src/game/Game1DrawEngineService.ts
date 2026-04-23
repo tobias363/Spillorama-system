@@ -65,6 +65,7 @@ import type { Game1PotService } from "./pot/Game1PotService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { evaluateAccumulatingPots } from "./pot/PotEvaluator.js";
 import type { AdminGame1Broadcaster } from "./AdminGame1Broadcaster.js";
+import type { Game1PlayerBroadcaster } from "./Game1PlayerBroadcaster.js";
 import type { Game1MiniGameOrchestrator } from "./minigames/Game1MiniGameOrchestrator.js";
 import {
   parseOddsenConfig,
@@ -137,6 +138,14 @@ export interface Game1DrawEngineServiceOptions {
    * Feil i broadcaster loggres men påvirker ikke draw-flyten.
    */
   adminBroadcaster?: AdminGame1Broadcaster;
+  /**
+   * PR-C4: valgfri broadcaster for default-namespace (spiller-klient).
+   * Fire-and-forget — engine kaller `onDrawNew` / `onPatternWon` /
+   * `onRoomUpdate` POST-commit slik at spiller-UI oppdateres samtidig
+   * med admin-UI. Scheduled Spill 1 brukte før kun admin-broadcaster;
+   * uten denne porten fryste spiller-brett til neste reconnect.
+   */
+  playerBroadcaster?: Game1PlayerBroadcaster;
   /**
    * BIN-690 M1: valgfri orchestrator for mini-games etter Fullt Hus.
    * Fire-and-forget — engine kaller `maybeTriggerFor` POST-commit slik
@@ -384,6 +393,8 @@ export class Game1DrawEngineService {
   private readonly payoutService: Game1PayoutService | null;
   private readonly jackpotService: Game1JackpotService | null;
   private adminBroadcaster: AdminGame1Broadcaster | null;
+  /** PR-C4: broadcaster for default-namespace (spiller-klient). */
+  private playerBroadcaster: Game1PlayerBroadcaster | null;
   private miniGameOrchestrator: Game1MiniGameOrchestrator | null;
   private oddsenEngine: MiniGameOddsenEngine | null;
   private physicalTicketPayoutService: PhysicalTicketPayoutService | null;
@@ -433,6 +444,7 @@ export class Game1DrawEngineService {
     this.payoutService = options.payoutService ?? null;
     this.jackpotService = options.jackpotService ?? null;
     this.adminBroadcaster = options.adminBroadcaster ?? null;
+    this.playerBroadcaster = options.playerBroadcaster ?? null;
     this.miniGameOrchestrator = options.miniGameOrchestrator ?? null;
     this.oddsenEngine = options.oddsenEngine ?? null;
     this.physicalTicketPayoutService = options.physicalTicketPayoutService ?? null;
@@ -538,6 +550,87 @@ export class Game1DrawEngineService {
   /** PR 4d.3: late-binding for admin-broadcaster (io må finnes først). */
   setAdminBroadcaster(broadcaster: AdminGame1Broadcaster): void {
     this.adminBroadcaster = broadcaster;
+  }
+
+  /** PR-C4: late-binding for player-broadcaster (io må finnes først). */
+  setPlayerBroadcaster(broadcaster: Game1PlayerBroadcaster): void {
+    this.playerBroadcaster = broadcaster;
+  }
+
+  /**
+   * PR-C4: fire-and-forget broadcast av `draw:new` til spiller-klient via
+   * default-namespace. Kalles POST-commit fra drawNext() med 0-basert
+   * drawIndex (matcher `GameBridge.lastAppliedDrawIndex`-kontrakten).
+   */
+  private notifyPlayerDrawNew(
+    roomCode: string,
+    scheduledGameId: string,
+    ballNumber: number,
+    drawIndex0Based: number
+  ): void {
+    if (!this.playerBroadcaster) return;
+    try {
+      this.playerBroadcaster.onDrawNew({
+        roomCode,
+        number: ballNumber,
+        drawIndex: drawIndex0Based,
+        gameId: scheduledGameId,
+      });
+    } catch (err) {
+      log.warn(
+        { err, scheduledGameId, roomCode, drawIndex: drawIndex0Based },
+        "playerBroadcaster.onDrawNew kastet — ignorert"
+      );
+    }
+  }
+
+  /**
+   * PR-C4: fire-and-forget broadcast av `pattern:won` til spiller-klient
+   * via default-namespace. Matcher admin phase-won-event men sendes til
+   * `roomCode` istedenfor admin-rommet.
+   */
+  private notifyPlayerPatternWon(
+    roomCode: string,
+    scheduledGameId: string,
+    patternName: string,
+    phase: number,
+    winnerIds: string[],
+    drawIndex0Based: number
+  ): void {
+    if (!this.playerBroadcaster) return;
+    try {
+      this.playerBroadcaster.onPatternWon({
+        roomCode,
+        gameId: scheduledGameId,
+        patternName,
+        phase,
+        winnerIds,
+        winnerCount: winnerIds.length,
+        drawIndex: drawIndex0Based,
+      });
+    } catch (err) {
+      log.warn(
+        { err, scheduledGameId, roomCode, patternName },
+        "playerBroadcaster.onPatternWon kastet — ignorert"
+      );
+    }
+  }
+
+  /**
+   * PR-C4: fire-and-forget push av oppdatert `room:update`-snapshot til
+   * spiller-klient. Tynn adapter — kaller på eksisterende `emitRoomUpdate`-
+   * infrastruktur i index.ts.
+   */
+  private notifyPlayerRoomUpdate(roomCode: string): void {
+    if (!this.playerBroadcaster) return;
+    try {
+      this.playerBroadcaster.onRoomUpdate(roomCode);
+    } catch (err) {
+      log.warn(
+        { err, roomCode },
+        "playerBroadcaster.onRoomUpdate kastet — ignorert"
+      );
+    }
   }
 
   /** PR 4d.3: fire-and-forget admin-broadcast for draw-progress. */
@@ -818,6 +911,12 @@ export class Game1DrawEngineService {
       roomCode: string | null;
     } | null = null;
 
+    // PR-C4: fanget BingoEngine room_code slik at playerBroadcaster kan
+    // sende `draw:new` + `room:update` til spiller-rommet POST-commit.
+    // NULL når ingen spiller har joinet enda (rommet finnes ikke) —
+    // da hopper vi over player-broadcast (admin-broadcast går uansett).
+    let capturedRoomCode: string | null = null;
+
     return this.runInTransaction(async (client) => {
       const state = await this.loadGameStateForUpdate(client, scheduledGameId);
       if (!state) {
@@ -846,6 +945,12 @@ export class Game1DrawEngineService {
           `Kan ikke trekke kule i status '${game.status}'.`
         );
       }
+
+      // PR-C4: capture room_code for POST-commit player-broadcast.
+      // Settes kun hvis minst én spiller har joinet (handler i 4d.2 skriver
+      // kolonnen). NULL → hopp over player-broadcast, admin-broadcast går
+      // uansett.
+      capturedRoomCode = game.room_code;
 
       const drawBag = parseDrawBag(state.draw_bag_json);
       if (state.draws_completed >= drawBag.length) {
@@ -1031,6 +1136,36 @@ export class Game1DrawEngineService {
           capturedPhaseResult.winnerIds,
           view.drawsCompleted
         );
+      }
+      // PR-C4: spiller-broadcast til default-namespace. Samme rekkefølge som
+      // admin-broadcast (draw:new → pattern:won → room:update) slik at
+      // spiller-UI og admin-UI holder seg synkronisert.
+      //
+      // `drawsCompleted` i view er 1-basert (INSERT-sekvens). Klientens
+      // `GameBridge.lastAppliedDrawIndex` er 0-basert (første ball =
+      // drawIndex 0), så vi sender `view.drawsCompleted - 1`. Matcher
+      // `drawBall()` for Spill 2/3 i BingoEngine som også er 0-basert.
+      if (capturedRoomCode !== null && view.lastDrawnBall != null) {
+        const drawIndex0Based = view.drawsCompleted - 1;
+        this.notifyPlayerDrawNew(
+          capturedRoomCode,
+          scheduledGameId,
+          view.lastDrawnBall,
+          drawIndex0Based
+        );
+        if (capturedPhaseResult) {
+          this.notifyPlayerPatternWon(
+            capturedRoomCode,
+            scheduledGameId,
+            capturedPhaseResult.patternName,
+            capturedPhaseResult.phase,
+            capturedPhaseResult.winnerIds,
+            drawIndex0Based
+          );
+        }
+        // room:update push avslutter sekvensen — spilleren får oppdatert
+        // player-liste / lucky-numbers / stakes samtidig med ball.
+        this.notifyPlayerRoomUpdate(capturedRoomCode);
       }
       // BIN-690 M1: fire-and-forget mini-game-trigger for Fullt Hus-vinnere.
       // Kjøres POST-commit slik at mini-game-feil IKKE kan rulle tilbake

@@ -178,6 +178,7 @@ import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { createGame1ScheduledEventHandlers } from "./sockets/game1ScheduledEvents.js";
 import { createAdminGame1Namespace } from "./sockets/adminGame1Namespace.js";
+import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAdapter.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { errorReporter } from "./middleware/errorReporter.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
@@ -1910,6 +1911,16 @@ io.on("connection", (socket: Socket) => {
 const adminGame1Handle = createAdminGame1Namespace({ io, platformService });
 game1MasterControlService.setAdminBroadcaster(adminGame1Handle.broadcaster);
 game1DrawEngineService.setAdminBroadcaster(adminGame1Handle.broadcaster);
+
+// PR-C4: spiller-broadcaster for default-namespace. Speiler admin-broadcast
+// slik at spiller-klient mottar `draw:new` / `pattern:won` / `room:update`
+// POST-commit fra `drawNext()`. Før PR-C4 fikk spiller-UI ingen live-
+// oppdatering under scheduled Spill 1 (bare admin-namespace var koblet opp).
+const game1PlayerBroadcaster = createGame1PlayerBroadcaster({
+  io,
+  emitRoomUpdate,
+});
+game1DrawEngineService.setPlayerBroadcaster(game1PlayerBroadcaster);
 
 // ── Debug/test endpoint — room gap detection (localhost-only) ─────────────────
 app.get("/api/room-gap/:code", (req, res) => {

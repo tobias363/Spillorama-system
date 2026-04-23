@@ -1398,3 +1398,325 @@ test("integration: startGame → 3×drawNext loop (2 purchases, maxDraws=3)", as
   assert.equal(view3.isFinished, true);
   assert.deepEqual(view3.drawnBalls, [11, 22, 33]);
 });
+
+// ── PR-C4: player-broadcaster-tester ────────────────────────────────────────
+//
+// Disse testene dekker gapet identifisert i P1.1 research: scheduled Spill 1
+// broadcastet før PR-C4 kun til `/admin-game1`-namespace, så spiller-klient
+// (default-namespace) fikk ingen live-oppdateringer fra drawNext().
+
+interface RecordedPlayerDrawNew {
+  roomCode: string;
+  number: number;
+  drawIndex: number;
+  gameId: string;
+}
+
+interface RecordedPlayerPatternWon {
+  roomCode: string;
+  gameId: string;
+  patternName: string;
+  phase: number;
+  winnerIds: string[];
+  winnerCount: number;
+  drawIndex: number;
+}
+
+function makeRecordingPlayerBroadcaster(): {
+  broadcaster: import("./Game1PlayerBroadcaster.js").Game1PlayerBroadcaster;
+  drawNewCalls: RecordedPlayerDrawNew[];
+  patternWonCalls: RecordedPlayerPatternWon[];
+  roomUpdateCalls: string[];
+} {
+  const drawNewCalls: RecordedPlayerDrawNew[] = [];
+  const patternWonCalls: RecordedPlayerPatternWon[] = [];
+  const roomUpdateCalls: string[] = [];
+  return {
+    broadcaster: {
+      onDrawNew: (evt) => {
+        drawNewCalls.push({ ...evt });
+      },
+      onPatternWon: (evt) => {
+        patternWonCalls.push({ ...evt });
+      },
+      onRoomUpdate: (roomCode) => {
+        roomUpdateCalls.push(roomCode);
+      },
+    },
+    drawNewCalls,
+    patternWonCalls,
+    roomUpdateCalls,
+  };
+}
+
+test("PR-C4: drawNext sender draw:new + room:update til spiller-rom når room_code er satt", async () => {
+  const { pool } = createStubPool([
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("FOR UPDATE"),
+      rows: [runningStateRow()],
+    },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      // Første spiller har joinet — room_code er satt.
+      rows: [scheduledGameRow({ status: "running", room_code: "ROOM-C4" })],
+    },
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") && s.includes("app_game1_draws"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") && s.includes("app_game1_ticket_assignments"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("UPDATE") && s.includes("app_game1_game_state"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("SELECT"),
+      rows: [
+        runningStateRow({
+          draws_completed: 1,
+          last_drawn_ball: 10,
+          last_drawn_at: "2026-04-21T12:01:00.000Z",
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [
+        {
+          draw_sequence: 1,
+          ball_value: 10,
+          drawn_at: "2026-04-21T12:01:00.000Z",
+        },
+      ],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ]);
+
+  const recorder = makeRecordingPlayerBroadcaster();
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase([]),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    playerBroadcaster: recorder.broadcaster,
+  });
+
+  const view = await service.drawNext("g1");
+  assert.equal(view.drawsCompleted, 1);
+  assert.equal(view.lastDrawnBall, 10);
+
+  // draw:new sendt med 0-basert drawIndex (matcher GameBridge-kontrakt).
+  assert.equal(recorder.drawNewCalls.length, 1, "draw:new sendt én gang");
+  assert.equal(recorder.drawNewCalls[0]!.roomCode, "ROOM-C4");
+  assert.equal(recorder.drawNewCalls[0]!.number, 10);
+  assert.equal(
+    recorder.drawNewCalls[0]!.drawIndex,
+    0,
+    "første ball skal ha drawIndex=0 (0-basert)"
+  );
+  assert.equal(recorder.drawNewCalls[0]!.gameId, "g1");
+
+  // room:update sendt POST draw:new så klient får fresh snapshot.
+  assert.deepEqual(
+    recorder.roomUpdateCalls,
+    ["ROOM-C4"],
+    "room:update skal pushes etter draw:new"
+  );
+
+  // Ingen phase-won (ingen vinnere).
+  assert.equal(recorder.patternWonCalls.length, 0);
+});
+
+test("PR-C4: drawNext sender INGEN broadcast til spiller-rom når room_code er NULL (ingen joinet enda)", async () => {
+  const { pool } = createStubPool([
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("FOR UPDATE"),
+      rows: [runningStateRow()],
+    },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      // room_code er NULL — ingen spiller har joinet.
+      rows: [scheduledGameRow({ status: "running", room_code: null })],
+    },
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") && s.includes("app_game1_draws"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") && s.includes("app_game1_ticket_assignments"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("UPDATE") && s.includes("app_game1_game_state"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("SELECT"),
+      rows: [
+        runningStateRow({
+          draws_completed: 1,
+          last_drawn_ball: 10,
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [
+        { draw_sequence: 1, ball_value: 10, drawn_at: "2026-04-21T12:01:00.000Z" },
+      ],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ]);
+
+  const recorder = makeRecordingPlayerBroadcaster();
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase([]),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    playerBroadcaster: recorder.broadcaster,
+  });
+
+  const view = await service.drawNext("g1");
+  assert.equal(view.drawsCompleted, 1);
+
+  // Ingen spiller-broadcast — ingen trenger den, rommet er tomt.
+  assert.equal(recorder.drawNewCalls.length, 0, "ingen draw:new når room_code=NULL");
+  assert.equal(recorder.roomUpdateCalls.length, 0);
+  assert.equal(recorder.patternWonCalls.length, 0);
+});
+
+test("PR-C4: drawNext sender drawIndex=1 på andre ball (0-basert inkrement)", async () => {
+  const { pool } = createStubPool([
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("FOR UPDATE"),
+      // Første ball allerede trukket.
+      rows: [runningStateRow({ draws_completed: 1, last_drawn_ball: 10 })],
+    },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      rows: [scheduledGameRow({ status: "running", room_code: "ROOM-C4" })],
+    },
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") && s.includes("app_game1_draws"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") && s.includes("app_game1_ticket_assignments"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("UPDATE") && s.includes("app_game1_game_state"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("SELECT"),
+      rows: [runningStateRow({ draws_completed: 2, last_drawn_ball: 20 })],
+    },
+    {
+      match: (s) => s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [
+        { draw_sequence: 1, ball_value: 10, drawn_at: "..." },
+        { draw_sequence: 2, ball_value: 20, drawn_at: "..." },
+      ],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ]);
+
+  const recorder = makeRecordingPlayerBroadcaster();
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase([]),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    playerBroadcaster: recorder.broadcaster,
+  });
+
+  await service.drawNext("g1");
+
+  assert.equal(recorder.drawNewCalls.length, 1);
+  assert.equal(
+    recorder.drawNewCalls[0]!.drawIndex,
+    1,
+    "andre ball = drawIndex 1 (drawsCompleted=2 → 2-1)"
+  );
+  assert.equal(recorder.drawNewCalls[0]!.number, 20);
+});
+
+test("PR-C4: playerBroadcaster.onDrawNew som kaster svelges (fire-and-forget)", async () => {
+  const { pool } = createStubPool([
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("FOR UPDATE"),
+      rows: [runningStateRow()],
+    },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      rows: [scheduledGameRow({ status: "running", room_code: "ROOM-C4" })],
+    },
+    {
+      match: (s) =>
+        s.includes("INSERT INTO") && s.includes("app_game1_draws"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("FROM") && s.includes("app_game1_ticket_assignments"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("UPDATE") && s.includes("app_game1_game_state"),
+      rows: [],
+    },
+    {
+      match: (s) =>
+        s.includes("app_game1_game_state") && s.includes("SELECT"),
+      rows: [runningStateRow({ draws_completed: 1, last_drawn_ball: 10 })],
+    },
+    {
+      match: (s) => s.includes("FROM") && s.includes("app_game1_draws"),
+      rows: [{ draw_sequence: 1, ball_value: 10, drawn_at: "..." }],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ]);
+
+  const throwingBroadcaster: import("./Game1PlayerBroadcaster.js").Game1PlayerBroadcaster = {
+    onDrawNew: () => {
+      throw new Error("socket explode");
+    },
+    onPatternWon: () => undefined,
+    onRoomUpdate: () => undefined,
+  };
+
+  const service = new Game1DrawEngineService({
+    pool: pool as never,
+    ticketPurchaseService: makeFakeTicketPurchase([]),
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    playerBroadcaster: throwingBroadcaster,
+  });
+
+  // Skal ikke kaste selv om broadcasteren feiler — draw er allerede committed.
+  const view = await service.drawNext("g1");
+  assert.equal(view.drawsCompleted, 1);
+  assert.equal(view.lastDrawnBall, 10);
+});
