@@ -71,12 +71,15 @@ describe("TVScreenPage rendering", () => {
                 lastBall: 16,
               },
               patterns: [
-                { name: "Row 1", phase: 1, playersWon: 5, prize: 10000, highlighted: true },
-                { name: "Row 2", phase: 2, playersWon: 0, prize: 0, highlighted: false },
-                { name: "Row 3", phase: 3, playersWon: 0, prize: 0, highlighted: false },
-                { name: "Row 4", phase: 4, playersWon: 0, prize: 0, highlighted: false },
-                { name: "Full House", phase: 5, playersWon: 0, prize: 0, highlighted: false },
+                { name: "1 Rad", phase: 1, playersWon: 5, prize: 10000, highlighted: true },
+                { name: "2 Rader", phase: 2, playersWon: 0, prize: 0, highlighted: false },
+                { name: "3 Rader", phase: 3, playersWon: 0, prize: 0, highlighted: false },
+                { name: "4 Rader", phase: 4, playersWon: 0, prize: 0, highlighted: false },
+                { name: "Fullt Hus", phase: 5, playersWon: 0, prize: 0, highlighted: false },
               ],
+              drawnCount: 12,
+              totalBalls: 75,
+              nextGame: { name: "Quick Bingo", startAt: "2026-04-23T21:00:00Z" },
               countdownToNextGame: null,
               status: "drawing",
             },
@@ -109,10 +112,42 @@ describe("TVScreenPage rendering", () => {
     expect(title.textContent).toContain("Game 3");
     expect(title.textContent).toContain("Mystery");
     expect(container.querySelector("[data-testid='tv-last-ball']")!.textContent!.trim()).toBe("16");
-    expect(container.querySelector("[data-testid='tv-total-draws']")!.textContent).toBe("6");
     const rows = container.querySelectorAll("[data-testid='tv-pattern-row']");
     expect(rows.length).toBe(5);
     expect(rows[0]!.classList.contains("highlighted")).toBe(true);
+  });
+
+  it("Bølge 1: renders drawn-counter X / Y", async () => {
+    mountTvScreenPage(container, "hall-1", "token-abc");
+    await new Promise((r) => setTimeout(r, 10));
+    const counter = container.querySelector("[data-testid='tv-drawn-counter']")!;
+    expect(counter).toBeTruthy();
+    expect(container.querySelector("[data-testid='tv-drawn-count']")!.textContent!.trim()).toBe("12");
+    expect(container.querySelector("[data-testid='tv-total-balls']")!.textContent!.trim()).toBe("75");
+  });
+
+  it("Bølge 1: renders active-pattern banner for første ikke-vunnet pattern", async () => {
+    mountTvScreenPage(container, "hall-1", "token-abc");
+    await new Promise((r) => setTimeout(r, 10));
+    const banner = container.querySelector("[data-testid='tv-active-pattern']")!;
+    expect(banner).toBeTruthy();
+    // Første pattern er vunnet (playersWon=5) → aktivt blir neste (2 Rader).
+    expect(
+      container.querySelector("[data-testid='tv-active-pattern-name']")!.textContent!.trim()
+    ).toBe("2 Rader");
+  });
+
+  it("Bølge 1: renders sub-header med current + next game", async () => {
+    mountTvScreenPage(container, "hall-1", "token-abc");
+    await new Promise((r) => setTimeout(r, 10));
+    const current = container.querySelector("[data-testid='tv-subheader-current']")!;
+    const next = container.querySelector("[data-testid='tv-subheader-next']")!;
+    expect(current.textContent).toContain("Spiller nå:");
+    expect(current.textContent).toContain("Mystery");
+    expect(next.textContent).toContain("Neste:");
+    expect(next.textContent).toContain("Quick Bingo");
+    // Tidspunkt rendres — nøyaktig HH:MM avhenger av timezone, men skal ha "kl. "
+    expect(next.textContent).toContain("kl.");
   });
 
   it("persists voice-selection to localStorage per hall", async () => {

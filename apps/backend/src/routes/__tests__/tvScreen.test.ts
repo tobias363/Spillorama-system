@@ -104,6 +104,9 @@ const exampleState: TvGameState = {
     { name: "Row 4", phase: 4, playersWon: 0, prize: 0, highlighted: false },
     { name: "Full House", phase: 5, playersWon: 0, prize: 0, highlighted: false },
   ],
+  drawnCount: 12,
+  totalBalls: 75,
+  nextGame: { name: "Quick Bingo", startAt: "2026-04-23T21:00:00Z" },
   countdownToNextGame: null,
   status: "drawing",
 };
@@ -166,6 +169,11 @@ test("GET /api/tv/:hallId/:tvToken/state returns state for valid token", async (
     assert.equal(body.data.patterns.length, 5);
     assert.equal(body.data.patterns[0]!.highlighted, true);
     assert.equal(body.data.status, "drawing");
+    // Bølge 1: drawnCount, totalBalls, nextGame skal være i response.
+    assert.equal(body.data.drawnCount, 12);
+    assert.equal(body.data.totalBalls, 75);
+    assert.equal(body.data.nextGame?.name, "Quick Bingo");
+    assert.equal(body.data.nextGame?.startAt, "2026-04-23T21:00:00Z");
   } finally {
     await ctx.close();
   }

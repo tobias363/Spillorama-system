@@ -7,6 +7,9 @@
  * state, bytter vi automatisk til winners-side i 30 sekunder.
  *
  * Legacy-spec: Admin V1.0 Game 1 - 24.3.2023 s.17.
+ * Bølge 1-paritet (2026-04-23): drawn-counter (X / Y), aktivt pattern-
+ * banner (Patterns_Txt) og current/next-game sub-header
+ * (Current_Game_Name_Txt + Next_Game_Name_Txt fra BingoHallDisplay.cs).
  *
  * Voice-valg persisteres i localStorage per hall (`tv_voice_<hallId>`).
  * Audio-filene eksisterer ikke ennå — dropdownen er placeholder til
@@ -41,6 +44,7 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
   root.innerHTML = `
     <div class="tv-host" data-testid="tv-screen-host">
       <div class="tv-header">SPILL-O-RAMA BINGO</div>
+      <div class="tv-subheader" id="tv-subheader" data-testid="tv-subheader"></div>
       <div class="tv-voice-select">
         <label for="tv-voice">Voice:</label>
         <select id="tv-voice" data-testid="tv-voice-select">
@@ -64,6 +68,7 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
   }
 
   const bodyEl = root.querySelector<HTMLElement>("#tv-body")!;
+  const subHeaderEl = root.querySelector<HTMLElement>("#tv-subheader")!;
 
   const instance: ActiveInstance = {
     hallId,
@@ -80,6 +85,7 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
     try {
       const state = await fetchTvState(hallId, tvToken);
       if (instance.destroyed) return;
+      renderSubHeader(subHeaderEl, state);
       renderState(bodyEl, state);
       // Auto-switch til winners-siden når siste game er ended. Hopper bare én
       // gang per transition (guard på previousStatus) så vi ikke starter
@@ -117,6 +123,7 @@ function renderState(target: HTMLElement, state: TvGameState): void {
   }
 
   const game = state.currentGame;
+  const activePatternName = findActivePatternName(state);
   target.className = "tv-screen-body";
   target.innerHTML = `
     <section class="tv-screen-left">
@@ -148,9 +155,13 @@ function renderState(target: HTMLElement, state: TvGameState): void {
         <div class="tv-game-title" data-testid="tv-game-title">
           Game ${game?.number ?? "—"} - ${escapeHtml(game?.name ?? "")}
         </div>
-        <div class="tv-total-draws">
-          Total number of balls drawn:
-          <strong data-testid="tv-total-draws">${game?.ballsDrawn.length ?? 0}</strong>
+        <div class="tv-drawn-counter" data-testid="tv-drawn-counter">
+          <span class="tv-drawn-counter-label">Trukket</span>
+          <span class="tv-drawn-counter-value">
+            <strong data-testid="tv-drawn-count">${state.drawnCount}</strong>
+            <span class="tv-drawn-counter-sep"> / </span>
+            <span data-testid="tv-total-balls">${state.totalBalls}</span>
+          </span>
         </div>
       </div>
       <div class="tv-last-ball-circle" data-testid="tv-last-ball">
@@ -159,8 +170,70 @@ function renderState(target: HTMLElement, state: TvGameState): void {
       <div class="tv-last-5">
         ${lastFiveBallsHtml(game?.ballsDrawn ?? [])}
       </div>
+      ${renderActivePatternBanner(activePatternName)}
       ${renderCountdown(state)}
     </section>
+  `;
+}
+
+/**
+ * Bølge 1: sub-header under "SPILL-O-RAMA BINGO" med current/next-game.
+ * Legacy ref: Current_Game_Name_Txt + Next_Game_Name_Txt i
+ * BingoHallDisplay.cs. Rendres alltid — skjules automatisk hvis begge er
+ * null (via CSS empty-state).
+ */
+function renderSubHeader(target: HTMLElement, state: TvGameState): void {
+  const lines: string[] = [];
+  if (state.currentGame) {
+    lines.push(`
+      <div class="tv-subheader-line" data-testid="tv-subheader-current">
+        <span class="tv-subheader-label">Spiller nå:</span>
+        <span class="tv-subheader-value">${escapeHtml(state.currentGame.name)}</span>
+      </div>
+    `);
+  }
+  if (state.nextGame) {
+    lines.push(`
+      <div class="tv-subheader-line" data-testid="tv-subheader-next">
+        <span class="tv-subheader-label">Neste:</span>
+        <span class="tv-subheader-value">
+          ${escapeHtml(state.nextGame.name)} kl. ${escapeHtml(formatTimeHHMM(state.nextGame.startAt))}
+        </span>
+      </div>
+    `);
+  }
+  target.innerHTML = lines.join("");
+}
+
+/**
+ * Bølge 1: finn aktivt (pågående) pattern-navn. Regelen per oppgaven:
+ * første pattern med playersWon === 0 (ikke vunnet ennå). Hvis alle er
+ * won/ingen finnes, bruker vi tredje-prioritets fallback: siste
+ * highlighted pattern. Returner null hvis listen er tom.
+ */
+function findActivePatternName(state: TvGameState): string | null {
+  const pending = state.patterns.find((p) => p.playersWon === 0);
+  if (pending) return pending.name;
+  // Alle vunnet — vis siste fase (Fullt Hus / Full House).
+  const last = state.patterns[state.patterns.length - 1];
+  return last?.name ?? null;
+}
+
+/**
+ * Bølge 1: stor banner mellom ball-raden og countdown som viser hvilket
+ * pattern som spilles nå (pulse-animasjon ved pattern-endring — se CSS
+ * `tv-active-pattern-pulse`). Legacy ref: AdminTVScreenWinners.Patterns_Txt
+ * viste navn under ball-raden som midtpunkt på TVen.
+ */
+function renderActivePatternBanner(name: string | null): string {
+  if (!name) return "";
+  return `
+    <div class="tv-active-pattern" data-testid="tv-active-pattern">
+      <span class="tv-active-pattern-label">Aktivt mønster</span>
+      <span class="tv-active-pattern-name" data-testid="tv-active-pattern-name">
+        ${escapeHtml(name)}
+      </span>
+    </div>
   `;
 }
 
@@ -215,6 +288,24 @@ function formatCountdown(seconds: number): string {
   const mm = Math.floor(seconds / 60);
   const ss = seconds % 60;
   return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+}
+
+/**
+ * Bølge 1: formatter ISO-timestamp til HH:MM i norsk tidssone (Europe/Oslo).
+ * Brukes i sub-header ("Neste: X kl. 18:00"). Fail-open ved ugyldig input.
+ */
+function formatTimeHHMM(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "--:--";
+    return d.toLocaleTimeString("nb-NO", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/Oslo",
+    });
+  } catch {
+    return "--:--";
+  }
 }
 
 function escapeHtml(s: string): string {
