@@ -1,10 +1,10 @@
 /**
- * BIN-676: CMS admin-service.
+ * BIN-676 + BIN-680: CMS admin-service.
  *
  * Tekst-CRUD for fem statiske sider (aboutus, terms, support, links,
  * responsible-gaming) + full FAQ-CRUD. Service-laget eier slug-whitelist,
- * FEATURE_DISABLED-gate for `responsible-gaming` PUT (regulatorisk —
- * versjons-historikk kreves av BIN-680), og input-validering.
+ * input-validering, og (BIN-680 Lag 1) regulatorisk versjonering for
+ * `responsible-gaming` og andre slugs i `CMS_VERSION_HISTORY_REQUIRED`.
  *
  * Legacy-opphav:
  *   legacy/unity-backend/App/Models/cms.js (singleton-dokument med 5 felter)
@@ -15,13 +15,23 @@
  * Mønster: samme struktur som SettingsService (BIN-677) og SavedGameService
  * (BIN-624). Object.create test-hook, idempotent ensureInitialized.
  *
- * FEATURE_DISABLED-gate:
- *   `responsible-gaming` er en regulatorisk-sensitiv side (pengespill-
- *   forskriften §11 krever versjons-historikk + diff-logging). BIN-680 vil
- *   implementere `app_cms_content_versions`-tabell og versjoneringsflyt.
- *   Inntil da: `updateContent(slug="responsible-gaming", ...)` kaster
- *   DomainError("FEATURE_DISABLED"). GET er ikke gated — admin må kunne
- *   lese gjeldende tekst for feilsøking selv uten edit.
+ * BIN-680 Lag 1 — versjons-historikk (pengespillforskriften §11):
+ *   Regulatoriske slugs krever versjonert redigerings-flyt:
+ *     draft → review → approved → live → retired
+ *   4-øyne: approve kastes FOUR_EYES_VIOLATION hvis approver === creator.
+ *   Publiser promoterer approved → live og retirer forrige live-versjon i
+ *   samme transaksjon. Tabellen er append-only bortsett fra status-metadata.
+ *
+ *   `updateContent()` for regulatoriske slugs oppretter nå en ny draft-
+ *   versjon (tidligere FEATURE_DISABLED-gate). For ikke-regulatoriske slugs
+ *   beholdes den opprinnelige upsert-semantikken for bakoverkompatibilitet.
+ *
+ *   `getContent()` for regulatoriske slugs returnerer gjeldende LIVE-versjons
+ *   innhold — ikke noe av draft/review/approved. Hvis ingen live eksisterer,
+ *   returneres tom streng.
+ *
+ *   Lag 2 (player-facing GET /api/spillvett/text) og Lag 3 (consent-sporing)
+ *   er IKKE i scope for Lag 1.
  */
 
 import { randomUUID } from "node:crypto";
@@ -61,6 +71,73 @@ export interface CmsContent {
   updatedByUserId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// ── BIN-680 Lag 1: versjons-typer ──────────────────────────────────────────
+
+export type CmsVersionStatus =
+  | "draft"
+  | "review"
+  | "approved"
+  | "live"
+  | "retired";
+
+export const CMS_VERSION_STATUSES: readonly CmsVersionStatus[] = [
+  "draft",
+  "review",
+  "approved",
+  "live",
+  "retired",
+] as const;
+
+/**
+ * Persistent versjon-post fra `app_cms_content_versions`.
+ * Immutable bortsett fra status-metadata (approvedBy/publishedBy/retiredAt).
+ */
+export interface CmsContentVersion {
+  id: string;
+  slug: CmsSlug;
+  versionNumber: number;
+  content: string;
+  status: CmsVersionStatus;
+  createdByUserId: string;
+  createdAt: string;
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  publishedByUserId: string | null;
+  publishedAt: string | null;
+  retiredAt: string | null;
+}
+
+export interface CreateVersionInput {
+  slug: string;
+  content: unknown;
+  createdByUserId: string;
+}
+
+export interface VersionTransitionInput {
+  versionId: string;
+  userId: string;
+}
+
+export interface ApproveVersionInput {
+  versionId: string;
+  approvedByUserId: string;
+}
+
+export interface PublishVersionInput {
+  versionId: string;
+  publishedByUserId: string;
+}
+
+/**
+ * Resultat av publish: returnerer både den nye live-versjonen og evt.
+ * den forrige live-versjonen som ble retirert. Lar route-laget audit-logge
+ * `previousLiveVersionId` uten å måtte gjøre en ekstra query.
+ */
+export interface PublishVersionResult {
+  live: CmsContentVersion;
+  previousLiveVersionId: string | null;
 }
 
 export interface FaqEntry {
@@ -109,6 +186,21 @@ interface FaqRow {
   updated_by_user_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+interface CmsContentVersionRow {
+  id: string;
+  slug: string;
+  version_number: number;
+  content: string;
+  status: CmsVersionStatus;
+  created_by_user_id: string;
+  created_at: Date | string;
+  approved_by_user_id: string | null;
+  approved_at: Date | string | null;
+  published_by_user_id: string | null;
+  published_at: Date | string | null;
+  retired_at: Date | string | null;
 }
 
 function asIso(value: Date | string): string {
@@ -164,6 +256,18 @@ function assertFaqText(value: unknown, field: string, max = 10_000): string {
   return trimmed;
 }
 
+function assertUserId(value: unknown, field = "userId"): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new DomainError("INVALID_INPUT", `${field} er påkrevd.`);
+  }
+  return value.trim();
+}
+
+function asIsoOrNull(value: Date | string | null): string | null {
+  if (value === null) return null;
+  return asIso(value);
+}
+
 function assertSortOrder(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new DomainError("INVALID_INPUT", "sortOrder må være et tall.");
@@ -215,15 +319,54 @@ export class CmsService {
     return `"${this.schema}"."app_cms_faq"`;
   }
 
+  private contentVersionsTable(): string {
+    return `"${this.schema}"."app_cms_content_versions"`;
+  }
+
+  /**
+   * BIN-680 Lag 1: identifiser om en slug krever versjonert flyt.
+   * Bevart som public getter slik at route-laget kan velge ulike audit-
+   * actions per slug uten å hardkode listen to steder.
+   */
+  static requiresVersionHistory(slug: CmsSlug): boolean {
+    return CMS_VERSION_HISTORY_REQUIRED.includes(slug);
+  }
+
   // ── CMS content (tekst-sider) ─────────────────────────────────────────
 
   /**
-   * Hent tekst-side. Returnerer en tom-default hvis slugen ikke har blitt
-   * skrevet tidligere — admin-UI kan da redigere og lagre.
+   * Hent tekst-side. For regulatoriske slugs returneres live-versjonens
+   * innhold (eller tom streng hvis ingen live eksisterer). For ikke-
+   * regulatoriske slugs returneres den tradisjonelle `app_cms_content`-raden.
    */
   async getContent(slug: string): Promise<CmsContent> {
     await this.ensureInitialized();
     const validSlug = assertValidSlug(slug);
+
+    // BIN-680: regulatoriske slugs henter live-versjonen i stedet for
+    // `app_cms_content`-raden. Ingen live = tom streng (admin-UI viser
+    // tom textarea + lager første draft på neste save).
+    if (CmsService.requiresVersionHistory(validSlug)) {
+      const live = await this.getLiveVersion(validSlug);
+      if (live) {
+        return {
+          slug: validSlug,
+          content: live.content,
+          updatedByUserId: live.publishedByUserId ?? live.createdByUserId,
+          createdAt: live.createdAt,
+          updatedAt: live.publishedAt ?? live.createdAt,
+        };
+      }
+      const nowIso = new Date().toISOString();
+      return {
+        slug: validSlug,
+        content: "",
+        updatedByUserId: null,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+    }
+
     const { rows } = await this.pool.query<CmsContentRow>(
       `SELECT slug, content, updated_by_user_id, created_at, updated_at
        FROM ${this.contentTable()}
@@ -253,8 +396,16 @@ export class CmsService {
   }
 
   /**
-   * Upsert tekst-side. Kaster FEATURE_DISABLED for `responsible-gaming`
-   * inntil BIN-680 implementerer versjons-historikk (regulatorisk krav).
+   * Oppdater tekst-side.
+   *
+   * Ikke-regulatoriske slugs: tradisjonell upsert (bakoverkompatibel).
+   *
+   * Regulatoriske slugs (BIN-680 Lag 1): oppretter en ny DRAFT-versjon
+   * automatisk. PUT /api/admin/cms/:slug blir ekvivalent med POST
+   * /api/admin/cms/:slug/versions for disse. Returnerer den syntetiske
+   * CmsContent-visningen av den nyopprettede draften slik at eksisterende
+   * admin-klient fortsatt fungerer — men gjeldende live-versjon forblir
+   * uendret inntil draft er sendt til review → approved → published.
    */
   async updateContent(
     slug: string,
@@ -263,12 +414,28 @@ export class CmsService {
   ): Promise<CmsContent> {
     await this.ensureInitialized();
     const validSlug = assertValidSlug(slug);
-    if (CMS_VERSION_HISTORY_REQUIRED.includes(validSlug)) {
-      throw new DomainError(
-        "FEATURE_DISABLED",
-        `Redigering av '${validSlug}' krever versjons-historikk (pengespillforskriften §11) og er foreløpig deaktivert. Blokkert av BIN-680.`
-      );
+
+    if (CmsService.requiresVersionHistory(validSlug)) {
+      if (!actorUserId || !actorUserId.trim()) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "actorUserId er påkrevd for regulatorisk slug (versjons-historikk)."
+        );
+      }
+      const draft = await this.createVersion({
+        slug: validSlug,
+        content,
+        createdByUserId: actorUserId,
+      });
+      return {
+        slug: validSlug,
+        content: draft.content,
+        updatedByUserId: draft.createdByUserId,
+        createdAt: draft.createdAt,
+        updatedAt: draft.createdAt,
+      };
     }
+
     const validContent = assertContentString(content);
     try {
       await this.pool.query(
@@ -290,6 +457,312 @@ export class CmsService {
       );
     }
     return this.getContent(validSlug);
+  }
+
+  // ── BIN-680 Lag 1: versjons-API ────────────────────────────────────────
+
+  /**
+   * Opprett en ny draft-versjon for en regulatorisk slug.
+   * Tildeler version_number = (max_for_slug + 1) i samme transaksjon som
+   * INSERT for å unngå race (to samtidige draft-opprettelser).
+   */
+  async createVersion(input: CreateVersionInput): Promise<CmsContentVersion> {
+    await this.ensureInitialized();
+    const validSlug = assertValidSlug(input.slug);
+    if (!CmsService.requiresVersionHistory(validSlug)) {
+      throw new DomainError(
+        "CMS_SLUG_NOT_VERSIONED",
+        `Slug '${validSlug}' krever ikke versjons-historikk. Bruk updateContent() i stedet.`
+      );
+    }
+    const validContent = assertContentString(input.content);
+    const createdBy = assertUserId(input.createdByUserId, "createdByUserId");
+    const id = randomUUID();
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: maxRows } = await client.query<{ max: number | null }>(
+        `SELECT MAX(version_number) AS max
+         FROM ${this.contentVersionsTable()}
+         WHERE slug = $1`,
+        [validSlug]
+      );
+      const nextVersion = (maxRows[0]?.max ?? 0) + 1;
+      await client.query(
+        `INSERT INTO ${this.contentVersionsTable()}
+           (id, slug, version_number, content, status, created_by_user_id)
+         VALUES ($1, $2, $3, $4, 'draft', $5)`,
+        [id, validSlug, nextVersion, validContent, createdBy]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      if (err instanceof DomainError) throw err;
+      logger.error(
+        { err, slug: validSlug },
+        "[BIN-680] createVersion failed"
+      );
+      throw new DomainError(
+        "CMS_VERSION_CREATE_FAILED",
+        "Kunne ikke opprette ny versjon."
+      );
+    } finally {
+      client.release();
+    }
+    return this.getVersionById(id);
+  }
+
+  /**
+   * draft → review. Samme admin kan sende til review (første trinn av 4-øyne
+   * er at en annen admin approver).
+   */
+  async submitForReview(
+    input: VersionTransitionInput
+  ): Promise<CmsContentVersion> {
+    await this.ensureInitialized();
+    const versionId = assertUserId(input.versionId, "versionId");
+    assertUserId(input.userId, "userId");
+
+    const version = await this.getVersionById(versionId);
+    if (version.status !== "draft") {
+      throw new DomainError(
+        "CMS_VERSION_INVALID_TRANSITION",
+        `Kan ikke sende versjon i status '${version.status}' til review; kun 'draft' er tillatt.`
+      );
+    }
+    await this.pool.query(
+      `UPDATE ${this.contentVersionsTable()}
+         SET status = 'review'
+       WHERE id = $1 AND status = 'draft'`,
+      [versionId]
+    );
+    return this.getVersionById(versionId);
+  }
+
+  /**
+   * review → approved. 4-øyne: approver må være forskjellig fra creator.
+   * Håndheves både i service-lag (tidlig fail) og DB-CHECK (siste forsvars-
+   * linje).
+   */
+  async approveVersion(
+    input: ApproveVersionInput
+  ): Promise<CmsContentVersion> {
+    await this.ensureInitialized();
+    const versionId = assertUserId(input.versionId, "versionId");
+    const approvedBy = assertUserId(input.approvedByUserId, "approvedByUserId");
+
+    const version = await this.getVersionById(versionId);
+    if (version.status !== "review") {
+      throw new DomainError(
+        "CMS_VERSION_INVALID_TRANSITION",
+        `Kan ikke godkjenne versjon i status '${version.status}'; kun 'review' er tillatt.`
+      );
+    }
+    if (approvedBy === version.createdByUserId) {
+      throw new DomainError(
+        "FOUR_EYES_VIOLATION",
+        "Godkjenner må være en annen admin enn skaper (pengespillforskriften §11)."
+      );
+    }
+
+    try {
+      await this.pool.query(
+        `UPDATE ${this.contentVersionsTable()}
+           SET status = 'approved',
+               approved_by_user_id = $2,
+               approved_at = now()
+         WHERE id = $1 AND status = 'review'`,
+        [versionId, approvedBy]
+      );
+    } catch (err) {
+      if (err instanceof DomainError) throw err;
+      logger.error(
+        { err, versionId },
+        "[BIN-680] approveVersion DB-check failed"
+      );
+      throw new DomainError(
+        "CMS_VERSION_APPROVE_FAILED",
+        "Kunne ikke godkjenne versjon."
+      );
+    }
+    return this.getVersionById(versionId);
+  }
+
+  /**
+   * approved → live. Retirer forrige live-versjon i samme transaksjon, og
+   * oppdaterer `app_cms_content.live_version_id` som FK-cache. Returnerer
+   * både den nye live-versjonen og ID for den forrige live-versjonen (for
+   * audit-detaljer).
+   */
+  async publishVersion(
+    input: PublishVersionInput
+  ): Promise<PublishVersionResult> {
+    await this.ensureInitialized();
+    const versionId = assertUserId(input.versionId, "versionId");
+    const publishedBy = assertUserId(
+      input.publishedByUserId,
+      "publishedByUserId"
+    );
+
+    const version = await this.getVersionById(versionId);
+    if (version.status !== "approved") {
+      throw new DomainError(
+        "CMS_VERSION_INVALID_TRANSITION",
+        `Kan ikke publisere versjon i status '${version.status}'; kun 'approved' er tillatt.`
+      );
+    }
+
+    let previousLiveVersionId: string | null = null;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Retire gammel live for samme slug (om det finnes).
+      const { rows: oldLive } = await client.query<{ id: string }>(
+        `SELECT id
+         FROM ${this.contentVersionsTable()}
+         WHERE slug = $1 AND status = 'live'
+         FOR UPDATE`,
+        [version.slug]
+      );
+      if (oldLive[0]) {
+        previousLiveVersionId = oldLive[0].id;
+        await client.query(
+          `UPDATE ${this.contentVersionsTable()}
+             SET status = 'retired',
+                 retired_at = now()
+           WHERE id = $1`,
+          [previousLiveVersionId]
+        );
+      }
+
+      // Promoter approved → live.
+      await client.query(
+        `UPDATE ${this.contentVersionsTable()}
+           SET status = 'live',
+               published_by_user_id = $2,
+               published_at = now()
+         WHERE id = $1 AND status = 'approved'`,
+        [versionId, publishedBy]
+      );
+
+      // Oppdater app_cms_content med FK-cache. Siden regulatoriske slugs
+      // ikke lenger bruker `content`-kolonnen som sannhetskilde, skriver vi
+      // en tom streng der — actual content leses alltid via live-versjon i
+      // getContent().
+      await client.query(
+        `INSERT INTO ${this.contentTable()}
+           (slug, content, updated_by_user_id, live_version_id, live_version_number, updated_at)
+         VALUES ($1, '', $2, $3, $4, now())
+         ON CONFLICT (slug) DO UPDATE SET
+           live_version_id = EXCLUDED.live_version_id,
+           live_version_number = EXCLUDED.live_version_number,
+           updated_by_user_id = EXCLUDED.updated_by_user_id,
+           updated_at = now()`,
+        [version.slug, publishedBy, versionId, version.versionNumber]
+      );
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      if (err instanceof DomainError) throw err;
+      logger.error(
+        { err, versionId },
+        "[BIN-680] publishVersion failed"
+      );
+      throw new DomainError(
+        "CMS_VERSION_PUBLISH_FAILED",
+        "Kunne ikke publisere versjon."
+      );
+    } finally {
+      client.release();
+    }
+
+    const live = await this.getVersionById(versionId);
+    return { live, previousLiveVersionId };
+  }
+
+  /**
+   * Hent én versjon by id. Kaster CMS_VERSION_NOT_FOUND om ikke finnes.
+   */
+  async getVersionById(id: string): Promise<CmsContentVersion> {
+    await this.ensureInitialized();
+    const validId = assertUserId(id, "id");
+    const { rows } = await this.pool.query<CmsContentVersionRow>(
+      `SELECT id, slug, version_number, content, status,
+              created_by_user_id, created_at,
+              approved_by_user_id, approved_at,
+              published_by_user_id, published_at, retired_at
+       FROM ${this.contentVersionsTable()}
+       WHERE id = $1`,
+      [validId]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError(
+        "CMS_VERSION_NOT_FOUND",
+        `Versjon finnes ikke: ${validId}`
+      );
+    }
+    return this.mapVersionRow(row);
+  }
+
+  /**
+   * Hent gjeldende live-versjon for en slug, eller null hvis ingen.
+   */
+  async getLiveVersion(slug: string): Promise<CmsContentVersion | null> {
+    await this.ensureInitialized();
+    const validSlug = assertValidSlug(slug);
+    const { rows } = await this.pool.query<CmsContentVersionRow>(
+      `SELECT id, slug, version_number, content, status,
+              created_by_user_id, created_at,
+              approved_by_user_id, approved_at,
+              published_by_user_id, published_at, retired_at
+       FROM ${this.contentVersionsTable()}
+       WHERE slug = $1 AND status = 'live'
+       ORDER BY version_number DESC
+       LIMIT 1`,
+      [validSlug]
+    );
+    const row = rows[0];
+    return row ? this.mapVersionRow(row) : null;
+  }
+
+  /**
+   * Hent full versjons-historikk (alle statuser) sortert nyeste → eldste.
+   */
+  async getVersionHistory(slug: string): Promise<CmsContentVersion[]> {
+    await this.ensureInitialized();
+    const validSlug = assertValidSlug(slug);
+    const { rows } = await this.pool.query<CmsContentVersionRow>(
+      `SELECT id, slug, version_number, content, status,
+              created_by_user_id, created_at,
+              approved_by_user_id, approved_at,
+              published_by_user_id, published_at, retired_at
+       FROM ${this.contentVersionsTable()}
+       WHERE slug = $1
+       ORDER BY version_number DESC`,
+      [validSlug]
+    );
+    return rows.map((row) => this.mapVersionRow(row));
+  }
+
+  private mapVersionRow(row: CmsContentVersionRow): CmsContentVersion {
+    return {
+      id: row.id,
+      slug: row.slug as CmsSlug,
+      versionNumber: row.version_number,
+      content: row.content,
+      status: row.status,
+      createdByUserId: row.created_by_user_id,
+      createdAt: asIso(row.created_at),
+      approvedByUserId: row.approved_by_user_id,
+      approvedAt: asIsoOrNull(row.approved_at),
+      publishedByUserId: row.published_by_user_id,
+      publishedAt: asIsoOrNull(row.published_at),
+      retiredAt: asIsoOrNull(row.retired_at),
+    };
   }
 
   // ── FAQ CRUD ──────────────────────────────────────────────────────────
@@ -438,8 +911,17 @@ export class CmsService {
           content TEXT NOT NULL DEFAULT '',
           updated_by_user_id TEXT NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          live_version_id TEXT NULL,
+          live_version_number INTEGER NULL
         )`
+      );
+      // BIN-680: legg til live_version-kolonnene hvis tabellen ble opprettet
+      // før migration 20260700000000. IF NOT EXISTS-ALTER er idempotent.
+      await client.query(
+        `ALTER TABLE ${this.contentTable()}
+           ADD COLUMN IF NOT EXISTS live_version_id TEXT NULL,
+           ADD COLUMN IF NOT EXISTS live_version_number INTEGER NULL`
       );
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this.faqTable()} (
@@ -456,6 +938,34 @@ export class CmsService {
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_cms_faq_sort_order
          ON ${this.faqTable()}(sort_order ASC, created_at ASC)`
+      );
+      // BIN-680: regulatorisk versjons-historikk-tabell.
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.contentVersionsTable()} (
+          id TEXT PRIMARY KEY,
+          slug TEXT NOT NULL,
+          version_number INTEGER NOT NULL,
+          content TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('draft', 'review', 'approved', 'live', 'retired')),
+          created_by_user_id TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          approved_by_user_id TEXT NULL,
+          approved_at TIMESTAMPTZ NULL,
+          published_by_user_id TEXT NULL,
+          published_at TIMESTAMPTZ NULL,
+          retired_at TIMESTAMPTZ NULL,
+          UNIQUE (slug, version_number),
+          CONSTRAINT cms_content_versions_four_eyes_chk
+            CHECK (approved_by_user_id IS NULL OR approved_by_user_id <> created_by_user_id)
+        )`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_cms_content_versions_slug_live
+         ON ${this.contentVersionsTable()}(slug) WHERE status = 'live'`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_cms_content_versions_slug_history
+         ON ${this.contentVersionsTable()}(slug, version_number DESC)`
       );
       await client.query("COMMIT");
     } catch (err) {
