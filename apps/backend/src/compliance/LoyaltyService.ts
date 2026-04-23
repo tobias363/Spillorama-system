@@ -31,263 +31,58 @@ import { Pool } from "pg";
 import { DomainError } from "../game/BingoEngine.js";
 import { getPoolTuning } from "../util/pgPool.js";
 import { logger as rootLogger } from "../util/logger.js";
+import type {
+  LoyaltyTier,
+  CreateLoyaltyTierInput,
+  UpdateLoyaltyTierInput,
+  ListLoyaltyTierFilter,
+  LoyaltyPlayerState,
+  AwardLoyaltyPointsInput,
+  AwardLoyaltyActivityInput,
+  OverrideLoyaltyTierInput,
+  LoyaltyEvent,
+  AwardResult,
+  MonthlyResetResult,
+  LoyaltyServiceOptions,
+  LoyaltyTierRow,
+  LoyaltyPlayerStateRow,
+  LoyaltyEventRow,
+} from "./LoyaltyTypes.js";
+import {
+  assertSchemaName,
+  assertNonEmptyString,
+  assertPositiveInt,
+  assertNonNegativeInt,
+  assertIntOrNull,
+  assertInteger,
+  assertObject,
+  monthKeyFromDate,
+  isUniqueViolation,
+} from "./LoyaltyValidators.js";
+import { initializeLoyaltySchema } from "./LoyaltySchema.js";
+import {
+  mapTierRow,
+  mapStateRow,
+  mapEventRow,
+} from "./LoyaltyMappers.js";
+
+// Re-export for backward-compat (eksisterende imports fra denne modulen).
+export type {
+  LoyaltyTier,
+  CreateLoyaltyTierInput,
+  UpdateLoyaltyTierInput,
+  ListLoyaltyTierFilter,
+  LoyaltyPlayerState,
+  AwardLoyaltyPointsInput,
+  AwardLoyaltyActivityInput,
+  OverrideLoyaltyTierInput,
+  LoyaltyEvent,
+  AwardResult,
+  MonthlyResetResult,
+  LoyaltyServiceOptions,
+} from "./LoyaltyTypes.js";
 
 const logger = rootLogger.child({ module: "loyalty-service" });
-
-// ── Public types ────────────────────────────────────────────────────────────
-
-export interface LoyaltyTier {
-  id: string;
-  name: string;
-  rank: number;
-  minPoints: number;
-  maxPoints: number | null;
-  benefits: Record<string, unknown>;
-  active: boolean;
-  createdByUserId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  deletedAt: string | null;
-}
-
-export interface CreateLoyaltyTierInput {
-  name: string;
-  rank: number;
-  minPoints?: number;
-  maxPoints?: number | null;
-  benefits?: Record<string, unknown>;
-  active?: boolean;
-  createdByUserId: string;
-}
-
-export interface UpdateLoyaltyTierInput {
-  name?: string;
-  rank?: number;
-  minPoints?: number;
-  maxPoints?: number | null;
-  benefits?: Record<string, unknown>;
-  active?: boolean;
-}
-
-export interface ListLoyaltyTierFilter {
-  active?: boolean;
-  includeDeleted?: boolean;
-  limit?: number;
-}
-
-export interface LoyaltyPlayerState {
-  userId: string;
-  currentTier: LoyaltyTier | null;
-  lifetimePoints: number;
-  monthPoints: number;
-  monthKey: string | null;
-  tierLocked: boolean;
-  lastUpdatedAt: string;
-  createdAt: string;
-}
-
-export interface AwardLoyaltyPointsInput {
-  userId: string;
-  pointsDelta: number;
-  reason: string;
-  metadata?: Record<string, unknown>;
-  createdByUserId: string;
-}
-
-/**
- * GAME1_SCHEDULE PR 5: automatisk activity-award-input. Brukes fra
- * BingoEngine-hook ved buy-in / game-win. Forskjellig fra admin-award ved:
- *   - `eventType` er fritt-form (f.eks. 'ticket.purchase', 'game.win').
- *   - `createdByUserId` er NULL (system-event).
- *   - `pointsDelta=0` er tillatt — vi lar porten sende 0 hvis
- *     business-regelen bestemmer at små buy-ins ikke gir poeng enda.
- *     Da skrives KUN en event-rad (markør), ingen state-mutasjon.
- */
-export interface AwardLoyaltyActivityInput {
-  userId: string;
-  /** Fritt-form event-type-slug. F.eks. 'ticket.purchase', 'game.win'. */
-  eventType: string;
-  /** Poeng-endring. 0 = bare markør-event, ingen state-oppdatering. */
-  pointsDelta: number;
-  /**
-   * Fri-form metadata om aktiviteten (gameId, roomCode, amount i kr, etc.).
-   * Lagret i events.metadata_json. Ingen PII forventet.
-   */
-  metadata?: Record<string, unknown>;
-}
-
-export interface OverrideLoyaltyTierInput {
-  userId: string;
-  /** NULL = fjern override (lås opp for automatic assignment). */
-  tierId: string | null;
-  reason: string;
-  createdByUserId: string;
-}
-
-export interface LoyaltyEvent {
-  id: string;
-  userId: string;
-  eventType: string;
-  pointsDelta: number;
-  metadata: Record<string, unknown>;
-  createdByUserId: string | null;
-  createdAt: string;
-}
-
-export interface AwardResult {
-  state: LoyaltyPlayerState;
-  event: LoyaltyEvent;
-  /** true hvis tier endret seg som følge av award (auto-assignment). */
-  tierChanged: boolean;
-}
-
-export interface MonthlyResetResult {
-  playersReset: number;
-  monthKey: string;
-}
-
-export interface LoyaltyServiceOptions {
-  connectionString: string;
-  schema?: string;
-}
-
-// ── Row types for DB mapping ────────────────────────────────────────────────
-
-interface LoyaltyTierRow {
-  id: string;
-  name: string;
-  rank: number | string;
-  min_points: number | string;
-  max_points: number | string | null;
-  benefits_json: Record<string, unknown> | null;
-  active: boolean;
-  created_by_user_id: string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
-  deleted_at: Date | string | null;
-}
-
-interface LoyaltyPlayerStateRow {
-  user_id: string;
-  current_tier_id: string | null;
-  lifetime_points: number | string;
-  month_points: number | string;
-  month_key: string | null;
-  tier_locked: boolean;
-  last_updated_at: Date | string;
-  created_at: Date | string;
-}
-
-interface LoyaltyEventRow {
-  id: string;
-  user_id: string;
-  event_type: string;
-  points_delta: number | string;
-  metadata_json: Record<string, unknown> | null;
-  created_by_user_id: string | null;
-  created_at: Date | string;
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function asIso(value: Date | string): string {
-  return typeof value === "string" ? value : value.toISOString();
-}
-
-function asIsoOrNull(value: Date | string | null): string | null {
-  return value === null ? null : asIso(value);
-}
-
-function assertSchemaName(schema: string): string {
-  if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
-    throw new DomainError("INVALID_CONFIG", "Ugyldig schema-navn.");
-  }
-  return schema;
-}
-
-function assertNonEmptyString(
-  value: unknown,
-  field: string,
-  max = 200
-): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new DomainError("INVALID_INPUT", `${field} er påkrevd.`);
-  }
-  const trimmed = value.trim();
-  if (trimmed.length > max) {
-    throw new DomainError(
-      "INVALID_INPUT",
-      `${field} kan maksimalt være ${max} tegn.`
-    );
-  }
-  return trimmed;
-}
-
-function assertPositiveInt(value: unknown, field: string): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
-    throw new DomainError(
-      "INVALID_INPUT",
-      `${field} må være et positivt heltall.`
-    );
-  }
-  return n;
-}
-
-function assertNonNegativeInt(value: unknown, field: string): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
-    throw new DomainError(
-      "INVALID_INPUT",
-      `${field} må være et ikke-negativt heltall.`
-    );
-  }
-  return n;
-}
-
-function assertIntOrNull(value: unknown, field: string): number | null {
-  if (value === null || value === undefined) return null;
-  const n = Number(value);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
-    throw new DomainError(
-      "INVALID_INPUT",
-      `${field} må være et ikke-negativt heltall eller null.`
-    );
-  }
-  return n;
-}
-
-function assertInteger(value: unknown, field: string): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || !Number.isInteger(n)) {
-    throw new DomainError("INVALID_INPUT", `${field} må være et heltall.`);
-  }
-  return n;
-}
-
-function assertObject(
-  value: unknown,
-  field: string
-): Record<string, unknown> {
-  if (value === undefined || value === null) return {};
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new DomainError("INVALID_INPUT", `${field} må være et objekt.`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function monthKeyFromDate(date: Date): string {
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  if (err && typeof err === "object" && "code" in err) {
-    return (err as { code: unknown }).code === "23505";
-  }
-  return false;
-}
 
 // ── Service ────────────────────────────────────────────────────────────────
 
@@ -363,7 +158,7 @@ export class LoyaltyService {
        LIMIT $${params.length}`,
       params
     );
-    return rows.map((row) => this.mapTierRow(row));
+    return rows.map((row) => mapTierRow(row));
   }
 
   async getTier(id: string): Promise<LoyaltyTier> {
@@ -382,7 +177,7 @@ export class LoyaltyService {
     if (!row) {
       throw new DomainError("LOYALTY_TIER_NOT_FOUND", "Loyalty-tier finnes ikke.");
     }
-    return this.mapTierRow(row);
+    return mapTierRow(row);
   }
 
   async createTier(input: CreateLoyaltyTierInput): Promise<LoyaltyTier> {
@@ -684,7 +479,7 @@ export class LoyaltyService {
       const eventRow = eventInsert.rows[0]!;
       return {
         state,
-        event: this.mapEventRow(eventRow),
+        event: mapEventRow(eventRow),
         tierChanged,
       };
     } catch (err) {
@@ -774,7 +569,7 @@ export class LoyaltyService {
       }
 
       await client.query("COMMIT");
-      return this.mapEventRow(eventInsert.rows[0]!);
+      return mapEventRow(eventInsert.rows[0]!);
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
       throw err;
@@ -917,7 +712,7 @@ export class LoyaltyService {
        LIMIT $2`,
       [uid, lim]
     );
-    return rows.map((row) => this.mapEventRow(row));
+    return rows.map((row) => mapEventRow(row));
   }
 
   /** List alle player-states (paginert, tier-filter). */
@@ -984,36 +779,6 @@ export class LoyaltyService {
     return rows[0]?.id ?? null;
   }
 
-  private mapTierRow(row: LoyaltyTierRow): LoyaltyTier {
-    return {
-      id: row.id,
-      name: row.name,
-      rank: Number(row.rank),
-      minPoints: Number(row.min_points),
-      maxPoints: row.max_points === null ? null : Number(row.max_points),
-      benefits: (row.benefits_json ?? {}) as Record<string, unknown>,
-      active: Boolean(row.active),
-      createdByUserId: row.created_by_user_id,
-      createdAt: asIso(row.created_at),
-      updatedAt: asIso(row.updated_at),
-      deletedAt: asIsoOrNull(row.deleted_at),
-    };
-  }
-
-  private mapStateRow(row: LoyaltyPlayerStateRow): LoyaltyPlayerState {
-    return {
-      userId: row.user_id,
-      // currentTier hentes inn av mapStateRowAsync ved behov.
-      currentTier: null,
-      lifetimePoints: Number(row.lifetime_points),
-      monthPoints: Number(row.month_points),
-      monthKey: row.month_key,
-      tierLocked: Boolean(row.tier_locked),
-      lastUpdatedAt: asIso(row.last_updated_at),
-      createdAt: asIso(row.created_at),
-    };
-  }
-
   /**
    * Samme som mapStateRow men beriker currentTier via separat SELECT.
    * Brukt av getPlayerState og listPlayerStates hvor vi vil vise tier-info.
@@ -1021,7 +786,7 @@ export class LoyaltyService {
   private async mapStateRowAsync(
     row: LoyaltyPlayerStateRow
   ): Promise<LoyaltyPlayerState> {
-    const state = this.mapStateRow(row);
+    const state = mapStateRow(row);
     if (row.current_tier_id) {
       try {
         state.currentTier = await this.getTier(row.current_tier_id);
@@ -1037,110 +802,10 @@ export class LoyaltyService {
     return state;
   }
 
-  private mapEventRow(row: LoyaltyEventRow): LoyaltyEvent {
-    return {
-      id: row.id,
-      userId: row.user_id,
-      eventType: row.event_type,
-      pointsDelta: Number(row.points_delta),
-      metadata: (row.metadata_json ?? {}) as Record<string, unknown>,
-      createdByUserId: row.created_by_user_id,
-      createdAt: asIso(row.created_at),
-    };
-  }
-
   private async ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.initializeSchema();
+      this.initPromise = initializeLoyaltySchema(this.pool, this.schema);
     }
     await this.initPromise;
-  }
-
-  private async initializeSchema(): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.tierTable()} (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          rank INTEGER NOT NULL CHECK (rank > 0),
-          min_points INTEGER NOT NULL DEFAULT 0 CHECK (min_points >= 0),
-          max_points INTEGER NULL CHECK (max_points IS NULL OR max_points > min_points),
-          benefits_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-          active BOOLEAN NOT NULL DEFAULT true,
-          created_by_user_id TEXT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          deleted_at TIMESTAMPTZ NULL
-        )`
-      );
-      await client.query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS uq_${this.schema}_loyalty_tiers_name
-         ON ${this.tierTable()}(name) WHERE deleted_at IS NULL`
-      );
-      await client.query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS uq_${this.schema}_loyalty_tiers_rank
-         ON ${this.tierTable()}(rank) WHERE deleted_at IS NULL`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_tiers_rank_active
-         ON ${this.tierTable()}(rank DESC, min_points ASC)
-         WHERE deleted_at IS NULL AND active = true`
-      );
-
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.stateTable()} (
-          user_id TEXT PRIMARY KEY,
-          current_tier_id TEXT NULL,
-          lifetime_points INTEGER NOT NULL DEFAULT 0 CHECK (lifetime_points >= 0),
-          month_points INTEGER NOT NULL DEFAULT 0 CHECK (month_points >= 0),
-          month_key TEXT NULL,
-          tier_locked BOOLEAN NOT NULL DEFAULT false,
-          last_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_player_state_tier
-         ON ${this.stateTable()}(current_tier_id) WHERE current_tier_id IS NOT NULL`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_player_state_lifetime
-         ON ${this.stateTable()}(lifetime_points DESC)`
-      );
-
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.eventTable()} (
-          id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL,
-          event_type TEXT NOT NULL,
-          points_delta INTEGER NOT NULL DEFAULT 0,
-          metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_by_user_id TEXT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_events_user_time
-         ON ${this.eventTable()}(user_id, created_at DESC)`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_events_type_time
-         ON ${this.eventTable()}(event_type, created_at DESC)`
-      );
-      await client.query("COMMIT");
-    } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
-      if (err instanceof DomainError) throw err;
-      logger.error({ err }, "[BIN-700] loyalty schema init failed");
-      throw new DomainError(
-        "LOYALTY_INIT_FAILED",
-        "Kunne ikke initialisere loyalty-tabeller."
-      );
-    } finally {
-      client.release();
-    }
   }
 }
