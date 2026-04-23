@@ -80,6 +80,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { DomainError } from "../BingoEngine.js";
+import { IdempotencyKeys } from "../idempotency.js";
 import type {
   MiniGame,
   MiniGameChoiceInput,
@@ -580,7 +581,7 @@ export class MiniGameOddsenEngine implements MiniGame {
         potNok,
         `Oddsen-pot (tall ${state.chosen_number})`,
         {
-          idempotencyKey: `g1-oddsen-${state.id}`,
+          idempotencyKey: IdempotencyKeys.game1Oddsen({ stateId: state.id }),
           to: "winnings",
         },
       );

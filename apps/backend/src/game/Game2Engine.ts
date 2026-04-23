@@ -22,6 +22,7 @@
 
 import { randomUUID } from "node:crypto";
 import { BingoEngine } from "./BingoEngine.js";
+import { IdempotencyKeys } from "./idempotency.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
 import { hasFull3x3 } from "./ticket.js";
@@ -349,7 +350,13 @@ export class Game2Engine extends BingoEngine {
       player.walletId,
       payout,
       `G2 jackpot prize ${room.code}`,
-      { idempotencyKey: `g2-jackpot-${game.id}-${claim.id}`, targetSide: "winnings" }
+      {
+        idempotencyKey: IdempotencyKeys.game2Jackpot({
+          gameId: game.id,
+          claimId: claim.id,
+        }),
+        targetSide: "winnings",
+      }
     );
     player.balance = roundCurrency(player.balance + payout);
     game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
@@ -446,7 +453,13 @@ export class Game2Engine extends BingoEngine {
       player.walletId,
       payout,
       `G2 lucky bonus ${room.code}`,
-      { idempotencyKey: `g2-lucky-${game.id}-${claim.id}`, targetSide: "winnings" }
+      {
+        idempotencyKey: IdempotencyKeys.game2Lucky({
+          gameId: game.id,
+          claimId: claim.id,
+        }),
+        targetSide: "winnings",
+      }
     );
     player.balance = roundCurrency(player.balance + payout);
     game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));

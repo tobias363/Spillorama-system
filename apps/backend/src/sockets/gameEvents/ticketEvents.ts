@@ -21,6 +21,7 @@ import {
   TicketCancelPayloadSchema,
 } from "@spillorama/shared-types/socket-events";
 import { DomainError } from "../../game/BingoEngine.js";
+import { IdempotencyKeys } from "../../game/idempotency.js";
 import type { SocketContext } from "./context.js";
 import type { AckResponse, MarkPayload } from "./types.js";
 
@@ -86,7 +87,11 @@ export function registerTicketEvents(ctx: SocketContext): void {
 
       // Idempotency: (room, player, ticket) is the natural key. A retried
       // request with the same ticketId produces the same ledger entry.
-      const idempotencyKey = `ticket-replace-${roomCode}-${playerId}-${ticketId}`;
+      const idempotencyKey = IdempotencyKeys.adhocTicketReplace({
+        roomCode,
+        playerId,
+        ticketId,
+      });
       const { debitedAmount } = await engine.chargeTicketReplacement(
         roomCode,
         playerId,

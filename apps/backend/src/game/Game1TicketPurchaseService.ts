@@ -51,6 +51,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { DomainError } from "./BingoEngine.js";
+import { IdempotencyKeys } from "./idempotency.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { WalletAdapter, WalletTransaction } from "../adapters/WalletAdapter.js";
 import type {
@@ -342,7 +343,11 @@ export class Game1TicketPurchaseService {
           buyer.walletId,
           amountNok,
           `game1_purchase:${purchaseId}`,
-          { idempotencyKey: `game1-purchase:${input.idempotencyKey}:debit` }
+          {
+            idempotencyKey: IdempotencyKeys.game1PurchaseDebit({
+              clientIdempotencyKey: input.idempotencyKey,
+            }),
+          }
         );
       } catch (err) {
         if (err instanceof DomainError) throw err;
@@ -527,7 +532,12 @@ export class Game1TicketPurchaseService {
           buyer.walletId,
           amountNok,
           `game1_refund:${purchase.id}`,
-          { idempotencyKey: `game1-refund:${purchase.id}:credit`, to: "deposit" }
+          {
+            idempotencyKey: IdempotencyKeys.game1RefundCredit({
+              purchaseId: purchase.id,
+            }),
+            to: "deposit",
+          }
         );
         refundTransactionId = walletTx.id;
       } catch (err) {

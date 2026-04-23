@@ -25,6 +25,7 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { DomainError } from "../game/BingoEngine.js";
+import { IdempotencyKeys } from "../game/idempotency.js";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { AgentService } from "./AgentService.js";
@@ -425,7 +426,9 @@ export class AgentProductSaleService {
           "Spilleren har ikke nok penger i wallet."
         );
       }
-      const idempotencyKey = `product-sale:${input.cartId}:wallet`;
+      const idempotencyKey = IdempotencyKeys.agentProductSale({
+        cartId: input.cartId,
+      });
       const walletTx = await this.wallet.debit(
         player.walletId,
         totalNok,

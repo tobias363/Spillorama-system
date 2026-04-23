@@ -41,6 +41,7 @@ import type {
 import { NoopSplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import { DomainError } from "./BingoEngine.js";
+import { IdempotencyKeys } from "./idempotency.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-payout-service" });
@@ -216,7 +217,11 @@ export class Game1PayoutService {
             centsToKroner(totalCreditCents),
             `Spill 1 ${input.phaseName} — spill ${input.scheduledGameId}`,
             {
-              idempotencyKey: `g1-phase-${input.scheduledGameId}-${input.phase}-${winner.assignmentId}`,
+              idempotencyKey: IdempotencyKeys.game1Phase({
+                scheduledGameId: input.scheduledGameId,
+                phase: input.phase,
+                assignmentId: winner.assignmentId,
+              }),
               to: "winnings",
             }
           );

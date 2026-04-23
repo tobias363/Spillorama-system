@@ -24,6 +24,7 @@ import { getPoolTuning } from "../util/pgPool.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
 import { DomainError } from "../game/BingoEngine.js";
+import { IdempotencyKeys } from "../game/idempotency.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "payment-request-service" });
@@ -444,7 +445,10 @@ export class PaymentRequestService {
         kind === "deposit"
           ? `Manuell innskudd #${current.id}`
           : `Manuelt uttak #${current.id}`;
-      const idempotencyKey = `payment-request:${kind}:${current.id}`;
+      const idempotencyKey = IdempotencyKeys.paymentRequest({
+        kind,
+        requestId: current.id,
+      });
 
       let walletTransactionId: string;
       try {

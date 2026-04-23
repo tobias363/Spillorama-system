@@ -68,6 +68,7 @@ import type { WalletAdapter } from "../../adapters/WalletAdapter.js";
 import type { AuditLogService } from "../../compliance/AuditLogService.js";
 import type { Game1PotService, PotRow, TryWinResult } from "./Game1PotService.js";
 import type { PotDailyAccumulationTickService } from "./PotDailyAccumulationTickService.js";
+import { IdempotencyKeys } from "../idempotency.js";
 import { logger as rootLogger } from "../../util/logger.js";
 
 const log = rootLogger.child({ module: "game1-pot-evaluator" });
@@ -192,9 +193,15 @@ function idempotencyKeyFor(
   scheduledGameId: string
 ): string {
   if (potType === "jackpott") {
-    return `g1-jackpot-${pot.hallId}-${scheduledGameId}`;
+    return IdempotencyKeys.game1Jackpot({
+      hallId: pot.hallId,
+      scheduledGameId,
+    });
   }
-  return `g1-pot-${pot.id}-${scheduledGameId}`;
+  return IdempotencyKeys.game1Pot({
+    potId: pot.id,
+    scheduledGameId,
+  });
 }
 
 /** Menneskelesbar credit-beskrivelse per potType. */

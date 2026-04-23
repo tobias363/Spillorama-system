@@ -28,6 +28,7 @@ import type {
   RoomState,
 } from "./types.js";
 import { DomainError } from "./BingoEngine.js";
+import { IdempotencyKeys } from "./idempotency.js";
 
 /** Default prize segments for the jackpot wheel (in kr). */
 export const JACKPOT_PRIZES: readonly number[] = [5, 10, 15, 20, 25, 50, 10, 15];
@@ -148,7 +149,10 @@ export async function spinJackpot(
       prizeAmount,
       `Jackpot prize ${room.code}`,
       {
-        idempotencyKey: `jackpot-${game.id}-spin-${jackpot.playedSpins}`,
+        idempotencyKey: IdempotencyKeys.adhocJackpot({
+          gameId: game.id,
+          playedSpins: jackpot.playedSpins,
+        }),
         targetSide: "winnings",
       },
     );
@@ -274,7 +278,13 @@ export async function playMiniGame(
       player.walletId,
       prizeAmount,
       `Mini-game ${miniGame.type} prize ${room.code}`,
-      { idempotencyKey: `minigame-${game.id}-${miniGame.type}`, targetSide: "winnings" },
+      {
+        idempotencyKey: IdempotencyKeys.adhocMiniGame({
+          gameId: game.id,
+          miniGameType: miniGame.type,
+        }),
+        targetSide: "winnings",
+      },
     );
     player.balance += prizeAmount;
 

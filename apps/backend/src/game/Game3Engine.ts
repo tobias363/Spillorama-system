@@ -26,6 +26,7 @@
 
 import { randomUUID } from "node:crypto";
 import { BingoEngine } from "./BingoEngine.js";
+import { IdempotencyKeys } from "./idempotency.js";
 import {
   PatternCycler,
   type PatternSpec,
@@ -388,7 +389,10 @@ export class Game3Engine extends BingoEngine {
           requestedPayout: pricePerWinner,
           houseAccountId, gameType, channel,
           label: `G3 pattern ${pattern.name} ${room.code}`,
-          idempotencyKey: `g3-pattern-${game.id}-${claim.id}`,
+          idempotencyKey: IdempotencyKeys.game3Pattern({
+            gameId: game.id,
+            claimId: claim.id,
+          }),
         })
       : 0;
 
@@ -402,7 +406,10 @@ export class Game3Engine extends BingoEngine {
         requestedPayout: luckyPrize,
         houseAccountId, gameType, channel,
         label: `G3 lucky bonus ${room.code}`,
-        idempotencyKey: `g3-lucky-${game.id}-${claim.id}`,
+        idempotencyKey: IdempotencyKeys.game3Lucky({
+          gameId: game.id,
+          claimId: claim.id,
+        }),
       });
       if (luckyPaid > 0) {
         claim.bonusTriggered = true;

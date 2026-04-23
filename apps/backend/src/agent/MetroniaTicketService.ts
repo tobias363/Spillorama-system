@@ -20,6 +20,7 @@
 
 import { randomUUID } from "node:crypto";
 import { DomainError } from "../game/BingoEngine.js";
+import { IdempotencyKeys } from "../game/idempotency.js";
 import type { PlatformService, UserRole } from "../platform/PlatformService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { AgentService } from "./AgentService.js";
@@ -144,7 +145,7 @@ export class MetroniaTicketService {
         player.walletId,
         input.amountNok,
         `Refund — Metronia create failed (${ticketId})`,
-        { idempotencyKey: `${uniqueTransaction}:refund` }
+        { idempotencyKey: IdempotencyKeys.machineRefund({ uniqueTransaction }) }
       );
       throw err;
     }
@@ -232,7 +233,7 @@ export class MetroniaTicketService {
         player.walletId,
         input.amountNok,
         `Refund — Metronia topup failed (${ticket.id})`,
-        { idempotencyKey: `${uniqueTransaction}:refund` }
+        { idempotencyKey: IdempotencyKeys.machineRefund({ uniqueTransaction }) }
       );
       throw err;
     }
@@ -289,7 +290,7 @@ export class MetroniaTicketService {
         player.walletId,
         payoutNok,
         `Metronia payout ${ticket.id}`,
-        { idempotencyKey: `${uniqueTransaction}:credit` }
+        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
       );
       walletTxId = walletTx.id;
       afterBalance = previousBalance + payoutNok;
@@ -379,7 +380,7 @@ export class MetroniaTicketService {
         player.walletId,
         refundNok,
         `Metronia void refund ${ticket.id}`,
-        { idempotencyKey: `${uniqueTransaction}:credit` }
+        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
       );
       walletTxId = walletTx.id;
       afterBalance = previousBalance + refundNok;

@@ -34,6 +34,7 @@ import type {
   Ticket,
 } from "./types.js";
 import { DomainError } from "./BingoEngine.js";
+import { IdempotencyKeys } from "./idempotency.js";
 
 const logger = rootLogger.child({ module: "engine.recovery" });
 
@@ -201,7 +202,12 @@ export async function refundDebitedPlayers(
         player.walletId,
         amount,
         `Refund: game start failed ${roomCode}`,
-        { idempotencyKey: `refund-${gameId}-${player.id}` },
+        {
+          idempotencyKey: IdempotencyKeys.adhocRefund({
+            gameId,
+            playerId: player.id,
+          }),
+        },
       );
       player.balance += amount;
     } catch (refundErr) {

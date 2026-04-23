@@ -18,6 +18,7 @@
 
 import { randomUUID } from "node:crypto";
 import { DomainError } from "../game/BingoEngine.js";
+import { IdempotencyKeys } from "../game/idempotency.js";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { PhysicalTicketService } from "../compliance/PhysicalTicketService.js";
@@ -220,7 +221,7 @@ export class AgentTransactionService {
     }
 
     const txId = `agenttx-${randomUUID()}`;
-    const idempotencyKey = `agent-tx:${txId}:wallet`;
+    const idempotencyKey = IdempotencyKeys.agentTxWallet({ txId });
     const reason = `agent ${actionType} shift=${shift.id} clientReq=${input.clientRequestId}`;
 
     const walletTx = walletDirection === "CREDIT"
@@ -334,7 +335,9 @@ export class AgentTransactionService {
     let walletTxId: string | null = null;
     let afterBalance = previousBalance;
     if (input.paymentMethod === "WALLET") {
-      const idempotencyKey = `agent-ticket:${ticket.uniqueId}:sell:wallet`;
+      const idempotencyKey = IdempotencyKeys.agentPhysicalSell({
+        ticketUniqueId: ticket.uniqueId,
+      });
       const reason = `physical ticket sale ${ticket.uniqueId} shift=${shift.id}`;
       const walletTx = await this.wallet.debit(player.walletId, priceNok, reason, { idempotencyKey });
       walletTxId = walletTx.id;
@@ -428,7 +431,9 @@ export class AgentTransactionService {
     let walletTxId: string | null = null;
     let afterBalance = previousBalance;
     if (original.paymentMethod === "WALLET" && original.walletDirection === "DEBIT") {
-      const idempotencyKey = `agent-tx:${original.id}:cancel`;
+      const idempotencyKey = IdempotencyKeys.agentTxCancel({
+        originalTxId: original.id,
+      });
       const reason = `physical sale cancel related=${original.id} shift=${shift.id}`;
       const walletTx = await this.wallet.credit(player.walletId, amount, reason, { idempotencyKey });
       walletTxId = walletTx.id;
@@ -501,7 +506,11 @@ export class AgentTransactionService {
       ticketCount: input.ticketCount,
       totalPriceCents,
       requestedByAgentUserId: input.agentUserId,
-      idempotencyKey: `agent-ticket:digital:${input.gameId}:${input.playerUserId}:${input.clientRequestId}`,
+      idempotencyKey: IdempotencyKeys.agentDigitalTicket({
+        gameId: input.gameId,
+        playerUserId: input.playerUserId,
+        clientRequestId: input.clientRequestId,
+      }),
     });
 
     // Code below runs kun når stub er erstattet med real impl. Vi lar

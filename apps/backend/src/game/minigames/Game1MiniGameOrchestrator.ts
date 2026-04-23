@@ -48,6 +48,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { DomainError } from "../BingoEngine.js";
+import { IdempotencyKeys } from "../idempotency.js";
 import type { MiniGame, MiniGameTriggerContext, MiniGameType } from "./types.js";
 import { MINI_GAME_TYPES } from "./types.js";
 import type { AuditLogService } from "../../compliance/AuditLogService.js";
@@ -671,7 +672,9 @@ export class Game1MiniGameOrchestrator {
       amountKroner,
       `Mini-game ${miniGameType} premie`,
       {
-        idempotencyKey: `g1-minigame-${context.resultId}`,
+        idempotencyKey: IdempotencyKeys.game1MiniGame({
+          resultId: context.resultId,
+        }),
         to: "winnings",
       },
     );

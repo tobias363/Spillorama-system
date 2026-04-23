@@ -2,6 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import type { BingoSystemAdapter } from "../adapters/BingoSystemAdapter.js";
 import { WalletError } from "../adapters/WalletAdapter.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import { IdempotencyKeys } from "./idempotency.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
 import * as variantConfigModule from "./variantConfig.js";
@@ -759,7 +760,12 @@ export class BingoEngine {
             houseAccountId,
             playerBuyIn,
             `Bingo buy-in ${room.code} (${playerTicketCount} tickets)`,
-            { idempotencyKey: `buyin-${gameId}-${player.id}` }
+            {
+              idempotencyKey: IdempotencyKeys.adhocBuyIn({
+                gameId,
+                playerId: player.id,
+              }),
+            }
           );
           debitedPlayers.push({ player, fromAccountId: transfer.fromTx.accountId, toAccountId: transfer.toTx.accountId, amount: playerBuyIn });
           player.balance -= playerBuyIn;
@@ -1281,7 +1287,11 @@ export class BingoEngine {
         payout,
         `${pattern.name} prize ${room.code}`,
         {
-          idempotencyKey: `phase-${patternResult.patternId}-${game.id}-${player.id}`,
+          idempotencyKey: IdempotencyKeys.adhocPhase({
+            patternId: patternResult.patternId,
+            gameId: game.id,
+            playerId: player.id,
+          }),
           targetSide: "winnings",
         },
       );
@@ -1773,7 +1783,13 @@ export class BingoEngine {
           player.walletId,
           payout,
           `Line prize ${room.code}`,
-          { idempotencyKey: `line-prize-${game.id}-${claim.id}`, targetSide: "winnings" }
+          {
+            idempotencyKey: IdempotencyKeys.adhocLinePrize({
+              gameId: game.id,
+              claimId: claim.id,
+            }),
+            targetSide: "winnings",
+          }
         );
         player.balance += payout;
         game.remainingPrizePool = roundCurrency(Math.max(0, game.remainingPrizePool - payout));
@@ -1872,7 +1888,13 @@ export class BingoEngine {
           player.walletId,
           payout,
           `Bingo prize ${room.code}`,
-          { idempotencyKey: `bingo-prize-${game.id}-${claim.id}`, targetSide: "winnings" }
+          {
+            idempotencyKey: IdempotencyKeys.adhocBingoPrize({
+              gameId: game.id,
+              claimId: claim.id,
+            }),
+            targetSide: "winnings",
+          }
         );
         player.balance += payout;
         await this.compliance.recordLossEntry(player.walletId, room.hallId, {
@@ -2287,7 +2309,10 @@ export class BingoEngine {
       walletId,
       amount,
       input.reason?.trim() || `Extra prize ${hallId}/${linkId}`,
-      { idempotencyKey: `extra-prize-${extraPrizeId}`, targetSide: "winnings" }
+      {
+        idempotencyKey: IdempotencyKeys.adhocExtraPrize({ extraPrizeId }),
+        targetSide: "winnings",
+      }
     );
     await this.compliance.recordLossEntry(walletId, hallId, {
       type: "PAYOUT",

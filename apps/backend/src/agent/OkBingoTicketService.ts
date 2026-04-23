@@ -13,6 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import { DomainError } from "../game/BingoEngine.js";
+import { IdempotencyKeys } from "../game/idempotency.js";
 import type { PlatformService, UserRole } from "../platform/PlatformService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
 import type { AgentService } from "./AgentService.js";
@@ -145,7 +146,7 @@ export class OkBingoTicketService {
         player.walletId,
         input.amountNok,
         `Refund — OK Bingo create failed (${ticketId})`,
-        { idempotencyKey: `${uniqueTransaction}:refund` }
+        { idempotencyKey: IdempotencyKeys.machineRefund({ uniqueTransaction }) }
       );
       throw err;
     }
@@ -233,7 +234,7 @@ export class OkBingoTicketService {
         player.walletId,
         input.amountNok,
         `Refund — OK Bingo topup failed (${ticket.id})`,
-        { idempotencyKey: `${uniqueTransaction}:refund` }
+        { idempotencyKey: IdempotencyKeys.machineRefund({ uniqueTransaction }) }
       );
       throw err;
     }
@@ -291,7 +292,7 @@ export class OkBingoTicketService {
         player.walletId,
         payoutNok,
         `OK Bingo payout ${ticket.id}`,
-        { idempotencyKey: `${uniqueTransaction}:credit` }
+        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
       );
       walletTxId = walletTx.id;
       afterBalance = previousBalance + payoutNok;
@@ -376,7 +377,7 @@ export class OkBingoTicketService {
         player.walletId,
         refundNok,
         `OK Bingo void refund ${ticket.id}`,
-        { idempotencyKey: `${uniqueTransaction}:credit` }
+        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
       );
       walletTxId = walletTx.id;
       afterBalance = previousBalance + refundNok;
