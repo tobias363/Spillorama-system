@@ -83,6 +83,10 @@ import {
 } from "./Game1DrawEnginePhysicalTickets.js";
 export type { PhysicalTicketWinInfo } from "./Game1DrawEnginePhysicalTickets.js";
 import {
+  destroyBingoEngineRoomIfPresent,
+  destroyRoomForScheduledGameFromDb,
+} from "./Game1DrawEngineCleanup.js";
+import {
   buildVariantConfigFromSpill1Config,
   resolvePatternsForColor,
   type Spill1ConfigInput,
@@ -516,41 +520,21 @@ export class Game1DrawEngineService {
   }
 
   /**
-   * PR-C1b: fail-closed destroyRoom-kall. Kalles POST-commit fra
-   * drawNext (ved `isFinished=true`) og fra stopGame. Idempotent ved
-   * design: duplisert call til destroyRoom på samme roomCode gir
-   * `ROOM_NOT_FOUND` (allerede slettet) som vi svelger.
-   *
-   * Fail-closed-kontrakt:
-   *   - `bingoEngine` ikke satt → no-op (test-scenarier uten engine).
-   *   - `roomCode` null/tomt → no-op (scheduled_game uten joinede spillere).
-   *   - `destroyRoom` ikke definert på engine-instansen → no-op
-   *     (defensivt; eldre engine-versjoner uten metoden).
-   *   - `destroyRoom` kaster → log warning og returner normalt. Room
-   *     kan i teorien bli liggende som orphan, men memory-leaket er
-   *     begrenset og ikke regulatorisk-kritisk.
+   * PR-C1b: delegate-wrapper mot helper-funksjon i
+   * `Game1DrawEngineCleanup.ts`. Byte-identisk fail-closed kontrakt —
+   * se helper-filen for full dokumentasjon.
    */
   private destroyRoomIfPresent(
     scheduledGameId: string,
     roomCode: string | null,
     context: "completion" | "cancellation"
   ): void {
-    if (!this.bingoEngine) return;
-    if (roomCode == null || roomCode.trim() === "") return;
-    const fn = this.bingoEngine.destroyRoom?.bind(this.bingoEngine);
-    if (typeof fn !== "function") return;
-    try {
-      fn(roomCode);
-      log.info(
-        { scheduledGameId, roomCode, context },
-        "[PR-C1b] destroyRoom etter scheduled-game-terminering"
-      );
-    } catch (err) {
-      log.warn(
-        { err, scheduledGameId, roomCode, context },
-        "[PR-C1b] destroyRoom feilet — rommet kan bli liggende som orphan (ikke regulatorisk-kritisk)"
-      );
-    }
+    destroyBingoEngineRoomIfPresent(
+      this.bingoEngine,
+      scheduledGameId,
+      roomCode,
+      context
+    );
   }
 
   /** PR 4d.3: late-binding for admin-broadcaster (io må finnes først). */
@@ -1476,34 +1460,20 @@ export class Game1DrawEngineService {
   }
 
   /**
-   * PR-C1b: les `room_code` fra scheduled_games og kall
-   * `destroyRoomIfPresent`. Fail-closed — SQL-feil eller DomainError fra
-   * destroyRoom svelges med warning.
-   *
-   * Brukes av `stopGame` (via intern call) og er også eksponert som
-   * offentlig API slik at Game1MasterControlService kan rydde rom ved
-   * cancel-before-start (der `stopGame` ikke kalles pga. status-sjekken).
+   * PR-C1b: delegate-wrapper mot helper-funksjon. Signatur og atferd uendret.
+   * Se `Game1DrawEngineCleanup.ts` for full dokumentasjon.
    */
   async destroyRoomForScheduledGameSafe(
     scheduledGameId: string,
     context: "completion" | "cancellation"
   ): Promise<void> {
-    try {
-      const { rows } = await this.pool.query<{ room_code: string | null }>(
-        `SELECT room_code
-           FROM ${this.scheduledGamesTable()}
-          WHERE id = $1`,
-        [scheduledGameId]
-      );
-      const row = rows[0];
-      if (!row) return; // ingen rad → ingenting å rydde
-      this.destroyRoomIfPresent(scheduledGameId, row.room_code, context);
-    } catch (err) {
-      log.warn(
-        { err, scheduledGameId, context },
-        "[PR-C1b] room-cleanup feilet ved oppslag av room_code — ignorert (fail-closed)"
-      );
-    }
+    await destroyRoomForScheduledGameFromDb(
+      this.pool,
+      this.scheduledGamesTable(),
+      this.bingoEngine,
+      scheduledGameId,
+      context
+    );
   }
 
   async getState(
