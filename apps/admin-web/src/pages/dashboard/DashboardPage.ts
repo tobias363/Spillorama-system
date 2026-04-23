@@ -12,9 +12,16 @@ import { renderOngoingGamesTabs } from "./widgets/OngoingGamesTabs.js";
 const REFRESH_MS = 10_000;
 
 let activeController: PollController | null = null;
+// Mount-generation marker. Incremented on every mountDashboard() call so a
+// pending fetchDashboardData() promise from a previous mount can detect it has
+// been replaced (or unmounted) and bail out before overwriting the DOM.
+// Without this, navigating away before the initial fetch resolves lets a stale
+// promise run renderAll() on a container now owned by another route.
+let activeMountId = 0;
 
 export async function mountDashboard(container: HTMLElement, session: Session): Promise<void> {
   stopActivePolling();
+  const mountId = ++activeMountId;
   container.innerHTML = "";
   container.setAttribute("data-page", "dashboard");
 
@@ -28,9 +35,14 @@ export async function mountDashboard(container: HTMLElement, session: Session): 
   try {
     initial = await fetchDashboardData({ hallId: session.hall[0]?.id });
   } catch (err) {
+    // Bail if we've been unmounted/replaced while fetching — don't overwrite
+    // another route's DOM with an error box.
+    if (mountId !== activeMountId) return;
     renderError(container, err);
     return;
   }
+  // Bail if we've been unmounted/replaced while awaiting the initial fetch.
+  if (mountId !== activeMountId) return;
   renderAll(container, session, initial);
 
   activeController = startPolling(
@@ -47,6 +59,14 @@ export async function mountDashboard(container: HTMLElement, session: Session): 
 
 export function unmountDashboard(): void {
   stopActivePolling();
+  // Invalidate any pending initial-fetch promise from mountDashboard() so it
+  // won't render on a container that now belongs to another route.
+  activeMountId++;
+  // Clear the dashboard-marker from whichever container still has it so
+  // renderAll()'s safety check fails fast if a stale poll-callback somehow
+  // slips through (defense-in-depth).
+  const stale = document.querySelector('[data-page="dashboard"]');
+  stale?.removeAttribute("data-page");
 }
 
 function stopActivePolling(): void {
@@ -57,6 +77,12 @@ function stopActivePolling(): void {
 }
 
 function renderAll(container: HTMLElement, session: Session, data: DashboardData): void {
+  // Defense-in-depth: bail if the container is no longer the dashboard.
+  // This catches pending fetchDashboardData() promises inside startPolling()
+  // that resolved after the user navigated away — without this, a polling
+  // tick can overwrite a foreign route's DOM (observed: navigate to /hall,
+  // ~4 s later the container is wiped and replaced with dashboard widgets).
+  if (container.getAttribute("data-page") !== "dashboard") return;
   container.innerHTML = "";
 
   // ── Row 1: info-boxes ──────────────────────────────────────────────────────
