@@ -9,6 +9,7 @@
 
 import { t } from "../../../i18n/I18n.js";
 import { Toast } from "../../../components/Toast.js";
+import { Modal } from "../../../components/Modal.js";
 import { ApiError } from "../../../api/client.js";
 import { escapeHtml } from "../common/escape.js";
 import { fetchSchedule, type ScheduleRow } from "./ScheduleState.js";
@@ -21,10 +22,29 @@ export interface ScheduleDetailOpts {
   id?: string;
 }
 
+/**
+ * Rydder opp rester av modal-DOM fra tidligere besøk. Uten dette stacker
+ * `.modal.fade.in` + `.modal-backdrop` seg opp når admin navigerer
+ * tilbake/frem til `/schedules/create` (memory-leak observert i QA).
+ *
+ * Vi bruker `Modal.closeAll(true)` for properly registrerte instanser, og
+ * følger opp med et DOM-sweep for foreldreløse noder (f.eks. hvis en gammel
+ * modal ble lagt til av legacy bootstrap.min.js eller en tidligere
+ * feilhåndtering droppet referansen).
+ */
+function cleanupStaleModals(): void {
+  Modal.closeAll(true);
+  document
+    .querySelectorAll(".modal.fade.in, .modal-backdrop")
+    .forEach((el) => el.remove());
+  document.body.classList.remove("modal-open");
+}
+
 export async function renderScheduleDetailPages(
   container: HTMLElement,
   opts: ScheduleDetailOpts
 ): Promise<void> {
+  cleanupStaleModals();
   if (opts.kind === "create") {
     renderCreateShell(container);
     // Åpner modalen automatisk slik at URL-routen /schedules/create fortsatt
