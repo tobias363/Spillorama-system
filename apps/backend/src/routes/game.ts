@@ -328,25 +328,9 @@ export function createGameRouter(deps: GameRouterDeps): express.Router {
     }
   });
 
-  // ── Notifications (stub — V1 returns empty array) ────────────────────────────
-
-  router.get("/api/notifications", async (req, res) => {
-    try {
-      await getAuthenticatedUser(req);
-      apiSuccess(res, []);
-    } catch (error) {
-      apiFailure(res, error);
-    }
-  });
-
-  router.post("/api/notifications/read", async (req, res) => {
-    try {
-      await getAuthenticatedUser(req);
-      apiSuccess(res, { ok: true });
-    } catch (error) {
-      apiFailure(res, error);
-    }
-  });
+  // BIN-FCM: /api/notifications* er flyttet til routes/notifications.ts
+  // (backed av FcmPushService). Dette routerens notification-stubber er
+  // fjernet; se createNotificationsRouter i index.ts.
 
   return router;
 }
