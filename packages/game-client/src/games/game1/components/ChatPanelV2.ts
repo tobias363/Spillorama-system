@@ -4,6 +4,11 @@ import type { SpilloramaSocket } from "../../../net/SpilloramaSocket.js";
 
 const MAX_MESSAGES = 80;
 
+/** Width of the panel when collapsed — fits "Vis chat <" toggle label.
+ *  Must stay in sync with CHAT_COLLAPSED_WIDTH in PlayScreen.ts. */
+export const CHAT_COLLAPSED_WIDTH_PX = 110;
+export const CHAT_OPEN_WIDTH_PX = 265;
+
 /**
  * Pure HTML chat panel (right sidebar, 265px).
  *
@@ -197,18 +202,20 @@ export class ChatPanelV2 {
       this.collapsed = true;
       this.body.style.display = "none";
       this.body.style.opacity = "0";
-      this.root.style.width = "48px";
+      this.root.style.width = `${CHAT_COLLAPSED_WIDTH_PX}px`;
       this.renderToggleBtn();
     }
   }
 
   /**
-   * Render the toggle button content — when collapsed we show a chat icon
-   * only (fits inside the 48px sliver), when expanded the full text label.
+   * Render the toggle button content — when collapsed we show "Vis chat <"
+   * (text + left-pointing chevron), when expanded "Skjul chat >" (text +
+   * right-pointing chevron). The collapsed layout tells the player the
+   * panel can be opened by clicking.
    */
   private renderToggleBtn(): void {
     if (this.collapsed) {
-      this.toggleBtn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-label="Vis chat"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>`;
+      this.toggleBtn.innerHTML = `Vis chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 6l1.41 1.41L10.83 12l4.58 4.59L14 18l-6-6z"/></svg>`;
       this.toggleBtn.setAttribute("aria-label", "Vis chat");
       this.toggleBtn.title = "Vis chat";
     } else {
@@ -271,22 +278,19 @@ export class ChatPanelV2 {
       // Collapse: hide body content, shrink width (animated via CSS transition)
       this.body.style.opacity = "0";
       this.body.style.transition = "opacity 0.15s ease-out";
-      this.root.style.width = "48px";
+      this.root.style.width = `${CHAT_COLLAPSED_WIDTH_PX}px`;
       setTimeout(() => { this.body.style.display = "none"; }, 250);
     } else {
       // Expand: show body content, restore width (animated via CSS transition)
       this.body.style.display = "flex";
-      this.root.style.width = "265px";
+      this.root.style.width = `${CHAT_OPEN_WIDTH_PX}px`;
       requestAnimationFrame(() => {
         this.body.style.opacity = "1";
         this.body.style.transition = "opacity 0.2s ease-in 0.1s";
       });
     }
 
-    this.toggleBtn.innerHTML = this.collapsed
-      ? `Vis chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14 6l1.41 1.41L10.83 12l4.58 4.59L14 18l-6-6z"/></svg>`
-      : `Skjul chat <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>`;
-
+    this.renderToggleBtn();
     this.onToggle?.(this.collapsed);
   }
 

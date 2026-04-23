@@ -27,8 +27,9 @@ import { TicketGridHtml } from "../components/TicketGridHtml.js";
  * open on first load.
  */
 const TUBE_COLUMN_WIDTH = 140;
+// Kept in sync with CHAT_OPEN_WIDTH_PX / CHAT_COLLAPSED_WIDTH_PX in ChatPanelV2.
 const CHAT_WIDTH = 265;
-const CHAT_COLLAPSED_WIDTH = 48;
+const CHAT_COLLAPSED_WIDTH = 110;
 const TICKET_TOP = 230;        // below the center-top combo panel
 /** Y offset below the ticket grid for the LINE/BINGO claim buttons. */
 const CLAIM_AREA = 60;
