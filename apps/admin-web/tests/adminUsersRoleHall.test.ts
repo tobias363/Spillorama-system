@@ -115,10 +115,11 @@ describe("dispatchers", () => {
     expect(isAdminUsersRoute("/wallet")).toBe(false);
   });
 
-  it("isRoleRoute matches 3 paths", () => {
+  it("isRoleRoute matches 4 paths", () => {
     expect(isRoleRoute("/role")).toBe(true);
     expect(isRoleRoute("/role/matrix")).toBe(true);
     expect(isRoleRoute("/role/assign")).toBe(true);
+    expect(isRoleRoute("/role/agent")).toBe(true);
     expect(isRoleRoute("/role/x")).toBe(false);
   });
 

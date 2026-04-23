@@ -85,6 +85,8 @@ import { createAdminSecurityRouter } from "./routes/adminSecurity.js";
 import { SecurityService } from "./compliance/SecurityService.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createAdminAgentsRouter } from "./routes/adminAgents.js";
+import { createAdminAgentPermissionsRouter } from "./routes/adminAgentPermissions.js";
+import { AgentPermissionService } from "./platform/AgentPermissionService.js";
 import { createAgentTransactionsRouter } from "./routes/agentTransactions.js";
 import { createAgentDashboardRouter } from "./routes/agentDashboard.js";
 import { createAgentContextRouter } from "./routes/agentContext.js";
@@ -600,6 +602,14 @@ const miniGamesConfigService = new MiniGamesConfigService({
 // template-payloaden lever som config_json (ingen normalisering i v1 siden
 // malen kopieres i sin helhet).
 const savedGameService = new SavedGameService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+
+// Role Management — per-agent permission-matrix (Admin CR 21.02.2024 side 5 +
+// Agent V1.0 permissions). 15 moduler * 4-5 actions, én rad per (agent, modul).
+// AGENT_PERMISSION_READ (ADMIN/SUPPORT) / AGENT_PERMISSION_WRITE (ADMIN-only).
+const agentPermissionService = new AgentPermissionService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -1452,6 +1462,13 @@ app.use(createAdminAgentsRouter({
   platformService,
   agentService,
   agentShiftService,
+  auditLogService,
+}));
+// Role Management — per-agent permission-matrix (Admin CR 21.02.2024 side 5).
+app.use(createAdminAgentPermissionsRouter({
+  platformService,
+  agentService,
+  agentPermissionService,
   auditLogService,
 }));
 

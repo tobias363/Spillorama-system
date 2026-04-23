@@ -160,7 +160,20 @@ export const adminSidebar: SidebarNode[] = [
     ],
   },
 
-  { kind: "leaf", id: "role", path: "/role", icon: "fa fa-users mr-20", labelKey: "role_management", roles: ["admin", "super-admin"] },
+  {
+    kind: "group",
+    id: "role-management",
+    icon: "fa fa-users mr-20",
+    labelKey: "role_management",
+    module: "Role Management",
+    roles: ["admin", "super-admin"],
+    children: [
+      { kind: "leaf", id: "role", path: "/role", icon: "fa fa-circle-o", labelKey: "role_list_title" },
+      { kind: "leaf", id: "role-matrix", path: "/role/matrix", icon: "fa fa-circle-o", labelKey: "role_matrix_title" },
+      { kind: "leaf", id: "role-assign", path: "/role/assign", icon: "fa fa-circle-o", labelKey: "assign_role_title" },
+      { kind: "leaf", id: "role-agent", path: "/role/agent", icon: "fa fa-circle-o", labelKey: "agent_role_permissions_title" },
+    ],
+  },
 
   {
     kind: "group",
