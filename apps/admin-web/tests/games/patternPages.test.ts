@@ -39,11 +39,73 @@ function gameRow(slug: string, settings: Record<string, unknown> = {}): unknown 
   };
 }
 
+/**
+ * Mock-fetch that answers both the new BIN-620 `/api/admin/game-types/*`
+ * endpoints and the legacy `/api/admin/games` fallback. Pattern pages call
+ * `fetchGameType` which hits the new endpoint first.
+ */
+function mockGameTypeFetch(slugs: string[]): typeof fetch {
+  const slugToGameType = (slug: string) => {
+    const slugToType: Record<string, string> = {
+      bingo: "game_1",
+      rocket: "game_2",
+      monsterbingo: "game_3",
+      spillorama: "game_5",
+    };
+    const type = slugToType[slug] ?? slug;
+    const isPattern = type === "game_1" || type === "game_3";
+    return {
+      id: slug,
+      typeSlug: slug,
+      name: slug === "bingo" ? "Game 1" : slug === "monsterbingo" ? "Game 3" : slug,
+      photo: `${slug}.png`,
+      pattern: isPattern,
+      gridRows: slug === "rocket" ? 3 : 5,
+      gridColumns: slug === "rocket" ? 3 : 5,
+      rangeMin: 1,
+      rangeMax: 75,
+      totalNoTickets: null,
+      userMaxTickets: null,
+      luckyNumbers: [],
+      status: "active",
+      extra: {},
+      createdBy: null,
+      createdAt: "",
+      updatedAt: "",
+    };
+  };
+
+  return (async (url: string | URL) => {
+    const urlStr = String(url);
+    // Detail endpoint: /api/admin/game-types/:id
+    const detailMatch = urlStr.match(/^\/api\/admin\/game-types\/([^?]+)/);
+    if (detailMatch) {
+      const requestedSlug = decodeURIComponent(detailMatch[1]!);
+      if (slugs.includes(requestedSlug)) {
+        return okJson(slugToGameType(requestedSlug));
+      }
+      return new Response(
+        JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "missing" } }),
+        { status: 404 }
+      );
+    }
+    // List endpoint
+    if (urlStr.startsWith("/api/admin/game-types")) {
+      return okJson({ gameTypes: slugs.map(slugToGameType), count: slugs.length });
+    }
+    // Legacy fallback
+    if (urlStr.startsWith("/api/admin/games")) {
+      return okJson(slugs.map((s) => gameRow(s)));
+    }
+    return okJson([]);
+  }) as typeof fetch;
+}
+
 describe("PatternListPage", () => {
   const originalFetch = globalThis.fetch;
   beforeEach(() => {
     initI18n();
-    globalThis.fetch = (async () => okJson([gameRow("bingo")])) as typeof fetch;
+    globalThis.fetch = mockGameTypeFetch(["bingo"]);
   });
   afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -67,7 +129,7 @@ describe("PatternListPage", () => {
   });
 
   it("shows 'not found' error when gameType is unknown", async () => {
-    globalThis.fetch = (async () => okJson([gameRow("bingo")])) as typeof fetch;
+    globalThis.fetch = mockGameTypeFetch(["bingo"]);
     const c = document.createElement("div");
     await renderPatternListPage(c, "nonexistent");
     const alert = c.querySelector(".alert.alert-danger");
@@ -79,7 +141,7 @@ describe("PatternAddPage — 5x5 bitmask grid interaction", () => {
   const originalFetch = globalThis.fetch;
   beforeEach(() => {
     initI18n();
-    globalThis.fetch = (async () => okJson([gameRow("bingo")])) as typeof fetch;
+    globalThis.fetch = mockGameTypeFetch(["bingo"]);
   });
   afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -108,7 +170,7 @@ describe("PatternAddPage — 5x5 bitmask grid interaction", () => {
   });
 
   it("renders the BIN-627 max-patterns info block for Game 3", async () => {
-    globalThis.fetch = (async () => okJson([gameRow("monsterbingo")])) as typeof fetch;
+    globalThis.fetch = mockGameTypeFetch(["monsterbingo"]);
     const c = document.createElement("div");
     await renderPatternAddPage(c, "monsterbingo");
     const infos = c.querySelectorAll(".alert.alert-info");
@@ -170,7 +232,7 @@ describe("PatternEditPage (BIN-627 placeholder)", () => {
   const originalFetch = globalThis.fetch;
   beforeEach(() => {
     initI18n();
-    globalThis.fetch = (async () => okJson([gameRow("bingo")])) as typeof fetch;
+    globalThis.fetch = mockGameTypeFetch(["bingo"]);
   });
   afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -189,7 +251,7 @@ describe("PatternViewPage", () => {
   const originalFetch = globalThis.fetch;
   beforeEach(() => {
     initI18n();
-    globalThis.fetch = (async () => okJson([gameRow("bingo")])) as typeof fetch;
+    globalThis.fetch = mockGameTypeFetch(["bingo"]);
   });
   afterEach(() => {
     globalThis.fetch = originalFetch;

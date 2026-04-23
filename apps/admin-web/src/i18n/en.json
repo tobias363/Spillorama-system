@@ -2728,5 +2728,13 @@
   "pt_err_scanned_required": "Scanned ticket ID is required.",
   "pt_err_reason_required": "Reason is required for rejection.",
 
-  "optional": "optional"
+  "optional": "optional",
+
+  "slug": "Slug",
+  "filename": "Filename",
+  "slug_auto_generated_hint": "Leave empty to auto-generate from name.",
+  "game_type_deleted": "Game type deleted",
+  "sub_game_deleted": "Sub game deleted",
+  "pattern_deleted": "Pattern deleted",
+  "saved_game_deleted": "Saved game deleted"
 }

@@ -1,20 +1,20 @@
 //
 // Legacy layout:
 //   - Content-header with title + breadcrumb (Dashboard → Spilltabell)
-//   - Panel with "Games" heading + right-aligned "Add Game" button (permission-gated)
+//   - Panel with "Games" heading + right-aligned "Add Game" button
 //   - DataTable with 5 cols: Name, Photo, Row, Column, Action
-//   - Action column: View / Edit buttons (superadmin sees both; non-super gated)
+//   - Action column: View / Edit / Delete buttons
 //
-// Port notes:
-//   - DataTables.net server-side was unnecessary — our list is small (<10 entries)
-//     and the platform-games endpoint returns the full set; we render client-side.
-//   - Delete was commented out in legacy (line 156-160) — we omit it.
-//   - Add/Edit write-ops are BIN-620 placeholders — Add button shows informative
-//     disabled-state.
+// Wired to BIN-620 backend per admin-game-types API.
 
 import { t } from "../../../i18n/I18n.js";
 import { DataTable } from "../../../components/DataTable.js";
-import { fetchGameTypeList } from "./GameTypeState.js";
+import { Toast } from "../../../components/Toast.js";
+import {
+  fetchGameTypeList,
+  deleteGameType,
+} from "./GameTypeState.js";
+import { ApiError } from "../../../api/client.js";
 import { escapeHtml } from "../common/escape.js";
 import type { GameType } from "../common/types.js";
 
@@ -26,6 +26,19 @@ export async function renderGameTypeListPage(container: HTMLElement): Promise<vo
 
   tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
 
+  await loadAndRender(tableHost);
+
+  // Wire Add-button
+  const addBtn = container.querySelector<HTMLAnchorElement>('[data-action="add-game-type"]');
+  if (addBtn) {
+    addBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      window.location.hash = "#/gameType/add";
+    });
+  }
+}
+
+async function loadAndRender(tableHost: HTMLElement): Promise<void> {
   try {
     const rows = await fetchGameTypeList();
     renderTable(tableHost, rows);
@@ -37,7 +50,6 @@ export async function renderGameTypeListPage(container: HTMLElement): Promise<vo
 
 function renderShell(): string {
   // Title: {{game.game_table}} → "Spilltabell".
-  // Add-button is BIN-620 placeholder — disabled with tooltip.
   return `
     <div class="page-wrapper"><div class="container-fluid">
       <section class="content-header">
@@ -53,13 +65,11 @@ function renderShell(): string {
             <div class="panel-heading">
               <div class="pull-left"><h6 class="panel-title txt-dark">${escapeHtml(t("games"))}</h6></div>
               <div class="pull-right">
-                <button type="button"
+                <a href="#/gameType/add"
                   class="btn btn-primary btn-md"
-                  disabled
-                  title="Venter på backend-endpoint — BIN-620">
+                  data-action="add-game-type">
                   <i class="fa fa-plus"></i> ${escapeHtml(t("add_game"))}
-                  <small style="opacity:0.75;margin-left:6px;">(BIN-620)</small>
-                </button>
+                </a>
               </div>
               <div class="clearfix"></div>
             </div>
@@ -103,13 +113,51 @@ function renderTable(host: HTMLElement, rows: GameType[]): void {
              title="${escapeHtml(t("view_game"))}">
             <i class="fa fa-eye" aria-hidden="true"></i>
           </a>
-          <button type="button"
-            class="btn btn-warning btn-xs btn-rounded"
-            disabled
-            title="Venter på backend-endpoint — BIN-620">
+          <a href="#/gameType/edit/${encodeURIComponent(row._id)}"
+             class="btn btn-warning btn-xs btn-rounded m-lr-3"
+             title="${escapeHtml(t("edit_game"))}"
+             data-action="edit-game-type">
             <i class="fa fa-edit" aria-hidden="true"></i>
+          </a>
+          <button type="button"
+             class="btn btn-danger btn-xs btn-rounded"
+             title="${escapeHtml(t("confirm_delete"))}"
+             data-action="delete-game-type"
+             data-id="${escapeHtml(row._id)}"
+             data-name="${escapeHtml(row.name)}">
+            <i class="fa fa-trash" aria-hidden="true"></i>
           </button>`,
       },
     ],
   });
+
+  // Wire delete buttons
+  host.querySelectorAll<HTMLButtonElement>('button[data-action="delete-game-type"]').forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const id = btn.dataset.id;
+      const name = btn.dataset.name ?? "";
+      if (!id) return;
+      if (!window.confirm(`${t("confirm_delete")}\n${name}`)) return;
+      void handleDelete(host, id);
+    });
+  });
+}
+
+async function handleDelete(tableHost: HTMLElement, id: string): Promise<void> {
+  try {
+    const result = await deleteGameType(id);
+    if ("ok" in result && result.ok) {
+      Toast.success(t("success"));
+      await loadAndRender(tableHost);
+      return;
+    }
+    if ("reason" in result) {
+      Toast.error(result.message ?? t("something_went_wrong"));
+      return;
+    }
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : (err instanceof Error ? err.message : String(err));
+    Toast.error(msg);
+  }
 }

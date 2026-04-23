@@ -2721,5 +2721,13 @@
   "pt_err_scanned_required": "Scannet bong-ID er påkrevd.",
   "pt_err_reason_required": "Grunn er påkrevd for avvisning.",
 
-  "optional": "valgfritt"
+  "optional": "valgfritt",
+
+  "slug": "Slug",
+  "filename": "Filnavn",
+  "slug_auto_generated_hint": "La stå tom for å auto-generere fra navnet.",
+  "game_type_deleted": "Spill-type slettet",
+  "sub_game_deleted": "Underspill slettet",
+  "pattern_deleted": "Mønster slettet",
+  "saved_game_deleted": "Lagret spill slettet"
 }

@@ -1,18 +1,29 @@
-// GameType state — fetches from backend `/api/admin/games` and adapts the
-// platform response to the legacy-shaped GameType row used by admin-UI.
+// GameType state — wires UI to new BIN-620 backend (`/api/admin/game-types/*`)
+// plus the legacy-compat platform `/api/admin/games` mapping for the GameType
+// overview catalog.
 //
-//   GET  /gameType                      → list-page (DataTable ajax: /gameType/getGameType)
-//   GET  /addGameType                   → add-form GET
-//   POST /addGameType                   → add-form POST        ← PLACEHOLDER (BIN-620)
-//   GET  /editGameType/:id              → edit-form GET
-//   POST /editGameType/:id              → edit-form POST       ← PLACEHOLDER (BIN-620)
-//   POST /gameType/deleteGameType       → delete               ← PLACEHOLDER (BIN-620)
-//   GET  /viewGameType/:id              → view-page
+// Historikk: før BIN-620 ble GameType-listen trukket ut av platform-tabellen
+// `/api/admin/games` (minimal shape — slug/title/settings). Nå har vi en
+// dedikert GameType-tabell med full CRUD; listPage fortrinner den.
+// Vi beholder `mapPlatformRowToGameType` som fallback / kompatibilitetslag
+// fordi eksisterende tester (gameTypeState.test.ts) bruker den.
 //
-// Write-ops are deferred to BIN-620 backend CRUD; this module intentionally
-// does NOT call fetch() for POST/PUT/DELETE in this PR.
+// BIN-620 endpoints:
+//   GET    /api/admin/game-types              → list
+//   GET    /api/admin/game-types/:id          → detail
+//   POST   /api/admin/game-types              → create
+//   PATCH  /api/admin/game-types/:id          → update
+//   DELETE /api/admin/game-types/:id          → delete
 
-import { apiRequest } from "../../../api/client.js";
+import { apiRequest, ApiError } from "../../../api/client.js";
+import {
+  listGameTypes,
+  getGameType as apiGetGameType,
+  createGameType as apiCreateGameType,
+  updateGameType as apiUpdateGameType,
+  deleteGameType as apiDeleteGameType,
+  type AdminGameType,
+} from "../../../api/admin-game-types.js";
 import type { GameType, PlatformGameRow } from "../common/types.js";
 
 /**
@@ -78,44 +89,170 @@ export function mapPlatformRowToGameType(row: PlatformGameRow): GameType {
   };
 }
 
-/** Fetch the full list of GameTypes (admin catalog, including disabled). */
+/**
+ * Map a BIN-620 GameType (new shape with UUID + typeSlug) to the legacy
+ * GameType shape used by UI.
+ */
+export function mapAdminGameTypeToGameType(gt: AdminGameType): GameType {
+  // Map typeSlug to legacy "type" discriminator when possible.
+  const slugToType: Record<string, GameType["type"]> = {
+    bingo: "game_1",
+    rocket: "game_2",
+    monsterbingo: "game_3",
+    spillorama: "game_5",
+  };
+  const type = slugToType[gt.typeSlug] ?? gt.typeSlug;
+  return {
+    _id: gt.id,
+    slug: gt.typeSlug,
+    name: gt.name,
+    type,
+    row: gt.gridRows,
+    columns: gt.gridColumns,
+    photo: gt.photo || `${gt.typeSlug}.png`,
+    pattern: gt.pattern,
+    isActive: gt.status === "active",
+    createdAt: gt.createdAt,
+    updatedAt: gt.updatedAt,
+  };
+}
+
+/**
+ * Fetch the full list of GameTypes. Prefer the BIN-620 dedicated endpoint;
+ * fall back to the legacy `/api/admin/games` platform catalog if BIN-620 is
+ * disabled (avoids regression on dev envs where migrations haven't run yet).
+ */
 export async function fetchGameTypeList(): Promise<GameType[]> {
+  try {
+    const result = await listGameTypes({});
+    if (result?.gameTypes && result.gameTypes.length > 0) {
+      return result.gameTypes.map(mapAdminGameTypeToGameType);
+    }
+    // Empty result from BIN-620 — fall through to legacy for backfill
+  } catch (err) {
+    // 404/501 suggests endpoint missing — fall through to legacy.
+    // Other errors: re-throw so list shows error-message.
+    if (!(err instanceof ApiError) || (err.status !== 404 && err.status !== 501)) {
+      // Fall through to legacy anyway — platform `/api/admin/games` was the
+      // source-of-truth before BIN-620. If BIN-620 returns 403 admin will
+      // already be blocked from both endpoints so legacy-GET will throw too.
+    }
+  }
+  // Legacy fallback
   const rows = await apiRequest<PlatformGameRow[]>("/api/admin/games", { auth: true });
   if (!Array.isArray(rows)) return [];
   return rows.map(mapPlatformRowToGameType);
 }
 
-/** Fetch a single GameType by slug (acts as `_id` in the legacy URL-scheme). */
-export async function fetchGameType(slug: string): Promise<GameType | null> {
+/** Fetch a single GameType by id or slug (acts as `_id` in the UI URL-scheme). */
+export async function fetchGameType(idOrSlug: string): Promise<GameType | null> {
+  // Try BIN-620 detail endpoint first — supports UUID and typeSlug per
+  // gameTypeService.get(id) which falls back to slug-lookup.
+  try {
+    const gt = await apiGetGameType(idOrSlug);
+    return mapAdminGameTypeToGameType(gt);
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 404 || err.status === 501)) {
+      // Fall through to legacy list
+    } else if (err instanceof ApiError && err.status === 400) {
+      // Backend may not have this id — try legacy
+    } else {
+      throw err;
+    }
+  }
+  // Legacy fallback: scan the list
   const list = await fetchGameTypeList();
-  return list.find((gt) => gt._id === slug) ?? null;
+  return list.find((gt) => gt._id === idOrSlug || gt.slug === idOrSlug) ?? null;
 }
 
 /** Form-payload shape (mirrors legacy addGame.html form fields). */
 export interface GameTypeFormPayload {
   name: string;
+  /** typeSlug required for new GameType (e.g. "bingo", "rocket"). */
+  typeSlug?: string;
   row: number;
   columns: number;
   pattern: boolean;
-  /** base64-encoded file content — legacy used multipart/form-data, new shell will use JSON+base64 when BIN-620 lands. */
-  photo?: string | null;
+  /** Photo filename (under /profile/bingo/). */
+  photo?: string;
+  status?: "active" | "inactive";
 }
 
-/**
- * PLACEHOLDER — returns rejected promise signalling that the backend
- * endpoint is not yet implemented. UI surfaces this as a disabled-save-toast
- * per PR-A3 placeholder mönster (see PR-A3-PLAN.md §3.2). Tracked in BIN-620.
- */
+/** Unified write-result contract. */
+export type GameTypeWriteResult =
+  | { ok: true; row: GameType }
+  | { ok: false; reason: "PERMISSION_DENIED"; message: string }
+  | { ok: false; reason: "NOT_FOUND"; message: string }
+  | { ok: false; reason: "VALIDATION"; message: string }
+  | { ok: false; reason: "BACKEND_ERROR"; message: string };
+
+function apiErrorToWriteResult(err: unknown): GameTypeWriteResult {
+  if (err instanceof ApiError) {
+    if (err.status === 403) {
+      return { ok: false, reason: "PERMISSION_DENIED", message: err.message };
+    }
+    if (err.status === 404) {
+      return { ok: false, reason: "NOT_FOUND", message: err.message };
+    }
+    if (err.status === 400) {
+      return { ok: false, reason: "VALIDATION", message: err.message };
+    }
+    return { ok: false, reason: "BACKEND_ERROR", message: err.message };
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return { ok: false, reason: "BACKEND_ERROR", message: msg };
+}
+
+/** Create or update a GameType via BIN-620 endpoints. */
 export async function saveGameType(
-  _payload: GameTypeFormPayload,
-  _existingId?: string
-): Promise<{ ok: false; reason: "BACKEND_MISSING"; issue: "BIN-620" }> {
-  return { ok: false, reason: "BACKEND_MISSING", issue: "BIN-620" };
+  payload: GameTypeFormPayload,
+  existingId?: string
+): Promise<GameTypeWriteResult> {
+  try {
+    const gt = existingId
+      ? await apiUpdateGameType(existingId, {
+          name: payload.name,
+          gridRows: payload.row,
+          gridColumns: payload.columns,
+          pattern: payload.pattern,
+          ...(payload.photo !== undefined ? { photo: payload.photo } : {}),
+          ...(payload.status !== undefined ? { status: payload.status } : {}),
+        })
+      : await apiCreateGameType({
+          typeSlug: (payload.typeSlug ?? slugify(payload.name)).trim(),
+          name: payload.name,
+          gridRows: payload.row,
+          gridColumns: payload.columns,
+          pattern: payload.pattern,
+          ...(payload.photo !== undefined ? { photo: payload.photo } : {}),
+          ...(payload.status !== undefined ? { status: payload.status } : {}),
+        });
+    return { ok: true, row: mapAdminGameTypeToGameType(gt) };
+  } catch (err) {
+    return apiErrorToWriteResult(err);
+  }
+}
+
+/** Soft-delete a GameType via BIN-620 endpoint. */
+export async function deleteGameType(
+  id: string
+): Promise<GameTypeWriteResult | { ok: true; softDeleted: boolean }> {
+  try {
+    const result = await apiDeleteGameType(id);
+    return { ok: true, softDeleted: result.softDeleted };
+  } catch (err) {
+    return apiErrorToWriteResult(err);
+  }
 }
 
 /**
- * PLACEHOLDER — delete not yet backed. Tracked in BIN-620.
+ * Derive a URL-safe slug from a display name. Matches the legacy `slug`
+ * column format: lowercase, a-z0-9 + hyphens only.
  */
-export async function deleteGameType(_id: string): Promise<{ ok: false; reason: "BACKEND_MISSING"; issue: "BIN-620" }> {
-  return { ok: false, reason: "BACKEND_MISSING", issue: "BIN-620" };
+function slugify(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
