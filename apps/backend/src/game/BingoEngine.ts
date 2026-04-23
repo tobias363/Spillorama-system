@@ -112,6 +112,15 @@ import type { LoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js
 import { NoopLoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
 import type { SplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
 import { NoopSplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
+// Extracted helpers (refactor/s1-bingo-engine-split — Forslag A)
+import {
+  activateJackpot as activateJackpotHelper,
+  spinJackpot as spinJackpotHelper,
+  activateMiniGame as activateMiniGameHelper,
+  playMiniGame as playMiniGameHelper,
+  type MiniGamesContext,
+  type MiniGameRotationState,
+} from "./BingoEngineMiniGames.js";
 
 export type {
   LossLimits,
@@ -2485,34 +2494,22 @@ export class BingoEngine {
 
   // ── Jackpot (Game 5 Free Spin) ──────────────────────────────────────────
 
-  /** Default prize segments for the jackpot wheel (in kr). */
-  private static readonly JACKPOT_PRIZES = [5, 10, 15, 20, 25, 50, 10, 15];
-
   /**
    * Activate jackpot mini-game for a player (called after BINGO win in Game 5).
    * Returns the jackpot state, or null if not applicable.
+   *
+   * Implementasjon ekstrahert til {@link BingoEngineMiniGames.activateJackpot}
+   * i refactor/s1-bingo-engine-split (Forslag A).
    */
   activateJackpot(roomCode: string, playerId: string): JackpotState | null {
-    const room = this.requireRoom(roomCode);
-    const game = room.currentGame;
-    if (!game) return null;
-    if (game.jackpot) return game.jackpot; // Already activated
-
-    const jackpot: JackpotState = {
-      playerId,
-      prizeList: [...BingoEngine.JACKPOT_PRIZES],
-      totalSpins: 1,
-      playedSpins: 0,
-      spinHistory: [],
-      isComplete: false,
-    };
-    game.jackpot = jackpot;
-    return jackpot;
+    return activateJackpotHelper(this.getMiniGamesContext(), roomCode, playerId);
   }
 
   /**
    * Process a jackpot spin. Server picks a random segment.
    * Returns the spin result with prize amount.
+   *
+   * Implementasjon ekstrahert til {@link BingoEngineMiniGames.spinJackpot}.
    */
   async spinJackpot(roomCode: string, playerId: string): Promise<{
     segmentIndex: number;
@@ -2522,138 +2519,39 @@ export class BingoEngine {
     isComplete: boolean;
     spinHistory: JackpotState["spinHistory"];
   }> {
-    const room = this.requireRoom(roomCode);
-    const game = room.currentGame;
-    if (!game || !game.jackpot) {
-      throw new DomainError("NO_JACKPOT", "Ingen aktiv jackpot.");
-    }
-    const jackpot = game.jackpot;
-    if (jackpot.playerId !== playerId) {
-      throw new DomainError("NOT_JACKPOT_PLAYER", "Jackpot tilhører en annen spiller.");
-    }
-    if (jackpot.isComplete) {
-      throw new DomainError("JACKPOT_COMPLETE", "Jackpot er allerede fullført.");
-    }
-    if (jackpot.playedSpins >= jackpot.totalSpins) {
-      throw new DomainError("NO_SPINS_LEFT", "Ingen spinn igjen.");
-    }
-
-    // Server-authoritative random segment
-    const segmentIndex = Math.floor(Math.random() * jackpot.prizeList.length);
-    const prizeAmount = jackpot.prizeList[segmentIndex];
-    jackpot.playedSpins += 1;
-
-    jackpot.spinHistory.push({
-      spinNumber: jackpot.playedSpins,
-      segmentIndex,
-      prizeAmount,
-    });
-
-    if (jackpot.playedSpins >= jackpot.totalSpins) {
-      jackpot.isComplete = true;
-    }
-
-    // Credit prize to player balance
-    if (prizeAmount > 0) {
-      const player = this.requirePlayer(room, playerId);
-      const gameType = "DATABINGO" as const;
-      const channel = "INTERNET" as const;
-      const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
-
-      // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
-      const transfer = await this.walletAdapter.transfer(
-        houseAccountId,
-        player.walletId,
-        prizeAmount,
-        `Jackpot prize ${room.code}`,
-        {
-          idempotencyKey: `jackpot-${game.id}-spin-${jackpot.playedSpins}`,
-          targetSide: "winnings",
-        },
-      );
-      player.balance += prizeAmount;
-
-      await this.compliance.recordLossEntry(player.walletId, room.hallId, {
-        type: "PAYOUT",
-        amount: prizeAmount,
-        createdAtMs: Date.now(),
-      });
-      await this.ledger.recordComplianceLedgerEvent({
-        hallId: room.hallId,
-        gameType,
-        channel,
-        eventType: "PRIZE",
-        amount: prizeAmount,
-        roomCode: room.code,
-        gameId: game.id,
-        claimId: `jackpot-${game.id}-spin-${jackpot.playedSpins}`,
-        playerId,
-        walletId: player.walletId,
-        sourceAccountId: transfer.fromTx.accountId,
-        targetAccountId: transfer.toTx.accountId,
-        policyVersion: "jackpot-v1",
-      });
-    }
-
-    return {
-      segmentIndex,
-      prizeAmount,
-      playedSpins: jackpot.playedSpins,
-      totalSpins: jackpot.totalSpins,
-      isComplete: jackpot.isComplete,
-      spinHistory: jackpot.spinHistory,
-    };
+    return spinJackpotHelper(this.getMiniGamesContext(), roomCode, playerId);
   }
 
   // ── Mini-games (Game 1 — Wheel of Fortune / Treasure Chest) ─────────────
 
-  /** Default prize segments for Game 1 mini-games (in kr). */
-  private static readonly MINIGAME_PRIZES = [5, 10, 15, 20, 25, 50, 10, 15];
-
   /**
-   * BIN-505/506: 4-way rotation order for Game 1 mini-games. Legacy ran the
-   * same rotation per hall (wheel → chest → mystery → colorDraft), reading
-   * prize lists from the admin-configured `otherGame` collection. We keep the
-   * rotation but default every type to MINIGAME_PRIZES until per-type admin
-   * config lands (follow-up issue).
+   * Mini-game rotation counter-state. Bor i en container så
+   * {@link BingoEngineMiniGames.activateMiniGame} kan mutere feltet uten at
+   * engine eksponerer en public setter.
    */
-  private static readonly MINIGAME_ROTATION: readonly MiniGameType[] = [
-    "wheelOfFortune",
-    "treasureChest",
-    "mysteryGame",
-    "colorDraft",
-  ];
-
-  /** Mini-game rotation counter — indexes into MINIGAME_ROTATION. */
-  private miniGameCounter = 0;
+  private readonly miniGameRotation: MiniGameRotationState = { counter: 0 };
 
   /**
    * Activate a mini-game for a player (called after BINGO win in Game 1).
    * Rotates wheelOfFortune → treasureChest → mysteryGame → colorDraft.
+   *
+   * Implementasjon ekstrahert til {@link BingoEngineMiniGames.activateMiniGame}.
    */
   activateMiniGame(roomCode: string, playerId: string): MiniGameState | null {
-    const room = this.requireRoom(roomCode);
-    const game = room.currentGame;
-    if (!game) return null;
-    if (game.miniGame) return game.miniGame; // Already activated
-
-    const rotation = BingoEngine.MINIGAME_ROTATION;
-    const type: MiniGameType = rotation[this.miniGameCounter % rotation.length];
-    this.miniGameCounter += 1;
-
-    const miniGame: MiniGameState = {
+    return activateMiniGameHelper(
+      this.getMiniGamesContext(),
+      this.miniGameRotation,
+      roomCode,
       playerId,
-      type,
-      prizeList: [...BingoEngine.MINIGAME_PRIZES],
-      isPlayed: false,
-    };
-    game.miniGame = miniGame;
-    return miniGame;
+    );
   }
 
   /**
    * Play the mini-game. Server picks the winning segment/chest.
-   * For treasureChest, selectedIndex is the player's pick (cosmetic only — prize is server-determined).
+   * For treasureChest, selectedIndex is the player's pick (cosmetic only —
+   * prize is server-determined).
+   *
+   * Implementasjon ekstrahert til {@link BingoEngineMiniGames.playMiniGame}.
    */
   async playMiniGame(roomCode: string, playerId: string, _selectedIndex?: number): Promise<{
     type: MiniGameType;
@@ -2661,69 +2559,27 @@ export class BingoEngine {
     prizeAmount: number;
     prizeList: number[];
   }> {
-    const room = this.requireRoom(roomCode);
-    const game = room.currentGame;
-    if (!game || !game.miniGame) {
-      throw new DomainError("NO_MINIGAME", "Ingen aktiv mini-game.");
-    }
-    const miniGame = game.miniGame;
-    if (miniGame.playerId !== playerId) {
-      throw new DomainError("NOT_MINIGAME_PLAYER", "Mini-game tilhører en annen spiller.");
-    }
-    if (miniGame.isPlayed) {
-      throw new DomainError("MINIGAME_PLAYED", "Mini-game er allerede spilt.");
-    }
+    return playMiniGameHelper(
+      this.getMiniGamesContext(),
+      roomCode,
+      playerId,
+      _selectedIndex,
+    );
+  }
 
-    // Server-authoritative random segment
-    const segmentIndex = Math.floor(Math.random() * miniGame.prizeList.length);
-    const prizeAmount = miniGame.prizeList[segmentIndex];
-    miniGame.isPlayed = true;
-    miniGame.result = { segmentIndex, prizeAmount };
-
-    // Credit prize to player balance
-    if (prizeAmount > 0) {
-      const player = this.requirePlayer(room, playerId);
-      const gameType = "DATABINGO" as const;
-      const channel = "INTERNET" as const;
-      const houseAccountId = this.ledger.makeHouseAccountId(room.hallId, gameType, channel);
-
-      // PR-W3 wallet-split: payout er gevinst → krediter winnings-siden.
-      const transfer = await this.walletAdapter.transfer(
-        houseAccountId,
-        player.walletId,
-        prizeAmount,
-        `Mini-game ${miniGame.type} prize ${room.code}`,
-        { idempotencyKey: `minigame-${game.id}-${miniGame.type}`, targetSide: "winnings" },
-      );
-      player.balance += prizeAmount;
-
-      await this.compliance.recordLossEntry(player.walletId, room.hallId, {
-        type: "PAYOUT",
-        amount: prizeAmount,
-        createdAtMs: Date.now(),
-      });
-      await this.ledger.recordComplianceLedgerEvent({
-        hallId: room.hallId,
-        gameType,
-        channel,
-        eventType: "PRIZE",
-        amount: prizeAmount,
-        roomCode: room.code,
-        gameId: game.id,
-        claimId: `minigame-${game.id}-${miniGame.type}`,
-        playerId,
-        walletId: player.walletId,
-        sourceAccountId: transfer.fromTx.accountId,
-        targetAccountId: transfer.toTx.accountId,
-        policyVersion: "minigame-v1",
-      });
-    }
-
+  /**
+   * Bygger narrow port mot mini-game-modulen. Samler de interne adapterne
+   * + `requireRoom`/`requirePlayer` som modulen trenger uten å eksponere
+   * hele engine-state. Instansiert per-kall — billig og holder ingen extra
+   * felt på klassen.
+   */
+  private getMiniGamesContext(): MiniGamesContext {
     return {
-      type: miniGame.type,
-      segmentIndex,
-      prizeAmount,
-      prizeList: miniGame.prizeList,
+      walletAdapter: this.walletAdapter,
+      compliance: this.compliance,
+      ledger: this.ledger,
+      requireRoom: (code) => this.requireRoom(code),
+      requirePlayer: (room, playerId) => this.requirePlayer(room, playerId),
     };
   }
 
