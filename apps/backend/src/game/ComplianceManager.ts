@@ -2,11 +2,6 @@ import { DomainError } from "./BingoEngine.js";
 import { roundCurrency } from "../util/currency.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type {
-  PersistedLossEntry,
-  PersistedMandatoryBreakSummary,
-  PersistedPendingLossLimitChange,
-  PersistedPlaySessionState,
-  PersistedRestrictionState,
   ResponsibleGamingPersistenceAdapter,
   ResponsibleGamingPersistenceSnapshot
 } from "./ResponsibleGamingPersistence.js";
@@ -28,6 +23,12 @@ import {
   startOfLocalMonthMs,
   startOfNextLocalMonthMs
 } from "./ComplianceDateHelpers.js";
+import {
+  toPersistedLossEntry,
+  toPersistedPendingLossLimitChange,
+  toPersistedPlaySessionState,
+  toPersistedRestrictionState
+} from "./ComplianceMappers.js";
 
 export type {
   LossLimits,
@@ -474,7 +475,7 @@ export class ComplianceManager {
     existing.push(entry);
     this.lossEntriesByScope.set(scopeKey, existing);
     if (this.persistence) {
-      await this.persistence.insertLossEntry(this.toPersistedLossEntry(normalizedWalletId, normalizedHallId, entry));
+      await this.persistence.insertLossEntry(toPersistedLossEntry(normalizedWalletId, normalizedHallId, entry));
     }
   }
 
@@ -843,7 +844,7 @@ export class ComplianceManager {
     });
     if (hasPending) {
       await this.persistence.upsertPendingLossLimitChange(
-        this.toPersistedPendingLossLimitChange(walletId, hallId, pending)
+        toPersistedPendingLossLimitChange(walletId, hallId, pending)
       );
       return;
     }
@@ -876,7 +877,7 @@ export class ComplianceManager {
     }
     this.restrictionsByWallet.set(walletId, state);
     if (this.persistence) {
-      await this.persistence.upsertRestriction(this.toPersistedRestrictionState(walletId, state));
+      await this.persistence.upsertRestriction(toPersistedRestrictionState(walletId, state));
     }
   }
 
@@ -920,72 +921,8 @@ export class ComplianceManager {
 
     this.playStateByWallet.set(walletId, normalized);
     if (this.persistence) {
-      await this.persistence.upsertPlaySessionState(this.toPersistedPlaySessionState(walletId, normalized));
+      await this.persistence.upsertPlaySessionState(toPersistedPlaySessionState(walletId, normalized));
     }
-  }
-
-  // ── Persistence conversion helpers ───────────────────────────────
-
-  private toPersistedRestrictionState(walletId: string, state: RestrictionState): PersistedRestrictionState {
-    return {
-      walletId,
-      timedPauseUntilMs: state.timedPauseUntilMs,
-      timedPauseSetAtMs: state.timedPauseSetAtMs,
-      selfExcludedAtMs: state.selfExcludedAtMs,
-      selfExclusionMinimumUntilMs: state.selfExclusionMinimumUntilMs
-    };
-  }
-
-  private toPersistedPlaySessionState(walletId: string, state: PlaySessionState): PersistedPlaySessionState {
-    return {
-      walletId,
-      accumulatedMs: Math.max(0, Math.floor(state.accumulatedMs)),
-      activeFromMs: state.activeFromMs,
-      pauseUntilMs: state.pauseUntilMs,
-      gamesPlayedInSession: state.gamesPlayedInSession ?? 0,
-      lastMandatoryBreak: state.lastMandatoryBreak
-        ? this.toPersistedMandatoryBreakSummary(state.lastMandatoryBreak)
-        : undefined
-    };
-  }
-
-  private toPersistedMandatoryBreakSummary(summary: MandatoryBreakSummary): PersistedMandatoryBreakSummary {
-    return {
-      triggeredAtMs: summary.triggeredAtMs,
-      pauseUntilMs: summary.pauseUntilMs,
-      totalPlayMs: Math.max(0, Math.floor(summary.totalPlayMs)),
-      hallId: summary.hallId,
-      gamesPlayed: summary.gamesPlayed,
-      netLoss: {
-        daily: summary.netLoss.daily,
-        monthly: summary.netLoss.monthly
-      }
-    };
-  }
-
-  private toPersistedPendingLossLimitChange(
-    walletId: string,
-    hallId: string,
-    change: PendingLossLimitChange
-  ): PersistedPendingLossLimitChange {
-    return {
-      walletId,
-      hallId,
-      dailyPendingValue: change.daily?.value,
-      dailyEffectiveFromMs: change.daily?.effectiveFromMs,
-      monthlyPendingValue: change.monthly?.value,
-      monthlyEffectiveFromMs: change.monthly?.effectiveFromMs
-    };
-  }
-
-  private toPersistedLossEntry(walletId: string, hallId: string, entry: LossLedgerEntry): PersistedLossEntry {
-    return {
-      walletId,
-      hallId,
-      type: entry.type,
-      amount: entry.amount,
-      createdAtMs: entry.createdAtMs
-    };
   }
 
   // ── Date helpers ─────────────────────────────────────────────────
