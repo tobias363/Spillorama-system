@@ -220,6 +220,21 @@ describe("GameManagementPage (list/picker) — BIN-684 wired", () => {
     expect(ds?.style.display).toBe("none");
   });
 
+  it("DS-seksjonen viser 2 knapper (Spesialspill + Lag daglig tidsplan) når type er valgt", async () => {
+    mockMultiFetch({ games: [sampleRow], schedules: [] });
+    const c = document.createElement("div");
+    await renderGameManagementPage(c, "bingo");
+    const ds = c.querySelector<HTMLElement>("[data-testid='gm-ds-section']");
+    expect(ds?.style.display).not.toBe("none");
+    const specialBtn = c.querySelector<HTMLAnchorElement>("[data-testid='gm-ds-special-btn']");
+    const dailyBtn = c.querySelector<HTMLAnchorElement>("[data-testid='gm-ds-daily-btn']");
+    expect(specialBtn).not.toBeNull();
+    expect(dailyBtn).not.toBeNull();
+    // Heading er "<type.name> Tabell"
+    const heading = c.querySelector("#gm-ds-heading");
+    expect(heading?.textContent).toContain("Spill1");
+  });
+
   it("DS-tabell filtrerer schedules etter gameManagementId i GM-listen", async () => {
     const scheduleInScope = { ...sampleDs, id: "DSN_match", gameManagementId: "gm-42" };
     const scheduleOutOfScope = { ...sampleDs, id: "DSN_other", gameManagementId: "gm-999" };

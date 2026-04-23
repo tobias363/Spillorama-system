@@ -28,6 +28,7 @@
 
 import { t } from "../../../i18n/I18n.js";
 import { DataTable } from "../../../components/DataTable.js";
+import { Toast } from "../../../components/Toast.js";
 import { escapeHtml } from "../common/escape.js";
 import { fetchGameTypeList } from "../gameType/GameTypeState.js";
 import { isDropdownVisible, type GameType } from "../common/types.js";
@@ -42,6 +43,7 @@ import {
   fetchDailyScheduleList,
   type DailyScheduleRow,
 } from "../dailySchedules/DailyScheduleState.js";
+import { openDailyScheduleEditorModal } from "../dailySchedules/DailyScheduleEditorModal.js";
 
 export async function renderGameManagementPage(container: HTMLElement, typeId?: string): Promise<void> {
   container.innerHTML = renderShell();
@@ -52,6 +54,7 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
   const addBtnHost = container.querySelector<HTMLElement>("#gm-add-btn-host");
   const hintHost = container.querySelector<HTMLElement>("#gm-choose-type-hint");
   const dsSection = container.querySelector<HTMLElement>("#gm-ds-section");
+  const dsActionsHost = container.querySelector<HTMLElement>("#gm-ds-actions");
   const dsTableHost = container.querySelector<HTMLElement>("#gm-ds-table");
   const dsHeadingHost = container.querySelector<HTMLElement>("#gm-ds-heading");
   if (
@@ -61,6 +64,7 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
     !addBtnHost ||
     !hintHost ||
     !dsSection ||
+    !dsActionsHost ||
     !dsTableHost ||
     !dsHeadingHost
   ) {
@@ -93,6 +97,9 @@ export async function renderGameManagementPage(container: HTMLElement, typeId?: 
     if (gt) {
       dsSection.style.display = "";
       renderDsHeading(dsHeadingHost, gt);
+      renderDsActions(dsActionsHost, typeId, () => {
+        void reloadDailySchedules(typeId, dsTableHost);
+      });
       await reloadDailySchedules(typeId, dsTableHost);
     } else {
       dsSection.style.display = "none";
@@ -316,15 +323,61 @@ function renderRowActions(gt: GameType, row: GameManagementRow): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DailySchedule-seksjonen (pilot-blokker 2026-04-23) — første bolk: tabell.
-// Viser <type.name> Tabell + datatabell over schedules knyttet til
-// GameManagement-rader for valgt type. Backend-listen filtrerer kun på
-// gameManagementId, så vi filtrerer client-side mot GM-listen for typen.
-// Knapper + row-actions wires i påfølgende commits.
+// DailySchedule-seksjonen (pilot-blokker 2026-04-23).
+// Viser <type.name> Tabell + 2 knapper (Legg til spesialspill / Lag daglig
+// tidsplan) + datatabell over schedules knyttet til GameManagement-rader for
+// valgt type. Backend-listen filtrerer kun på gameManagementId, så vi
+// filtrerer client-side mot GM-listen for typen.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function renderDsHeading(host: HTMLElement, gt: GameType): void {
   host.textContent = `${gt.name} ${t("game_table")}`;
+}
+
+/**
+ * Rendrer de to legacy-knappene (Legg til spesialspill / Lag daglig
+ * tidsplan) og wirer click-handlere til DailyScheduleEditorModal. Modalen
+ * håndterer selve form-rendringen (19 felter); vi trigger bare riktig mode.
+ * Etter save → `onSaved()` (reload av tabellen).
+ *
+ * typeId holdes i scope for fremtidig pre-fill hvis modalen utvides med
+ * typeId-prop. Ingen pre-fill i dag — EditorModal har ingen slik knagg.
+ */
+function renderDsActions(host: HTMLElement, typeId: string, onSaved: () => void): void {
+  host.innerHTML = `
+    <a href="#" class="btn btn-primary btn-md" id="gm-ds-special-btn"
+       data-testid="gm-ds-special-btn" style="margin-right:8px;">
+      <i class="fa fa-plus"></i> ${escapeHtml(t("add_special_game"))}
+    </a>
+    <a href="#" class="btn btn-primary btn-md" id="gm-ds-daily-btn"
+       data-testid="gm-ds-daily-btn">
+      <i class="fa fa-plus"></i> ${escapeHtml(t("create_daily_schedule"))}
+    </a>`;
+
+  const specialBtn = host.querySelector<HTMLAnchorElement>("#gm-ds-special-btn");
+  specialBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openDailyScheduleEditorModal({
+      mode: "special",
+      onSaved: () => {
+        Toast.success(t("daily_schedule_created_success"));
+        onSaved();
+      },
+    });
+  });
+  const dailyBtn = host.querySelector<HTMLAnchorElement>("#gm-ds-daily-btn");
+  dailyBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openDailyScheduleEditorModal({
+      mode: "create",
+      onSaved: () => {
+        Toast.success(t("daily_schedule_created_success"));
+        onSaved();
+      },
+    });
+  });
+
+  void typeId;
 }
 
 async function reloadDailySchedules(typeId: string, host: HTMLElement): Promise<void> {
