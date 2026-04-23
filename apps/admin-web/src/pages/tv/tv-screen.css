@@ -37,9 +37,46 @@
   color: #ffd700;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
   letter-spacing: 4px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
   padding-bottom: 12px;
   border-bottom: 2px solid #ffd700;
+}
+
+/* ── Sub-header: Current / Next game (Bølge 1) ──────────────────────── */
+
+.tv-subheader {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  min-height: 0; /* empty state skjules naturlig */
+}
+
+.tv-subheader:empty {
+  display: none;
+}
+
+.tv-subheader-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  color: #ffd700;
+  font-size: 22px;
+  font-weight: 700;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.tv-subheader-label {
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 16px;
+  color: rgba(255, 215, 0, 0.75);
+}
+
+.tv-subheader-value {
+  color: #fff;
+  font-weight: 800;
 }
 
 /* ── TV Screen (live draw) ──────────────────────────────────────────── */
@@ -48,7 +85,9 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
-  height: calc(100% - 100px);
+  /* -140px dekker header (48px + border + margin) + sub-header
+     (~44px med både current+next-linje) + litt padding. */
+  height: calc(100% - 140px);
 }
 
 .tv-screen-left {
@@ -112,19 +151,44 @@
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.4);
 }
 
-.tv-total-draws {
+/* ── Drawn-counter X/Y (Bølge 1) ─────────────────────────────────────
+   Erstatter den gamle tv-total-draws (samme plassering top-right i
+   .tv-game-header). Stor gul tall på rød pute — matcher legacy
+   Ball_Drawn_Count_Txt / txtTotalNumbersWithdrawn. */
+.tv-drawn-counter {
   background: rgba(0, 0, 0, 0.35);
-  padding: 12px 20px;
-  border-radius: 8px;
-  font-size: 20px;
+  padding: 10px 22px;
+  border-radius: 10px;
   text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  border: 1px solid rgba(255, 215, 0, 0.5);
+}
+
+.tv-drawn-counter-label {
+  font-size: 14px;
+  color: rgba(255, 215, 0, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
   font-weight: 700;
 }
 
-.tv-total-draws strong {
+.tv-drawn-counter-value {
   color: #ffd700;
-  font-size: 32px;
-  display: block;
+  font-size: 48px;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.tv-drawn-counter-value strong {
+  color: #fff;
+}
+
+.tv-drawn-counter-sep {
+  color: rgba(255, 215, 0, 0.7);
 }
 
 .tv-last-ball-circle {
@@ -181,6 +245,54 @@
 .tv-small-ball.col-o {
   background: radial-gradient(circle at 30% 30%, #fff1a0, #cc9a00);
   color: #7a0000;
+}
+
+/* ── Aktivt pattern-banner (Bølge 1) ──────────────────────────────────
+   Stor bold tekst midt på skjerm (under ball-rad, over countdown) som
+   viser hvilket pattern som spilles nå. Pulse-animasjon ved mount /
+   DOM-replace så endring fanges visuelt. Legacy ref:
+   AdminTVScreenWinners.Patterns_Txt. */
+.tv-active-pattern {
+  text-align: center;
+  margin-top: 20px;
+  padding: 16px 24px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 2px solid #ffd700;
+  border-radius: 10px;
+  box-shadow: 0 0 18px rgba(255, 215, 0, 0.35);
+  animation: tv-active-pattern-pulse 1.8s ease-in-out infinite;
+}
+
+.tv-active-pattern-label {
+  display: block;
+  font-size: 16px;
+  color: rgba(255, 215, 0, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.tv-active-pattern-name {
+  display: block;
+  font-size: 56px;
+  font-weight: 900;
+  color: #ffd700;
+  letter-spacing: 2px;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.55);
+  line-height: 1.1;
+}
+
+@keyframes tv-active-pattern-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 18px rgba(255, 215, 0, 0.35);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 32px rgba(255, 215, 0, 0.7);
+    transform: scale(1.02);
+  }
 }
 
 .tv-countdown {

@@ -28,6 +28,15 @@ export interface TvGameState {
     lastBall: number | null;
   } | null;
   patterns: TvPatternRow[];
+  /** Bølge 1: totalt antall trukne baller (legacy Ball_Drawn_Count_Txt). */
+  drawnCount: number;
+  /** Bølge 1: ballpool-størrelse, typisk 75 for Spill 1 / Kvikkis. */
+  totalBalls: number;
+  /** Bølge 1: "Neste spill"-sub-header — null hvis ingen planlagte. */
+  nextGame: {
+    name: string;
+    startAt: string;
+  } | null;
   countdownToNextGame: {
     nextGameName: string;
     secondsRemaining: number;

@@ -48,6 +48,31 @@ export interface TvGameState {
     lastBall: number | null;
   } | null;
   patterns: TvPatternRow[];
+  /**
+   * Bølge 1 (2026-04-23): antall trukne baller så langt. Legacy
+   * `txtTotalNumbersWithdrawn` / `Ball_Drawn_Count_Txt` i
+   * `BingoHallDisplay.cs`. Holdes adskilt fra currentGame.ballsDrawn som
+   * kun inneholder siste 5 (for liten-ball-raden på TVen).
+   */
+  drawnCount: number;
+  /**
+   * Bølge 1: ballpool-størrelse for aktuelt spill (f.eks. 75 for Spill 1
+   * / Kvikkis). Leses fra `variantConfig.maxBallValue` hvis den finnes i
+   * scheduled_game.game_config_json; ellers default 75 for Game 1.
+   */
+  totalBalls: number;
+  /**
+   * Bølge 1: neste planlagte spill for hallen (navn + start). Brukes til
+   * "Spiller nå / Neste: X kl. HH:MM"-sub-header. Null hvis ingen
+   * fremtidige rader i scheduled_games. Merk: `countdownToNextGame`
+   * speiler samme data når siste game er `ended`; nextGame er satt
+   * også mens et game pågår slik at sub-header alltid kan vise neste.
+   */
+  nextGame: {
+    name: string;
+    /** scheduled_start_time ISO. */
+    startAt: string;
+  } | null;
   /** Countdown til neste game (etter completed) — null hvis current game pågår. */
   countdownToNextGame: {
     nextGameName: string;
@@ -91,7 +116,16 @@ interface ScheduledGameRow {
   scheduled_start_time: Date | string;
   scheduled_end_time: Date | string;
   status: string;
+  /**
+   * Bølge 1: snapshot av GameManagement.config_json (per-spawn). Brukes
+   * for å lese `variantConfig.maxBallValue` til totalBalls-counter.
+   * NULL-toleranse — default 75 for Game 1.
+   */
+  game_config_json: unknown;
 }
+
+/** Game 1-default når `game_config_json` ikke bærer variant-config. */
+const DEFAULT_GAME1_TOTAL_BALLS = 75;
 
 interface GameStateRow {
   current_phase: number;
@@ -124,11 +158,25 @@ export class TvScreenService {
     const activeRow = await this.findActiveScheduledGame(hall.id);
     const fallbackRow = activeRow ?? (await this.findLatestCompletedScheduledGame(hall.id));
 
+    // Bølge 1: neste planlagte spill hentes uansett — brukes både i
+    // countdown (når current er ended) OG i sub-header "Neste: X kl. HH:MM"
+    // mens current pågår. Én query begge veier.
+    const nextRow = await this.findNextScheduledGame(hall.id);
+    const nextGame = nextRow
+      ? {
+          name: this.displayName(nextRow),
+          startAt: this.asIso(nextRow.scheduled_start_time),
+        }
+      : null;
+
     if (!fallbackRow) {
       return {
         hall,
         currentGame: null,
         patterns: this.emptyPatterns(),
+        drawnCount: 0,
+        totalBalls: DEFAULT_GAME1_TOTAL_BALLS,
+        nextGame,
         countdownToNextGame: null,
         status: "waiting",
       };
@@ -144,8 +192,11 @@ export class TvScreenService {
     const patterns = this.buildPatternRows(winners, state?.current_phase ?? 1);
 
     // Last 5 balls (draws er i rekkefølge — backend gir dem sortert).
+    // Bølge 1: drawnCount = full length, NOT siste 5 — gir "X / 75"-telleren.
+    const drawnCount = draws.length;
     const ballsDrawn = draws.slice(-5);
     const lastBall = draws.length > 0 ? draws[draws.length - 1]! : null;
+    const totalBalls = this.extractTotalBalls(fallbackRow.game_config_json);
 
     const isActive = activeRow !== null;
     const status: TvGameState["status"] = isActive
@@ -154,18 +205,18 @@ export class TvScreenService {
         : "drawing"
       : "ended";
 
-    // Countdown: hvis siste game er completed, finn neste scheduled for hallen.
+    // Countdown: hvis siste game er completed, regn ut sek-remaining fra
+    // nextRow (samme kilde som nextGame). Når current er aktiv, forblir
+    // countdown null selv om nextGame er satt — vi viser ikke timer før
+    // runden er ferdig.
     let countdown: TvGameState["countdownToNextGame"] = null;
-    if (!isActive) {
-      const next = await this.findNextScheduledGame(hall.id);
-      if (next) {
-        const startMs = new Date(next.scheduled_start_time).getTime();
-        const secondsRemaining = Math.max(0, Math.floor((startMs - Date.now()) / 1000));
-        countdown = {
-          nextGameName: this.displayName(next),
-          secondsRemaining,
-        };
-      }
+    if (!isActive && nextRow) {
+      const startMs = new Date(nextRow.scheduled_start_time).getTime();
+      const secondsRemaining = Math.max(0, Math.floor((startMs - Date.now()) / 1000));
+      countdown = {
+        nextGameName: this.displayName(nextRow),
+        secondsRemaining,
+      };
     }
 
     return {
@@ -179,6 +230,9 @@ export class TvScreenService {
         lastBall,
       },
       patterns,
+      drawnCount,
+      totalBalls,
+      nextGame,
       countdownToNextGame: countdown,
       status,
     };
@@ -255,7 +309,8 @@ export class TvScreenService {
   private async findActiveScheduledGame(hallId: string): Promise<ScheduledGameRow | null> {
     const { rows } = await this.pool.query<ScheduledGameRow>(
       `SELECT id, sub_game_index, sub_game_name, custom_game_name,
-              scheduled_start_time, scheduled_end_time, status
+              scheduled_start_time, scheduled_end_time, status,
+              game_config_json
          FROM ${this.scheduledGamesTable()}
         WHERE (master_hall_id = $1
            OR participating_halls_json::jsonb @> to_jsonb($1::text))
@@ -270,7 +325,8 @@ export class TvScreenService {
   private async findLatestCompletedScheduledGame(hallId: string): Promise<ScheduledGameRow | null> {
     const { rows } = await this.pool.query<ScheduledGameRow>(
       `SELECT id, sub_game_index, sub_game_name, custom_game_name,
-              scheduled_start_time, scheduled_end_time, status
+              scheduled_start_time, scheduled_end_time, status,
+              game_config_json
          FROM ${this.scheduledGamesTable()}
         WHERE (master_hall_id = $1
            OR participating_halls_json::jsonb @> to_jsonb($1::text))
@@ -285,7 +341,8 @@ export class TvScreenService {
   private async findNextScheduledGame(hallId: string): Promise<ScheduledGameRow | null> {
     const { rows } = await this.pool.query<ScheduledGameRow>(
       `SELECT id, sub_game_index, sub_game_name, custom_game_name,
-              scheduled_start_time, scheduled_end_time, status
+              scheduled_start_time, scheduled_end_time, status,
+              game_config_json
          FROM ${this.scheduledGamesTable()}
         WHERE (master_hall_id = $1
            OR participating_halls_json::jsonb @> to_jsonb($1::text))
@@ -393,6 +450,34 @@ export class TvScreenService {
 
   private displayName(row: ScheduledGameRow): string {
     return row.custom_game_name?.trim() || row.sub_game_name;
+  }
+
+  /**
+   * Bølge 1: Hent ballpool-størrelse fra scheduler-snapshot. Leter etter
+   * `variantConfig.maxBallValue` inne i `game_config_json` (scheduler
+   * kopierer hit ved spawn). Hvis feltet mangler eller JSON er ugyldig,
+   * defaulter vi til 75 — som er riktig for Game 1 (norsk 5-fase og
+   * kvikkis). TvScreenService dekker p.t. kun Game 1, men defaulten holder
+   * også når variant-config legges til senere.
+   */
+  private extractTotalBalls(gameConfig: unknown): number {
+    if (gameConfig && typeof gameConfig === "object") {
+      // Scheduler lagrer normalisert form: { spill1: { variantConfig: { maxBallValue, ... } } }
+      const cfg = gameConfig as Record<string, unknown>;
+      const spill1 = cfg.spill1 as Record<string, unknown> | undefined;
+      const variant = spill1?.variantConfig as Record<string, unknown> | undefined;
+      const mv = variant?.maxBallValue;
+      if (typeof mv === "number" && Number.isFinite(mv) && mv > 0) {
+        return Math.floor(mv);
+      }
+      // Noen snapshot-path lagrer flat: { variantConfig: { ... } }
+      const flatVariant = cfg.variantConfig as Record<string, unknown> | undefined;
+      const flatMv = flatVariant?.maxBallValue;
+      if (typeof flatMv === "number" && Number.isFinite(flatMv) && flatMv > 0) {
+        return Math.floor(flatMv);
+      }
+    }
+    return DEFAULT_GAME1_TOTAL_BALLS;
   }
 
   private asIso(d: Date | string): string {
