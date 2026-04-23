@@ -1,24 +1,26 @@
-// PR-A6 (BIN-674) — otherGames dispatcher.
+// PR-A1 (refactor) — otherGames dispatcher.
+//
+// Konsoliderer 4 tidligere per-type-sider til én generisk
+// `renderMiniGameConfigPage(container, type)`. URL-strukturen og
+// test-ID-ene er uendret; dette er ren strukturell refactor.
 //
 // Routes:
-//   /wheelOfFortune    → WheelOfFortunePage (24 prizes)
-//   /treasureChest     → TreasureChestPage (10 prizes)
-//   /mystery           → MysteryGamePage (6 prizes)
-//   /colorDraft        → ColorDraftPage (3 colors × 4 prizes)
-//
-// Backend-gap: BIN-A6-OG (ingen /api/admin/other-games/* ennå).
+//   /wheelOfFortune    → renderMiniGameConfigPage(host, "wheel")       24 prizes
+//   /treasureChest     → renderMiniGameConfigPage(host, "chest")       10 prizes
+//   /mystery           → renderMiniGameConfigPage(host, "mystery")      6 prizes
+//   /colorDraft        → renderMiniGameConfigPage(host, "colordraft")   3×4 prizes
 
-import { renderWheelOfFortunePage } from "./WheelOfFortunePage.js";
-import { renderTreasureChestPage } from "./TreasureChestPage.js";
-import { renderMysteryGamePage } from "./MysteryGamePage.js";
-import { renderColorDraftPage } from "./ColorDraftPage.js";
+import { renderMiniGameConfigPage } from "./MiniGameConfigPage.js";
+import type { MiniGameType } from "../../api/admin-other-games.js";
 
-const OTHER_GAMES_ROUTES = new Set<string>([
-  "/wheelOfFortune",
-  "/treasureChest",
-  "/mystery",
-  "/colorDraft",
-]);
+const ROUTE_TO_TYPE: Record<string, MiniGameType> = {
+  "/wheelOfFortune": "wheel",
+  "/treasureChest": "chest",
+  "/mystery": "mystery",
+  "/colorDraft": "colordraft",
+};
+
+const OTHER_GAMES_ROUTES = new Set<string>(Object.keys(ROUTE_TO_TYPE));
 
 export function isOtherGamesRoute(path: string): boolean {
   return OTHER_GAMES_ROUTES.has(path);
@@ -26,20 +28,10 @@ export function isOtherGamesRoute(path: string): boolean {
 
 export function mountOtherGamesRoute(container: HTMLElement, path: string): void {
   container.innerHTML = "";
-  switch (path) {
-    case "/wheelOfFortune":
-      renderWheelOfFortunePage(container);
-      return;
-    case "/treasureChest":
-      renderTreasureChestPage(container);
-      return;
-    case "/mystery":
-      renderMysteryGamePage(container);
-      return;
-    case "/colorDraft":
-      renderColorDraftPage(container);
-      return;
-    default:
-      container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown otherGames route: ${path}</div></div>`;
+  const type = ROUTE_TO_TYPE[path];
+  if (!type) {
+    container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown otherGames route: ${path}</div></div>`;
+    return;
   }
+  renderMiniGameConfigPage(container, type);
 }

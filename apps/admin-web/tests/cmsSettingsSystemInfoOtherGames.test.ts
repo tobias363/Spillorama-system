@@ -21,6 +21,11 @@ import {
   isOtherGamesRoute,
   mountOtherGamesRoute,
 } from "../src/pages/otherGames/index.js";
+import {
+  isMiniGameType,
+  renderMiniGameConfigPage,
+  schemaForType,
+} from "../src/pages/otherGames/MiniGameConfigPage.js";
 import noI18n from "../src/i18n/no.json";
 import enI18n from "../src/i18n/en.json";
 
@@ -661,6 +666,125 @@ describe("BIN-679 otherGames dispatcher", () => {
       '[data-testid="wheel-prizes"] input[name="price-0"]'
     )!;
     expect(first.value).toBe("777");
+  });
+});
+
+// ── PR-A1 generic MiniGameConfigPage ────────────────────────────────────────
+
+describe("PR-A1 generic MiniGameConfigPage", () => {
+  it("isMiniGameType accepts the 4 canonical types and rejects others", () => {
+    expect(isMiniGameType("wheel")).toBe(true);
+    expect(isMiniGameType("chest")).toBe(true);
+    expect(isMiniGameType("mystery")).toBe(true);
+    expect(isMiniGameType("colordraft")).toBe(true);
+    expect(isMiniGameType("bogus")).toBe(false);
+    expect(isMiniGameType("")).toBe(false);
+  });
+
+  it("schemaForType returns expected shape per type", () => {
+    const wheel = schemaForType("wheel");
+    expect(wheel.testPrefix).toBe("wheel");
+    expect(wheel.groups.length).toBe(1);
+    expect(wheel.groups[0]!.count).toBe(24);
+    expect(wheel.groups[0]!.gridTestId).toBe("wheel-prizes");
+    expect(wheel.groups[0]!.colSize).toBe("col-lg-1");
+
+    const chest = schemaForType("chest");
+    expect(chest.testPrefix).toBe("chest");
+    expect(chest.groups.length).toBe(1);
+    expect(chest.groups[0]!.count).toBe(10);
+
+    const mystery = schemaForType("mystery");
+    expect(mystery.testPrefix).toBe("mystery");
+    expect(mystery.groups[0]!.count).toBe(6);
+
+    const colordraft = schemaForType("colordraft");
+    expect(colordraft.testPrefix).toBe("colordraft");
+    expect(colordraft.groups.length).toBe(3);
+    expect(colordraft.groups.map((g) => g.gridTestId)).toEqual([
+      "colordraft-red",
+      "colordraft-yellow",
+      "colordraft-green",
+    ]);
+  });
+
+  it("renderMiniGameConfigPage renders correct field count per type (direct call)", async () => {
+    // wheel: 24 flat
+    const hostWheel = container();
+    renderMiniGameConfigPage(hostWheel, "wheel");
+    await tick();
+    expect(
+      hostWheel.querySelectorAll('[data-testid="wheel-prizes"] input[type="number"]').length
+    ).toBe(24);
+    expect(hostWheel.querySelector('form[data-testid="wheel-form"]')).toBeTruthy();
+
+    // chest: 10 flat
+    const hostChest = container();
+    renderMiniGameConfigPage(hostChest, "chest");
+    await tick();
+    expect(
+      hostChest.querySelectorAll('[data-testid="chest-prizes"] input[type="number"]').length
+    ).toBe(10);
+
+    // mystery: 6 flat
+    const hostMystery = container();
+    renderMiniGameConfigPage(hostMystery, "mystery");
+    await tick();
+    expect(
+      hostMystery.querySelectorAll('[data-testid="mystery-prizes"] input[type="number"]').length
+    ).toBe(6);
+
+    // colordraft: 3×4
+    const hostColor = container();
+    renderMiniGameConfigPage(hostColor, "colordraft");
+    await tick();
+    expect(
+      hostColor.querySelectorAll('[data-testid="colordraft-red"] input[type="number"]').length
+    ).toBe(4);
+    expect(
+      hostColor.querySelectorAll('[data-testid="colordraft-yellow"] input[type="number"]').length
+    ).toBe(4);
+    expect(
+      hostColor.querySelectorAll('[data-testid="colordraft-green"] input[type="number"]').length
+    ).toBe(4);
+  });
+
+  it("colordraft seeds prize inputs per color from legacy *Prizes-fields", async () => {
+    installFetch((input) => {
+      const url = typeof input === "string" ? input : (input as URL | Request).toString();
+      if (url.includes("/api/admin/mini-games/colordraft")) {
+        return apiOk({
+          id: "colordraft-1",
+          gameType: "colordraft",
+          config: {
+            redPrizes: [100, 200, 300, 400],
+            yellowPrizes: [10, 20, 30, 40],
+            greenPrizes: [1, 2, 3, 4],
+          },
+          active: true,
+          updatedByUserId: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return jsonResponse(404, { ok: false, error: { code: "NOT_FOUND", message: "" } });
+    });
+
+    const host = container();
+    mountOtherGamesRoute(host, "/colorDraft");
+    await tick();
+    const red0 = host.querySelector<HTMLInputElement>(
+      '[data-testid="colordraft-red"] input[name="redColorPrize-0"]'
+    )!;
+    const yellow2 = host.querySelector<HTMLInputElement>(
+      '[data-testid="colordraft-yellow"] input[name="yellowColorPrize-2"]'
+    )!;
+    const green3 = host.querySelector<HTMLInputElement>(
+      '[data-testid="colordraft-green"] input[name="greenColorPrize-3"]'
+    )!;
+    expect(red0.value).toBe("100");
+    expect(yellow2.value).toBe("30");
+    expect(green3.value).toBe("4");
   });
 });
 
