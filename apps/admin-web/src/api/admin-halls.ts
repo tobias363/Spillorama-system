@@ -42,8 +42,9 @@ export interface AdminHall {
    * TV Screen public display token — auto-generert backend-side, unik per hall.
    * Brukes i TV-URL som bingoverten åpner på hall-skjermen:
    *   /admin/#/tv/<hallId>/<tvToken>
+   * Optional for bakoverkompatibilitet med eldre test-fixtures; alltid satt av backend.
    */
-  tvToken: string;
+  tvToken?: string;
   createdAt: string;
   updatedAt: string;
 }

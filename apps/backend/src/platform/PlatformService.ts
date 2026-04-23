@@ -113,8 +113,10 @@ export interface HallDefinition {
    * Brukes av `/api/tv/:hallId/:tvToken/state` + `/api/tv/:hallId/:tvToken/winners`
    * for å autentisere TV-kiosk-skjermer uten login.
    * Separat fra BIN-503 display-tokens (som er socket-handshake, hash-lagret).
+   * Optional i type-hierarkiet for bakoverkompatibilitet med eldre test-fixtures;
+   * alltid satt av `mapHall()` (DB-kolonnen har NOT NULL DEFAULT gen_random_uuid()).
    */
-  tvToken: string;
+  tvToken?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1121,6 +1123,10 @@ export class PlatformService {
       throw new DomainError("TV_TOKEN_INVALID", "TV-token ugyldig.");
     }
     // Constant-time-ish compare: length-mismatch shortcut + Buffer-compare.
+    // tvToken er optional i typen for bakoverkompatibilitet, men alltid satt fra DB.
+    if (!hall.tvToken) {
+      throw new DomainError("TV_TOKEN_INVALID", "TV-token ugyldig.");
+    }
     const expected = Buffer.from(hall.tvToken);
     const got = Buffer.from(normalizedToken);
     if (expected.length !== got.length || !timingSafeEqual(expected, got)) {

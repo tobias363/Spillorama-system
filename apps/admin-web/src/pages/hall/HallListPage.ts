@@ -196,7 +196,7 @@ function buildTvUrl(row: AdminHall): string {
   // Admin-web er base-mounted på `/admin/` (se vite.config.ts base). Full URL
   // er derfor origin + /admin/ + hash-route.
   const hid = encodeURIComponent(row.id);
-  const tok = encodeURIComponent(row.tvToken);
+  const tok = encodeURIComponent(row.tvToken ?? "");
   return `${origin}/admin/#/tv/${hid}/${tok}`;
 }
 
