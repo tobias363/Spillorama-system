@@ -116,14 +116,15 @@ export function unmountTvScreenPage(): void {
 // ── Rendering ──────────────────────────────────────────────────────────
 
 function renderState(target: HTMLElement, state: TvGameState): void {
-  if (!state.currentGame && state.status === "waiting") {
-    target.className = "tv-loading";
-    target.innerHTML = "Venter på neste spill...";
-    return;
-  }
-
+  // Alltid rendre Bølge 1-layoutet (pattern-tabell, drawn-counter, pattern-
+  // banner). Empty-state vises med 0-verdier + "Venter på spill"-banner
+  // istedenfor å erstatte hele skjermen med en tom melding. Dette speiler
+  // legacy BingoHallDisplay.cs som viser layouten kontinuerlig og kun
+  // bytter dataene som oppdateres.
   const game = state.currentGame;
   const activePatternName = findActivePatternName(state);
+  const isEmptyState = !game && state.status === "waiting";
+
   target.className = "tv-screen-body";
   target.innerHTML = `
     <section class="tv-screen-left">
@@ -153,7 +154,7 @@ function renderState(target: HTMLElement, state: TvGameState): void {
     <section class="tv-screen-right">
       <div class="tv-game-header">
         <div class="tv-game-title" data-testid="tv-game-title">
-          Game ${game?.number ?? "—"} - ${escapeHtml(game?.name ?? "")}
+          ${game ? `Game ${game.number} - ${escapeHtml(game.name)}` : "Venter på spill"}
         </div>
         <div class="tv-drawn-counter" data-testid="tv-drawn-counter">
           <span class="tv-drawn-counter-label">Trukket</span>
@@ -171,7 +172,7 @@ function renderState(target: HTMLElement, state: TvGameState): void {
         ${lastFiveBallsHtml(game?.ballsDrawn ?? [])}
       </div>
       ${renderActivePatternBanner(activePatternName)}
-      ${renderCountdown(state)}
+      ${isEmptyState ? `<div class="tv-waiting-notice" data-testid="tv-waiting-notice">Venter på neste spill...</div>` : renderCountdown(state)}
     </section>
   `;
 }

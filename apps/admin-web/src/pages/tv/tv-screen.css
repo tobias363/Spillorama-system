@@ -418,3 +418,16 @@
 .tv-winners-table tr:last-child td {
   border-bottom: none;
 }
+
+/* Bølge 1 oppgradering: "Venter på neste spill"-banner i empty-state */
+.tv-waiting-notice {
+  margin-top: 20px;
+  padding: 16px 24px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 600;
+  color: rgba(255, 215, 0, 0.75);
+  font-style: italic;
+  letter-spacing: 1px;
+}
+

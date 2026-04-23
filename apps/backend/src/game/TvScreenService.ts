@@ -152,6 +152,37 @@ export class TvScreenService {
    * game-info queries fra DB.
    */
   async getState(hall: { id: string; name: string }): Promise<TvGameState> {
+    // Fail-open: hvis app_game1_scheduled_games (eller relaterte tabeller)
+    // mangler i target-DB (staging/prod uten kjørte migrations), skal TV-
+    // klienten få en tom snapshot i stedet for 500. Bølge 1-design vises da
+    // i "waiting"-empty-state i stedet for error-overlay. PostgreSQL error
+    // 42P01 = undefined_table, 42703 = undefined_column.
+    try {
+      return await this.getStateInternal(hall);
+    } catch (err) {
+      if (this.isMissingTableError(err)) {
+        return {
+          hall,
+          currentGame: null,
+          patterns: this.emptyPatterns(),
+          drawnCount: 0,
+          totalBalls: DEFAULT_GAME1_TOTAL_BALLS,
+          nextGame: null,
+          countdownToNextGame: null,
+          status: "waiting",
+        };
+      }
+      throw err;
+    }
+  }
+
+  private isMissingTableError(err: unknown): boolean {
+    if (!err || typeof err !== "object") return false;
+    const code = (err as { code?: unknown }).code;
+    return code === "42P01" || code === "42703";
+  }
+
+  private async getStateInternal(hall: { id: string; name: string }): Promise<TvGameState> {
     // 1) Finn "current game" — prioritet: aktiv (running/paused/purchase_open/
     //    ready_to_start) > siste completed i dag. Hall deltar hvis den er
     //    master_hall_id ELLER står i participating_halls_json.
