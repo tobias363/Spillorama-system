@@ -61,6 +61,7 @@ import {
   monthKeyFromDate,
   isUniqueViolation,
 } from "./LoyaltyValidators.js";
+import { initializeLoyaltySchema } from "./LoyaltySchema.js";
 
 // Re-export for backward-compat (eksisterende imports fra denne modulen).
 export type {
@@ -842,96 +843,8 @@ export class LoyaltyService {
 
   private async ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.initializeSchema();
+      this.initPromise = initializeLoyaltySchema(this.pool, this.schema);
     }
     await this.initPromise;
-  }
-
-  private async initializeSchema(): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.tierTable()} (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          rank INTEGER NOT NULL CHECK (rank > 0),
-          min_points INTEGER NOT NULL DEFAULT 0 CHECK (min_points >= 0),
-          max_points INTEGER NULL CHECK (max_points IS NULL OR max_points > min_points),
-          benefits_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-          active BOOLEAN NOT NULL DEFAULT true,
-          created_by_user_id TEXT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          deleted_at TIMESTAMPTZ NULL
-        )`
-      );
-      await client.query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS uq_${this.schema}_loyalty_tiers_name
-         ON ${this.tierTable()}(name) WHERE deleted_at IS NULL`
-      );
-      await client.query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS uq_${this.schema}_loyalty_tiers_rank
-         ON ${this.tierTable()}(rank) WHERE deleted_at IS NULL`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_tiers_rank_active
-         ON ${this.tierTable()}(rank DESC, min_points ASC)
-         WHERE deleted_at IS NULL AND active = true`
-      );
-
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.stateTable()} (
-          user_id TEXT PRIMARY KEY,
-          current_tier_id TEXT NULL,
-          lifetime_points INTEGER NOT NULL DEFAULT 0 CHECK (lifetime_points >= 0),
-          month_points INTEGER NOT NULL DEFAULT 0 CHECK (month_points >= 0),
-          month_key TEXT NULL,
-          tier_locked BOOLEAN NOT NULL DEFAULT false,
-          last_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_player_state_tier
-         ON ${this.stateTable()}(current_tier_id) WHERE current_tier_id IS NOT NULL`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_player_state_lifetime
-         ON ${this.stateTable()}(lifetime_points DESC)`
-      );
-
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.eventTable()} (
-          id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL,
-          event_type TEXT NOT NULL,
-          points_delta INTEGER NOT NULL DEFAULT 0,
-          metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_by_user_id TEXT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_events_user_time
-         ON ${this.eventTable()}(user_id, created_at DESC)`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_loyalty_events_type_time
-         ON ${this.eventTable()}(event_type, created_at DESC)`
-      );
-      await client.query("COMMIT");
-    } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
-      if (err instanceof DomainError) throw err;
-      logger.error({ err }, "[BIN-700] loyalty schema init failed");
-      throw new DomainError(
-        "LOYALTY_INIT_FAILED",
-        "Kunne ikke initialisere loyalty-tabeller."
-      );
-    } finally {
-      client.release();
-    }
   }
 }
