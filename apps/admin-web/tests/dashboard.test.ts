@@ -4,6 +4,8 @@ import { renderInfoBox } from "../src/pages/dashboard/widgets/InfoBox.js";
 import { renderLatestRequestsBox } from "../src/pages/dashboard/widgets/LatestRequestsBox.js";
 import { renderTopPlayersBox } from "../src/pages/dashboard/widgets/TopPlayersBox.js";
 import { renderOngoingGamesTabs } from "../src/pages/dashboard/widgets/OngoingGamesTabs.js";
+import { mountDashboard, unmountDashboard } from "../src/pages/dashboard/DashboardPage.js";
+import type { Session } from "../src/auth/Session.js";
 import { initI18n } from "../src/i18n/I18n.js";
 
 describe("DashboardState — classifyRoom", () => {
@@ -194,6 +196,141 @@ describe("OngoingGamesTabs", () => {
     expect(rows).toHaveLength(1);
     expect(pane2?.textContent).toContain("500");
     expect(pane2?.textContent).toContain("Hall 1");
+  });
+});
+
+// ── mount/unmount race-condition regression ──────────────────────────────────
+
+describe("mountDashboard — navigation race-condition", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    initI18n();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    // Ensure polling/timer is torn down even if a test throws.
+    unmountDashboard();
+  });
+
+  function makeSession(): Session {
+    return {
+      id: "u1",
+      name: "Admin",
+      email: "a@x",
+      role: "admin",
+      isSuperAdmin: false,
+      avatar: "",
+      hall: [],
+      dailyBalance: null,
+      permissions: {},
+    };
+  }
+
+  function okJsonBody(data: unknown): Response {
+    return new Response(JSON.stringify({ ok: true, data }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+
+  it("does not overwrite a foreign container if the initial fetch resolves after unmount", async () => {
+    // Gate the /rooms fetch so we can unmount before it resolves — that's the
+    // race PM observed in production (navigate to /hall, ~4s later the
+    // container gets wiped by dashboard widgets).
+    let releaseRooms: (() => void) | null = null;
+    const roomsGate = new Promise<void>((resolve) => {
+      releaseRooms = resolve;
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/api/admin/rooms")) {
+        await roomsGate;
+        return okJsonBody([]);
+      }
+      if (u.includes("/api/admin/halls")) return okJsonBody([]);
+      if (u.includes("/api/admin/users?role=agent")) return okJsonBody({ users: [], count: 0 });
+      return new Response(JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "" } }), { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const container = document.createElement("div");
+    document.body.append(container);
+
+    // 1. Start mounting the dashboard — it awaits fetchDashboardData().
+    const mountPromise = mountDashboard(container, makeSession());
+
+    // 2. Simulate the user navigating away: unmount + re-purpose the
+    //    container for another route (what main.ts renderPage does).
+    unmountDashboard();
+    container.removeAttribute("data-page");
+    container.innerHTML = '<div class="hall-route">Hall page</div>';
+    container.setAttribute("data-route", "/hall");
+
+    // 3. Now let the gated fetch resolve — the stale mount-promise will
+    //    wake up and try to render. It MUST bail out rather than wipe the
+    //    Hall-route DOM.
+    releaseRooms!();
+    await mountPromise;
+
+    expect(container.querySelector(".hall-route")).toBeTruthy();
+    expect(container.getAttribute("data-route")).toBe("/hall");
+    // No dashboard widgets should have been grafted on.
+    expect(container.querySelector(".info-box")).toBeFalsy();
+    expect(container.querySelector(".nav-tabs")).toBeFalsy();
+    expect(container.hasAttribute("data-last-refresh")).toBe(false);
+
+    container.remove();
+  });
+
+  it("does not render an error box on a foreign container if the initial fetch rejects after unmount", async () => {
+    // Same race, but the fetch errors rather than resolves. Without the fix,
+    // renderError() would paint the error box over whichever route took over
+    // the container.
+    let rejectRooms: ((e: Error) => void) | null = null;
+    const roomsGate = new Promise<Response>((_resolve, reject) => {
+      rejectRooms = reject;
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/api/admin/rooms")) return roomsGate;
+      if (u.includes("/api/admin/halls")) return okJsonBody([]);
+      if (u.includes("/api/admin/users?role=agent")) return okJsonBody({ users: [], count: 0 });
+      return new Response(JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "" } }), { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const container = document.createElement("div");
+    document.body.append(container);
+
+    const mountPromise = mountDashboard(container, makeSession());
+
+    // Navigate away mid-fetch, then re-purpose the container.
+    unmountDashboard();
+    container.removeAttribute("data-page");
+    container.innerHTML = '<div class="hall-route">Hall page</div>';
+    container.setAttribute("data-route", "/hall");
+
+    // Reject the gated fetch.
+    rejectRooms!(new Error("boom"));
+    await mountPromise;
+
+    // The Hall-route DOM must still be intact.
+    expect(container.querySelector(".hall-route")).toBeTruthy();
+    expect(container.querySelector(".box-danger")).toBeFalsy();
+
+    container.remove();
+  });
+
+  it("unmountDashboard clears data-page so a stale poll-callback bails out of renderAll", () => {
+    const container = document.createElement("div");
+    container.setAttribute("data-page", "dashboard");
+    document.body.append(container);
+
+    unmountDashboard();
+
+    // The marker should be stripped so any lingering poll-callback fails the
+    // renderAll() guard immediately.
+    expect(container.hasAttribute("data-page")).toBe(false);
+    container.remove();
   });
 });
 
