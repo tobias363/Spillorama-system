@@ -50,18 +50,15 @@ export class CenterTopPanel {
   constructor(overlay: HtmlOverlayManager, callbacks: CenterTopCallbacks = {}) {
     this.callbacks = callbacks;
 
+    // Visual styling (border, gradient, shadow) moved to `top-group-wrapper`
+    // in PlayScreen so player-info + combo + actions all sit inside one
+    // visible container (PM 2026-04-23: "disse er fortsatt ikke et element").
+    // This root is now a plain flex row holding combo + actions.
     this.root = overlay.createElement("center-top", {
       display: "flex",
       flexDirection: "row",
       alignItems: "stretch",
       alignSelf: "flex-start",
-      marginTop: "15px",
-      marginLeft: "30px",
-      background: "radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45))",
-      border: "1px solid rgba(255, 120, 50, 0.35)",
-      borderRadius: "14px",
-      boxShadow: "0 10px 34px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255,255,255,0.1)",
-      overflow: "hidden",
       pointerEvents: "auto",
     });
 

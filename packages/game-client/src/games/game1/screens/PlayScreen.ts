@@ -38,7 +38,7 @@ const TICKET_TOP = 230;        // below the center-top combo panel
 /** Y offset below the ticket grid for the LINE/BINGO claim buttons. */
 const CLAIM_AREA = 60;
 const RING_SIZE = 170;
-const RING_TOP_Y = 30;          // mockup col-ring margin-top
+const RING_TOP_Y = 23;          // PM 2026-04-23: 7px opp fra mockup (30 → 23)
 const DRAW_COUNT_Y_OFFSET = 16; // gap below the ring for the "X/Y" text
 
 type Callbacks = {
@@ -189,15 +189,29 @@ export class PlayScreen extends Container {
       onStartGame: () => this.callbacks.onStartGame?.(),
     });
 
-    // Wrap player-info + combo-panel in a shared container so the whole
-    // top-row group can be repositioned together (PM-ask 2026-04-23:
-    // "fiks også sånn at elementene blir i samme container så man kan
-    // flytte den slik man vil"). Both were flex children of overlayRoot
-    // — now both are children of `topGroupWrapper`, which is the flex
-    // child in overlayRoot's place.
+    // One shared container for player-info + combo + actions — single
+    // bordered box with gradient bg + shadow that wraps all three so the
+    // group visually reads as a single unit and can be repositioned as
+    // one (PM-ask 2026-04-23: "disse er fortsatt ikke et element").
+    // Styling previously lived on CenterTopPanel.root; moved here so
+    // leftInfo (player-info) is inside the same visual boundary.
     const topGroupWrapper = document.createElement("div");
     topGroupWrapper.id = "top-group-wrapper";
-    topGroupWrapper.style.cssText = "display:flex;flex-direction:row;align-items:flex-start;flex-shrink:0;pointer-events:none;";
+    topGroupWrapper.style.cssText = [
+      "display:flex",
+      "flex-direction:row",
+      "align-items:stretch",
+      "align-self:flex-start",
+      "flex-shrink:0",
+      "margin-top:15px",
+      "margin-left:20px",
+      "background:radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45))",
+      "border:1px solid rgba(255, 120, 50, 0.35)",
+      "border-radius:14px",
+      "box-shadow:0 10px 34px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255,255,255,0.1)",
+      "overflow:hidden",
+      "pointer-events:auto",
+    ].join(";");
     // Re-parent the two roots (createElement appended them to overlayRoot).
     topGroupWrapper.appendChild(this.leftInfo.rootEl);
     topGroupWrapper.appendChild(this.centerTop.rootEl);
