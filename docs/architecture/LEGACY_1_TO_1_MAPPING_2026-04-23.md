@@ -305,5 +305,64 @@ Settlement er **regulatorisk kritisk**. Det binder dagens omsetning + utbetaling
 
 ---
 
+## 8. Arkitekturbeslutninger tatt 2026-04-23 (svar fra Tobias)
+
+| # | Beslutning | Konsekvens |
+|---|---|---|
+| 1 | **Agent-portal:** Route-tree i `apps/admin-web` (`/agent/*`) | Redirect basert på role (ADMIN → `/admin/*`, AGENT → `/agent/*`). Samme build/deploy. |
+| 2 | **TV Screen auth:** Hall-token i URL (`/tv/:hallId/:hallToken`) | Hver hall får unik token i DB (`app_halls.tv_token` UUID). Ingen IP-whitelist-krav initialt. |
+| 3 | **Ticket Colors:** Utvid til alle 8 farger nå | Small/Large × Yellow/White/Purple + Red + Green + Blue + Small Green. DB-enum + winning % per farge på ScheduleSubGame. |
+| 4 | **Bot Game:** Droppes | Simulering skjer på andre måter. Ingen `Bot Game`-checkbox eller `By Player/By Bot`-filter i rapporter. |
+| 5 | **Import Player:** Engangs-migrering | Tobias deler Excel med ~6000 spillere. Vi lager script som kjøres én gang på prod. Permanent Excel-import kan bygges senere om nødvendig. |
+| 6 | **Settlement:** Alle 4 maskiner + 1:1 wireframe | Metronia, OK Bingo, Franco, Otium (manuell innlegging). |
+| 7 | **Norsk Tipping/Rikstoto:** Manuell innlegging | Verifisert mot wireframe. Admin-Hall Account Report har "API" for maskiner men resten er manuelt. |
+| 8 | **Role Management:** 1:1 wireframe | Full `Agent Role Permission Table` med 15 moduler × 5 actions (Create/Edit/View/Delete/Block-Unblock). |
+| 9 | **Screen Saver:** TV-skjermen (primær) + dedikerte terminaler (sekundær) | Admin-config definerer bilder + timing. Viser på TV når inaktiv + evt. hall-terminaler. IKKE på spiller-mobil. |
+
+## 9. Oppdatert Fase 1 (MVP) basert på beslutninger
+
+Med avgjørelsene over er MVP-scope justert:
+
+**Admin-panel (6 PR-er):**
+1. Approve/Reject Player-flyt (pågår — Agent 1)
+2. Hall Number + Add Money (pågår — Agent 2)
+3. Report Management Game 1 (pågår — Agent 3) — **uten By Bot-filter**
+4. Schedule Management: Utvid til 8 ticket-colors + winning % per farge + Mystery Game
+5. Hall Account Report + Settlement Report
+6. Withdraw in Hall / Bank + Add email account + XML-eksport
+
+**Agent-portal som route-tree i admin-web (11 PR-er):**
+7. Login-gate: redirecter AGENT-role til `/agent/*`
+8. Agent Dashboard
+9. Cash In/Out Management-panel
+10. Add Daily Balance + Control Daily Balance
+11. Settlement (alle 4 maskiner + Norsk Tipping + Norsk Rikstoto manuelt)
+12. Unique ID: Create/Add Money/Withdraw/List/Details
+13. Add Money / Withdraw — Registered User
+14. Register More Tickets + Register Sold Tickets (8 farger)
+15. Next Game panel: Start + PAUSE + Resume
+16. Check for Bingo + Physical Cashout
+17. Shift Log Out-flyt
+
+**Public display (1 PR):**
+18. TV Screen `/tv/:hallId/:hallToken` + Winners + voice-select per hall
+
+**Frontend-spiller (3 PR-er):**
+19. Mystery Game-runtime
+20. Points-skjul + Landing Open/Start@HH:MM/Closed
+21. Profile Settings Language/Block myself/Set Limit
+
+**Tillegg (3 PR-er):**
+22. Role Management UI + backend enforcement (per-agent permissions)
+23. Import Player: engangs-migrering av 6000 spillere fra Excel
+24. Screen Saver: admin-config + TV-klient rendering
+
+**Totalt: ~24 PR-er i Fase 1**
+
+Post-pilot (Fase 2) krymper tilsvarende — Role Management og Screen Saver flyttes nå opp til MVP.
+
+---
+
 **Laget av:** PM-agent 2026-04-23
-**Status:** Initial kartlegging, bør valideres mot faktisk legacy-bruk med hall-operatør
+**Sist oppdatert:** 2026-04-23 (arkitekturbeslutninger tatt med Tobias)
+**Status:** Beslutninger forankret. Fase 1 kan nå detaljeres og bygges.
