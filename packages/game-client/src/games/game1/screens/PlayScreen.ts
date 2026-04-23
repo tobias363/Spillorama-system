@@ -20,13 +20,17 @@ import { stakeFromState } from "../logic/StakeCalculator.js";
 import { TicketGridHtml } from "../components/TicketGridHtml.js";
 
 /**
- * Redesign 2026-04-23 — mockup `.balls-column-wrap` is 140px wide,
- * `.chat-panel` 265px, `.game-number-ring` 170×170 sits just right of the
- * tube column. Chat is on the RIGHT edge (original placement) and
- * defaults to collapsed so players see the game without the chat panel
- * open on first load.
+ * Redesign 2026-04-23 — explicit column-based layout so each region has
+ * its own flex child in overlayRoot with an independently tunable width:
+ *   [tube spacer 140][ring spacer 200][leftInfo][centerTop][chatPanel →]
+ * Pixi renders the tube and ring behind the respective spacers. chatPanel
+ * uses margin-left:auto to pin itself to the right edge.
+ *
+ * Ball positioning mirrors mockup `.game-number-ring`: 170×170 with top
+ * 30px below the game-container top. Exact match to spillorama-ui-mockup.
  */
 const TUBE_COLUMN_WIDTH = 140;
+const RING_COLUMN_WIDTH = 200;  // 170 ring + 30 breathing room
 // Kept in sync with CHAT_OPEN_WIDTH_PX / CHAT_COLLAPSED_WIDTH_PX in ChatPanelV2.
 const CHAT_WIDTH = 265;
 const CHAT_COLLAPSED_WIDTH = 110;
@@ -34,6 +38,7 @@ const TICKET_TOP = 230;        // below the center-top combo panel
 /** Y offset below the ticket grid for the LINE/BINGO claim buttons. */
 const CLAIM_AREA = 60;
 const RING_SIZE = 170;
+const RING_TOP_Y = 30;          // mockup col-ring margin-top
 const DRAW_COUNT_Y_OFFSET = 16; // gap below the ring for the "X/Y" text
 
 type Callbacks = {
@@ -126,18 +131,18 @@ export class PlayScreen extends Container {
     this.loadBackground(screenWidth, screenHeight);
 
     // ── Pixi components (ball animation + center ball) ────────────────────
+    // Ball tube sits inside the 140px tube-spacer column, centred (108px wide).
     this.ballTube = new BallTube(screenHeight - 22);
     this.ballTube.x = (TUBE_COLUMN_WIDTH - 108) / 2;
     this.ballTube.y = 21;
     this.addChild(this.ballTube);
 
+    // Ring sits inside the 200px ring-spacer column, centred (170px wide).
+    // y=RING_TOP_Y (30) matches mockup `.col-ring margin-top: 30px` exactly.
     this.centerBall = new CenterBall(pauseAwareBridge);
-    this.centerBall.x = TUBE_COLUMN_WIDTH - 10;
-    // y=90 keeps the top of the ring (BALL_SIZE=170) clear of the 80px
-    // web-shell topbar. setBaseY anchors the idle-float so the yoyo
-    // animation doesn't drift upward when re-triggered.
-    this.centerBall.y = 90;
-    this.centerBall.setBaseY(90);
+    this.centerBall.x = TUBE_COLUMN_WIDTH + (RING_COLUMN_WIDTH - RING_SIZE) / 2;
+    this.centerBall.y = RING_TOP_Y;
+    this.centerBall.setBaseY(RING_TOP_Y);
     this.addChild(this.centerBall);
     this.centerBall.showWaiting();
 
@@ -147,10 +152,18 @@ export class PlayScreen extends Container {
     overlayRoot.style.display = "flex";
     overlayRoot.style.flexDirection = "row";
 
-    // Spacer for ball tube column (Pixi-rendered behind the HTML).
+    // Column 1: ball tube (Pixi-rendered behind). Explicit flex child so
+    // the downstream columns line up predictably.
     const tubeSpacer = document.createElement("div");
     tubeSpacer.style.cssText = `width:${TUBE_COLUMN_WIDTH}px;flex-shrink:0;pointer-events:none;`;
     overlayRoot.appendChild(tubeSpacer);
+
+    // Column 2: ring (Pixi-rendered behind). Separate spacer lets us
+    // tune the gap between tube and leftInfo without touching the ball
+    // tube's x position or LeftInfoPanel's margin.
+    const ringSpacer = document.createElement("div");
+    ringSpacer.style.cssText = `width:${RING_COLUMN_WIDTH}px;flex-shrink:0;pointer-events:none;`;
+    overlayRoot.appendChild(ringSpacer);
 
     this.leftInfo = new LeftInfoPanel(this.overlayManager, pauseAwareBridge ?? undefined);
     this.calledNumbers = new CalledNumbersOverlay(this.overlayManager);

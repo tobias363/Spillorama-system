@@ -56,9 +56,7 @@ export class CenterTopPanel {
       alignItems: "stretch",
       alignSelf: "flex-start",
       marginTop: "30px",
-      // Push the panel further right so it sits more centred over the
-      // ticket area instead of crowding the player-info column.
-      marginLeft: "120px",
+      marginLeft: "30px",
       background: "radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45))",
       border: "1px solid rgba(255, 120, 50, 0.35)",
       borderRadius: "14px",

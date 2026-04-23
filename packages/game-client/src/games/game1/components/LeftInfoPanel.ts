@@ -33,9 +33,9 @@ export class LeftInfoPanel {
       gap: "10px",
       paddingTop: "18px",
       minWidth: "120px",
-      // 170px ring (Pixi) sits between the ball tube and this panel, so
-      // skip past it horizontally.
-      marginLeft: "190px",
+      // Ball tube + ring each have their own flex-row spacer column
+      // ahead of this panel, so no manual left margin is needed.
+      marginLeft: "20px",
     });
 
     // Row 1: icon + count
