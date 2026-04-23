@@ -157,6 +157,7 @@ import { createAdminGameTypesRouter } from "./routes/adminGameTypes.js";
 import { GameTypeService } from "./admin/GameTypeService.js";
 import { createAdminSubGamesRouter } from "./routes/adminSubGames.js";
 import { SubGameService } from "./admin/SubGameService.js";
+import { createAdminGame1PotsRouter } from "./routes/adminGame1Pots.js";
 import { createAdminLeaderboardTiersRouter } from "./routes/adminLeaderboardTiers.js";
 import { LeaderboardTierService } from "./admin/LeaderboardTierService.js";
 import { createAdminLoyaltyRouter } from "./routes/adminLoyalty.js";
@@ -1381,6 +1382,16 @@ app.use(createAdminSubGamesRouter({
   platformService,
   auditLogService,
   subGameService,
+}));
+// Agent IJ — Innsatsen-jackpot: per-hall pot-administrasjon (Game1PotService).
+// 5 endepunkter — list/detail/init/patch-config/reset. HALL_GAME_CONFIG_READ/WRITE.
+// Legacy Innsatsen-potten (dailySchedule.innsatsenSales + subGame.jackpotDraw) er
+// normalisert til app_game1_accumulating_pots — denne ruteren gir admin-UI
+// tilgang til pot-config + manuell reset.
+app.use(createAdminGame1PotsRouter({
+  platformService,
+  auditLogService,
+  potService: game1PotService,
 }));
 // BIN-668: LeaderboardTier CRUD. 5 endepunkter — list/detail/create/patch/
 // delete. Admin-konfigurert plass→premie/poeng-mapping.

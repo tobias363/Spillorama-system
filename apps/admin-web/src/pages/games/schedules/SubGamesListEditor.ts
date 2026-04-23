@@ -74,6 +74,16 @@ interface SubGameRowState {
   elvisDataJson: string;
   extraJson: string;
   /**
+   * Agent IJ — Innsatsen/Jackpot port: strukturert draw-threshold-input (1..75).
+   * Legacy-felt `jackpotData.jackpotDraw` gir ball-nummer hvor Fullt Hus
+   * må være truffet for at jackpot/pot-utbetaling skal trigges. Vi eksponerer
+   * både dette og `jackpotPrize` (premie-beløp) som strukturerte felter i
+   * tillegg til å bevare bakoverkompat med jackpotData-JSON (advanced-section).
+   * Begge speiles inn i/ut av `jackpotData`-objektet ved round-trip.
+   */
+  jackpotDraw: string;
+  jackpotPrize: string;
+  /**
    * feat/schedule-8-colors-mystery: STANDARD (pattern-sub-game) eller
    * MYSTERY (priceOptions-sub-game). Rendrer forskjellig UI.
    */
@@ -103,6 +113,8 @@ function emptyRow(): SubGameRowState {
     jackpotDataJson: "",
     elvisDataJson: "",
     extraJson: "",
+    jackpotDraw: "",
+    jackpotPrize: "",
     subGameType: "STANDARD",
     selectedColors: new Set(),
     rowPrizesByColor: {},
@@ -168,6 +180,26 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
     extraForJson = Object.keys(rest).length > 0 ? rest : undefined;
   }
 
+  // Agent IJ — hent ut strukturerte jackpotDraw/jackpotPrize hvis satt.
+  // Resten av jackpotData (f.eks. jackpotEnabled-flags eller legacy-keys) skal
+  // fortsatt være tilgjengelig i Avansert-textareaen så vi ikke mister data.
+  let jackpotDraw = "";
+  let jackpotPrize = "";
+  let jackpotDataForJson: Record<string, unknown> | undefined = sg.jackpotData;
+  if (sg.jackpotData && typeof sg.jackpotData === "object") {
+    const jd = sg.jackpotData as Record<string, unknown>;
+    if (jd.jackpotDraw !== undefined && jd.jackpotDraw !== null) {
+      jackpotDraw = String(jd.jackpotDraw);
+    }
+    if (jd.jackpotPrize !== undefined && jd.jackpotPrize !== null) {
+      jackpotPrize = String(jd.jackpotPrize);
+    }
+    const rest: Record<string, unknown> = { ...jd };
+    delete rest.jackpotDraw;
+    delete rest.jackpotPrize;
+    jackpotDataForJson = Object.keys(rest).length > 0 ? rest : undefined;
+  }
+
   return {
     name: sg.name ?? "",
     customGameName: sg.customGameName ?? "",
@@ -182,8 +214,8 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
         ? JSON.stringify(sg.ticketTypesData, null, 2)
         : "",
     jackpotDataJson:
-      sg.jackpotData && Object.keys(sg.jackpotData).length > 0
-        ? JSON.stringify(sg.jackpotData, null, 2)
+      jackpotDataForJson && Object.keys(jackpotDataForJson).length > 0
+        ? JSON.stringify(jackpotDataForJson, null, 2)
         : "",
     elvisDataJson:
       sg.elvisData && Object.keys(sg.elvisData).length > 0
@@ -193,6 +225,8 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
       extraForJson && Object.keys(extraForJson).length > 0
         ? JSON.stringify(extraForJson, null, 2)
         : "",
+    jackpotDraw,
+    jackpotPrize,
     subGameType: sg.subGameType === "MYSTERY" ? "MYSTERY" : "STANDARD",
     selectedColors,
     rowPrizesByColor,
@@ -362,6 +396,34 @@ function rowStateToSubgame(
         );
       }
     }
+  }
+
+  // Agent IJ — Innsatsen-jackpot: strukturerte jackpotDraw/jackpotPrize
+  // speiles inn i slot.jackpotData. Legacy-felter i jackpotData-JSON er
+  // allerede parset via parseJsonObj; vi merger strukturerte felter oppå
+  // slik at den strukturerte UI-en vinner over eventuelle duplikate
+  // legacy-verdier.
+  const structuredJackpot: Record<string, unknown> = {};
+  if (state.jackpotDraw.trim()) {
+    const n = Number(state.jackpotDraw.trim());
+    if (!Number.isInteger(n) || n < 1 || n > 75) {
+      throw new Error(
+        `${t("schedule_subgames_row_label")} ${rowIndex + 1}: jackpotDraw må være heltall 1..75`
+      );
+    }
+    structuredJackpot.jackpotDraw = n;
+  }
+  if (state.jackpotPrize.trim()) {
+    const n = Number(state.jackpotPrize.trim());
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error(
+        `${t("schedule_subgames_row_label")} ${rowIndex + 1}: jackpotPrize må være >= 0`
+      );
+    }
+    structuredJackpot.jackpotPrize = n;
+  }
+  if (Object.keys(structuredJackpot).length > 0) {
+    slot.jackpotData = { ...(slot.jackpotData ?? {}), ...structuredJackpot };
   }
 
   return slot;
@@ -602,6 +664,40 @@ export function mountSubGamesListEditor(
                    value="${escapeHtml(row.seconds)}">
           </div>
         </div>
+        <fieldset style="border:1px solid #e8e8e8;border-radius:3px;padding:6px 8px;margin-top:4px;background:#fff;">
+          <legend style="font-size:12px;padding:0 4px;color:#333;">
+            ${escapeHtml(t("schedule_subgames_jackpot_legend"))}
+          </legend>
+          <div class="row">
+            <div class="form-group col-sm-6">
+              <label for="sg-jpdraw-${index}" style="font-size:12px;">
+                ${escapeHtml(t("schedule_subgames_jackpot_draw_threshold"))}
+              </label>
+              <input type="number" id="sg-jpdraw-${index}"
+                     class="form-control input-sm"
+                     data-sg-field="jackpotDraw"
+                     min="1" max="75" step="1"
+                     placeholder="1..75"
+                     value="${escapeHtml(row.jackpotDraw)}">
+              <p class="help-block" style="margin-top:2px;font-size:11px;">
+                ${escapeHtml(t("schedule_subgames_jackpot_draw_threshold_hint"))}
+              </p>
+            </div>
+            <div class="form-group col-sm-6">
+              <label for="sg-jpprize-${index}" style="font-size:12px;">
+                ${escapeHtml(t("schedule_subgames_jackpot_prize"))}
+              </label>
+              <input type="number" id="sg-jpprize-${index}"
+                     class="form-control input-sm"
+                     data-sg-field="jackpotPrize"
+                     min="0" step="1"
+                     value="${escapeHtml(row.jackpotPrize)}">
+              <p class="help-block" style="margin-top:2px;font-size:11px;">
+                ${escapeHtml(t("schedule_subgames_jackpot_prize_hint"))}
+              </p>
+            </div>
+          </div>
+        </fieldset>
         ${renderSubGameTypeAndColors(row, index)}
         <details class="sg-advanced" style="margin-top:4px;">
           <summary style="cursor:pointer;font-size:12px;color:#555;">

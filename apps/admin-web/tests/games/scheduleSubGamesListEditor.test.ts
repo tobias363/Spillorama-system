@@ -823,6 +823,158 @@ describe("SubGamesListEditor (fix/schedule-structured-subgames)", () => {
     expect(mp.value).toBe("1000,2000,3000");
   });
 
+  // ── Agent IJ — Innsatsen-jackpot: strukturert jackpot-terskel ────────────
+
+  it("jackpot: strukturert jackpotDraw-input lagres inn i jackpotData", async () => {
+    const fetchMock = installFetch((_url, init) => {
+      if (init && init.method === "POST") {
+        const body = JSON.parse(init.body as string);
+        return successResponse({
+          id: "sch-new",
+          scheduleName: body.scheduleName,
+          scheduleNumber: "SID_X",
+          scheduleType: body.scheduleType ?? "Auto",
+          luckyNumberPrize: 0,
+          status: "active",
+          isAdminSchedule: true,
+          manualStartTime: "",
+          manualEndTime: "",
+          subGames: body.subGames ?? [],
+          createdBy: null,
+          createdAt: "",
+          updatedAt: "",
+        });
+      }
+      return successResponse({});
+    });
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+    document.querySelector<HTMLInputElement>("#sch-name")!.value = "Pilot";
+
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    const row = document.querySelector<HTMLElement>(".sg-row")!;
+    row.querySelector<HTMLInputElement>('[data-sg-field="name"]')!.value =
+      "Innsatsen-runde";
+    row
+      .querySelector<HTMLInputElement>('[data-sg-field="name"]')!
+      .dispatchEvent(new Event("input"));
+
+    const drawInput = row.querySelector<HTMLInputElement>(
+      '[data-sg-field="jackpotDraw"]'
+    )!;
+    expect(drawInput).not.toBeNull();
+    drawInput.value = "58";
+    drawInput.dispatchEvent(new Event("input"));
+
+    const prizeInput = row.querySelector<HTMLInputElement>(
+      '[data-sg-field="jackpotPrize"]'
+    )!;
+    prizeInput.value = "2000";
+    prizeInput.dispatchEvent(new Event("input"));
+
+    getConfirmButton().click();
+    await flush();
+
+    const postCall = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall).toBeTruthy();
+    const body = JSON.parse((postCall![1] as RequestInit).body as string);
+    expect(body.subGames[0].jackpotData).toEqual({
+      jackpotDraw: 58,
+      jackpotPrize: 2000,
+    });
+  });
+
+  it("jackpot: jackpotDraw > 75 → valideringsfeil og ingen POST", async () => {
+    const fetchMock = installFetch(() => successResponse({}));
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+    document.querySelector<HTMLInputElement>("#sch-name")!.value = "Pilot";
+
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    const row = document.querySelector<HTMLElement>(".sg-row")!;
+    row.querySelector<HTMLInputElement>('[data-sg-field="name"]')!.value =
+      "Bad runde";
+    row
+      .querySelector<HTMLInputElement>('[data-sg-field="name"]')!
+      .dispatchEvent(new Event("input"));
+
+    const drawInput = row.querySelector<HTMLInputElement>(
+      '[data-sg-field="jackpotDraw"]'
+    )!;
+    drawInput.value = "76";
+    drawInput.dispatchEvent(new Event("input"));
+
+    getConfirmButton().click();
+    await flush();
+
+    // Ingen POST skal ha gått ut
+    const postCall = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall).toBeFalsy();
+  });
+
+  it("jackpot: edit-modus round-trip henter jackpotDraw fra eksisterende jackpotData", async () => {
+    installFetch((url) => {
+      if (String(url).includes("/sch-1")) {
+        return successResponse({
+          id: "sch-1",
+          scheduleName: "Innsatsen-mal",
+          scheduleNumber: "SID_1",
+          scheduleType: "Auto",
+          luckyNumberPrize: 0,
+          status: "active",
+          isAdminSchedule: true,
+          manualStartTime: "",
+          manualEndTime: "",
+          subGames: [
+            {
+              name: "Innsatsen-runde",
+              jackpotData: { jackpotDraw: 58, jackpotPrize: 2000, someLegacyKey: "keep" },
+            },
+          ],
+          createdBy: null,
+          createdAt: "",
+          updatedAt: "",
+        });
+      }
+      return successResponse({});
+    });
+
+    await openScheduleEditorModal({ mode: "edit", scheduleId: "sch-1" });
+    await flush();
+
+    const row = document.querySelector<HTMLElement>(".sg-row")!;
+    const drawInput = row.querySelector<HTMLInputElement>(
+      '[data-sg-field="jackpotDraw"]'
+    )!;
+    expect(drawInput.value).toBe("58");
+    const prizeInput = row.querySelector<HTMLInputElement>(
+      '[data-sg-field="jackpotPrize"]'
+    )!;
+    expect(prizeInput.value).toBe("2000");
+
+    // Advanced jackpotData-JSON skal inneholde legacy-key (someLegacyKey)
+    // men IKKE duplisere jackpotDraw/jackpotPrize.
+    const jpTextarea = row.querySelector<HTMLTextAreaElement>(
+      '[data-sg-field="jackpotDataJson"]'
+    )!;
+    const advancedJson = jpTextarea.value.trim()
+      ? JSON.parse(jpTextarea.value)
+      : {};
+    expect(advancedJson).toEqual({ someLegacyKey: "keep" });
+  });
+
   it("JSON-fallback: submit fra JSON-modus sender samme shape som listen", async () => {
     const fetchMock = installFetch((_url, init) => {
       if (init && init.method === "POST") {
