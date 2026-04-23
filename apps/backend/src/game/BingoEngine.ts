@@ -10,31 +10,12 @@ import * as variantConfigModule from "./variantConfig.js";
 const logger = rootLogger.child({ module: "engine" });
 import {
   findFirstCompleteLinePatternIndex,
-  countCompleteLines,
-  countCompleteRows,
-  countCompleteColumns,
   hasFullBingo,
   makeRoomCode,
   ticketContainsNumber,
-  buildTicketMask5x5,
 } from "./ticket.js";
-import {
-  classifyPhaseFromPatternName,
-  ticketMaskMeetsPhase,
-} from "@spillorama/shared-types/spill1-patterns";
 import { buildDrawBag, resolveDrawBagConfig } from "./DrawBagStrategy.js";
-import { resolvePatternsForColor } from "./spill1VariantMapper.js";
 import type { PatternConfig } from "./variantConfig.js";
-// PR-P5: Gjenbruker bitmask-matcher for custom concurrent patterns.
-import {
-  buildTicketMask as patternMatcherBuildTicketMask,
-  matchesPattern as patternMatcherMatches,
-} from "./PatternMatcher.js";
-
-/** PR B: Sentinel-nøkkel for flat-path vinner-gruppen (én gruppe, ingen farge-skille). */
-const FLAT_GROUP_KEY = "__flat__";
-/** PR B: Sentinel-nøkkel for brett uten ticket.color satt — bruker __default__-matrise. */
-const UNCOLORED_KEY = "__uncolored__";
 import type {
   ClaimRecord,
   ClaimType,
@@ -54,15 +35,12 @@ import type {
 } from "./types.js";
 import { InMemoryRoomStateStore, type RoomStateStore } from "../store/RoomStateStore.js";
 import type {
-  ResponsibleGamingPersistenceAdapter,
-  ResponsibleGamingPersistenceSnapshot
+  ResponsibleGamingPersistenceAdapter
 } from "./ResponsibleGamingPersistence.js";
 import { ComplianceManager } from "./ComplianceManager.js";
 import type {
   LossLimits,
-  LossLedgerEntry,
-  PlayerComplianceSnapshot,
-  GameplayBlockType
+  PlayerComplianceSnapshot
 } from "./ComplianceManager.js";
 import type { WalletTransaction } from "../adapters/WalletAdapter.js";
 
@@ -104,11 +82,11 @@ export function lossLimitAmountFromTransfer(
   return Math.max(0, roundCurrency(fromDeposit));
 }
 import { PrizePolicyManager } from "./PrizePolicyManager.js";
-import type { PrizeGameType, PrizePolicySnapshot, PrizePolicyVersion, ExtraPrizeEntry, ExtraDrawDenialAudit } from "./PrizePolicyManager.js";
+import type { PrizeGameType, PrizePolicySnapshot, ExtraDrawDenialAudit } from "./PrizePolicyManager.js";
 import { PayoutAuditTrail } from "./PayoutAuditTrail.js";
 import type { PayoutAuditEvent } from "./PayoutAuditTrail.js";
 import { ComplianceLedger } from "./ComplianceLedger.js";
-import type { LedgerGameType, LedgerChannel, LedgerEventType, ComplianceLedgerEntry, DailyComplianceReport, DailyComplianceReportRow, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionTransfer, OverskuddDistributionBatch, RevenueSummary, TimeSeriesReport, TimeSeriesGranularity, TopPlayersReport, GameSessionsReport } from "./ComplianceLedger.js";
+import type { LedgerGameType, LedgerChannel, ComplianceLedgerEntry, DailyComplianceReport, RangeComplianceReport, GameStatisticsReport, OrganizationAllocationInput, OverskuddDistributionBatch, RevenueSummary, TimeSeriesReport, TimeSeriesGranularity, TopPlayersReport, GameSessionsReport } from "./ComplianceLedger.js";
 import type { LoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
 import { NoopLoyaltyPointsHookPort } from "../adapters/LoyaltyPointsHookPort.js";
 import type { SplitRoundingAuditPort } from "../adapters/SplitRoundingAuditPort.js";
