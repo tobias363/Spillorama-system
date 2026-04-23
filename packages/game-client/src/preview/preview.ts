@@ -397,7 +397,8 @@ function ensureShown(
     | WheelOverlay
     | TreasureChestOverlay
     | OddsenOverlay
-    | ColorDraftOverlay,
+    | ColorDraftOverlay
+    | MysteryGameOverlay,
   log: HTMLElement,
 ): void {
   if (overlay.visible) return;
@@ -413,6 +414,9 @@ function ensureShown(
       break;
     case "colordraft":
       (overlay as ColorDraftOverlay).show(colordraftTriggerPayload());
+      break;
+    case "mystery":
+      (overlay as MysteryGameOverlay).show(mysteryTriggerPayload() as Parameters<MysteryGameOverlay["show"]>[0]);
       break;
   }
   logLine(log, "(auto-show() først — overlay var skjult)");
