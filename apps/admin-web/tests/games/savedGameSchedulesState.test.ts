@@ -47,26 +47,74 @@ function installFetch(impl: (input: string | URL | Request, init?: RequestInit) 
   return fn;
 }
 
-describe("SavedGame (BIN-624 placeholders)", () => {
-  it("fetchSavedGameList returns []", async () => {
+describe("SavedGame (BIN-624 live)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("bingo_admin_access_token", "tok");
+  });
+
+  it("fetchSavedGameList returns [] on 404 (backend migrations not run)", async () => {
+    installFetch(() => jsonResponse({ ok: false, error: { code: "NOT_FOUND", message: "x" } }, 404));
     expect(await fetchSavedGameList()).toEqual([]);
   });
-  it("fetchSavedGame returns null", async () => {
+
+  it("fetchSavedGameList maps rows from /api/admin/saved-games", async () => {
+    installFetch(() =>
+      successResponse({
+        savedGames: [
+          {
+            id: "sg-1",
+            gameTypeId: "bingo",
+            name: "Template A",
+            isAdminSave: true,
+            config: {},
+            status: "active",
+            createdBy: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+        count: 1,
+      })
+    );
+    const rows = await fetchSavedGameList();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?._id).toBe("sg-1");
+  });
+
+  it("fetchSavedGame returns null on 404", async () => {
+    installFetch(() => jsonResponse({ ok: false, error: { code: "NOT_FOUND", message: "x" } }, 404));
     expect(await fetchSavedGame("x")).toBeNull();
   });
-  it("saveSavedGame resolves BIN-624 BACKEND_MISSING", async () => {
-    expect(await saveSavedGame({ gameTypeId: "bingo", name: "x" })).toEqual({
-      ok: false,
-      reason: "BACKEND_MISSING",
-      issue: "BIN-624",
-    });
+
+  it("saveSavedGame POSTs on create and returns row on success", async () => {
+    installFetch(() =>
+      successResponse({
+        id: "sg-1",
+        gameTypeId: "bingo",
+        name: "Template A",
+        isAdminSave: true,
+        config: {},
+        status: "active",
+        createdBy: null,
+        createdAt: "",
+        updatedAt: "",
+      })
+    );
+    const res = await saveSavedGame({ gameTypeId: "bingo", name: "Template A" });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.row._id).toBe("sg-1");
+    }
   });
-  it("deleteSavedGame resolves BIN-624 BACKEND_MISSING", async () => {
-    expect(await deleteSavedGame("x")).toEqual({
-      ok: false,
-      reason: "BACKEND_MISSING",
-      issue: "BIN-624",
-    });
+
+  it("deleteSavedGame returns softDeleted on success", async () => {
+    installFetch(() => successResponse({ softDeleted: true }));
+    const res = await deleteSavedGame("sg-1");
+    expect(res.ok).toBe(true);
+    if ("softDeleted" in res) {
+      expect(res.softDeleted).toBe(true);
+    }
   });
 });
 

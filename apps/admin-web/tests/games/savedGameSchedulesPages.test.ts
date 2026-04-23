@@ -1,9 +1,7 @@
-// Render + dispatcher tests for SavedGame / Schedule / DailySchedule pages
-// (PR-A3b bolker 5–7).
+// Render + dispatcher tests for SavedGame / Schedule / DailySchedule pages.
 //
-// Etter BIN-625/626 er Schedule- og DailySchedule-sidene wired til live
-// endepunkter — gap-banneren er fjernet. SavedGame er fortsatt placeholder
-// (BIN-624).
+// Etter BIN-624/625/626 er alle tre wired til live endepunkter —
+// gap-banneren er fjernet.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { initI18n } from "../../src/i18n/I18n.js";
@@ -35,16 +33,24 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 6; i++) await new Promise<void>((r) => setTimeout(r, 0));
 }
 
-describe("SavedGameListPage (BIN-624 placeholder)", () => {
-  beforeEach(() => initI18n());
+describe("SavedGameListPage (BIN-624 live)", () => {
+  beforeEach(() => {
+    initI18n();
+    // Default: empty list from backend.
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () =>
+      successResponse({ savedGames: [], count: 0 })) as typeof fetch;
+  });
 
-  it("renders title + BIN-624 banner + disabled Add", async () => {
+  it("renders title + enabled Add link (no BIN-624 placeholder)", async () => {
     const c = document.createElement("div");
     await renderSavedGameListPage(c);
     expect(c.querySelector("h1")?.textContent).toBeTruthy();
-    expect(c.querySelector(".panel-body .alert")?.textContent).toContain("BIN-624");
-    const btn = c.querySelector("button[disabled]");
-    expect(btn?.getAttribute("title")).toContain("BIN-624");
+    // No BIN-624 banner any more
+    const banner = c.querySelector(".panel-body .alert");
+    expect(banner?.textContent ?? "").not.toContain("BIN-624");
+    // Add link points to GM (where templates are created)
+    const addLink = c.querySelector<HTMLAnchorElement>('a[data-action="back-to-gm"]');
+    expect(addLink).not.toBeNull();
   });
 
   it("mounts the empty DataTable", async () => {
@@ -54,19 +60,53 @@ describe("SavedGameListPage (BIN-624 placeholder)", () => {
   });
 });
 
-describe("SavedGame detail pages (BIN-624)", () => {
-  beforeEach(() => initI18n());
-  for (const kind of ["add", "view", "view-g3", "edit"] as const) {
-    it(`${kind} page renders BIN-624 banner`, async () => {
-      const c = document.createElement("div");
-      await renderSavedGameDetailPages(c, {
-        kind,
-        typeId: "bingo",
-        id: kind === "add" ? undefined : "sg-1",
-      });
-      expect(c.querySelector(".alert")?.textContent).toContain("BIN-624");
-    });
-  }
+describe("SavedGame detail pages (BIN-624 live)", () => {
+  beforeEach(() => {
+    initI18n();
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = (async (url: string | URL) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/api/admin/saved-games/sg-1")) {
+        return successResponse({
+          id: "sg-1",
+          gameTypeId: "bingo",
+          name: "Template A",
+          isAdminSave: true,
+          config: {},
+          status: "active",
+          createdBy: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+        });
+      }
+      return jsonResponse({ ok: false, error: { code: "NOT_FOUND", message: "x" } }, 404);
+    }) as typeof fetch;
+  });
+
+  it("add page references the GameManagement workflow", async () => {
+    const c = document.createElement("div");
+    await renderSavedGameDetailPages(c, { kind: "add", typeId: "bingo" });
+    const alert = c.querySelector(".alert.alert-info");
+    expect(alert).not.toBeNull();
+  });
+
+  it("view page renders SavedGame row", async () => {
+    const c = document.createElement("div");
+    await renderSavedGameDetailPages(c, { kind: "view", typeId: "bingo", id: "sg-1" });
+    expect(c.querySelector('[data-testid="savedGame-view"]')).not.toBeNull();
+  });
+
+  it("view-g3 page renders SavedGame row", async () => {
+    const c = document.createElement("div");
+    await renderSavedGameDetailPages(c, { kind: "view-g3", typeId: "bingo", id: "sg-1" });
+    expect(c.querySelector('[data-testid="savedGame-view"]')).not.toBeNull();
+  });
+
+  it("edit page renders form with prefilled name", async () => {
+    const c = document.createElement("div");
+    await renderSavedGameDetailPages(c, { kind: "edit", typeId: "bingo", id: "sg-1" });
+    const name = c.querySelector<HTMLInputElement>("#sg-name");
+    expect(name?.value).toBe("Template A");
+  });
 });
 
 describe("ScheduleListPage (BIN-625 wired)", () => {
