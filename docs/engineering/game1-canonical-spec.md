@@ -36,9 +36,11 @@ patterns:
 miniGames:
   - wheelOfFortune
   - treasureChest
-  - mysteryGame   # BIN-505 — backend rotation active; client UI via MysteryGameOverlay
+  - mysteryGame   # BIN-505 — legacy Unity rotation; BIN-MYSTERY M6 port i BIN-690-framework (type="mystery")
   - colorDraft    # BIN-506 — backend rotation active; client UI via ColorDraftOverlay
-miniGameRotation: round-robin  # wheel → chest → mystery → colorDraft → wheel …
+  # BIN-690 M1-M6 scheduled-games framework har følgende type-union:
+  # "wheel" | "chest" | "colordraft" | "oddsen" | "mystery"
+miniGameRotation: round-robin  # wheel → chest → mystery → colorDraft → oddsen → wheel …
 audioVoicePacks:
   - no-male
   - no-female
@@ -177,17 +179,27 @@ drawIndex 4                → wheelOfFortune (wraps)
 ...
 ```
 
-**4-veis rotasjon aktiv (backend).** Wheel → Chest → Mystery → ColorDraft, implementert i `BingoEngine.MINIGAME_ROTATION` ([BIN-505](https://linear.app/bingosystem/issue/BIN-505) + [BIN-506](https://linear.app/bingosystem/issue/BIN-506)). Klient-UI finnes som stubs (`MysteryGameOverlay.ts`, `ColorDraftOverlay.ts`); full klient-integrasjon spores som egne oppfølgings-issuer.
+**Legacy Unity rotasjon (BingoEngine).** Wheel → Chest → Mystery → ColorDraft, implementert i `BingoEngine.MINIGAME_ROTATION` ([BIN-505](https://linear.app/bingosystem/issue/BIN-505) + [BIN-506](https://linear.app/bingosystem/issue/BIN-506)). Dette er host-player-room-scope.
+
+**BIN-690 scheduled-games framework (nyere spor).** `Game1MiniGameOrchestrator` kobler admin-konfigurert rotasjon (`gameConfigJson.spill1.miniGames: string[]`) mot konkrete implementasjoner. Type-union: `"wheel" | "chest" | "colordraft" | "oddsen" | "mystery"`. Kanonisk rotasjon: `wheel → chest → mystery → colordraft → oddsen → wheel`.
 
 **Wheel of Fortune:** 8 segmenter, default prize-tabell i `BingoEngine.ts:1282` (`MINIGAME_PRIZES`). GSAP `rotateZ`-animasjon. Spiller klikker "spin", server velger segment deterministisk.
 
 **Treasure Chest:** N kister, spiller klikker, server velger prize. Visning: sprite-swap + GSAP scale.
 
-**Mystery Game:** Ball-picker. 8 balls som vises hemmelig; spiller velger én, server avslører prize. Samme `minigame:play { selectedIndex }`-kontrakt som Treasure Chest.
+**Mystery Game (BIN-MYSTERY M6 port):** 5-runders opp/ned-gjetting med 5-sifrede tall. Server trekker `middleNumber` + `resultNumber` deterministisk fra `resultId`-seed. Per runde (`ballCurrentIndex` 0-4, talt fra rightmost siffer) sammenligner spilleren `resultDigit` mot `middleDigit`:
+  - `UP` + resultDigit > middleDigit → RIKTIG (priceIndex++)
+  - `DOWN` + resultDigit < middleDigit → RIKTIG (priceIndex++)
+  - Feil retning → priceIndex-- (clamped til 0)
+  - `middleDigit == resultDigit` → **JOKER** → priceIndex settes til max (5), spillet ender umiddelbart.
 
-**Color Draft:** Color-pick variant. Spiller velger én av flere fargeknapper, server avslører prize. Samme `minigame:play`-kontrakt.
+6-trinns premie-stige (`prizeListNok`); final `priceIndex` peker på hvilken premie som utbetales. Default: `[50, 100, 200, 400, 800, 1500]` kr. Auto-turn-timer: 20s første valg, 10s påfølgende. Port fra `legacy/unity-client/Assets/_Project/_Scripts/Panels/Mystery Game Panel/MysteryGamePanel.cs` (commit `5fda0f78`). Engine i `apps/backend/src/game/minigames/MiniGameMysteryEngine.ts`, overlay i `packages/game-client/src/games/game1/components/MysteryGameOverlay.ts`.
 
-**Prize-konfigurasjon:** Alle fire typer bruker `MINIGAME_PRIZES` per-default. Admin-konfigurerbar prize-tabell per mini-game-type er en oppfølgende issue — legacy leste fra `otherGame`-collection, hvilket skal porters når Admin-panelet får support.
+**Color Draft:** Observation-puzzle: spiller ser `targetColor` + N `slotColors[]` i trigger, velger luke som matcher. Match ⇒ `winPrizeNok`, ellers `consolationPrizeNok` (default 0). Server-autoritativ via seeded-RNG-rekonstruksjon i `handleChoice`.
+
+**Oddsen:** Cross-round mini-game. Forrige Fullt Hus-vinner velger 1 av 3 tall (default 55/56/57). Valget persisteres per-hall i `app_game1_oddsen_state` og resolves ved terskel-draw (default #57) i NESTE spill i samme hall. Pot 1500/3000 kr avhengig av ticket_size_at_win.
+
+**Prize-konfigurasjon:** Legacy BingoEngine-varianter bruker `MINIGAME_PRIZES` per-default. BIN-690 framework leser fra `app_mini_games_config.config_json` (per-type). Tom config = hver engines default (se `DEFAULT_MYSTERY_CONFIG` osv.).
 
 ---
 

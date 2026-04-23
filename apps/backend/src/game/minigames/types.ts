@@ -33,7 +33,12 @@
  * treasureChest, mysteryGame, colorDraft). Det er legacy-wired in host-
  * player-room-modus; denne union er for scheduled-games framework (M1+).
  */
-export type MiniGameType = "wheel" | "chest" | "colordraft" | "oddsen";
+export type MiniGameType =
+  | "wheel"
+  | "chest"
+  | "colordraft"
+  | "oddsen"
+  | "mystery";
 
 /** Alle støttede mini-game-typer (for iterasjon + validering). */
 export const MINI_GAME_TYPES: readonly MiniGameType[] = [
@@ -41,6 +46,7 @@ export const MINI_GAME_TYPES: readonly MiniGameType[] = [
   "chest",
   "colordraft",
   "oddsen",
+  "mystery",
 ] as const;
 
 /**
@@ -158,6 +164,8 @@ export interface MiniGameTriggerPayload {
    *   - chest: { chestCount: 3, prizes: [...] (skjult til etter valg) }
    *   - colordraft: { slots: 12, colors: ["red", "blue", ...] }
    *   - oddsen: { totalBalls: 75, betRange: [min, max] }
+   *   - mystery: { middleNumber, resultNumber, prizeListNok, maxRounds,
+   *       autoTurnFirstMoveSec, autoTurnOtherMoveSec }
    */
   readonly payload: Readonly<Record<string, unknown>>;
 }

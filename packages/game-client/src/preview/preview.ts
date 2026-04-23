@@ -2,7 +2,7 @@
  * Spill 1 — Bonusspill Preview
  * ================================================================
  *
- * Isolated dev-tool page for previewing the four Spill 1 mini-game
+ * Isolated dev-tool page for previewing the five Spill 1 mini-game
  * overlays without running a full bingo round. Each overlay gets its
  * own PIXI.Application (800 x 600) and a panel of buttons that fire
  * realistic `show()` / `animateResult()` / `showChoiceError()` calls
@@ -18,6 +18,7 @@
  *   - TreasureChestOverlay — Skattekisten
  *   - OddsenOverlay       — Oddsen (cross-round mystery)
  *   - ColorDraftOverlay   — Fargetrekning
+ *   - MysteryGameOverlay  — Mystery Game (opp/ned, 5 runder, joker)
  */
 
 import { Application } from "pixi.js";
@@ -25,6 +26,7 @@ import { WheelOverlay } from "../games/game1/components/WheelOverlay.js";
 import { TreasureChestOverlay } from "../games/game1/components/TreasureChestOverlay.js";
 import { OddsenOverlay } from "../games/game1/components/OddsenOverlay.js";
 import { ColorDraftOverlay } from "../games/game1/components/ColorDraftOverlay.js";
+import { MysteryGameOverlay } from "../games/game1/components/MysteryGameOverlay.js";
 
 const STAGE_W = 800;
 const STAGE_H = 600;
@@ -35,7 +37,7 @@ const STAGE_H = 600;
  */
 const noopBridge = { getState: (): { isPaused: boolean } => ({ isPaused: false }) };
 
-type OverlayKey = "wheel" | "chest" | "oddsen" | "colordraft";
+type OverlayKey = "wheel" | "chest" | "oddsen" | "colordraft" | "mystery";
 
 interface OverlayHandle {
   app: Application;
@@ -43,7 +45,8 @@ interface OverlayHandle {
     | WheelOverlay
     | TreasureChestOverlay
     | OddsenOverlay
-    | ColorDraftOverlay;
+    | ColorDraftOverlay
+    | MysteryGameOverlay;
   log: HTMLElement;
 }
 
@@ -200,6 +203,101 @@ function colordraftMissResultPayload(): Record<string, unknown> {
   };
 }
 
+function mysteryTriggerPayload(): Record<string, unknown> {
+  // middle = 53472, result = 78913. Ingen equal digits, så spillet kan kjøre
+  // 5 full-runder. Optimal play: DOWN, DOWN, UP, UP, UP (reversed: digit 0..4).
+  return {
+    middleNumber: 53472,
+    resultNumber: 78913,
+    prizeListNok: [50, 100, 200, 400, 800, 1500],
+    maxRounds: 5,
+    autoTurnFirstMoveSec: 20,
+    autoTurnOtherMoveSec: 10,
+  };
+}
+function mysteryWinResultPayload(): Record<string, unknown> {
+  return {
+    middleNumber: 53472,
+    resultNumber: 78913,
+    rounds: [
+      {
+        direction: "down",
+        middleDigit: 2,
+        resultDigit: 3,
+        outcome: "wrong",
+        priceIndexAfter: 0,
+      },
+      {
+        direction: "up",
+        middleDigit: 7,
+        resultDigit: 1,
+        outcome: "wrong",
+        priceIndexAfter: 0,
+      },
+      {
+        direction: "up",
+        middleDigit: 4,
+        resultDigit: 9,
+        outcome: "correct",
+        priceIndexAfter: 1,
+      },
+      {
+        direction: "up",
+        middleDigit: 3,
+        resultDigit: 8,
+        outcome: "correct",
+        priceIndexAfter: 2,
+      },
+      {
+        direction: "up",
+        middleDigit: 5,
+        resultDigit: 7,
+        outcome: "correct",
+        priceIndexAfter: 3,
+      },
+    ],
+    finalPriceIndex: 3,
+    prizeAmountKroner: 400,
+    jokerTriggered: false,
+  };
+}
+function mysteryJokerResultPayload(): Record<string, unknown> {
+  // Joker på runde 0 (digit 2 == 2). Spillet termineres umiddelbart.
+  return {
+    middleNumber: 53472,
+    resultNumber: 78912,
+    rounds: [
+      {
+        direction: "up",
+        middleDigit: 2,
+        resultDigit: 2,
+        outcome: "joker",
+        priceIndexAfter: 5,
+      },
+    ],
+    finalPriceIndex: 5,
+    prizeAmountKroner: 1500,
+    jokerTriggered: true,
+  };
+}
+function mysteryBustResultPayload(): Record<string, unknown> {
+  // Alle runder wrong → priceIndex = 0 → min-premie.
+  return {
+    middleNumber: 53472,
+    resultNumber: 78913,
+    rounds: [
+      { direction: "up", middleDigit: 2, resultDigit: 3, outcome: "correct", priceIndexAfter: 1 },
+      { direction: "down", middleDigit: 7, resultDigit: 1, outcome: "correct", priceIndexAfter: 2 },
+      { direction: "down", middleDigit: 4, resultDigit: 9, outcome: "wrong", priceIndexAfter: 1 },
+      { direction: "down", middleDigit: 3, resultDigit: 8, outcome: "wrong", priceIndexAfter: 0 },
+      { direction: "down", middleDigit: 5, resultDigit: 7, outcome: "wrong", priceIndexAfter: 0 },
+    ],
+    finalPriceIndex: 0,
+    prizeAmountKroner: 50,
+    jokerTriggered: false,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Overlay wiring
 // ─────────────────────────────────────────────────────────────────
@@ -263,6 +361,20 @@ async function setupColorDraft(): Promise<void> {
   overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
   handles.set("colordraft", { app, instance: overlay, log });
   logLine(log, "Klar. Trykk 'Trigger Fargetrekning' for å starte.");
+}
+
+async function setupMystery(): Promise<void> {
+  const app = await createApp("stage-mystery");
+  const overlay = new MysteryGameOverlay(STAGE_W, STAGE_H);
+  app.stage.addChild(overlay);
+  const log = document.getElementById("log-mystery")!;
+  overlay.setOnChoice((choice) => {
+    logLine(log, `onChoice fired: ${JSON.stringify(choice)} — animerer resultat om 500 ms`);
+    setTimeout(() => overlay.animateResult(mysteryWinResultPayload(), 40000), 500);
+  });
+  overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
+  handles.set("mystery", { app, instance: overlay, log });
+  logLine(log, "Klar. Trykk 'Trigger Mystery Game' for å starte.");
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -332,6 +444,9 @@ function handleAction(overlayKey: OverlayKey, action: string): void {
         break;
       case "colordraft":
         handleColorDraftAction(h.instance as ColorDraftOverlay, action, log);
+        break;
+      case "mystery":
+        handleMysteryAction(h.instance as MysteryGameOverlay, action, log);
         break;
     }
   } catch (err) {
@@ -453,6 +568,35 @@ function handleColorDraftAction(overlay: ColorDraftOverlay, action: string, log:
   }
 }
 
+function handleMysteryAction(overlay: MysteryGameOverlay, action: string, log: HTMLElement): void {
+  switch (action) {
+    case "trigger":
+      overlay.show(mysteryTriggerPayload());
+      logLine(log, "show() kalt — middle=53472, result=78913, 6-trinns premie-stige");
+      break;
+    case "result-win":
+      overlay.animateResult(mysteryWinResultPayload(), 40000);
+      logLine(log, "animateResult() kalt — priceIndex=3, 400 kr");
+      break;
+    case "result-joker":
+      overlay.animateResult(mysteryJokerResultPayload(), 150000);
+      logLine(log, "animateResult() kalt — JOKER på runde 0, 1500 kr (max)");
+      break;
+    case "result-bust":
+      overlay.animateResult(mysteryBustResultPayload(), 5000);
+      logLine(log, "animateResult() kalt — priceIndex=0, 50 kr (min)");
+      break;
+    case "error":
+      overlay.showChoiceError({ code: "E_PREVIEW", message: "Dummy-feil (preview)" });
+      logLine(log, "showChoiceError() kalt", true);
+      break;
+    case "hide":
+      overlay.visible = false;
+      logLine(log, "overlay.visible = false");
+      break;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Boot
 // ─────────────────────────────────────────────────────────────────
@@ -478,6 +622,7 @@ async function boot(): Promise<void> {
     setupChest().catch((e) => console.error("Chest setup failed:", e)),
     setupOddsen().catch((e) => console.error("Oddsen setup failed:", e)),
     setupColorDraft().catch((e) => console.error("ColorDraft setup failed:", e)),
+    setupMystery().catch((e) => console.error("Mystery setup failed:", e)),
   ]);
 }
 

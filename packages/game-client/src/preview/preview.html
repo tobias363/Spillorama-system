@@ -189,6 +189,25 @@
         </div>
       </div>
     </section>
+
+    <!-- Mystery Game -->
+    <section class="panel" data-overlay="mystery">
+      <h2>Mystery Game (opp/ned + joker)</h2>
+      <p class="sub">MysteryGameOverlay — 5 runder opp/ned-gjetting, matching-siffer = JOKER (max-premie), 6-trinns premie-stige. Portert 1:1 fra legacy Unity.</p>
+      <div class="stage-row">
+        <div class="stage-wrap" id="stage-mystery"></div>
+        <div class="controls">
+          <h3>Kontroller</h3>
+          <button class="action primary" data-action="trigger" data-overlay="mystery">Trigger Mystery Game</button>
+          <button class="action secondary" data-action="result-win" data-overlay="mystery">Vis resultat (400 kr)</button>
+          <button class="action secondary" data-action="result-joker" data-overlay="mystery">Vis JOKER (1500 kr)</button>
+          <button class="action secondary" data-action="result-bust" data-overlay="mystery">Vis bust (50 kr)</button>
+          <button class="action" data-action="error" data-overlay="mystery">Simuler choice-error</button>
+          <button class="action" data-action="hide" data-overlay="mystery">Skjul overlay</button>
+          <div class="log" id="log-mystery"></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer>

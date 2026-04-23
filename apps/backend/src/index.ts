@@ -72,6 +72,7 @@ import { MiniGameWheelEngine } from "./game/minigames/MiniGameWheelEngine.js";
 import { MiniGameChestEngine } from "./game/minigames/MiniGameChestEngine.js";
 import { MiniGameColordraftEngine } from "./game/minigames/MiniGameColordraftEngine.js";
 import { MiniGameOddsenEngine } from "./game/minigames/MiniGameOddsenEngine.js";
+import { MiniGameMysteryEngine } from "./game/minigames/MiniGameMysteryEngine.js";
 import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAdapter.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
@@ -1102,6 +1103,16 @@ const miniGameOddsenEngine = new MiniGameOddsenEngine({
   auditLog: auditLogService,
 });
 game1MiniGameOrchestrator.registerMiniGame(miniGameOddsenEngine);
+
+// BIN-MYSTERY M6: registrer Mystery Game-implementasjon. Admin config
+// (game_type='mystery') overstyrer DEFAULT_MYSTERY_CONFIG (prizeListNok =
+// [50, 100, 200, 400, 800, 1500], autoTurnFirstMoveSec=20, otherMoveSec=10).
+// Mystery Game er 5-runders opp/ned-gjetting: server trekker middleNumber
+// + resultNumber (5-sifrede tall) deterministisk fra resultId-seed;
+// spilleren gjetter per-digit om resultDigit er høyere eller lavere enn
+// middleDigit. Matchende sifre → joker (auto-win, max-premie). Klient
+// sender `{ directions: ["up"|"down", ...] }` samlet til handleChoice.
+game1MiniGameOrchestrator.registerMiniGame(new MiniGameMysteryEngine());
 
 game1DrawEngineService.setMiniGameOrchestrator(game1MiniGameOrchestrator);
 // BIN-690 M5: late-bind oddsen-engine til draw-engine slik at
