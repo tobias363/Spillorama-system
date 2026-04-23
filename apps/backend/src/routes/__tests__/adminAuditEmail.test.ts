@@ -25,6 +25,7 @@ import {
   AuditLogService,
   InMemoryAuditLogStore,
 } from "../../compliance/AuditLogService.js";
+import { InMemoryHallCashLedger } from "../../agent/HallCashLedger.js";
 import type {
   PlatformService,
   PublicAppUser,
@@ -212,6 +213,7 @@ async function startAdminServer(options: {
     auditLogService: audit,
     emailService,
     supportEmail: "support@spillorama.no",
+    hallCashLedger: new InMemoryHallCashLedger(),
   };
 
   const app = express();

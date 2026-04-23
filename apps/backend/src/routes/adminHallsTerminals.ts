@@ -12,7 +12,7 @@ import {
 import type { AdminSubRouterDeps } from "./adminShared.js";
 
 export function createAdminHallsTerminalsRouter(deps: AdminSubRouterDeps): express.Router {
-  const { platformService, helpers } = deps;
+  const { platformService, hallCashLedger, helpers } = deps;
   const { auditAdmin, requireAdminPermissionUser } = helpers;
   const router = express.Router();
 
@@ -37,11 +37,13 @@ export function createAdminHallsTerminalsRouter(deps: AdminSubRouterDeps): expre
         name: mustBeNonEmptyString(req.body?.name, "name"),
         region: typeof req.body?.region === "string" ? req.body.region : undefined,
         address: typeof req.body?.address === "string" ? req.body.address : undefined,
-        isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined
+        isActive: typeof req.body?.isActive === "boolean" ? req.body.isActive : undefined,
+        hallNumber: parseOptionalHallNumber(req.body?.hallNumber),
       });
       auditAdmin(req, adminUser, "hall.create", "hall", hall.id, {
         slug: hall.slug,
         name: hall.name,
+        hallNumber: hall.hallNumber ?? null,
       });
       apiSuccess(res, hall);
     } catch (error) {
@@ -62,12 +64,99 @@ export function createAdminHallsTerminalsRouter(deps: AdminSubRouterDeps): expre
         // BIN-540 admin-flip for the pilot cutover handle. Validated inside
         // PlatformService.assertClientVariant; unknown values return
         // INVALID_INPUT, not INTERNAL_ERROR.
-        clientVariant: typeof req.body?.clientVariant === "string" ? req.body.clientVariant : undefined
+        clientVariant: typeof req.body?.clientVariant === "string" ? req.body.clientVariant : undefined,
+        hallNumber: req.body?.hallNumber !== undefined ? parseOptionalHallNumber(req.body.hallNumber) : undefined,
       });
       auditAdmin(req, adminUser, "hall.update", "hall", hallId, {
         fields: Object.keys(req.body ?? {}),
       });
       apiSuccess(res, hall);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── Add Money (cash-balanse-kreditering) ──────────────────────────────────
+  //
+  // Legacy: bingoverten/admin registrerer at hallen fysisk har fått tilført
+  // kontanter til safe-en (f.eks. ved skift-start eller manuell påfylling).
+  // Vi bruker MANUAL_ADJUSTMENT-tx med CREDIT-direction for å mutere
+  // `app_halls.cash_balance` atomisk sammen med en immutable tx-rad i
+  // `app_hall_cash_transactions`.
+  //
+  // Backing: BIN-583 HallCashLedger (migrations 20260418250200 +
+  // 20260418250300). Ingen egen `available_balance`-kolonne/tabell — det
+  // er samme konsept som `cash_balance` + eksisterende ledger-infrastruktur.
+
+  router.post("/api/admin/halls/:hallId/add-money", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "HALL_WRITE");
+      const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+      const amountRaw = req.body?.amount;
+      const amount = typeof amountRaw === "number"
+        ? amountRaw
+        : typeof amountRaw === "string" ? Number(amountRaw) : NaN;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        apiFailure(res, new Error("amount må være et positivt tall"));
+        return;
+      }
+      // Resolve hall-id (støtter både uuid og slug). Bruker platformService
+      // så slug→id-mapping gjenbruker eksisterende normalisering.
+      const hall = await platformService.getHall(hallId);
+      const reasonRaw = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+      const reason = reasonRaw.length > 0 ? reasonRaw.slice(0, 500) : null;
+
+      const tx = await hallCashLedger.applyCashTx({
+        hallId: hall.id,
+        txType: "MANUAL_ADJUSTMENT",
+        direction: "CREDIT",
+        amount,
+        notes: reason,
+        otherData: {
+          source: "admin.add_money",
+          adminUserId: adminUser.id,
+        },
+      });
+
+      auditAdmin(req, adminUser, "hall.balance.add", "hall", hall.id, {
+        amount,
+        reason,
+        balanceAfter: tx.afterBalance,
+        txId: tx.id,
+      });
+
+      apiSuccess(res, {
+        hallId: hall.id,
+        amount,
+        previousBalance: tx.previousBalance,
+        balanceAfter: tx.afterBalance,
+        transaction: tx,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // Historikk for hall balance-transaksjoner. Brukes av admin-UI til å vise
+  // "Transaction History" under Add Money-popupen (post-MVP) + for audit-
+  // rapporter. Paginert via limit/offset; sortert nyeste først.
+  router.get("/api/admin/halls/:hallId/balance-transactions", async (req, res) => {
+    try {
+      await requireAdminPermissionUser(req, "HALL_READ");
+      const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+      const hall = await platformService.getHall(hallId);
+      const limitRaw = parseOptionalInteger(req.query.limit, "limit");
+      const offsetRaw = parseOptionalInteger(req.query.offset, "offset");
+      const limit = limitRaw !== undefined ? Number(limitRaw) : 100;
+      const offset = offsetRaw !== undefined ? Number(offsetRaw) : 0;
+      const txs = await hallCashLedger.listForHall(hall.id, { limit, offset });
+      const balances = await hallCashLedger.getHallBalances(hall.id);
+      apiSuccess(res, {
+        hallId: hall.id,
+        cashBalance: balances.cashBalance,
+        dropsafeBalance: balances.dropsafeBalance,
+        transactions: txs,
+      });
     } catch (error) {
       apiFailure(res, error);
     }
@@ -335,4 +424,28 @@ export function createAdminHallsTerminalsRouter(deps: AdminSubRouterDeps): expre
   });
 
   return router;
+}
+
+/**
+ * Admin-payload aksepterer `hallNumber` som number, string (fra form-input),
+ * eller null/"" (eksplisitt tømming). Returnerer null for tom streng / null,
+ * et heltall for gyldige verdier, eller kaster ved syntaktisk feil.
+ *
+ * Range-validering (positivt heltall) skjer i PlatformService.normalizeHallNumber
+ * — her gjør vi bare string→number-konvertering og null-normalisering.
+ */
+function parseOptionalHallNumber(raw: unknown): number | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed === "") return null;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      throw new Error("hallNumber må være et heltall");
+    }
+    return parsed;
+  }
+  if (typeof raw === "number") return raw;
+  throw new Error("hallNumber må være et heltall");
 }

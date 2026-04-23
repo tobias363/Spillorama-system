@@ -1691,6 +1691,7 @@ app.use(createAdminRouter({
   auditLogService,
   emailService,
   supportEmail,
+  hallCashLedger,
 }));
 
 app.use(createWalletRouter({ platformService, engine, walletAdapter, swedbankPayService, emitWalletRoomUpdates }));
