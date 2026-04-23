@@ -41,7 +41,7 @@ import { TicketGridHtml } from "../components/TicketGridHtml.js";
  */
 const TUBE_COLUMN_WIDTH = 140;
 const RING_COLUMN_WIDTH = 200;  // 170 ring + 30 breathing room
-const OVERLAY_ROW_GAP = 20;     // flex gap between top-level containers
+const OVERLAY_ROW_GAP = 69;     // flex gap between top-level containers
 const CALL_GROUP_GAP = 10;      // gap inside callGroup (ring ↔ clover)
 // Kept in sync with CHAT_OPEN_WIDTH_PX / CHAT_COLLAPSED_WIDTH_PX in ChatPanelV2.
 const CHAT_WIDTH = 265;
