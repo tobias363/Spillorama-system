@@ -56,7 +56,13 @@ describe("BingoTicketHtml", () => {
   it("marks the free centre cell by default", () => {
     const cells = ticket.root.querySelectorAll(".ticket-grid > div");
     const centre = cells[12] as HTMLDivElement;
-    expect(centre.textContent).toBe("F");
+    // 2026-04-23 redesign: free cell renders Asset 4 (roulette/clover) as
+    // an <img> instead of the literal "F" text — verify via the dataset
+    // marker and the presence of the icon element.
+    expect(centre.dataset.number).toBe("0");
+    const icon = centre.querySelector("img") as HTMLImageElement | null;
+    expect(icon).not.toBeNull();
+    expect(icon!.alt).toBe("F");
     // Free cell is always considered marked — remaining only counts non-free.
     expect(ticket.getRemainingCount()).toBe(24);
   });

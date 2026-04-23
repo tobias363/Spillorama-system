@@ -17,11 +17,15 @@
 
 const GRID_SIZE = 5;
 const CELL_COUNT = GRID_SIZE * GRID_SIZE;
-const CELL_SIZE = 10;
+// Mockup `.bingo-grid` is 136px wide, 5 cols, 2px gap → ~25.6px per cell.
+const CELL_SIZE = 25;
 const CELL_GAP = 2;
 const TOTAL_SIZE = GRID_SIZE * CELL_SIZE + (GRID_SIZE - 1) * CELL_GAP;
-const FILL_COLOR = "#ffe83d";
-const NORMAL_COLOR = "rgba(255,255,255,0.15)";
+const FILL_BG = "linear-gradient(135deg, #f1c40f, #d35400)";
+const FILL_BORDER = "#ffcc00";
+const FILL_SHADOW = "inset 0 0 4px rgba(255,255,255,0.4), 0 0 4px rgba(255,150,0,0.5)";
+const NORMAL_BG = "rgba(100,20,20,0.4)";
+const NORMAL_BORDER = "1px solid rgba(255,80,80,0.2)";
 const CENTER_INDEX = 12; // row 2, col 2 — free space
 
 /** Axis-tag for en linje i combinasjonen. */
@@ -31,6 +35,12 @@ export class PatternMiniGrid {
   readonly root: HTMLDivElement;
   private cells: HTMLDivElement[] = [];
   private animationTimer: ReturnType<typeof setInterval> | null = null;
+  /** Indices av celler som er i hit-state akkurat nå. Brukes av highlightLines
+   *  for å diffe mot neste combo — kun celler som faktisk bytter state får
+   *  style-writes. Uten diffing ville alle 25 celler fått 3 style-writes per
+   *  1-sek-step (75 writes/sek) — synlig som subtil flimring, spesielt under
+   *  blur (f.eks. backdrop-filter bak buy-popup). */
+  private currentHitIndices = new Set<number>();
 
   constructor() {
     this.root = document.createElement("div");
@@ -48,9 +58,21 @@ export class PatternMiniGrid {
         width: `${CELL_SIZE}px`,
         height: `${CELL_SIZE}px`,
         borderRadius: "2px",
-        background: NORMAL_COLOR,
-        transition: "background 0.2s ease",
+        background: NORMAL_BG,
+        border: NORMAL_BORDER,
+        transition: "background 0.2s ease, box-shadow 0.2s ease",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
       });
+      if (i === CENTER_INDEX) {
+        // Free-space marker (mockup `Asset 4.png` — roulette/clover icon).
+        const icon = document.createElement("img");
+        icon.src = "/web/games/assets/game1/design/center-free.png";
+        icon.alt = "";
+        icon.style.cssText = "width:85%;height:85%;object-fit:contain;pointer-events:none;";
+        cell.appendChild(icon);
+      }
       this.cells.push(cell);
       this.root.appendChild(cell);
     }
@@ -79,8 +101,20 @@ export class PatternMiniGrid {
   private showCustomMask(mask: number[]): void {
     for (let i = 0; i < this.cells.length; i++) {
       const filled = i < mask.length && mask[i] === 1 && i !== CENTER_INDEX;
-      this.cells[i].style.background = filled ? FILL_COLOR : NORMAL_COLOR;
+      this.applyCellState(this.cells[i], filled);
       if (filled) this.pulseCell(this.cells[i]);
+    }
+  }
+
+  private applyCellState(cell: HTMLDivElement, hit: boolean): void {
+    if (hit) {
+      cell.style.background = FILL_BG;
+      cell.style.borderColor = FILL_BORDER;
+      cell.style.boxShadow = FILL_SHADOW;
+    } else {
+      cell.style.background = NORMAL_BG;
+      cell.style.borderColor = "rgba(255,80,80,0.2)";
+      cell.style.boxShadow = "";
     }
   }
 
@@ -119,22 +153,37 @@ export class PatternMiniGrid {
     );
   }
 
-  /** Farg alle celler i de gitte linjene (rader eller kolonner), minus center. */
+  /** Farg alle celler i de gitte linjene (rader eller kolonner), minus center.
+   *
+   *  Diff-basert: beregn nye hit-indices, så bare celler som faktisk bytter
+   *  state får style-writes. Celler som forblir hit beholder sin CSS pulse-
+   *  animation uten reset (som tidligere avbrøt pulsen hver sekund). */
   private highlightLines(lines: Line[]): void {
-    for (const cell of this.cells) {
-      cell.style.background = NORMAL_COLOR;
-      cell.style.transform = "scale(1)";
-    }
+    const newHits = new Set<number>();
     for (const line of lines) {
       const cellsInLine = line.axis === "row"
         ? rowCellIndices(line.index)
         : colCellIndices(line.index);
       for (const idx of cellsInLine) {
-        if (idx === CENTER_INDEX) continue;
-        this.cells[idx].style.background = FILL_COLOR;
-        this.pulseCell(this.cells[idx]);
+        if (idx !== CENTER_INDEX) newHits.add(idx);
       }
     }
+
+    // hit → normal (celler som var hit forrige step men ikke nå)
+    for (const idx of this.currentHitIndices) {
+      if (newHits.has(idx)) continue;
+      this.applyCellState(this.cells[idx], false);
+      this.cells[idx].style.animation = "";
+      this.cells[idx].style.transform = "scale(1)";
+    }
+    // normal → hit (nye treff)
+    for (const idx of newHits) {
+      if (this.currentHitIndices.has(idx)) continue;
+      this.applyCellState(this.cells[idx], true);
+      this.pulseCell(this.cells[idx]);
+    }
+
+    this.currentHitIndices = newHits;
   }
 
   private pulseCell(cell: HTMLDivElement): void {
@@ -142,11 +191,13 @@ export class PatternMiniGrid {
   }
 
   private clearAll(): void {
-    for (const cell of this.cells) {
-      cell.style.background = NORMAL_COLOR;
-      cell.style.transform = "scale(1)";
-      cell.style.animation = "";
+    // Diff mot nåværende hit-set — bare celler som faktisk var hit trenger reset.
+    for (const idx of this.currentHitIndices) {
+      this.applyCellState(this.cells[idx], false);
+      this.cells[idx].style.transform = "scale(1)";
+      this.cells[idx].style.animation = "";
     }
+    this.currentHitIndices.clear();
   }
 
   stopAnimation(): void {

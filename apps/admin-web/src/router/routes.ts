@@ -156,7 +156,9 @@ export const routes: RouteDef[] = [
   { path: "/agent/games", titleKey: "agent_game_management", roles: ["agent", "hall-operator"] },
   { path: "/agent/cash-in-out", titleKey: "agent_cash_in_out_management", roles: ["agent", "hall-operator"] },
   { path: "/agent/unique-id", titleKey: "agent_unique_id_management", roles: ["agent", "hall-operator"] },
-  { path: "/agent/physical-cashout", titleKey: "agent_physical_cashout", roles: ["agent", "hall-operator"] },
+  { path: "/agent/physical-cashout", titleKey: "agent_physical_cashout_title", roles: ["agent", "hall-operator"] },
+  // Agent-portal Check-for-Bingo (P0 pilot-blokker).
+  { path: "/agent/bingo-check", titleKey: "agent_check_bingo", roles: ["agent", "hall-operator"] },
   // PR-B1: cash-inout sub-pages. Exact matches only — use query string for
   // row-scoped deep-links (e.g. `#/agent/sellPhysicalTickets?gameId=X`).
   { path: "/agent/sellPhysicalTickets", titleKey: "register_sold_ticket", roles: ["agent"] },

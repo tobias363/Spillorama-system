@@ -1,4 +1,4 @@
-import { Container, Sprite, Assets } from "pixi.js";
+import { Container, Sprite, Text, Assets } from "pixi.js";
 import gsap from "gsap";
 import type { GameState } from "../../../bridge/GameBridge.js";
 import type { PatternWonPayload, ChatMessage } from "@spillorama/shared-types/socket-events";
@@ -19,11 +19,49 @@ import { checkClaims } from "../../game2/logic/ClaimDetector.js";
 import { stakeFromState } from "../logic/StakeCalculator.js";
 import { TicketGridHtml } from "../components/TicketGridHtml.js";
 
-const TUBE_COLUMN_WIDTH = 130;
+/**
+ * Redesign 2026-04-23 — explicit column-based layout so each region has
+ * its own flex child in overlayRoot with an independently tunable width:
+ *   [tube spacer 140][ring spacer 200][leftInfo][centerTop][chatPanel →]
+ * Pixi renders the tube and ring behind the respective spacers. chatPanel
+ * uses margin-left:auto to pin itself to the right edge.
+ *
+ * Ball positioning mirrors mockup `.game-number-ring`: 170×170 with top
+ * 30px below the game-container top. Exact match to spillorama-ui-mockup.
+ */
+/**
+ * Layout 2026-04-23 — overlayRoot flex-row with explicit gap between
+ * top-level containers (best-practice, no marginLeft hacks):
+ *
+ *   [tubeSpacer] gap [callGroup: ring + clover] gap [topGroupWrapper] ...chatPanel
+ *
+ * Each top-level child is a logical unit. Pixi ball-tube + ring render
+ * behind their respective spacer children. `OVERLAY_ROW_GAP` is the
+ * single source of truth for the spacing between containers.
+ */
+const TUBE_COLUMN_WIDTH = 155;
+const RING_COLUMN_WIDTH = 200;  // 170 ring + 30 breathing room
+const OVERLAY_ROW_GAP = 0;      // base flex gap between top-level containers (per-container spacing under)
+/** Gap til høyre for den store ballen (ring) — mellom ringen og firkløveren. */
+const GAP_RIGHT_OF_BALL = 68;
+/** Gap til høyre for firkløver-kolonnen — mellom "Velg lykketall" og HOVEDSPILL-panelet. */
+const GAP_RIGHT_OF_CLOVER = 91;
+// Kept in sync with CHAT_OPEN_WIDTH_PX / CHAT_COLLAPSED_WIDTH_PX in ChatPanelV2.
 const CHAT_WIDTH = 265;
-const TICKET_TOP = 170;
-/** Y offset below the ticket grid for the LINE/BINGO claim buttons. */
-const CLAIM_AREA = 60;
+const CHAT_COLLAPSED_WIDTH = 110;
+const TICKET_TOP = 239;
+/** Fast x-posisjon for ticket-grid + claim-buttons (frakoblet fra top-radens posisjon). */
+const TICKET_LEFT = 155;
+/** Y offset below the ticket grid for the LINE/BINGO claim buttons.
+ *  0 = ticket-grid bruker full skjermhøyde; fade-masken i TicketGridHtml
+ *  tonar bunnen ut slik at evt. claim-knapper (vanligvis skjult) fortsatt
+ *  ser naturlige ut når de dukker opp. */
+const CLAIM_AREA = 0;
+const RING_SIZE = 170;
+const RING_TOP_Y = 18;
+/** Clover "Velg lykketall"-knapp right-of-ring inside callGroup. */
+const CLOVER_SIZE = 72;
+const DRAW_COUNT_Y_OFFSET = 16; // gap below the ring for the "X/Y" text
 
 type Callbacks = {
   onClaim?: (type: "LINE" | "BINGO") => void;
@@ -72,6 +110,9 @@ export class PlayScreen extends Container {
   private readonly lineBtn: ClaimButton;
   private readonly bingoBtn: ClaimButton;
   private readonly audio: AudioManager;
+  /** Standalone Pixi text for "X/Y" drawn-ball counter under the ring.
+   * NOT a child of CenterBall so the idle-float tween doesn't move it. */
+  private readonly drawCountText: Text;
 
   /** Chat-toggle tween on the jackpot header offset. See setupChatLayoutSync. */
   private headerShiftTween: gsap.core.Tween | null = null;
@@ -112,45 +153,109 @@ export class PlayScreen extends Container {
     this.loadBackground(screenWidth, screenHeight);
 
     // ── Pixi components (ball animation + center ball) ────────────────────
-    this.ballTube = new BallTube(screenHeight - 16);
-    this.ballTube.x = (TUBE_COLUMN_WIDTH - 96) / 2 + 10;
-    this.ballTube.y = 8;
+    // Ball tube sits inside the 140px tube-spacer column, centred (108px wide).
+    this.ballTube = new BallTube(screenHeight - 22);
+    this.ballTube.x = (TUBE_COLUMN_WIDTH - 108) / 2;
+    this.ballTube.y = 21;
     this.addChild(this.ballTube);
 
+    // Ring sits inside the ringSpacer (first child of callGroup). Absolute
+    // x in viewport = tubeSpacer width + overlay gap + padding inside
+    // ringSpacer to centre the 170px ring in its 200px column.
     this.centerBall = new CenterBall(pauseAwareBridge);
-    this.centerBall.x = TUBE_COLUMN_WIDTH + (screenWidth - TUBE_COLUMN_WIDTH - CHAT_WIDTH) / 2 - 60;
-    this.centerBall.y = 20;
+    this.centerBall.x = this.ringCenterColumnLeft() + (RING_COLUMN_WIDTH - RING_SIZE) / 2;
+    this.centerBall.y = RING_TOP_Y;
+    this.centerBall.setBaseY(RING_TOP_Y);
     this.addChild(this.centerBall);
     this.centerBall.showWaiting();
-
-    // ── Claim buttons (Pixi — small, self-contained, not worth HTML) ──────
-    const ticketAreaLeft = TUBE_COLUMN_WIDTH;
-    const ticketAreaWidth = screenWidth - TUBE_COLUMN_WIDTH - CHAT_WIDTH - 20;
-    const btnY = screenHeight - 55;
-    const btnCentreX = ticketAreaLeft + ticketAreaWidth / 2;
-
-    this.lineBtn = new ClaimButton("LINE", 130, 44);
-    this.lineBtn.x = btnCentreX - 140;
-    this.lineBtn.y = btnY;
-    this.lineBtn.setOnClaim((type) => this.callbacks.onClaim?.(type));
-    this.addChild(this.lineBtn);
-
-    this.bingoBtn = new ClaimButton("BINGO", 130, 44);
-    this.bingoBtn.x = btnCentreX + 10;
-    this.bingoBtn.y = btnY;
-    this.bingoBtn.setOnClaim((type) => this.callbacks.onClaim?.(type));
-    this.addChild(this.bingoBtn);
 
     // ── HTML overlay layer ────────────────────────────────────────────────
     this.overlayManager = new HtmlOverlayManager(container);
     const overlayRoot = this.overlayManager.getRoot();
     overlayRoot.style.display = "flex";
     overlayRoot.style.flexDirection = "row";
+    overlayRoot.style.alignItems = "flex-start";
+    // Single gap source — spacing between top-level containers
+    // (tubeSpacer, callGroup, topGroupWrapper, chatPanel).
+    overlayRoot.style.gap = `${OVERLAY_ROW_GAP}px`;
 
-    // Spacer for ball tube column (PixiJS renders behind the HTML).
+    // Tube spacer — occupies the visual column where the Pixi ball-tube
+    // renders. Not a "container" in the PM sense, but the ball-tube
+    // needs dedicated layout space.
     const tubeSpacer = document.createElement("div");
     tubeSpacer.style.cssText = `width:${TUBE_COLUMN_WIDTH}px;flex-shrink:0;pointer-events:none;`;
     overlayRoot.appendChild(tubeSpacer);
+
+    // Glass-tube-overlay — dekorasjon som legger seg over Pixi-ballkolonnen
+    // (rundet topp, rett bunn, mørk tinted fyll, høylys-striper, bunnskygge).
+    // Portert 1:1 fra GlassTube.jsx (PM 2026-04-23). Pixi-ballene rendres
+    // bak HTML-laget og vises gjennom den semi-transparente glass-effekten.
+    this.buildGlassTubeOverlay(overlayRoot, screenHeight);
+
+    // ── Container 1: big ring + "Velg lykketall" firkløver-knapp ──────────
+    // One logical unit (PM 2026-04-23: "ene containeren styrer stor ball
+    // og lykketall"). Pixi ring renders behind ringSpacer, the clover is
+    // an HTML button inside the same flex row so they move together.
+    const callGroup = document.createElement("div");
+    callGroup.id = "call-group-wrapper";
+    callGroup.style.cssText = [
+      "display:flex",
+      "flex-direction:row",
+      "align-items:flex-start",
+      `gap:${GAP_RIGHT_OF_BALL}px`,
+      "flex-shrink:0",
+      "pointer-events:none",
+    ].join(";");
+
+    const ringSpacer = document.createElement("div");
+    ringSpacer.style.cssText = `width:${RING_COLUMN_WIDTH}px;flex-shrink:0;`;
+    callGroup.appendChild(ringSpacer);
+
+    const cloverColumn = document.createElement("div");
+    cloverColumn.style.cssText = "display:flex;flex-direction:column;align-items:center;padding-top:51px;gap:6px;flex-shrink:0;pointer-events:auto;";
+
+    const cloverBtn = document.createElement("button");
+    cloverBtn.type = "button";
+    cloverBtn.title = "Velg lykketall";
+    cloverBtn.setAttribute("aria-label", "Velg lykketall");
+    cloverBtn.style.cssText = [
+      `width:${CLOVER_SIZE}px`,
+      `height:${CLOVER_SIZE}px`,
+      "background:url(/web/games/assets/game1/design/lucky-clover.png) center/contain no-repeat",
+      "background-color:transparent",
+      "border:none",
+      "padding:0",
+      "cursor:pointer",
+      "filter:drop-shadow(0 3px 6px rgba(0,0,0,0.5))",
+      "transition:transform 0.15s ease-out",
+    ].join(";");
+    cloverBtn.addEventListener("mouseenter", () => { cloverBtn.style.transform = "scale(1.08)"; });
+    cloverBtn.addEventListener("mouseleave", () => { cloverBtn.style.transform = ""; });
+    cloverBtn.addEventListener("click", () => this.callbacks.onLuckyNumberTap?.());
+    cloverColumn.appendChild(cloverBtn);
+
+    const cloverLabel = document.createElement("div");
+    cloverLabel.style.cssText = [
+      "text-align:center",
+      "color:#fff",
+      "font-size:13px",
+      "font-weight:700",
+      "line-height:1.15",
+      "letter-spacing:0.2px",
+      "text-shadow:0 2px 4px rgba(0,0,0,0.6)",
+      "pointer-events:none",
+      "user-select:none",
+    ].join(";");
+    const line1 = document.createElement("div");
+    line1.textContent = "Velg";
+    const line2 = document.createElement("div");
+    line2.textContent = "lykketall";
+    cloverLabel.appendChild(line1);
+    cloverLabel.appendChild(line2);
+    cloverColumn.appendChild(cloverLabel);
+
+    callGroup.appendChild(cloverColumn);
+    overlayRoot.appendChild(callGroup);
 
     this.leftInfo = new LeftInfoPanel(this.overlayManager, pauseAwareBridge ?? undefined);
     this.calledNumbers = new CalledNumbersOverlay(this.overlayManager);
@@ -164,7 +269,6 @@ export class PlayScreen extends Container {
       onCancelTicket: (id) => this.callbacks.onCancelTicket?.(id),
     });
     this.ticketGrid.mount(overlayRoot);
-    this.positionTicketGrid();
 
     this.centerTop = new CenterTopPanel(this.overlayManager, {
       onShowCalledNumbers: () => this.calledNumbers.toggle(),
@@ -177,10 +281,71 @@ export class PlayScreen extends Container {
       onStartGame: () => this.callbacks.onStartGame?.(),
     });
 
-    this.chatPanel = new ChatPanelV2(this.overlayManager, socket, roomCode);
+    // ── Container 2: player-info + combo-panel + action-buttons ──────────
+    // PM 2026-04-23: "den andre yster da resten". Bordered box with the
+    // shared gradient/shadow that visually unifies the three info
+    // sections. Horizontal spacing to callGroup is handled by the
+    // overlayRoot flex gap, not a marginLeft hack.
+    const topGroupWrapper = document.createElement("div");
+    topGroupWrapper.id = "top-group-wrapper";
+    topGroupWrapper.style.cssText = [
+      "display:flex",
+      "flex-direction:row",
+      "align-items:stretch",
+      "align-self:flex-start",
+      "flex-shrink:0",
+      "margin-top:18px",
+      `margin-left:${GAP_RIGHT_OF_CLOVER}px`,
+      "background:radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45))",
+      "border:1px solid rgba(255, 120, 50, 0.35)",
+      "border-radius:14px",
+      "box-shadow:0 10px 34px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255,255,255,0.1)",
+      "overflow:hidden",
+      "pointer-events:auto",
+    ].join(";");
+    // Re-parent the two roots (createElement appended them to overlayRoot).
+    topGroupWrapper.appendChild(this.leftInfo.rootEl);
+    topGroupWrapper.appendChild(this.centerTop.rootEl);
+    overlayRoot.appendChild(topGroupWrapper);
+
+    // Chat on the RIGHT edge (flex-row last child), default collapsed so
+    // players land in the game without the chat panel expanded.
+    this.chatPanel = new ChatPanelV2(this.overlayManager, socket, roomCode, {
+      initialCollapsed: true,
+    });
     this.headerBar = new HeaderBar(this.overlayManager);
 
+    this.drawCountText = new Text({
+      text: "",
+      style: {
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontSize: 15,
+        fill: 0xffffff,
+        fontWeight: "700",
+        align: "center",
+        letterSpacing: 0.5,
+        dropShadow: { color: 0x000000, alpha: 0.8, blur: 4, distance: 1 },
+      },
+    });
+    this.drawCountText.anchor.set(0.5);
+    this.drawCountText.x = this.centerBall.x + RING_SIZE / 2;
+    this.drawCountText.y = this.centerBall.y + RING_SIZE + DRAW_COUNT_Y_OFFSET;
+    this.addChild(this.drawCountText);
+
+    // ── Claim buttons (Pixi — small, self-contained, not worth HTML) ──────
+    this.lineBtn = new ClaimButton("LINE", 130, 44);
+    this.lineBtn.setOnClaim((type) => this.callbacks.onClaim?.(type));
+    this.addChild(this.lineBtn);
+
+    this.bingoBtn = new ClaimButton("BINGO", 130, 44);
+    this.bingoBtn.setOnClaim((type) => this.callbacks.onClaim?.(type));
+    this.addChild(this.bingoBtn);
+
+    this.positionClaimButtons();
+    this.positionTicketGrid();
+
     this.setupChatLayoutSync();
+    this.registerTopNavActions();
 
     // Opt-in blink-diagnostic (kun aktivert med ?diag=blink i URL-en).
     if (shouldInstallBlinkDiagnostic()) {
@@ -289,11 +454,17 @@ export class PlayScreen extends Container {
       state.totalDrawCapacity,
       state.players,
     );
+    // "X/Y" counter under the ring — rendered as standalone Pixi Text so the
+    // CenterBall idle-float doesn't drag it around.
+    this.drawCountText.text = state.totalDrawCapacity > 0
+      ? `${state.drawCount}/${state.totalDrawCapacity}`
+      : "";
     this.chatPanel.updatePlayerCount(state.playerCount);
     this.centerTop.setGameRunning(running);
     this.centerTop.updatePatterns(state.patterns, state.patternResults, state.prizePool);
     this.centerTop.setCanStartNow(state.canStartNow, running);
-    this.headerBar.update(state.jackpot);
+    this.centerTop.updateJackpot(state.jackpot);
+    this.headerBar.update(state.jackpot); // kept for API parity (no-op render)
 
     // Auto-open the buy popup on entry so the player doesn't have to hunt for
     // the "Forhåndskjøp" button. One-shot per screen-session (see
@@ -447,12 +618,122 @@ export class PlayScreen extends Container {
       this.bgSprite.width = width;
       this.bgSprite.height = height;
     }
-    this.centerBall.x = TUBE_COLUMN_WIDTH + (width - TUBE_COLUMN_WIDTH - CHAT_WIDTH) / 2 - 60;
+    this.positionClaimButtons();
     this.positionTicketGrid();
-    // Re-pin the claim buttons.
-    const ticketAreaWidth = width - TUBE_COLUMN_WIDTH - (this.chatPanel.isCollapsed() ? 48 : CHAT_WIDTH) - 20;
-    const btnY = height - 55;
-    const btnCentreX = TUBE_COLUMN_WIDTH + ticketAreaWidth / 2;
+  }
+
+  /** Current chat column width (collapsed vs expanded). */
+  private chatWidth(): number {
+    return this.chatPanel?.isCollapsed() ? CHAT_COLLAPSED_WIDTH : CHAT_WIDTH;
+  }
+
+  /** Build the glass-tube HTML overlay that sits over the Pixi ball-column.
+   *  Pure decoration — pointer-events:none, no balls inside (Pixi owns those).
+   *  Styles portert 1:1 fra GlassTube.jsx. */
+  private buildGlassTubeOverlay(overlayRoot: HTMLElement, screenHeight: number): void {
+    // Pixi ball tube: 108px wide at x=(TUBE_COLUMN_WIDTH-108)/2, y=21.
+    // Glass wraps den med 6px buffer på hver side.
+    const ballTubeX = (TUBE_COLUMN_WIDTH - 108) / 2;
+    const glassW = 96;  // 20% smalere enn tidligere (120)
+    const glassX = ballTubeX - (glassW - 108) / 2;
+    const glassTop = 13;
+    const glassH = screenHeight - glassTop; // helt ned til bunn
+    const radius = glassW / 2;
+
+    const glass = document.createElement("div");
+    Object.assign(glass.style, {
+      position: "absolute",
+      left: `${glassX}px`,
+      top: `${glassTop}px`,
+      width: `${glassW}px`,
+      height: `${glassH}px`,
+      borderRadius: `${radius}px ${radius}px 0 0`,
+      background: [
+        "linear-gradient(180deg, rgba(0,0,0,0.22) 0%, rgba(0,0,0,0.12) 50%, rgba(0,0,0,0.28) 100%)",
+        "linear-gradient(90deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 18%, rgba(255,255,255,0) 42%, rgba(255,255,255,0) 58%, rgba(255,255,255,0.08) 80%, rgba(255,255,255,0.18) 100%)",
+      ].join(","),
+      borderTop: "1px solid rgba(255,255,255,0.18)",
+      borderLeft: "1px solid rgba(255,255,255,0.18)",
+      borderRight: "1px solid rgba(255,255,255,0.18)",
+      borderBottom: "none",
+      boxShadow: [
+        "inset 0 2px 6px rgba(0,0,0,0.6)",
+        "inset 3px 0 6px rgba(0,0,0,0.35)",
+        "inset -3px 0 6px rgba(0,0,0,0.35)",
+        "0 -8px 24px rgba(0,0,0,0.45)",
+      ].join(","),
+      overflow: "hidden",
+      pointerEvents: "none",
+      zIndex: "2",
+    });
+
+    // Venstre høylys-stripe
+    const leftHi = document.createElement("div");
+    Object.assign(leftHi.style, {
+      position: "absolute",
+      left: "4px",
+      top: "8px",
+      bottom: "4px",
+      width: "3px",
+      borderRadius: "3px",
+      background: "linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.35))",
+      filter: "blur(0.5px)",
+    });
+    glass.appendChild(leftHi);
+
+    // Høyre høylys-stripe (tynnere)
+    const rightHi = document.createElement("div");
+    Object.assign(rightHi.style, {
+      position: "absolute",
+      right: "3px",
+      top: "12px",
+      bottom: "4px",
+      width: "2px",
+      borderRadius: "2px",
+      background: "linear-gradient(180deg, rgba(255,255,255,0.25), rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.18))",
+      filter: "blur(0.5px)",
+    });
+    glass.appendChild(rightHi);
+
+    // Topp-glans
+    const topGloss = document.createElement("div");
+    Object.assign(topGloss.style, {
+      position: "absolute",
+      top: "3px",
+      left: "18%",
+      right: "18%",
+      height: "4px",
+      borderRadius: "4px",
+      background: "radial-gradient(ellipse, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 70%)",
+    });
+    glass.appendChild(topGloss);
+
+    // Bunn-åpning — mask fade ut tint + høylys-striper de siste 28px så
+    // glasset ser åpent ut. Ballene (Pixi) er bak laget og forblir synlige
+    // helt ned — virker som om de faller ut av røret.
+    glass.style.maskImage = "linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%)";
+    glass.style.webkitMaskImage = "linear-gradient(to bottom, #000 0, #000 calc(100% - 28px), transparent 100%)";
+
+    overlayRoot.appendChild(glass);
+  }
+
+  /** x-coord where the ring's flex column starts (inside callGroup). */
+  private ringCenterColumnLeft(): number {
+    return TUBE_COLUMN_WIDTH + OVERLAY_ROW_GAP;
+  }
+
+  /** x-coord of the ring's left edge — the anchor ticket + claim
+   *  buttons align to so "bongene kommer på linje med det store tallet". */
+  private ringLeftEdge(): number {
+    return this.ringCenterColumnLeft() + (RING_COLUMN_WIDTH - RING_SIZE) / 2;
+  }
+
+  /** Re-pin the LINE/BINGO claim buttons over the current ticket area. */
+  private positionClaimButtons(): void {
+    const ticketAreaLeft = TICKET_LEFT;
+    const ticketAreaWidth = this.screenW - ticketAreaLeft - this.chatWidth() - 20;
+    const btnY = this.screenH - 55;
+    const btnCentreX = ticketAreaLeft + ticketAreaWidth / 2;
     this.lineBtn.x = btnCentreX - 140;
     this.lineBtn.y = btnY;
     this.bingoBtn.x = btnCentreX + 10;
@@ -470,6 +751,7 @@ export class PlayScreen extends Container {
     this.headerShiftTween = null;
     this.headerBar.destroy();
     this.overlayManager.destroy();
+    this.unregisterTopNavActions();
     super.destroy({ children: true });
   }
 
@@ -481,19 +763,42 @@ export class PlayScreen extends Container {
   }
 
   private positionTicketGrid(): void {
-    const chatW = this.chatPanel?.isCollapsed() ? 48 : CHAT_WIDTH;
-    const left = TUBE_COLUMN_WIDTH;
+    // Frakoblet fra ring-posisjon (TUBE_COLUMN_WIDTH) — tickets beholder
+    // opprinnelig plassering selv om top-raden flyttes.
+    const left = TICKET_LEFT;
     const top = TICKET_TOP;
-    const width = this.screenW - TUBE_COLUMN_WIDTH - chatW - 20;
+    const width = this.screenW - left - this.chatWidth() - 20;
     const height = this.screenH - TICKET_TOP - CLAIM_AREA;
     this.ticketGrid.setBounds(left, top, Math.max(200, width), Math.max(100, height));
   }
 
-  /** Resize ticket grid when the chat panel collapses / expands, and slide the
-   *  jackpot header bar -80px when chat opens. */
+  /**
+   * Register "Se oppleste tall" + "Bytt bakgrunn og markør" handlers on
+   * `window.__gameActions` so the web-shell topnav buttons can invoke them.
+   * The shell toggles `body.has-game-actions` to show the buttons only
+   * while a game that owns these actions is mounted. Cleared in destroy().
+   */
+  private registerTopNavActions(): void {
+    const w = window as unknown as { __gameActions?: Record<string, () => void> };
+    w.__gameActions = {
+      showCalledNumbers: () => this.calledNumbers.toggle(),
+      openMarkerBg: () => this.callbacks.onOpenMarkerBg?.(),
+    };
+    document.body.classList.add("has-game-actions");
+  }
+
+  private unregisterTopNavActions(): void {
+    const w = window as unknown as { __gameActions?: unknown };
+    delete w.__gameActions;
+    document.body.classList.remove("has-game-actions");
+  }
+
+  /** Resize ticket grid + re-pin claim buttons when the chat panel
+   *  collapses / expands. */
   private setupChatLayoutSync(): void {
     this.chatPanel.setOnToggle((collapsed) => {
       this.positionTicketGrid();
+      this.positionClaimButtons();
       const targetOffset = collapsed ? 0 : -80;
       this.headerShiftTween?.kill();
       const proxy = { x: this.headerBar.currentOffsetX };
@@ -543,7 +848,8 @@ export class PlayScreen extends Container {
   }
 
   private loadBackground(width: number, height: number): void {
-    Assets.load("/web/games/assets/bg-game.png")
+    // Nytt design (2026-04-23): mørk-rød bakgrunn fra spillorama-ui-mockup.
+    Assets.load("/web/games/assets/game1/design/background.png")
       .then((texture) => {
         if (!texture) return;
         this.bgSprite = new Sprite(texture);

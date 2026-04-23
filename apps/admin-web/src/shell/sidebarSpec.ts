@@ -307,6 +307,7 @@ export const agentSidebar: SidebarNode[] = [
     ],
   },
   { kind: "leaf", id: "agent-unique-id", path: "/agent/unique-id", icon: "fa fa-id-card", labelKey: "agent_unique_id_management" },
+  { kind: "leaf", id: "agent-bingo-check", path: "/agent/bingo-check", icon: "fa fa-check-circle-o", labelKey: "agent_check_bingo" },
   { kind: "leaf", id: "agent-physical-cashout", path: "/agent/physical-cashout", icon: "fa fa-ticket", labelKey: "agent_physical_cashout" },
 ];
 

@@ -43,6 +43,57 @@ function rgba(n: number, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+/**
+ * Bong-palett (Bong.jsx-port). Flate pastellfarger for bong-bakgrunn + header-
+ * tekst. Marked/free/pulse-styling er konstant (samme på tvers av fargevarianter).
+ */
+const BONG_COLORS: Record<string, { bg: string; text: string; header: string; footerText: string }> = {
+  yellow:  { bg: "#f0b92e", text: "#2a1a00", header: "#2a1a00", footerText: "#3a2400" },
+  purple:  { bg: "#b8a4e8", text: "#2a1040", header: "#2a1040", footerText: "#2a1040" },
+  green:   { bg: "#7dc97a", text: "#0f3a10", header: "#0f3a10", footerText: "#0f3a10" },
+  white:   { bg: "#e8e4dc", text: "#2a2420", header: "#2a2420", footerText: "#2a2420" },
+  red:     { bg: "#dc2626", text: "#ffffff", header: "#ffffff", footerText: "#ffffff" },
+  orange:  { bg: "#f97316", text: "#2a1400", header: "#2a1400", footerText: "#2a1400" },
+  blue:    { bg: "#60a5fa", text: "#0a1f40", header: "#0a1f40", footerText: "#0a1f40" },
+};
+
+const MARKED_BG = "#7a1a1a";
+const MARKED_TEXT = "#ffffff";
+const FREE_BG = "#2d7a3f";
+const FREE_TEXT = "#ffffff";
+const UNMARKED_BG = "rgba(255,255,255,0.55)";
+
+/** Velg Bong-palett fra ticket.color. Fallback yellow for ukjente/Elvis-varianter. */
+function bongPaletteFor(colorName: string | undefined): typeof BONG_COLORS["yellow"] {
+  const n = (colorName ?? "").toLowerCase();
+  if (n.includes("yellow")) return BONG_COLORS.yellow;
+  if (n.includes("white"))  return BONG_COLORS.white;
+  if (n.includes("purple")) return BONG_COLORS.purple;
+  if (n.includes("green"))  return BONG_COLORS.green;
+  if (n.includes("red"))    return BONG_COLORS.red;
+  if (n.includes("orange")) return BONG_COLORS.orange;
+  if (n.includes("blue"))   return BONG_COLORS.blue;
+  return BONG_COLORS.yellow;
+}
+
+/** Injisér pulse-keyframes én gang per dokument (for One-to-go footer-badge). */
+function ensureBongStyles(): void {
+  if (typeof document === "undefined") return;
+  if (document.getElementById("bong-ticket-styles")) return;
+  const s = document.createElement("style");
+  s.id = "bong-ticket-styles";
+  s.textContent = `
+@keyframes bong-otg-badge {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50%      { opacity: 1; transform: scale(1.04); }
+}
+.bong-otg-pulse {
+  animation: bong-otg-badge 1.3s ease-in-out infinite;
+}
+`;
+  document.head.appendChild(s);
+}
+
 export class BingoTicketHtml {
   readonly root: HTMLDivElement;
   private readonly inner: HTMLDivElement;
@@ -66,16 +117,19 @@ export class BingoTicketHtml {
   readonly cardHeight = 300;
 
   constructor(private readonly opts: BingoTicketHtmlOptions) {
+    ensureBongStyles();
     this.ticket = opts.ticket;
     this.theme = getTicketThemeByName(opts.ticket.color, 0);
 
     this.root = document.createElement("div");
     Object.assign(this.root.style, {
-      width: `${this.cardWidth}px`,
-      height: `${this.cardHeight}px`,
+      // Bong fyller grid-cellen fullt ut — visuell horisontal luft mellom
+      // bonger = CSS column-gap (ikke ubrukt cellplass). Høyden følger bredden
+      // via aspect-ratio for å bevare 4:5-proporsjonene (240×300 design).
+      width: "100%",
+      aspectRatio: `${this.cardWidth} / ${this.cardHeight}`,
       perspective: "1000px",
       cursor: "pointer",
-      flex: "0 0 auto",
       userSelect: "none",
     });
 
@@ -203,6 +257,7 @@ export class BingoTicketHtml {
 
   private buildFace(isBack: boolean): HTMLDivElement {
     const face = document.createElement("div");
+    const palette = bongPaletteFor(this.ticket.color);
     Object.assign(face.style, {
       position: "absolute",
       top: "0",
@@ -211,15 +266,18 @@ export class BingoTicketHtml {
       height: "100%",
       backfaceVisibility: "hidden",
       transform: isBack ? "rotateY(180deg)" : "rotateY(0deg)",
-      background: hex(this.theme.cardBg),
-      borderRadius: "10px",
+      // Bong.jsx: flat pastell bakgrunn på hele kortet. Back-face beholder
+      // original mørk stil så metadata er lesbar.
+      background: isBack ? hex(this.theme.cardBg) : palette.bg,
+      borderRadius: "8px",
       boxSizing: "border-box",
-      padding: "6px 8px 10px 8px",
+      padding: isBack ? "6px 8px 10px 8px" : "12px 14px 10px 14px",
       display: "flex",
       flexDirection: "column",
-      gap: "4px",
-      boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+      gap: isBack ? "4px" : "10px",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
       overflow: "hidden",
+      fontFamily: "'Inter', system-ui, sans-serif",
     });
 
     if (isBack) {
@@ -232,38 +290,59 @@ export class BingoTicketHtml {
   }
 
   private populateFront(face: HTMLDivElement): void {
-    // Header row
+    const palette = bongPaletteFor(this.ticket.color);
+
+    // Header: label venstre + pris høyre (Bong.jsx-layout). Ingen bakgrunn —
+    // teksten ligger direkte på bong-fargen.
     const header = document.createElement("div");
     Object.assign(header.style, {
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
-      gap: "6px",
-      height: "26px",
-      padding: "0 8px",
-      background: hex(this.theme.headerBg),
-      color: hex(this.theme.headerText),
-      borderRadius: "6px",
-      fontSize: "12px",
-      fontWeight: "700",
+      gap: "8px",
+      color: palette.header,
+      whiteSpace: "nowrap",
+      position: "relative",
     });
 
-    // × cancel button (left side). Rendered whenever `cancelable=true` and
-    // the ticket has a stable id — onCancel is optional so the UI doesn't
-    // depend on controller wire-up timing. Missing handler = no-op click
-    // (still stops propagation so it doesn't also flip the card).
+    const name = document.createElement("div");
+    name.className = "ticket-header-name";
+    Object.assign(name.style, {
+      fontSize: "13px",
+      fontWeight: "700",
+      letterSpacing: "-0.005em",
+      flex: "1",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+    });
+    header.appendChild(name);
+
+    const price = document.createElement("div");
+    price.className = "ticket-header-price";
+    Object.assign(price.style, {
+      fontSize: "12px",
+      fontWeight: "600",
+      fontVariantNumeric: "tabular-nums",
+    });
+    header.appendChild(price);
+
+    // × cancel-knapp — absolutt posisjonert øverst til høyre slik at den ikke
+    // forstyrrer header-layout. Vises kun når cancelable + ticket har id.
     if (this.opts.cancelable && this.opts.ticket.id) {
       const btn = document.createElement("button");
       btn.textContent = "\u00d7";
       btn.setAttribute("aria-label", "Avbestill brett");
       Object.assign(btn.style, {
+        position: "absolute",
+        top: "-4px",
+        right: "-6px",
         width: "18px",
         height: "18px",
         borderRadius: "50%",
         border: "none",
-        background: "rgba(0,0,0,0.35)",
-        color: hex(this.theme.headerText),
-        fontSize: "14px",
+        background: "rgba(0,0,0,0.25)",
+        color: palette.header,
+        fontSize: "12px",
         fontWeight: "700",
         lineHeight: "1",
         cursor: "pointer",
@@ -278,59 +357,38 @@ export class BingoTicketHtml {
         this.opts.onCancel?.(id);
       });
       header.appendChild(btn);
-    } else {
-      // Placeholder to keep layout consistent.
-      const spacer = document.createElement("span");
-      spacer.style.width = "18px";
-      header.appendChild(spacer);
     }
-
-    const name = document.createElement("div");
-    name.className = "ticket-header-name";
-    name.style.flex = "1";
-    name.style.textAlign = "center";
-    name.style.whiteSpace = "nowrap";
-    name.style.overflow = "hidden";
-    name.style.textOverflow = "ellipsis";
-    header.appendChild(name);
-
-    const price = document.createElement("div");
-    price.className = "ticket-header-price";
-    price.style.minWidth = "44px";
-    price.style.textAlign = "right";
-    header.appendChild(price);
 
     face.appendChild(header);
 
-    // Elvis-banner — vises kun for Elvis-bonger (BIN-688).
-    // Fargen ligger allerede i theme; bildet er egen placeholder-asset per
-    // variant (1-5) og kan byttes uten kode-endring. Ukjent Elvis-variant
-    // (f.eks. "elvis9") renderes tekst-bare uten bilde som fallback.
+    // Elvis-banner — beholdt for Elvis-bonger (BIN-688).
     if (isElvisColor(this.ticket.color)) {
       face.appendChild(this.buildElvisBanner());
     }
 
-    // Grid container
+    // Grid container — 5 kolonner, 5px gap.
     const gridWrap = document.createElement("div");
     gridWrap.className = "ticket-grid";
     Object.assign(gridWrap.style, {
       display: "grid",
       gridTemplateColumns: `repeat(${this.opts.cols}, 1fr)`,
       gridTemplateRows: `repeat(${this.opts.rows}, 1fr)`,
-      gap: "3px",
+      gap: "5px",
       flex: "1",
     });
     face.appendChild(gridWrap);
 
-    // ToGo footer
+    // ToGo footer — "X igjen" eller "One to go!" når kun én mark gjenstår.
     const toGo = document.createElement("div");
     toGo.className = "ticket-togo";
     Object.assign(toGo.style, {
       textAlign: "center",
-      fontSize: "12px",
-      fontWeight: "700",
-      color: hex(this.theme.toGoColor),
-      height: "16px",
+      fontSize: "11px",
+      fontWeight: "500",
+      color: palette.footerText,
+      opacity: "0.75",
+      letterSpacing: "0",
+      textTransform: "none",
     });
     face.appendChild(toGo);
   }
@@ -438,12 +496,36 @@ export class BingoTicketHtml {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: "14px",
-          fontWeight: "700",
-          borderRadius: "6px",
-          transition: "background 0.12s, color 0.12s, transform 0.12s",
+          fontSize: "13px",
+          fontWeight: "600",
+          fontFamily: "'Inter', system-ui, sans-serif",
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: "1",
+          borderRadius: "3px",
+          aspectRatio: "1 / 1",
+          transition: "background 0.12s, color 0.12s",
         });
-        cell.textContent = n === 0 ? "F" : String(n);
+        if (n === 0) {
+          // FREE-celle (Bong.jsx): grønn pille inne i hvit celle-ramme.
+          const freeInner = document.createElement("div");
+          Object.assign(freeInner.style, {
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "82%",
+            height: "70%",
+            background: FREE_BG,
+            color: FREE_TEXT,
+            borderRadius: "2px",
+            fontSize: "8px",
+            fontWeight: "700",
+            letterSpacing: "0.04em",
+          });
+          freeInner.textContent = "FREE";
+          cell.appendChild(freeInner);
+        } else {
+          cell.textContent = String(n);
+        }
         gridWrap.appendChild(cell);
         this.cellNodes.push(cell);
       }
@@ -457,23 +539,30 @@ export class BingoTicketHtml {
     if (!cell) return;
     const n = Number(cell.dataset.number);
     const isFree = n === 0;
-    const isMarked = isFree || this.marks.has(n);
+    const isMarked = !isFree && this.marks.has(n);
     const isLucky = cell.dataset.lucky === "true";
-    const c = this.theme.cellColors;
+    const palette = bongPaletteFor(this.ticket.color);
 
     if (isFree) {
-      cell.style.background = hex(c.bgFree);
-      cell.style.color = hex(c.textFree);
+      // FREE-celle har hvit base (som unmarked) med grønn inner-pille.
+      cell.style.background = UNMARKED_BG;
+      cell.style.color = palette.text;
+      cell.style.fontWeight = "600";
+      cell.style.boxShadow = "none";
     } else if (isMarked) {
-      cell.style.background = hex(c.markerColor);
-      cell.style.color = hex(c.textMarked);
+      cell.style.background = MARKED_BG;
+      cell.style.color = MARKED_TEXT;
+      cell.style.fontWeight = "700";
+      cell.style.boxShadow = "none";
     } else if (isLucky) {
-      cell.style.background = rgba(c.bgHighlight, 0.85);
-      cell.style.color = hex(c.textDefault);
+      cell.style.background = UNMARKED_BG;
+      cell.style.color = palette.text;
+      cell.style.fontWeight = "700";
       cell.style.boxShadow = "inset 0 0 0 2px #ffe83d";
     } else {
-      cell.style.background = hex(c.bgDefault);
-      cell.style.color = hex(c.textDefault);
+      cell.style.background = UNMARKED_BG;
+      cell.style.color = palette.text;
+      cell.style.fontWeight = "600";
       cell.style.boxShadow = "none";
     }
   }
@@ -489,8 +578,26 @@ export class BingoTicketHtml {
   }
 
   private updateToGo(): void {
-    // Fase-aktivt pattern overstyrer whole-card-telling så spilleren ser
-    // "X igjen til 1 Rad" i stedet for "24 igjen" (hele brettet).
+    const palette = bongPaletteFor(this.ticket.color);
+    const setOneToGo = () => {
+      this.toGoEl.textContent = "One to go!";
+      this.toGoEl.style.color = palette.footerText;
+      this.toGoEl.style.opacity = "1";
+      this.toGoEl.style.fontWeight = "700";
+      this.toGoEl.style.letterSpacing = "0.06em";
+      this.toGoEl.style.textTransform = "uppercase";
+      this.toGoEl.classList.add("bong-otg-pulse");
+    };
+    const setNormal = (text: string, winColor = false) => {
+      this.toGoEl.textContent = text;
+      this.toGoEl.style.color = winColor ? "#2a9d8f" : palette.footerText;
+      this.toGoEl.style.opacity = "0.75";
+      this.toGoEl.style.fontWeight = "500";
+      this.toGoEl.style.letterSpacing = "0";
+      this.toGoEl.style.textTransform = "none";
+      this.toGoEl.classList.remove("bong-otg-pulse");
+    };
+
     if (this.activePattern) {
       const phaseRemaining = remainingForPattern(
         this.ticket.grid,
@@ -498,25 +605,16 @@ export class BingoTicketHtml {
         this.activePattern.name,
       );
       if (phaseRemaining !== null) {
-        if (phaseRemaining === 0) {
-          this.toGoEl.textContent = `${this.activePattern.name} — klar!`;
-          this.toGoEl.style.color = "#2a9d8f";
-        } else {
-          this.toGoEl.textContent = `${phaseRemaining} igjen til ${this.activePattern.name}`;
-          this.toGoEl.style.color = hex(this.theme.toGoColor);
-        }
+        if (phaseRemaining === 0) setNormal(`${this.activePattern.name} — klar!`, true);
+        else if (phaseRemaining === 1) setOneToGo();
+        else setNormal(`${phaseRemaining} igjen til ${this.activePattern.name}`);
         return;
       }
-      // Ukjent pattern-navn → fall gjennom til whole-card-telling.
     }
     const remaining = this.getRemainingCount();
-    if (remaining === 0) {
-      this.toGoEl.textContent = "Ferdig!";
-      this.toGoEl.style.color = "#2a9d8f";
-    } else {
-      this.toGoEl.textContent = `${remaining} igjen`;
-      this.toGoEl.style.color = hex(this.theme.toGoColor);
-    }
+    if (remaining === 0) setNormal("Ferdig!", true);
+    else if (remaining === 1) setOneToGo();
+    else setNormal(`${remaining} igjen`);
   }
 
   private findCellIndex(number: number): number {

@@ -6,57 +6,66 @@ import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
  * Speiler Unity `BingoTemplates.cs:86` (`maxPurchaseTicket = 30`) og backend
  * håndhevelse i `apps/backend/src/sockets/gameEvents.ts:533-547` + DB CHECK i
  * `migrations/20260413000002_max_tickets_30_all_games.sql`.
- *
- * Én "Large"/"Elvis" med `ticketCount=3` teller som 3 vektede brett. Klienten
- * er kun UX-lag — serveren er autoritativ.
  */
 const MAX_WEIGHTED_TICKETS = 30;
 
+const FONT_STACK = "'Poppins', system-ui, sans-serif";
+
+/** Brikke-farge fra type-navn. Speiler KjopsModal-paletten. */
+function ticketColor(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("yellow")) return "#f5b841";
+  if (n.includes("white")) return "#eeeae0";
+  if (n.includes("purple")) return "#8b5cf6";
+  if (n.includes("red")) return "#dc2626";
+  if (n.includes("green")) return "#22c55e";
+  if (n.includes("orange")) return "#f97316";
+  return "#f5b841";
+}
+
+interface TypeRow {
+  type: string;
+  /** BIN-688: canonical ticket-type name sent to backend. */
+  name: string;
+  displayName: string;
+  color: string;
+  price: number;
+  ticketCount: number;
+  qty: number;
+  row: HTMLDivElement;
+  qtyLabel: HTMLSpanElement;
+  plusBtn: HTMLButtonElement;
+  minusBtn: HTMLButtonElement;
+  stepper: HTMLDivElement;
+}
+
 /**
- * Game 1 ticket purchase popup — 3-column grid with +/- per type.
+ * Game 1 ticket purchase popup — KjopsModal-port (2026-04-24).
  *
- * Shows each ticket type from the backend with its own quantity selector.
- * Player adjusts quantities and clicks "Kjøp" to arm for the next round.
- * Transparent backdrop so the draw is visible behind.
- *
- * Implementerer også Unity-avledet 30-brett-grense:
- *   - Plus-knapp per rad disables når rad ville overskride remaining-kapasitet
- *.
- *   - `alreadyPurchased` (antall brett allerede kjøpt denne runden) fratrekkes
- *     før remaining beregnes.
- *   - X-knapp per rad nullstiller qty (klient-state, ingen popup).
+ * 2-column layout med én rad per billett-type: [brett-ikon] [navn + pris] [stepper].
+ * Beholder public API + 30-brett-grense-logikk fra forrige versjon.
  */
 export class Game1BuyPopup {
   private backdrop: HTMLDivElement;
   private card: HTMLDivElement;
+  private summaryEl: HTMLDivElement;
   private typesContainer: HTMLDivElement;
-  private totalLabel: HTMLDivElement;
   private statusMsg: HTMLDivElement;
+  private totalBrettEl: HTMLDivElement;
+  private totalKrEl: HTMLDivElement;
   private buyBtn: HTMLButtonElement;
 
   private onBuy: ((selections: Array<{ type: string; qty: number; name?: string }>) => void) | null = null;
   private alreadyPurchased = 0;
-  private typeRows: Array<{
-    type: string;
-    /** BIN-688: ticket-type name (e.g. "Small Yellow") — sent to backend so
-     * pre-round brett render in the colour the player actually selected. */
-    name: string;
-    price: number;
-    ticketCount: number;
-    qty: number;
-    qtyLabel: HTMLSpanElement;
-    plusBtn: HTMLButtonElement;
-    minusBtn: HTMLButtonElement;
-    clearBtn: HTMLButtonElement;
-  }> = [];
+  private typeRows: TypeRow[] = [];
 
-  constructor(private overlay: HtmlOverlayManager) {
-    // Full-screen backdrop (transparent — game visible behind)
+  constructor(overlay: HtmlOverlayManager) {
     this.backdrop = document.createElement("div");
     Object.assign(this.backdrop.style, {
       position: "absolute",
       inset: "0",
-      background: "rgba(0,0,0,0.35)",
+      background: "rgba(0, 0, 0, 0.65)",
+      backdropFilter: "blur(3px)",
       display: "none",
       alignItems: "center",
       justifyContent: "center",
@@ -68,94 +77,136 @@ export class Game1BuyPopup {
     });
     overlay.getRoot().appendChild(this.backdrop);
 
-    // Popup card
     this.card = document.createElement("div");
     Object.assign(this.card.style, {
-      background: "linear-gradient(180deg, #3a0a0a 0%, #1a0000 100%)",
-      border: "2px solid #790001",
-      borderRadius: "16px",
-      padding: "24px 20px",
-      boxSizing: "border-box",
-      minWidth: "340px",
-      maxWidth: "540px",
-      width: "94%",
-      maxHeight: "85vh",
+      background: "radial-gradient(ellipse at top, #2a0f12 0%, #1a0809 70%, #140607 100%)",
+      borderRadius: "18px",
+      padding: "22px",
+      color: "#f5e8d8",
+      fontFamily: FONT_STACK,
+      boxShadow: "0 30px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255, 200, 120, 0.08)",
+      width: "min(580px, 92vw)",
+      maxHeight: "90vh",
       overflowY: "auto",
-      boxShadow: "0 8px 32px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)",
+      position: "relative",
+      boxSizing: "border-box",
     });
     this.backdrop.appendChild(this.card);
 
-    // Title
-    const title = document.createElement("h2");
-    title.textContent = "Kjøp billetter";
+    // ── Header ─────────────────────────────────────────────────────────────
+    const header = document.createElement("div");
+    header.style.cssText = "margin-bottom:18px;";
+    const title = document.createElement("div");
+    title.textContent = "Neste spill";
     Object.assign(title.style, {
-      margin: "0 0 20px 0",
-      fontSize: "22px",
-      fontWeight: "700",
-      color: "#ffe83d",
-      textAlign: "center",
+      fontSize: "20px",
+      fontWeight: "500",
+      color: "#f5e8d8",
+      letterSpacing: "-0.01em",
+      lineHeight: "1.1",
     });
-    this.card.appendChild(title);
+    header.appendChild(title);
 
-    // 3-column grid for ticket types
+    const subtitle = document.createElement("div");
+    subtitle.textContent = "STANDARD";
+    Object.assign(subtitle.style, {
+      fontSize: "12px",
+      fontWeight: "600",
+      color: "#f5b841",
+      letterSpacing: "0.14em",
+      marginTop: "3px",
+    });
+    header.appendChild(subtitle);
+
+    this.summaryEl = document.createElement("div");
+    this.summaryEl.style.cssText = "margin-top:6px;";
+    header.appendChild(this.summaryEl);
+
+    this.card.appendChild(header);
+
+    // ── Types grid (2-col) ─────────────────────────────────────────────────
     this.typesContainer = document.createElement("div");
-    this.typesContainer.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;";
+    Object.assign(this.typesContainer.style, {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      rowGap: "16px",
+      columnGap: "65px",
+    });
     this.card.appendChild(this.typesContainer);
 
-    // Separator
-    this.card.appendChild(this.createSep());
+    // ── Separator ──────────────────────────────────────────────────────────
+    const sep = document.createElement("div");
+    sep.style.cssText = "height:1px;background:rgba(245,232,216,0.08);margin:18px 0 14px;";
+    this.card.appendChild(sep);
 
-    // Total row
-    this.totalLabel = document.createElement("div");
-    Object.assign(this.totalLabel.style, {
-      fontSize: "18px",
-      fontWeight: "600",
-      color: "#fff",
-      textAlign: "center",
-      margin: "14px 0 18px",
-    });
-    this.card.appendChild(this.totalLabel);
-
-    // Status message
+    // ── Status message (for 30-brett-grense) ───────────────────────────────
     this.statusMsg = document.createElement("div");
     Object.assign(this.statusMsg.style, {
-      fontSize: "14px",
+      fontSize: "13px",
       color: "#ff6b6b",
       textAlign: "center",
-      margin: "0 0 10px",
-      minHeight: "20px",
+      minHeight: "18px",
+      marginBottom: "8px",
     });
     this.card.appendChild(this.statusMsg);
 
-    // Buttons: Kjøp + Avbryt
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;flex-direction:column;gap:10px;";
+    // ── Total row ──────────────────────────────────────────────────────────
+    const totalRow = document.createElement("div");
+    Object.assign(totalRow.style, {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: "14px",
+    });
 
+    const totalLeft = document.createElement("div");
+    const totalLbl = document.createElement("div");
+    totalLbl.textContent = "Totalt";
+    Object.assign(totalLbl.style, {
+      fontSize: "13px",
+      color: "rgba(245,232,216,0.6)",
+      fontWeight: "500",
+    });
+    this.totalBrettEl = document.createElement("div");
+    this.totalBrettEl.textContent = "0 brett";
+    Object.assign(this.totalBrettEl.style, {
+      fontSize: "22px",
+      fontWeight: "600",
+      color: "#f5e8d8",
+      fontVariantNumeric: "tabular-nums",
+      marginTop: "2px",
+      letterSpacing: "-0.015em",
+    });
+    totalLeft.appendChild(totalLbl);
+    totalLeft.appendChild(this.totalBrettEl);
+    totalRow.appendChild(totalLeft);
+
+    this.totalKrEl = document.createElement("div");
+    this.totalKrEl.textContent = "0 kr";
+    Object.assign(this.totalKrEl.style, {
+      fontSize: "22px",
+      fontWeight: "600",
+      color: "#f5e8d8",
+      fontVariantNumeric: "tabular-nums",
+      letterSpacing: "-0.015em",
+    });
+    totalRow.appendChild(this.totalKrEl);
+    this.card.appendChild(totalRow);
+
+    // ── Buttons ────────────────────────────────────────────────────────────
     this.buyBtn = document.createElement("button");
-    this.buyBtn.textContent = "Kjøp";
+    this.buyBtn.textContent = "Velg brett for å kjøpe";
     this.stylePrimaryBtn(this.buyBtn);
     this.buyBtn.addEventListener("click", () => this.handleBuy());
-    btnRow.appendChild(this.buyBtn);
+    this.card.appendChild(this.buyBtn);
 
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "Avbryt";
     this.styleSecondaryBtn(cancelBtn);
     cancelBtn.addEventListener("click", () => this.hide());
-    btnRow.appendChild(cancelBtn);
-
-    this.card.appendChild(btnRow);
+    this.card.appendChild(cancelBtn);
   }
 
-  /**
-   * Show popup with ticket types from backend.
-   * Each type gets a card with +/- qty selector in a 3-column grid.
-   * If ticketTypes is empty, does nothing (waits for backend data).
-   *
-   * @param alreadyPurchased Antall brett spilleren allerede har kjøpt denne
-   *   runden (typisk `state.myTickets.length`). Speiler Unity
-   *   `Game1PurchaseTicket.cs:69` hvor serveren-gitt ticket-count subtraheres
-   *   fra 30-grensen før plus-knappene evalueres.
-   */
   showWithTypes(
     entryFee: number,
     ticketTypes: Array<{ name: string; type: string; priceMultiplier: number; ticketCount: number }>,
@@ -169,14 +220,12 @@ export class Game1BuyPopup {
 
     for (const tt of ticketTypes) {
       const price = Math.round(entryFee * tt.priceMultiplier);
-      // BIN-688: pass `tt.name` separately from display-name so the
-      // backend gets the canonical colour name ("Small Yellow") regardless
-      // of any UI formatting applied in getDisplayName.
-      this.buildTypeCard(this.getDisplayName(tt), tt.type, tt.name, price, tt.ticketCount);
+      const displayName = this.getDisplayName(tt);
+      this.buildTypeRow(displayName, tt.type, tt.name, price, tt.ticketCount);
     }
 
+    this.statusMsg.textContent = "";
     this.updateTotal();
-    this.buyBtn.textContent = "Kjøp";
     this.backdrop.style.display = "flex";
   }
 
@@ -192,7 +241,6 @@ export class Game1BuyPopup {
     this.onBuy = callback;
   }
 
-  /** Returns the total number of tickets selected across all types. */
   getTotalTicketCount(): number {
     return this.typeRows.reduce((sum, r) => sum + r.qty * r.ticketCount, 0);
   }
@@ -226,193 +274,336 @@ export class Game1BuyPopup {
     return tt.name;
   }
 
-  private buildTypeCard(displayName: string, type: string, canonicalName: string, price: number, ticketCount: number): void {
-    // `displayName` is used for the label (may differ from canonicalName, e.g.
-    // "Traffic Light" vs individual colours). `canonicalName` is the variant
-    // config's `name` field and is what the backend needs to colour pre-round
-    // tickets correctly (BIN-688).
-    const name = displayName;
-    const card = document.createElement("div");
-    Object.assign(card.style, {
-      background: "rgba(0,0,0,0.3)",
-      border: "1px solid rgba(255,255,255,0.12)",
-      borderRadius: "10px",
-      padding: "10px 8px",
+  private buildTypeRow(
+    displayName: string,
+    type: string,
+    canonicalName: string,
+    price: number,
+    ticketCount: number,
+  ): void {
+    const color = ticketColor(canonicalName);
+
+    const row = document.createElement("div");
+    Object.assign(row.style, {
       position: "relative",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: "12px",
+      padding: "10px 10px",
+      margin: "0 -10px",
+      borderRadius: "8px",
+      background: "transparent",
+      transition: "background .15s, box-shadow .15s",
     });
 
-    // X-knapp (delete/clear) — synlig kun når qty > 0. Klient-state, ingen popup.
-    // Mønster fra Unity `Game1ViewPurchaseElvisTicket.cs:17,49-76` (deleteBtn),
-    // tilpasset til vår per-rad UX: X nullstiller qty i stedet for å delete
-    // en ikke-eksisterende server-bong.
-    const clearBtn = document.createElement("button");
-    clearBtn.textContent = "\u00d7";
-    clearBtn.setAttribute("aria-label", `Fjern ${name}`);
-    Object.assign(clearBtn.style, {
-      position: "absolute",
-      top: "4px",
-      right: "4px",
-      width: "22px",
-      height: "22px",
-      borderRadius: "50%",
-      border: "1px solid rgba(255,255,255,0.3)",
-      background: "rgba(0,0,0,0.5)",
-      color: "#fff",
+    // Left: brett-ikon + label + metadata
+    const left = document.createElement("div");
+    left.style.cssText = "display:flex;align-items:center;gap:11px;min-width:0;flex:1;";
+
+    const brettMini = this.createBrettMini(color);
+    left.appendChild(brettMini);
+
+    const info = document.createElement("div");
+    info.style.cssText = "min-width:0;";
+    const label = document.createElement("div");
+    label.textContent = displayName;
+    Object.assign(label.style, {
       fontSize: "14px",
-      lineHeight: "1",
-      fontWeight: "700",
-      cursor: "pointer",
-      padding: "0",
-      display: "none",
-      opacity: "1",
-      transition: "opacity 0.15s",
-      fontFamily: "inherit",
+      fontWeight: "500",
+      color: "#f5e8d8",
+      lineHeight: "1.2",
     });
-    card.appendChild(clearBtn);
+    info.appendChild(label);
 
-    const nameEl = document.createElement("div");
-    nameEl.textContent = ticketCount > 1 ? `${name} (${ticketCount} brett)` : name;
-    Object.assign(nameEl.style, {
-      fontSize: "13px", fontWeight: "600", color: "#fff",
-      textAlign: "center", lineHeight: "1.3", marginBottom: "2px",
+    const meta = document.createElement("div");
+    Object.assign(meta.style, {
+      fontSize: "12px",
+      color: "rgba(245,232,216,0.5)",
+      marginTop: "2px",
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
     });
-    card.appendChild(nameEl);
+    const priceTxt = document.createElement("span");
+    priceTxt.textContent = `${price} kr`;
+    meta.appendChild(priceTxt);
 
-    const priceEl = document.createElement("div");
-    priceEl.textContent = `${price} kr`;
-    Object.assign(priceEl.style, {
-      fontSize: "12px", color: "#ccc", textAlign: "center", marginBottom: "8px",
+    const sep = document.createElement("span");
+    sep.textContent = "·";
+    sep.style.opacity = "0.4";
+    meta.appendChild(sep);
+
+    const brettBadge = document.createElement("span");
+    brettBadge.innerHTML = `${ticketCount}&nbsp;brett`;
+    Object.assign(brettBadge.style, {
+      display: "inline-flex",
+      alignItems: "center",
+      padding: "1px 6px",
+      background: "rgba(255,255,255,0.05)",
+      border: "1px solid rgba(255,255,255,0.06)",
+      borderRadius: "4px",
+      fontSize: "11px",
+      fontWeight: "500",
+      color: "rgba(245,232,216,0.7)",
+      whiteSpace: "nowrap",
+      flexShrink: "0",
     });
-    card.appendChild(priceEl);
+    meta.appendChild(brettBadge);
 
-    const qtyRow = document.createElement("div");
-    qtyRow.style.cssText = "display:flex;align-items:center;justify-content:center;gap:10px;";
+    info.appendChild(meta);
+    left.appendChild(info);
+    row.appendChild(left);
 
+    // Right: stepper (−/count/+)
+    const stepper = document.createElement("div");
+    Object.assign(stepper.style, {
+      display: "inline-flex",
+      alignItems: "center",
+      background: "rgba(255,255,255,0.04)",
+      border: "1px solid rgba(255,255,255,0.08)",
+      borderRadius: "8px",
+      overflow: "hidden",
+      height: "32px",
+      fontFamily: FONT_STACK,
+    });
+
+    const minusBtn = this.createStepBtn("\u2212");
     const qtyLabel = document.createElement("span");
     qtyLabel.textContent = "0";
     Object.assign(qtyLabel.style, {
-      fontSize: "22px", fontWeight: "700", color: "#fff",
-      minWidth: "32px", textAlign: "center",
+      minWidth: "26px",
+      textAlign: "center",
+      fontSize: "14px",
+      fontWeight: "600",
+      color: "rgba(245,232,216,0.55)",
+      fontVariantNumeric: "tabular-nums",
     });
+    const plusBtn = this.createStepBtn("+");
 
-    const minusBtn = this.createRoundBtn("\u2212");
-    const plusBtn = this.createRoundBtn("+");
+    stepper.appendChild(minusBtn);
+    stepper.appendChild(qtyLabel);
+    stepper.appendChild(plusBtn);
+    row.appendChild(stepper);
 
-    const entry = {
+    // Legacy DOM-compat for eksisterende tester: qtyRow er siste child på `row`,
+    // rekkefølge [minus, qtyLabel, plus] matcher forventet struktur.
+
+    const entry: TypeRow = {
       type,
       name: canonicalName,
+      displayName,
+      color,
       price,
       ticketCount,
       qty: 0,
+      row,
       qtyLabel,
       plusBtn,
       minusBtn,
-      clearBtn,
+      stepper,
     };
     this.typeRows.push(entry);
 
     minusBtn.addEventListener("click", () => {
       if (entry.qty > 0) {
         entry.qty--;
-        qtyLabel.textContent = String(entry.qty);
         this.updateTotal();
       }
     });
-
     plusBtn.addEventListener("click", () => {
       if (plusBtn.disabled) return;
       entry.qty++;
-      qtyLabel.textContent = String(entry.qty);
       this.updateTotal();
     });
 
-    clearBtn.addEventListener("click", () => {
-      if (entry.qty === 0) return;
-      // 150ms fade på X-knappen i det raden resettes (UX-valg jf. PR-3-plan).
-      clearBtn.style.opacity = "0";
-      entry.qty = 0;
-      qtyLabel.textContent = "0";
-      this.updateTotal();
-      // updateTotal() skjuler X via display:none når qty=0; opacity nullstilles
-      // via reset i updateTotal slik at neste visning starter på full opacity.
+    this.typesContainer.appendChild(row);
+  }
+
+  /** BrettMini: 3×3 grid med små fargede ruter. */
+  private createBrettMini(color: string): HTMLDivElement {
+    const isLight = color === "#eeeae0";
+    const wrap = document.createElement("div");
+    Object.assign(wrap.style, {
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 5px)",
+      gap: "1.5px",
+      padding: "3px",
+      background: "rgba(0,0,0,0.25)",
+      borderRadius: "3px",
+      border: "1px solid rgba(255,255,255,0.06)",
+      flexShrink: "0",
     });
+    for (let i = 0; i < 9; i++) {
+      const cell = document.createElement("div");
+      Object.assign(cell.style, {
+        width: "5px",
+        height: "5px",
+        background: color,
+        borderRadius: "1px",
+        boxShadow: isLight ? "inset 0 0 0 0.5px rgba(0,0,0,0.1)" : "none",
+      });
+      wrap.appendChild(cell);
+    }
+    return wrap;
+  }
 
-    qtyRow.appendChild(minusBtn);
-    qtyRow.appendChild(qtyLabel);
-    qtyRow.appendChild(plusBtn);
-    card.appendChild(qtyRow);
-
-    this.typesContainer.appendChild(card);
+  private createStepBtn(text: string): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.textContent = text;
+    Object.assign(btn.style, {
+      width: "30px",
+      height: "100%",
+      border: "none",
+      background: "transparent",
+      color: "rgba(245,232,216,0.75)",
+      fontSize: "15px",
+      cursor: "pointer",
+      padding: "0",
+      fontFamily: FONT_STACK,
+    });
+    return btn;
   }
 
   /**
-   * Rekalkuler total, status-melding og per-rad plus/X-knapp tilgjengelighet.
+   * Rekalkuler total, status-melding, aktiv-styling og plus-knapp state.
    *
-   * Vektet logikk: `remaining = MAX - alreadyPurchased - Σ(qty × ticketCount)`.
-   * Plus-knapp for rad disables når å legge til én til ville overskride remaining
-   * (dvs. når `ticketCount > remaining`). Mønster fra Unity
+   * Vektet: `remaining = MAX - alreadyPurchased - Σ(qty × ticketCount)`.
+   * Plus-knapp disables når ticketCount > remaining. Fra Unity
    * `PrefabGame1TicketPurchaseSubType.cs:48-58,76` (`AllowMorePurchase`).
-   *
-   * Edge case: dersom `alreadyPurchased >= MAX` skjules alle plus-knapper, buy
-   * disables, og en dedikert melding vises.
    */
   private updateTotal(): void {
-    const total = this.typeRows.reduce((sum, r) => sum + r.qty * r.price, 0);
-    const weightedSelected = this.typeRows.reduce((sum, r) => sum + r.qty * r.ticketCount, 0);
-    const remaining = MAX_WEIGHTED_TICKETS - this.alreadyPurchased - weightedSelected;
-
-    this.totalLabel.textContent = `Totalt: ${total} kr`;
-
-    // Edge case: spiller har allerede nådd 30 → ingen flere brett kan legges til.
+    const totalKr = this.typeRows.reduce((sum, r) => sum + r.qty * r.price, 0);
+    const totalBrett = this.typeRows.reduce((sum, r) => sum + r.qty * r.ticketCount, 0);
+    const remaining = MAX_WEIGHTED_TICKETS - this.alreadyPurchased - totalBrett;
     const atHardCap = this.alreadyPurchased >= MAX_WEIGHTED_TICKETS;
 
-    for (const row of this.typeRows) {
-      // Plus disables når rad-vekten ikke får plass i remaining, eller ved hard cap.
-      const disable = atHardCap || row.ticketCount > remaining;
-      row.plusBtn.disabled = disable;
-      row.plusBtn.style.opacity = disable ? "0.35" : "1";
-      row.plusBtn.style.cursor = disable ? "not-allowed" : "pointer";
+    // Oppdater total-visning
+    this.totalKrEl.textContent = `${totalKr} kr`;
+    this.totalBrettEl.textContent = `${totalBrett} brett`;
 
-      // X-knapp synlig kun når qty > 0. Reset opacity til 1 når vi skjuler den
-      // slik at neste visning starter rent (pairs med fade-out i onClick).
-      if (row.qty > 0) {
-        row.clearBtn.style.display = "block";
-        row.clearBtn.style.opacity = "1";
-      } else {
-        row.clearBtn.style.display = "none";
-        row.clearBtn.style.opacity = "1";
-      }
+    // Per-rad: aktiv/inaktiv styling + plus-disabling + qty-label
+    for (const r of this.typeRows) {
+      r.qtyLabel.textContent = String(r.qty);
+      const active = r.qty > 0;
+
+      // Qty-label farge
+      r.qtyLabel.style.color = active ? "#f5b841" : "rgba(245,232,216,0.55)";
+
+      // Stepper-pill styling — aktiv = gyllen glow
+      r.stepper.style.background = active ? "rgba(245, 184, 65, 0.12)" : "rgba(255,255,255,0.04)";
+      r.stepper.style.border = `1px solid ${active ? "rgba(245, 184, 65, 0.4)" : "rgba(255,255,255,0.08)"}`;
+
+      // Row-level highlight
+      r.row.style.background = active ? "rgba(245,184,65,0.05)" : "transparent";
+      r.row.style.boxShadow = active ? "inset 0 0 0 1px rgba(245,184,65,0.18)" : "none";
+
+      // Plus-disabling
+      const disable = atHardCap || r.ticketCount > remaining;
+      r.plusBtn.disabled = disable;
+      r.plusBtn.style.opacity = disable ? "0.35" : "1";
+      r.plusBtn.style.cursor = disable ? "not-allowed" : "pointer";
     }
 
-    // Status-melding og buy-knapp state
+    // Status-melding
     if (atHardCap) {
       this.statusMsg.style.color = "#ffe83d";
       this.statusMsg.textContent = "Du har maks 30 brett denne runden";
-      this.buyBtn.disabled = true;
-      this.buyBtn.style.opacity = "0.5";
-      this.buyBtn.style.cursor = "default";
-      return;
-    }
-
-    if (weightedSelected === 0) {
+    } else if (totalBrett === 0) {
       this.statusMsg.textContent = "";
-      this.buyBtn.disabled = true;
-      this.buyBtn.style.opacity = "0.5";
-      this.buyBtn.style.cursor = "default";
-      return;
-    }
-
-    if (remaining === 0) {
-      // Sum av alreadyPurchased + selected == MAX → grønn "maks valgt"-melding.
+    } else if (remaining === 0) {
       this.statusMsg.style.color = "#81c784";
       this.statusMsg.textContent = "Maks 30 brett valgt";
     } else {
       this.statusMsg.textContent = "";
     }
 
-    this.buyBtn.disabled = false;
-    this.buyBtn.style.opacity = "1";
-    this.buyBtn.style.cursor = "pointer";
+    // SelectedSummary pills
+    this.renderSummary();
+
+    // Buy-knapp state
+    const canBuy = !atHardCap && totalBrett > 0;
+    this.buyBtn.disabled = !canBuy;
+    if (canBuy) {
+      this.buyBtn.textContent = `Kjøp ${totalBrett} brett · ${totalKr} kr`;
+      this.buyBtn.style.background = "linear-gradient(180deg, #ef4444 0%, #b91c1c 100%)";
+      this.buyBtn.style.color = "#fff";
+      this.buyBtn.style.cursor = "pointer";
+      this.buyBtn.style.boxShadow = "0 4px 14px rgba(220,38,38,0.35), inset 0 1px 0 rgba(255,255,255,0.2)";
+    } else {
+      this.buyBtn.textContent = "Velg brett for å kjøpe";
+      this.buyBtn.style.background = "rgba(220, 38, 38, 0.25)";
+      this.buyBtn.style.color = "rgba(245,232,216,0.4)";
+      this.buyBtn.style.cursor = "not-allowed";
+      this.buyBtn.style.boxShadow = "none";
+    }
+  }
+
+  private renderSummary(): void {
+    const selected = this.typeRows.filter((r) => r.qty > 0);
+    this.summaryEl.innerHTML = "";
+
+    if (selected.length === 0) {
+      const empty = document.createElement("div");
+      empty.textContent = "Ingen brett valgt";
+      Object.assign(empty.style, {
+        fontSize: "12px",
+        color: "rgba(245,232,216,0.4)",
+        fontStyle: "italic",
+        marginTop: "2px",
+      });
+      this.summaryEl.appendChild(empty);
+      return;
+    }
+
+    const wrap = document.createElement("div");
+    Object.assign(wrap.style, {
+      display: "flex",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: "6px",
+      marginTop: "6px",
+    });
+
+    const label = document.createElement("span");
+    label.textContent = "Du kjøper:";
+    Object.assign(label.style, {
+      fontSize: "12px",
+      color: "rgba(245,232,216,0.55)",
+      marginRight: "2px",
+    });
+    wrap.appendChild(label);
+
+    for (const r of selected) {
+      const pill = document.createElement("span");
+      Object.assign(pill.style, {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        background: "rgba(245,184,65,0.1)",
+        border: "1px solid rgba(245,184,65,0.25)",
+        borderRadius: "999px",
+        padding: "3px 9px 3px 6px",
+        fontSize: "12px",
+        color: "#f5e8d8",
+        fontWeight: "500",
+      });
+      const dot = document.createElement("span");
+      Object.assign(dot.style, {
+        width: "10px",
+        height: "10px",
+        borderRadius: "2px",
+        background: r.color,
+        boxShadow: r.color === "#eeeae0"
+          ? "inset 0 0 0 1px rgba(0,0,0,0.15)"
+          : "inset 0 1px 0 rgba(255,255,255,0.2)",
+      });
+      pill.appendChild(dot);
+      pill.appendChild(document.createTextNode(`${r.qty}× ${r.displayName}`));
+      wrap.appendChild(pill);
+    }
+
+    this.summaryEl.appendChild(wrap);
   }
 
   private handleBuy(): void {
@@ -421,63 +612,45 @@ export class Game1BuyPopup {
     this.buyBtn.style.opacity = "0.6";
     this.buyBtn.textContent = "Vennligst vent...";
     this.statusMsg.textContent = "";
-    // BIN-688: include `name` so the backend can colour each pre-round
-    // ticket according to the specific variant (Small Yellow vs Small
-    // Purple — both have `type === "small"`, name is the distinguisher).
     const selections = this.typeRows
       .filter((r) => r.qty > 0)
       .map((r) => ({ type: r.type, qty: r.qty, name: r.name }));
     this.onBuy?.(selections);
   }
 
-  private createRoundBtn(text: string): HTMLButtonElement {
-    const btn = document.createElement("button");
-    btn.textContent = text;
-    Object.assign(btn.style, {
-      width: "36px", height: "36px", borderRadius: "50%",
-      border: "2px solid rgba(255,255,255,0.3)",
-      background: "rgba(255,255,255,0.08)",
-      color: "#fff", fontSize: "22px", fontWeight: "700",
-      cursor: "pointer", display: "flex", alignItems: "center",
-      justifyContent: "center", transition: "background 0.15s, opacity 0.15s",
-      fontFamily: "inherit",
-    });
-    btn.addEventListener("mouseenter", () => {
-      if (!btn.disabled) btn.style.background = "rgba(255,255,255,0.18)";
-    });
-    btn.addEventListener("mouseleave", () => {
-      if (!btn.disabled) btn.style.background = "rgba(255,255,255,0.08)";
-    });
-    return btn;
-  }
-
-  private createSep(): HTMLDivElement {
-    const sep = document.createElement("div");
-    sep.style.cssText = "height:1px;background:rgba(255,255,255,0.12);margin:4px 0;";
-    return sep;
-  }
-
   private stylePrimaryBtn(btn: HTMLButtonElement): void {
     Object.assign(btn.style, {
-      padding: "14px", fontSize: "17px", fontWeight: "700",
-      borderRadius: "10px", border: "none",
-      background: "linear-gradient(180deg, #c41030 0%, #8a0020 100%)",
-      color: "#fff", cursor: "pointer", textAlign: "center",
-      fontFamily: "inherit", boxShadow: "0 2px 8px rgba(140,0,20,0.4)",
-      transition: "opacity 0.15s",
+      width: "100%",
+      border: "none",
+      borderRadius: "10px",
+      padding: "13px 16px",
+      background: "rgba(220, 38, 38, 0.25)",
+      color: "rgba(245,232,216,0.4)",
+      fontSize: "14px",
+      fontWeight: "600",
+      fontFamily: "inherit",
+      cursor: "not-allowed",
+      boxShadow: "none",
+      transition: "background .15s, box-shadow .15s",
     });
-    btn.addEventListener("mouseenter", () => { if (!btn.disabled) btn.style.opacity = "0.85"; });
-    btn.addEventListener("mouseleave", () => { if (!btn.disabled) btn.style.opacity = "1"; });
   }
 
   private styleSecondaryBtn(btn: HTMLButtonElement): void {
     Object.assign(btn.style, {
-      padding: "12px", fontSize: "15px", fontWeight: "500",
-      borderRadius: "10px", border: "1.5px solid rgba(255,255,255,0.25)",
-      background: "transparent", color: "#ccc", cursor: "pointer",
-      textAlign: "center", fontFamily: "inherit", transition: "background 0.15s",
+      width: "100%",
+      border: "1px solid rgba(245,232,216,0.14)",
+      borderRadius: "10px",
+      padding: "12px 16px",
+      background: "transparent",
+      color: "rgba(245,232,216,0.85)",
+      fontSize: "14px",
+      fontWeight: "500",
+      fontFamily: "inherit",
+      cursor: "pointer",
+      marginTop: "8px",
+      transition: "background 0.15s",
     });
-    btn.addEventListener("mouseenter", () => { btn.style.background = "rgba(255,255,255,0.08)"; });
+    btn.addEventListener("mouseenter", () => { btn.style.background = "rgba(255,255,255,0.05)"; });
     btn.addEventListener("mouseleave", () => { btn.style.background = "transparent"; });
   }
 }

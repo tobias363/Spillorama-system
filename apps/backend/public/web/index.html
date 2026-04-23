@@ -340,7 +340,7 @@
       display: flex; align-items: center; gap: 0;
       height: 36px;
       border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 10px;
+      border-radius: 20px;
       background: rgba(255,255,255,0.06);
       overflow: hidden;
       flex-shrink: 0;
@@ -379,7 +379,7 @@
       display: flex; align-items: center; gap: 6px;
       padding: 0 14px;
       height: 36px;
-      border-radius: 10px;
+      border-radius: 20px;
       background: rgba(255,255,255,0.07);
       border: 1px solid rgba(255,255,255,0.1);
       font-size: 14px; font-weight: 800;
@@ -401,7 +401,7 @@
       padding: 0 14px;
       height: 36px;
       border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 10px;
+      border-radius: 20px;
       background: rgba(255,255,255,0.07);
       color: rgba(255,255,255,0.9);
       font-family: inherit;
@@ -625,6 +625,15 @@
     }
     .lobby-back-bar.is-visible { display: flex; }
 
+    /* #web-game-container has inline `inset:0` which wins over a regular
+       CSS rule — so we need !important to push the game area below the
+       80px back-bar. DOM-ordered BEFORE .lobby-back-bar, so `~` never
+       matches; use :has() instead (all modern browsers 2023+). */
+    body:has(.lobby-back-bar.is-visible) #web-game-container {
+      top: 80px !important;
+      height: calc(100dvh - 80px) !important;
+    }
+
     /* Left group: logo + back button */
     .game-bar-left {
       display: flex; align-items: center;
@@ -640,7 +649,7 @@
     .lobby-back-btn {
       display: flex; align-items: center; gap: 7px;
       border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 10px;
+      border-radius: 20px;
       padding: 0 16px;
       height: 36px;
       background: rgba(255,255,255,0.07);
@@ -652,6 +661,11 @@
       transition: background 0.15s;
     }
     .lobby-back-btn:hover { background: rgba(255,255,255,0.13); }
+
+    /* Spill-spesifikke handlinger — skjules som default, vises når
+       Game1Controller registrerer window.__gameActions ved mount. */
+    .game-action-btn { display: none; }
+    body.has-game-actions .game-action-btn { display: flex; }
 
     /* Center spacer (game name, optional) */
     .game-bar-title {
@@ -1162,7 +1176,7 @@
       #candy-close-btn { top: 8px; right: 8px; padding: 8px 12px; font-size: 12px; }
 
       /* Game container — account for shorter game bar */
-      .lobby-back-bar.is-visible ~ #web-game-container { top: 52px; height: calc(100dvh - 52px); }
+      body:has(.lobby-back-bar.is-visible) #web-game-container { top: 52px !important; height: calc(100dvh - 52px) !important; }
     }
 
     /* ── Safe area insets (notched phones) ─────────────────────────────── */
@@ -1178,7 +1192,7 @@
       .game-bar-logo-img { height: 24px; }
       .game-bar-title { display: none; }
       .lobby-back-btn { height: 28px; font-size: 12px; }
-      .lobby-back-bar.is-visible ~ #web-game-container { top: 44px; height: calc(100dvh - 44px); }
+      body:has(.lobby-back-bar.is-visible) #web-game-container { top: 44px !important; height: calc(100dvh - 44px) !important; }
     }
 
     body.candy-overlay-open {
@@ -1595,7 +1609,7 @@
   <!-- ═══ 4. GAME TOP BAR (shown when a game is active) ═══════════════════ -->
   <div id="lobby-back-bar" class="lobby-back-bar">
 
-    <!-- Left: logo + tilbake-knapp -->
+    <!-- Left: logo + tilbake-knapp + game-actions -->
     <div class="game-bar-left">
       <a class="game-bar-logo" href="#">
         <img class="game-bar-logo-img" src="logo.png" alt="Spillorama">
@@ -1604,6 +1618,17 @@
       <button class="lobby-back-btn" type="button" onclick="window.returnToShellLobby()">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         Tilbake til lobby
+      </button>
+      <!-- Spill 1-spesifikke handlinger — wired til window.__gameActions
+           som Game1Controller registrerer ved mount. Skjules for andre
+           spill via JS som toggler data-game-slug på baren. -->
+      <button class="lobby-back-btn game-action-btn" data-action="called-numbers" type="button"
+              onclick="window.__gameActions && window.__gameActions.showCalledNumbers && window.__gameActions.showCalledNumbers()">
+        Se oppleste tall
+      </button>
+      <button class="lobby-back-btn game-action-btn" data-action="marker-bg" type="button"
+              onclick="window.__gameActions && window.__gameActions.openMarkerBg && window.__gameActions.openMarkerBg()">
+        Bytt bakgrunn og markør
       </button>
     </div>
 
@@ -1635,11 +1660,6 @@
     </div>
   </div>
 
-  <!-- ═══ 5. SPILLVETT FAB ══════════════════════════════════════════════ -->
-  <button id="spillvett-fab" class="spillvett-fab" type="button" hidden>Spillvett</button>
-
-  <!-- ═══ DEBUG: Ticket Debug Button ═══ -->
-  <button id="ticket-debug-btn" style="position:fixed;bottom:10px;right:120px;z-index:9999;background:#ff6600;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px" onclick="window._showTicketDebug()">🎫 Debug</button>
   <script>
   window._showTicketDebug = function() {
     var jwt = sessionStorage.getItem('spillorama.accessToken') || '';
@@ -2641,9 +2661,13 @@
     document.getElementById('profile-backdrop').addEventListener('click', function () {
       document.getElementById('profile-overlay').classList.remove('is-open');
     });
-    document.getElementById('spillvett-fab').addEventListener('click', function () {
-      window.ShowSpillvettPanel();
-    });
+    // #spillvett-fab fjernet i 6f7cee1e — behold no-op hvis det kommer tilbake.
+    var spillvettFab = document.getElementById('spillvett-fab');
+    if (spillvettFab) {
+      spillvettFab.addEventListener('click', function () {
+        window.ShowSpillvettPanel();
+      });
+    }
 
     /* ── Info panel system ───────────────────────────────────────────── */
 

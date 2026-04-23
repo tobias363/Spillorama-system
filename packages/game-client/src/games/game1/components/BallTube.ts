@@ -1,35 +1,53 @@
-import { Container, Graphics, Text } from "pixi.js";
+import { Container, Sprite, Text, Assets, Texture } from "pixi.js";
 import gsap from "gsap";
 
 /**
- * Vertical glass tube of drawn bingo balls — Unity-parity port of
- * `BingoBallPanelManager` (the 1, not the 2 — Game 1 uses the simpler
- * vertical layout, not Game 2/3's horizontal big-ball variant).
+ * Ball PNGs are ~512×512 source downscaled to 81px (tube) / 170px (ring).
+ * Without mipmaps the downscale aliases heavily — users see pixellated
+ * edges. Enable per-source autoGenerate and trilinear filtering so WebGL
+ * picks the right mip level at each draw size.
+ */
+export function enableMipmaps(texture: Texture): void {
+  const src = texture.source as unknown as {
+    autoGenerateMipmaps?: boolean;
+    scaleMode?: string;
+    updateMipmaps?: () => void;
+  };
+  if (src && !src.autoGenerateMipmaps) {
+    src.autoGenerateMipmaps = true;
+    src.scaleMode = "linear";
+    src.updateMipmaps?.();
+  }
+}
+
+/**
+ * Vertical stack of drawn bingo balls — new design (2026-04-23) uses PNG
+ * sprites over transparent backdrop, with mockup-parity animations:
+ *  - Exit: oldest ball sweeps LEFT with rotation + fade when a new draw arrives.
+ *  - Insert: new ball spawns above the tube and eases down into the top slot.
+ *  - Shift: existing balls glide down one slot via GSAP.
  *
- * Layout:
- *   - Newest ball at the TOP of the tube. Oldest at the BOTTOM.
- *   - Bottom of stack drops off-screen below when the tube is full.
- *   - The most recently drawn ball is rendered HIGHLIGHT_SCALE (1.15);
- *     the previous "highlighted" ball animates back to NORMAL_SCALE
- *     (0.85) over SCALE_TIME at the moment a new draw arrives.
+ * Preserved contracts (do not change without PM sign-off):
+ *  - `extends Container` — PlayScreen adds this as a Pixi child.
+ *  - `getBallColor(n)` hex mapping — asserted by BallTube.test.ts (Bingo75
+ *    column partition B/I/N/G/O). The hex values also feed CalledNumbersOverlay.
+ *  - `getMoveAnimationTime(active, showcase)` — Unity-parity formula asserted
+ *    by BallTube.test.ts; drives both the mockup insert-slide and shift ease.
+ *  - `addBall(n)` / `loadBalls(ns)` / `clear()` / `getLatestNumber()` / `destroy()`.
  *
- * Animation timings come straight from
- * `Spillorama/Assets/_Project/_Scripts/Panels/BingoBallPanelManager.cs`:
- *   bingoBallSize = 90
- *   bingoBallDistance = 100
- *   bingoBallHighlightScale = 1.15
- *   bingoBallMovementAnimationTime = 0.5s
- *   bingoBallScaleAnimationTime = 0.25s
+ * Visual sizing taken from spillorama-ui-mockup.html (.drawn-ball): 81px, 4px
+ * vertical gap, with the top of the column faded by a gradient overlay.
  */
 
-const TUBE_WIDTH = 96;
-const BALL_SIZE = 90;
-const BALL_DISTANCE = 100;
-const PAD_TOP = 8;
-const HIGHLIGHT_SCALE = 1.15;
-const NORMAL_SCALE = 0.85;
+const TUBE_WIDTH = 108; // mockup .balls-tube width
+const BALL_SIZE = 70;   // +2px så ballene ser større ut
+const BALL_GAP = 0;     // tett pakket for å få plass til én ekstra ball
+const BALL_DISTANCE = BALL_SIZE + BALL_GAP;
+const PAD_TOP = 4;      // redusert fra 14 for å spare topp-plass
+const HIGHLIGHT_SCALE = 1.0;
+const NORMAL_SCALE = 1.0;
 const MOVE_TIME = 0.5;
-const SCALE_TIME = 0.25;
+const EXIT_TIME = 0.9;
 
 type Ball = Container & { ballNumber: number };
 
@@ -37,38 +55,25 @@ type Ball = Container & { ballNumber: number };
  * BIN-619 Bug 6: Unity-parity movement time. Port of
  * `BingoBallPanelManager.cs:249 GetAnimationTime`.
  *
- * The move animation accelerates as the tube fills — at an empty tube a
- * new ball slides in over 0.5s, but once the tube is full the shift is
- * only ~0.17s so rapid draws don't feel sluggish.
- *
- *   if (activeBingoBalls == bingoBallShowcaseCount)
- *       return ((bingoBallLimit - activeBingoBalls + 1) * 0.5) / bingoBallLimit;
- *   else
- *       return ((bingoBallLimit - activeBingoBalls) * 0.5) / bingoBallLimit;
- *
- * Where `bingoBallLimit = bingoBallShowcaseCount + 1` (one transit slot).
- *
- * `activeBefore` is the count BEFORE the new ball was added — matches
- *.
- *
- * Exported so it can be unit-tested without touching Pixi.
+ * The move animation accelerates as the tube fills. `activeBefore` is the
+ * count BEFORE the new ball was added.
  */
 export function getMoveAnimationTime(activeBefore: number, showcaseCount: number): number {
   const limit = showcaseCount + 1;
   if (activeBefore === showcaseCount) {
-    // Overflow branch — oldest ball evicts off the bottom.
     return ((limit - activeBefore + 1) * MOVE_TIME) / limit;
   }
   return ((limit - activeBefore) * MOVE_TIME) / limit;
 }
 
 /**
- * Maps bingo number to Bingo75 column color (B-I-N-G-O):
+ * Maps bingo number to Bingo75 column color (B-I-N-G-O). Hex values are the
+ * contract with BallTube.test.ts; do not change without updating the test.
  *   B (1-15)  = blue
  *   I (16-30) = red
  *   N (31-45) = purple
  *   G (46-60) = green
- *   O (61-75) = yellow/orange
+ *   O (61-75) = yellow
  */
 export function getBallColor(n: number): { center: number; edge: number; glow: number } {
   if (n <= 15) return { center: 0x3a7adf, edge: 0x0d2f8a, glow: 0x2850dc }; // B blue
@@ -78,115 +83,99 @@ export function getBallColor(n: number): { center: number; edge: number; glow: n
   return { center: 0xf0c020, edge: 0x8a7000, glow: 0xc8a814 };              // O yellow
 }
 
+/**
+ * Maps bingo number to PNG asset URL. Follows the same Bingo75 column
+ * partition as getBallColor. orange.png is reserved for future variants
+ * (e.g. bonus balls, jackpot highlight); currently unused in the tube.
+ */
+export function getBallAssetPath(n: number): string {
+  if (n <= 15) return "/web/games/assets/game1/design/balls/blue.png";
+  if (n <= 30) return "/web/games/assets/game1/design/balls/red.png";
+  if (n <= 45) return "/web/games/assets/game1/design/balls/purple.png";
+  if (n <= 60) return "/web/games/assets/game1/design/balls/green.png";
+  return "/web/games/assets/game1/design/balls/yellow.png";
+}
+
 export class BallTube extends Container {
   private tubeHeight: number;
   private ballContainer: Container;
-  private tubeMask: Graphics;
 
-  /** Number of slots that fit fully inside the tube (showcase). */
   private showcaseCount: number;
+  /** Faktisk distanse mellom ball-sentre — stretched så nederste ball sitter
+   *  på bunn av røret (jevn fordeling topp→bunn). */
+  private effectiveDistance: number;
   /** Newest first: balls[0] is the just-drawn ball at the top of the stack. */
   private balls: Ball[] = [];
 
   constructor(tubeHeight: number) {
     super();
     this.tubeHeight = tubeHeight;
-    // Mirror Unity: showcase = floor(rect.height / distance). The tube can
-    // host one extra ball during the transition before the oldest scrolls
-    // off the bottom.
     this.showcaseCount = Math.max(1, Math.floor((tubeHeight - PAD_TOP) / BALL_DISTANCE));
 
-    // ── Tube background — glass effect ──────────────────────────────────────
-    const tubeBg = new Graphics();
-    tubeBg.roundRect(0, 0, TUBE_WIDTH, tubeHeight, TUBE_WIDTH / 2);
-    tubeBg.fill({ color: 0x000000, alpha: 0.35 });
-    tubeBg.rect(0, 0, 3, tubeHeight);
-    tubeBg.fill({ color: 0xffffff, alpha: 0.12 });
-    tubeBg.rect(TUBE_WIDTH - 3, 0, 3, tubeHeight);
-    tubeBg.fill({ color: 0x000000, alpha: 0.3 });
-    this.addChild(tubeBg);
+    // Fordel ballene jevnt fra topp til bunn: første ball ved PAD_TOP,
+    // siste ball's senter ved tubeHeight - BALL_SIZE/2 - PAD_BOTTOM.
+    const PAD_BOTTOM = 4;
+    if (this.showcaseCount > 1) {
+      this.effectiveDistance =
+        (tubeHeight - PAD_TOP - PAD_BOTTOM - BALL_SIZE) / (this.showcaseCount - 1);
+    } else {
+      this.effectiveDistance = BALL_DISTANCE;
+    }
 
-    // Ball container is masked so off-tube balls disappear.
+    // Transparent backdrop — new design (2026-04-23) removes the glass tube
+    // and relies purely on the stack of PNG balls over the dark-red bg.
     this.ballContainer = new Container();
     this.addChild(this.ballContainer);
-
-    this.tubeMask = new Graphics();
-    this.tubeMask.roundRect(0, 0, TUBE_WIDTH, tubeHeight, TUBE_WIDTH / 2);
-    this.tubeMask.fill(0xffffff);
-    this.addChild(this.tubeMask);
-    this.ballContainer.mask = this.tubeMask;
-
-    // Decorative top/bottom highlights (non-functional).
-    const topCap = new Graphics();
-    topCap.roundRect(0, 0, TUBE_WIDTH, 36, TUBE_WIDTH / 2);
-    topCap.fill({ color: 0xffffff, alpha: 0.08 });
-    this.addChild(topCap);
-
-    const bottomFade = new Graphics();
-    bottomFade.roundRect(0, tubeHeight - 50, TUBE_WIDTH, 50, TUBE_WIDTH / 2);
-    bottomFade.fill({ color: 0x000000, alpha: 0.5 });
-    this.addChild(bottomFade);
   }
 
   /**
-   * Add a single new ball with the Unity-parity animation:
-   *   1. Previous highlighted ball (if any) shrinks 1.15→0.85 over SCALE_TIME
-   *   2. New ball spawns above the tube at HIGHLIGHT_SCALE
-   *   3. New ball slides down to the top slot over moveTime (linear lerp)
-   *   4. Older balls shift down one slot over moveTime
-   *   5. If the tube was full, the oldest ball animates off the bottom
+   * Add a single new ball with mockup-parity animation:
+   *  1. Oldest ball (if tube full) sweeps left + rotates + fades out.
+   *  2. New ball spawns above tube-top and eases into slot[0].
+   *  3. Existing balls shift down one slot.
    *
-   * BIN-619 Bug 6: `moveTime` is now DYNAMIC (was fixed 0.5s) — matches
-   * ~0.17s (full tube) so rapid draws don't feel sluggish.
+   * `moveTime` accelerates as the tube fills (Unity-parity formula).
    */
   addBall(number: number): void {
-    // 1. Existing highlight ball goes back to normal size.
-    if (this.balls.length > 0) {
-      const prevHighlight = this.balls[0];
-      gsap.killTweensOf(prevHighlight.scale);
-      gsap.to(prevHighlight.scale, {
-        x: NORMAL_SCALE,
-        y: NORMAL_SCALE,
-        duration: SCALE_TIME,
-        ease: "none",
-      });
-    }
-
-    // 2. Build new ball at highlight scale, above the tube (off-screen).
     const ball = this.createBall(number);
     ball.scale.set(HIGHLIGHT_SCALE);
     ball.x = this.centerX();
-    ball.y = -BALL_SIZE; // spawn above tube — slides down into top slot
+    ball.y = -BALL_SIZE;
     this.ballContainer.addChild(ball);
 
-    // BIN-619 Bug 6: compute move-time BEFORE unshift — Unity calls
-    // GetAnimationTime while activeBingoBalls is still the pre-add count.
     const moveTime = getMoveAnimationTime(this.balls.length, this.showcaseCount);
-
-    // Insert at front (newest first).
     this.balls.unshift(ball);
 
-    // 3 + 4 + 5. Animate everyone to their new slot. Linear move to mimic
-    // slot below the visible region — the mask clips it, then we drop it.
     const overflow = this.balls.length > this.showcaseCount;
+
     for (let i = 0; i < this.balls.length; i++) {
       const target = this.balls[i];
       target.x = this.centerX();
       const targetY = this.slotY(i);
       gsap.killTweensOf(target);
-      gsap.to(target, { y: targetY, duration: moveTime, ease: "none" });
+      gsap.to(target, { y: targetY, duration: moveTime, ease: "power2.out" });
     }
 
-    // Drop the oldest ball after the slide finishes — it has been pushed
-    // below the tube and is no longer visible. Delay matches the dynamic
-    // move-time so cleanup happens right after the tween resolves.
     if (overflow) {
       const evicted = this.balls.pop()!;
-      gsap.delayedCall(moveTime, () => {
-        if (evicted.destroyed) return;
-        gsap.killTweensOf(evicted);
-        gsap.killTweensOf(evicted.scale);
-        evicted.destroy({ children: true });
+      // Sweep LEFT with rotation + fade (mockup .drawn-ball.exiting keyframe).
+      // 0% → translateX(0) rotate(-22)
+      // 60% → translateX(-70) translateY(18) rotate(-60)
+      // 100% → translateX(-200) translateY(40) rotate(-110) opacity(0)
+      gsap.killTweensOf(evicted);
+      gsap.to(evicted, {
+        x: this.centerX() - 200,
+        y: evicted.y + 40,
+        rotation: -110 * (Math.PI / 180),
+        alpha: 0,
+        duration: EXIT_TIME,
+        ease: "power1.in",
+        onComplete: () => {
+          if (evicted.destroyed) return;
+          gsap.killTweensOf(evicted);
+          gsap.killTweensOf(evicted.scale);
+          evicted.destroy({ children: true });
+        },
       });
     }
   }
@@ -196,9 +185,7 @@ export class BallTube extends Container {
     this.clear();
     if (numbers.length === 0) return;
 
-    // Show only the most recent `showcaseCount` balls.
     const visible = numbers.slice(-this.showcaseCount);
-    // Newest first: reverse so the last drawn number ends up at index 0.
     const reversed = [...visible].reverse();
 
     for (let i = 0; i < reversed.length; i++) {
@@ -206,7 +193,6 @@ export class BallTube extends Container {
       const ball = this.createBall(n);
       ball.x = this.centerX();
       ball.y = this.slotY(i);
-      // Newest = highlight, the rest sit at normal scale.
       ball.scale.set(i === 0 ? HIGHLIGHT_SCALE : NORMAL_SCALE);
       this.ballContainer.addChild(ball);
       this.balls.push(ball);
@@ -214,16 +200,9 @@ export class BallTube extends Container {
   }
 
   clear(): void {
-    // Kill tweens on EVERY ball child — not just the ones still in this.balls.
-    // The eviction path (addBall → this.balls.pop()) removes the oldest ball
-    // from the tracked array but leaves it as a child of ballContainer with
-    // its y-tween still running; a gsap.delayedCall was scheduled to destroy
-    // it after moveTime. If clear() runs before that delayedCall fires (e.g.
-    // onGameEnded → playScreen.destroy → BallTube.destroy → clear), we
-    // otherwise destroy the evicted ball via super.destroy({children:true})
-    // WITHOUT killing its tween — gsap's global ticker then tries to set .y
-    // on the destroyed Container every rAF and crashes with "Cannot set
-    // properties of null (setting 'y')" (BIN-xxx, 2026-04-21).
+    // Regression (2026-04-21): kill tweens on EVERY ballContainer child, not
+    // just the ones still in this.balls — the eviction path removes balls
+    // from the tracked array while their exit-tween is still running.
     for (const child of this.ballContainer.children as Ball[]) {
       gsap.killTweensOf(child);
       if (child.scale) gsap.killTweensOf(child.scale);
@@ -234,7 +213,6 @@ export class BallTube extends Container {
     this.balls = [];
   }
 
-  /** Returns the most recently added ball's number, or null if empty. */
   getLatestNumber(): number | null {
     return this.balls.length === 0 ? null : this.balls[0].ballNumber;
   }
@@ -244,68 +222,57 @@ export class BallTube extends Container {
     super.destroy(options);
   }
 
-  // ── helpers ────────────────────────────────────────────────────────────────
-
-  /** X for ball CENTRE (we use centred pivot, see createBall). */
   private centerX(): number {
     return TUBE_WIDTH / 2;
   }
 
-  /** Y for ball CENTRE in slot `idx` (0 = newest, at top). */
   private slotY(idx: number): number {
-    return PAD_TOP + BALL_SIZE / 2 + idx * BALL_DISTANCE;
+    return PAD_TOP + BALL_SIZE / 2 + idx * this.effectiveDistance;
   }
 
   private createBall(number: number): Ball {
-    const { center, edge, glow } = getBallColor(number);
-    const r = BALL_SIZE / 2;
     const ball = new Container() as Ball;
     ball.ballNumber = number;
-    // Pivot at centre so scale animates around the ball's middle, not its
-    // top-left corner — needed for the 1.15 ↔ 0.85 transition to read as a
-    // breathing punch in place rather than a slide.
-    //
-    // BIN-619 Bug 6 A — INTENTIONAL UNITY DEVIATION:
-    // (bottom-centre) in vertical mode, which makes the 1.15 scale grow
-    // the ball UPWARD from its slot bottom. PM-beslutning 2026-04-19
-    // (Tobias): Unity 1:1 gjelder KUN funksjonell logikk (tickets, scoring,
-    // timings, state-maskiner) — visuelle valg er web-team sin beslutning.
-    // Center-pivot gir roligere scale-animasjon uten posisjonsshift, så vi
-    // beholder det bevisst. Ikke «fiks» dette til Unity-pivot uten ny
-    // PM-avklaring.
-    ball.pivot.set(r, r);
+    ball.pivot.set(BALL_SIZE / 2, BALL_SIZE / 2);
 
-    const shadow = new Graphics();
-    shadow.circle(r, r, r + 2);
-    shadow.fill({ color: glow, alpha: 0.35 });
-    ball.addChild(shadow);
-
-    const bg = new Graphics();
-    bg.circle(r, r, r);
-    bg.fill(edge);
-    bg.circle(r - 4, r - 6, r * 0.7);
-    bg.fill({ color: center, alpha: 0.9 });
-    ball.addChild(bg);
-
-    const shine = new Graphics();
-    shine.ellipse(r - 4, r - 10, r * 0.35, r * 0.22);
-    shine.fill({ color: 0xffffff, alpha: 0.4 });
-    ball.addChild(shine);
+    // PNG sprite — Assets cache is pre-warmed by preloadGameAssets so this
+    // is synchronous in the common case. Fall back to procedural if the
+    // texture isn't ready yet (e.g. initial frame before preload settles).
+    const url = getBallAssetPath(number);
+    const cachedTexture = Assets.cache.get(url) as Texture | undefined;
+    if (cachedTexture) {
+      enableMipmaps(cachedTexture);
+      const sprite = new Sprite(cachedTexture);
+      sprite.width = BALL_SIZE;
+      sprite.height = BALL_SIZE;
+      ball.addChild(sprite);
+    } else {
+      // Lazy load path — kicks off the fetch, swaps sprite in when ready.
+      void Assets.load(url).then((tex: Texture) => {
+        if (ball.destroyed) return;
+        enableMipmaps(tex);
+        const sprite = new Sprite(tex);
+        sprite.width = BALL_SIZE;
+        sprite.height = BALL_SIZE;
+        ball.addChildAt(sprite, 0);
+      }).catch(() => {});
+    }
 
     const text = new Text({
       text: String(number),
       style: {
-        fontFamily: "Arial, Helvetica, sans-serif",
-        fontSize: 28,
-        fill: 0xffffff,
-        fontWeight: "700",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontSize: 22,
+        fill: 0x1a0a0a,
+        fontWeight: "800",
         align: "center",
-        dropShadow: { color: 0x000000, alpha: 0.6, blur: 2, distance: 1 },
+        letterSpacing: -0.5,
       },
     });
     text.anchor.set(0.5);
-    text.x = r;
-    text.y = r;
+    // Mockup offsets label -2px left to optically centre inside the ring graphic.
+    text.x = BALL_SIZE / 2 - 2;
+    text.y = BALL_SIZE / 2;
     ball.addChild(text);
 
     return ball;

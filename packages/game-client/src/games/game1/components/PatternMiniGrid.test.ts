@@ -9,7 +9,10 @@
 import { describe, it, expect } from "vitest";
 import { PatternMiniGrid } from "./PatternMiniGrid.js";
 
-const FILL_COLOR = "#ffe83d";
+// 2026-04-23 redesign: fill is now a linear-gradient (yellow → orange) per
+// mockup `.bingo-cell.hit`. Detect "hit" cells via any substring that only
+// appears on the filled variant — we use the unique gradient keyword.
+const FILL_BG_KEYWORD = "linear-gradient";
 const CENTER_INDEX = 12;
 const GRID_SIZE = 5;
 
@@ -29,7 +32,7 @@ function asInternals(grid: PatternMiniGrid): MiniGridInternals {
 function filledCellIndices(cells: HTMLDivElement[]): number[] {
   const out: number[] = [];
   for (let i = 0; i < cells.length; i++) {
-    if (cells[i].style.background === FILL_COLOR) out.push(i);
+    if (cells[i].style.background.includes(FILL_BG_KEYWORD)) out.push(i);
   }
   return out;
 }
@@ -123,7 +126,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN vertikale kolonner", () => {
       { axis: "col", index: 1 },
     ]);
     expect(filledCellIndices(grid.cells).length).toBe(10);
-    expect(grid.cells[CENTER_INDEX].style.background).not.toBe(FILL_COLOR);
+    expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
 
     // Kol 0 + kol 2 — kol 2 krysser center
     grid.highlightLines([
@@ -131,7 +134,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN vertikale kolonner", () => {
       { axis: "col", index: 2 },
     ]);
     expect(filledCellIndices(grid.cells).length).toBe(9);
-    expect(grid.cells[CENTER_INDEX].style.background).not.toBe(FILL_COLOR);
+    expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
     grid.destroy();
   });
 
@@ -143,7 +146,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN vertikale kolonner", () => {
       const usedCols = new Set(combo.map((l) => l.index));
       const missingCol = [0, 1, 2, 3, 4].find((c) => !usedCols.has(c))!;
       for (const idx of colCellIndices(missingCol)) {
-        expect(grid.cells[idx].style.background).not.toBe(FILL_COLOR);
+        expect(grid.cells[idx].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
       }
     }
     grid.destroy();
@@ -154,7 +157,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN vertikale kolonner", () => {
     for (const phase of [1, 2, 3, 4]) {
       for (const combo of grid.getPhaseCombinations(phase)) {
         grid.highlightLines(combo);
-        expect(grid.cells[CENTER_INDEX].style.background).not.toBe(FILL_COLOR);
+        expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
       }
     }
     grid.destroy();

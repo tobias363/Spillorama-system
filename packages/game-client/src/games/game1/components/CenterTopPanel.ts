@@ -16,181 +16,256 @@ export interface CenterTopCallbacks {
 }
 
 /**
- * HTML overlay for game info (badge, prize rows) and action buttons.
+ * Redesign 2026-04-23 — mockup `.center-top`:
+ *   [combo-panel: 5×5 mini-grid | prize pills]  [action-buttons-panel]
  *
- * Positioned in the center-top of the play area. Shows the current game's
- * pattern prizes and provides quick-action buttons.
+ * - One active pattern mini-grid (not one per row — simpler, matches mockup).
+ * - Prize pills for each pattern: completed (strikethrough, dim), active
+ *   (yellow border), and inactive (muted).
+ * - Jackpot display moved into this panel (mockup `.jackpot-display`).
+ * - Primary actions kept: Forhåndskjøp + Kjøp flere brett.
+ * - Secondary callbacks (lucky-number, settings, marker-bg, cancel-tickets,
+ *   show-called-numbers) are PRESERVED in the interface but don't render
+ *   visible buttons — Se oppleste tall + Bytt bakgrunn belong in the
+ *   web-shell topnav in the new design. Callback shape stays so PlayScreen
+ *   can rewire them later without another API break.
  *
- * Button behaviour (matching Unity):
- * - "Se oppleste tall" — toggles CalledNumbersOverlay
- * - "Forhåndskjøp" — arms bet for next round (bet:arm)
- * - "Bytt bakgrunn" — background change (placeholder)
- * - "Kjøp flere brett" — arms bet for next round (bet:arm), same as Unity
+ * Also: A6 "Start spill" host button — visible only when canStartNow.
  */
 export class CenterTopPanel {
   private root: HTMLDivElement;
-  private badgeEl: HTMLDivElement;
-  private prizeRowsEl: HTMLDivElement;
+  private gameNameEl: HTMLDivElement;
+  private jackpotEl: HTMLDivElement;
+  private jackpotPrizeEl: HTMLSpanElement;
+  private gridHostEl: HTMLDivElement;
+  private prizeListEl: HTMLDivElement;
   private callbacks: CenterTopCallbacks;
-  private buyMoreBtn: HTMLButtonElement | null = null;
-  private preBuyBtn: HTMLButtonElement | null = null;
-  private cancelBtn: HTMLButtonElement | null = null;
-  /** A6: Host manual start button — visible only when canStartNow === true. */
+  private buyMoreBtn: HTMLButtonElement;
+  private preBuyBtn: HTMLButtonElement;
   private startGameBtn: HTMLButtonElement;
+
+  private activeGrid: PatternMiniGrid | null = null;
+  private activePatternId: string | null = null;
 
   constructor(overlay: HtmlOverlayManager, callbacks: CenterTopCallbacks = {}) {
     this.callbacks = callbacks;
 
+    // Visual styling (border, gradient, shadow) moved to `top-group-wrapper`
+    // in PlayScreen so player-info + combo + actions all sit inside one
+    // visible container (PM 2026-04-23: "disse er fortsatt ikke et element").
+    // This root is now a plain flex row holding combo + actions.
     this.root = overlay.createElement("center-top", {
-      flex: "1",
+      display: "flex",
+      flexDirection: "row",
+      alignItems: "stretch",
+      alignSelf: "flex-start",
+      pointerEvents: "auto",
+    });
+
+    // ── Combo panel (left half: grid + prize pills) ────────────────────────
+    const combo = document.createElement("div");
+    Object.assign(combo.style, {
+      padding: "15px 26px",
       display: "flex",
       flexDirection: "column",
-      padding: "18px 0",
-      marginLeft: "40px",
-      marginRight: "40px",
+      justifyContent: "center",
+      width: "376px",
+      borderLeft: "1px solid rgba(255, 120, 50, 0.2)",
+      boxShadow: "inset 10px 0 20px rgba(0, 0, 0, 0.15)",
     });
 
-    // Top row: game info + action buttons
-    const topRow = document.createElement("div");
-    topRow.style.cssText = "display:flex;flex-direction:row;align-items:flex-start;gap:40px;";
+    const comboBody = document.createElement("div");
+    Object.assign(comboBody.style, {
+      display: "flex",
+      gap: "20px",
+      justifyContent: "space-between",
+      alignItems: "stretch",
+    });
 
-    // Game info column
-    const gameInfo = document.createElement("div");
-    gameInfo.style.cssText = "display:flex;flex-direction:column;gap:6px;";
+    // Grid column (PatternMiniGrid is injected in updatePatterns)
+    this.gridHostEl = document.createElement("div");
+    Object.assign(this.gridHostEl.style, {
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "center",
+      flex: "0 0 auto",
+    });
+    comboBody.appendChild(this.gridHostEl);
 
-    this.badgeEl = document.createElement("div");
-    Object.assign(this.badgeEl.style, {
-      display: "inline-block",
-      background: "#b06010",
-      color: "#fff",
-      fontSize: "13px",
+    // Prize pill list column
+    this.prizeListEl = document.createElement("div");
+    Object.assign(this.prizeListEl.style, {
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "center",
+      alignItems: "flex-end",
+      gap: "8px",
+      flex: "1",
+    });
+    comboBody.appendChild(this.prizeListEl);
+
+    combo.appendChild(comboBody);
+    this.root.appendChild(combo);
+
+    // ── Action buttons panel (right half) ──────────────────────────────────
+    const actions = document.createElement("div");
+    Object.assign(actions.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "9px",
+      padding: "14px 25px 5px 25px",
+      borderLeft: "1px solid rgba(255, 120, 50, 0.2)",
+      boxShadow: "inset 10px 0 20px rgba(0, 0, 0, 0.15)",
+      justifyContent: "flex-start",
+      // Fast bredde så kolonnen ikke krymper når "Forhåndskjøp til dagens
+      // spill" byttes ut med kortere "Kjøp flere brett"-tekst.
+      width: "245px",
+      boxSizing: "border-box",
+      flexShrink: "0",
+    });
+
+    // Game name (e.g. "GAME 2: KOMBINERTINNSATS")
+    this.gameNameEl = document.createElement("div");
+    Object.assign(this.gameNameEl.style, {
+      fontSize: "11px",
       fontWeight: "700",
-      padding: "5px 16px",
-      borderRadius: "6px",
-      marginBottom: "10px",
-      width: "fit-content",
+      color: "#ffffff",
+      padding: "2px 0",
+      letterSpacing: "0.5px",
+      whiteSpace: "nowrap",
+      textAlign: "center",
+      marginBottom: "2px",
     });
-    this.badgeEl.textContent = "Bingo";
-    gameInfo.appendChild(this.badgeEl);
+    this.gameNameEl.textContent = "HOVEDSPILL 1";
+    actions.appendChild(this.gameNameEl);
 
-    this.prizeRowsEl = document.createElement("div");
-    this.prizeRowsEl.style.cssText = "font-size:16px;color:#ddd;line-height:2;";
-    gameInfo.appendChild(this.prizeRowsEl);
-
-    topRow.appendChild(gameInfo);
-
-    // Action buttons (2x2 grid)
-    const actionsGrid = document.createElement("div");
-    actionsGrid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-top:2px;";
-
-    const buttons: { label: string; key: keyof CenterTopCallbacks; ref?: "buyMore" | "preBuy" | "cancel" }[] = [
-      { label: "Se oppleste tall", key: "onShowCalledNumbers" },
-      { label: "Forhåndskjøp", key: "onPreBuy", ref: "preBuy" },
-      { label: "Heldig tall", key: "onSelectLuckyNumber" },
-      { label: "Kjøp flere brett", key: "onBuyMoreTickets", ref: "buyMore" },
-      { label: "Markør/bakgrunn", key: "onOpenMarkerBg" },
-      { label: "Innstillinger", key: "onOpenSettings" },
-      { label: "Avbestill bonger", key: "onCancelTickets", ref: "cancel" },
-    ];
-
-    for (const { label, key, ref } of buttons) {
-      const btn = document.createElement("button");
-      btn.textContent = label;
-      Object.assign(btn.style, {
-        background: "rgba(0,0,0,0.25)",
-        border: "1.5px solid rgba(255,255,255,0.5)",
-        borderRadius: "22px",
-        padding: "9px 22px",
-        fontSize: "14px",
-        color: "#eee",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        backdropFilter: "blur(2px)",
-        width: "100%",
-        textAlign: "center",
-        fontFamily: "inherit",
-      });
-      btn.addEventListener("mouseenter", () => {
-        if (!btn.disabled) btn.style.background = "rgba(255,255,255,0.1)";
-      });
-      btn.addEventListener("mouseleave", () => {
-        if (!btn.disabled) btn.style.background = "rgba(0,0,0,0.25)";
-      });
-      btn.addEventListener("click", () => {
-        this.callbacks[key]?.();
-      });
-      actionsGrid.appendChild(btn);
-
-      if (ref === "buyMore") this.buyMoreBtn = btn;
-      if (ref === "preBuy") this.preBuyBtn = btn;
-      if (ref === "cancel") { this.cancelBtn = btn; btn.style.borderColor = "rgba(239,83,80,0.6)"; btn.style.color = "#ef5350"; }
-    }
-
-    topRow.appendChild(actionsGrid);
-
-    // A6: Host manual start button — prominent action button, hidden by default
-    this.startGameBtn = document.createElement("button");
-    this.startGameBtn.textContent = "Start spill";
-    Object.assign(this.startGameBtn.style, {
+    // Jackpot display
+    this.jackpotEl = document.createElement("div");
+    Object.assign(this.jackpotEl.style, {
       display: "none",
-      background: "linear-gradient(180deg, #2e7d32, #1b5e20)",
-      border: "2px solid #4caf50",
-      borderRadius: "10px",
-      padding: "12px 32px",
-      fontSize: "16px",
-      fontWeight: "700",
+      fontSize: "11px",
+      fontWeight: "800",
       color: "#fff",
-      cursor: "pointer",
-      fontFamily: "inherit",
-      marginTop: "12px",
-      alignSelf: "flex-start",
-      boxShadow: "0 2px 8px rgba(76,175,80,0.4)",
+      whiteSpace: "nowrap",
+      textAlign: "center",
+      marginBottom: "6px",
+      textShadow: "0 2px 4px rgba(0, 0, 0, 0.8)",
+      letterSpacing: "0.5px",
     });
-    this.startGameBtn.addEventListener("mouseenter", () => {
-      this.startGameBtn.style.background = "linear-gradient(180deg, #388e3c, #2e7d32)";
+    const jackpotLabel = document.createElement("span");
+    jackpotLabel.textContent = "";
+    this.jackpotEl.appendChild(jackpotLabel);
+    this.jackpotPrizeEl = document.createElement("span");
+    Object.assign(this.jackpotPrizeEl.style, {
+      color: "#ffcc00",
+      fontSize: "13px",
     });
-    this.startGameBtn.addEventListener("mouseleave", () => {
-      this.startGameBtn.style.background = "linear-gradient(180deg, #2e7d32, #1b5e20)";
-    });
-    this.startGameBtn.addEventListener("click", () => {
-      this.callbacks.onStartGame?.();
-    });
+    this.jackpotEl.appendChild(this.jackpotPrizeEl);
+    actions.appendChild(this.jackpotEl);
 
-    this.root.appendChild(topRow);
-    this.root.appendChild(this.startGameBtn);
+    this.preBuyBtn = this.createActionButton("Forhåndskjøp til dagens spill", () => this.callbacks.onPreBuy?.());
+    actions.appendChild(this.preBuyBtn);
+
+    this.buyMoreBtn = this.createActionButton("Kjøp flere brett", () => this.callbacks.onBuyMoreTickets?.());
+    actions.appendChild(this.buyMoreBtn);
+
+    // A6: host-only manual start — hidden until scheduler says canStartNow.
+    this.startGameBtn = this.createActionButton("Start spill", () => this.callbacks.onStartGame?.(), {
+      background: "linear-gradient(180deg, rgba(46, 125, 50, 0.6), rgba(27, 94, 32, 0.8))",
+      borderColor: "rgba(76, 175, 80, 0.6)",
+    });
+    this.startGameBtn.style.display = "none";
+    actions.appendChild(this.startGameBtn);
+
+    this.root.appendChild(actions);
   }
 
-  private patternGrids: PatternMiniGrid[] = [];
-  /**
-   * Previous payout amount per patternId — used to detect payout changes
-   * and trigger the flash animation on the `txtAmount` span. Mirrors
-   * which writes `txtAmount.text = $"{amount} kr"`. Unity only updates text,
-   * but product-side wants an animated flash to signal the change to
-   * players — we add that here (PR-5 C3).
-   */
+  private createActionButton(
+    label: string,
+    onClick: () => void,
+    overrides?: { background?: string; borderColor?: string },
+  ): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    Object.assign(btn.style, {
+      background: overrides?.background ?? "rgba(120, 20, 20, 0.4)",
+      backdropFilter: "blur(6px)",
+      border: `1px solid ${overrides?.borderColor ?? "rgba(255, 100, 100, 0.2)"}`,
+      borderRadius: "10px",
+      padding: "9px 12px",
+      color: "#ffffff",
+      fontSize: "11px",
+      fontWeight: "700",
+      whiteSpace: "nowrap",
+      cursor: "pointer",
+      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 100, 100, 0.1)",
+      transition: "all 0.15s ease-out",
+      fontFamily: "inherit",
+    });
+    btn.addEventListener("mouseenter", () => {
+      if (btn.disabled) return;
+      btn.style.background = "linear-gradient(180deg, rgba(60,20,20,0.5), rgba(25,5,5,0.7))";
+      btn.style.borderColor = "rgba(255,255,255,0.5)";
+      btn.style.boxShadow = "0 6px 16px rgba(0,0,0,0.7), inset 0 1px 2px rgba(255,255,255,0.3)";
+      btn.style.transform = "translateY(-1px)";
+    });
+    btn.addEventListener("mouseleave", () => {
+      if (btn.disabled) return;
+      btn.style.background = overrides?.background ?? "rgba(120, 20, 20, 0.4)";
+      btn.style.borderColor = overrides?.borderColor ?? "rgba(255, 100, 100, 0.2)";
+      btn.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 100, 100, 0.1)";
+      btn.style.transform = "";
+    });
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
   private lastAmountByPatternId = new Map<string, number>();
-  /**
-   * Memo of the last-rendered inputs so we skip the expensive `innerHTML = ""`
-   * + rebuild when nothing actually changed. `PlayScreen.update()` calls this
-   * on every room:update — without the memo, the prize-rows area flashed
-   * (DOM-nuke + re-create) on every ball draw and every player-join event.
-   */
   private lastPatternsSignature: string | null = null;
 
   updatePatterns(patterns: PatternDefinition[], patternResults: PatternResult[], prizePool = 0): void {
+    // Pre-game (ingen aktiv game) → serverens `patterns` er tom. Vis likevel
+    // 5 placeholder-pills (Rad 1-4 + Full Hus, 0 kr) + mini-grid med Rad 1-
+    // design, så combo-panelet aldri er tomt mens spilleren venter på start.
+    if (patterns.length === 0) {
+      patterns = CenterTopPanel.placeholderPatterns();
+      patternResults = [];
+    }
     const signature = this.computePatternsSignature(patterns, patternResults, prizePool);
     if (signature === this.lastPatternsSignature) return;
+    console.debug("[blink] CenterTop.updatePatterns sig-change", {
+      prev: this.lastPatternsSignature,
+      next: signature,
+    });
     this.lastPatternsSignature = signature;
 
-    // Destroy old pattern grids
-    for (const g of this.patternGrids) g.destroy();
-    this.patternGrids = [];
-    this.prizeRowsEl.innerHTML = "";
+    this.prizeListEl.innerHTML = "";
 
-    // Find first unwon pattern
+    // Find first un-won pattern.
     let currentPatternIdx = 0;
     for (let i = 0; i < patternResults.length; i++) {
       if (patternResults[i]?.isWon) currentPatternIdx = i + 1;
+    }
+    const currentPattern = patterns[currentPatternIdx] ?? null;
+
+    // Swap the mini-grid to the active pattern's design.
+    if (currentPattern && currentPattern.id !== this.activePatternId) {
+      console.debug("[blink] CenterTop.miniGrid swap", {
+        fromId: this.activePatternId,
+        toId: currentPattern.id,
+        toDesign: currentPattern.design,
+      });
+      if (this.activeGrid) this.activeGrid.destroy();
+      this.activeGrid = new PatternMiniGrid();
+      this.activeGrid.setDesign(currentPattern.design);
+      this.gridHostEl.innerHTML = "";
+      this.gridHostEl.appendChild(this.activeGrid.root);
+      this.activePatternId = currentPattern.id;
+    } else if (!currentPattern && this.activeGrid) {
+      this.activeGrid.destroy();
+      this.activeGrid = null;
+      this.activePatternId = null;
+      this.gridHostEl.innerHTML = "";
     }
 
     const seenIds = new Set<string>();
@@ -199,105 +274,112 @@ export class CenterTopPanel {
       const pattern = patterns[i];
       const result = patternResults.find((r) => r.patternId === pattern.id);
 
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,0.15);padding:4px 0;";
-      if (i === currentPatternIdx) {
-        const miniGrid = new PatternMiniGrid();
-        miniGrid.setDesign(pattern.design);
-        this.patternGrids.push(miniGrid);
-        row.appendChild(miniGrid.root);
-      }
-
-      // Pattern text
-      const span = document.createElement("span");
-      span.style.cssText = "font-size:16px;color:#ddd;flex:1;";
-
       // PR C (variantConfig-admin-kobling): honor winningType fra PR A/B.
-      // - "fixed":   vis `prize1` direkte (admin-UI konfigurert flat kr).
-      // - "percent" eller udefinert: prosent av pot (legacy-atferd).
-      // Post-pilot: per-farge-differensiering (vis spillerens egen tickets
-      // farge-matrise) er egen scope — krever per-player snapshot-scoping.
       const computedPrize =
         pattern.winningType === "fixed"
           ? (pattern.prize1 ?? 0)
           : Math.round((pattern.prizePercent / 100) * prizePool);
       const prize = result?.payoutAmount ?? computedPrize;
-      const won = result?.isWon;
+      const won = result?.isWon === true;
 
-      // Display name mapping
       let displayName = pattern.name;
       if (pattern.name === "Full House") displayName = "Full Hus";
       else if (pattern.name === "Picture" || pattern.name === "picture") displayName = "Bilde";
       else if (pattern.name === "Frame" || pattern.name === "frame") displayName = "Ramme";
       else if (/^Row \d/.test(pattern.name)) displayName = pattern.name.replace("Row", "Rad");
 
-      span.textContent = `${displayName} – ${prize} kr`;
-      let activeColor = "#ddd";
-      if (won) {
-        activeColor = "#4caf50";
-        span.style.color = activeColor;
-        span.style.fontWeight = "700";
-        span.textContent = `\u2714 ${displayName} – ${prize} kr`;
-      } else if (i === currentPatternIdx) {
-        // Current active pattern — bright yellow
-        activeColor = "#ffe83d";
-        span.style.color = activeColor;
-        span.style.fontWeight = "700";
-      } else {
-        activeColor = "#888";
-        span.style.color = activeColor;
-      }
-      row.appendChild(span);
-      this.prizeRowsEl.appendChild(row);
+      const pill = document.createElement("div");
+      pill.className = "prize-pill";
+      Object.assign(pill.style, {
+        background: "rgba(120, 20, 20, 0.4)",
+        backdropFilter: "blur(6px)",
+        border: "1px solid rgba(255, 100, 100, 0.2)",
+        boxShadow: "0 4px 8px rgba(0,0,0,0.4)",
+        borderRadius: "14px",
+        height: "24px",
+        padding: "0 14px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: "12px",
+        fontWeight: "600",
+        color: "#c1c1c1",
+        width: "85%",
+        boxSizing: "border-box",
+        whiteSpace: "nowrap",
+      });
+      // Inner span so tests that probe by tag / flashAmount targeting can
+      // keep querying `span` (see CenterTopPanel.test.ts findSpanForPattern).
+      const label = document.createElement("span");
+      label.textContent = `${displayName} - ${prize} kr`;
+      pill.appendChild(label);
 
-      // PR-5 C3: flash when the payout amount for this pattern changes.
-      // we add a GSAP scale + colour pulse so players notice mid-round payout
-      // updates (e.g. when a partial win re-distributes the pool).
+      if (won) {
+        pill.classList.add("completed");
+        pill.style.textDecoration = "line-through";
+        pill.style.textDecorationThickness = "1.5px";
+        pill.style.opacity = "0.5";
+      } else if (i === currentPatternIdx) {
+        pill.classList.add("active");
+        pill.style.border = "1.5px solid #ffcc00";
+        pill.style.color = "#fff";
+        pill.style.boxShadow = "0 4px 10px rgba(0, 0, 0, 0.5), inset 0 0 6px rgba(255,200,0,0.2)";
+      }
+
+      this.prizeListEl.appendChild(pill);
+
+      // Flash payout changes (PR-5 C3).
       seenIds.add(pattern.id);
       const prev = this.lastAmountByPatternId.get(pattern.id);
       if (prev !== undefined && prev !== prize && !won) {
-        this.flashAmount(span, activeColor);
+        this.flashAmount(label);
       }
       this.lastAmountByPatternId.set(pattern.id, prize);
     }
 
-    // Prune memory of patterns that disappeared (new round, pattern list changed)
     for (const id of Array.from(this.lastAmountByPatternId.keys())) {
       if (!seenIds.has(id)) this.lastAmountByPatternId.delete(id);
     }
   }
 
-  /**
-   * GSAP flash on a pattern row: quick scale pulse + yellow colour flash
-   * back to the row's baseline colour. Matches Unity spec: scale 1.0 → 1.2
-   * (0.15s) + colour #ffe83d → baseline (0.4s).
-   */
-  private flashAmount(span: HTMLSpanElement, baselineColor: string): void {
+  private flashAmount(span: HTMLSpanElement): void {
     gsap.killTweensOf(span);
     gsap.fromTo(
       span,
       { scale: 1 },
       {
-        scale: 1.2,
+        scale: 1.12,
         duration: 0.15,
         ease: "power2.out",
         yoyo: true,
         repeat: 1,
-        transformOrigin: "left center",
+        transformOrigin: "center",
       },
     );
     gsap.fromTo(
       span,
       { color: "#ffe83d" },
-      { color: baselineColor, duration: 0.4, ease: "power2.out" },
+      { color: "inherit", duration: 0.4, ease: "power2.out" },
     );
   }
 
-  /** Show brief confirmation feedback on a button after action completes. */
+  /**
+   * Update jackpot display from room:update.gameVariant.jackpot.
+   * Hides when missing or isDisplay=false.
+   */
+  updateJackpot(jackpot: { drawThreshold: number; prize: number; isDisplay: boolean } | null | undefined): void {
+    if (!jackpot || !jackpot.isDisplay) {
+      this.jackpotEl.style.display = "none";
+      return;
+    }
+    this.jackpotEl.style.display = "block";
+    const label = this.jackpotEl.firstChild;
+    if (label) label.textContent = `${jackpot.drawThreshold} JACKPOT : `;
+    this.jackpotPrizeEl.textContent = `${jackpot.prize} KR`;
+  }
+
   showButtonFeedback(button: "buyMore" | "preBuy", success: boolean): void {
     const btn = button === "buyMore" ? this.buyMoreBtn : this.preBuyBtn;
-    if (!btn) return;
-
     const originalText = btn.textContent;
     btn.textContent = success ? "Registrert!" : "Feil";
     btn.style.background = success ? "rgba(46,125,50,0.5)" : "rgba(183,28,28,0.5)";
@@ -307,7 +389,7 @@ export class CenterTopPanel {
 
     setTimeout(() => {
       btn.textContent = originalText;
-      btn.style.background = "rgba(0,0,0,0.25)";
+      btn.style.background = "rgba(120, 20, 20, 0.4)";
       btn.disabled = false;
       btn.style.cursor = "pointer";
       btn.style.opacity = "1";
@@ -315,50 +397,50 @@ export class CenterTopPanel {
   }
 
   /**
-   * BIN-409/451 (D2): Persistent disabled state for the "Kjøp flere brett"
-   * button once the server-authoritative `disableBuyAfterBalls` threshold is
-   * reached mid-round.
-   *
-   *   - `Game1GamePlayPanel.cs:170` `BuyMoreDisableFlagVal` (flag satt
-   *     én gang per runde når drawCount krysser threshold).
-   *   - `Game1GamePlayPanel.SocketFlow.cs:174` — serveren styrer `disableBuyAfterBalls`.
-   *   - `Game1GamePlayPanel.SocketFlow.cs:109-113, :457-461, :485-489` — per-ball sjekk.
-   *   - `BingoTemplates.cs:350` `disableBuyAfterBalls` (default threshold).
-   *
-   * native `title`-attributt som en a11y-forbedring (PM godkjent Q2 2026-04-18):
-   * "Kjøp er stengt — trekning pågår". Dette er en funksjonelt nøytral
-   * produkt-forbedring — vanlige screenreadere annonserer disablede knapper,
-   * tooltip gir seende spillere en forklaring ved hover.
-   *
-   * Rotårsak for den originale BIN-451-buggen: `showButtonFeedback("buyMore", false)`
-   * disablet knappen i bare 1.5 s (setTimeout reset) — ikke permanent. Etter 1.5 s
-   * kunne spillere klikke "Kjøp flere" igjen selv om `drawCount >= disableBuyAfterBalls`.
-   * Denne metoden disabler permanent til neste runde (enableBuyMore kalles ved
-   * onGameStarted).
+   * BIN-409/451 (D2): persistent buy-more disable once server threshold is
+   * reached mid-round. Re-enabled at next round start.
    */
   setBuyMoreDisabled(disabled: boolean, reason?: string): void {
-    const btn = this.buyMoreBtn;
-    if (!btn) return;
-    btn.disabled = disabled;
-    btn.style.opacity = disabled ? "0.4" : "1";
-    btn.style.cursor = disabled ? "not-allowed" : "pointer";
-    btn.title = disabled ? (reason ?? "") : "";
-    // Hover-handler leser `btn.disabled` direkte og respekterer derfor state —
-    // enabled-state resetter background (mouseleave allerede nullstiller).
-    if (!disabled) {
-      btn.style.background = "rgba(0,0,0,0.25)";
-    }
+    this.buyMoreBtn.disabled = disabled;
+    this.buyMoreBtn.style.opacity = disabled ? "0.4" : "1";
+    this.buyMoreBtn.style.cursor = disabled ? "not-allowed" : "pointer";
+    this.buyMoreBtn.title = disabled ? (reason ?? "") : "";
   }
 
-  /** Hide cancel button during game. */
   setGameRunning(running: boolean): void {
-    if (this.cancelBtn) this.cancelBtn.style.display = running ? "none" : "";
-    if (this.buyMoreBtn) this.buyMoreBtn.style.display = running ? "" : "none";
+    // "Kjøp flere brett" kjøper bonger til NESTE trekning — vises mellom
+    // runder (når ingen trekning pågår). "Forhåndskjøp til dagens spill"
+    // kjøper til planlagte spill — vises mens nåværende trekning pågår.
+    this.buyMoreBtn.style.display = running ? "none" : "";
+    this.preBuyBtn.style.display = running ? "" : "none";
   }
 
-  /** A6: Show/hide the manual start button based on scheduler.canStartNow + game status. */
   setCanStartNow(canStart: boolean, gameRunning: boolean): void {
-    this.startGameBtn.style.display = canStart && !gameRunning ? "block" : "none";
+    this.startGameBtn.style.display = canStart && !gameRunning ? "" : "none";
+  }
+
+  /** Expose the root element so PlayScreen can re-parent it into the
+   *  shared top-row wrapper (player-info + combo-panel). */
+  get rootEl(): HTMLDivElement {
+    return this.root;
+  }
+
+  /** Game-name header text — e.g. "HOVEDSPILL 1". */
+  setBadge(text: string): void {
+    this.gameNameEl.textContent = text.toUpperCase();
+  }
+
+  /** Pre-game placeholder — 5 dummy-patterns så combo-panelet alltid viser
+   *  Rad 1-4 + Full Hus (0 kr) + mini-grid med Rad 1-design. */
+  private static placeholderPatterns(): PatternDefinition[] {
+    const base = { claimType: "LINE" as const, prizePercent: 0, winningType: "fixed" as const, prize1: 0 };
+    return [
+      { id: "placeholder-rad1", name: "Rad 1", order: 0, design: 1, ...base },
+      { id: "placeholder-rad2", name: "Rad 2", order: 1, design: 2, ...base },
+      { id: "placeholder-rad3", name: "Rad 3", order: 2, design: 3, ...base },
+      { id: "placeholder-rad4", name: "Rad 4", order: 3, design: 4, ...base },
+      { id: "placeholder-fullhus", name: "Full House", order: 4, design: 5, claimType: "BINGO" as const, prizePercent: 0, winningType: "fixed" as const, prize1: 0 },
+    ];
   }
 
   private computePatternsSignature(
@@ -366,8 +448,6 @@ export class CenterTopPanel {
     patternResults: PatternResult[],
     prizePool: number,
   ): string {
-    // PR C: inkludér winningType + prize1 i signaturen slik at
-    // signature-cache invalideres når admin endrer fixed-mode-beløp.
     const pats = patterns
       .map((p) => `${p.id}:${p.name}:${p.design}:${p.prizePercent}:${p.winningType ?? ""}:${p.prize1 ?? 0}`)
       .join(",");
@@ -377,13 +457,9 @@ export class CenterTopPanel {
     return `${pats}|${wins}|prize=${prizePool}`;
   }
 
-  setBadge(text: string): void {
-    this.badgeEl.textContent = text;
-  }
-
   destroy(): void {
-    for (const g of this.patternGrids) g.destroy();
-    this.patternGrids = [];
+    if (this.activeGrid) this.activeGrid.destroy();
+    this.activeGrid = null;
     this.root.remove();
   }
 }

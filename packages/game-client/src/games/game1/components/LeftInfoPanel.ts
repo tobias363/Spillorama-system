@@ -1,65 +1,57 @@
 import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
 import type { Player } from "@spillorama/shared-types/game";
 
-/** Bridge-state shape used for pause-awareness. */
+/** Bridge-state shape kept for API parity — countdown logic now lives in CenterBall. */
 interface PauseAwareBridge {
   getState(): { isPaused: boolean };
 }
 
 /**
- * HTML overlay panel showing player info, number ring, and draw progress.
+ * Player-info column from the 2026-04-23 redesign (mockup `.col-player`).
+ *  - Row 1: person-icon + 2-digit zero-padded player count (e.g. "02").
+ *  - Row 2: "Innsats: X kr" + "Gevinst: Y kr" on two lines.
  *
- * Layout (from mockup):
- * - Column 1: player count icon + number, innsats, gevinst
- * - Column 2: large number ring (90px, red gradient), draw progress text
- *
- * The number ring also supports countdown mode, displaying seconds
- * remaining before the next game starts.
- *
- * Pause-hook (BIN-420 G23): the `setInterval` that drives the countdown
- * display honours `state.isPaused`. While paused, the deadline is pushed
- * forward by the tick interval so the remaining-seconds readout stays frozen
- * — matching Unity's `Game1GamePlayPanel.SocketFlow.cs:672-696` pause
- * behaviour where scheduler updates are suspended.
+ * The old "number ring + progress" column has been removed — the big ring
+ * is now owned by CenterBall (Pixi) per the mockup's `.game-number-ring`.
+ * Countdown methods are preserved as no-ops so PlayScreen's existing call
+ * sites keep working; the countdown display itself is rendered by CenterBall.
  */
 export class LeftInfoPanel {
   private root: HTMLDivElement;
   private playerCountEl: HTMLSpanElement;
   private entryFeeEl: HTMLSpanElement;
   private prizeEl: HTMLSpanElement;
-  private numberRingEl: HTMLDivElement;
-  private progressEl: HTMLDivElement;
-  private countdownInterval: ReturnType<typeof setInterval> | null = null;
-  private countdownDeadline = 0;
   private bridge: PauseAwareBridge | null = null;
 
   constructor(overlay: HtmlOverlayManager, bridge?: PauseAwareBridge) {
     this.bridge = bridge ?? null;
     this.root = overlay.createElement("left-panel", {
+      pointerEvents: "auto",
       flexShrink: "0",
       alignSelf: "flex-start",
-      display: "grid",
-      gridTemplateColumns: "auto auto",
-      columnGap: "40px",
-      alignItems: "center",
-      padding: "15px 0 18px 0",
-      marginLeft: "40px",
+      display: "flex",
+      flexDirection: "column",
+      gap: "10px",
+      paddingTop: "35px",
+      paddingRight: "21px",
+      minWidth: "120px",
+      marginLeft: "20px",
     });
 
-    // Column 1: Player info
-    const colPlayer = document.createElement("div");
-    colPlayer.style.cssText = "display:flex;flex-direction:column;gap:6px;";
-
+    // Row 1: icon + count
     const playerRow = document.createElement("div");
-    playerRow.style.cssText = "display:flex;align-items:center;gap:8px;font-size:18px;font-weight:700;color:#ddd;";
-    playerRow.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>`;
+    playerRow.className = "player-info";
+    playerRow.style.cssText = "display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700;color:#fff;";
+    playerRow.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>`;
     this.playerCountEl = document.createElement("span");
-    this.playerCountEl.textContent = "0";
+    this.playerCountEl.textContent = "00";
     playerRow.appendChild(this.playerCountEl);
-    colPlayer.appendChild(playerRow);
+    this.root.appendChild(playerRow);
 
+    // Row 2: bet info
     const betInfo = document.createElement("div");
-    betInfo.style.cssText = "font-size:14px;color:#bbb;line-height:1.8;";
+    betInfo.className = "bet-info";
+    betInfo.style.cssText = "font-size:16px;color:#bbb;line-height:1.6;";
     this.entryFeeEl = document.createElement("span");
     this.entryFeeEl.textContent = "Innsats: 0 kr";
     this.prizeEl = document.createElement("span");
@@ -67,49 +59,19 @@ export class LeftInfoPanel {
     betInfo.appendChild(this.entryFeeEl);
     betInfo.appendChild(document.createElement("br"));
     betInfo.appendChild(this.prizeEl);
-    colPlayer.appendChild(betInfo);
-
-    this.root.appendChild(colPlayer);
-
-    // Column 2: Number ring + progress
-    const colRing = document.createElement("div");
-    colRing.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:6px;";
-
-    this.numberRingEl = document.createElement("div");
-    Object.assign(this.numberRingEl.style, {
-      width: "90px",
-      height: "90px",
-      borderRadius: "50%",
-      background: "radial-gradient(circle at 38% 32%, #c0392b, #7b1010 70%)",
-      border: "3px solid #e53935",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontSize: "42px",
-      fontWeight: "700",
-      color: "#fff",
-    });
-    this.numberRingEl.textContent = "--";
-    colRing.appendChild(this.numberRingEl);
-
-    this.progressEl = document.createElement("div");
-    this.progressEl.style.cssText = "font-size:13px;color:#aaa;";
-    this.progressEl.textContent = "0/0";
-    colRing.appendChild(this.progressEl);
-
-    this.root.appendChild(colRing);
+    this.root.appendChild(betInfo);
   }
 
   update(
     playerCount: number,
     totalStake: number,
     myWinnings: number,
-    lastDrawnNumber: number | null,
-    drawCount: number,
-    totalDrawCapacity: number,
+    _lastDrawnNumber: number | null,
+    _drawCount: number,
+    _totalDrawCapacity: number,
     players?: Player[],
   ): void {
-    // G2/G3: Count unique halls from player data
+    // G2/G3: multi-hall labelling.
     let hallCount = 0;
     if (players && players.length > 0) {
       const halls = new Set<string>();
@@ -124,82 +86,29 @@ export class LeftInfoPanel {
       ? `${countStr} (${hallCount} haller)`
       : countStr;
 
-    // BIN-686 Bug 2: previously showed "Innsats: —" (em-dash) when stake
-    // was 0, which users read as missing/broken. Always show kroner — the
-    // 0-case is legitimate UX (bruker har ingen innsats enda) and the
-    // dash was a leftover from a placeholder phase.
     this.entryFeeEl.textContent = `Innsats: ${totalStake} kr`;
-    // "Gevinst" = user's actual accumulated winnings this round (sum of
-    // patternResults.payoutAmount where winnerId === myPlayerId). NOT the
-    // total prize pool — that would shadow Innsats for a sole-buyer scenario
-    // and is misleading: players see "Gevinst" and expect their own winnings
-    // (2026-04-21 Tobias-report).
+    // "Gevinst" = this player's accumulated winnings this round (see PlayScreen
+    // summation) — not the full prize pool (2026-04-21 Tobias-report).
     this.prizeEl.textContent = `Gevinst: ${myWinnings} kr`;
-    this.numberRingEl.textContent = lastDrawnNumber !== null
-      ? String(lastDrawnNumber).padStart(2, "0")
-      : "--";
-    this.progressEl.textContent = `${drawCount}/${totalDrawCapacity}`;
   }
 
-  /**
-   * Start countdown mode — show seconds remaining in the number ring.
-   */
-  startCountdown(millisUntilStart: number): void {
-    this.stopCountdown();
-
-    if (millisUntilStart <= 0) {
-      this.numberRingEl.textContent = "...";
-      this.progressEl.textContent = "";
-      return;
-    }
-
-    this.countdownDeadline = Date.now() + millisUntilStart;
-    this.updateCountdownDisplay();
-
-    this.countdownInterval = setInterval(() => {
-      // BIN-420 G23: respect server-authoritative pause — freeze display.
-      if (this.bridge?.getState().isPaused) {
-        this.countdownDeadline += 250;
-        return;
-      }
-      this.updateCountdownDisplay();
-    }, 250);
+  /** Expose the root element so PlayScreen can re-parent it into the
+   *  shared top-row wrapper (player-info + combo-panel). */
+  get rootEl(): HTMLDivElement {
+    return this.root;
   }
 
-  /** Late-wire bridge (tests use this; controller passes in constructor). */
+  /** No-op — CenterBall owns the countdown display in the new design. */
+  startCountdown(_millisUntilStart: number): void {}
+
+  /** No-op — matches startCountdown. */
+  stopCountdown(): void {}
+
   setBridge(bridge: PauseAwareBridge): void {
     this.bridge = bridge;
   }
 
-  stopCountdown(): void {
-    if (this.countdownInterval !== null) {
-      clearInterval(this.countdownInterval);
-      this.countdownInterval = null;
-    }
-  }
-
-  private updateCountdownDisplay(): void {
-    const remaining = Math.ceil((this.countdownDeadline - Date.now()) / 1000);
-    if (remaining <= 0) {
-      this.numberRingEl.textContent = "...";
-      this.progressEl.textContent = "";
-      this.stopCountdown();
-    } else {
-      const formatted = this.formatCountdown(remaining);
-      this.numberRingEl.textContent = formatted;
-      this.progressEl.textContent = `Neste spill om ${formatted}`;
-    }
-  }
-
-  /** Format seconds as MM:SS (e.g. 150 → "02:30", 45 → "00:45"). */
-  private formatCountdown(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
   destroy(): void {
-    this.stopCountdown();
     this.root.remove();
   }
 }
