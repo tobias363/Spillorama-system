@@ -58,6 +58,9 @@ export interface BingoRuntimeConfig {
   // GAME1_SCHEDULE PR 4c: auto-draw-tick for Game 1 (fixed seconds-intervall)
   jobGame1AutoDrawEnabled: boolean;
   jobGame1AutoDrawIntervalMs: number;
+  // BIN-FCM: FCM push-notification cron (legacy sendGameStartNotifications)
+  jobGameStartNotificationsEnabled: boolean;
+  jobGameStartNotificationsIntervalMs: number;
   // Storage
   usePostgresBingoAdapter: boolean;
   checkpointConnectionString: string;
@@ -163,6 +166,19 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   // tick-intervallet bare polles. Default 1000 ms matcher "global 1s tick".
   const jobGame1AutoDrawIntervalMs = Math.max(500, parsePositiveIntEnv(process.env.GAME1_AUTO_DRAW_INTERVAL_MS, 1_000));
 
+  // BIN-FCM: FCM push-notification cron for pre-game-varsler.
+  // Legacy kjørte hver 1min (60s). Default ON når FIREBASE_CREDENTIALS_JSON
+  // er satt — service-laget kjører i no-op-modus uten credentials, så
+  // cronen spammer ikke pending-rader.
+  const jobGameStartNotificationsEnabled = parseBooleanEnv(
+    process.env.JOB_GAME_START_NOTIFICATIONS_ENABLED,
+    true,
+  );
+  const jobGameStartNotificationsIntervalMs = Math.max(
+    30_000,
+    parsePositiveIntEnv(process.env.JOB_GAME_START_NOTIFICATIONS_INTERVAL_MS, 60_000),
+  );
+
   // BIN-159/BIN-240: PostgreSQL checkpointing
   const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
   const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, true) && checkpointConnectionString.length > 0;
@@ -213,6 +229,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
     jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
+    jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,

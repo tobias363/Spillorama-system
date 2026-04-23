@@ -91,6 +91,12 @@ services:
         sync: false
       - key: FIREBASE_ADMIN_DB_URL
         sync: false
+      # BIN-FCM: push-notifikasjoner. Base64-encoded service-account JSON.
+      # Se docs/operations/FCM_PUSH_NOTIFICATIONS.md for oppsett.
+      - key: FIREBASE_CREDENTIALS_JSON
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
       - key: CLOUDINARY_CLOUD_NAME
         sync: false
       - key: CLOUDINARY_API_KEY

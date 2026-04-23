@@ -57,6 +57,10 @@ import { Game1PayoutService } from "./game/Game1PayoutService.js";
 import { Game1JackpotService } from "./game/Game1JackpotService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
 import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
+import { FcmPushService } from "./notifications/FcmPushService.js";
+import { createGameStartNotificationsJob } from "./jobs/gameStartNotifications.js";
+import { createNotificationsRouter } from "./routes/notifications.js";
+import { createAdminNotificationsRouter } from "./routes/adminNotifications.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
@@ -308,6 +312,7 @@ const {
   jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
   jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
+  jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -655,6 +660,13 @@ const cmsService = new CmsService({
 // (EmailService blir stub uten SMTP_HOST; audit bruker in-memory uten
 // DB-backing). Agent 3 vil wire ADMIN-side audit-kall i påfølgende PR.
 const emailService = new EmailService();
+// BIN-FCM: Firebase Cloud Messaging push-service. Kjører no-op uten
+// FIREBASE_CREDENTIALS_JSON (matcher EmailService-mønsteret) — dev-miljø
+// kan starte uten Firebase-credentials, mens prod må sette env-var.
+const fcmPushService = new FcmPushService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
 const auditLogStore: AuditLogStore = platformConnectionString
   ? new PostgresAuditLogStore({
       pool: new Pool({
@@ -908,6 +920,23 @@ jobScheduler.register({
   intervalMs: jobLoyaltyMonthlyResetIntervalMs,
   enabled: jobLoyaltyMonthlyResetEnabled,
   run: createLoyaltyMonthlyResetJob({ loyaltyService }),
+});
+
+// BIN-FCM: sendGameStartNotifications cron (legacy 1min). Finner spill som
+// starter innen notification-vinduet og sender push til deltagende halls
+// aktive spillere. Dedup via eksisterende 'game-start'-rader i
+// app_notifications siste 24t. No-op når FCM er disabled — cron logger
+// bare 0 items i så fall.
+jobScheduler.register({
+  name: "game-start-notifications",
+  description: "Send FCM push to players when a scheduled Game 1 is within its notification window (BIN-FCM).",
+  intervalMs: jobGameStartNotificationsIntervalMs,
+  enabled: jobGameStartNotificationsEnabled,
+  run: createGameStartNotificationsJob({
+    pool: platformService.getPool(),
+    schema: pgSchema,
+    fcmPushService,
+  }),
 });
 
 // GAME1_SCHEDULE PR 1+2: 15s-tick som spawner Game 1-rader fra daily_schedules,
@@ -1781,6 +1810,17 @@ app.use(createPaymentsRouter({
 }));
 app.use(createPaymentRequestsRouter({ platformService, paymentRequestService, emitWalletRoomUpdates }));
 app.use(createGameRouter({ platformService, engine, drawScheduler, emitRoomUpdate, buildRoomUpdatePayload, assertUserCanAccessRoom, assertUserCanActAsPlayer }));
+
+// BIN-FCM: notifikasjons-endpoints. Player-facing (/api/notifications*)
+// + admin-broadcast (/api/admin/notifications/broadcast).
+app.use(createNotificationsRouter({ platformService, fcmPushService }));
+app.use(createAdminNotificationsRouter({
+  platformService,
+  fcmPushService,
+  auditLogService,
+  pool: platformService.getPool(),
+  schema: pgSchema,
+}));
 
 // ── Prometheus + health ───────────────────────────────────────────────────────
 
