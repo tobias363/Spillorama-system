@@ -20,12 +20,15 @@
 
 import { t } from "../../../i18n/I18n.js";
 import { DataTable } from "../../../components/DataTable.js";
+import { Toast } from "../../../components/Toast.js";
 import {
   fetchPatternList,
   maxPatternsForGameType,
+  deletePattern,
   type PatternRow,
 } from "./PatternState.js";
 import { fetchGameType } from "../gameType/GameTypeState.js";
+import { ApiError } from "../../../api/client.js";
 import { escapeHtml } from "../common/escape.js";
 import { formatLegacyDateTime } from "../subGame/SubGameListPage.js";
 import type { GameType } from "../common/types.js";
@@ -45,7 +48,15 @@ export async function renderPatternListPage(
     container.innerHTML = renderShell({ gameType, rows }, null);
 
     const tableHost = container.querySelector<HTMLElement>("#pattern-list-table");
-    if (tableHost) renderTable(tableHost, gameType, rows);
+    if (tableHost) renderTable(tableHost, gameType, rows, async () => {
+      // Re-render after delete
+      const refreshed = await fetchPatternList(typeId);
+      container.innerHTML = renderShell({ gameType, rows: refreshed }, null);
+      const host = container.querySelector<HTMLElement>("#pattern-list-table");
+      if (host) renderTable(host, gameType, refreshed, async () => {
+        await renderPatternListPage(container, typeId);
+      });
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     container.innerHTML = renderShell(null, msg);
@@ -67,14 +78,12 @@ function renderShell(args: ShellArgs | null, error: string | null): string {
   const count = args?.rows.length ?? 0;
   const canAdd = args && (max === null || count < max);
 
-  const addButton = canAdd
-    ? `<button type="button"
+  const addButton = canAdd && args
+    ? `<a href="#/patternManagement/${encodeURIComponent(args.gameType._id)}/add"
            class="btn btn-primary btn-md"
-           disabled
-           title="Venter på backend-endpoint — BIN-627">
+           data-action="add-pattern">
            <i class="fa fa-plus"></i> ${escapeHtml(t("add_pattern"))} ${escapeHtml(gameName)}
-           <small style="opacity:0.75;margin-left:6px;">(BIN-627)</small>
-         </button>`
+         </a>`
     : "";
 
   const errorBlock = error
@@ -103,11 +112,6 @@ function renderShell(args: ShellArgs | null, error: string | null): string {
             ${errorBlock}
             <div class="panel-wrapper collapse in">
               <div class="panel-body">
-                <div class="alert alert-warning" style="margin:0 0 12px;">
-                  <i class="fa fa-info-circle"></i>
-                  Venter på backend-endpoint.
-                  <strong>BIN-627</strong> Pattern CRUD må leveres før listen viser data.
-                </div>
                 <div class="table-wrap"><div class="table-responsive">
                   <div id="pattern-list-table"></div>
                 </div></div>
@@ -119,7 +123,12 @@ function renderShell(args: ShellArgs | null, error: string | null): string {
     </div></div>`;
 }
 
-function renderTable(host: HTMLElement, gameType: GameType, rows: PatternRow[]): void {
+function renderTable(
+  host: HTMLElement,
+  gameType: GameType,
+  rows: PatternRow[],
+  onChanged?: () => void | Promise<void>
+): void {
   // Column set depends on game-type per legacy pattern.html:103-242.
   const isGame1 = gameType.type === "game_1";
 
@@ -153,15 +162,43 @@ function renderTable(host: HTMLElement, gameType: GameType, rows: PatternRow[]):
         key: "_id",
         title: t("action"),
         align: "center",
-        render: (row) => renderActionButtons(gameType.type, gameType._id, row._id),
+        render: (row) => renderActionButtons(gameType.type, gameType._id, row._id, row.patternName),
       },
     ],
   });
+
+  // Wire delete buttons
+  host.querySelectorAll<HTMLButtonElement>('button[data-action="delete-pattern"]').forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const id = btn.dataset.id;
+      const name = btn.dataset.name ?? "";
+      if (!id) return;
+      if (!window.confirm(`${t("confirm_delete")}\n${name}`)) return;
+      void handleDelete(id, onChanged);
+    });
+  });
 }
 
-function renderActionButtons(gameType: string, typeId: string, patternId: string): string {
-  // Game 4 (DEPRECATED) shows only view per legacy §208-238; others show view+edit+delete
-  // all disabled as BIN-627 placeholders.
+async function handleDelete(id: string, onChanged?: () => void | Promise<void>): Promise<void> {
+  try {
+    const result = await deletePattern(id);
+    if ("ok" in result && result.ok) {
+      Toast.success(t("pattern_deleted"));
+      if (onChanged) await onChanged();
+      return;
+    }
+    if ("reason" in result) {
+      Toast.error(result.message ?? t("something_went_wrong"));
+    }
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+    Toast.error(msg);
+  }
+}
+
+function renderActionButtons(gameType: string, typeId: string, patternId: string, patternName: string): string {
+  // Game 4 (DEPRECATED) shows only view; others show view+edit+delete
   const viewBtn = `
     <a href="#/patternManagement/${encodeURIComponent(typeId)}/view/${encodeURIComponent(patternId)}"
        class="btn btn-info btn-xs btn-rounded"
@@ -172,17 +209,18 @@ function renderActionButtons(gameType: string, typeId: string, patternId: string
   if (gameType === "game_4") return viewBtn;
 
   const editBtn = `
-    <button type="button"
+    <a href="#/patternManagement/${encodeURIComponent(typeId)}/edit/${encodeURIComponent(patternId)}"
       class="btn btn-warning btn-xs btn-rounded m-lr-3"
-      disabled
-      title="Venter på backend-endpoint — BIN-627">
+      title="${escapeHtml(t("edit"))}">
       <i class="fa fa-edit" aria-hidden="true"></i>
-    </button>`;
+    </a>`;
   const deleteBtn = `
     <button type="button"
       class="btn btn-danger btn-xs btn-rounded"
-      disabled
-      title="Venter på backend-endpoint — BIN-627">
+      title="${escapeHtml(t("confirm_delete"))}"
+      data-action="delete-pattern"
+      data-id="${escapeHtml(patternId)}"
+      data-name="${escapeHtml(patternName)}">
       <i class="fa fa-trash" aria-hidden="true"></i>
     </button>`;
   return `${viewBtn}${editBtn}${deleteBtn}`;

@@ -2734,6 +2734,7 @@
   "filename": "Filename",
   "slug_auto_generated_hint": "Leave empty to auto-generate from name.",
   "pattern_ids_comma_separated_hint": "Comma-separated pattern IDs (e.g. pid1,pid2).",
+  "pattern_mask_empty_error": "Pattern cannot be empty — pick at least one cell on the grid.",
   "winners_count": "Winners",
   "payouts_total": "Payouts total",
   "jackpots_total": "Jackpots total",

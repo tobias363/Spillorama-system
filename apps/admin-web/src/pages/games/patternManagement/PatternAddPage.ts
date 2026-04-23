@@ -13,8 +13,10 @@
 // Edit-mode: pre-fills values from fetchPattern(typeId, id). Add-mode: blank grid.
 
 import { t } from "../../../i18n/I18n.js";
+import { Toast } from "../../../components/Toast.js";
 import {
   fetchPattern,
+  savePattern,
   toggleCell,
   isCellSet,
   countCells,
@@ -38,6 +40,7 @@ export async function renderPatternAddPage(
     }
     container.innerHTML = renderShell(gameType, null, null, false);
     wireGrid(container, gameType, 0);
+    wireSubmit(container, typeId, null);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     container.innerHTML = renderShell(null, null, msg, false);
@@ -59,9 +62,9 @@ export async function renderPatternEditPage(
       container.innerHTML = renderShell(null, null, `Game type "${typeId}" not found`, true);
       return;
     }
-    // row is null until BIN-627 lands → render a blank-grid edit-shell anyway
     container.innerHTML = renderShell(gameType, row, null, true);
     wireGrid(container, gameType, row?.mask ?? 0);
+    wireSubmit(container, typeId, row);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     container.innerHTML = renderShell(null, null, msg, true);
@@ -95,14 +98,6 @@ function renderShell(
   const errorBlock = error
     ? `<div class="alert alert-danger" style="margin:8px 16px;">${escapeHtml(error)}</div>`
     : "";
-
-  const banner = `
-    <div class="alert alert-warning" role="alert" style="margin:8px 16px;">
-      <i class="fa fa-info-circle"></i>
-      Venter på backend-endpoint.
-      <strong>BIN-627</strong> Pattern CRUD må leveres før lagring er mulig.
-      Rutenettet er interaktivt for å forhåndsvise mønster-bitmasken (grønn = satt).
-    </div>`;
 
   // Max-patterns warning (Game 3: 32, Game 5: 17, etc.)
   const max = gameType ? maxPatternsForGameType(gameType.type) : null;
@@ -147,7 +142,6 @@ function renderShell(
             <div class="panel-heading"><div class="pull-left">
               <h6 class="panel-title txt-dark">${escapeHtml(heading)}</h6>
             </div><div class="clearfix"></div></div>
-            ${banner}
             ${maxBlock}
             ${errorBlock}
             <div class="panel-wrapper collapse in">
@@ -164,7 +158,7 @@ function renderShell(
                           <input type="text" class="form-control" name="patternName" id="patternName"
                             value="${escapeHtml(pattern?.patternName ?? "")}"
                             placeholder="${escapeHtml(t("enter"))} ${escapeHtml(t("pattern_name"))}"
-                            maxlength="40" disabled>
+                            maxlength="40" required>
                         </div>
                       </div>
                     </div>
@@ -189,8 +183,8 @@ function renderShell(
                         <div class="col-sm-12">
                           <div class="input-group">
                             <div class="input-group-addon"><i class="glyphicon glyphicon-thumbs-up"></i></div>
-                            <select class="form-control" name="status" id="status" disabled>
-                              <option value="active"${pattern?.status === "active" ? " selected" : ""}>${escapeHtml(t("active"))}</option>
+                            <select class="form-control" name="status" id="status">
+                              <option value="active"${pattern?.status !== "inactive" ? " selected" : ""}>${escapeHtml(t("active"))}</option>
                               <option value="inactive"${pattern?.status === "inactive" ? " selected" : ""}>${escapeHtml(t("inactive"))}</option>
                             </select>
                           </div>
@@ -200,8 +194,7 @@ function renderShell(
                   </div></div></div>
 
                   <div style="clear:both;padding-top:16px;padding-left:16px;">
-                    <button type="submit" class="btn btn-success btn-flat" disabled
-                      title="Venter på backend-endpoint — BIN-627">
+                    <button type="submit" class="btn btn-success btn-flat" data-action="save-pattern">
                       ${escapeHtml(t("submit"))}
                     </button>
                     <a href="${backHref}" class="btn btn-danger btn-flat">${escapeHtml(t("cancel"))}</a>
@@ -234,35 +227,99 @@ function renderGridHtml(rows: number, cols: number, mask: PatternMask): string {
   return html;
 }
 
-/** Game 1 specific toggle flags (WoF, TChest, Mystery, RowPr, Jackpot, ExtraGame, LuckyBonus). */
+/** Game 1 specific toggle flags (WoF, TChest, Mystery, RowPr). */
 function renderGame1Flags(pattern: PatternRow | null): string {
   const flag = (labelKey: string, name: string, value: boolean | undefined): string => `
     <div class="form-group">
       <div class="row">
         <label class="mb-10 col-sm-12">${escapeHtml(t(labelKey))}:</label>
         <div class="col-sm-12">
-          <label style="margin-right:24px;">
-            <input type="checkbox" name="${name}-yes" value="yes" disabled${value === true ? " checked" : ""}>
-            ${escapeHtml(t("yes"))}
-          </label>
-          <label>
-            <input type="checkbox" name="${name}-no" value="no" disabled${value === false ? " checked" : ""}>
-            ${escapeHtml(t("no"))}
+          <label class="switch">
+            <input type="checkbox" name="${name}" id="${name}"${value === true ? " checked" : ""}>
+            <span class="slider round"></span>
           </label>
         </div>
       </div>
     </div>`;
   return `
-    ${flag("wheel_of_fortune", "wheelOfFortune", pattern?.isWoF)}
-    ${flag("treasure_chest", "treasureChest", pattern?.isTchest)}
-    ${flag("mystery_game", "mystery", pattern?.isMys)}
-    ${flag("row_pattern_prize", "rowPrize", pattern?.isRowPr)}`;
+    ${flag("wheel_of_fortune", "isWoF", pattern?.isWoF)}
+    ${flag("treasure_chest", "isTchest", pattern?.isTchest)}
+    ${flag("mystery_game", "isMys", pattern?.isMys)}
+    ${flag("row_pattern_prize", "isRowPr", pattern?.isRowPr)}`;
+}
+
+/**
+ * Wire up the submit handler for the pattern add/edit form.
+ * Reads mask from #maskValue, name/status/flags from their inputs,
+ * then calls savePattern and navigates back on success.
+ */
+export function wireSubmit(container: HTMLElement, typeId: string, existing: PatternRow | null): void {
+  const form = container.querySelector<HTMLFormElement>("#PatternForm");
+  if (!form) return;
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void submitPattern(container, typeId, existing);
+  });
+}
+
+async function submitPattern(container: HTMLElement, typeId: string, existing: PatternRow | null): Promise<void> {
+  const nameEl = container.querySelector<HTMLInputElement>("#patternName");
+  const maskEl = container.querySelector<HTMLInputElement>("#maskValue");
+  const statusEl = container.querySelector<HTMLSelectElement>("#status");
+  const submitBtn = container.querySelector<HTMLButtonElement>('button[type="submit"][data-action="save-pattern"]');
+
+  const patternName = nameEl?.value.trim() ?? "";
+  const mask = Number(maskEl?.value ?? 0);
+  const status = statusEl?.value === "inactive" ? "inactive" : "active";
+
+  if (!patternName) {
+    Toast.error(t("all_fields_are_required"));
+    return;
+  }
+  if (!Number.isFinite(mask) || mask === 0) {
+    Toast.error(t("pattern_mask_empty_error"));
+    return;
+  }
+
+  // Game 1 optional flags
+  const isWoF = container.querySelector<HTMLInputElement>("#isWoF")?.checked;
+  const isTchest = container.querySelector<HTMLInputElement>("#isTchest")?.checked;
+  const isMys = container.querySelector<HTMLInputElement>("#isMys")?.checked;
+  const isRowPr = container.querySelector<HTMLInputElement>("#isRowPr")?.checked;
+
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const result = await savePattern(
+      typeId,
+      {
+        patternName,
+        mask,
+        status: status as "active" | "inactive",
+        ...(isWoF !== undefined ? { isWoF } : {}),
+        ...(isTchest !== undefined ? { isTchest } : {}),
+        ...(isMys !== undefined ? { isMys } : {}),
+        ...(isRowPr !== undefined ? { isRowPr } : {}),
+      },
+      existing?._id
+    );
+    if (result.ok) {
+      Toast.success(t("success"));
+      window.location.hash = `#/patternManagement/${encodeURIComponent(typeId)}`;
+      return;
+    }
+    Toast.error(result.message ?? t("something_went_wrong"));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    Toast.error(msg);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
 /**
  * Wire up click-handlers on the bitmask-grid cells. The mask is stored as a
- * closure + synced to the hidden input so a future backend-save would pick
- * it up via FormData.get("mask").
+ * closure + synced to the hidden input so backend-save picks it up via
+ * maskValue on submit.
  *
  * Exported so tests can drive it directly against a detached container.
  */

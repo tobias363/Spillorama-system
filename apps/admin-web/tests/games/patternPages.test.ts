@@ -93,6 +93,17 @@ function mockGameTypeFetch(slugs: string[]): typeof fetch {
     if (urlStr.startsWith("/api/admin/game-types")) {
       return okJson({ gameTypes: slugs.map(slugToGameType), count: slugs.length });
     }
+    // Pattern detail → 404 by default (no fixture)
+    if (urlStr.match(/^\/api\/admin\/patterns\/[^?]+/)) {
+      return new Response(
+        JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "missing" } }),
+        { status: 404 }
+      );
+    }
+    // Pattern list → empty
+    if (urlStr.startsWith("/api/admin/patterns")) {
+      return okJson({ patterns: [], count: 0 });
+    }
     // Legacy fallback
     if (urlStr.startsWith("/api/admin/games")) {
       return okJson(slugs.map((s) => gameRow(s)));
@@ -111,21 +122,20 @@ describe("PatternListPage", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("renders title + breadcrumb + pending banner (BIN-627)", async () => {
+  it("renders title + breadcrumb + DataTable host", async () => {
     const c = document.createElement("div");
     await renderPatternListPage(c, "bingo");
     expect(c.querySelector(".content-header h1")?.textContent).toBeTruthy();
     expect(c.querySelector(".breadcrumb")).not.toBeNull();
-    const banner = c.querySelector(".panel-body .alert.alert-warning");
-    expect(banner?.textContent).toContain("BIN-627");
+    expect(c.querySelector("#pattern-list-table")).not.toBeNull();
   });
 
-  it("renders a disabled Add button when game is Game 1 (unlimited)", async () => {
+  it("renders an enabled Add button when game is Game 1 (unlimited)", async () => {
     const c = document.createElement("div");
     await renderPatternListPage(c, "bingo");
-    const addBtn = c.querySelector(".pull-right button[disabled]");
+    const addBtn = c.querySelector<HTMLAnchorElement>('.pull-right a[data-action="add-pattern"]');
     expect(addBtn).not.toBeNull();
-    expect(addBtn?.getAttribute("title")).toContain("BIN-627");
+    expect(addBtn?.getAttribute("href")).toContain("bingo/add");
   });
 
   it("shows 'not found' error when gameType is unknown", async () => {
@@ -161,15 +171,15 @@ describe("PatternAddPage — 5x5 bitmask grid interaction", () => {
     expect(onCells.length).toBe(0);
   });
 
-  it("renders disabled Submit button + BIN-627 banner", async () => {
+  it("renders an enabled Submit button (BIN-627 live)", async () => {
     const c = document.createElement("div");
     await renderPatternAddPage(c, "bingo");
-    const submit = c.querySelector<HTMLButtonElement>('button[type="submit"][disabled]');
+    const submit = c.querySelector<HTMLButtonElement>('button[type="submit"][data-action="save-pattern"]');
     expect(submit).not.toBeNull();
-    expect(c.textContent).toContain("BIN-627");
+    expect(submit?.disabled).toBe(false);
   });
 
-  it("renders the BIN-627 max-patterns info block for Game 3", async () => {
+  it("renders the max-patterns info block for Game 3", async () => {
     globalThis.fetch = mockGameTypeFetch(["monsterbingo"]);
     const c = document.createElement("div");
     await renderPatternAddPage(c, "monsterbingo");
@@ -243,7 +253,9 @@ describe("PatternEditPage (BIN-627 placeholder)", () => {
     await renderPatternEditPage(c, "bingo", "any-id");
     const cells = c.querySelectorAll(".pattern-cell");
     expect(cells.length).toBe(25);
-    expect(c.textContent).toContain("BIN-627");
+    // Should have enabled form (BIN-627 live)
+    const submit = c.querySelector<HTMLButtonElement>('button[type="submit"][data-action="save-pattern"]');
+    expect(submit).not.toBeNull();
   });
 });
 
@@ -257,11 +269,11 @@ describe("PatternViewPage", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("shows pending-banner when backend yields null", async () => {
+  it("shows not-found banner when backend yields null", async () => {
     const c = document.createElement("div");
     await renderPatternViewPage(c, "bingo", "any-id");
-    const banner = c.querySelector(".alert.alert-warning");
-    expect(banner?.textContent).toContain("BIN-627");
+    const banner = c.querySelector('[data-testid="pattern-not-found"]');
+    expect(banner).not.toBeNull();
   });
 
   it("Cancel-button navigates back to the list", async () => {

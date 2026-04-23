@@ -1,17 +1,5 @@
-//
-//   POST /getPatternMenu                              → sidebar dynamic menu  ← PLACEHOLDER (BIN-627)
-//   GET  /patternGameDetailList/:id                   → list-page              ← PLACEHOLDER (BIN-627)
-//   GET  /addPattern/:id                              → add-form GET
-//   POST /addPattern/:id/:type/add                    → add POST               ← PLACEHOLDER (BIN-627)
-//   GET  /patternEdit/:typeId/:id                     → edit-form GET
-//   POST /patternEdit/:typeId/:id                     → edit POST              ← PLACEHOLDER (BIN-627)
-//   GET  /viewPattern/:typeId/:id                     → view-only
-//   POST /getPatternDelete                            → delete                 ← PLACEHOLDER (BIN-627)
-//   POST /checkForPatternName                         → name uniqueness        ← PLACEHOLDER (BIN-627)
-//   POST /getPatternDetailList                        → DataTable ajax         ← PLACEHOLDER (BIN-627)
-//
-// Write-ops are deferred to BIN-627 backend CRUD; this module intentionally
-// does NOT call fetch() for POST/PUT/DELETE in this PR.
+// PatternState — wires admin-UI to BIN-627 backend endpoints
+// (`/api/admin/patterns/*` via admin-patterns.ts).
 //
 // PatternMask (25-bit bitmask) is imported from shared-types — the same type
 // Agent C uses for Game 3 PatternMatcher (packages/shared-types/src/game.ts).
@@ -21,6 +9,15 @@ import type { PatternMask } from "../common/types.js";
 // only re-exports the *type*, so we import the values directly from shared-types.
 // eslint-disable-next-line — relative path matches common/types.ts PatternMask import.
 import { PATTERN_MASK_FULL, PATTERN_MASK_CENTER_BIT } from "../../../../../../packages/shared-types/src/game.js";
+import {
+  listPatterns,
+  getPattern as apiGetPattern,
+  createPattern as apiCreatePattern,
+  updatePattern as apiUpdatePattern,
+  deletePattern as apiDeletePattern,
+  type AdminPattern,
+} from "../../../api/admin-patterns.js";
+import { ApiError } from "../../../api/client.js";
 
 /**
  * Row shape for the pattern list + view pages.
@@ -75,9 +72,51 @@ export interface PatternFormPayload {
   status: "active" | "inactive";
 }
 
-/** Placeholder contract shared with bolk 1 / 2 (BIN-627 for patterns). */
+/** Unified write-result contract — live after BIN-627 wire-up. */
 export type WriteResult =
-  | { ok: false; reason: "BACKEND_MISSING"; issue: "BIN-627" };
+  | { ok: true; row: PatternRow }
+  | { ok: false; reason: "PERMISSION_DENIED"; message: string }
+  | { ok: false; reason: "NOT_FOUND"; message: string }
+  | { ok: false; reason: "VALIDATION"; message: string }
+  | { ok: false; reason: "BACKEND_ERROR"; message: string };
+
+function toRow(p: AdminPattern): PatternRow {
+  return {
+    _id: p.id,
+    gameName: p.gameName || p.name,
+    patternNumber: p.patternNumber ? Number(p.patternNumber) : 0,
+    patternName: p.name,
+    mask: p.mask,
+    isWoF: p.isWoF,
+    isTchest: p.isTchest,
+    isMys: p.isMys,
+    isRowPr: p.isRowPr,
+    rowPercentage: p.rowPercentage,
+    isJackpot: p.isJackpot,
+    isGameTypeExtra: p.isGameTypeExtra,
+    isLuckyBonus: p.isLuckyBonus,
+    status: p.status,
+    createdAt: p.createdAt,
+    gameType: p.gameTypeId,
+  };
+}
+
+function apiErrorToWriteResult(err: unknown): WriteResult {
+  if (err instanceof ApiError) {
+    if (err.status === 403) {
+      return { ok: false, reason: "PERMISSION_DENIED", message: err.message };
+    }
+    if (err.status === 404) {
+      return { ok: false, reason: "NOT_FOUND", message: err.message };
+    }
+    if (err.status === 400) {
+      return { ok: false, reason: "VALIDATION", message: err.message };
+    }
+    return { ok: false, reason: "BACKEND_ERROR", message: err.message };
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return { ok: false, reason: "BACKEND_ERROR", message: msg };
+}
 
 // ── Helpers: legacy grid-string ↔ PatternMask ───────────────────────────────
 
@@ -161,35 +200,86 @@ export function countCells(mask: PatternMask): number {
 // Re-export shared-types utilities for convenience.
 export { PATTERN_MASK_FULL, PATTERN_MASK_CENTER_BIT };
 
-// ── Placeholder fetch/write operations (BIN-627) ────────────────────────────
+// ── Live fetch/write operations (BIN-627) ───────────────────────────────────
 
 /**
- * PLACEHOLDER — list endpoint not yet ported. Returns empty array so the
- * DataTable still renders (with empty-state message). Tracked in BIN-627.
+ * Fetch pattern list for a given game-type. Returns [] on 404 so UI keeps
+ * rendering the DataTable empty-state without erroring.
  */
-export async function fetchPatternList(_typeId: string): Promise<PatternRow[]> {
-  // NOTE: when BIN-627 lands, call apiRequest(`/api/admin/patterns?typeId=${typeId}`)
-  // here and map the response via legacyGridToMask().
-  return [];
+export async function fetchPatternList(typeId: string): Promise<PatternRow[]> {
+  try {
+    const result = await listPatterns({ gameTypeId: typeId });
+    return (result.patterns ?? []).map(toRow);
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 404 || err.status === 501)) {
+      return [];
+    }
+    throw err;
+  }
 }
 
-/** PLACEHOLDER — single fetch for view/:id. Returns null until BIN-627. */
-export async function fetchPattern(_typeId: string, _id: string): Promise<PatternRow | null> {
-  return null;
+/** Fetch a single pattern by id. Returns null on 404. */
+export async function fetchPattern(_typeId: string, id: string): Promise<PatternRow | null> {
+  try {
+    const p = await apiGetPattern(id);
+    return toRow(p);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
-/** PLACEHOLDER — save not yet backed. Tracked in BIN-627. */
+/** Create or update a pattern. */
 export async function savePattern(
-  _typeId: string,
-  _payload: PatternFormPayload,
-  _existingId?: string
+  typeId: string,
+  payload: PatternFormPayload,
+  existingId?: string
 ): Promise<WriteResult> {
-  return { ok: false, reason: "BACKEND_MISSING", issue: "BIN-627" };
+  try {
+    const p = existingId
+      ? await apiUpdatePattern(existingId, {
+          name: payload.patternName,
+          mask: payload.mask,
+          status: payload.status,
+          ...(payload.isWoF !== undefined ? { isWoF: payload.isWoF } : {}),
+          ...(payload.isTchest !== undefined ? { isTchest: payload.isTchest } : {}),
+          ...(payload.isMys !== undefined ? { isMys: payload.isMys } : {}),
+          ...(payload.isRowPr !== undefined ? { isRowPr: payload.isRowPr } : {}),
+          ...(payload.rowPercentage !== undefined ? { rowPercentage: payload.rowPercentage } : {}),
+          ...(payload.isJackpot !== undefined ? { isJackpot: payload.isJackpot } : {}),
+          ...(payload.isGameTypeExtra !== undefined ? { isGameTypeExtra: payload.isGameTypeExtra } : {}),
+          ...(payload.isLuckyBonus !== undefined ? { isLuckyBonus: payload.isLuckyBonus } : {}),
+        })
+      : await apiCreatePattern({
+          gameTypeId: typeId,
+          name: payload.patternName,
+          mask: payload.mask,
+          status: payload.status,
+          ...(payload.isWoF !== undefined ? { isWoF: payload.isWoF } : {}),
+          ...(payload.isTchest !== undefined ? { isTchest: payload.isTchest } : {}),
+          ...(payload.isMys !== undefined ? { isMys: payload.isMys } : {}),
+          ...(payload.isRowPr !== undefined ? { isRowPr: payload.isRowPr } : {}),
+          ...(payload.rowPercentage !== undefined ? { rowPercentage: payload.rowPercentage } : {}),
+          ...(payload.isJackpot !== undefined ? { isJackpot: payload.isJackpot } : {}),
+          ...(payload.isGameTypeExtra !== undefined ? { isGameTypeExtra: payload.isGameTypeExtra } : {}),
+          ...(payload.isLuckyBonus !== undefined ? { isLuckyBonus: payload.isLuckyBonus } : {}),
+        });
+    return { ok: true, row: toRow(p) };
+  } catch (err) {
+    return apiErrorToWriteResult(err);
+  }
 }
 
-/** PLACEHOLDER — delete not yet backed. Tracked in BIN-627. */
-export async function deletePattern(_id: string): Promise<WriteResult> {
-  return { ok: false, reason: "BACKEND_MISSING", issue: "BIN-627" };
+/** Soft-delete a pattern. */
+export async function deletePattern(
+  id: string
+): Promise<WriteResult | { ok: true; softDeleted: boolean }> {
+  try {
+    const result = await apiDeletePattern(id);
+    return { ok: true, softDeleted: result.softDeleted };
+  } catch (err) {
+    return apiErrorToWriteResult(err);
+  }
 }
 
 /**

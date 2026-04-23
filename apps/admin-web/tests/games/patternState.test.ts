@@ -1,13 +1,13 @@
-// Unit tests for PatternState (PR-A3 bolk 3).
+// Unit tests for PatternState (BIN-627 wire-up).
 //
-// Coverage (heavy — 15+ tests):
+// Coverage:
 //   - PatternMask bitmask-encoding: legacyGridToMask / maskToLegacyGrid round-trip
 //   - toggleCell: idempotent double-toggle, out-of-range guard
 //   - isCellSet / countCells
 //   - maxPatternsForGameType: Game 1 / 3 / 4 / 5 limits
-//   - Placeholder write-ops (BIN-627 contract)
+//   - fetch/save/delete wired to BIN-627 backend
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   legacyGridToMask,
   maskToLegacyGrid,
@@ -150,28 +150,124 @@ describe("maxPatternsForGameType", () => {
   });
 });
 
-describe("placeholder fetch/write ops (BIN-627 contract)", () => {
-  it("fetchPatternList returns [] until backend lands", async () => {
-    const rows = await fetchPatternList("game_1");
+describe("fetch/save/delete pattern (BIN-627 live)", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const patternFixture = (partial: Record<string, unknown> = {}) => ({
+    id: "p-1",
+    gameTypeId: "bingo",
+    gameName: "Game 1",
+    patternNumber: "1",
+    name: "Line 1",
+    mask: 31,
+    claimType: "LINE",
+    prizePercent: 10,
+    orderIndex: 1,
+    design: 0,
+    status: "active",
+    isWoF: false,
+    isTchest: false,
+    isMys: false,
+    isRowPr: false,
+    rowPercentage: 0,
+    isJackpot: false,
+    isGameTypeExtra: false,
+    isLuckyBonus: false,
+    patternPlace: null,
+    extra: {},
+    createdBy: null,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    ...partial,
+  });
+
+  it("fetchPatternList returns mapped rows from /api/admin/patterns", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ ok: true, data: { patterns: [patternFixture()], count: 1 } }),
+        { status: 200 }
+      )) as typeof fetch;
+    const rows = await fetchPatternList("bingo");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?._id).toBe("p-1");
+    expect(rows[0]?.mask).toBe(31);
+  });
+
+  it("fetchPatternList returns [] on 404", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "missing" } }),
+        { status: 404 }
+      )) as typeof fetch;
+    const rows = await fetchPatternList("bingo");
     expect(rows).toEqual([]);
   });
 
-  it("fetchPattern returns null until backend lands", async () => {
-    const p = await fetchPattern("game_1", "anything");
+  it("fetchPattern returns null on 404", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ ok: false, error: { code: "NOT_FOUND", message: "missing" } }),
+        { status: 404 }
+      )) as typeof fetch;
+    const p = await fetchPattern("bingo", "anything");
     expect(p).toBeNull();
   });
 
-  it("savePattern resolves to BACKEND_MISSING", async () => {
-    const res = await savePattern("game_1", {
+  it("savePattern POSTs on create", async () => {
+    const spy = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, data: patternFixture() }), { status: 200 })
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+    const res = await savePattern("bingo", {
       patternName: "test",
       mask: 31,
       status: "active",
     });
-    expect(res).toEqual({ ok: false, reason: "BACKEND_MISSING", issue: "BIN-627" });
+    expect(res.ok).toBe(true);
+    const calls = spy.mock.calls as unknown as Array<[string, RequestInit?]>;
+    const post = calls.find((c) => c[1]?.method === "POST");
+    expect(post?.[0]).toBe("/api/admin/patterns");
   });
 
-  it("deletePattern resolves to BACKEND_MISSING", async () => {
-    const res = await deletePattern("x");
-    expect(res).toEqual({ ok: false, reason: "BACKEND_MISSING", issue: "BIN-627" });
+  it("savePattern PATCHes on update with existingId", async () => {
+    const spy = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true, data: patternFixture() }), { status: 200 })
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+    const res = await savePattern(
+      "bingo",
+      { patternName: "Updated", mask: 31, status: "active" },
+      "p-1"
+    );
+    expect(res.ok).toBe(true);
+    const calls = spy.mock.calls as unknown as Array<[string, RequestInit?]>;
+    const patch = calls.find((c) => c[1]?.method === "PATCH");
+    expect(patch?.[0]).toBe("/api/admin/patterns/p-1");
+  });
+
+  it("deletePattern DELETEs and returns softDeleted", async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ ok: true, data: { softDeleted: true } }), { status: 200 })) as typeof fetch;
+    const res = await deletePattern("p-1");
+    expect(res.ok).toBe(true);
+    if ("softDeleted" in res) {
+      expect(res.softDeleted).toBe(true);
+    }
+  });
+
+  it("savePattern returns PERMISSION_DENIED on 403", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ ok: false, error: { code: "FORBIDDEN", message: "Forbidden" } }),
+        { status: 403 }
+      )) as typeof fetch;
+    const res = await savePattern("bingo", { patternName: "x", mask: 1, status: "active" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reason).toBe("PERMISSION_DENIED");
+    }
   });
 });

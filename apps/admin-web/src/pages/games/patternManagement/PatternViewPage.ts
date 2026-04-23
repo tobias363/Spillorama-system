@@ -89,10 +89,9 @@ function renderShell(
       </div></div></div>`
     : error
       ? `<div class="alert alert-danger" style="margin:16px;">${escapeHtml(error)}</div>`
-      : `<div class="alert alert-warning" style="margin:16px;">
+      : `<div class="alert alert-warning" style="margin:16px;" data-testid="pattern-not-found">
            <i class="fa fa-info-circle"></i>
-           Venter på backend-endpoint.
-           <strong>BIN-627</strong> Pattern view må leveres før data vises.
+           ${escapeHtml(t("not_found"))}
          </div>`;
 
   return `

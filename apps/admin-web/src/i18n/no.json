@@ -2727,6 +2727,7 @@
   "filename": "Filnavn",
   "slug_auto_generated_hint": "La stå tom for å auto-generere fra navnet.",
   "pattern_ids_comma_separated_hint": "Kommaseparerte pattern-IDer (f.eks. pid1,pid2).",
+  "pattern_mask_empty_error": "Mønsteret kan ikke være tomt — velg minst én celle i rutenettet.",
   "winners_count": "Antall vinnere",
   "payouts_total": "Sum utbetalinger",
   "jackpots_total": "Sum jackpot-utbetalinger",
