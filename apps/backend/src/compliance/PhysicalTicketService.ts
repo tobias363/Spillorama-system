@@ -15,366 +15,78 @@ import { Pool } from "pg";
 import { DomainError } from "../game/BingoEngine.js";
 import { getPoolTuning } from "../util/pgPool.js";
 import { logger as rootLogger } from "../util/logger.js";
+import {
+  VALID_BATCH_STATUSES,
+  VALID_PHYSICAL_TICKET_PATTERNS,
+  MAX_BATCH_SIZE,
+  type PhysicalBatchStatus,
+  type PhysicalTicketStatus,
+  type PhysicalTicketPattern,
+  type PhysicalTicketBatch,
+  type PhysicalTicket,
+  type CreateBatchInput,
+  type UpdateBatchInput,
+  type ListBatchesFilter,
+  type ListSoldTicketsFilter,
+  type GenerateResult,
+  type PhysicalTicketBatchTransfer,
+  type PhysicalTicketCashout,
+  type RecordCashoutInput,
+  type PhysicalTicketCashoutResult,
+  type RewardAllInput,
+  type RewardAllDetailStatus,
+  type RewardAllDetail,
+  type RewardAllResult,
+  type PhysicalTicketServiceOptions,
+  type BatchRow,
+  type TicketRow,
+  type CashoutRow,
+} from "./PhysicalTicketTypes.js";
+
+// Re-export for backward-compat (eksisterende imports fra denne modulen).
+export {
+  VALID_BATCH_STATUSES,
+  VALID_PHYSICAL_TICKET_PATTERNS,
+  MAX_BATCH_SIZE,
+} from "./PhysicalTicketTypes.js";
+export type {
+  PhysicalBatchStatus,
+  PhysicalTicketStatus,
+  PhysicalTicketPattern,
+  PhysicalTicketBatch,
+  PhysicalTicket,
+  CreateBatchInput,
+  UpdateBatchInput,
+  ListBatchesFilter,
+  ListSoldTicketsFilter,
+  GenerateResult,
+  PhysicalTicketBatchTransfer,
+  PhysicalTicketCashout,
+  RecordCashoutInput,
+  PhysicalTicketCashoutResult,
+  RewardAllInput,
+  RewardAllDetailStatus,
+  RewardAllDetail,
+  RewardAllResult,
+  PhysicalTicketServiceOptions,
+} from "./PhysicalTicketTypes.js";
+
+import {
+  asIso,
+  assertSchemaName,
+  assertBatchStatus,
+  assertPositiveInt,
+  assertBatchName,
+  isUniqueViolation,
+} from "./PhysicalTicketValidators.js";
+import {
+  mapBatch,
+  mapCashout,
+  mapTicket,
+} from "./PhysicalTicketMappers.js";
+import { initializePhysicalTicketSchema } from "./PhysicalTicketSchema.js";
 
 const logger = rootLogger.child({ module: "physical-ticket-service" });
-
-export type PhysicalBatchStatus = "DRAFT" | "ACTIVE" | "CLOSED";
-export type PhysicalTicketStatus = "UNSOLD" | "SOLD" | "VOIDED";
-
-const VALID_BATCH_STATUSES: PhysicalBatchStatus[] = ["DRAFT", "ACTIVE", "CLOSED"];
-
-/** Max antall billetter som kan genereres i én batch (ops-grense). */
-const MAX_BATCH_SIZE = 10_000;
-
-export interface PhysicalTicketBatch {
-  id: string;
-  hallId: string;
-  batchName: string;
-  rangeStart: number;
-  rangeEnd: number;
-  defaultPriceCents: number;
-  gameSlug: string | null;
-  assignedGameId: string | null;
-  status: PhysicalBatchStatus;
-  createdBy: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * BIN-698: vinnende mønster stemplet på billett-raden ved første BIN-641
- * check-bingo. Kanonisk 5×5 Bingo75-set; utvidelser gjøres via ny migrasjon.
- */
-export type PhysicalTicketPattern =
-  | "row_1"
-  | "row_2"
-  | "row_3"
-  | "row_4"
-  | "full_house";
-
-const VALID_PHYSICAL_TICKET_PATTERNS: readonly PhysicalTicketPattern[] = [
-  "row_1",
-  "row_2",
-  "row_3",
-  "row_4",
-  "full_house",
-] as const;
-
-export interface PhysicalTicket {
-  id: string;
-  batchId: string;
-  uniqueId: string;
-  hallId: string;
-  status: PhysicalTicketStatus;
-  priceCents: number | null;
-  assignedGameId: string | null;
-  soldAt: string | null;
-  soldBy: string | null;
-  buyerUserId: string | null;
-  voidedAt: string | null;
-  voidedBy: string | null;
-  voidedReason: string | null;
-  createdAt: string;
-  updatedAt: string;
-  // ── BIN-698: win-data (stemplet av BIN-641 check-bingo ved første kall).
-  /**
-   * 25 tall i row-major-rekkefølge (5×5 grid, index 12 = free-centre = 0).
-   * NULL før første check-bingo; immutable etter stamping.
-   */
-  numbersJson: number[] | null;
-  /** Høyeste vinnende mønster ved stamping. NULL = ikke evaluert eller tapte. */
-  patternWon: PhysicalTicketPattern | null;
-  /**
-   * Beregnet payout i cents. NULL = BIN-641 stamplet ikke beløp (dagens
-   * oppførsel); BIN-639 (PR 2) setter verdi når admin distribuerer.
-   */
-  wonAmountCents: number | null;
-  /** Tidspunkt for første BIN-641-stamping. NULL før check-bingo. */
-  evaluatedAt: string | null;
-  /** true = BIN-639 reward-all har distribuert premien. */
-  isWinningDistributed: boolean;
-  /** Tidspunkt for BIN-639-distribusjon. NULL før distribusjon. */
-  winningDistributedAt: string | null;
-}
-
-export interface CreateBatchInput {
-  hallId: string;
-  batchName: string;
-  rangeStart: number;
-  rangeEnd: number;
-  defaultPriceCents: number;
-  gameSlug?: string | null;
-  assignedGameId?: string | null;
-  createdBy: string;
-}
-
-export interface UpdateBatchInput {
-  batchName?: string;
-  defaultPriceCents?: number;
-  gameSlug?: string | null;
-  assignedGameId?: string | null;
-  status?: PhysicalBatchStatus;
-}
-
-export interface ListBatchesFilter {
-  hallId?: string;
-  status?: PhysicalBatchStatus;
-  limit?: number;
-}
-
-export interface ListSoldTicketsFilter {
-  hallId?: string;
-  limit?: number;
-}
-
-export interface GenerateResult {
-  batchId: string;
-  generated: number;
-  firstUniqueId: string;
-  lastUniqueId: string;
-}
-
-export interface PhysicalTicketBatchTransfer {
-  id: string;
-  batchId: string;
-  fromHallId: string;
-  toHallId: string;
-  reason: string;
-  transferredBy: string;
-  transferredAt: string;
-  ticketCountAtTransfer: number;
-}
-
-/**
- * BIN-640: én cashout-rad per utbetalt fysisk billett. UNIQUE-constraint
- * på `ticketUniqueId` gir idempotens.
- */
-export interface PhysicalTicketCashout {
-  id: string;
-  ticketUniqueId: string;
-  hallId: string;
-  gameId: string | null;
-  payoutCents: number;
-  paidBy: string;
-  paidAt: string;
-  notes: string | null;
-  otherData: Record<string, unknown>;
-}
-
-export interface RecordCashoutInput {
-  uniqueId: string;
-  payoutCents: number;
-  paidBy: string;
-  notes?: string | null;
-  otherData?: Record<string, unknown>;
-}
-
-export interface PhysicalTicketCashoutResult {
-  cashout: PhysicalTicketCashout;
-  ticket: PhysicalTicket;
-}
-
-/**
- * BIN-639: bulk reward-all input. Admin-UI beregner payoutCents per vinner
- * og sender array med `{ uniqueId, amountCents }`. Service prosesserer hver
- * ticket som egen mini-transaksjon slik at én feil ikke ruller tilbake de
- * andre.
- */
-export interface RewardAllInput {
-  gameId: string;
-  rewards: Array<{ uniqueId: string; amountCents: number }>;
-  actorId: string;
-}
-
-export type RewardAllDetailStatus =
-  | "rewarded"
-  | "skipped_already_distributed"
-  | "skipped_not_stamped"
-  | "skipped_not_won"
-  | "skipped_wrong_game"
-  | "ticket_not_found"
-  | "invalid_amount";
-
-export interface RewardAllDetail {
-  uniqueId: string;
-  status: RewardAllDetailStatus;
-  amountCents?: number;
-  cashoutId?: string;
-  hallId?: string;
-  message?: string;
-}
-
-export interface RewardAllResult {
-  rewardedCount: number;
-  totalPayoutCents: number;
-  skippedCount: number;
-  details: RewardAllDetail[];
-}
-
-export interface PhysicalTicketServiceOptions {
-  connectionString: string;
-  schema?: string;
-}
-
-interface BatchRow {
-  id: string;
-  hall_id: string;
-  batch_name: string;
-  range_start: string | number;
-  range_end: string | number;
-  default_price_cents: string | number;
-  game_slug: string | null;
-  assigned_game_id: string | null;
-  status: PhysicalBatchStatus;
-  created_by: string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
-}
-
-interface TicketRow {
-  id: string;
-  batch_id: string;
-  unique_id: string;
-  hall_id: string;
-  status: PhysicalTicketStatus;
-  price_cents: string | number | null;
-  assigned_game_id: string | null;
-  sold_at: Date | string | null;
-  sold_by: string | null;
-  buyer_user_id: string | null;
-  voided_at: Date | string | null;
-  voided_by: string | null;
-  voided_reason: string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
-  // BIN-698: win-data-kolonner. pg-driver returnerer JSONB som parsed object,
-  // men eldre miljøer kan returnere string — håndteres i mapTicket.
-  numbers_json?: unknown;
-  pattern_won?: string | null;
-  won_amount_cents?: string | number | null;
-  evaluated_at?: Date | string | null;
-  is_winning_distributed?: boolean | null;
-  winning_distributed_at?: Date | string | null;
-}
-
-interface CashoutRow {
-  id: string;
-  ticket_unique_id: string;
-  hall_id: string;
-  game_id: string | null;
-  payout_cents: string | number;
-  paid_by: string;
-  paid_at: Date | string;
-  notes: string | null;
-  other_data: unknown;
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code?: string }).code === "23505"
-  );
-}
-
-/**
- * BIN-698: parse `numbers_json` fra DB (JSONB → parsed array). Returnerer
- * null hvis verdien ikke er en array av 25 heltall (defense-in-depth).
- * pg-driver returnerer JSONB som allerede-parsed JS-objekt; eldre driver-
- * versjoner kan returnere string — begge støttes.
- */
-function parseNumbersJson(raw: unknown): number[] | null {
-  if (raw === null || raw === undefined) return null;
-  let value: unknown = raw;
-  if (typeof raw === "string") {
-    try {
-      value = JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-  if (!Array.isArray(value)) return null;
-  if (value.length !== 25) return null;
-  const out: number[] = [];
-  for (const v of value) {
-    const n = typeof v === "number" ? v : Number(v);
-    if (!Number.isFinite(n) || !Number.isInteger(n)) return null;
-    out.push(n);
-  }
-  return out;
-}
-
-/** BIN-698: validér pattern-tekst fra DB mot whitelist. */
-function parsePattern(raw: string | null): PhysicalTicketPattern | null {
-  if (raw === null) return null;
-  return (VALID_PHYSICAL_TICKET_PATTERNS as readonly string[]).includes(raw)
-    ? (raw as PhysicalTicketPattern)
-    : null;
-}
-
-function asJsonObject(value: unknown): Record<string, unknown> {
-  if (value === null || value === undefined) return {};
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
-    } catch {
-      return {};
-    }
-  }
-  if (typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
-}
-
-function asIso(value: Date | string): string {
-  return typeof value === "string" ? value : value.toISOString();
-}
-
-function asIsoOrNull(value: Date | string | null): string | null {
-  return value === null ? null : asIso(value);
-}
-
-function assertSchemaName(schema: string): string {
-  if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
-    throw new DomainError("INVALID_CONFIG", "Ugyldig schema-navn.");
-  }
-  return schema;
-}
-
-function assertBatchStatus(value: unknown): PhysicalBatchStatus {
-  if (typeof value !== "string") {
-    throw new DomainError("INVALID_INPUT", "status må være en streng.");
-  }
-  const upper = value.trim().toUpperCase() as PhysicalBatchStatus;
-  if (!VALID_BATCH_STATUSES.includes(upper)) {
-    throw new DomainError("INVALID_INPUT", `status må være én av ${VALID_BATCH_STATUSES.join(", ")}.`);
-  }
-  return upper;
-}
-
-function assertPositiveInt(value: unknown, field: string): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
-    throw new DomainError("INVALID_INPUT", `${field} må være et ikke-negativt heltall.`);
-  }
-  return n;
-}
-
-function assertBatchName(value: unknown): string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new DomainError("INVALID_INPUT", "batchName er påkrevd.");
-  }
-  const trimmed = value.trim();
-  if (trimmed.length > 120) {
-    throw new DomainError("INVALID_INPUT", "batchName er for lang (maks 120 tegn).");
-  }
-  return trimmed;
-}
 
 export class PhysicalTicketService {
   private readonly pool: Pool;
@@ -431,7 +143,7 @@ export class PhysicalTicketService {
        LIMIT $${params.length}`,
       params
     );
-    return rows.map((r) => this.mapBatch(r));
+    return rows.map((r) => mapBatch(r));
   }
 
   async getBatch(batchId: string): Promise<PhysicalTicketBatch> {
@@ -450,7 +162,7 @@ export class PhysicalTicketService {
     if (!row) {
       throw new DomainError("PHYSICAL_BATCH_NOT_FOUND", "Batch finnes ikke.");
     }
-    return this.mapBatch(row);
+    return mapBatch(row);
   }
 
   async createBatch(input: CreateBatchInput): Promise<PhysicalTicketBatch> {
@@ -509,7 +221,7 @@ export class PhysicalTicketService {
                    game_slug, assigned_game_id, status, created_by, created_at, updated_at`,
         [id, hallId, batchName, rangeStart, rangeEnd, defaultPriceCents, gameSlug, assignedGameId, input.createdBy]
       );
-      return this.mapBatch(rows[0]!);
+      return mapBatch(rows[0]!);
     } catch (err) {
       const msg = (err as { message?: string })?.message ?? "";
       if (/duplicate key|unique/i.test(msg) && /batch_name/i.test(msg)) {
@@ -562,7 +274,7 @@ export class PhysicalTicketService {
       );
       const row = rows[0];
       if (!row) throw new DomainError("PHYSICAL_BATCH_NOT_FOUND", "Batch finnes ikke.");
-      return this.mapBatch(row);
+      return mapBatch(row);
     } catch (err) {
       const msg = (err as { message?: string })?.message ?? "";
       if (/duplicate key|unique/i.test(msg) && /batch_name/i.test(msg)) {
@@ -700,7 +412,7 @@ export class PhysicalTicketService {
         [batch.id, trimmed]
       );
       await client.query("COMMIT");
-      return this.mapBatch(batch);
+      return mapBatch(batch);
     } catch (err) {
       await client.query("ROLLBACK");
       if (err instanceof DomainError) throw err;
@@ -736,7 +448,7 @@ export class PhysicalTicketService {
        LIMIT $${params.length}`,
       params
     );
-    return rows.map((r) => this.mapTicket(r));
+    return rows.map((r) => mapTicket(r));
   }
 
   /**
@@ -792,7 +504,7 @@ export class PhysicalTicketService {
        LIMIT $${params.length}`,
       params
     );
-    return rows.map((r) => this.mapTicket(r));
+    return rows.map((r) => mapTicket(r));
   }
 
   /**
@@ -877,7 +589,7 @@ export class PhysicalTicketService {
        LIMIT $${limitParam} OFFSET $${offsetParam}`,
       params
     );
-    return rows.map((r) => this.mapTicket(r));
+    return rows.map((r) => mapTicket(r));
   }
 
   /**
@@ -899,7 +611,7 @@ export class PhysicalTicketService {
        WHERE unique_id = $1`,
       [uniqueId.trim()]
     );
-    return rows[0] ? this.mapTicket(rows[0]) : null;
+    return rows[0] ? mapTicket(rows[0]) : null;
   }
 
   /**
@@ -962,7 +674,7 @@ export class PhysicalTicketService {
       // Idempotens: allerede stemplet → returner uten mutasjon.
       if (existing.numbers_json !== null && existing.numbers_json !== undefined) {
         await client.query("COMMIT");
-        return this.mapTicket(existing);
+        return mapTicket(existing);
       }
 
       const { rows } = await client.query<TicketRow>(
@@ -980,7 +692,7 @@ export class PhysicalTicketService {
         [uniqueId, JSON.stringify(input.numbers), input.patternWon]
       );
       await client.query("COMMIT");
-      return this.mapTicket(rows[0]!);
+      return mapTicket(rows[0]!);
     } catch (err) {
       await client.query("ROLLBACK");
       if (err instanceof DomainError) throw err;
@@ -1072,7 +784,7 @@ export class PhysicalTicketService {
         [uniqueId, soldBy, buyerUserId, priceCents]
       );
       await client.query("COMMIT");
-      return this.mapTicket(rows[0]!);
+      return mapTicket(rows[0]!);
     } catch (err) {
       await client.query("ROLLBACK");
       if (err instanceof DomainError) throw err;
@@ -1230,7 +942,7 @@ export class PhysicalTicketService {
        LIMIT 1`,
       [trimmed]
     );
-    return rows[0] ? this.mapCashout(rows[0]) : null;
+    return rows[0] ? mapCashout(rows[0]) : null;
   }
 
   /**
@@ -1315,8 +1027,8 @@ export class PhysicalTicketService {
       );
       await client.query("COMMIT");
       return {
-        cashout: this.mapCashout(inserted[0]!),
-        ticket: this.mapTicket(ticketRow),
+        cashout: mapCashout(inserted[0]!),
+        ticket: mapTicket(ticketRow),
       };
     } catch (err) {
       await client.query("ROLLBACK");
@@ -1566,191 +1278,10 @@ export class PhysicalTicketService {
 
   // ── Private helpers ────────────────────────────────────────────────────
 
-  private mapBatch(row: BatchRow): PhysicalTicketBatch {
-    return {
-      id: row.id,
-      hallId: row.hall_id,
-      batchName: row.batch_name,
-      rangeStart: Number(row.range_start),
-      rangeEnd: Number(row.range_end),
-      defaultPriceCents: Number(row.default_price_cents),
-      gameSlug: row.game_slug,
-      assignedGameId: row.assigned_game_id,
-      status: row.status,
-      createdBy: row.created_by,
-      createdAt: asIso(row.created_at),
-      updatedAt: asIso(row.updated_at),
-    };
-  }
-
-  private mapCashout(row: CashoutRow): PhysicalTicketCashout {
-    return {
-      id: row.id,
-      ticketUniqueId: row.ticket_unique_id,
-      hallId: row.hall_id,
-      gameId: row.game_id,
-      payoutCents: Number(row.payout_cents),
-      paidBy: row.paid_by,
-      paidAt: asIso(row.paid_at),
-      notes: row.notes,
-      otherData: asJsonObject(row.other_data),
-    };
-  }
-
-  private mapTicket(row: TicketRow): PhysicalTicket {
-    return {
-      id: row.id,
-      batchId: row.batch_id,
-      uniqueId: row.unique_id,
-      hallId: row.hall_id,
-      status: row.status,
-      priceCents: row.price_cents === null ? null : Number(row.price_cents),
-      assignedGameId: row.assigned_game_id,
-      soldAt: asIsoOrNull(row.sold_at),
-      soldBy: row.sold_by,
-      buyerUserId: row.buyer_user_id,
-      voidedAt: asIsoOrNull(row.voided_at),
-      voidedBy: row.voided_by,
-      voidedReason: row.voided_reason,
-      createdAt: asIso(row.created_at),
-      updatedAt: asIso(row.updated_at),
-      // ── BIN-698: win-data
-      numbersJson: parseNumbersJson(row.numbers_json),
-      patternWon: parsePattern(row.pattern_won ?? null),
-      wonAmountCents:
-        row.won_amount_cents === null || row.won_amount_cents === undefined
-          ? null
-          : Number(row.won_amount_cents),
-      evaluatedAt: asIsoOrNull(row.evaluated_at ?? null),
-      isWinningDistributed: row.is_winning_distributed === true,
-      winningDistributedAt: asIsoOrNull(row.winning_distributed_at ?? null),
-    };
-  }
-
   private async ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.initializeSchema();
+      this.initPromise = initializePhysicalTicketSchema(this.pool, this.schema);
     }
     await this.initPromise;
-  }
-
-  private async initializeSchema(): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.batchesTable()} (
-          id TEXT PRIMARY KEY,
-          hall_id TEXT NOT NULL,
-          batch_name TEXT NOT NULL,
-          range_start BIGINT NOT NULL,
-          range_end BIGINT NOT NULL,
-          default_price_cents BIGINT NOT NULL CHECK (default_price_cents >= 0),
-          game_slug TEXT NULL,
-          assigned_game_id TEXT NULL,
-          status TEXT NOT NULL DEFAULT 'DRAFT'
-            CHECK (status IN ('DRAFT', 'ACTIVE', 'CLOSED')),
-          created_by TEXT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          CHECK (range_end >= range_start),
-          UNIQUE (hall_id, batch_name)
-        )`
-      );
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.ticketsTable()} (
-          id TEXT PRIMARY KEY,
-          batch_id TEXT NOT NULL REFERENCES ${this.batchesTable()}(id) ON DELETE CASCADE,
-          unique_id TEXT UNIQUE NOT NULL,
-          hall_id TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'UNSOLD'
-            CHECK (status IN ('UNSOLD', 'SOLD', 'VOIDED')),
-          price_cents BIGINT NULL CHECK (price_cents IS NULL OR price_cents >= 0),
-          assigned_game_id TEXT NULL,
-          sold_at TIMESTAMPTZ NULL,
-          sold_by TEXT NULL,
-          buyer_user_id TEXT NULL,
-          voided_at TIMESTAMPTZ NULL,
-          voided_by TEXT NULL,
-          voided_reason TEXT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          numbers_json JSONB NULL,
-          pattern_won TEXT NULL
-            CHECK (pattern_won IS NULL OR pattern_won IN ('row_1','row_2','row_3','row_4','full_house')),
-          won_amount_cents BIGINT NULL
-            CHECK (won_amount_cents IS NULL OR won_amount_cents >= 0),
-          evaluated_at TIMESTAMPTZ NULL,
-          is_winning_distributed BOOLEAN NOT NULL DEFAULT false,
-          winning_distributed_at TIMESTAMPTZ NULL
-        )`
-      );
-      // BIN-698: Defense-in-depth for miljøer der tabellen finnes fra før —
-      // legger til kolonner hvis de mangler (matcher migrasjon 20260427000100).
-      await client.query(
-        `ALTER TABLE ${this.ticketsTable()}
-           ADD COLUMN IF NOT EXISTS numbers_json JSONB NULL,
-           ADD COLUMN IF NOT EXISTS pattern_won TEXT NULL,
-           ADD COLUMN IF NOT EXISTS won_amount_cents BIGINT NULL,
-           ADD COLUMN IF NOT EXISTS evaluated_at TIMESTAMPTZ NULL,
-           ADD COLUMN IF NOT EXISTS is_winning_distributed BOOLEAN NOT NULL DEFAULT false,
-           ADD COLUMN IF NOT EXISTS winning_distributed_at TIMESTAMPTZ NULL`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_ptb_hall
-         ON ${this.batchesTable()}(hall_id)`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_pt_batch
-         ON ${this.ticketsTable()}(batch_id)`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_pt_game_status
-         ON ${this.ticketsTable()}(assigned_game_id, status)
-         WHERE assigned_game_id IS NOT NULL`
-      );
-      // BIN-698: partial index for BIN-639 reward-all query
-      //   ("alle vinnende billetter i et game som ikke er utbetalt ennå").
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_pt_undistributed_winners
-         ON ${this.ticketsTable()}(assigned_game_id)
-         WHERE won_amount_cents > 0 AND is_winning_distributed = false`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_pt_hall_status
-         ON ${this.ticketsTable()}(hall_id, status)`
-      );
-      // BIN-640: single-ticket cashouts — én rad per utbetalt fysisk billett.
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this.cashoutsTable()} (
-          id TEXT PRIMARY KEY,
-          ticket_unique_id TEXT NOT NULL UNIQUE,
-          hall_id TEXT NOT NULL,
-          game_id TEXT NULL,
-          payout_cents BIGINT NOT NULL CHECK (payout_cents > 0),
-          paid_by TEXT NOT NULL,
-          paid_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          notes TEXT NULL,
-          other_data JSONB NOT NULL DEFAULT '{}'::jsonb
-        )`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_ptc_hall_paid_at
-         ON ${this.cashoutsTable()}(hall_id, paid_at DESC)`
-      );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_ptc_game
-         ON ${this.cashoutsTable()}(game_id, paid_at DESC)
-         WHERE game_id IS NOT NULL`
-      );
-      await client.query("COMMIT");
-    } catch (err) {
-      await client.query("ROLLBACK");
-      if (err instanceof DomainError) throw err;
-      throw new DomainError("PHYSICAL_INIT_FAILED", "Kunne ikke initialisere physical-ticket-tabeller.");
-    } finally {
-      client.release();
-    }
   }
 }
