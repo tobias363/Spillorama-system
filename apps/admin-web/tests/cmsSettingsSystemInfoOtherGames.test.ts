@@ -253,7 +253,7 @@ describe("CMS dispatcher (BIN-676 wired)", () => {
     expect(responsibleRow?.innerHTML).toContain("#/ResponsibleGameing");
   });
 
-  it("/ResponsibleGameing shows regulatory lock banner and renders read-only textarea with disabled save (BIN-680)", async () => {
+  it("/ResponsibleGameing viser versjons-flyt-banner + redigerbar textarea + save-knapp (BIN-680 Lag 1)", async () => {
     mockApiRouter([
       {
         match: /\/api\/admin\/cms\/responsible-gaming$/,
@@ -266,18 +266,40 @@ describe("CMS dispatcher (BIN-676 wired)", () => {
           updatedAt: "2026-04-20T00:00:00Z",
         }),
       },
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming\/history$/,
+        method: "GET",
+        handler: () => ({
+          slug: "responsible-gaming",
+          versions: [],
+          count: 0,
+        }),
+      },
+      {
+        match: /\/api\/auth\/me$/,
+        method: "GET",
+        handler: () => ({ id: "admin-1", email: "a@b", role: "ADMIN" }),
+      },
+      {
+        match: /\/api\/admin\/permissions$/,
+        method: "GET",
+        handler: () => ({}),
+      },
     ]);
     const host = container();
     mountCmsRoute(host, "/ResponsibleGameing");
     await tick();
+    // Banner vises fortsatt (info om regulatorisk versjons-flyt), men nå som
+    // informasjon — ikke lås.
     expect(host.querySelector('[data-testid="cms-regulatory-lock-banner"]')).toBeTruthy();
     const textarea = host.querySelector<HTMLTextAreaElement>('[data-testid="cms-body-textarea"]');
-    expect(textarea?.readOnly).toBe(true);
+    expect(textarea?.readOnly).toBe(false); // BIN-680: ikke readonly
     expect(textarea?.value).toBe("Gjeldende tekst");
     const save = host.querySelector<HTMLButtonElement>('[data-testid="cms-save-btn"]');
     expect(save).toBeTruthy();
-    expect(save!.disabled).toBe(true);
-    expect(save!.title).toContain("BIN-680");
+    expect(save!.disabled).toBe(false); // BIN-680: ikke disabled
+    // Historikk-panel skal være synlig.
+    expect(host.querySelector('[data-testid="cms-version-history"]')).toBeTruthy();
   });
 
   it("/TermsofService allows edit (no regulatory lock) and roundtrips via PUT", async () => {
@@ -329,7 +351,9 @@ describe("CMS dispatcher (BIN-676 wired)", () => {
     expect(puttedContent).toBe("Vilkår v2");
   });
 
-  it("/ResponsibleGameing: UI blokkerer PUT pga isLocked-sjekk (BIN-680)", async () => {
+  it("/ResponsibleGameing: lagring oppretter draft via PUT og viser draft i historikk (BIN-680 Lag 1)", async () => {
+    let puttedContent: string | null = null;
+    let historyCalls = 0;
     const router = mockApiRouter([
       {
         match: /\/api\/admin\/cms\/responsible-gaming$/,
@@ -345,27 +369,204 @@ describe("CMS dispatcher (BIN-676 wired)", () => {
       {
         match: /\/api\/admin\/cms\/responsible-gaming$/,
         method: "PUT",
-        status: 400,
-        handler: () => ({
-          ok: false,
-          error: {
-            code: "FEATURE_DISABLED",
-            message:
-              "Redigering av 'responsible-gaming' krever versjons-historikk og er foreløpig deaktivert. Blokkert av BIN-680.",
-          },
-        }),
+        handler: (_url, init) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            content: string;
+          };
+          puttedContent = body.content;
+          return {
+            slug: "responsible-gaming",
+            content: body.content,
+            updatedByUserId: "admin-1",
+            createdAt: "2026-04-20T00:00:00Z",
+            updatedAt: "2026-04-20T00:00:00Z",
+          };
+        },
+      },
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming\/history$/,
+        method: "GET",
+        handler: () => {
+          historyCalls++;
+          if (historyCalls === 1) {
+            return { slug: "responsible-gaming", versions: [], count: 0 };
+          }
+          return {
+            slug: "responsible-gaming",
+            versions: [
+              {
+                id: "ver-1",
+                slug: "responsible-gaming",
+                versionNumber: 1,
+                content: "ny tekst",
+                status: "draft",
+                createdByUserId: "admin-1",
+                createdAt: "2026-04-20T10:00:00Z",
+                approvedByUserId: null,
+                approvedAt: null,
+                publishedByUserId: null,
+                publishedAt: null,
+                retiredAt: null,
+              },
+            ],
+            count: 1,
+          };
+        },
+      },
+      {
+        match: /\/api\/auth\/me$/,
+        method: "GET",
+        handler: () => ({ id: "admin-1", email: "a@b", role: "ADMIN" }),
+      },
+      {
+        match: /\/api\/admin\/permissions$/,
+        method: "GET",
+        handler: () => ({}),
       },
     ]);
     const host = container();
     mountCmsRoute(host, "/ResponsibleGameing");
     await tick();
+    const textarea = host.querySelector<HTMLTextAreaElement>('[data-testid="cms-body-textarea"]')!;
+    textarea.value = "ny tekst";
     const form = host.querySelector<HTMLFormElement>("#cms-text-form")!;
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await tick();
+
+    // PUT skal ha blitt kalt (i motsetning til gamle BIN-680-gate-oppførsel).
     const putCalls = router.mock.calls.filter(
       (c) => (c[1] as RequestInit | undefined)?.method === "PUT"
     );
-    expect(putCalls.length).toBe(0);
+    expect(putCalls.length).toBe(1);
+    expect(puttedContent).toBe("ny tekst");
+
+    // Historikk-panelet skal være oppdatert med draften.
+    await tick();
+    expect(host.querySelector('[data-testid="cms-history-list"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="cms-version-status-draft"]')).toBeTruthy();
+  });
+
+  it("/ResponsibleGameing: 4-øyne — approve-knapp er disabled for creator", async () => {
+    mockApiRouter([
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming$/,
+        method: "GET",
+        handler: () => ({
+          slug: "responsible-gaming",
+          content: "",
+          updatedByUserId: null,
+          createdAt: "2026-04-20T00:00:00Z",
+          updatedAt: "2026-04-20T00:00:00Z",
+        }),
+      },
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming\/history$/,
+        method: "GET",
+        handler: () => ({
+          slug: "responsible-gaming",
+          versions: [
+            {
+              id: "ver-1",
+              slug: "responsible-gaming",
+              versionNumber: 1,
+              content: "tekst",
+              status: "review",
+              createdByUserId: "admin-1",
+              createdAt: "2026-04-20T10:00:00Z",
+              approvedByUserId: null,
+              approvedAt: null,
+              publishedByUserId: null,
+              publishedAt: null,
+              retiredAt: null,
+            },
+          ],
+          count: 1,
+        }),
+      },
+      {
+        match: /\/api\/auth\/me$/,
+        method: "GET",
+        // Samme bruker som draften — 4-øyne skal blokkere.
+        handler: () => ({ id: "admin-1", email: "a@b", role: "ADMIN" }),
+      },
+      {
+        match: /\/api\/admin\/permissions$/,
+        method: "GET",
+        handler: () => ({}),
+      },
+    ]);
+    const host = container();
+    mountCmsRoute(host, "/ResponsibleGameing");
+    await tick();
+    await tick();
+
+    // Approve-knappen finnes men er disabled.
+    const approveBtn = host.querySelector<HTMLButtonElement>(
+      '[data-testid="cms-approve-ver-1"]'
+    );
+    expect(approveBtn).toBeTruthy();
+    expect(approveBtn!.disabled).toBe(true);
+  });
+
+  it("/ResponsibleGameing: 4-øyne — approve-knapp er enabled for annen admin", async () => {
+    mockApiRouter([
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming$/,
+        method: "GET",
+        handler: () => ({
+          slug: "responsible-gaming",
+          content: "",
+          updatedByUserId: null,
+          createdAt: "2026-04-20T00:00:00Z",
+          updatedAt: "2026-04-20T00:00:00Z",
+        }),
+      },
+      {
+        match: /\/api\/admin\/cms\/responsible-gaming\/history$/,
+        method: "GET",
+        handler: () => ({
+          slug: "responsible-gaming",
+          versions: [
+            {
+              id: "ver-1",
+              slug: "responsible-gaming",
+              versionNumber: 1,
+              content: "tekst",
+              status: "review",
+              createdByUserId: "admin-1",
+              createdAt: "2026-04-20T10:00:00Z",
+              approvedByUserId: null,
+              approvedAt: null,
+              publishedByUserId: null,
+              publishedAt: null,
+              retiredAt: null,
+            },
+          ],
+          count: 1,
+        }),
+      },
+      {
+        match: /\/api\/auth\/me$/,
+        method: "GET",
+        // Annen bruker enn creator.
+        handler: () => ({ id: "admin-2", email: "c@d", role: "ADMIN" }),
+      },
+      {
+        match: /\/api\/admin\/permissions$/,
+        method: "GET",
+        handler: () => ({}),
+      },
+    ]);
+    const host = container();
+    mountCmsRoute(host, "/ResponsibleGameing");
+    await tick();
+    await tick();
+
+    const approveBtn = host.querySelector<HTMLButtonElement>(
+      '[data-testid="cms-approve-ver-1"]'
+    );
+    expect(approveBtn).toBeTruthy();
+    expect(approveBtn!.disabled).toBe(false);
   });
 
   it("/faq renders DataTable med add-button og viser FAQ-rader fra backend", async () => {

@@ -1,17 +1,24 @@
-// BIN-676 — admin-cms API-wrappers.
+// BIN-676 + BIN-680 — admin-cms API-wrappers.
 //
 // Thin wrappers around `apps/backend/src/routes/adminCms.ts`:
 //   GET    /api/admin/cms/faq          → liste
 //   POST   /api/admin/cms/faq          → opprett
 //   PATCH  /api/admin/cms/faq/:id      → oppdater
 //   DELETE /api/admin/cms/faq/:id      → slett
-//   GET    /api/admin/cms/:slug        → hent tekst-side
-//   PUT    /api/admin/cms/:slug        → oppdater tekst-side
+//   GET    /api/admin/cms/:slug        → hent tekst-side (live for regulatoriske)
+//   PUT    /api/admin/cms/:slug        → oppdater/opprett draft
 //
-// Regulatorisk-gate (BIN-680):
-//   PUT /api/admin/cms/responsible-gaming returnerer HTTP 400 +
-//   error.code='FEATURE_DISABLED' inntil versjons-historikk-tabellen +
-//   diff-logging er på plass. UI renderer responsible-gaming read-only.
+//   BIN-680 Lag 1:
+//   GET    /api/admin/cms/:slug/history
+//   GET    /api/admin/cms/:slug/versions/:id
+//   POST   /api/admin/cms/:slug/versions           (draft)
+//   POST   /api/admin/cms/:slug/versions/:id/submit
+//   POST   /api/admin/cms/:slug/versions/:id/approve
+//   POST   /api/admin/cms/:slug/versions/:id/publish
+//
+// BIN-680: `responsible-gaming` er ikke lenger FEATURE_DISABLED på PUT —
+// den oppretter nå ny draft-versjon. Full workflow (submit/approve/publish)
+// eksponeres via versjons-endepunktene.
 //
 // Domeneoppdeling:
 //   1. CMS text: aboutus, terms, support, links, responsible-gaming.
@@ -39,10 +46,20 @@ export type CmsBackendSlug =
   | "links"
   | "responsible-gaming";
 
-/** Slugs som er regulatorisk-låst for PUT (BIN-680). GET er alltid tillatt. */
-export const CMS_REGULATORY_LOCKED_SLUGS: readonly CmsBackendSlug[] = [
+/**
+ * Slugs som krever regulatorisk versjons-workflow (BIN-680 Lag 1).
+ * PUT oppretter nå en ny draft-versjon i stedet for å upserte direkte;
+ * publisering krever eksplisitt approve + publish via versjons-endepunkter.
+ *
+ * Beholder navnet LOCKED for bakoverkompat med eksisterende testselektorer,
+ * men semantikken er nå "krever versjonert flyt" — ikke "permanent låst".
+ */
+export const CMS_REGULATORY_VERSIONED_SLUGS: readonly CmsBackendSlug[] = [
   "responsible-gaming",
 ] as const;
+
+/** @deprecated Use CMS_REGULATORY_VERSIONED_SLUGS. Navn beholdt for migrerings-perioden. */
+export const CMS_REGULATORY_LOCKED_SLUGS = CMS_REGULATORY_VERSIONED_SLUGS;
 
 const TEXT_KEY_TO_SLUG: Record<CmsTextKey, CmsBackendSlug> = {
   terms_of_service: "terms",
@@ -56,8 +73,18 @@ export function textKeyToSlug(key: CmsTextKey): CmsBackendSlug {
   return TEXT_KEY_TO_SLUG[key];
 }
 
+/**
+ * Returnerer true for slugs som krever versjonert redigerings-flyt (BIN-680).
+ * UI bruker dette til å vise historikk-panel og workflow-knapper i stedet
+ * for direkte PUT.
+ */
+export function requiresVersionWorkflow(key: CmsTextKey): boolean {
+  return CMS_REGULATORY_VERSIONED_SLUGS.includes(textKeyToSlug(key));
+}
+
+/** @deprecated Bruk `requiresVersionWorkflow` — "locked" er ikke lenger riktig navn. */
 export function isRegulatoryLocked(key: CmsTextKey): boolean {
-  return CMS_REGULATORY_LOCKED_SLUGS.includes(textKeyToSlug(key));
+  return requiresVersionWorkflow(key);
 }
 
 export interface CmsTextRecord {
@@ -217,4 +244,106 @@ export async function deleteFaq(id: string): Promise<boolean> {
     { method: "DELETE", auth: true }
   );
   return true;
+}
+
+// ── BIN-680: CMS content versioning ───────────────────────────────────────
+
+export type CmsVersionStatus =
+  | "draft"
+  | "review"
+  | "approved"
+  | "live"
+  | "retired";
+
+export interface CmsVersionRecord {
+  id: string;
+  slug: CmsBackendSlug;
+  versionNumber: number;
+  content: string;
+  status: CmsVersionStatus;
+  createdByUserId: string;
+  createdAt: string;
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  publishedByUserId: string | null;
+  publishedAt: string | null;
+  retiredAt: string | null;
+}
+
+interface VersionHistoryEnvelope {
+  slug: CmsBackendSlug;
+  versions: CmsVersionRecord[];
+  count: number;
+}
+
+/** Hent full versjons-historikk for en regulatorisk slug. */
+export async function listCmsVersions(
+  key: CmsTextKey
+): Promise<CmsVersionRecord[]> {
+  const slug = textKeyToSlug(key);
+  const env = await apiRequest<VersionHistoryEnvelope>(
+    `/api/admin/cms/${encodeURIComponent(slug)}/history`,
+    { auth: true }
+  );
+  return env.versions;
+}
+
+/** Hent én versjon. */
+export async function getCmsVersion(
+  key: CmsTextKey,
+  versionId: string
+): Promise<CmsVersionRecord> {
+  const slug = textKeyToSlug(key);
+  return apiRequest<CmsVersionRecord>(
+    `/api/admin/cms/${encodeURIComponent(slug)}/versions/${encodeURIComponent(versionId)}`,
+    { auth: true }
+  );
+}
+
+/** Opprett ny draft-versjon fra gitt tekst. */
+export async function createCmsVersion(
+  key: CmsTextKey,
+  content: string
+): Promise<CmsVersionRecord> {
+  const slug = textKeyToSlug(key);
+  return apiRequest<CmsVersionRecord>(
+    `/api/admin/cms/${encodeURIComponent(slug)}/versions`,
+    { method: "POST", body: { content }, auth: true }
+  );
+}
+
+/** draft → review. */
+export async function submitCmsVersion(
+  key: CmsTextKey,
+  versionId: string
+): Promise<CmsVersionRecord> {
+  const slug = textKeyToSlug(key);
+  return apiRequest<CmsVersionRecord>(
+    `/api/admin/cms/${encodeURIComponent(slug)}/versions/${encodeURIComponent(versionId)}/submit`,
+    { method: "POST", auth: true }
+  );
+}
+
+/** review → approved (4-øyne: admin-UI disable-er knappen hvis same-user). */
+export async function approveCmsVersion(
+  key: CmsTextKey,
+  versionId: string
+): Promise<CmsVersionRecord> {
+  const slug = textKeyToSlug(key);
+  return apiRequest<CmsVersionRecord>(
+    `/api/admin/cms/${encodeURIComponent(slug)}/versions/${encodeURIComponent(versionId)}/approve`,
+    { method: "POST", auth: true }
+  );
+}
+
+/** approved → live (retirer forrige live i samme transaksjon på backend). */
+export async function publishCmsVersion(
+  key: CmsTextKey,
+  versionId: string
+): Promise<CmsVersionRecord & { previousLiveVersionId: string | null }> {
+  const slug = textKeyToSlug(key);
+  return apiRequest<CmsVersionRecord & { previousLiveVersionId: string | null }>(
+    `/api/admin/cms/${encodeURIComponent(slug)}/versions/${encodeURIComponent(versionId)}/publish`,
+    { method: "POST", auth: true }
+  );
 }
