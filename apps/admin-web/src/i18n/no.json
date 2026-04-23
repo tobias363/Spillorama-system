@@ -2726,6 +2726,7 @@
   "slug": "Slug",
   "filename": "Filnavn",
   "slug_auto_generated_hint": "La stå tom for å auto-generere fra navnet.",
+  "pattern_ids_comma_separated_hint": "Kommaseparerte pattern-IDer (f.eks. pid1,pid2).",
   "game_type_deleted": "Spill-type slettet",
   "sub_game_deleted": "Underspill slettet",
   "pattern_deleted": "Mønster slettet",

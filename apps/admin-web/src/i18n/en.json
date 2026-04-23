@@ -2733,6 +2733,7 @@
   "slug": "Slug",
   "filename": "Filename",
   "slug_auto_generated_hint": "Leave empty to auto-generate from name.",
+  "pattern_ids_comma_separated_hint": "Comma-separated pattern IDs (e.g. pid1,pid2).",
   "game_type_deleted": "Game type deleted",
   "sub_game_deleted": "Sub game deleted",
   "pattern_deleted": "Pattern deleted",

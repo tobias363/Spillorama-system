@@ -1,60 +1,80 @@
-// /subGame/add and /subGame/edit/:id — 1:1 port of
-//
-// Renders the full legacy form read-only with a disabled Submit button and
-// "Venter på backend-endpoint — BIN-621" banner. When BIN-621 ships, flip the
-// disabled-flag + wire the submit handler in SubGameState.saveSubGame.
+// /subGame/add and /subGame/edit/:id — wired to BIN-621 backend
+// (`/api/admin/sub-games/*` via admin-sub-games.ts).
 //
 // Edit-mode: pre-fills values from fetchSubGame(id). Add-mode: blank form.
-// Both modes are non-functional for writes in PR-A3 per PM placeholder mönster.
-//
-// Legacy had two multi-select dropdowns (pattern-rows + ticket colors) backed
-// by Select2. We render them as disabled <select multiple> — the underlying
-// options are shown so admins can see the legacy vocabulary.
 
 import { t } from "../../../i18n/I18n.js";
+import { Toast } from "../../../components/Toast.js";
 import {
   fetchSubGame,
+  saveSubGame,
+  isGameNameLocallyValid,
   LEGACY_TICKET_COLOR_OPTIONS,
   type SubGameRow,
 } from "./SubGameState.js";
+import { fetchGameTypeList } from "../gameType/GameTypeState.js";
 import { escapeHtml } from "../common/escape.js";
+import type { GameType } from "../common/types.js";
 
 export async function renderSubGameAddPage(container: HTMLElement): Promise<void> {
-  container.innerHTML = renderShell(null, null);
-}
-
-export async function renderSubGameEditPage(container: HTMLElement, id: string): Promise<void> {
-  container.innerHTML = renderShell(null, "(loading)");
+  container.innerHTML = renderShell(null, null, []);
   try {
-    const sg = await fetchSubGame(id);
-    if (!sg) {
-      // PLACEHOLDER: fetchSubGame returns null until BIN-621. Show a
-      // distinct banner so the admin knows this is backend-pending, not a
-      // "really not found" 404.
-      container.innerHTML = renderShell(null, null);
-      return;
-    }
-    container.innerHTML = renderShell(sg, null);
+    const gameTypes = await fetchGameTypeList();
+    container.innerHTML = renderShell(null, null, gameTypes);
+    wireForm(container, null);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    container.innerHTML = renderShell(null, msg);
+    container.innerHTML = renderShell(null, msg, []);
   }
 }
 
-function renderShell(sg: SubGameRow | null, error: string | null): string {
+export async function renderSubGameEditPage(container: HTMLElement, id: string): Promise<void> {
+  container.innerHTML = renderShell(null, "(loading)", []);
+  try {
+    const [sg, gameTypes] = await Promise.all([fetchSubGame(id), fetchGameTypeList()]);
+    if (!sg) {
+      container.innerHTML = renderShell(null, `Sub-game "${id}" not found`, gameTypes);
+      return;
+    }
+    container.innerHTML = renderShell(sg, null, gameTypes);
+    wireForm(container, sg);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    container.innerHTML = renderShell(null, msg, []);
+  }
+}
+
+function renderShell(
+  sg: SubGameRow | null,
+  error: string | null,
+  gameTypes: GameType[]
+): string {
   const isEdit = sg !== null;
   const heading = isEdit ? t("edit_sub_game") : t("add_sub_game");
 
-  const selectedPatternIds = new Set(sg?.patternRow.map((p) => p.patternId) ?? []);
   const selectedColors = new Set(sg?.ticketColor.map((c) => c.name) ?? []);
 
-  // Pattern-row options: until BIN-621 exposes the catalog via API, we
-  // render whatever is already referenced by the current sub-game plus
-  // a hint that options are pending. This keeps edit-view correct.
-  const patternOptions = sg?.patternRow.map((p) => ({ id: p.patternId, name: p.name })) ?? [];
+  // Default to bingo (game_1) for new sub-games.
+  const currentGameTypeId = sg?.gameTypeId ?? (gameTypes.find((g) => g.type === "game_1")?._id ?? gameTypes[0]?._id ?? "");
 
   const body = `
     <div class="col-sm-8"><div class="panel-wrapper collapse in"><div class="panel-body">
+
+      <div class="form-group">
+        <div class="row">
+          <label class="mb-10 col-sm-12" for="gameTypeId">${escapeHtml(t("game_type"))}:</label>
+          <div class="col-sm-6">
+            <select class="form-control" id="gameTypeId" name="gameTypeId" ${isEdit ? "disabled" : ""}>
+              ${gameTypes
+                .map(
+                  (gt) =>
+                    `<option value="${escapeHtml(gt._id)}"${gt._id === currentGameTypeId ? " selected" : ""}>${escapeHtml(gt.name)}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
+        </div>
+      </div>
 
       <div class="form-group">
         <div class="row">
@@ -63,29 +83,19 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
             <input type="text" class="form-control" name="gameName" id="gameName"
               value="${escapeHtml(sg?.gameName ?? "")}"
               placeholder="${escapeHtml(t("enter"))} ${escapeHtml(t("game_name"))}"
-              maxlength="40" disabled>
+              maxlength="40" required>
           </div>
         </div>
       </div>
 
       <div class="form-group">
         <div class="row">
-          <label class="mb-10 col-sm-12" for="patternRowSelected">${escapeHtml(t("select_pattern_row"))}:</label>
+          <label class="mb-10 col-sm-12" for="selectPatternRow">${escapeHtml(t("select_pattern_row"))}:</label>
           <div class="col-sm-6">
-            <select class="form-control" multiple disabled id="patternRowSelected" name="selectPatternRow">
-              ${
-                patternOptions.length > 0
-                  ? patternOptions
-                      .map(
-                        (p) =>
-                          `<option value="${escapeHtml(p.id)}"${
-                            selectedPatternIds.has(p.id) ? " selected" : ""
-                          }>${escapeHtml(p.name)}</option>`
-                      )
-                      .join("")
-                  : `<option disabled>${escapeHtml(t("no_data_available"))} (BIN-621)</option>`
-              }
-            </select>
+            <input type="text" class="form-control" id="selectPatternRow" name="selectPatternRow"
+              value="${escapeHtml(sg?.patternRow.map((p) => p.patternId).join(",") ?? "")}"
+              placeholder="pattern-id,pattern-id">
+            <p class="help-block">${escapeHtml(t("pattern_ids_comma_separated_hint"))}</p>
           </div>
         </div>
       </div>
@@ -94,7 +104,7 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
         <div class="row">
           <label class="mb-10 col-sm-12" for="ticketColorSelected">${escapeHtml(t("select_ticket_color"))}:</label>
           <div class="col-sm-6">
-            <select class="form-control" multiple disabled id="ticketColorSelected" name="selectTicketColor">
+            <select class="form-control" multiple id="ticketColorSelected" name="selectTicketColor" style="height:120px;">
               ${LEGACY_TICKET_COLOR_OPTIONS.map(
                 (c) =>
                   `<option value="${escapeHtml(c)}"${selectedColors.has(c) ? " selected" : ""}>${escapeHtml(c)}</option>`
@@ -110,8 +120,8 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
           <div class="col-sm-6">
             <div class="input-group">
               <div class="input-group-addon"><i class="glyphicon glyphicon-thumbs-up"></i></div>
-              <select class="form-control" name="status" id="status" disabled>
-                <option value="active"${sg?.status === "active" ? " selected" : ""}>${escapeHtml(t("active"))}</option>
+              <select class="form-control" name="status" id="status">
+                <option value="active"${sg?.status !== "inactive" ? " selected" : ""}>${escapeHtml(t("active"))}</option>
                 <option value="inactive"${sg?.status === "inactive" ? " selected" : ""}>${escapeHtml(t("inactive"))}</option>
               </select>
             </div>
@@ -119,13 +129,6 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
         </div>
       </div>
     </div></div></div>`;
-
-  const banner = `
-    <div class="alert alert-warning" role="alert" style="margin:8px 16px;">
-      <i class="fa fa-info-circle"></i>
-      Venter på backend-endpoint.
-      <strong>BIN-621</strong> SubGame CRUD må leveres før lagring er mulig.
-    </div>`;
 
   const errorBlock = error
     ? `<div class="alert alert-danger" style="margin:8px 16px;">${escapeHtml(error)}</div>`
@@ -147,16 +150,15 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
             <div class="panel-heading"><div class="pull-left">
               <h6 class="panel-title txt-dark">${escapeHtml(heading)}</h6>
             </div><div class="clearfix"></div></div>
-            ${banner}
             ${errorBlock}
             <div class="panel-wrapper collapse in">
               <div class="panel-body">
                 <div class="table-wrap"><div class="table-responsive">
-                  <form class="form-horizontal" onsubmit="return false;">
+                  <form id="subGameForm" class="form-horizontal"
+                    data-existing-id="${escapeHtml(sg?._id ?? "")}">
                     ${body}
                     <div style="clear:both;padding-top:16px;padding-left:16px;">
-                      <button type="submit" class="btn btn-success btn-flat" disabled
-                        title="Venter på backend-endpoint — BIN-621">
+                      <button type="submit" class="btn btn-success btn-flat" data-action="save-sub-game">
                         ${escapeHtml(t("submit"))}
                       </button>
                       <a href="#/subGame" class="btn btn-danger btn-flat">${escapeHtml(t("cancel"))}</a>
@@ -169,4 +171,68 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
         </div></div>
       </section>
     </div></div>`;
+}
+
+export function wireForm(container: HTMLElement, existing: SubGameRow | null): void {
+  const form = container.querySelector<HTMLFormElement>("#subGameForm");
+  if (!form) return;
+
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void submitForm(form, existing);
+  });
+}
+
+async function submitForm(form: HTMLFormElement, existing: SubGameRow | null): Promise<void> {
+  const gameTypeIdEl = form.querySelector<HTMLSelectElement>("#gameTypeId");
+  const gameNameEl = form.querySelector<HTMLInputElement>("#gameName");
+  const patternRowEl = form.querySelector<HTMLInputElement>("#selectPatternRow");
+  const ticketColorEl = form.querySelector<HTMLSelectElement>("#ticketColorSelected");
+  const statusEl = form.querySelector<HTMLSelectElement>("#status");
+  const submitBtn = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+
+  const gameTypeId = gameTypeIdEl?.value.trim() ?? "";
+  const gameName = gameNameEl?.value.trim() ?? "";
+  const patternRowStr = patternRowEl?.value.trim() ?? "";
+  const selectPatternRow = patternRowStr
+    ? patternRowStr.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  const selectTicketColor = ticketColorEl
+    ? Array.from(ticketColorEl.selectedOptions).map((o) => o.value)
+    : [];
+  const status = (statusEl?.value === "inactive" ? "inactive" : "active") as "active" | "inactive";
+
+  if (!isGameNameLocallyValid(gameName)) {
+    Toast.error(t("all_fields_are_required"));
+    return;
+  }
+  if (!existing && !gameTypeId) {
+    Toast.error(t("all_fields_are_required"));
+    return;
+  }
+
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const result = await saveSubGame(
+      {
+        gameTypeId,
+        gameName,
+        selectPatternRow,
+        selectTicketColor,
+        status,
+      },
+      existing?._id
+    );
+    if (result.ok) {
+      Toast.success(t("success"));
+      window.location.hash = "#/subGame";
+      return;
+    }
+    Toast.error(result.message ?? t("something_went_wrong"));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    Toast.error(msg);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }

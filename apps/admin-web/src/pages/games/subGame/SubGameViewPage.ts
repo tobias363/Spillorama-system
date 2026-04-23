@@ -93,10 +93,10 @@ function renderShell(sg: SubGameRow | null, error: string | null): string {
       </div></div></div>`
     : error
       ? `<div class="alert alert-danger" style="margin:16px;">${escapeHtml(error)}</div>`
-      : `<div class="alert alert-warning" style="margin:16px;">
+      : `<div class="alert alert-warning" style="margin:16px;" data-testid="subGame-not-found">
            <i class="fa fa-info-circle"></i>
-           Venter på backend-endpoint.
-           <strong>BIN-621</strong> SubGame view må leveres før data vises.
+           ${escapeHtml(t("not_found"))}
+           <small style="opacity:0.75;margin-left:6px;">(BIN-621)</small>
          </div>`;
 
   return `

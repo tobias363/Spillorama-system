@@ -1,10 +1,10 @@
-// Render tests for subGame pages (PR-A3 bolk 2).
+// Render tests for subGame pages (BIN-621 wire-up).
 //
 // Focus: verify HTML scaffolding matches the legacy shell
-// (breadcrumb, panel-heading, BIN-621 placeholder banner, disabled buttons,
+// (breadcrumb, panel-heading, enabled buttons wired to handlers,
 // dispatcher registration).
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { renderSubGameListPage, formatLegacyDateTime } from "../../src/pages/games/subGame/SubGameListPage.js";
 import { renderSubGameViewPage } from "../../src/pages/games/subGame/SubGameViewPage.js";
 import {
@@ -14,46 +14,74 @@ import {
 import { initI18n } from "../../src/i18n/I18n.js";
 import { isGamesRoute, mountGamesRoute } from "../../src/pages/games/index.js";
 
+function okJson(data: unknown): Response {
+  return new Response(JSON.stringify({ ok: true, data }), { status: 200 });
+}
+
+function errJson(code: string, message: string, status: number): Response {
+  return new Response(
+    JSON.stringify({ ok: false, error: { code, message } }),
+    { status }
+  );
+}
+
+function defaultFetch(): typeof fetch {
+  return (async (url: string | URL) => {
+    const urlStr = String(url);
+    if (urlStr.startsWith("/api/admin/sub-games")) {
+      return okJson({ subGames: [], count: 0 });
+    }
+    if (urlStr.startsWith("/api/admin/game-types")) {
+      return okJson({ gameTypes: [], count: 0 });
+    }
+    if (urlStr.startsWith("/api/admin/games")) {
+      return okJson([]);
+    }
+    return okJson([]);
+  }) as typeof fetch;
+}
+
 describe("SubGameListPage", () => {
+  const originalFetch = globalThis.fetch;
   beforeEach(() => {
     initI18n();
+    globalThis.fetch = defaultFetch();
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
-  it("renders title + breadcrumb + disabled Add-button (BIN-621)", async () => {
+  it("renders title + breadcrumb + enabled Add-button (BIN-621 live)", async () => {
     const c = document.createElement("div");
     await renderSubGameListPage(c);
     expect(c.querySelector(".content-header h1")?.textContent).toBeTruthy();
     expect(c.querySelector(".breadcrumb")).not.toBeNull();
-    const addBtn = c.querySelector("button[disabled]");
+    const addBtn = c.querySelector<HTMLAnchorElement>('[data-action="add-sub-game"]');
     expect(addBtn).not.toBeNull();
-    expect(addBtn?.getAttribute("title")).toContain("BIN-621");
+    expect(addBtn?.getAttribute("href")).toBe("#/subGame/add");
   });
 
-  it("renders the pending banner (BIN-621) in the panel body", async () => {
-    const c = document.createElement("div");
-    await renderSubGameListPage(c);
-    const banner = c.querySelector(".panel-body .alert.alert-warning");
-    expect(banner?.textContent).toContain("BIN-621");
-  });
-
-  it("mounts an empty DataTable (no rows until backend lands)", async () => {
+  it("mounts an empty DataTable (no rows until backend has data)", async () => {
     const c = document.createElement("div");
     await renderSubGameListPage(c);
     const host = c.querySelector("#subGame-list-table");
     expect(host).not.toBeNull();
-    // The DataTable renders its empty-state cell rather than a header+tbody.
     const rows = c.querySelectorAll("#subGame-list-table tbody tr");
-    // Empty dataset: either 0 body rows, or 1 "no data" row.
     expect(rows.length).toBeLessThanOrEqual(1);
   });
 });
 
 describe("SubGameViewPage", () => {
+  const originalFetch = globalThis.fetch;
   beforeEach(() => {
     initI18n();
+    globalThis.fetch = (async () => errJson("NOT_FOUND", "missing", 404)) as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
-  it("renders pending banner when backend returns null (placeholder)", async () => {
+  it("renders pending banner when backend returns null", async () => {
     const c = document.createElement("div");
     await renderSubGameViewPage(c, "any-id");
     const banner = c.querySelector(".alert.alert-warning");
@@ -66,16 +94,21 @@ describe("SubGameViewPage", () => {
 });
 
 describe("SubGameAddEditPage", () => {
+  const originalFetch = globalThis.fetch;
   beforeEach(() => {
     initI18n();
+    globalThis.fetch = defaultFetch();
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
-  it("add-page renders a disabled submit + BIN-621 banner", async () => {
+  it("add-page renders an enabled submit button", async () => {
     const c = document.createElement("div");
     await renderSubGameAddPage(c);
-    const submit = c.querySelector('button[type="submit"][disabled]');
+    const submit = c.querySelector<HTMLButtonElement>('button[type="submit"][data-action="save-sub-game"]');
     expect(submit).not.toBeNull();
-    expect(c.textContent).toContain("BIN-621");
+    expect(submit?.disabled).toBe(false);
   });
 
   it("add-page includes ticket-color select with 8 legacy options", async () => {
@@ -83,7 +116,8 @@ describe("SubGameAddEditPage", () => {
     await renderSubGameAddPage(c);
     const colorSelect = c.querySelector<HTMLSelectElement>('select[name="selectTicketColor"]');
     expect(colorSelect).not.toBeNull();
-    expect(colorSelect?.disabled).toBe(true);
+    // Enabled for BIN-621 wire-up
+    expect(colorSelect?.disabled).toBe(false);
     expect(colorSelect?.querySelectorAll("option").length).toBe(8);
   });
 
@@ -96,11 +130,18 @@ describe("SubGameAddEditPage", () => {
     expect(status?.querySelector('option[value="inactive"]')).not.toBeNull();
   });
 
-  it("edit-page shows placeholder banner when fetchSubGame returns null", async () => {
+  it("edit-page shows 'not found' when fetchSubGame returns null", async () => {
+    globalThis.fetch = (async (url: string | URL) => {
+      const urlStr = String(url);
+      if (urlStr.includes("/api/admin/sub-games/missing-id")) {
+        return errJson("NOT_FOUND", "missing", 404);
+      }
+      return okJson([]);
+    }) as typeof fetch;
     const c = document.createElement("div");
     await renderSubGameEditPage(c, "missing-id");
-    const banner = c.querySelector(".alert.alert-warning");
-    expect(banner?.textContent).toContain("BIN-621");
+    const err = c.querySelector(".alert.alert-danger");
+    expect(err?.textContent ?? "").toContain("missing-id");
   });
 });
 
@@ -119,7 +160,6 @@ describe("games route dispatcher (bolk 2: subGame)", () => {
     initI18n();
     const c = document.createElement("div");
     mountGamesRoute(c, "/subGame");
-    // Async render — we just confirm the static shell renders synchronously.
     expect(c.querySelector(".page-wrapper")).not.toBeNull();
   });
 
@@ -134,14 +174,12 @@ describe("games route dispatcher (bolk 2: subGame)", () => {
     initI18n();
     const c = document.createElement("div");
     mountGamesRoute(c, "/subGame/edit/abc%20def");
-    // Just verify it did not 404 — any .page-wrapper == success.
     expect(c.querySelector(".page-wrapper")).not.toBeNull();
   });
 });
 
 describe("formatLegacyDateTime", () => {
   it("formats a morning ISO date as `y/mm/d h:mm am`", () => {
-    // 2026-04-19T07:05:00Z in local time — we test the structure, not the tz.
     const out = formatLegacyDateTime("2026-04-19T07:05:00Z");
     expect(out).toMatch(/^\d{4}\/\d{2}\/\d{1,2} \d{1,2}:\d{2} (am|pm)$/);
   });
@@ -152,11 +190,8 @@ describe("formatLegacyDateTime", () => {
   });
 
   it("uses 12 for midnight and noon", () => {
-    // 00:00 should become 12 am; 12:00 should become 12 pm.
     const midnight = formatLegacyDateTime("2026-04-19T00:30:00");
     const noon = formatLegacyDateTime("2026-04-19T12:30:00");
-    // Accept either 12 or the local hour — since JS test runs in system tz.
-    // We only verify the format is stable.
     expect(midnight).toMatch(/ (am|pm)$/);
     expect(noon).toMatch(/ (am|pm)$/);
   });

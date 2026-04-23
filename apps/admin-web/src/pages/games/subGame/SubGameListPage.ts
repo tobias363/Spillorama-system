@@ -2,22 +2,20 @@
 // Legacy layout:
 //   - Content-header with title "Sub Game [ Game 1 ] Table" + breadcrumb
 //   - Panel with "Sub Game [ Game 1 ]" heading + right-aligned "Add Sub Game" button
-//     (permission-gated by `addFlag`)
 //   - DataTable with 5 cols: Game Name, Number of Pattern/Rows, Status, Creation Date, Action
-//   - Action column: View / Edit / Delete — all BIN-621 placeholders in PR-A3
+//   - Action column: View / Edit / Delete
 //
-// Port notes:
-//   - DataTables.net server-side in legacy; in PR-A3 we render client-side with
-//     the shared DataTable component since the sub-game table is small.
-//   - The list is empty until BIN-621 lands the backend endpoint — shows the
-//     legacy empty-state translation.
-//   - Game 4 rows filtered via GAME_TYPE_HIDDEN_FROM_DROPDOWN (no-op today since
-//     legacy sub-games were always Game 1 anyway, but keeps the invariant
-//     explicit).
+// Wired to BIN-621 backend per admin-sub-games API.
 
 import { t } from "../../../i18n/I18n.js";
 import { DataTable } from "../../../components/DataTable.js";
-import { fetchSubGameList, type SubGameRow } from "./SubGameState.js";
+import { Toast } from "../../../components/Toast.js";
+import {
+  fetchSubGameList,
+  deleteSubGame,
+  type SubGameRow,
+} from "./SubGameState.js";
+import { ApiError } from "../../../api/client.js";
 import { escapeHtml } from "../common/escape.js";
 import { isDropdownVisible } from "../common/types.js";
 
@@ -29,6 +27,10 @@ export async function renderSubGameListPage(container: HTMLElement): Promise<voi
 
   tableHost.innerHTML = `<div class="text-center"><i class="fa fa-spinner fa-spin fa-2x"></i></div>`;
 
+  await loadAndRender(tableHost);
+}
+
+async function loadAndRender(tableHost: HTMLElement): Promise<void> {
   try {
     const rows = await fetchSubGameList();
     // Game 4 guard: drop rows whose gameTypeRef resolves to hidden types.
@@ -61,23 +63,16 @@ function renderShell(): string {
                 <h6 class="panel-title txt-dark">${escapeHtml(t("sub_game"))} [ ${escapeHtml(t("game1"))} ]</h6>
               </div>
               <div class="pull-right">
-                <button type="button"
+                <a href="#/subGame/add"
                   class="btn btn-primary btn-md"
-                  disabled
-                  title="Venter på backend-endpoint — BIN-621">
+                  data-action="add-sub-game">
                   <i class="fa fa-plus"></i> ${escapeHtml(t("add_sub_game"))}
-                  <small style="opacity:0.75;margin-left:6px;">(BIN-621)</small>
-                </button>
+                </a>
               </div>
               <div class="clearfix"></div>
             </div>
             <div class="panel-wrapper collapse in">
               <div class="panel-body">
-                <div class="alert alert-warning" style="margin:0 0 12px;">
-                  <i class="fa fa-info-circle"></i>
-                  Venter på backend-endpoint.
-                  <strong>BIN-621</strong> SubGame CRUD må leveres før listen viser data.
-                </div>
                 <div class="table-wrap"><div class="table-responsive">
                   <div id="subGame-list-table"></div>
                 </div></div>
@@ -125,21 +120,52 @@ function renderTable(host: HTMLElement, rows: SubGameRow[]): void {
              title="${escapeHtml(t("view"))}">
             <i class="fa fa-eye" aria-hidden="true"></i>
           </a>
-          <button type="button"
-            class="btn btn-warning btn-xs btn-rounded m-lr-3"
-            disabled
-            title="Venter på backend-endpoint — BIN-621">
+          <a href="#/subGame/edit/${encodeURIComponent(row._id)}"
+             class="btn btn-warning btn-xs btn-rounded m-lr-3"
+             title="${escapeHtml(t("edit"))}">
             <i class="fa fa-edit" aria-hidden="true"></i>
-          </button>
+          </a>
           <button type="button"
-            class="btn btn-danger btn-xs btn-rounded"
-            disabled
-            title="Venter på backend-endpoint — BIN-621">
+             class="btn btn-danger btn-xs btn-rounded"
+             title="${escapeHtml(t("confirm_delete"))}"
+             data-action="delete-sub-game"
+             data-id="${escapeHtml(row._id)}"
+             data-name="${escapeHtml(row.gameName)}">
             <i class="fa fa-trash" aria-hidden="true"></i>
           </button>`,
       },
     ],
   });
+
+  // Wire delete buttons
+  host.querySelectorAll<HTMLButtonElement>('button[data-action="delete-sub-game"]').forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const id = btn.dataset.id;
+      const name = btn.dataset.name ?? "";
+      if (!id) return;
+      if (!window.confirm(`${t("confirm_delete")}\n${name}`)) return;
+      void handleDelete(host, id);
+    });
+  });
+}
+
+async function handleDelete(tableHost: HTMLElement, id: string): Promise<void> {
+  try {
+    const result = await deleteSubGame(id);
+    if ("ok" in result && result.ok) {
+      Toast.success(t("sub_game_deleted"));
+      await loadAndRender(tableHost);
+      return;
+    }
+    if ("reason" in result) {
+      Toast.error(result.message ?? t("something_went_wrong"));
+      return;
+    }
+  } catch (err) {
+    const msg = err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err);
+    Toast.error(msg);
+  }
 }
 
 /**
