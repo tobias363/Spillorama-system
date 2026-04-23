@@ -29,18 +29,29 @@ import { TicketGridHtml } from "../components/TicketGridHtml.js";
  * Ball positioning mirrors mockup `.game-number-ring`: 170×170 with top
  * 30px below the game-container top. Exact match to spillorama-ui-mockup.
  */
+/**
+ * Layout 2026-04-23 — overlayRoot flex-row with explicit gap between
+ * top-level containers (best-practice, no marginLeft hacks):
+ *
+ *   [tubeSpacer] gap [callGroup: ring + clover] gap [topGroupWrapper] ...chatPanel
+ *
+ * Each top-level child is a logical unit. Pixi ball-tube + ring render
+ * behind their respective spacer children. `OVERLAY_ROW_GAP` is the
+ * single source of truth for the spacing between containers.
+ */
 const TUBE_COLUMN_WIDTH = 140;
 const RING_COLUMN_WIDTH = 200;  // 170 ring + 30 breathing room
+const OVERLAY_ROW_GAP = 20;     // flex gap between top-level containers
+const CALL_GROUP_GAP = 10;      // gap inside callGroup (ring ↔ clover)
 // Kept in sync with CHAT_OPEN_WIDTH_PX / CHAT_COLLAPSED_WIDTH_PX in ChatPanelV2.
 const CHAT_WIDTH = 265;
 const CHAT_COLLAPSED_WIDTH = 110;
-const TICKET_TOP = 230;        // below the center-top combo panel
+const TICKET_TOP = 230;
 /** Y offset below the ticket grid for the LINE/BINGO claim buttons. */
 const CLAIM_AREA = 60;
 const RING_SIZE = 170;
-const RING_TOP_Y = 18;          // PM 2026-04-23: ytterligere 5px opp (23 → 18)
-/** Clover "velg heldig tall"-knapp til høyre for ringen. */
-const CLOVER_COLUMN_WIDTH = 100;
+const RING_TOP_Y = 18;
+/** Clover "Velg lykketall"-knapp right-of-ring inside callGroup. */
 const CLOVER_SIZE = 72;
 const DRAW_COUNT_Y_OFFSET = 16; // gap below the ring for the "X/Y" text
 
@@ -140,10 +151,11 @@ export class PlayScreen extends Container {
     this.ballTube.y = 21;
     this.addChild(this.ballTube);
 
-    // Ring sits inside the 200px ring-spacer column, centred (170px wide).
-    // y=RING_TOP_Y (30) matches mockup `.col-ring margin-top: 30px` exactly.
+    // Ring sits inside the ringSpacer (first child of callGroup). Absolute
+    // x in viewport = tubeSpacer width + overlay gap + padding inside
+    // ringSpacer to centre the 170px ring in its 200px column.
     this.centerBall = new CenterBall(pauseAwareBridge);
-    this.centerBall.x = TUBE_COLUMN_WIDTH + (RING_COLUMN_WIDTH - RING_SIZE) / 2;
+    this.centerBall.x = this.ringCenterColumnLeft() + (RING_COLUMN_WIDTH - RING_SIZE) / 2;
     this.centerBall.y = RING_TOP_Y;
     this.centerBall.setBaseY(RING_TOP_Y);
     this.addChild(this.centerBall);
@@ -154,25 +166,40 @@ export class PlayScreen extends Container {
     const overlayRoot = this.overlayManager.getRoot();
     overlayRoot.style.display = "flex";
     overlayRoot.style.flexDirection = "row";
+    overlayRoot.style.alignItems = "flex-start";
+    // Single gap source — spacing between top-level containers
+    // (tubeSpacer, callGroup, topGroupWrapper, chatPanel).
+    overlayRoot.style.gap = `${OVERLAY_ROW_GAP}px`;
 
-    // Column 1: ball tube (Pixi-rendered behind). Explicit flex child so
-    // the downstream columns line up predictably.
+    // Tube spacer — occupies the visual column where the Pixi ball-tube
+    // renders. Not a "container" in the PM sense, but the ball-tube
+    // needs dedicated layout space.
     const tubeSpacer = document.createElement("div");
     tubeSpacer.style.cssText = `width:${TUBE_COLUMN_WIDTH}px;flex-shrink:0;pointer-events:none;`;
     overlayRoot.appendChild(tubeSpacer);
 
-    // Column 2: ring (Pixi-rendered behind). Separate spacer lets us
-    // tune the gap between tube and leftInfo without touching the ball
-    // tube's x position or LeftInfoPanel's margin.
-    const ringSpacer = document.createElement("div");
-    ringSpacer.style.cssText = `width:${RING_COLUMN_WIDTH}px;flex-shrink:0;pointer-events:none;`;
-    overlayRoot.appendChild(ringSpacer);
+    // ── Container 1: big ring + "Velg lykketall" firkløver-knapp ──────────
+    // One logical unit (PM 2026-04-23: "ene containeren styrer stor ball
+    // og lykketall"). Pixi ring renders behind ringSpacer, the clover is
+    // an HTML button inside the same flex row so they move together.
+    const callGroup = document.createElement("div");
+    callGroup.id = "call-group-wrapper";
+    callGroup.style.cssText = [
+      "display:flex",
+      "flex-direction:row",
+      "align-items:flex-start",
+      `gap:${CALL_GROUP_GAP}px`,
+      "flex-shrink:0",
+      "pointer-events:none",
+    ].join(";");
 
-    // Column 3: "Velg lykketall"-knapp — firkløver-ikonet + label under.
-    // Klikk åpner LuckyNumberPicker via eksisterende onLuckyNumberTap-
-    // callback (Game1Controller eier pickeren).
+    const ringSpacer = document.createElement("div");
+    ringSpacer.style.cssText = `width:${RING_COLUMN_WIDTH}px;flex-shrink:0;`;
+    callGroup.appendChild(ringSpacer);
+
     const cloverColumn = document.createElement("div");
-    cloverColumn.style.cssText = `width:${CLOVER_COLUMN_WIDTH}px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:40px;gap:6px;pointer-events:none;`;
+    cloverColumn.style.cssText = "display:flex;flex-direction:column;align-items:center;padding-top:40px;gap:6px;flex-shrink:0;pointer-events:auto;";
+
     const cloverBtn = document.createElement("button");
     cloverBtn.type = "button";
     cloverBtn.title = "Velg lykketall";
@@ -185,7 +212,6 @@ export class PlayScreen extends Container {
       "border:none",
       "padding:0",
       "cursor:pointer",
-      "pointer-events:auto",
       "filter:drop-shadow(0 3px 6px rgba(0,0,0,0.5))",
       "transition:transform 0.15s ease-out",
     ].join(";");
@@ -194,7 +220,6 @@ export class PlayScreen extends Container {
     cloverBtn.addEventListener("click", () => this.callbacks.onLuckyNumberTap?.());
     cloverColumn.appendChild(cloverBtn);
 
-    // Label: "Velg" over "lykketall" — to linjer sentrert under ikonet.
     const cloverLabel = document.createElement("div");
     cloverLabel.style.cssText = [
       "text-align:center",
@@ -207,7 +232,6 @@ export class PlayScreen extends Container {
       "pointer-events:none",
       "user-select:none",
     ].join(";");
-    cloverLabel.textContent = "";
     const line1 = document.createElement("div");
     line1.textContent = "Velg";
     const line2 = document.createElement("div");
@@ -216,7 +240,8 @@ export class PlayScreen extends Container {
     cloverLabel.appendChild(line2);
     cloverColumn.appendChild(cloverLabel);
 
-    overlayRoot.appendChild(cloverColumn);
+    callGroup.appendChild(cloverColumn);
+    overlayRoot.appendChild(callGroup);
 
     this.leftInfo = new LeftInfoPanel(this.overlayManager, pauseAwareBridge ?? undefined);
     this.calledNumbers = new CalledNumbersOverlay(this.overlayManager);
@@ -242,12 +267,11 @@ export class PlayScreen extends Container {
       onStartGame: () => this.callbacks.onStartGame?.(),
     });
 
-    // One shared container for player-info + combo + actions — single
-    // bordered box with gradient bg + shadow that wraps all three so the
-    // group visually reads as a single unit and can be repositioned as
-    // one (PM-ask 2026-04-23: "disse er fortsatt ikke et element").
-    // Styling previously lived on CenterTopPanel.root; moved here so
-    // leftInfo (player-info) is inside the same visual boundary.
+    // ── Container 2: player-info + combo-panel + action-buttons ──────────
+    // PM 2026-04-23: "den andre yster da resten". Bordered box with the
+    // shared gradient/shadow that visually unifies the three info
+    // sections. Horizontal spacing to callGroup is handled by the
+    // overlayRoot flex gap, not a marginLeft hack.
     const topGroupWrapper = document.createElement("div");
     topGroupWrapper.id = "top-group-wrapper";
     topGroupWrapper.style.cssText = [
@@ -257,7 +281,6 @@ export class PlayScreen extends Container {
       "align-self:flex-start",
       "flex-shrink:0",
       "margin-top:15px",
-      "margin-left:20px",
       "background:radial-gradient(ellipse at top left, rgba(50, 15, 15, 0.45), rgba(15, 0, 0, 0.45))",
       "border:1px solid rgba(255, 120, 50, 0.35)",
       "border-radius:14px",
@@ -589,9 +612,20 @@ export class PlayScreen extends Container {
     return this.chatPanel?.isCollapsed() ? CHAT_COLLAPSED_WIDTH : CHAT_WIDTH;
   }
 
+  /** x-coord where the ring's flex column starts (inside callGroup). */
+  private ringCenterColumnLeft(): number {
+    return TUBE_COLUMN_WIDTH + OVERLAY_ROW_GAP;
+  }
+
+  /** x-coord of the ring's left edge — the anchor ticket + claim
+   *  buttons align to so "bongene kommer på linje med det store tallet". */
+  private ringLeftEdge(): number {
+    return this.ringCenterColumnLeft() + (RING_COLUMN_WIDTH - RING_SIZE) / 2;
+  }
+
   /** Re-pin the LINE/BINGO claim buttons over the current ticket area. */
   private positionClaimButtons(): void {
-    const ticketAreaLeft = TUBE_COLUMN_WIDTH + (RING_COLUMN_WIDTH - RING_SIZE) / 2;
+    const ticketAreaLeft = this.ringLeftEdge();
     const ticketAreaWidth = this.screenW - ticketAreaLeft - this.chatWidth() - 20;
     const btnY = this.screenH - 55;
     const btnCentreX = ticketAreaLeft + ticketAreaWidth / 2;
@@ -624,11 +658,8 @@ export class PlayScreen extends Container {
   }
 
   private positionTicketGrid(): void {
-    // PM 2026-04-23: "plasser bongene så de kommer på linje med det store
-    // tallet over". Starter tickets ved ringens venstre kant i stedet for
-    // tube-spacer-enden. Ringen sitter sentrert i 200px-kolonnen med
-    // (RING_COLUMN_WIDTH - RING_SIZE)/2 = 15px padding på hver side.
-    const left = TUBE_COLUMN_WIDTH + (RING_COLUMN_WIDTH - RING_SIZE) / 2;
+    // Tickets align to ring's left edge — see ringLeftEdge() doc.
+    const left = this.ringLeftEdge();
     const top = TICKET_TOP;
     const width = this.screenW - left - this.chatWidth() - 20;
     const height = this.screenH - TICKET_TOP - CLAIM_AREA;
