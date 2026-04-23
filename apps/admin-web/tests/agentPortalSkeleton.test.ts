@@ -17,7 +17,6 @@ import {
 } from "../src/auth/Session.js";
 import { agentSidebar } from "../src/shell/sidebarSpec.js";
 import { mountAgentPhysicalTickets } from "../src/pages/agent-portal/AgentPhysicalTicketsPage.js";
-import { mountAgentGames } from "../src/pages/agent-portal/AgentGamesPage.js";
 import { mountAgentCashInOut } from "../src/pages/agent-portal/AgentCashInOutPage.js";
 import { mountAgentUniqueId } from "../src/pages/agent-portal/AgentUniqueIdPage.js";
 import { mountAgentPhysicalCashout } from "../src/pages/agent-portal/AgentPhysicalCashoutPage.js";
@@ -155,9 +154,10 @@ describe("Agent-portal placeholder-sider", () => {
     document.body.innerHTML = '<div id="c"></div>';
   });
 
+  // /agent/games ble løftet ut av placeholder-lista da Next-Game-panel landet;
+  // se nextGamePanel.test.ts for dekning av den siden.
   const placeholders = [
     { name: "physical-tickets", mount: mountAgentPhysicalTickets, titleKey: "add_physical_tickets" },
-    { name: "games", mount: mountAgentGames, titleKey: "agent_game_management" },
     { name: "cash-in-out", mount: mountAgentCashInOut, titleKey: "agent_cash_in_out_management" },
     { name: "unique-id", mount: mountAgentUniqueId, titleKey: "agent_unique_id_management" },
     { name: "physical-cashout", mount: mountAgentPhysicalCashout, titleKey: "agent_physical_cashout" },
