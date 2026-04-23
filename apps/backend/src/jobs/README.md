@@ -12,6 +12,7 @@ instance runs each tick in multi-node deploys.
 | `swedbank-payment-sync` | every 60 min, `setInterval` | Payments | `JOB_SWEDBANK_ENABLED` |
 | `bankid-expiry-reminder` | polled every 15 min, runs once after 07:00 local | KYC / auth | `JOB_BANKID_ENABLED` |
 | `self-exclusion-cleanup` | polled every 15 min, runs once after 00:00 local | Responsible gaming (Spillvett) | `JOB_RG_CLEANUP_ENABLED` |
+| `machine-ticket-auto-close` | polled every 15 min, runs once after 00:00 local | Metronia / OK Bingo (agent-POS) | `JOB_MACHINE_AUTO_CLOSE_ENABLED` |
 | `game1-schedule-tick` | every 15 s, `setInterval` | Game 1 / scheduling | `GAME1_SCHEDULE_TICK_ENABLED` |
 
 Master kill-switch: `JOBS_ENABLED` (default `true`).
@@ -40,6 +41,21 @@ self-exclusion minimum marker (`self_exclusion_minimum_until`) when 1
 year has passed. `self_excluded_at` is left in place to preserve the
 audit trail; lifting the exclusion itself requires an explicit user
 action per Spillvett policy.
+
+### `machine-ticket-auto-close`
+Daglig auto-close av hengende Metronia- og OK-Bingo-billetter — port av
+legacy `Boot/Server.js:583-618` `autoCloseTicket('Metronia')` +
+`autoCloseTicket('OK Bingo')`. Scanner `app_machine_tickets` for rader
+der `is_closed=false` OG `created_at <= now() - maxAgeHours` (default
+24h), og kaller `autoCloseTicket()` på tilhørende service. Wallet credit +
+DB mark-closed + compliance-audit håndteres per ticket. Per-ticket-feil
+logges og telles, men avbryter ikke batchen — hver ticket retry-es neste
+dag.
+
+Systembruker `system:auto-close-cron` brukes som `closed_by_user_id`.
+`agent_transactions`-rad skrives kun hvis `ticket.shift_id` fortsatt er
+satt (kolonnen er NOT NULL i DB); compliance-audit-entry skrives
+uavhengig av dette. Idempotent via `uniqueTransaction`-suffix `:auto`.
 
 ### `game1-schedule-tick` (GAME1_SCHEDULE PR 1)
 Spawns Game 1 rows into `app_game1_scheduled_games` from
@@ -70,6 +86,10 @@ swedbank-payment-sync pattern).
 | `JOB_RG_CLEANUP_ENABLED` | `true` | Toggle self-exclusion/pause cleanup job. |
 | `JOB_RG_CLEANUP_INTERVAL_MS` | `900000` (15m) | Polling tick. |
 | `JOB_RG_CLEANUP_RUN_AT_HOUR` | `0` | Local-time hour after which the daily body is allowed. |
+| `JOB_MACHINE_AUTO_CLOSE_ENABLED` | `true` | Toggle Metronia/OK-Bingo auto-close cron. |
+| `JOB_MACHINE_AUTO_CLOSE_INTERVAL_MS` | `900000` (15m) | Polling tick. |
+| `JOB_MACHINE_AUTO_CLOSE_RUN_AT_HOUR` | `0` | Local-time hour after which the daily body is allowed (legacy var 00:00). |
+| `JOB_MACHINE_AUTO_CLOSE_MAX_AGE_HOURS` | `24` | Lukker kun billetter eldre enn dette. Legacy var 24h (forrige driftsdøgn). |
 | `GAME1_SCHEDULE_TICK_ENABLED` | `false` | Toggle Game 1 schedule-tick (default OFF until PR 2-3 ready). |
 | `GAME1_SCHEDULE_TICK_INTERVAL_MS` | `15000` (15s) | Tick interval. |
 

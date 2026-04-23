@@ -44,6 +44,11 @@ export interface BingoRuntimeConfig {
   jobRgCleanupEnabled: boolean;
   jobRgCleanupIntervalMs: number;
   jobRgCleanupRunAtHour: number;
+  // BIN-582: Metronia/OK Bingo machine-ticket auto-close (legacy 00:00-cron)
+  jobMachineAutoCloseEnabled: boolean;
+  jobMachineAutoCloseIntervalMs: number;
+  jobMachineAutoCloseRunAtHour: number;
+  jobMachineAutoCloseMaxAgeHours: number;
   // BIN-700: loyalty monthly reset
   jobLoyaltyMonthlyResetEnabled: boolean;
   jobLoyaltyMonthlyResetIntervalMs: number;
@@ -132,6 +137,15 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const jobRgCleanupIntervalMs = Math.max(60_000, parsePositiveIntEnv(process.env.JOB_RG_CLEANUP_INTERVAL_MS, 15 * 60 * 1000));
   const jobRgCleanupRunAtHour = Math.min(23, Math.max(0, Math.floor(parseNonNegativeNumberEnv(process.env.JOB_RG_CLEANUP_RUN_AT_HOUR, 0))));
 
+  // BIN-582: daglig auto-close av hengende Metronia/OK-Bingo-billetter.
+  // Legacy kjørte 00:00 for å lukke alt fra forrige driftsdøgn. Bruker
+  // samme polling-mønster som RG-cleanup (polling 15 min + date-key);
+  // maxAgeHours=24 matcher legacy "siste driftsdøgn".
+  const jobMachineAutoCloseEnabled = parseBooleanEnv(process.env.JOB_MACHINE_AUTO_CLOSE_ENABLED, true);
+  const jobMachineAutoCloseIntervalMs = Math.max(60_000, parsePositiveIntEnv(process.env.JOB_MACHINE_AUTO_CLOSE_INTERVAL_MS, 15 * 60 * 1000));
+  const jobMachineAutoCloseRunAtHour = Math.min(23, Math.max(0, Math.floor(parseNonNegativeNumberEnv(process.env.JOB_MACHINE_AUTO_CLOSE_RUN_AT_HOUR, 0))));
+  const jobMachineAutoCloseMaxAgeHours = Math.max(1, Math.floor(parseNonNegativeNumberEnv(process.env.JOB_MACHINE_AUTO_CLOSE_MAX_AGE_HOURS, 24)));
+
   // BIN-700: loyalty-monthly-reset-job. Nullstiller month_points for alle
   // spillere ved månedskift. Default ON — idempotent, billig (single UPDATE).
   // Polling-intervall 1 time (nok presisjon for "kjør én gang pr måned").
@@ -194,6 +208,8 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
     jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
     jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
+    jobMachineAutoCloseEnabled, jobMachineAutoCloseIntervalMs,
+    jobMachineAutoCloseRunAtHour, jobMachineAutoCloseMaxAgeHours,
     jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
     jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,

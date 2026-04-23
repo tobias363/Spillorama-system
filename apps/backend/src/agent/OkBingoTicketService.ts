@@ -72,6 +72,18 @@ export interface OpenDayInput {
   roomId?: number;
 }
 
+/**
+ * BIN-582 autoClose-cron: system-initiert close av hengende ticket.
+ *
+ * Kalles fra daglig cron — ingen active-shift-check. Speiler semantikken i
+ * MetroniaTicketService.autoCloseTicket; roomId tas fra ticket.roomId
+ * (fallback defaultRoomId).
+ */
+export interface AutoCloseOkBingoTicketInput {
+  ticketId: string;
+  systemActorUserId: string;
+}
+
 export interface OkBingoDailySalesAggregate {
   shiftId: string | null;
   totalCreatedNok: number;
@@ -320,6 +332,82 @@ export class OkBingoTicketService {
         roomId,
       },
     });
+    return closed;
+  }
+
+  // ── AUTO-CLOSE (cron, BIN-582) ──────────────────────────────────────────
+
+  /**
+   * System-initiert close fra daglig cron. Speiler closeTicket() men uten
+   * active-shift-check. Se MetroniaTicketService.autoCloseTicket for
+   * detaljert design-rasjonale — semantikken er identisk.
+   */
+  async autoCloseTicket(input: AutoCloseOkBingoTicketInput): Promise<MachineTicket> {
+    const ticket = await this.tickets.getById(input.ticketId);
+    if (!ticket) throw new DomainError("MACHINE_TICKET_NOT_FOUND", "Ukjent OK Bingo-ticket.");
+    if (ticket.machineName !== "OK_BINGO") {
+      throw new DomainError("MACHINE_TICKET_WRONG_TYPE", "Ticket er ikke en OK Bingo-ticket.");
+    }
+    if (ticket.isClosed) {
+      throw new DomainError("MACHINE_TICKET_CLOSED", "Ticket er allerede lukket.");
+    }
+
+    const uniqueTransaction = `okbingo:close:${ticket.id}:auto`;
+    const roomId = Number.parseInt(ticket.roomId ?? "", 10) || this.defaultRoomId;
+    const apiResult = await this.okbingo.closeTicket({
+      ticketNumber: ticket.ticketNumber,
+      roomId,
+      uniqueTransaction,
+    });
+
+    const payoutNok = centsToNok(apiResult.finalBalanceCents);
+    const player = await this.platform.getUserById(ticket.playerUserId);
+    const previousBalance = await this.wallet.getBalance(player.walletId);
+    let walletTxId: string | null = null;
+    let afterBalance = previousBalance;
+    if (payoutNok > 0) {
+      const walletTx = await this.wallet.credit(
+        player.walletId,
+        payoutNok,
+        `OK Bingo auto-close payout ${ticket.id}`,
+        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
+      );
+      walletTxId = walletTx.id;
+      afterBalance = previousBalance + payoutNok;
+    }
+
+    const closed = await this.tickets.markClosed(
+      ticket.id,
+      input.systemActorUserId,
+      apiResult.finalBalanceCents
+    );
+
+    if (ticket.shiftId) {
+      await this.txs.insert({
+        id: `agenttx-${randomUUID()}`,
+        shiftId: ticket.shiftId,
+        agentUserId: ticket.agentUserId,
+        playerUserId: player.id,
+        hallId: ticket.hallId,
+        actionType: "MACHINE_CLOSE",
+        walletDirection: "CREDIT",
+        paymentMethod: "WALLET",
+        amount: payoutNok,
+        previousBalance,
+        afterBalance,
+        walletTxId,
+        ticketUniqueId: ticket.ticketNumber,
+        notes: "auto-close (daily cron)",
+        otherData: {
+          machineName: "OK_BINGO",
+          machineTicketId: ticket.id,
+          payoutCents: apiResult.finalBalanceCents,
+          roomId,
+          autoClosed: true,
+          systemActorUserId: input.systemActorUserId,
+        },
+      });
+    }
     return closed;
   }
 

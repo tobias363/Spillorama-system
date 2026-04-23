@@ -327,3 +327,70 @@ test("freeze: createTicket etter close-day → SHIFT_SETTLED", async () => {
       (err.code === "NO_ACTIVE_SHIFT" || err.code === "SHIFT_SETTLED")
   );
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-CLOSE (BIN-582 cron)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("autoCloseTicket lukker + crediterer player selv etter shift-settlement", async () => {
+  const ctx = makeSetup();
+  const { shiftId } = await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "r-1",
+  });
+  ctx.okbingo.setBalance(ticket.ticketNumber, 2500); // 25 kr igjen
+  // Settle shiften
+  await ctx.store.markShiftSettled(shiftId, "a1");
+
+  const closed = await ctx.service.autoCloseTicket({
+    ticketId: ticket.id,
+    systemActorUserId: "system:auto-close-cron",
+  });
+  assert.equal(closed.isClosed, true);
+  assert.equal(closed.closedByUserId, "system:auto-close-cron");
+  assert.equal(closed.payoutCents, 2500);
+  assert.equal(await ctx.wallet.getBalance("wallet-p1"), 425); // 400 + 25 payout
+
+  const txs = await ctx.txStore.list({ shiftId });
+  const closeTx = txs.find((t) => t.actionType === "MACHINE_CLOSE");
+  assert.ok(closeTx);
+  assert.equal((closeTx?.otherData as { autoClosed?: boolean }).autoClosed, true);
+});
+
+test("autoCloseTicket på allerede lukket ticket → MACHINE_TICKET_CLOSED", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "r-1",
+  });
+  await ctx.service.closeTicket({
+    agentUserId: "a1", ticketNumber: ticket.ticketNumber, clientRequestId: "r-c",
+  });
+  await assert.rejects(
+    ctx.service.autoCloseTicket({
+      ticketId: ticket.id,
+      systemActorUserId: "system:auto-close-cron",
+    }),
+    (err) => err instanceof DomainError && err.code === "MACHINE_TICKET_CLOSED"
+  );
+});
+
+test("autoCloseTicket bruker roomId fra ticketen (OK_BINGO-spesifikk)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, roomId: 500,
+    clientRequestId: "r-1",
+  });
+  // Verifiser at ticket har roomId satt — autoClose må plukke denne,
+  // ikke default.
+  assert.equal(ticket.roomId, "500");
+  const closed = await ctx.service.autoCloseTicket({
+    ticketId: ticket.id,
+    systemActorUserId: "system:auto-close-cron",
+  });
+  assert.equal(closed.isClosed, true);
+});

@@ -48,6 +48,7 @@ import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
+import { createMachineTicketAutoCloseJob } from "./jobs/machineTicketAutoClose.js";
 import { createLoyaltyMonthlyResetJob } from "./jobs/loyaltyMonthlyReset.js";
 import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
 import { Game1RecoveryService } from "./game/Game1RecoveryService.js";
@@ -302,6 +303,8 @@ const {
   jobsEnabled, jobSwedbankEnabled, jobSwedbankIntervalMs,
   jobBankIdEnabled, jobBankIdIntervalMs, jobBankIdRunAtHour,
   jobRgCleanupEnabled, jobRgCleanupIntervalMs, jobRgCleanupRunAtHour,
+  jobMachineAutoCloseEnabled, jobMachineAutoCloseIntervalMs,
+  jobMachineAutoCloseRunAtHour, jobMachineAutoCloseMaxAgeHours,
   jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
   jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
@@ -1708,6 +1711,25 @@ app.use(createAgentOkBingoRouter({
   okBingoTicketService,
   auditLogService,
 }));
+
+// BIN-582: Metronia/OK-Bingo auto-close-cron. Registeres her fordi den
+// trenger begge ticket-services + machineTicketStore (som ikke er
+// konstruert på tidspunktet de andre jobbene registeres på linje ~854).
+// JobScheduler.start() kalles etter alle register()-kallene.
+jobScheduler.register({
+  name: "machine-ticket-auto-close",
+  description: "Daily auto-close of hanging Metronia/OK-Bingo tickets (BIN-582 legacy cron port).",
+  intervalMs: jobMachineAutoCloseIntervalMs,
+  enabled: jobMachineAutoCloseEnabled,
+  run: createMachineTicketAutoCloseJob({
+    machineTicketStore,
+    metroniaService: metroniaTicketService,
+    okBingoService: okBingoTicketService,
+    auditLogService,
+    runAtHourLocal: jobMachineAutoCloseRunAtHour,
+    maxTicketAgeHours: jobMachineAutoCloseMaxAgeHours,
+  }),
+});
 
 app.use(createAdminRouter({
   platformService, engine, io, drawScheduler, bingoSettingsState, responsibleGamingStore,

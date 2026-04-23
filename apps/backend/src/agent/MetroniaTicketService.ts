@@ -71,6 +71,25 @@ export interface VoidMetroniaTicketInput {
   reason: string;
 }
 
+/**
+ * BIN-582 autoClose-cron: system-initiert close av hengende ticket.
+ *
+ * Kalles fra daglig cron — NO active-shift-check (agent har typisk
+ * allerede settlet shiften når cron kjører). Gjør samme Metronia-API-kall
+ * og wallet-credit som manuell close, men logger ikke agent-transaction
+ * hvis ticketen ikke har shift_id (kan skje hvis shiften er slettet;
+ * app_agent_transactions.shift_id er NOT NULL).
+ *
+ * Idempotent: unique-transaction-suffix `:auto` forhindrer dobbel-API-kall
+ * om jobben kjører to ganger (retry etter crash).
+ */
+export interface AutoCloseMetroniaTicketInput {
+  /** Machine-ticket ID (ikke ticket_number). */
+  ticketId: string;
+  /** System-user ID som skal stemples som closed_by. */
+  systemActorUserId: string;
+}
+
 export interface MetroniaDailySalesAggregate {
   shiftId: string | null;
   totalCreatedNok: number;
@@ -317,6 +336,90 @@ export class MetroniaTicketService {
         payoutCents: apiResult.finalBalanceCents,
       },
     });
+    return closed;
+  }
+
+  // ── AUTO-CLOSE (cron, BIN-582) ──────────────────────────────────────────
+
+  /**
+   * System-initiert close fra daglig cron. Speiler closeTicket() men:
+   *   - Ingen active-shift-check (agent kan ha settlet shiften alt).
+   *   - `ticketId` brukes direkte (cron scanner på id, ikke ticketNumber).
+   *   - agent-transaction skrives kun hvis ticket.shiftId er satt (DB-CHECK
+   *     krever NOT NULL). Ved NULL shift_id logger vi kun via structured log
+   *     + compliance-audit (se cron-job).
+   *   - uniqueTransaction-suffix `:auto` for idempotency mot Metronia-API.
+   *
+   * Returnerer den lukkede ticket-en. Kaster hvis allerede lukket eller
+   * Metronia-API feiler — cron-jobb fanger og logger per-ticket-feil.
+   */
+  async autoCloseTicket(input: AutoCloseMetroniaTicketInput): Promise<MachineTicket> {
+    const ticket = await this.tickets.getById(input.ticketId);
+    if (!ticket) throw new DomainError("MACHINE_TICKET_NOT_FOUND", "Ukjent Metronia-ticket.");
+    if (ticket.machineName !== "METRONIA") {
+      throw new DomainError("MACHINE_TICKET_WRONG_TYPE", "Ticket er ikke en Metronia-ticket.");
+    }
+    if (ticket.isClosed) {
+      throw new DomainError("MACHINE_TICKET_CLOSED", "Ticket er allerede lukket.");
+    }
+
+    const uniqueTransaction = `metronia:close:${ticket.id}:auto`;
+    const apiResult = await this.metronia.closeTicket({
+      ticketNumber: ticket.ticketNumber,
+      uniqueTransaction,
+      roomId: ticket.roomId,
+    });
+
+    const payoutNok = centsToNok(apiResult.finalBalanceCents);
+    const player = await this.platform.getUserById(ticket.playerUserId);
+    const previousBalance = await this.wallet.getBalance(player.walletId);
+    let walletTxId: string | null = null;
+    let afterBalance = previousBalance;
+    if (payoutNok > 0) {
+      const walletTx = await this.wallet.credit(
+        player.walletId,
+        payoutNok,
+        `Metronia auto-close payout ${ticket.id}`,
+        { idempotencyKey: IdempotencyKeys.machineCredit({ uniqueTransaction }) }
+      );
+      walletTxId = walletTx.id;
+      afterBalance = previousBalance + payoutNok;
+    }
+
+    const closed = await this.tickets.markClosed(
+      ticket.id,
+      input.systemActorUserId,
+      apiResult.finalBalanceCents
+    );
+
+    // agent-transactions.shift_id er NOT NULL — skipper rad hvis shift er
+    // fjernet (ON DELETE SET NULL på machine_tickets). Cron logger selv
+    // via compliance-audit uavhengig av dette.
+    if (ticket.shiftId) {
+      await this.txs.insert({
+        id: `agenttx-${randomUUID()}`,
+        shiftId: ticket.shiftId,
+        agentUserId: ticket.agentUserId,
+        playerUserId: player.id,
+        hallId: ticket.hallId,
+        actionType: "MACHINE_CLOSE",
+        walletDirection: "CREDIT",
+        paymentMethod: "WALLET",
+        amount: payoutNok,
+        previousBalance,
+        afterBalance,
+        walletTxId,
+        ticketUniqueId: ticket.ticketNumber,
+        notes: "auto-close (daily cron)",
+        otherData: {
+          machineName: "METRONIA",
+          machineTicketId: ticket.id,
+          payoutCents: apiResult.finalBalanceCents,
+          autoClosed: true,
+          systemActorUserId: input.systemActorUserId,
+        },
+      });
+    }
     return closed;
   }
 

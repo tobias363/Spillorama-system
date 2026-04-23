@@ -359,7 +359,7 @@ Legacy `Boot/Server.js:583–618` hadde:
 | `loyalty-monthly-reset` | månedskift | ✅ | `src/jobs/loyaltyMonthlyReset.ts` |
 | `game1-schedule-tick` (erstatter `startGameCron`) | 15s | ✅ | `src/jobs/game1ScheduleTick.ts` |
 | `game1-auto-draw-tick` (erstatter `game1StatusCron`) | 1s | ✅ | `src/jobs/game1AutoDrawTick.ts` |
-| Metronia/OK Bingo `autoCloseTicket` | daglig | 🟡 | Logikk finnes i agent-shift `close-day` + integration-klienter, men ingen dedikert cron |
+| Metronia/OK Bingo `autoCloseTicket` | daglig | ✅ | `src/jobs/machineTicketAutoClose.ts` — lukker hengende billetter > 24h |
 | `generateExcelOfWithdraw` (Excel-eksport) | daglig | ❌ | Mangler — legacy sendte Excel-fil per epost |
 | `sendGameStartNotifications` (FCM push før spill) | 1min | ❌ | Mangler — se §3.2 |
 
@@ -553,7 +553,7 @@ Største nye migrasjons-grupper:
 
 1. **FCM push-notifikasjoner + notif-subsystem** — mobil-app kan ikke få game-start, bonuser, RG-varsler. Påvirker også legacy `sendGameStartNotifications`-cron.
 2. **Voucher player-side redemption** — admin-CRUD finnes; socket `ApplyVoucherCode` / `RedeemVoucher` ikke portert. Blokker G2/G3-spillere fra å bruke vouchers.
-3. **Metronia + OK Bingo `autoCloseTicket`-cron** — logikk finnes manuelt i agent-shift `close-day`, men ingen dedikert daglig cron som lukker hengende billetter.
+3. ~~**Metronia + OK Bingo `autoCloseTicket`-cron**~~ — ✅ LUKKET: `src/jobs/machineTicketAutoClose.ts` (daglig cron, 24h-cutoff, compliance-audit per auto-close).
 
 ### 6.2 Prioritet P1 — før pilot-GA
 

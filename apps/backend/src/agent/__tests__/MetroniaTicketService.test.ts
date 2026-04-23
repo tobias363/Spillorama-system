@@ -371,3 +371,88 @@ test("freeze: createTicket etter close-day → SHIFT_SETTLED", async () => {
       (err.code === "NO_ACTIVE_SHIFT" || err.code === "SHIFT_SETTLED")
   );
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-CLOSE (BIN-582 cron)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("autoCloseTicket lukker ticket + crediterer player + skriver agent-tx også etter shift-settlement", async () => {
+  const ctx = makeSetup();
+  const { shiftId } = await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "r-1",
+  });
+  ctx.metronia.setBalance(ticket.ticketNumber, 2000); // 20 kr igjen
+  // Settle shiften — simulerer at agent gikk hjem uten å lukke ticket
+  await ctx.store.markShiftSettled(shiftId, "a1");
+
+  const closed = await ctx.service.autoCloseTicket({
+    ticketId: ticket.id,
+    systemActorUserId: "system:auto-close-cron",
+  });
+
+  assert.equal(closed.isClosed, true);
+  assert.equal(closed.closedByUserId, "system:auto-close-cron");
+  assert.equal(closed.payoutCents, 2000);
+  assert.equal(await ctx.wallet.getBalance("wallet-p1"), 420); // 400 + 20 auto-payout
+
+  // Agent-tx skrevet (ticket.shiftId fortsatt satt).
+  const txs = await ctx.txStore.list({ shiftId });
+  const closeTx = txs.find((t) => t.actionType === "MACHINE_CLOSE");
+  assert.ok(closeTx, "skal skrive MACHINE_CLOSE rad");
+  assert.equal(closeTx?.amount, 20);
+  assert.equal((closeTx?.otherData as { autoClosed?: boolean }).autoClosed, true);
+});
+
+test("autoCloseTicket krever ingen active-shift (fungerer fra cron)", async () => {
+  const ctx = makeSetup();
+  const { shiftId } = await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "r-1",
+  });
+  // Settle shiften — nå er ikke agenten aktiv lenger
+  await ctx.store.markShiftSettled(shiftId, "a1");
+  // Påstand: en direkte call til closeTicket ville kastet SHIFT_SETTLED.
+  await assert.rejects(
+    ctx.service.closeTicket({ agentUserId: "a1", ticketNumber: ticket.ticketNumber, clientRequestId: "manual" }),
+    (err) => err instanceof DomainError && (err.code === "NO_ACTIVE_SHIFT" || err.code === "SHIFT_SETTLED")
+  );
+  // autoCloseTicket skal fungere fordi ingen shift-check gjøres.
+  const closed = await ctx.service.autoCloseTicket({
+    ticketId: ticket.id,
+    systemActorUserId: "system:auto-close-cron",
+  });
+  assert.equal(closed.isClosed, true);
+});
+
+test("autoCloseTicket på allerede lukket ticket → MACHINE_TICKET_CLOSED", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedPlayer("p1", "hall-a", 500);
+  const ticket = await ctx.service.createTicket({
+    agentUserId: "a1", playerUserId: "p1", amountNok: 100, clientRequestId: "r-1",
+  });
+  await ctx.service.closeTicket({
+    agentUserId: "a1", ticketNumber: ticket.ticketNumber, clientRequestId: "r-c",
+  });
+  await assert.rejects(
+    ctx.service.autoCloseTicket({
+      ticketId: ticket.id,
+      systemActorUserId: "system:auto-close-cron",
+    }),
+    (err) => err instanceof DomainError && err.code === "MACHINE_TICKET_CLOSED"
+  );
+});
+
+test("autoCloseTicket på ukjent id → MACHINE_TICKET_NOT_FOUND", async () => {
+  const ctx = makeSetup();
+  await assert.rejects(
+    ctx.service.autoCloseTicket({
+      ticketId: "does-not-exist",
+      systemActorUserId: "system:auto-close-cron",
+    }),
+    (err) => err instanceof DomainError && err.code === "MACHINE_TICKET_NOT_FOUND"
+  );
+});
