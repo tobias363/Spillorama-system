@@ -167,6 +167,7 @@ import { createAdminCmsRouter } from "./routes/adminCms.js";
 import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
+import { createAdminReportsGame1ManagementRouter } from "./routes/adminReportsGame1Management.js";
 import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRedFlagPlayers.js";
 import { createAdminPlayersTopRouter } from "./routes/adminPlayersTop.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
@@ -1600,6 +1601,14 @@ app.use(createAdminHallReportsRouter({
 app.use(createAdminReportsSubgameDrillDownRouter({
   platformService,
   engine,
+}));
+// BIN-BOT-01: "Report Management Game 1" aggregate-rapport (OMS/UTD/Payout%/RES
+// per sub-game). Filtre: fra/til dato, group-of-hall, hall, type (player|bot),
+// fritekst-søk. HALL_OPERATOR auto-scope til egen hall. Read-only.
+app.use(createAdminReportsGame1ManagementRouter({
+  platformService,
+  engine,
+  hallGroupService,
 }));
 // BIN-651: red-flag players report (AML + regulatorisk AuditLog on view).
 // Paginert liste over red-flaggede spillere med flag-årsak + siste aktivitet.

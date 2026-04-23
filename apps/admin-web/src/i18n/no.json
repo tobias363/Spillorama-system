@@ -2772,5 +2772,21 @@
   "pattern_deleted": "Mønster slettet",
   "saved_game_deleted": "Lagret spill slettet",
   "activate_daily_schedule": "Aktiver daglig tidsplan",
-  "deactivate_daily_schedule": "Deaktiver daglig tidsplan"
+  "deactivate_daily_schedule": "Deaktiver daglig tidsplan",
+  "report_management_game1": "Rapport Game 1",
+  "oms": "OMS",
+  "utd": "UTD",
+  "res": "RES",
+  "payout_percent": "Payout %",
+  "by_player": "By Player",
+  "by_bot": "By Bot",
+  "export_excel": "Eksporter Excel",
+  "total_utd": "Total UTD",
+  "total_res": "Total RES",
+  "total_payout_percent": "Total Payout %",
+  "all_halls": "Alle haller",
+  "all_groups": "Alle grupper",
+  "no_subgames_found": "Ingen underspill funnet i valgte filtre",
+  "bot_filter_not_supported_note": "Bot-funksjonalitet er ikke aktivert i systemet ennå — resultatet blir tomt.",
+  "print_report": "Skriv ut rapport"
 }

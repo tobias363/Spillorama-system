@@ -1599,6 +1599,67 @@ export class PlatformService {
   }
 
   /**
+   * BIN-BOT-01: List every sub-game child row (parent_schedule_id NOT NULL)
+   * across all parents, optionally filtered by hall. Used by the
+   * "Report Management Game 1" aggregate to find every candidate sub-game
+   * in the requested window — the route itself filters by schedule-log
+   * started_at, so this returns a superset.
+   *
+   * Hard cap at 10_000 rows — the admin UI paginates to 10 per page, and
+   * even a busy pilot hall has <500 sub-games configured per month. The
+   * cap prevents pathological growth from hanging the aggregator.
+   */
+  async listAllSubGameChildren(options?: { hallId?: string }): Promise<ScheduleSlot[]> {
+    await this.ensureInitialized();
+    const conditions: string[] = ["parent_schedule_id IS NOT NULL"];
+    const params: unknown[] = [];
+    if (options?.hallId) {
+      params.push(options.hallId);
+      conditions.push(`hall_id = $${params.length}`);
+    }
+    const { rows } = await this.pool.query<ScheduleSlotRow>(
+      `SELECT id, hall_id, game_type, display_name, day_of_week, start_time::text,
+              prize_description, max_tickets, is_active, sort_order, variant_config,
+              parent_schedule_id, sub_game_sequence, sub_game_number,
+              created_at, updated_at
+       FROM ${this.scheduleTable()}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY hall_id ASC, sub_game_sequence ASC, id ASC
+       LIMIT 10000`,
+      params
+    );
+    return rows.map((r) => this.mapScheduleSlot(r));
+  }
+
+  /**
+   * BIN-BOT-01: Query schedule-log rows by date-window + optional hall.
+   * Complements listScheduleLogForSlots (which takes a slot-id list) —
+   * this one is used by the Game1 management report where we don't know
+   * the slot-ids up-front.
+   */
+  async listScheduleLogInRange(input: {
+    from: string;
+    to: string;
+    hallId?: string;
+  }): Promise<ScheduleLogEntry[]> {
+    await this.ensureInitialized();
+    const conditions: string[] = ["started_at >= $1", "started_at <= $2"];
+    const params: unknown[] = [input.from, input.to];
+    if (input.hallId) {
+      params.push(input.hallId);
+      conditions.push(`hall_id = $${params.length}`);
+    }
+    const { rows } = await this.pool.query<ScheduleLogRow>(
+      `SELECT * FROM ${this.scheduleLogTable()}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY started_at DESC
+       LIMIT 10000`,
+      params
+    );
+    return rows.map((r) => this.mapScheduleLog(r));
+  }
+
+  /**
    * BIN-647: Fetch a single schedule-slot by id (parent or child). Returns
    * null if the row doesn't exist. Lean accessor used by the drill-down
    * route to resolve `parentId` → hallId for hall-scope enforcement.

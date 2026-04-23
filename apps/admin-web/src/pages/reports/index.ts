@@ -4,6 +4,7 @@
 // Handles all 15 report routes (static + dynamic).
 
 import { renderGame1ReportPage } from "./game1/Game1ReportPage.js";
+import { renderGame1ManagementReportPage } from "./game1/Game1ManagementReportPage.js";
 import { renderGame1SubgamesPage } from "./game1/Game1SubgamesPage.js";
 import { renderGame1HistoryPage } from "./game1/Game1HistoryPage.js";
 import { renderGame2ReportPage } from "./game2/Game2ReportPage.js";
@@ -21,6 +22,7 @@ import { renderTotalRevenueReportPage } from "./totalRevenue/TotalRevenueReportP
 
 const STATIC_REPORT_ROUTES = new Set<string>([
   "/reportGame1",
+  "/reportManagement/game1",
   "/reportGame2",
   "/reportGame3",
   "/reportGame4",
@@ -53,6 +55,9 @@ export function mountReportRoute(container: HTMLElement, path: string): void {
   switch (bare) {
     case "/reportGame1":
       void renderGame1ReportPage(container);
+      return;
+    case "/reportManagement/game1":
+      void renderGame1ManagementReportPage(container);
       return;
     case "/reportGame2":
       void renderGame2ReportPage(container);

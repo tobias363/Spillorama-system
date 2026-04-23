@@ -268,6 +268,60 @@ export async function getPayoutsByGameTickets(q: { gameId: string }):
   );
 }
 
+// ── 11. /api/admin/reports/game1 — Report Management Game 1 ─────────────────
+// BIN-BOT-01: sub-game-aggregert OMS/UTD/Payout%/RES med filtre.
+// Per legacy wireframe WF_B_Spillorama Admin V1.0.pdf p.29 + bot-filter
+// per SpilloramaBotReport_V1.0_31.01.2024.pdf.
+
+export interface Game1ManagementReportQuery {
+  from?: string;
+  to?: string;
+  groupOfHallId?: string;
+  hallId?: string;
+  type?: "player" | "bot";
+  q?: string;
+}
+
+export interface Game1ManagementReportRow {
+  subGameId: string;
+  subGameNumber: string | null;
+  childGameId: string;
+  parentScheduleId: string;
+  hallId: string;
+  hallName: string;
+  groupOfHallId: string | null;
+  groupOfHallName: string | null;
+  startedAt: string | null;
+  oms: number;
+  utd: number;
+  payoutPct: number;
+  res: number;
+}
+
+export interface Game1ManagementReportTotals {
+  oms: number;
+  utd: number;
+  payoutPct: number;
+  res: number;
+}
+
+export interface Game1ManagementReportResponse {
+  from: string;
+  to: string;
+  generatedAt: string;
+  type: "player" | "bot";
+  rows: Game1ManagementReportRow[];
+  totals: Game1ManagementReportTotals;
+}
+
+export async function getGame1ManagementReport(
+  q: Game1ManagementReportQuery,
+): Promise<Game1ManagementReportResponse> {
+  const qs = buildQs(q);
+  const path = qs ? `/api/admin/reports/game1?${qs}` : "/api/admin/reports/game1";
+  return apiRequest<Game1ManagementReportResponse>(path, { auth: true });
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 function buildQs(obj: object): string {

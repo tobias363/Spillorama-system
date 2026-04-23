@@ -36,6 +36,23 @@ const REPORT_KEYS = [
   "unique_players",
   "user_transactions",
   "winners",
+  // BIN-BOT-01: Report Management Game 1 keys.
+  "report_management_game1",
+  "oms",
+  "utd",
+  "res",
+  "payout_percent",
+  "by_player",
+  "by_bot",
+  "export_excel",
+  "total_utd",
+  "total_res",
+  "total_payout_percent",
+  "all_halls",
+  "all_groups",
+  "no_subgames_found",
+  "bot_filter_not_supported_note",
+  "print_report",
 ];
 
 describe("report-bolk i18n keys", () => {

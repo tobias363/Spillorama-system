@@ -17,9 +17,10 @@ describe("reports dispatcher", () => {
       })) as typeof fetch;
   });
 
-  it("matches all 10 static routes", () => {
+  it("matches all 11 static routes", () => {
     const routes = [
       "/reportGame1",
+      "/reportManagement/game1",
       "/reportGame2",
       "/reportGame3",
       "/reportGame4",
