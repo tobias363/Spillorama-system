@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spill 1 — Bonusspill Preview</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #0f0f1a; color: #fff; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body { padding: 24px; }
+
+    header {
+      max-width: 1000px; margin: 0 auto 20px;
+      padding-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    header h1 {
+      font-size: 24px; color: #ffe83d; letter-spacing: 1px;
+    }
+    header p.lead {
+      margin-top: 8px; color: rgba(255,255,255,0.6);
+      font-size: 14px; line-height: 1.45;
+    }
+    header p.note {
+      margin-top: 6px; color: rgba(255,200,100,0.75);
+      font-size: 12px; font-style: italic;
+    }
+
+    main { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+    .panel {
+      background: linear-gradient(180deg, #1a1a2e 0%, #12121f 100%);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .panel h2 {
+      font-size: 18px; color: #ffe83d; margin-bottom: 4px;
+    }
+    .panel .sub {
+      font-size: 12px; color: rgba(255,255,255,0.45);
+      margin-bottom: 14px;
+    }
+
+    .stage-row {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .stage-wrap {
+      width: 800px; height: 600px;
+      background: #000;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+    .stage-wrap canvas { display: block; }
+
+    .controls {
+      display: flex; flex-direction: column; gap: 10px;
+      min-width: 200px;
+    }
+    .controls h3 {
+      font-size: 13px; color: rgba(255,255,255,0.5);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    button.action {
+      padding: 10px 14px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: #2a1d3a;
+      color: #fff; font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit;
+      text-align: left;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    button.action:hover { background: #39254f; border-color: rgba(255,232,61,0.4); }
+    button.action.primary { background: linear-gradient(180deg, #c41030 0%, #8a0020 100%); border-color: rgba(255,232,61,0.3); }
+    button.action.primary:hover { background: linear-gradient(180deg, #d41840 0%, #9a002a 100%); }
+    button.action.secondary { background: #1b4a3a; }
+    button.action.secondary:hover { background: #236050; }
+    button.action:disabled { opacity: 0.4; cursor: default; }
+
+    .log {
+      margin-top: 8px; padding: 8px 10px;
+      background: rgba(0,0,0,0.4); border-radius: 6px;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11px; color: #9dffb9; min-height: 20px;
+      max-height: 90px; overflow-y: auto;
+      line-height: 1.4;
+    }
+    .log .err { color: #ff8888; }
+
+    footer {
+      max-width: 1000px; margin: 32px auto 0;
+      padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.05);
+      color: rgba(255,255,255,0.35); font-size: 11px; text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SPILL 1 — BONUSSPILL PREVIEW</h1>
+    <p class="lead">
+      Dette er isolerte design-previews av de fire bonusspill-overleggene i Spill 1.
+      Trigger, choice og result er simulert med dummy-data — ingen backend-kall skjer.
+    </p>
+    <p class="note">
+      Kun til design- og funksjonstest. Ekte spill kjører mot backend via socket.io.
+    </p>
+  </header>
+
+  <main>
+    <!-- Wheel of Fortune -->
+    <section class="panel" data-overlay="wheel">
+      <h2>Lykkehjulet (Wheel of Fortune)</h2>
+      <p class="sub">WheelOverlay — 50 segmenter, auto-spin etter 10 s, auto-dismiss etter resultat.</p>
+      <div class="stage-row">
+        <div class="stage-wrap" id="stage-wheel"></div>
+        <div class="controls">
+          <h3>Kontroller</h3>
+          <button class="action primary" data-action="trigger" data-overlay="wheel">Trigger Lykkehjul</button>
+          <button class="action" data-action="choice" data-overlay="wheel">Simuler klikk "SPINN"</button>
+          <button class="action secondary" data-action="result" data-overlay="wheel">Vis resultat (500 kr)</button>
+          <button class="action" data-action="error" data-overlay="wheel">Simuler choice-error</button>
+          <button class="action" data-action="hide" data-overlay="wheel">Skjul overlay</button>
+          <div class="log" id="log-wheel"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Treasure Chest -->
+    <section class="panel" data-overlay="chest">
+      <h2>Skattekisten (Treasure Chest)</h2>
+      <p class="sub">TreasureChestOverlay — 6 kister, skjult prisinfo til valg, auto-velg etter 10 s.</p>
+      <div class="stage-row">
+        <div class="stage-wrap" id="stage-chest"></div>
+        <div class="controls">
+          <h3>Kontroller</h3>
+          <button class="action primary" data-action="trigger" data-overlay="chest">Trigger Skattekiste</button>
+          <button class="action" data-action="choice" data-overlay="chest">Simuler klikk (velg kiste 3)</button>
+          <button class="action secondary" data-action="result" data-overlay="chest">Vis resultat (kiste 3 vinner)</button>
+          <button class="action" data-action="error" data-overlay="chest">Simuler choice-error</button>
+          <button class="action" data-action="hide" data-overlay="chest">Skjul overlay</button>
+          <div class="log" id="log-chest"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Oddsen -->
+    <section class="panel" data-overlay="oddsen">
+      <h2>Oddsen (Mystery / Cross-round)</h2>
+      <p class="sub">OddsenOverlay — velg 1 av 3 tall (55/56/57), avgjøres i neste spill.</p>
+      <div class="stage-row">
+        <div class="stage-wrap" id="stage-oddsen"></div>
+        <div class="controls">
+          <h3>Kontroller</h3>
+          <button class="action primary" data-action="trigger" data-overlay="oddsen">Trigger Oddsen</button>
+          <button class="action" data-action="choice" data-overlay="oddsen">Simuler klikk (velg 56)</button>
+          <button class="action secondary" data-action="result" data-overlay="oddsen">Vis venter-state (deferred)</button>
+          <button class="action secondary" data-action="result-hit" data-overlay="oddsen">Vis TREFF (1500 kr)</button>
+          <button class="action secondary" data-action="result-miss" data-overlay="oddsen">Vis BOM</button>
+          <button class="action" data-action="error" data-overlay="oddsen">Simuler choice-error</button>
+          <button class="action" data-action="hide" data-overlay="oddsen">Skjul overlay</button>
+          <div class="log" id="log-oddsen"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Color Draft -->
+    <section class="panel" data-overlay="colordraft">
+      <h2>Fargetrekning (Color Draft)</h2>
+      <p class="sub">ColorDraftOverlay — match målfargen blant 12 luker, auto-velg etter 10 s.</p>
+      <div class="stage-row">
+        <div class="stage-wrap" id="stage-colordraft"></div>
+        <div class="controls">
+          <h3>Kontroller</h3>
+          <button class="action primary" data-action="trigger" data-overlay="colordraft">Trigger Fargetrekning</button>
+          <button class="action" data-action="choice" data-overlay="colordraft">Simuler klikk (velg luke 4)</button>
+          <button class="action secondary" data-action="result" data-overlay="colordraft">Vis TREFF (250 kr)</button>
+          <button class="action secondary" data-action="result-miss" data-overlay="colordraft">Vis BOM (0 kr)</button>
+          <button class="action" data-action="error" data-overlay="colordraft">Simuler choice-error</button>
+          <button class="action" data-action="hide" data-overlay="colordraft">Skjul overlay</button>
+          <div class="log" id="log-colordraft"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Spillorama · Spill 1 bonus-overlay preview · 800 × 600 kanvas · dummy-data · ingen backend-kall
+  </footer>
+
+  <script type="module" src="./preview.ts"></script>
+</body>
+</html>
