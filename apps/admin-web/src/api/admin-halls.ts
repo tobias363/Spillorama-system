@@ -34,6 +34,10 @@ export interface AdminHall {
   isActive: boolean;
   clientVariant: HallClientVariant;
   tvUrl?: string;
+  /** Legacy Hall Number (101, 102, …). Null = ikke satt. */
+  hallNumber?: number | null;
+  /** Cash-balanse hallen disponerer (Available Balance). Default 0. */
+  cashBalance?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -72,6 +76,7 @@ export interface CreateHallInput {
   settlementAccount?: string;
   invoiceMethod?: string;
   isActive?: boolean;
+  hallNumber?: number | null;
 }
 
 export function createHall(input: CreateHallInput): Promise<AdminHall> {
@@ -92,6 +97,67 @@ export interface UpdateHallInput {
   invoiceMethod?: string;
   isActive?: boolean;
   clientVariant?: HallClientVariant;
+  hallNumber?: number | null;
+}
+
+// ── Add Money / balanse-transaksjoner ────────────────────────────────────────
+
+export interface AddMoneyInput {
+  amount: number;
+  reason?: string;
+}
+
+export interface HallBalanceTransaction {
+  id: string;
+  hallId: string;
+  agentUserId: string | null;
+  shiftId: string | null;
+  settlementId: string | null;
+  txType: "DAILY_BALANCE_TRANSFER" | "DROP_SAFE_MOVE" | "SHIFT_DIFFERENCE" | "MANUAL_ADJUSTMENT";
+  direction: "CREDIT" | "DEBIT";
+  amount: number;
+  previousBalance: number;
+  afterBalance: number;
+  notes: string | null;
+  otherData: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AddMoneyResult {
+  hallId: string;
+  amount: number;
+  previousBalance: number;
+  balanceAfter: number;
+  transaction: HallBalanceTransaction;
+}
+
+export function addMoneyToHall(hallId: string, input: AddMoneyInput): Promise<AddMoneyResult> {
+  return apiRequest<AddMoneyResult>(`/api/admin/halls/${encodeURIComponent(hallId)}/add-money`, {
+    method: "POST",
+    body: input,
+    auth: true,
+  });
+}
+
+export interface HallBalanceTransactionsResult {
+  hallId: string;
+  cashBalance: number;
+  dropsafeBalance: number;
+  transactions: HallBalanceTransaction[];
+}
+
+export function listHallBalanceTransactions(
+  hallId: string,
+  params: { limit?: number; offset?: number } = {},
+): Promise<HallBalanceTransactionsResult> {
+  const qs = new URLSearchParams();
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiRequest<HallBalanceTransactionsResult>(
+    `/api/admin/halls/${encodeURIComponent(hallId)}/balance-transactions${suffix}`,
+    { auth: true },
+  );
 }
 
 export function updateHall(id: string, patch: UpdateHallInput): Promise<AdminHall> {

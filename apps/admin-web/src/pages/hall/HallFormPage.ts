@@ -4,6 +4,14 @@
 //   POST /api/admin/halls                 create
 //   PUT  /api/admin/halls/:id             update
 //   listHalls() to resolve existing record on edit (no GET :id endpoint).
+//
+// Felter:
+//   - Hall Name         (mandatory)
+//   - Slug              (URL-safe string, auto-generert fra name hvis tomt)
+//   - Hall Number       (heltall, mandatory — legacy legacy 101/102/...)
+//   - Address
+//   - Organization Number / Settlement Account / Invoice Method
+//   - Status (Active/Inactive)
 
 import { t } from "../../i18n/I18n.js";
 import { Toast } from "../../components/Toast.js";
@@ -57,6 +65,8 @@ async function mount(host: HTMLElement, editId: string | null): Promise<void> {
     }
   }
 
+  const hallNumberValue = existing?.hallNumber != null ? String(existing.hallNumber) : "";
+
   host.innerHTML = `
     <form id="hall-form" class="form-horizontal" data-testid="hall-form">
       <div class="form-group">
@@ -67,10 +77,25 @@ async function mount(host: HTMLElement, editId: string | null): Promise<void> {
         </div>
       </div>
       <div class="form-group">
-        <label class="col-sm-3 control-label" for="hf-slug">${escapeHtml(t("hall_number"))}</label>
+        <label class="col-sm-3 control-label" for="hf-slug">${escapeHtml(t("slug"))}</label>
         <div class="col-sm-9">
           <input type="text" id="hf-slug" name="slug" class="form-control" required
             value="${escapeHtml(existing?.slug ?? "")}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-sm-3 control-label" for="hf-hall-number">${escapeHtml(t("hall_number"))}</label>
+        <div class="col-sm-9">
+          <input
+            type="number"
+            min="1"
+            step="1"
+            id="hf-hall-number"
+            name="hallNumber"
+            class="form-control"
+            data-testid="hall-number-input"
+            value="${escapeHtml(hallNumberValue)}"
+          >
         </div>
       </div>
       <div class="form-group">
@@ -149,6 +174,7 @@ async function mount(host: HTMLElement, editId: string | null): Promise<void> {
 async function submit(form: HTMLFormElement, existing: AdminHall | null): Promise<void> {
   const name = (form.querySelector<HTMLInputElement>("#hf-name")!).value.trim();
   const slug = (form.querySelector<HTMLInputElement>("#hf-slug")!).value.trim();
+  const hallNumberRaw = (form.querySelector<HTMLInputElement>("#hf-hall-number")!).value.trim();
   const region = (form.querySelector<HTMLInputElement>("#hf-region")!).value.trim();
   const address = (form.querySelector<HTMLInputElement>("#hf-address")!).value.trim();
   const organizationNumber = (form.querySelector<HTMLInputElement>("#hf-org")!).value.trim();
@@ -163,11 +189,24 @@ async function submit(form: HTMLFormElement, existing: AdminHall | null): Promis
     return;
   }
 
+  let hallNumber: number | null | undefined;
+  if (hallNumberRaw === "") {
+    hallNumber = null;
+  } else {
+    const parsed = Number(hallNumberRaw);
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+      Toast.error(t("hall_number_positive_integer"));
+      return;
+    }
+    hallNumber = parsed;
+  }
+
   try {
     if (existing) {
       const patch: Record<string, unknown> = {
         name, slug, region, address,
         organizationNumber, settlementAccount, invoiceMethod, isActive,
+        hallNumber,
       };
       if (clientVariant) patch.clientVariant = clientVariant;
       await updateHall(existing.id, patch);
@@ -178,6 +217,7 @@ async function submit(form: HTMLFormElement, existing: AdminHall | null): Promis
         settlementAccount: settlementAccount || undefined,
         invoiceMethod: invoiceMethod || undefined,
         isActive,
+        hallNumber,
       });
     }
     Toast.success(t("success"));
