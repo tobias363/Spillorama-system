@@ -200,3 +200,16 @@ export async function deleteDailySchedule(
 ): Promise<{ softDeleted: boolean }> {
   return apiDeleteDailySchedule(id, opts);
 }
+
+/**
+ * Partial PATCH — brukes av toggle-active-actionen i gameManagement-siden
+ * der vi kun vil oppdatere status uten å røre navn/dato/osv. Returnerer den
+ * oppdaterte raden (med legacy `_id`-alias).
+ */
+export async function patchDailySchedule(
+  id: string,
+  patch: Partial<DailyScheduleFormPayload>
+): Promise<DailyScheduleRow> {
+  const row = await apiUpdateDailySchedule(id, toUpdate(patch));
+  return attachLegacyId(row);
+}

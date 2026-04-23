@@ -6,6 +6,8 @@
 //   - View/View-G3 siden henter detail-data og rendrer table
 //   - SubGames er wired
 //   - Tickets + CloseDay forblir placeholders (backend mangler / BIN-623)
+//   - DailySchedule-seksjonen (feat/game-management-daily-schedules):
+//     tabell + buttons + row-actions når type er valgt (pilot-blokker).
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { initI18n } from "../../src/i18n/I18n.js";
@@ -131,6 +133,144 @@ describe("GameManagementPage (list/picker) — BIN-684 wired", () => {
     await renderGameManagementPage(c, "bingo");
     const err = c.querySelector("[data-testid='gm-error']");
     expect(err).not.toBeNull();
+  });
+
+  // ── DailySchedule-seksjonen (feat/game-management-daily-schedules) ─────────
+  // Legacy-admin viste DailySchedule-tabell + 2 actions når type var valgt.
+  // Ny admin må matche dette for pilot-blokkeren.
+
+  /**
+   * Fetch-mock som svarer på ulike endepunkter:
+   *   /api/admin/game-management  → games-liste
+   *   /api/admin/daily-schedules  → schedules-liste
+   *   alt annet                   → null (no-op)
+   */
+  function mockMultiFetch(routes: {
+    games?: unknown[];
+    schedules?: unknown[];
+  }): ReturnType<typeof vi.fn> {
+    const games = routes.games ?? [];
+    const schedules = routes.schedules ?? [];
+    const spy = vi.fn();
+    spy.mockImplementation(async (url: string | URL) => {
+      const u = String(url);
+      if (u.includes("/api/admin/game-management")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, data: { games, count: games.length } }),
+        };
+      }
+      if (u.includes("/api/admin/daily-schedules")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            data: { schedules, count: schedules.length },
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, data: null }),
+      };
+    });
+    (globalThis as unknown as { fetch: unknown }).fetch = spy as unknown as typeof fetch;
+    return spy;
+  }
+
+  const sampleDs = {
+    id: "DSN_2026419_111942258",
+    name: "Oslo bingo Mon-Fre",
+    gameManagementId: "gm-42",
+    hallId: null,
+    hallIds: {
+      masterHallId: "Oslo bingo",
+      hallIds: ["Oslo"],
+      groupHallIds: ["Oslo"],
+    },
+    weekDays: 31,
+    day: null,
+    startDate: "2026-04-20T00:00:00.000Z",
+    endDate: "2026-04-24T00:00:00.000Z",
+    startTime: "09:00",
+    endTime: "23:00",
+    status: "active" as const,
+    stopGame: false,
+    specialGame: false,
+    isSavedGame: false,
+    isAdminSavedGame: false,
+    innsatsenSales: 0,
+    subgames: [],
+    otherData: {},
+    createdBy: "admin-1",
+    createdAt: "2026-04-19T12:00:00Z",
+    updatedAt: "2026-04-19T12:00:00Z",
+    deletedAt: null,
+  };
+
+  it("DS-seksjonen er skjult før type er valgt", async () => {
+    mockFetch(emptyList);
+    const c = document.createElement("div");
+    await renderGameManagementPage(c);
+    const ds = c.querySelector<HTMLElement>("[data-testid='gm-ds-section']");
+    expect(ds).not.toBeNull();
+    expect(ds?.style.display).toBe("none");
+  });
+
+  it("DS-seksjonen viser 2 knapper (Spesialspill + Lag daglig tidsplan) når type er valgt", async () => {
+    mockMultiFetch({ games: [sampleRow], schedules: [] });
+    const c = document.createElement("div");
+    await renderGameManagementPage(c, "bingo");
+    const ds = c.querySelector<HTMLElement>("[data-testid='gm-ds-section']");
+    expect(ds?.style.display).not.toBe("none");
+    const specialBtn = c.querySelector<HTMLAnchorElement>("[data-testid='gm-ds-special-btn']");
+    const dailyBtn = c.querySelector<HTMLAnchorElement>("[data-testid='gm-ds-daily-btn']");
+    expect(specialBtn).not.toBeNull();
+    expect(dailyBtn).not.toBeNull();
+    // Heading er "<type.name> Tabell"
+    const heading = c.querySelector("#gm-ds-heading");
+    expect(heading?.textContent).toContain("Spill1");
+  });
+
+  it("DS-tabell filtrerer schedules etter gameManagementId i GM-listen", async () => {
+    const scheduleInScope = { ...sampleDs, id: "DSN_match", gameManagementId: "gm-42" };
+    const scheduleOutOfScope = { ...sampleDs, id: "DSN_other", gameManagementId: "gm-999" };
+    mockMultiFetch({
+      games: [sampleRow], // gm-42
+      schedules: [scheduleInScope, scheduleOutOfScope],
+    });
+    const c = document.createElement("div");
+    await renderGameManagementPage(c, "bingo");
+    expect(c.textContent).toContain("DSN_match");
+    expect(c.textContent).not.toContain("DSN_other");
+  });
+
+  it("DS-tabell formatterer dato-range som DD/MM/YYYY-DD/MM/YYYY + tidsluke", async () => {
+    mockMultiFetch({ games: [sampleRow], schedules: [sampleDs] });
+    const c = document.createElement("div");
+    await renderGameManagementPage(c, "bingo");
+    // Forventet: 20/04/2026-24/04/2026 (matchende legacy-format).
+    expect(c.textContent).toContain("20/04/2026-24/04/2026");
+    // Tidsluke: "09:00 - 23:00"
+    expect(c.textContent).toContain("09:00 - 23:00");
+  });
+
+  it("DS-tabell viser row-actions (view/edit/toggle/delete)", async () => {
+    mockMultiFetch({ games: [sampleRow], schedules: [sampleDs] });
+    const c = document.createElement("div");
+    await renderGameManagementPage(c, "bingo");
+    expect(c.querySelector("[data-testid='gm-ds-view']")).not.toBeNull();
+    expect(c.querySelector("[data-testid='gm-ds-edit']")).not.toBeNull();
+    expect(c.querySelector("[data-testid='gm-ds-toggle']")).not.toBeNull();
+    expect(c.querySelector("[data-testid='gm-ds-delete']")).not.toBeNull();
+    // View-knappen peker til detaljesiden for schedule.
+    const view = c.querySelector<HTMLAnchorElement>("[data-testid='gm-ds-view']");
+    expect(view?.getAttribute("href")).toContain(
+      `/dailySchedule/subgame/view/${encodeURIComponent(sampleDs.id)}`
+    );
   });
 });
 
