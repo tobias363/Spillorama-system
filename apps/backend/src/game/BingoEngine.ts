@@ -15,7 +15,6 @@ import {
   ticketContainsNumber,
 } from "./ticket.js";
 import { buildDrawBag, resolveDrawBagConfig } from "./DrawBagStrategy.js";
-import type { PatternConfig } from "./variantConfig.js";
 import type {
   ClaimRecord,
   ClaimType,
@@ -111,9 +110,6 @@ import {
 } from "./BingoEngineRecovery.js";
 import {
   evaluateActivePhase as evaluateActivePhaseHelper,
-  evaluateConcurrentPatterns as evaluateConcurrentPatternsHelper,
-  computeCustomPatternPrize as computeCustomPatternPrizeHelper,
-  detectPhaseWinners as detectPhaseWinnersHelper,
   meetsPhaseRequirement as meetsPhaseRequirementHelper,
   type EvaluatePhaseCallbacks,
 } from "./BingoEnginePatternEval.js";
@@ -295,16 +291,12 @@ const DEFAULT_SELF_EXCLUSION_MIN_MS = 365 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_DRAWS_PER_ROUND = 30;
 const MAX_BINGO_BALLS_75 = 75;
 const DEFAULT_BONUS_TRIGGER_PATTERN_INDEX = 1;
-/** BIN-253: Minimum milliseconds between successive manual draw calls to prevent rapid-fire draws. */
-const MIN_MANUAL_DRAW_INTERVAL_MS = 500;
 
 export class BingoEngine {
   /** HOEY-7: Pluggable room state store (in-memory or Redis-backed). */
   // BIN-615 / PR-C2: protected so Game2Engine can persist rooms after auto-claim payouts.
   protected readonly rooms: RoomStateStore;
   private readonly roomLastRoundStartMs = new Map<string, number>();
-  /** BIN-253: Tracks last draw timestamp per room for minimum-interval enforcement. */
-  private readonly roomLastDrawMs = new Map<string, number>();
   /** BIN-251: Optional external store for cross-instance room state persistence. */
   private readonly roomStateStore?: import("../store/RoomStateStore.js").RoomStateStore;
 
@@ -1151,54 +1143,6 @@ export class BingoEngine {
    */
   private async evaluateActivePhase(room: RoomState, game: GameState): Promise<void> {
     await evaluateActivePhaseHelper(this.buildEvaluatePhaseCallbacks(), room, game);
-  }
-
-  /**
-   * PR-P5 (Extra-variant): concurrent pattern-evaluator.
-   *
-   * Implementasjon ekstrahert til {@link BingoEnginePatternEval.evaluateConcurrentPatterns}.
-   */
-  private async evaluateConcurrentPatterns(
-    room: RoomState,
-    game: GameState,
-  ): Promise<void> {
-    await evaluateConcurrentPatternsHelper(this.buildEvaluatePhaseCallbacks(), room, game);
-  }
-
-  /**
-   * PR-P5: compute prize for custom pattern.
-   *
-   * Implementasjon ekstrahert til {@link BingoEnginePatternEval.computeCustomPatternPrize}.
-   */
-  private computeCustomPatternPrize(
-    pattern: PatternDefinition,
-    prizePool: number,
-    lastBall: number | undefined,
-  ): number {
-    return computeCustomPatternPrizeHelper(pattern, prizePool, lastBall);
-  }
-
-  /**
-   * PR B: Detekter fase-vinnere, gruppert per farge når
-   * `patternsByColor` er satt.
-   *
-   * Implementasjon ekstrahert til {@link BingoEnginePatternEval.detectPhaseWinners}.
-   */
-  private detectPhaseWinners(
-    game: GameState,
-    drawnSet: Set<number>,
-    activePattern: PatternDefinition,
-    variantConfig: import("./variantConfig.js").GameVariantConfig | undefined,
-    hasPerColorMatrix: boolean,
-    phaseIndex: number,
-    roomCode: string,
-  ): {
-    totalUniqueWinners: number;
-    byColor: Map<string, { playerIds: Set<string>; patternForColor: PatternConfig | null }>;
-  } {
-    return detectPhaseWinnersHelper(
-      game, drawnSet, activePattern, variantConfig, hasPerColorMatrix, phaseIndex, roomCode,
-    );
   }
 
   /**
@@ -2602,55 +2546,6 @@ export class BingoEngine {
     );
   }
 
-  private async ensureSufficientBalance(players: Player[], entryFee: number): Promise<void> {
-    const balances = await Promise.all(
-      players.map(async (player) => ({
-        player,
-        balance: await this.walletAdapter.getBalance(player.walletId)
-      }))
-    );
-
-    const missing = balances.find(({ balance }) => balance < entryFee);
-    if (missing) {
-      throw new DomainError(
-        "INSUFFICIENT_FUNDS",
-        `Spiller ${missing.player.name} har ikke nok saldo til buy-in.`
-      );
-    }
-  }
-
-  private assertPlayersNotInAnotherRunningGame(roomCode: string, players: Player[]): void {
-    const walletIds = new Set(players.map((player) => player.walletId));
-    if (walletIds.size === 0) {
-      return;
-    }
-
-    for (const otherRoom of this.rooms.values()) {
-      if (otherRoom.code === roomCode) {
-        continue;
-      }
-      if (otherRoom.currentGame?.status !== "RUNNING") {
-        continue;
-      }
-
-      for (const otherPlayer of otherRoom.players.values()) {
-        if (!walletIds.has(otherPlayer.walletId)) {
-          continue;
-        }
-        throw new DomainError(
-          "PLAYER_ALREADY_IN_RUNNING_GAME",
-          `Spiller ${otherPlayer.name} deltar allerede i et annet aktivt spill (rom ${otherRoom.code}).`
-        );
-      }
-    }
-  }
-
-  private assertPlayersNotBlockedByRestriction(players: Player[], nowMs: number): void {
-    for (const player of players) {
-      this.assertWalletAllowedForGameplay(player.walletId, nowMs);
-    }
-  }
-
   private assertWalletNotInRunningGame(walletId: string, exceptRoomCode?: string): void {
     const normalizedWalletId = walletId.trim();
     if (!normalizedWalletId) {
@@ -2753,11 +2648,6 @@ export class BingoEngine {
     return eligible;
   }
 
-  private isPlayerOnRequiredPause(player: Player, nowMs: number): boolean {
-    const snapshot = this.compliance.getPlayerCompliance(player.walletId);
-    return snapshot.pause.isOnPause;
-  }
-
   private isPlayerBlockedByRestriction(player: Player, nowMs: number): boolean {
     try {
       this.compliance.assertWalletAllowedForGameplay(player.walletId, nowMs);
@@ -2775,48 +2665,6 @@ export class BingoEngine {
       }
     }
     return false;
-  }
-
-  private assertPlayersNotOnRequiredPause(players: Player[], nowMs: number): void {
-    const pausedPlayer = players.find((player) => this.isPlayerOnRequiredPause(player, nowMs));
-    if (!pausedPlayer) {
-      return;
-    }
-    const snapshot = this.compliance.getPlayerCompliance(pausedPlayer.walletId);
-    const untilMs = snapshot.pause.pauseUntil ?? new Date(nowMs).toISOString();
-    throw new DomainError(
-      "PLAYER_REQUIRED_PAUSE",
-      `Spiller har pålagt pause til ${untilMs}.`
-    );
-  }
-
-  private async assertLossLimitsBeforeBuyIn(
-    players: Player[],
-    entryFee: number,
-    nowMs: number,
-    hallId: string
-  ): Promise<void> {
-    if (entryFee <= 0) {
-      return;
-    }
-
-    for (const player of players) {
-      const limits = this.compliance.getEffectiveLossLimits(player.walletId, hallId);
-      const netLoss = this.compliance.calculateNetLoss(player.walletId, nowMs, hallId);
-
-      if (netLoss.daily + entryFee > limits.daily) {
-        throw new DomainError(
-          "DAILY_LOSS_LIMIT_EXCEEDED",
-          `Spiller ${player.name} overstiger daglig tapsgrense (${limits.daily}).`
-        );
-      }
-      if (netLoss.monthly + entryFee > limits.monthly) {
-        throw new DomainError(
-          "MONTHLY_LOSS_LIMIT_EXCEEDED",
-          `Spiller ${player.name} overstiger månedlig tapsgrense (${limits.monthly}).`
-        );
-      }
-    }
   }
 
   // BIN-615 / PR-C2: protected so Game2Engine can finalize play sessions on auto-end.
