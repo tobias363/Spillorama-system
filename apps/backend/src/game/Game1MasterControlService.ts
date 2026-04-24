@@ -61,7 +61,8 @@ export type MasterAuditAction =
   | "stop"
   | "exclude_hall"
   | "include_hall"
-  | "timeout_detected";
+  | "timeout_detected"
+  | "start_game_with_unready_override";
 
 export const MASTER_AUDIT_ACTIONS: readonly MasterAuditAction[] = [
   "start",
@@ -71,6 +72,7 @@ export const MASTER_AUDIT_ACTIONS: readonly MasterAuditAction[] = [
   "exclude_hall",
   "include_hall",
   "timeout_detected",
+  "start_game_with_unready_override",
 ];
 
 export interface MasterActor {
@@ -82,6 +84,23 @@ export interface MasterActor {
 export interface StartGameInput {
   gameId: string;
   confirmExcludedHalls?: string[];
+  /**
+   * Task 1.5: master-override for "agents not ready"-flyt. Hvis noen deltakende
+   * (non-excluded, non-master) haller har `is_ready=false` på start-tidspunktet,
+   * kaster `startGame` en `HALLS_NOT_READY`-DomainError med listen i
+   * `details.unreadyHalls`. Frontend viser popup "Agents not ready yet: …" med
+   * valg [Avbryt] / [Start uansett].
+   *
+   * Hvis master bekrefter override, kaller klienten `/start` på nytt med
+   * samtlige ikke-klare hall-IDer i `confirmUnreadyHalls`. Service ekskluderer
+   * da disse hallene (UPSERT excluded_from_game=true, grunn="unready_override")
+   * og skriver audit-entry `start_game_with_unready_override` med listen +
+   * tidsstempel FØR normal `start`-entry.
+   *
+   * KUN relevant ved initial start (status='purchase_open'|'ready_to_start').
+   * Resume (paused→running) bruker ingen ready-sjekk.
+   */
+  confirmUnreadyHalls?: string[];
   actor: MasterActor;
 }
 
@@ -308,6 +327,24 @@ export class Game1MasterControlService {
 
       const readyRows = await this.loadReadySnapshot(client, input.gameId);
 
+      // Task 1.5: compute orange (unready) halls BEFORE status-guard so
+      // `HALLS_NOT_READY` kan returneres med strukturert liste (via
+      // DomainError.details). Orange = not-ready, not-excluded, not master —
+      // master kan ikke være orange (master er alltid klar per definisjon i
+      // state-maskinen; kastes i purchase_open-gren under).
+      const confirmedUnready = new Set(input.confirmUnreadyHalls ?? []);
+      const unreadyHalls = readyRows
+        .filter(
+          (r) =>
+            !r.excluded_from_game &&
+            !r.is_ready &&
+            r.hall_id !== game.master_hall_id
+        )
+        .map((r) => r.hall_id);
+      const uncoveredUnready = unreadyHalls.filter(
+        (h) => !confirmedUnready.has(h)
+      );
+
       if (game.status === "purchase_open") {
         const nonExcluded = readyRows.filter((r) => !r.excluded_from_game);
         if (nonExcluded.length === 0) {
@@ -316,18 +353,101 @@ export class Game1MasterControlService {
             "Ingen deltakende haller er klare."
           );
         }
-        if (!nonExcluded.every((r) => r.is_ready)) {
+
+        // Master-hall er alltid deltaker og må være klar (kan ikke
+        // ekskluderes). Håndteres som blocking feil før unready-override.
+        const masterRow = readyRows.find(
+          (r) => r.hall_id === game.master_hall_id
+        );
+        if (masterRow && !masterRow.is_ready) {
           throw new DomainError(
             "HALLS_NOT_READY",
-            "Ikke alle deltakende haller er klare. Ekskluder manglende haller eller vent."
+            "Master-hallen er ikke klar.",
+            { unreadyHalls: [game.master_hall_id] }
+          );
+        }
+
+        // Task 1.5: tilsvar `confirmExcludedHalls` — hvis orange-listen
+        // ikke er fullstendig dekket av `confirmUnreadyHalls`, kast
+        // HALLS_NOT_READY med listen slik at frontend kan vise popup.
+        if (uncoveredUnready.length > 0) {
+          throw new DomainError(
+            "HALLS_NOT_READY",
+            `Haller er ikke klare: ${uncoveredUnready.join(", ")}.`,
+            { unreadyHalls: uncoveredUnready }
           );
         }
       }
 
-      const excludedHallIds = readyRows
+      // Task 1.5: hvis master har bekreftet override, marker de gjeldende
+      // hallene som excluded_from_game=true (med grunn="unready_override")
+      // FØR start-transisjonen slik at runde-beregning ikke inkluderer
+      // dem. Idempotent: hvis en hall allerede er ekskludert, gjør UPDATE
+      // ingen ting (ON CONFLICT DO UPDATE).
+      const overrideExcluded: string[] = [];
+      if (input.confirmUnreadyHalls && input.confirmUnreadyHalls.length > 0) {
+        for (const hallId of input.confirmUnreadyHalls) {
+          // Bare flytt haller som faktisk var orange (unready) til excluded.
+          // Dersom en hall ikke var i listen (f.eks. pga. race) ignoreres
+          // den stille — override-audit logger samtlige IDer klient sendte.
+          if (!unreadyHalls.includes(hallId)) continue;
+          if (hallId === game.master_hall_id) continue;
+          await client.query(
+            `INSERT INTO ${this.hallReadyTable()}
+               (game_id, hall_id, is_ready, excluded_from_game, excluded_reason)
+             VALUES ($1, $2, false, true, $3)
+             ON CONFLICT (game_id, hall_id) DO UPDATE
+               SET excluded_from_game = true,
+                   excluded_reason    = EXCLUDED.excluded_reason,
+                   updated_at         = now()`,
+            [input.gameId, hallId, "unready_override"]
+          );
+          overrideExcluded.push(hallId);
+        }
+
+        // Skriv override-audit FØR normal start-audit slik at det er
+        // sporbart i hvilken rekkefølge hendelsene skjedde. `unreadyHalls`
+        // = IDer klient sendte; `applied` = faktisk ekskluderte.
+        const overrideAuditId = await this.writeAudit(client, {
+          gameId: input.gameId,
+          action: "start_game_with_unready_override",
+          actor: input.actor,
+          groupHallId: game.group_hall_id,
+          snapshot: this.snapshotReadyRows(readyRows),
+          metadata: {
+            confirmUnreadyHalls: input.confirmUnreadyHalls,
+            appliedExcludedHalls: overrideExcluded,
+            overriddenAt: new Date().toISOString(),
+          },
+        });
+        log.info(
+          {
+            gameId: input.gameId,
+            actorId: input.actor.userId,
+            auditId: overrideAuditId,
+            overrideExcluded,
+          },
+          "master.start.unready_override"
+        );
+      }
+
+      // Re-compute excluded hall-IDs ETTER override-applikering slik at
+      // `confirmExcludedHalls`-sjekken inkluderer nyekskluderte. Unngå
+      // ekstra DB-round-trip hvis ingen override ble kjørt: da er pre-
+      // snapshot (readyRows) fortsatt gyldig.
+      const postRows =
+        overrideExcluded.length > 0
+          ? await this.loadReadySnapshot(client, input.gameId)
+          : readyRows;
+      const excludedHallIds = postRows
         .filter((r) => r.excluded_from_game)
         .map((r) => r.hall_id);
-      const confirmed = new Set(input.confirmExcludedHalls ?? []);
+      const confirmed = new Set([
+        ...(input.confirmExcludedHalls ?? []),
+        // Task 1.5: override-ekskluderte haller er implisitt bekreftet via
+        // `confirmUnreadyHalls`; kaller trenger ikke sende dem dobbelt.
+        ...overrideExcluded,
+      ]);
       const unconfirmed = excludedHallIds.filter((h) => !confirmed.has(h));
       if (unconfirmed.length > 0) {
         throw new DomainError(
@@ -360,7 +480,9 @@ export class Game1MasterControlService {
         snapshot: this.snapshotReadyRows(readyRows),
         metadata: {
           confirmExcludedHalls: input.confirmExcludedHalls ?? [],
+          confirmUnreadyHalls: input.confirmUnreadyHalls ?? [],
           excludedHallIds,
+          overrideExcluded,
         },
       });
 

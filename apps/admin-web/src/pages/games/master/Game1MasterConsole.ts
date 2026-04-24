@@ -346,8 +346,105 @@ async function onStart(container: HTMLElement, detail: Game1GameDetail): Promise
     if (!ok) return;
     confirmExcludedHalls = excludedHallIds;
   }
-  await callAction(container, detail.game.id, async () => {
-    await startGame1(detail.game.id, confirmExcludedHalls);
+
+  // Task 1.5: agents-not-ready popup + override-flyt.
+  // 1) Kall /start uten `confirmUnreadyHalls`.
+  // 2) Hvis backend svarer HALLS_NOT_READY med `details.unreadyHalls`, vis
+  //    popup "Noen haller er ikke klare" med liste + [Avbryt]/[Start uansett].
+  // 3) Ved [Start uansett] re-kall /start med `confirmUnreadyHalls`-listen.
+  try {
+    await startGame1(detail.game.id, { confirmExcludedHalls });
+    Toast.success(t("saved"));
+    await refresh(container, detail.game.id);
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "HALLS_NOT_READY") {
+      const unready = extractUnreadyHalls(err);
+      if (unready.length > 0) {
+        const proceed = await promptNotReadyDialog(detail, unready);
+        if (!proceed) return;
+        await callAction(container, detail.game.id, async () => {
+          await startGame1(detail.game.id, {
+            confirmExcludedHalls,
+            confirmUnreadyHalls: unready,
+          });
+        });
+        return;
+      }
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    Toast.error(msg);
+  }
+}
+
+/**
+ * Task 1.5: hent `unreadyHalls`-listen fra `ApiError.details`. Defensiv —
+ * hvis backend ikke inkluderer details (legacy-respons), returner tom liste
+ * så caller faller tilbake til generisk feil-toast.
+ */
+function extractUnreadyHalls(err: ApiError): string[] {
+  const details = err.details;
+  if (!details) return [];
+  const value = details.unreadyHalls;
+  if (!Array.isArray(value)) return [];
+  return value.filter((v: unknown): v is string => typeof v === "string");
+}
+
+/**
+ * Task 1.5: modal for "Agents not ready yet". Rendrer hall-navn (fra
+ * `detail.halls`) for hver orange-hall-ID. Returnerer `true` kun hvis master
+ * klikker "Start uansett". Backdrop = static slik at ved-siden-klikk ikke
+ * lukker modalen (unngår utilsiktet start).
+ */
+function promptNotReadyDialog(
+  detail: Game1GameDetail,
+  unreadyHallIds: string[]
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const body = document.createElement("div");
+    body.setAttribute("data-marker", "g1-master-not-ready-dialog");
+    const listItems = unreadyHallIds
+      .map((hallId) => {
+        const hall = detail.halls.find((h) => h.hallId === hallId);
+        const label = hall ? hall.hallName || hall.hallId : hallId;
+        return `<li>${escapeHtml(label)}</li>`;
+      })
+      .join("");
+    body.innerHTML = `
+      <p>${escapeHtml(t("game1_master_not_ready_body"))}</p>
+      <ul style="margin-top:12px;" data-testid="g1-master-not-ready-list">
+        ${listItems}
+      </ul>
+      <p class="text-muted small" style="margin-top:12px;">
+        ${escapeHtml(t("game1_master_not_ready_note"))}
+      </p>`;
+    let resolved = false;
+    const finish = (value: boolean): void => {
+      if (resolved) return;
+      resolved = true;
+      resolve(value);
+    };
+    Modal.open({
+      title: t("game1_master_not_ready_title"),
+      content: body,
+      backdrop: "static",
+      keyboard: true,
+      className: "modal-g1-not-ready",
+      buttons: [
+        {
+          label: t("no_cancle"),
+          variant: "default",
+          action: "cancel",
+          onClick: () => finish(false),
+        },
+        {
+          label: t("game1_master_start_anyway"),
+          variant: "danger",
+          action: "confirm",
+          onClick: () => finish(true),
+        },
+      ],
+      onClose: () => finish(false),
+    });
   });
 }
 

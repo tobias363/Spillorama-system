@@ -10,10 +10,25 @@ export interface ApiOptions {
 export class ApiError extends Error {
   code: string;
   status: number;
-  constructor(message: string, code: string, status: number) {
+  /**
+   * Task 1.5: strukturert detalj-nyttelast som backend kan legge på
+   * DomainError — propagerer via `toPublicError(err).details`. Brukes bl.a.
+   * av `HALLS_NOT_READY` til å sende `{ unreadyHalls: string[] }` slik at
+   * frontend kan rendre popup uten ekstra round-trip.
+   */
+  details?: Record<string, unknown>;
+  constructor(
+    message: string,
+    code: string,
+    status: number,
+    details?: Record<string, unknown>
+  ) {
     super(message);
     this.code = code;
     this.status = status;
+    if (details !== undefined) {
+      this.details = details;
+    }
   }
 }
 
@@ -51,17 +66,26 @@ export async function apiRequest<T = unknown>(path: string, options: ApiOptions 
   });
 
   const payload = (await response.json().catch(() => null)) as
-    | { ok: boolean; data?: T; error?: { code: string; message: string } }
+    | {
+        ok: boolean;
+        data?: T;
+        error?: {
+          code: string;
+          message: string;
+          details?: Record<string, unknown>;
+        };
+      }
     | null;
 
   if (!response.ok || !payload || payload.ok === false) {
     const message = payload?.error?.message ?? `HTTP ${response.status}`;
     const code = payload?.error?.code ?? "REQUEST_FAILED";
+    const details = payload?.error?.details;
     if (response.status === 401) {
       clearToken();
       window.dispatchEvent(new CustomEvent("auth:unauthorized"));
     }
-    throw new ApiError(message, code, response.status);
+    throw new ApiError(message, code, response.status, details);
   }
 
   return (payload.data ?? null) as T;

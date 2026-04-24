@@ -191,6 +191,21 @@ export function createAdminGame1MasterRouter(
       const confirmExcludedHalls = Array.isArray(body.confirmExcludedHalls)
         ? body.confirmExcludedHalls.filter((v: unknown): v is string => typeof v === "string")
         : undefined;
+      // Task 1.5: "agents not ready"-override. Klient kaller /start uten flag
+      // først; dersom backend returnerer HALLS_NOT_READY med `unreadyHalls`,
+      // viser frontend popup og re-kaller /start med samtlige orange hall-IDer
+      // i `confirmUnreadyHalls`. Se Game1MasterControlService.startGame
+      // for audit- og exclude-semantikk.
+      const confirmUnreadyHalls = Array.isArray(body.confirmUnreadyHalls)
+        ? body.confirmUnreadyHalls.filter((v: unknown): v is string => typeof v === "string")
+        : undefined;
+      // Task 1.5 (forward-compat mot HS #451): accept `confirmExcludeRedHalls`
+      // for rød-auto-exclude-mønster. Mappes inn som excluded (samme som
+      // confirmExcludedHalls). Hvis #451 lander kan service-laget bruke
+      // `Game1HallReadyService.getHallStatusForGame` for farge-deteksjon.
+      const confirmExcludeRedHalls = Array.isArray(body.confirmExcludeRedHalls)
+        ? body.confirmExcludeRedHalls.filter((v: unknown): v is string => typeof v === "string")
+        : undefined;
 
       const { masterHallId, groupHallId } = await loadMasterHallId(gameId);
       const masterActor = buildActor(actor, masterHallId);
@@ -198,8 +213,14 @@ export function createAdminGame1MasterRouter(
         gameId,
         actor: masterActor,
       };
-      if (confirmExcludedHalls !== undefined) {
-        startInput.confirmExcludedHalls = confirmExcludedHalls;
+      if (confirmExcludedHalls !== undefined || confirmExcludeRedHalls !== undefined) {
+        startInput.confirmExcludedHalls = [
+          ...(confirmExcludedHalls ?? []),
+          ...(confirmExcludeRedHalls ?? []),
+        ];
+      }
+      if (confirmUnreadyHalls !== undefined) {
+        startInput.confirmUnreadyHalls = confirmUnreadyHalls;
       }
       const result = await masterControlService.startGame(startInput);
 

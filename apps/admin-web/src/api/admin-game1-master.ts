@@ -73,13 +73,40 @@ export async function fetchGame1Detail(gameId: string): Promise<Game1GameDetail>
   );
 }
 
+/**
+ * Task 1.5: valgfri override-flagg for `startGame1`. Sendes når master velger
+ * "Start uansett" i "Agents not ready"-popupen.
+ *   - `confirmExcludedHalls`: haller master aktivt ekskluderte før start.
+ *   - `confirmUnreadyHalls`: haller som var orange (ikke-klar) på start-
+ *     tidspunktet og som master bekrefter skal ekskluderes fra runden.
+ *   - `confirmExcludeRedHalls`: haller som er røde (0 spillere) — auto-
+ *     ekskluderes (forward-compat mot HS #451).
+ */
+export interface StartGame1Overrides {
+  confirmExcludedHalls?: string[];
+  confirmUnreadyHalls?: string[];
+  confirmExcludeRedHalls?: string[];
+}
+
 export async function startGame1(
   gameId: string,
-  confirmExcludedHalls?: string[]
+  overrides?: StartGame1Overrides | string[]
 ): Promise<Game1MasterActionResponse> {
   const body: Record<string, unknown> = {};
-  if (confirmExcludedHalls !== undefined) {
-    body.confirmExcludedHalls = confirmExcludedHalls;
+  // Backward-compat: tidligere signatur `startGame1(gameId, confirmExcludedHalls?)`
+  // støttes fortsatt.
+  if (Array.isArray(overrides)) {
+    body.confirmExcludedHalls = overrides;
+  } else if (overrides) {
+    if (overrides.confirmExcludedHalls !== undefined) {
+      body.confirmExcludedHalls = overrides.confirmExcludedHalls;
+    }
+    if (overrides.confirmUnreadyHalls !== undefined) {
+      body.confirmUnreadyHalls = overrides.confirmUnreadyHalls;
+    }
+    if (overrides.confirmExcludeRedHalls !== undefined) {
+      body.confirmExcludeRedHalls = overrides.confirmExcludeRedHalls;
+    }
   }
   return apiRequest<Game1MasterActionResponse>(
     `/api/admin/game1/games/${encodeURIComponent(gameId)}/start`,
