@@ -1,0 +1,12 @@
+# Husky pre-commit hook -- blokker blink-risikable CSS- og CSS-in-JS-monstre.
+#
+# Kjorer lint-staged som:
+#  - stylelint --fix pa CSS-filer med endringer
+#  - lint-no-backdrop-js pa TS-filer med endringer (scanner hele TS-treet)
+#
+# Hvis hook feiler, fiks overtredelsene FOR commit. For nodbypass med
+# begrunnelse: commit med --no-verify og dokumenter hvorfor.
+#
+# Se docs/engineering/CSS_LINTING.md.
+
+npx lint-staged
