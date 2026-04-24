@@ -22,11 +22,46 @@ const CELL_SIZE = 25;
 const CELL_GAP = 2;
 const TOTAL_SIZE = GRID_SIZE * CELL_SIZE + (GRID_SIZE - 1) * CELL_GAP;
 const FILL_BG = "linear-gradient(135deg, #f1c40f, #d35400)";
-const FILL_BORDER = "#ffcc00";
-const FILL_SHADOW = "inset 0 0 4px rgba(255,255,255,0.4), 0 0 4px rgba(255,150,0,0.5)";
-const NORMAL_BG = "rgba(100,20,20,0.4)";
-const NORMAL_BORDER = "1px solid rgba(255,80,80,0.2)";
 const CENTER_INDEX = 12; // row 2, col 2 — free space
+
+/**
+ * BIN-blink-permanent-fix 2026-04-24: all cell-styling via CSS-klasser.
+ * Tidligere hver cycle (1/sek) gjorde `cell.style.background/boxShadow = ...`
+ * direkte + `transition: background 0.2s` trigget transitionstart-events
+ * (20+ per sekund). Nå styres alt via `.mini-cell` / `.mini-cell.hit` så
+ * class-toggle gir én attr:class-mutasjon i stedet for fem style-writes.
+ */
+function ensureMiniGridStyles(): void {
+  if (typeof document === "undefined") return;
+  if (document.getElementById("mini-grid-cell-styles")) return;
+  const s = document.createElement("style");
+  s.id = "mini-grid-cell-styles";
+  s.textContent = `
+@keyframes pattern-pulse {
+  from { transform: scale(1); }
+  to   { transform: scale(1.06); }
+}
+.mini-cell {
+  width: ${CELL_SIZE}px;
+  height: ${CELL_SIZE}px;
+  border-radius: 2px;
+  background: rgba(100,20,20,0.4);
+  border: 1px solid rgba(255,80,80,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* INGEN CSS-transition på background/box-shadow — ville gitt
+   * transitionstart-events for hver cell-swap. */
+}
+.mini-cell.hit {
+  background: ${FILL_BG};
+  border-color: #ffcc00;
+  box-shadow: inset 0 0 4px rgba(255,255,255,0.4), 0 0 4px rgba(255,150,0,0.5);
+  animation: pattern-pulse 0.5s ease-in-out infinite alternate;
+}
+`;
+  document.head.appendChild(s);
+}
 
 /** Axis-tag for en linje i combinasjonen. */
 type Line = { axis: "row" | "col"; index: number };
@@ -43,6 +78,7 @@ export class PatternMiniGrid {
   private currentHitIndices = new Set<number>();
 
   constructor() {
+    ensureMiniGridStyles();
     this.root = document.createElement("div");
     Object.assign(this.root.style, {
       display: "grid",
@@ -54,17 +90,7 @@ export class PatternMiniGrid {
 
     for (let i = 0; i < CELL_COUNT; i++) {
       const cell = document.createElement("div");
-      Object.assign(cell.style, {
-        width: `${CELL_SIZE}px`,
-        height: `${CELL_SIZE}px`,
-        borderRadius: "2px",
-        background: NORMAL_BG,
-        border: NORMAL_BORDER,
-        transition: "background 0.2s ease, box-shadow 0.2s ease",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      });
+      cell.className = "mini-cell";
       if (i === CENTER_INDEX) {
         // Free-space marker (mockup `Asset 4.png` — roulette/clover icon).
         const icon = document.createElement("img");
@@ -109,7 +135,6 @@ export class PatternMiniGrid {
       if (i === CENTER_INDEX) continue;
       allHits.add(i);
       this.applyCellState(this.cells[i], true);
-      this.pulseCell(this.cells[i]);
     }
     this.currentHitIndices = allHits;
   }
@@ -119,20 +144,16 @@ export class PatternMiniGrid {
     for (let i = 0; i < this.cells.length; i++) {
       const filled = i < mask.length && mask[i] === 1 && i !== CENTER_INDEX;
       this.applyCellState(this.cells[i], filled);
-      if (filled) this.pulseCell(this.cells[i]);
     }
   }
 
   private applyCellState(cell: HTMLDivElement, hit: boolean): void {
-    if (hit) {
-      cell.style.background = FILL_BG;
-      cell.style.borderColor = FILL_BORDER;
-      cell.style.boxShadow = FILL_SHADOW;
-    } else {
-      cell.style.background = NORMAL_BG;
-      cell.style.borderColor = "rgba(255,80,80,0.2)";
-      cell.style.boxShadow = "";
-    }
+    // BIN-blink-permanent-fix: én class-toggle i stedet for 3 style-writes.
+    // `pattern-pulse`-animasjonen ligger i `.mini-cell.hit`-selector så
+    // animationstart fyrer kun når klassen faktisk legges til, ikke hver
+    // sek. Diff-gate (`highlightLines`) sikrer at dette kun skjer på
+    // celler som faktisk bytter state.
+    cell.classList.toggle("hit", hit);
   }
 
   /** Cycler alle kombinasjoner for gitt fase (1-4), 1 sek per frame. */
@@ -198,33 +219,26 @@ export class PatternMiniGrid {
       }
     }
 
-    // hit → normal (celler som var hit forrige step men ikke nå)
+    // hit → normal (celler som var hit forrige step men ikke nå).
+    // BIN-blink-permanent-fix: én classList.toggle per celle, ikke
+    // tre separate style-writes + animation-reset.
     for (const idx of this.currentHitIndices) {
       if (newHits.has(idx)) continue;
       this.applyCellState(this.cells[idx], false);
-      this.cells[idx].style.animation = "";
-      this.cells[idx].style.transform = "scale(1)";
     }
     // normal → hit (nye treff)
     for (const idx of newHits) {
       if (this.currentHitIndices.has(idx)) continue;
       this.applyCellState(this.cells[idx], true);
-      this.pulseCell(this.cells[idx]);
     }
 
     this.currentHitIndices = newHits;
-  }
-
-  private pulseCell(cell: HTMLDivElement): void {
-    cell.style.animation = "pattern-pulse 0.5s ease-in-out infinite alternate";
   }
 
   private clearAll(): void {
     // Diff mot nåværende hit-set — bare celler som faktisk var hit trenger reset.
     for (const idx of this.currentHitIndices) {
       this.applyCellState(this.cells[idx], false);
-      this.cells[idx].style.transform = "scale(1)";
-      this.cells[idx].style.animation = "";
     }
     this.currentHitIndices.clear();
   }
@@ -253,10 +267,6 @@ function colCellIndices(col: number): number[] {
   return [0, 1, 2, 3, 4].map((r) => r * GRID_SIZE + col);
 }
 
-// Inject CSS keyframe én gang per dokument.
-if (typeof document !== "undefined" && !document.getElementById("pattern-pulse-style")) {
-  const style = document.createElement("style");
-  style.id = "pattern-pulse-style";
-  style.textContent = `@keyframes pattern-pulse { from { transform: scale(1); } to { transform: scale(1.06); } }`;
-  document.head.appendChild(style);
-}
+// CSS keyframe + .mini-cell / .mini-cell.hit styles defined in
+// `ensureMiniGridStyles` (#mini-grid-cell-styles) — injected on first
+// constructor call (only once per document).

@@ -428,7 +428,7 @@ describe("CenterTopPanel — fase-progresjon gjennom alle 5 faser", () => {
     const rad1 = findPill("Rad 1")!;
     const rad2 = findPill("Rad 2")!;
     expect(rad1.classList.contains("pattern-won-flash")).toBe(true);
-    expect(rad1.style.textDecoration).toBe("line-through");
+    expect(rad1.classList.contains("completed")).toBe(true);
     expect(rad2.classList.contains("active")).toBe(true);
   });
 
@@ -447,7 +447,7 @@ describe("CenterTopPanel — fase-progresjon gjennom alle 5 faser", () => {
     expect(findPill("Rad 2")!.classList.contains("pattern-won-flash")).toBe(true);
     expect(findPill("Rad 3")!.classList.contains("active")).toBe(true);
     // Rad 1 skal ha line-through men IKKE lenger flash (engangsanimasjon).
-    expect(findPill("Rad 1")!.style.textDecoration).toBe("line-through");
+    expect(findPill("Rad 1")!.classList.contains("completed")).toBe(true);
 
     // Rad 3 vunnet → Rad 4 aktiv
     panel.updatePatterns(PATTERNS_5, resultsWithWonIdx(0, 1, 2), 1000);
@@ -464,7 +464,7 @@ describe("CenterTopPanel — fase-progresjon gjennom alle 5 faser", () => {
     expect(findPill("Full Hus")!.classList.contains("pattern-won-flash")).toBe(true);
     // Alle pills har line-through
     for (const name of ["Rad 1", "Rad 2", "Rad 3", "Rad 4", "Full Hus"]) {
-      expect(findPill(name)!.style.textDecoration).toBe("line-through");
+      expect(findPill(name)!.classList.contains("completed")).toBe(true);
     }
   });
 
@@ -483,20 +483,24 @@ describe("CenterTopPanel — fase-progresjon gjennom alle 5 faser", () => {
     expect(findPill("Rad 2")!.classList.contains("active")).toBe(true);
   });
 
-  it("vunnet pattern får flash kun én gang (ikke ved hver state-update etterpå)", () => {
+  it("vunnet pattern får flash kun én gang (ikke ved hver state-update etterpå)", async () => {
     panel.updatePatterns(PATTERNS_5, resultsWithWonIdx(), 1000);
     panel.updatePatterns(PATTERNS_5, resultsWithWonIdx(0), 1000);
     const rad1 = findPill("Rad 1")!;
     expect(rad1.classList.contains("pattern-won-flash")).toBe(true);
 
-    // Simuler at vi får samme state igjen — flash skal IKKE re-trigge
-    // (signatur er ulik p.g.a. rebuilt pills, men prevWonIds sjekker
-    // transisjon, så Rad 1 som allerede var vunnet forrige render skal
-    // ikke flashe på nytt). Vi simulerer ved å gjøre en mindre endring
-    // (f.eks. prizePool endring) som tvinger rebuild uten fase-progresjon.
+    // Vent på at flash-klassen fjernes automatisk (setTimeout 900ms i
+    // animateWinFlash). Samme pill-instans bevares — ikke destroy/recreate
+    // som i gammel implementasjon.
+    await new Promise((r) => setTimeout(r, 950));
+    expect(rad1.classList.contains("pattern-won-flash")).toBe(false);
+
+    // Nå: en ny updatePatterns-call der Rad 1 fortsatt er vunnet skal
+    // IKKE re-trigge flash (prevWonIds tracker at den allerede er vunnet).
     panel.updatePatterns(PATTERNS_5, resultsWithWonIdx(0), 1001);
-    // Pill-en er rebygd etter signatur-endring (ny DOM-referanse).
     const rad1Again = findPill("Rad 1")!;
+    // Samme DOM-instans (ingen rebuild).
+    expect(rad1Again).toBe(rad1);
     expect(rad1Again.classList.contains("pattern-won-flash")).toBe(false);
   });
 });
@@ -516,14 +520,13 @@ describe("PatternMiniGrid — design per fase", () => {
     expect(cells.length).toBe(25);
     let hitCount = 0;
     for (let i = 0; i < cells.length; i++) {
-      const bg = cells[i].style.background;
-      // Fill-bg er en linear-gradient; normal-bg er rgba(100,20,20,...)
-      if (bg.includes("linear-gradient")) hitCount++;
+      // BIN-blink-permanent-fix: fylt-state er nå via `.hit`-CSS-klasse.
+      if (cells[i].classList.contains("hit")) hitCount++;
     }
     // Skal ha 24 hit-celler (alle minus center)
     expect(hitCount).toBe(24);
     // Center-cellen (idx 12) skal IKKE være hit
-    expect(cells[12].style.background.includes("linear-gradient")).toBe(false);
+    expect(cells[12].classList.contains("hit")).toBe(false);
     grid.destroy();
   });
 
@@ -533,7 +536,7 @@ describe("PatternMiniGrid — design per fase", () => {
       const grid = new PatternMiniGrid();
       grid.setDesign(design);
       const cells = Array.from(grid.root.children) as HTMLDivElement[];
-      const hitCount = cells.filter((c) => c.style.background.includes("linear-gradient")).length;
+      const hitCount = cells.filter((c) => c.classList.contains("hit")).length;
       // Design 1 = 1 rad ELLER 1 kol (5 celler), men center kan være inkludert
       // → 4 eller 5 synlige treff. Minst 4 celler skal være hit.
       expect(hitCount).toBeGreaterThanOrEqual(4);
@@ -549,5 +552,129 @@ describe("PatternMiniGrid — design per fase", () => {
     const hitCount = cells.filter((c) => c.style.background.includes("linear-gradient")).length;
     expect(hitCount).toBe(0);
     grid.destroy();
+  });
+});
+
+/**
+ * BIN-blink-permanent-fix 2026-04-24: regresjons-test som måler antall
+ * DOM-mutasjoner ved repeterte updatePatterns-kall med samme/lignende
+ * state. Før diff-rendering: ~75 mutasjoner per call. Etter: 0.
+ *
+ * Dette er den kritiske asserten som skal fange regresjoner fra nå av.
+ */
+describe("CenterTopPanel — blink prevention (DOM-mutasjons-kontrakt)", () => {
+  let panel: CenterTopPanel;
+  let container: HTMLElement;
+  let overlay: HtmlOverlayManager;
+
+  beforeEach(() => {
+    ({ panel, container, overlay } = makePanel());
+  });
+  afterEach(() => {
+    gsap.globalTimeline.clear();
+    panel.destroy();
+    overlay.destroy();
+    container.remove();
+  });
+
+  /** Teller MutationObserver-events i målt vindu (style + class + text + childList). */
+  async function observeMutations(root: HTMLElement, work: () => void): Promise<number> {
+    return new Promise<number>((resolve) => {
+      let count = 0;
+      const obs = new MutationObserver((muts) => {
+        count += muts.length;
+      });
+      obs.observe(root, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ["style", "class"],
+      });
+      work();
+      // Gi MutationObserver én mikrotask for å batche.
+      setTimeout(() => {
+        obs.disconnect();
+        resolve(count);
+      }, 0);
+    });
+  }
+
+  it("repeterte updatePatterns med identisk state → 0 mutasjoner i pill-listen", async () => {
+    // First seed — tillatt å mutere (full rebuild + mini-grid gsap-tween).
+    panel.updatePatterns(PATTERNS, results(50), 100);
+    // La mikrotasks og eventuelle gsap-initial-sets settle før måling.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const prizeList = panel.rootEl.querySelector("div > div:nth-child(2) > div:nth-child(2)") as HTMLElement
+      ?? panel.rootEl.querySelectorAll(".prize-pill")[0].parentElement!;
+    const pillBefore = prizeList.querySelectorAll(".prize-pill");
+    // Nå må repeterte kall med identisk state IKKE endre pill-DOM.
+    const count = await observeMutations(prizeList, () => {
+      panel.updatePatterns(PATTERNS, results(50), 100);
+      panel.updatePatterns(PATTERNS, results(50), 100);
+      panel.updatePatterns(PATTERNS, results(50), 100);
+    });
+    const pillAfter = prizeList.querySelectorAll(".prize-pill");
+
+    // Nøkkelen: samme DOM-instanser som før (ingen destroy/recreate).
+    expect(pillAfter.length).toBe(pillBefore.length);
+    for (let i = 0; i < pillBefore.length; i++) {
+      expect(pillAfter[i]).toBe(pillBefore[i]);
+    }
+    // Identisk state gir 0 mutasjoner (diff-rendering matcher cache).
+    // Tidligere kode: ~75 mutasjoner per call × 3 = 225+.
+    expect(count).toBe(0);
+  });
+
+  it("prize-pool-tweak uten struktur-endring → ingen full rebuild", async () => {
+    panel.updatePatterns(PATTERNS, results(50), 100);
+    // prizePool endres men patterns har alle winningType ikke satt → prize
+    // beregnet fra prizePercent × prizePool. prize-endring trigger flashAmount
+    // (spenner 1 tween), men IKKE innerHTML-rebuild.
+    const beforeHtml = panel.rootEl.innerHTML;
+    panel.updatePatterns(PATTERNS, results(50), 200);
+    // DOM-tree-shape skal være uendret — bare label.textContent endret.
+    const afterHtml = panel.rootEl.innerHTML;
+    // Pillene har samme struktur (5 divs × span), bare teksten er annerledes.
+    expect(afterHtml.split('class="prize-pill').length).toBe(
+      beforeHtml.split('class="prize-pill').length,
+    );
+  });
+
+  it("prize-endring oppdaterer KUN label.textContent, ikke pill-struktur", async () => {
+    panel.updatePatterns(PATTERNS, results(50), 100);
+    await new Promise((r) => setTimeout(r, 10));
+    const pillBefore = panel.rootEl.querySelectorAll(".prize-pill");
+    panel.updatePatterns(PATTERNS, results(60), 100); // prize endret
+    const pillAfter = panel.rootEl.querySelectorAll(".prize-pill");
+    expect(pillAfter.length).toBe(pillBefore.length);
+    // Samme DOM-instanser (ikke destroy/recreate).
+    for (let i = 0; i < pillBefore.length; i++) {
+      expect(pillAfter[i]).toBe(pillBefore[i]);
+    }
+    // Label skal ha ny tekst.
+    expect(pillAfter[0].querySelector("span")?.textContent).toBe("Rad 1 - 60 kr");
+  });
+
+  it("won-state trigger class-toggle, ikke innerHTML-rebuild", async () => {
+    panel.updatePatterns(PATTERNS, results(50), 100);
+    const pillBefore = panel.rootEl.querySelectorAll(".prize-pill");
+    panel.updatePatterns(PATTERNS, results(100, true), 100); // row1 won
+    const pillAfter = panel.rootEl.querySelectorAll(".prize-pill");
+    // Samme DOM-instanser.
+    expect(pillAfter[0]).toBe(pillBefore[0]);
+    expect(pillAfter[0].classList.contains("completed")).toBe(true);
+  });
+
+  it("struktur-endring (ny pattern lagt til) → full rebuild aksepteres", async () => {
+    panel.updatePatterns(PATTERNS, results(50), 100);
+    const extended: PatternDefinition[] = [
+      ...PATTERNS,
+      { id: "row3", name: "Row 3", claimType: "LINE", design: 1, prizePercent: 20, order: 3 },
+    ];
+    panel.updatePatterns(extended, results(50), 100);
+    const pills = panel.rootEl.querySelectorAll(".prize-pill");
+    expect(pills.length).toBe(3);
   });
 });

@@ -30,11 +30,18 @@ function asInternals(grid: PatternMiniGrid): MiniGridInternals {
 }
 
 function filledCellIndices(cells: HTMLDivElement[]): number[] {
+  // BIN-blink-permanent-fix: styling er nå via `.hit`-CSS-klasse (ikke inline
+  // style.background), så vi sjekker classList i stedet.
   const out: number[] = [];
   for (let i = 0; i < cells.length; i++) {
-    if (cells[i].style.background.includes(FILL_BG_KEYWORD)) out.push(i);
+    if (cells[i].classList.contains("hit")) out.push(i);
   }
   return out;
+}
+
+/** Test-helper: forventet "fylt"-sjekk via classList. */
+function isCellFilled(cell: HTMLDivElement): boolean {
+  return cell.classList.contains("hit");
 }
 
 function colCellIndices(col: number): number[] {
@@ -134,7 +141,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN adjacent horisontale rader", (
       { axis: "row", index: 1 },
     ]);
     expect(filledCellIndices(grid.cells).length).toBe(10);
-    expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
+    expect(isCellFilled(grid.cells[CENTER_INDEX])).toBe(false);
 
     // Rad 1 + rad 2 — rad 2 krysser center
     grid.highlightLines([
@@ -142,7 +149,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN adjacent horisontale rader", (
       { axis: "row", index: 2 },
     ]);
     expect(filledCellIndices(grid.cells).length).toBe(9);
-    expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
+    expect(isCellFilled(grid.cells[CENTER_INDEX])).toBe(false);
     grid.destroy();
   });
 
@@ -154,7 +161,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN adjacent horisontale rader", (
       const usedRows = new Set(combo.map((l) => l.index));
       const missingRow = [0, 1, 2, 3, 4].find((r) => !usedRows.has(r))!;
       for (const idx of rowCellIndices(missingRow)) {
-        expect(grid.cells[idx].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
+        expect(isCellFilled(grid.cells[idx])).toBe(false);
       }
     }
     grid.destroy();
@@ -165,7 +172,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN adjacent horisontale rader", (
     for (const phase of [1, 2, 3, 4]) {
       for (const combo of grid.getPhaseCombinations(phase)) {
         grid.highlightLines(combo);
-        expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
+        expect(isCellFilled(grid.cells[CENTER_INDEX])).toBe(false);
       }
     }
     grid.destroy();
