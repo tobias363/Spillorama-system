@@ -44,6 +44,7 @@ import { parseBingoSettingsPatch, normalizeBingoSchedulerSettings } from "./util
 import { getPrimaryRoomForHall, findPlayerInRoomByWallet, buildRoomUpdatePayload as buildRoomUpdatePayloadHelper, buildLeaderboard as buildLeaderboardHelper, type RoomUpdatePayload } from "./util/roomHelpers.js";
 import { RoomStateManager } from "./util/roomState.js";
 import { toDrawSchedulerSettings, createSchedulerCallbacks, createDailyReportScheduler, type PendingBingoSettingsUpdate } from "./util/schedulerSetup.js";
+import { WalletReservationExpiryService } from "./wallet/WalletReservationExpiryService.js";
 import { loadBingoRuntimeConfig } from "./util/envConfig.js";
 import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
@@ -922,6 +923,15 @@ const schedulerCallbacks = createSchedulerCallbacks({
   setPendingBingoSettingsUpdate: (u) => { pendingBingoSettingsUpdate = u; },
   getBingoSettingsEffectiveFromMs: () => bingoSettingsEffectiveFromMs,
   setBingoSettingsEffectiveFromMs: (ms) => { bingoSettingsEffectiveFromMs = ms; },
+  // BIN-694 (forrige fix): scheduler trenger variantConfig for fase-progresjon.
+  getVariantConfig: (code) => roomState.getVariantConfig(code),
+  // BIN-693 Option B: pass reservation-mapping til startGame så commit
+  // kjøres mot wallet-reservation i stedet for fresh transfer.
+  getReservationIdsByPlayer: (code) => roomState.getAllReservationIds(code),
+  clearReservationIdsForRoom: (code) => {
+    const ids = roomState.reservationIdByPlayerByRoom.get(code);
+    if (ids) ids.clear();
+  },
 });
 
 drawScheduler = new DrawScheduler({
@@ -936,6 +946,19 @@ drawScheduler = new DrawScheduler({
 drawScheduler.start();
 
 const dailyReportScheduler = createDailyReportScheduler({ engine, enabled: dailyReportJobEnabled, intervalMs: dailyReportJobIntervalMs });
+
+// BIN-693 Option B: Wallet-reservasjons-expiry-tick.
+const walletReservationExpiryTickMs = Math.max(
+  60_000,
+  Number(process.env.WALLET_RESERVATION_EXPIRY_TICK_MS ?? 300_000),
+);
+const walletReservationExpiryService = new WalletReservationExpiryService({
+  walletAdapter,
+  tickIntervalMs: walletReservationExpiryTickMs,
+  onTick: (count) => {
+    if (count > 0) console.log(`[wallet-reservation-expiry] expired ${count} stale reservations`);
+  },
+});
 
 // ── BIN-582: Legacy-cron ports (Swedbank sync, BankID expiry, RG cleanup) ────
 
@@ -2127,6 +2150,20 @@ const registerGameEvents = createGameEventHandlers({
   chatMessageStore,
   // BIN-587 B4b follow-up: dep for socket-event `voucher:redeem`.
   voucherRedemptionService,
+  // BIN-693 Option B: wallet-reservasjon-wiring.
+  walletAdapter,
+  getWalletIdForPlayer: (roomCode, playerId) => {
+    try {
+      const snap = engine.getRoomSnapshot(roomCode);
+      const player = snap.players.find((p) => p.id === playerId);
+      return player?.walletId ?? null;
+    } catch {
+      return null;
+    }
+  },
+  getReservationId: (code, pid) => roomState.getReservationId(code, pid),
+  setReservationId: (code, pid, rid) => roomState.setReservationId(code, pid, rid),
+  clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.
@@ -2262,6 +2299,7 @@ const PORT = Number(process.env.PORT ?? 4000);
 
   dailyReportScheduler.start();
   jobScheduler.start();
+  walletReservationExpiryService.start();
 
   // BIN-170: Load rooms from Redis on startup (if Redis provider)
   if (roomStateProvider === "redis") {

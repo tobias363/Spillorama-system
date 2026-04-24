@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type {
+  CommitReservationOptions,
   CreateWalletAccountInput,
   CreditOptions,
+  ReserveOptions,
   TransactionOptions,
   TransferOptions,
   WalletAccount,
   WalletAccountSide,
   WalletAdapter,
   WalletBalance,
+  WalletReservation,
   WalletTransaction,
   WalletTransactionType,
   WalletTransactionSplit,
@@ -27,6 +30,12 @@ export class InMemoryWalletAdapter implements WalletAdapter {
   private readonly accounts = new Map<string, InternalAccount>();
 
   private readonly ledger: WalletTransaction[] = [];
+
+  /** BIN-693: aktive + historiske reservasjoner. Key = reservation.id. */
+  private readonly reservations = new Map<string, WalletReservation>();
+
+  /** BIN-693: idempotencyKey → reservation.id. Lookup for reconnect/retry. */
+  private readonly reservationByIdempotencyKey = new Map<string, string>();
 
   constructor(private readonly defaultInitialBalance = 1000) {}
 
@@ -264,6 +273,208 @@ export class InMemoryWalletAdapter implements WalletAdapter {
       .slice(-limit)
       .reverse()
       .map((tx) => ({ ...tx }));
+  }
+
+  // ── BIN-693 Option B: Wallet-reservasjon ──────────────────────────────────
+
+  async getAvailableBalance(accountId: string): Promise<number> {
+    const normalized = this.assertAccountId(accountId);
+    const account = await this.ensureAccountInternal(normalized);
+    const reserved = this.sumActiveReservations(normalized);
+    return Math.max(0, account.depositBalance + account.winningsBalance - reserved);
+  }
+
+  async reserve(
+    accountId: string,
+    amount: number,
+    options: ReserveOptions,
+  ): Promise<WalletReservation> {
+    this.assertPositiveAmount(amount);
+    const normalized = this.assertAccountId(accountId);
+    const account = await this.ensureAccountInternal(normalized);
+
+    // Idempotens: samme key + samme beløp → eksisterende aktiv reservasjon.
+    // Annet beløp → IDEMPOTENCY_MISMATCH (caller må cancel først og lage ny).
+    const existingId = this.reservationByIdempotencyKey.get(options.idempotencyKey);
+    if (existingId) {
+      const existing = this.reservations.get(existingId);
+      if (existing && existing.status === "active") {
+        if (existing.amount !== amount) {
+          throw new WalletError(
+            "IDEMPOTENCY_MISMATCH",
+            `Reservasjon med samme key (${options.idempotencyKey}) har beløp ${existing.amount}, ikke ${amount}.`,
+          );
+        }
+        return { ...existing };
+      }
+    }
+
+    const available = account.depositBalance + account.winningsBalance - this.sumActiveReservations(normalized);
+    if (available < amount) {
+      throw new WalletError(
+        "INSUFFICIENT_FUNDS",
+        `Wallet ${normalized} har ikke tilstrekkelig tilgjengelig saldo (${available} < ${amount}).`,
+      );
+    }
+
+    const now = new Date();
+    const expiresAt = options.expiresAt ?? new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+    const reservation: WalletReservation = {
+      id: randomUUID(),
+      walletId: normalized,
+      amount,
+      idempotencyKey: options.idempotencyKey,
+      status: "active",
+      roomCode: options.roomCode,
+      gameSessionId: null,
+      createdAt: now.toISOString(),
+      releasedAt: null,
+      committedAt: null,
+      expiresAt,
+    };
+    this.reservations.set(reservation.id, reservation);
+    this.reservationByIdempotencyKey.set(options.idempotencyKey, reservation.id);
+    return { ...reservation };
+  }
+
+  async increaseReservation(
+    reservationId: string,
+    extraAmount: number,
+  ): Promise<WalletReservation> {
+    this.assertPositiveAmount(extraAmount);
+    const existing = this.reservations.get(reservationId);
+    if (!existing) {
+      throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+    }
+    if (existing.status !== "active") {
+      throw new WalletError(
+        "INVALID_STATE",
+        `Reservasjon ${reservationId} er ${existing.status}, kan ikke økes.`,
+      );
+    }
+    const account = await this.ensureAccountInternal(existing.walletId);
+    const available = account.depositBalance + account.winningsBalance - this.sumActiveReservations(existing.walletId);
+    if (available < extraAmount) {
+      throw new WalletError(
+        "INSUFFICIENT_FUNDS",
+        `Wallet ${existing.walletId} har ikke tilstrekkelig tilgjengelig saldo for økning (${available} < ${extraAmount}).`,
+      );
+    }
+    const updated: WalletReservation = { ...existing, amount: existing.amount + extraAmount };
+    this.reservations.set(reservationId, updated);
+    return { ...updated };
+  }
+
+  async releaseReservation(
+    reservationId: string,
+    amount?: number,
+  ): Promise<WalletReservation> {
+    const existing = this.reservations.get(reservationId);
+    if (!existing) {
+      throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+    }
+    if (existing.status !== "active") {
+      throw new WalletError(
+        "INVALID_STATE",
+        `Reservasjon ${reservationId} er ${existing.status}, kan ikke frigis.`,
+      );
+    }
+
+    if (amount === undefined || amount >= existing.amount) {
+      // Full release.
+      const updated: WalletReservation = {
+        ...existing,
+        status: "released",
+        releasedAt: new Date().toISOString(),
+      };
+      this.reservations.set(reservationId, updated);
+      return { ...updated };
+    }
+
+    this.assertPositiveAmount(amount);
+    // Partial release: reduser beløp, behold status='active'.
+    const updated: WalletReservation = {
+      ...existing,
+      amount: existing.amount - amount,
+    };
+    this.reservations.set(reservationId, updated);
+    return { ...updated };
+  }
+
+  async commitReservation(
+    reservationId: string,
+    toAccountId: string,
+    reason: string,
+    options?: CommitReservationOptions,
+  ): Promise<WalletTransferResult> {
+    const existing = this.reservations.get(reservationId);
+    if (!existing) {
+      throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+    }
+    if (existing.status !== "active") {
+      throw new WalletError(
+        "INVALID_STATE",
+        `Reservasjon ${reservationId} er ${existing.status}, kan ikke committes.`,
+      );
+    }
+
+    // Utfør faktisk transfer via eksisterende transfer-path — da følger
+    // gevinst-først-prioritering + ledger-skriving som før.
+    const transfer = await this.transfer(
+      existing.walletId,
+      toAccountId,
+      existing.amount,
+      reason,
+      options,
+    );
+
+    const updated: WalletReservation = {
+      ...existing,
+      status: "committed",
+      committedAt: new Date().toISOString(),
+      gameSessionId: options?.gameSessionId ?? null,
+    };
+    this.reservations.set(reservationId, updated);
+    return transfer;
+  }
+
+  async listActiveReservations(accountId: string): Promise<WalletReservation[]> {
+    const normalized = this.assertAccountId(accountId);
+    return Array.from(this.reservations.values())
+      .filter((r) => r.walletId === normalized && r.status === "active")
+      .map((r) => ({ ...r }));
+  }
+
+  async listReservationsByRoom(roomCode: string): Promise<WalletReservation[]> {
+    return Array.from(this.reservations.values())
+      .filter((r) => r.roomCode === roomCode)
+      .map((r) => ({ ...r }));
+  }
+
+  async expireStaleReservations(nowMs: number): Promise<number> {
+    const now = new Date(nowMs).toISOString();
+    let expired = 0;
+    for (const [id, r] of this.reservations) {
+      if (r.status === "active" && r.expiresAt < now) {
+        this.reservations.set(id, {
+          ...r,
+          status: "expired",
+          releasedAt: now,
+        });
+        expired++;
+      }
+    }
+    return expired;
+  }
+
+  private sumActiveReservations(walletId: string): number {
+    let total = 0;
+    for (const r of this.reservations.values()) {
+      if (r.walletId === walletId && r.status === "active") {
+        total += r.amount;
+      }
+    }
+    return total;
   }
 
   /** BIN-162: Look up an existing transaction by idempotency key. */

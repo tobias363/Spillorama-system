@@ -3378,7 +3378,12 @@ export class PlatformService {
   }
 
   private async withBalance(user: AppUser): Promise<PublicAppUser> {
-    const balance = await this.walletAdapter.getBalance(user.walletId);
+    // BIN-693 Option B: returner available_balance (total − active reservations)
+    // så klient-visning matcher "det som er tilgjengelig å bruke". Fallback til
+    // getBalance for adaptere som ikke har implementert reservation-flyten.
+    const balance = this.walletAdapter.getAvailableBalance
+      ? await this.walletAdapter.getAvailableBalance(user.walletId)
+      : await this.walletAdapter.getBalance(user.walletId);
     return {
       ...user,
       balance
