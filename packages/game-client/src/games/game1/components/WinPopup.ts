@@ -15,8 +15,8 @@
  */
 
 const LUCKY_CLOVER_URL = "/web/games/assets/game1/design/lucky-clover.png";
-/** Auto-close delay for fase 1-4 WinPopup (regel-endring 2026-04-24 Tobias). */
-const AUTO_CLOSE_DELAY_MS = 3000;
+/** Auto-close delay for fase 1-4 WinPopup (regel-endring 2026-04-24 rev 3 Tobias: 3s→4s). */
+const AUTO_CLOSE_DELAY_MS = 4000;
 
 function ensureWinPopupStyles(): void {
   if (typeof document === "undefined") return;
@@ -253,8 +253,8 @@ export class WinPopup {
       });
     });
 
-    // Auto-close etter 3s (regel-endring 2026-04-24 Tobias). Lukk-knappen
-    // overstyrer ved manuelt klikk.
+    // Auto-close etter 4s (regel-endring 2026-04-24 rev 3 Tobias). Lukk-
+    // knappen overstyrer ved manuelt klikk.
     this.autoCloseTimer = setTimeout(() => {
       this.hide();
       opts.onClose?.();

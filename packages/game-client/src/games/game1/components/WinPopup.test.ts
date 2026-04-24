@@ -90,12 +90,12 @@ describe("WinPopup", () => {
     expect(parent.textContent).not.toContain("1 personer");
   });
 
-  it("auto-close etter 3s (regel-endring 2026-04-24)", () => {
+  it("auto-close etter 4s (regel-endring 2026-04-24 rev 3)", () => {
     vi.useFakeTimers();
     let closed = false;
     popup.show({ rows: 1, amount: 100, onClose: () => { closed = true; } });
     expect(parent.children.length).toBeGreaterThan(0);
-    vi.advanceTimersByTime(2999);
+    vi.advanceTimersByTime(3999);
     expect(parent.children.length).toBeGreaterThan(0);
     expect(closed).toBe(false);
     vi.advanceTimersByTime(1);

@@ -99,12 +99,14 @@ describe("WinScreenV2", () => {
     expect(parent.textContent).toContain("BINGO! DU VANT");
   });
 
-  it("auto-close etter 5s (regel-endring 2026-04-24 rev 2)", () => {
+  it("auto-close 5s etter animasjonen er ferdig (regel-endring 2026-04-24 rev 3)", () => {
+    // Total delay = FOSS_DURATION_MS (3600) + COUNT_UP_DURATION_MS (2200)
+    //               + POST_ANIMATION_DWELL_MS (5000) = 10800ms.
     vi.useFakeTimers();
     let dismissed = false;
     screen.show({ amount: 100, onDismiss: () => { dismissed = true; } });
     expect(parent.children.length).toBeGreaterThan(0);
-    vi.advanceTimersByTime(4999);
+    vi.advanceTimersByTime(10799);
     expect(parent.children.length).toBeGreaterThan(0);
     expect(dismissed).toBe(false);
     vi.advanceTimersByTime(1);
@@ -122,7 +124,7 @@ describe("WinScreenV2", () => {
     )!;
     backBtn.click();
     expect(dismissCount).toBe(1);
-    vi.advanceTimersByTime(6000);
+    vi.advanceTimersByTime(12000);
     expect(dismissCount).toBe(1);
     vi.useRealTimers();
   });
