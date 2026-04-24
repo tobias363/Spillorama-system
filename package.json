@@ -35,6 +35,11 @@
     "perf:collect": "npm --prefix scripts/performance-budget run collect",
     "perf:compare": "npm --prefix scripts/performance-budget run compare",
     "perf:baseline": "npm --prefix scripts/performance-budget run baseline",
+    "pilot-hw:validate": "tsx scripts/pilot-hardware/validate-profile.ts",
+    "perf:collect:pilot-hw": "tsx scripts/pilot-hardware/collect-metrics-pilot-hw.ts",
+    "perf:compare:pilot-hw": "tsx scripts/pilot-hardware/compare-pilot-hw.ts",
+    "perf:check:pilot-hw": "npm run perf:collect:pilot-hw && npm run perf:compare:pilot-hw",
+    "test:visual:pilot-hw": "npm -w @spillorama/game-client exec playwright test --project=chromium-pilot-hw",
     "prepare": "husky || true && node scripts/setup-husky.mjs || true"
   },
   "lint-staged": {

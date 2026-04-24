@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pilot Hardware Baseline",
+  "type": "object",
+  "required": ["profile", "profileVersion", "scenarios"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "profile": { "type": "string" },
+    "profileVersion": { "type": "string" },
+    "generatedAt": {
+      "type": ["string", "null"],
+      "description": "ISO-8601 timestamp når baseline sist ble regenerert. null = ikke kalibrert mot faktisk måling ennå."
+    },
+    "description": { "type": "string" },
+    "scenarios": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "backdropFilterCount",
+          "paintCountPer2s",
+          "rafCallsPerSec",
+          "fpsMin"
+        ],
+        "properties": {
+          "backdropFilterCount": { "$ref": "#/definitions/maxBudget" },
+          "paintCountPer2s": { "$ref": "#/definitions/maxBudget" },
+          "rafCallsPerSec": { "$ref": "#/definitions/maxBudget" },
+          "fpsMin": { "$ref": "#/definitions/minBudget" },
+          "longAnimationFramesPer2s": { "$ref": "#/definitions/maxBudget" },
+          "infiniteAnimationCount": { "$ref": "#/definitions/maxBudget" }
+        }
+      }
+    },
+    "notes": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "maxBudget": {
+      "type": "object",
+      "required": ["max"],
+      "properties": {
+        "max": { "type": "number" },
+        "devMax": { "type": ["number", "null"] }
+      }
+    },
+    "minBudget": {
+      "type": "object",
+      "required": ["min"],
+      "properties": {
+        "min": { "type": "number" },
+        "devMin": { "type": ["number", "null"] }
+      }
+    }
+  }
+}
