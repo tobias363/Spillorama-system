@@ -133,6 +133,11 @@ export class AdminGame1Socket {
     onResumed?: (payload: AdminGame1Resumed) => void;
     onHallStatusUpdate: (payload: AdminGame1HallStatusUpdate) => void;
     onFallbackActive: (fallbackActive: boolean) => void;
+    onTransferRequest: (payload: AdminGame1TransferRequest) => void;
+    onTransferApproved: (payload: AdminGame1TransferRequest) => void;
+    onTransferRejected: (payload: AdminGame1TransferRequest) => void;
+    onTransferExpired: (payload: AdminGame1TransferRequest) => void;
+    onMasterChanged: (payload: AdminGame1MasterChanged) => void;
     _ioFactory: typeof io;
   };
   private currentGameId: string | null = null;

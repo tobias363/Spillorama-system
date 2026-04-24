@@ -195,6 +195,12 @@ function makeRecordingBroadcaster(): {
     onPhysicalTicketWon: () => undefined,
     onAutoPaused: (e) => autoPaused.push(e),
     onResumed: () => undefined,
+    // Task 1.6: transfer/master-change broadcasts ikke under test her.
+    onTransferRequest: () => undefined,
+    onTransferApproved: () => undefined,
+    onTransferRejected: () => undefined,
+    onTransferExpired: () => undefined,
+    onMasterChanged: () => undefined,
   };
   return { broadcaster, autoPaused, phaseWon };
 }
