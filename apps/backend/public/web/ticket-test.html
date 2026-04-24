@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Bong-design test</title>
+<style>
+  body { margin: 0; padding: 20px; background: #2a0a0a; font-family: 'Inter', system-ui, sans-serif; color: #f5e8d8; }
+  h3 { color: #f5c842; font-weight: 500; margin: 30px 0 10px; }
+  .grid { display: grid; grid-template-columns: repeat(5, minmax(0px, 1fr)); gap: 10px; align-content: start; max-width: 100%; }
+  .viewport-info { position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.8); padding: 8px 12px; border-radius: 6px; font-size: 12px; z-index: 100; }
+</style>
+</head>
+<body>
+<div class="viewport-info" id="vp"></div>
+<h3>Ticket grid — real rendering ved ulike viewport-bredder</h3>
+<div class="grid" id="grid"></div>
+
+<script type="module">
+document.getElementById('vp').textContent = `Viewport: ${window.innerWidth} × ${window.innerHeight}`;
+
+const BONG_COLORS = {
+  yellow: { bg: '#f0b92e', text: '#2a1a00' },
+  purple: { bg: '#b8a4e8', text: '#2a1040' },
+  green:  { bg: '#7dc97a', text: '#0f3a10' },
+  white:  { bg: '#e8e4dc', text: '#2a2420' },
+  red:    { bg: '#dc2626', text: '#ffffff' },
+};
+const MARKED_BG = '#7a1a1a';
+const MARKED_TEXT = '#ffffff';
+const FREE_BG = '#2d7a3f';
+const FREE_TEXT = '#ffffff';
+const UNMARKED_BG = 'rgba(255,255,255,0.55)';
+
+const CARD_W = 240, CARD_H = 300;
+
+function makeTicket(color, label, price, nums, markedSet) {
+  const palette = BONG_COLORS[color];
+  const ticket = document.createElement('div');
+  Object.assign(ticket.style, {
+    width: '100%',
+    maxWidth: '360px',
+    aspectRatio: `${CARD_W} / ${CARD_H}`,
+    justifySelf: 'center',
+    perspective: '1000px',
+    userSelect: 'none',
+  });
+
+  const inner = document.createElement('div');
+  inner.style.cssText = 'position:relative;width:100%;height:100%;';
+  ticket.appendChild(inner);
+
+  const front = document.createElement('div');
+  Object.assign(front.style, {
+    position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+    background: palette.bg,
+    borderRadius: '8px',
+    boxSizing: 'border-box',
+    padding: '12px 14px 10px 14px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+    overflow: 'hidden',
+    fontFamily: "'Inter', system-ui, sans-serif",
+  });
+  inner.appendChild(front);
+
+  // Header
+  const header = document.createElement('div');
+  header.style.cssText = `display:flex;align-items:center;justify-content:space-between;gap:8px;color:${palette.text};white-space:nowrap;position:relative;`;
+  const nameEl = document.createElement('div');
+  nameEl.textContent = label;
+  nameEl.style.cssText = 'font-size:13px;font-weight:700;letter-spacing:-0.005em;flex:1;overflow:hidden;text-overflow:ellipsis;';
+  header.appendChild(nameEl);
+  const priceEl = document.createElement('div');
+  priceEl.textContent = `${price} kr`;
+  priceEl.style.cssText = 'font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;';
+  header.appendChild(priceEl);
+  front.appendChild(header);
+
+  // Grid
+  const gridEl = document.createElement('div');
+  gridEl.className = 'ticket-grid';
+  gridEl.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(5,1fr);gap:5px;flex:1;';
+  for (let i = 0; i < 25; i++) {
+    const cell = document.createElement('div');
+    const n = nums[i];
+    const isFree = n === 0;
+    const isMarked = !isFree && markedSet.has(n);
+    Object.assign(cell.style, {
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '13px', fontWeight: isMarked ? '700' : '600',
+      fontFamily: "'Inter', system-ui, sans-serif",
+      fontVariantNumeric: 'tabular-nums', lineHeight: '1',
+      borderRadius: '3px', minWidth: '0', minHeight: '0',
+      background: isFree ? UNMARKED_BG : (isMarked ? MARKED_BG : UNMARKED_BG),
+      color: isFree ? palette.text : (isMarked ? MARKED_TEXT : palette.text),
+    });
+    if (isFree) {
+      const inner2 = document.createElement('div');
+      Object.assign(inner2.style, {
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: '82%', height: '70%', background: FREE_BG, color: FREE_TEXT,
+        borderRadius: '2px', fontSize: '8px', fontWeight: '700', letterSpacing: '0.04em',
+      });
+      inner2.textContent = 'FREE';
+      cell.appendChild(inner2);
+    } else {
+      cell.textContent = String(n);
+    }
+    gridEl.appendChild(cell);
+  }
+  front.appendChild(gridEl);
+
+  // ToGo
+  const toGo = document.createElement('div');
+  toGo.textContent = '24 igjen';
+  toGo.style.cssText = `text-align:center;font-size:11px;font-weight:500;color:${palette.text};opacity:0.75;`;
+  front.appendChild(toGo);
+
+  return ticket;
+}
+
+const nums = [
+  3,19,34,47,62,
+  4,20,35,49,63,
+  7,23,0,49,66,
+  8,28,41,52,67,
+  13,30,43,56,74
+];
+const marked = new Set([19, 34, 49, 28, 41]);
+
+const colors = [['yellow', 'Large Yellow', 60], ['purple', 'Small Purple', 20], ['green', 'Small Green', 20], ['white', 'Small White', 20], ['red', 'Small Red', 20]];
+
+const gridContainer = document.getElementById('grid');
+for (const [c, label, price] of colors) {
+  gridContainer.appendChild(makeTicket(c, label, price, nums, marked));
+}
+</script>
+</body>
+</html>

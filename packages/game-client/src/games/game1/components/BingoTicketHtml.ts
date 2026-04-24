@@ -149,12 +149,14 @@ export class BingoTicketHtml {
 
     this.root = document.createElement("div");
     Object.assign(this.root.style, {
-      // Bong.jsx-port: faste dimensjoner 240×300 (matcher referanse-design).
-      // `justifySelf: center` sentraliserer bongen i grid-cellen når
-      // cellen er bredere enn 240px (skjer på brede skjermer med
-      // `repeat(5, 1fr)`-grid). Hindrer stretching + kutting av innhold.
-      width: `${this.cardWidth}px`,
-      height: `${this.cardHeight}px`,
+      // Bong.jsx-port: bongen fyller grid-cellens bredde opp til maxWidth 360px.
+      // Høyden følger aspect-ratio 4:5 (240:300 → 0.8). `justifySelf: center`
+      // sentraliserer bongen når celle-bredden overstiger maxWidth. På brede
+      // skjermer (cell ≈ 275px) blir bongen ~275×344. På smale blir den
+      // mindre men bevarer proporsjonene.
+      width: "100%",
+      maxWidth: "360px",
+      aspectRatio: `${this.cardWidth} / ${this.cardHeight}`,
       justifySelf: "center",
       perspective: "1000px",
       cursor: "pointer",
@@ -530,7 +532,13 @@ export class BingoTicketHtml {
           fontVariantNumeric: "tabular-nums",
           lineHeight: "1",
           borderRadius: "3px",
-          aspectRatio: "1 / 1",
+          // Ingen aspect-ratio: 1/1 — det kombinert med grid-template-rows:
+          // repeat(5, 1fr) gjør at celler blir høyere enn kolonne-bredden,
+          // og aspect-ratio presser bredden utover → overflow/clip på høyre
+          // celle-kolonne. 1fr×1fr fra grid-template gir uniforme celler
+          // som tilpasser seg ticket-dimensjonene uten overflow.
+          minWidth: "0",
+          minHeight: "0",
           transition: "background 0.12s, color 0.12s",
         });
         if (n === 0) {
