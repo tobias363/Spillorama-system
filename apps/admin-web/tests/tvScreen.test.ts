@@ -54,39 +54,51 @@ describe("TVScreenPage rendering", () => {
   beforeEach(() => {
     container = mkContainer();
     // Stub fetch så rendering-pathen ikke treffer nettverk.
+    // Voice-endepunktet (/api/tv/:hallId/voice) returnerer voice1 som default.
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            ok: true,
-            data: {
-              hall: { id: "hall-1", name: "Test Hall" },
-              currentGame: {
-                id: "sg-1",
-                name: "Mystery",
-                number: 3,
-                startAt: "2026-04-23T20:00:00Z",
-                ballsDrawn: [71, 31, 1, 46, 75, 16],
-                lastBall: 16,
+      vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/voice")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ ok: true, data: { voice: "voice1" } }),
+              { status: 200, headers: { "content-type": "application/json" } }
+            )
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ok: true,
+              data: {
+                hall: { id: "hall-1", name: "Test Hall" },
+                currentGame: {
+                  id: "sg-1",
+                  name: "Mystery",
+                  number: 3,
+                  startAt: "2026-04-23T20:00:00Z",
+                  ballsDrawn: [71, 31, 1, 46, 75, 16],
+                  lastBall: 16,
+                },
+                patterns: [
+                  { name: "1 Rad", phase: 1, playersWon: 5, prize: 10000, highlighted: true },
+                  { name: "2 Rader", phase: 2, playersWon: 0, prize: 0, highlighted: false },
+                  { name: "3 Rader", phase: 3, playersWon: 0, prize: 0, highlighted: false },
+                  { name: "4 Rader", phase: 4, playersWon: 0, prize: 0, highlighted: false },
+                  { name: "Fullt Hus", phase: 5, playersWon: 0, prize: 0, highlighted: false },
+                ],
+                drawnCount: 12,
+                totalBalls: 75,
+                nextGame: { name: "Quick Bingo", startAt: "2026-04-23T21:00:00Z" },
+                countdownToNextGame: null,
+                status: "drawing",
               },
-              patterns: [
-                { name: "1 Rad", phase: 1, playersWon: 5, prize: 10000, highlighted: true },
-                { name: "2 Rader", phase: 2, playersWon: 0, prize: 0, highlighted: false },
-                { name: "3 Rader", phase: 3, playersWon: 0, prize: 0, highlighted: false },
-                { name: "4 Rader", phase: 4, playersWon: 0, prize: 0, highlighted: false },
-                { name: "Fullt Hus", phase: 5, playersWon: 0, prize: 0, highlighted: false },
-              ],
-              drawnCount: 12,
-              totalBalls: 75,
-              nextGame: { name: "Quick Bingo", startAt: "2026-04-23T21:00:00Z" },
-              countdownToNextGame: null,
-              status: "drawing",
-            },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } }
-        )
-      )
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        );
+      })
     );
   });
 
@@ -150,19 +162,23 @@ describe("TVScreenPage rendering", () => {
     expect(next.textContent).toContain("kl.");
   });
 
-  it("persists voice-selection to localStorage per hall", async () => {
+  it("voice-select viser alle 3 voice-options + er disabled (server-managed)", async () => {
     mountTvScreenPage(container, "hall-1", "token-abc");
     const sel = container.querySelector<HTMLSelectElement>("[data-testid='tv-voice-select']")!;
-    sel.value = "voice-2";
-    sel.dispatchEvent(new Event("change"));
-    expect(window.localStorage.getItem("tv_voice_hall-1")).toBe("voice-2");
+    expect(sel.options.length).toBe(3);
+    expect(Array.from(sel.options).map((o) => o.value)).toEqual(["voice1", "voice2", "voice3"]);
+    // Wireframe PDF 14: admin eier valget, ikke TV-operatoren foran skjermen.
+    expect(sel.disabled).toBe(true);
+    const note = container.querySelector("[data-testid='tv-voice-note']")!;
+    expect(note.textContent).toContain("admin");
   });
 
-  it("restores voice-selection from localStorage on mount", async () => {
-    window.localStorage.setItem("tv_voice_hall-42", "voice-3");
-    mountTvScreenPage(container, "hall-42", "token-abc");
-    const sel = container.querySelector<HTMLSelectElement>("[data-testid='tv-voice-select']")!;
-    expect(sel.value).toBe("voice-3");
+  it("fetcher voice-pack fra /api/tv/:hallId/voice ved mount", async () => {
+    mountTvScreenPage(container, "hall-99", "token-abc");
+    await new Promise((r) => setTimeout(r, 20));
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const urls = calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u === "/api/tv/hall-99/voice")).toBe(true);
   });
 });
 

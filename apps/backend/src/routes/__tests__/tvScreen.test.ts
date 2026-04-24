@@ -35,13 +35,17 @@ const validHall: HallDefinition = {
   updatedAt: "2026-04-23T00:00:00Z",
 };
 
-function makePlatformStub(): PlatformService {
+function makePlatformStub(voice: "voice1" | "voice2" | "voice3" = "voice1"): PlatformService {
   return {
     async verifyHallTvToken(hallId: string, tvToken: string): Promise<HallDefinition> {
       if (hallId === validHall.id && tvToken === validHall.tvToken) {
-        return { ...validHall };
+        return { ...validHall, tvVoiceSelection: voice };
       }
       throw new DomainError("TV_TOKEN_INVALID", "TV-token ugyldig.");
+    },
+    async getTvVoice(hallRef: string) {
+      if (hallRef === validHall.id || hallRef === validHall.slug) return voice;
+      throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
     },
   } as unknown as PlatformService;
 }
@@ -67,13 +71,14 @@ interface Ctx {
 
 async function startServer(
   state: TvGameState,
-  winners: TvWinnersSummary
+  winners: TvWinnersSummary,
+  voice: "voice1" | "voice2" | "voice3" = "voice1",
 ): Promise<Ctx> {
   const app = express();
   app.use(express.json());
   app.use(
     createTvScreenRouter({
-      platformService: makePlatformStub(),
+      platformService: makePlatformStub(voice),
       tvScreenService: makeTvStub(state, winners),
     })
   );
@@ -247,6 +252,33 @@ test("GET /api/tv with empty token component returns 404", async () => {
     const res = await fetch(`${ctx.baseUrl}/api/tv/${validHall.id}//state`);
     // Either 404 from route-miss or 404 from our handler — both OK.
     assert.equal(res.status, 404);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── Voice-config (wireframe PDF 14) ────────────────────────────────────────
+
+test("GET /api/tv/:hallId/voice returns hall voice pack", async () => {
+  const ctx = await startServer(exampleState, exampleWinners, "voice2");
+  try {
+    const res = await fetch(`${ctx.baseUrl}/api/tv/${validHall.id}/voice`);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { ok: boolean; data: { voice: string } };
+    assert.equal(body.ok, true);
+    assert.equal(body.data.voice, "voice2");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GET /api/tv/:hallId/voice returns 404 for unknown hall", async () => {
+  const ctx = await startServer(exampleState, exampleWinners);
+  try {
+    const res = await fetch(`${ctx.baseUrl}/api/tv/hall-does-not-exist/voice`);
+    assert.equal(res.status, 404);
+    const body = (await res.json()) as { ok: boolean; error: { code: string } };
+    assert.equal(body.error.code, "NOT_FOUND");
   } finally {
     await ctx.close();
   }

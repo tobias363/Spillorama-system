@@ -77,6 +77,16 @@ export interface UpdateGameInput {
 export type HallClientVariant = "web";
 export const HALL_CLIENT_VARIANTS: readonly HallClientVariant[] = ["web"] as const;
 
+/**
+ * TV-kiosk voice-pack-valg. Hver hall kan velge mellom 3 voice-packs for
+ * ball-utrop på TV-skjermen. Default er `voice1`. Audio-filene lastes av
+ * TV-klienten fra `/assets/tv-voices/<voice>/<ball>.mp3`.
+ *
+ * Wireframe PDF 14 (TV Screen + Winners) + 2026-04-24 PM-beslutning.
+ */
+export type HallTvVoice = "voice1" | "voice2" | "voice3";
+export const HALL_TV_VOICES: readonly HallTvVoice[] = ["voice1", "voice2", "voice3"] as const;
+
 export interface HallDefinition {
   id: string;
   slug: string;
@@ -117,6 +127,12 @@ export interface HallDefinition {
    * alltid satt av `mapHall()` (DB-kolonnen har NOT NULL DEFAULT gen_random_uuid()).
    */
   tvToken?: string;
+  /**
+   * TV-kiosk voice-pack for ball-utrop (wireframe PDF 14, 2026-04-24).
+   * NOT NULL DEFAULT 'voice1' i DB; optional i typen for bakoverkompat
+   * med eldre fixtures som ikke setter feltet.
+   */
+  tvVoiceSelection?: HallTvVoice;
   createdAt: string;
   updatedAt: string;
 }
@@ -357,6 +373,8 @@ interface HallRow {
   cash_balance: string | number | null;
   /** TV Screen public token — backfilt til uuid i migration 20260423000100. */
   tv_token: string;
+  /** TV-kiosk voice-pack — migration 20260811000000. NOT NULL DEFAULT 'voice1'. */
+  tv_voice_selection: string;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -1080,7 +1098,7 @@ export class PlatformService {
       `SELECT id, slug, name, region, address,
               organization_number, settlement_account, invoice_method,
               is_active, tv_url, hall_number, cash_balance, tv_token,
-              created_at, updated_at
+              tv_voice_selection, created_at, updated_at
        FROM ${this.hallsTable()}
        ${includeInactive ? "" : "WHERE is_active = true"}
        ORDER BY name ASC, slug ASC`
@@ -1146,6 +1164,52 @@ export class PlatformService {
     return "web";
   }
 
+  // ── TV-kiosk voice-pack ─────────────────────────────────────────────────
+  //
+  // Wireframe PDF 14 (TV Screen + Winners): hver hall velger hvilken av 3
+  // voice-packs som brukes ved ball-utrop på TV-skjermen. Default `voice1`.
+  // Audio-filer lastes av TV-klienten fra `/assets/tv-voices/<voice>/<ball>.mp3`.
+  //
+  // Vi slår ikke audit-log her (det skjer i route-laget) slik at service-
+  // lagene kan komposeres uten å slepe AuditLogService rundt.
+
+  async getTvVoice(hallReference: string): Promise<HallTvVoice> {
+    const hall = await this.getHall(hallReference);
+    return this.normalizeTvVoice(hall.tvVoiceSelection);
+  }
+
+  /**
+   * Oppdater voice-pack for en hall. Validerer at voice er én av
+   * ('voice1', 'voice2', 'voice3'); kaster INVALID_INPUT ellers.
+   * Returnerer den oppdaterte HallDefinition så routen kan returnere
+   * full entity (ikke bare voice-feltet) for enklere caching i admin-UI.
+   */
+  async setTvVoice(hallReference: string, voice: string): Promise<HallDefinition> {
+    await this.ensureInitialized();
+    if (voice !== "voice1" && voice !== "voice2" && voice !== "voice3") {
+      throw new DomainError("INVALID_INPUT", "voice må være en av: voice1, voice2, voice3.");
+    }
+    const hallRow = await this.resolveHallRowByReference(hallReference);
+    if (!hallRow) {
+      throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+    }
+    const { rows } = await this.pool.query<HallRow>(
+      `UPDATE ${this.hallsTable()}
+       SET tv_voice_selection = $2,
+           updated_at = now()
+       WHERE id = $1
+       RETURNING id, slug, name, region, address,
+                 organization_number, settlement_account, invoice_method,
+                 is_active, tv_url, hall_number, cash_balance, tv_token,
+                 tv_voice_selection, created_at, updated_at`,
+      [hallRow.id, voice]
+    );
+    if (!rows[0]) {
+      throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+    }
+    return this.mapHall(rows[0]);
+  }
+
   /** Test-only: no-op retained for backwards source-compat (cache is gone). */
   clearClientVariantCache(): void {
     // Intentionally empty — BIN-540 read-through-cachen er fjernet; metoden
@@ -1190,8 +1254,8 @@ export class PlatformService {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id, slug, name, region, address,
                    organization_number, settlement_account, invoice_method,
-                   is_active, tv_url, hall_number, cash_balance,
-                   created_at, updated_at`,
+                   is_active, tv_url, hall_number, cash_balance, tv_token,
+                   tv_voice_selection, created_at, updated_at`,
         [hallId, slug, name, region, address, organizationNumber, settlementAccount, invoiceMethod, isActive, hallNumber]
       );
       await this.seedHallGameConfigForHall(client, hallId);
@@ -1260,8 +1324,8 @@ export class PlatformService {
        WHERE id = $1
        RETURNING id, slug, name, region, address,
                  organization_number, settlement_account, invoice_method,
-                 is_active, tv_url, hall_number, cash_balance,
-                 created_at, updated_at`,
+                 is_active, tv_url, hall_number, cash_balance, tv_token,
+                 tv_voice_selection, created_at, updated_at`,
       [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive, nextHallNumber]
     );
 
@@ -3385,9 +3449,20 @@ export class PlatformService {
       hallNumber: row.hall_number ?? null,
       cashBalance: Number.isFinite(cashBalance) ? cashBalance : 0,
       tvToken: row.tv_token,
+      tvVoiceSelection: this.normalizeTvVoice(row.tv_voice_selection),
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
+  }
+
+  /**
+   * Normaliser DB-verdi til `HallTvVoice`. Fail-safe: ukjente verdier
+   * (null, eldre fixtures uten kolonnen) faller tilbake til `voice1`
+   * slik at TV-klienten alltid har en gyldig pack å laste.
+   */
+  private normalizeTvVoice(raw: string | null | undefined): HallTvVoice {
+    if (raw === "voice1" || raw === "voice2" || raw === "voice3") return raw;
+    return "voice1";
   }
 
   private mapHallDisplayToken(row: HallDisplayTokenRow): HallDisplayToken {
@@ -3592,7 +3667,7 @@ export class PlatformService {
       `SELECT id, slug, name, region, address,
               organization_number, settlement_account, invoice_method,
               is_active, tv_url, hall_number, cash_balance, tv_token,
-              created_at, updated_at
+              tv_voice_selection, created_at, updated_at
        FROM ${this.hallsTable()}
        WHERE id = $1
           OR slug = $2
@@ -3802,6 +3877,39 @@ export class PlatformService {
       await client.query(
         `CREATE UNIQUE INDEX IF NOT EXISTS ix_${this.schema}_app_halls_tv_token
          ON ${this.hallsTable()} (tv_token)`
+      ).catch(() => {});
+
+      // TV-kiosk voice-pack (migrasjon 20260811000000). Idempotent fallback
+      // så test-schema boot + fresh installs får default + CHECK-constraint
+      // på plass uten å avhenge av at migrations har kjørt.
+      await client.query(
+        `ALTER TABLE ${this.hallsTable()} ADD COLUMN IF NOT EXISTS tv_voice_selection TEXT`
+      ).catch(() => {});
+      await client.query(
+        `UPDATE ${this.hallsTable()} SET tv_voice_selection = 'voice1' WHERE tv_voice_selection IS NULL`
+      ).catch(() => {});
+      await client.query(
+        `ALTER TABLE ${this.hallsTable()} ALTER COLUMN tv_voice_selection SET DEFAULT 'voice1'`
+      ).catch(() => {});
+      await client.query(
+        `ALTER TABLE ${this.hallsTable()} ALTER COLUMN tv_voice_selection SET NOT NULL`
+      ).catch(() => {});
+      // CHECK-constraint: idempotent via ADD/DROP-mønster er risky, bruker
+      // en navngitt constraint + DROP-before-ADD med EXCEPTION-tolerant wrapper.
+      await client.query(
+        `DO $$
+         BEGIN
+           IF NOT EXISTS (
+             SELECT 1 FROM information_schema.constraint_column_usage
+              WHERE table_schema = '${this.schema}'
+                AND table_name = 'app_halls'
+                AND constraint_name = 'ck_app_halls_tv_voice_selection'
+           ) THEN
+             ALTER TABLE ${this.hallsTable()}
+               ADD CONSTRAINT ck_app_halls_tv_voice_selection
+               CHECK (tv_voice_selection IN ('voice1', 'voice2', 'voice3'));
+           END IF;
+         END$$`
       ).catch(() => {});
 
       // BIN-591: HALL_OPERATOR hall-scope. Added AFTER halls table exists

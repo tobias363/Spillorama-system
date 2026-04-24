@@ -334,6 +334,19 @@
   cursor: pointer;
 }
 
+/* Wireframe PDF 14: voice styres av admin, dropdownen er read-only på TV. */
+.tv-voice-select select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.tv-voice-note {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.7;
+  font-style: italic;
+}
+
 .tv-loading,
 .tv-error {
   display: flex;

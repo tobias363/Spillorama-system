@@ -20,8 +20,11 @@ import {
   listHalls,
   createHall,
   updateHall,
+  setHallVoice,
+  HALL_TV_VOICES,
   type AdminHall,
   type HallClientVariant,
+  type HallTvVoice,
 } from "../../api/admin-halls.js";
 import {
   boxClose,
@@ -31,6 +34,17 @@ import {
 } from "../adminUsers/shared.js";
 
 const CLIENT_VARIANTS: readonly HallClientVariant[] = ["web"];
+
+/**
+ * Voice-labels vist i dropdown. Map til stabile engelske labels så vi
+ * ikke er avhengig av at i18n-nøkler finnes før voice-pakkene får
+ * egne navn i audio-direkotrien.
+ */
+const VOICE_LABELS: Record<HallTvVoice, string> = {
+  voice1: "Voice 1",
+  voice2: "Voice 2",
+  voice3: "Voice 3",
+};
 
 export function renderHallFormPage(container: HTMLElement, editId: string | null): void {
   const isEdit = editId !== null;
@@ -144,6 +158,18 @@ async function mount(host: HTMLElement, editId: string | null): Promise<void> {
             ).join("")}
           </select>
         </div>
+      </div>
+      <div class="form-group" data-testid="hall-tv-settings-section">
+        <label class="col-sm-3 control-label" for="hf-tv-voice">TV Voice</label>
+        <div class="col-sm-9">
+          <select id="hf-tv-voice" name="tvVoiceSelection" class="form-control" data-testid="hall-tv-voice-select">
+            ${HALL_TV_VOICES.map(
+              (v) =>
+                `<option value="${escapeHtml(v)}"${(existing!.tvVoiceSelection ?? "voice1") === v ? " selected" : ""}>${escapeHtml(VOICE_LABELS[v])}</option>`
+            ).join("")}
+          </select>
+          <p class="help-block">Stemme som TV-kiosk bruker ved ball-utrop. Endring slås inn umiddelbart på aktive TV-skjermer.</p>
+        </div>
       </div>` : ""}
       <div class="form-group">
         <label class="col-sm-3 control-label" for="hf-active">${escapeHtml(t("status"))}</label>
@@ -182,6 +208,8 @@ async function submit(form: HTMLFormElement, existing: AdminHall | null): Promis
   const invoiceMethod = (form.querySelector<HTMLInputElement>("#hf-invoice")!).value.trim();
   const variantEl = form.querySelector<HTMLSelectElement>("#hf-variant");
   const clientVariant = variantEl ? (variantEl.value as HallClientVariant) : undefined;
+  const voiceEl = form.querySelector<HTMLSelectElement>("#hf-tv-voice");
+  const tvVoice = voiceEl ? (voiceEl.value as HallTvVoice) : undefined;
   const isActive = (form.querySelector<HTMLSelectElement>("#hf-active")!).value === "true";
 
   if (!name || !slug) {
@@ -210,6 +238,22 @@ async function submit(form: HTMLFormElement, existing: AdminHall | null): Promis
       };
       if (clientVariant) patch.clientVariant = clientVariant;
       await updateHall(existing.id, patch);
+      // Voice-pack er på et eget endpoint (egen RBAC + broadcast) og
+      // oppdateres bare når valget faktisk har endret seg. Feiler voice-
+      // patchen, viser vi fortsatt toast for hoved-patch-suksess så
+      // operatøren ikke taper feltverdiene.
+      if (tvVoice && tvVoice !== (existing.tvVoiceSelection ?? "voice1")) {
+        try {
+          await setHallVoice(existing.id, tvVoice);
+        } catch (voiceErr) {
+          Toast.error(
+            voiceErr instanceof ApiError
+              ? `TV Voice: ${voiceErr.message}`
+              : "TV Voice: oppdatering feilet"
+          );
+          return;
+        }
+      }
     } else {
       await createHall({
         slug, name, region, address,
