@@ -162,28 +162,23 @@ describe("remainingForPattern", () => {
     const marks = setOf(1, 16, 31, 46);
     expect(remainingForPattern(GRID_A, marks, "1 Rad")).toBe(1);
   });
-  it('"2 Rader": 2 fulle kolonner minus free center = 4+4-1 (free) = 8 bits nødvendig på tomt kort, 8 igjen', () => {
-    // Tomt kort → kol 2 har 4 igjen (free teller). Kol 0 har 5 igjen. Kol 2+kol 0 = 4+5 = 9.
-    // Beste kombo: kol 2 + kol 1 eller kol 2 + kol 3 = 4+5 = 9. Eller 2 nabo-kolonner uten center = 5+5 = 10.
-    // Minimum skal være kol inkludert center + en annen kol: 4+5 = 9.
+  it('"2 Rader": tomt kort → 9 igjen (rad 2 har free center, annen rad 5 ubits)', () => {
+    // Regel-endring 2026-04-24: fase 2 = 2 horisontale rader.
+    // Beste par: rad 2 (4 unmarked, bit 12 er free) + en annen rad (5 unmarked) = 9.
     expect(remainingForPattern(GRID_A, new Set<number>(), "2 Rader")).toBe(9);
   });
-  it('"2 Rader": 2 fulle kolonner merket → 0 igjen', () => {
-    // Kol 0: 1, 2, 3, 4, 5. Kol 1: 16, 17, 18, 19, 20.
-    const marks = setOf(1, 2, 3, 4, 5, 16, 17, 18, 19, 20);
+  it('"2 Rader": 2 fulle rader merket → 0 igjen', () => {
+    // Rad 0 på GRID_A: 1, 16, 31, 46, 61. Rad 1: 2, 17, 32, 47, 62.
+    const marks = setOf(1, 16, 31, 46, 61, 2, 17, 32, 47, 62);
     expect(remainingForPattern(GRID_A, marks, "2 Rader")).toBe(0);
   });
-  it('"2 Rader": 2 fulle RADER merker IKKE (backend krever kolonner i fase 2)', () => {
-    // Rad 0: 1, 16, 31, 46, 61. Rad 1: 2, 17, 32, 47, 62. Begge fulle rader.
-    // I kolonne-optikk: bit 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 markert.
-    // Beste kolonne-union: kol 2 (bits 2, 7, 12, 17, 22) → bit 12 (free) + bit 2, 7 markert = mangler 17, 22.
-    // Kol 2 + kol 0 = bit 12 + 0, 2, 5, 7 markert, mangler 10, 15, 20, 17, 22 = 5.
-    // Beste: 2 kolonner hvor flest rader krysser → hvilke 2 kolonner?
-    //   Kol a + kol b: markerte bits = {0,1,...,9} ∩ (kol a-maske | kol b-maske) + free.
-    //   Kol a har bits r*5+a for r=0..4. Fra bits 0-9 (rad 0+1) treffes bits a og 5+a = 2 bits per kol.
-    //   Per kolonne: 2 bits + free (hvis kol 2) = 2 eller 3 bits markert av 5. Mangler 3 eller 2.
-    //   Beste: kol 2 + en annen kol = 3 + 2 = 5 markerte av 10. Mangler 5.
-    expect(remainingForPattern(GRID_A, setOf(1, 16, 31, 46, 61, 2, 17, 32, 47, 62), "2 Rader")).toBe(5);
+  it('"2 Rader": 2 fulle KOLONNER merker IKKE (fase 2 krever rader)', () => {
+    // Regel-endring 2026-04-24: fase 2/3/4 = horisontale rader, ikke kolonner.
+    // Kol 0: 1, 2, 3, 4, 5. Kol 1: 16, 17, 18, 19, 20. Begge fulle kolonner.
+    // Beste rad-par: rad 2 har bit 12 (free) + bit 10 (3) + bit 11 (18) = 3 markert,
+    //   mangler bit 13, 14. Andre rader har 2 markert av 5 = mangler 3.
+    //   Beste: rad 2 + en annen rad = 2+3 = 5 markerte. Mangler 5.
+    expect(remainingForPattern(GRID_A, setOf(1, 2, 3, 4, 5, 16, 17, 18, 19, 20), "2 Rader")).toBe(5);
   });
   it('"Fullt Hus": tomt kort → 24 igjen (alle minus free center)', () => {
     expect(remainingForPattern(GRID_A, new Set<number>(), "Fullt Hus")).toBe(24);

@@ -45,17 +45,17 @@ test("PHASE_1_MASKS — 10 masker (5 rader + 5 kolonner)", () => {
   for (const m of PHASE_1_MASKS) assert.equal(popCount25(m), 5);
 });
 
-test("PHASE_2_MASKS — C(5,2) = 10 kolonne-par, hver 10 bits", () => {
+test("PHASE_2_MASKS — C(5,2) = 10 rad-par, hver 10 bits", () => {
   assert.equal(PHASE_2_MASKS.length, 10);
   for (const m of PHASE_2_MASKS) assert.equal(popCount25(m), 10);
 });
 
-test("PHASE_3_MASKS — C(5,3) = 10 kolonne-trippel, hver 15 bits", () => {
+test("PHASE_3_MASKS — C(5,3) = 10 rad-trippel, hver 15 bits", () => {
   assert.equal(PHASE_3_MASKS.length, 10);
   for (const m of PHASE_3_MASKS) assert.equal(popCount25(m), 15);
 });
 
-test("PHASE_4_MASKS — C(5,4) = 5 kolonne-kvartetter, hver 20 bits", () => {
+test("PHASE_4_MASKS — C(5,4) = 5 rad-kvartetter, hver 20 bits", () => {
   assert.equal(PHASE_4_MASKS.length, 5);
   for (const m of PHASE_4_MASKS) assert.equal(popCount25(m), 20);
 });
@@ -120,19 +120,19 @@ test("ticketMaskMeetsPhase — Phase1 kun på hel rad eller kolonne", () => {
   assert.equal(ticketMaskMeetsPhase(0b01111, Spill1Phase.Phase1), false);
 });
 
-test("ticketMaskMeetsPhase — Phase2 krever 2 vertikale kolonner", () => {
-  // 2 horisontale rader (10 bits, men ikke kolonner) → false
-  assert.equal(
-    ticketMaskMeetsPhase(ROW_MASKS[0] | ROW_MASKS[1], Spill1Phase.Phase2),
-    false,
-  );
-  // 2 kolonner → true
+test("ticketMaskMeetsPhase — Phase2 krever 2 horisontale rader", () => {
+  // 2 vertikale kolonner (10 bits, men ikke rader) → false
   assert.equal(
     ticketMaskMeetsPhase(COLUMN_MASKS[0] | COLUMN_MASKS[4], Spill1Phase.Phase2),
+    false,
+  );
+  // 2 rader → true
+  assert.equal(
+    ticketMaskMeetsPhase(ROW_MASKS[0] | ROW_MASKS[1], Spill1Phase.Phase2),
     true,
   );
-  // 1 kolonne → false
-  assert.equal(ticketMaskMeetsPhase(COLUMN_MASKS[0], Spill1Phase.Phase2), false);
+  // 1 rad → false
+  assert.equal(ticketMaskMeetsPhase(ROW_MASKS[0], Spill1Phase.Phase2), false);
 });
 
 test("ticketMaskMeetsPhase — FullHouse krever alle 25 bits", () => {
@@ -235,13 +235,13 @@ test("wire-kompat: ticketMaskMeetsPhase ⟺ remainingBitsForPhase === 0 (paramet
   }
 });
 
-test("wire-kompat: fase 2 godtar 2 kolonner men IKKE 2 rader", () => {
-  // Regresjon mot historisk bug (PR #315): klient behandlet 2 rader som
-  // gyldig fase 2; backend krever kolonner. Delt kilde gjør dette umulig.
+test("wire-kompat: fase 2 godtar 2 rader men IKKE 2 kolonner", () => {
+  // Regel-endring 2026-04-24 (Tobias): fase 2/3/4 er horisontale rader,
+  // ikke vertikale kolonner. Delt kilde med klient via PHASE_2_MASKS.
   const twoRows = ROW_MASKS[0] | ROW_MASKS[1];
   const twoCols = COLUMN_MASKS[0] | COLUMN_MASKS[1];
-  assert.equal(ticketMaskMeetsPhase(twoRows, Spill1Phase.Phase2), false);
-  assert.equal(ticketMaskMeetsPhase(twoCols, Spill1Phase.Phase2), true);
-  assert.equal(remainingBitsForPhase(Spill1Phase.Phase2, twoRows) > 0, true);
-  assert.equal(remainingBitsForPhase(Spill1Phase.Phase2, twoCols), 0);
+  assert.equal(ticketMaskMeetsPhase(twoRows, Spill1Phase.Phase2), true);
+  assert.equal(ticketMaskMeetsPhase(twoCols, Spill1Phase.Phase2), false);
+  assert.equal(remainingBitsForPhase(Spill1Phase.Phase2, twoRows), 0);
+  assert.equal(remainingBitsForPhase(Spill1Phase.Phase2, twoCols) > 0, true);
 });
