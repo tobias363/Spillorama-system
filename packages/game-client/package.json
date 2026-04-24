@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && vite build --config vite.preview.config.ts",
+    "build": "tsc && vite build && vite build --config vite.preview.config.ts && vite build --config vite.visual-harness.config.ts",
+    "build:visual-harness": "tsc && vite build && vite build --config vite.visual-harness.config.ts",
     "preview": "vite preview",
+    "serve:visual-harness": "node ../../scripts/serve-visual-harness.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "tsc --noEmit",

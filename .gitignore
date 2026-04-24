@@ -42,3 +42,12 @@ apps/admin-web/dist/
 scripts/performance-budget/report.json
 scripts/performance-budget/report.md
 scripts/performance-budget/package-lock.json
+
+# Playwright visual-regression
+# Baselines (__snapshots__) are committed — do NOT ignore them.
+# But failed-run output (diffs, videos, traces) and the HTML report must
+# stay out of git; CI uploads them as artefacts instead.
+packages/game-client/tests/visual/__output__/
+playwright-report/
+test-results/
+.playwright/
