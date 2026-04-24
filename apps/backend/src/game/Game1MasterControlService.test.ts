@@ -677,6 +677,191 @@ test("resumeGame avviser non-paused", async () => {
   );
 });
 
+// ── Task 1.1: resumeGame håndterer auto-pause-sidestate ────────────────────
+
+test("Task 1.1: resumeGame støtter auto-pause (status='running' + game_state.paused=true)", async () => {
+  // Scenario: drawNext satte paused=true etter phase-won. status er fortsatt
+  // 'running', men game_state.paused=true. Resume må flippe paused-feltet og
+  // beholde status='running'.
+  const { pool, queries } = createStubPool([
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    // loadGameForUpdate — status='running'
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      rows: [gameRow({ status: "running" })],
+    },
+    // SELECT FOR UPDATE fra game_state — paused=true + paused_at_phase=1
+    {
+      match: (s) =>
+        s.includes("FOR UPDATE") && s.includes("app_game1_game_state"),
+      rows: [
+        {
+          paused: true,
+          paused_at_phase: 1,
+          current_phase: 2,
+        },
+      ],
+    },
+    // UPDATE game_state SET paused=false + paused_at_phase=NULL
+    {
+      match: (s) =>
+        s.includes("UPDATE") &&
+        s.includes("app_game1_game_state") &&
+        s.includes("paused"),
+      rows: [],
+    },
+    // SELECT scheduled_games for audit-rad (etter UPDATE av game_state)
+    {
+      match: (s) =>
+        s.includes("SELECT id, status") && !s.includes("FOR UPDATE"),
+      rows: [gameRow({ status: "running" })],
+    },
+    // loadReadySnapshot
+    {
+      match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [],
+    },
+    // writeAudit
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"),
+      rows: [],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ]);
+  const svc = Game1MasterControlService.forTesting(pool as never);
+  const result = await svc.resumeGame({ gameId: "g1", actor: masterActor });
+  // Status forblir 'running' (auto-pause endrer ikke status)
+  assert.equal(result.status, "running");
+
+  // Verifiser at UPDATE game_state ble kalt med paused=false + NULL phase.
+  const gameStateUpdate = queries.find(
+    (q) =>
+      q.sql.includes("UPDATE") &&
+      q.sql.includes("app_game1_game_state") &&
+      q.sql.includes("paused")
+  );
+  assert.ok(gameStateUpdate, "UPDATE game_state må skje ved auto-pause-resume");
+  // Ikke UPDATE scheduled_games.status (status='running' allerede).
+  const scheduledStatusUpdate = queries.find(
+    (q) =>
+      q.sql.includes("UPDATE") &&
+      q.sql.includes("scheduled_games") &&
+      q.sql.includes("SET status")
+  );
+  assert.equal(
+    scheduledStatusUpdate,
+    undefined,
+    "status='running' → ingen UPDATE av scheduled_games.status ved auto-pause-resume"
+  );
+
+  // Audit-rad skrives med resumeType='auto' i metadata.
+  const auditQuery = queries.find(
+    (q) => q.sql.includes("INSERT") && q.sql.includes("master_audit")
+  );
+  assert.ok(auditQuery);
+  const metadata = JSON.parse(String(auditQuery!.params[7]));
+  assert.equal(metadata.resumeType, "auto");
+  assert.equal(metadata.phase, 2);
+});
+
+test("Task 1.1: resumeGame manuell pause fortsatt fungerer (backward compat)", async () => {
+  // Skal fortsatt håndtere legacy-flyten: status='paused' + ingen auto-pause
+  // sidestate.
+  const { pool, queries } = createStubPool([
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      rows: [gameRow({ status: "paused" })],
+    },
+    // SELECT FOR UPDATE fra game_state — paused=false (manuell pause er
+    // status-basert, ikke engine-basert)
+    {
+      match: (s) =>
+        s.includes("FOR UPDATE") && s.includes("app_game1_game_state"),
+      rows: [
+        {
+          paused: false,
+          paused_at_phase: null,
+          current_phase: 1,
+        },
+      ],
+    },
+    // UPDATE scheduled_games SET status='running'
+    {
+      match: (s) =>
+        s.includes("UPDATE") &&
+        s.includes("scheduled_games") &&
+        s.includes("'running'"),
+      rows: [gameRow({ status: "running" })],
+    },
+    // UPDATE game_state (defensiv nullstilling)
+    {
+      match: (s) =>
+        s.includes("UPDATE") &&
+        s.includes("app_game1_game_state") &&
+        s.includes("paused"),
+      rows: [],
+    },
+    {
+      match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
+      rows: [],
+    },
+    {
+      match: (s) => s.includes("INSERT INTO") && s.includes("master_audit"),
+      rows: [],
+    },
+    { match: (s) => s.startsWith("COMMIT"), rows: [] },
+  ]);
+  const svc = Game1MasterControlService.forTesting(pool as never);
+  const result = await svc.resumeGame({ gameId: "g1", actor: masterActor });
+  assert.equal(result.status, "running");
+
+  // Verifiser at UPDATE scheduled_games.status='running' ble kalt.
+  const statusUpdate = queries.find(
+    (q) =>
+      q.sql.includes("UPDATE") &&
+      q.sql.includes("scheduled_games") &&
+      q.sql.includes("SET status")
+  );
+  assert.ok(statusUpdate, "manuell resume må flippe status til 'running'");
+
+  // resumeType='manual' i audit.
+  const auditQuery = queries.find(
+    (q) => q.sql.includes("INSERT") && q.sql.includes("master_audit")
+  );
+  const metadata = JSON.parse(String(auditQuery!.params[7]));
+  assert.equal(metadata.resumeType, "manual");
+});
+
+test("Task 1.1: resumeGame avviser når verken status='paused' eller game_state.paused=true", async () => {
+  // Edge case: running game uten noen pause-sidestate → skal fortsatt kaste
+  // GAME_NOT_PAUSED (legacy-kontrakt beholdt).
+  const { pool } = createStubPool([
+    { match: (s) => s.startsWith("BEGIN"), rows: [] },
+    {
+      match: (s) => s.includes("FOR UPDATE") && s.includes("scheduled_games"),
+      rows: [gameRow({ status: "running" })],
+    },
+    {
+      match: (s) =>
+        s.includes("FOR UPDATE") && s.includes("app_game1_game_state"),
+      rows: [
+        {
+          paused: false,
+          paused_at_phase: null,
+          current_phase: 1,
+        },
+      ],
+    },
+    { match: (s) => s.startsWith("ROLLBACK"), rows: [] },
+  ]);
+  const svc = Game1MasterControlService.forTesting(pool as never);
+  await assert.rejects(
+    svc.resumeGame({ gameId: "g1", actor: masterActor }),
+    (err: unknown) => err instanceof DomainError && err.code === "GAME_NOT_PAUSED"
+  );
+});
+
 // ── stopGame ────────────────────────────────────────────────────────────────
 
 test("stopGame happy path fra running", async () => {

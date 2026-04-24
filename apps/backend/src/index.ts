@@ -22,6 +22,7 @@ import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 import { PaymentRequestService } from "./payments/PaymentRequestService.js";
 import { AuthTokenService } from "./auth/AuthTokenService.js";
 import { EmailService } from "./integration/EmailService.js";
+import { EmailQueue } from "./integration/EmailQueue.js";
 import {
   AuditLogService,
   InMemoryAuditLogStore,
@@ -43,11 +44,13 @@ import { parseBingoSettingsPatch, normalizeBingoSchedulerSettings } from "./util
 import { getPrimaryRoomForHall, findPlayerInRoomByWallet, buildRoomUpdatePayload as buildRoomUpdatePayloadHelper, buildLeaderboard as buildLeaderboardHelper, type RoomUpdatePayload } from "./util/roomHelpers.js";
 import { RoomStateManager } from "./util/roomState.js";
 import { toDrawSchedulerSettings, createSchedulerCallbacks, createDailyReportScheduler, type PendingBingoSettingsUpdate } from "./util/schedulerSetup.js";
+import { WalletReservationExpiryService } from "./wallet/WalletReservationExpiryService.js";
 import { loadBingoRuntimeConfig } from "./util/envConfig.js";
 import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
+import { createProfilePendingLossLimitFlushJob } from "./jobs/profilePendingLossLimitFlush.js";
 import { createMachineTicketAutoCloseJob } from "./jobs/machineTicketAutoClose.js";
 import { createLoyaltyMonthlyResetJob } from "./jobs/loyaltyMonthlyReset.js";
 import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
@@ -84,6 +87,8 @@ import { createAdminWalletRouter } from "./routes/adminWallet.js";
 import { createPaymentsRouter } from "./routes/payments.js";
 import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
 import { createPlayersRouter } from "./routes/players.js";
+import { createUserProfileRouter } from "./routes/userProfile.js";
+import { ProfileSettingsService } from "./compliance/ProfileSettingsService.js";
 import { createAdminPlayersRouter } from "./routes/adminPlayers.js";
 import { createAdminAmlRouter } from "./routes/adminAml.js";
 import { AmlService } from "./compliance/AmlService.js";
@@ -124,6 +129,10 @@ import type { OkBingoApiClient } from "./integration/okbingo/OkBingoApiClient.js
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
+import {
+  PostgresShiftPendingPayoutPort,
+  PostgresShiftTicketRangePort,
+} from "./agent/ports/ShiftLogoutPorts.js";
 import { AgentTransactionService } from "./agent/AgentTransactionService.js";
 import { PostgresAgentTransactionStore } from "./agent/AgentTransactionStore.js";
 import { AgentSettlementService } from "./agent/AgentSettlementService.js";
@@ -678,6 +687,14 @@ const cmsService = new CmsService({
 // DB-backing). Agent 3 vil wire ADMIN-side audit-kall i påfølgende PR.
 const emailService = new EmailService();
 
+// BIN-702: e-post-kø med retry. Moderator-handlinger (KYC-approve/reject
+// osv.) bruker `emailQueue.enqueue()` via `adminPlayers`-routeren slik at
+// en kortvarig SMTP-feil ikke får varselet til å forsvinne. Kjører et
+// enkelt 1s-intervall i prod; i tester wires køen direkte og processNext
+// kalles deterministisk.
+const emailQueue = new EmailQueue({ emailService });
+emailQueue.runLoop();
+
 // Accounting email dispatcher for Withdraw XML-batcher (wireframe 16.20).
 // Bruker eksisterende `app_withdraw_email_allowlist` (via securityService)
 // som regnskaps-CC-liste. PM-beslutning 2026-04-24 — ingen ny tabell.
@@ -705,6 +722,20 @@ const auditLogStore: AuditLogStore = platformConnectionString
   : new InMemoryAuditLogStore();
 const auditLogService = new AuditLogService(auditLogStore);
 
+// BIN-720: Profile Settings API — service (router wires mot slutten av
+// filen, sammen med andre app.use-kall). Tilgjengelig kun når
+// responsibleGamingStore er oppsatt; uten RG-persistence kan pending
+// loss-limit-state ikke serialiseres korrekt.
+const profileSettingsService = responsibleGamingStore
+  ? new ProfileSettingsService({
+      pool: platformService.getPool(),
+      schema: pgSchema,
+      engine,
+      rgPersistence: responsibleGamingStore,
+      auditLogService,
+    })
+  : undefined;
+
 // BIN-583 B3.1: agent-domene (auth + shift + admin-CRUD). Bruker samme
 // Postgres-pool som PlatformService slik at ensureInitialized sikrer
 // schema før første spørring.
@@ -713,7 +744,22 @@ const agentStore = new PostgresAgentStore({
   schema: pgSchema,
 });
 const agentService = new AgentService({ platformService, agentStore });
-const agentShiftService = new AgentShiftService({ agentStore, agentService });
+// Wireframe Gap #9: Shift Log Out-porter for flagging av pending cashouts
+// + ticket-ranges ved logout med checkbox-valg.
+const shiftPendingPayoutPort = new PostgresShiftPendingPayoutPort({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const shiftTicketRangePort = new PostgresShiftTicketRangePort({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const agentShiftService = new AgentShiftService({
+  agentStore,
+  agentService,
+  pendingPayoutPort: shiftPendingPayoutPort,
+  ticketRangePort: shiftTicketRangePort,
+});
 
 // BIN-583 B3.2: agent cash-ops + ticket sale + transaction-log.
 // PhysicalTicketService er instansiert litt senere (linje ~267); vi
@@ -877,6 +923,15 @@ const schedulerCallbacks = createSchedulerCallbacks({
   setPendingBingoSettingsUpdate: (u) => { pendingBingoSettingsUpdate = u; },
   getBingoSettingsEffectiveFromMs: () => bingoSettingsEffectiveFromMs,
   setBingoSettingsEffectiveFromMs: (ms) => { bingoSettingsEffectiveFromMs = ms; },
+  // BIN-694 (forrige fix): scheduler trenger variantConfig for fase-progresjon.
+  getVariantConfig: (code) => roomState.getVariantConfig(code),
+  // BIN-693 Option B: pass reservation-mapping til startGame så commit
+  // kjøres mot wallet-reservation i stedet for fresh transfer.
+  getReservationIdsByPlayer: (code) => roomState.getAllReservationIds(code),
+  clearReservationIdsForRoom: (code) => {
+    const ids = roomState.reservationIdByPlayerByRoom.get(code);
+    if (ids) ids.clear();
+  },
 });
 
 drawScheduler = new DrawScheduler({
@@ -891,6 +946,19 @@ drawScheduler = new DrawScheduler({
 drawScheduler.start();
 
 const dailyReportScheduler = createDailyReportScheduler({ engine, enabled: dailyReportJobEnabled, intervalMs: dailyReportJobIntervalMs });
+
+// BIN-693 Option B: Wallet-reservasjons-expiry-tick.
+const walletReservationExpiryTickMs = Math.max(
+  60_000,
+  Number(process.env.WALLET_RESERVATION_EXPIRY_TICK_MS ?? 300_000),
+);
+const walletReservationExpiryService = new WalletReservationExpiryService({
+  walletAdapter,
+  tickIntervalMs: walletReservationExpiryTickMs,
+  onTick: (count) => {
+    if (count > 0) console.log(`[wallet-reservation-expiry] expired ${count} stale reservations`);
+  },
+});
 
 // ── BIN-582: Legacy-cron ports (Swedbank sync, BankID expiry, RG cleanup) ────
 
@@ -937,6 +1005,18 @@ jobScheduler.register({
     runAtHourLocal: jobRgCleanupRunAtHour,
   }),
 });
+
+// BIN-720: Profile Settings 48h-queue flush. Promoterer pending loss-limit-
+// endringer → active når effectiveFromMs <= now. Polling-intervall 15 min.
+if (profileSettingsService) {
+  jobScheduler.register({
+    name: "profile-pending-loss-limit-flush",
+    description: "Activate pending loss-limit increases when 48h window has passed (BIN-720).",
+    intervalMs: 15 * 60 * 1000,
+    enabled: true,
+    run: createProfilePendingLossLimitFlushJob({ profileSettingsService }),
+  });
+}
 
 // BIN-700: nullstill month_points for alle spillere ved månedskift. Polling-
 // intervall 1 time (default). Idempotent via month_key-sammenligning i
@@ -1252,10 +1332,21 @@ app.use(createPlayersRouter({
   platformService,
   auditLogService,
 }));
+
+// BIN-720: Profile Settings API (PDF 8 + PDF 9 wireframes). Router wires
+// kun når responsibleGamingStore er tilgjengelig (instansen konstrueres
+// lenger opp i filen, sammen med job-registrering for 48h-flush-cron).
+if (profileSettingsService) {
+  app.use(createUserProfileRouter({
+    platformService,
+    profileSettingsService,
+  }));
+}
 app.use(createAdminPlayersRouter({
   platformService,
   auditLogService,
   emailService,
+  emailQueue,
   bankIdAdapter,
   webBaseUrl,
   supportEmail,
@@ -1398,6 +1489,10 @@ app.use(createAdminGame1MasterRouter({
   platformService,
   auditLogService,
   masterControlService: game1MasterControlService,
+  // Task 1.1 (Gap #1): wire draw-engine slik at GET /games/:gameId kan
+  // returnere engineState (paused, paused_at_phase). Master-console
+  // bruker feltene til å vise Resume-knapp + auto-pause-banner.
+  drawEngine: game1DrawEngineService,
   io,
 }));
 // GAME1_SCHEDULE PR 4a: ticket-purchase-router for Game 1. 3 endepunkter —
@@ -2055,6 +2150,20 @@ const registerGameEvents = createGameEventHandlers({
   chatMessageStore,
   // BIN-587 B4b follow-up: dep for socket-event `voucher:redeem`.
   voucherRedemptionService,
+  // BIN-693 Option B: wallet-reservasjon-wiring.
+  walletAdapter,
+  getWalletIdForPlayer: (roomCode, playerId) => {
+    try {
+      const snap = engine.getRoomSnapshot(roomCode);
+      const player = snap.players.find((p) => p.id === playerId);
+      return player?.walletId ?? null;
+    } catch {
+      return null;
+    }
+  },
+  getReservationId: (code, pid) => roomState.getReservationId(code, pid),
+  setReservationId: (code, pid, rid) => roomState.setReservationId(code, pid, rid),
+  clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.
@@ -2190,6 +2299,7 @@ const PORT = Number(process.env.PORT ?? 4000);
 
   dailyReportScheduler.start();
   jobScheduler.start();
+  walletReservationExpiryService.start();
 
   // BIN-170: Load rooms from Redis on startup (if Redis provider)
   if (roomStateProvider === "redis") {

@@ -193,3 +193,41 @@ export const Game1AdminPhysicalTicketWonPayloadSchema = z.object({
 export type Game1AdminPhysicalTicketWonPayload = z.infer<
   typeof Game1AdminPhysicalTicketWonPayloadSchema
 >;
+
+// ── Task 1.1: auto-pause ved phase-won ──────────────────────────────────────
+// Gap #1 i docs/architecture/MASTER_HALL_DASHBOARD_GAP_2026-04-24.md.
+//
+// `game1:auto-paused` — emittes av Game1DrawEngineService når en phase-won
+// trigget auto-pause (etter Rad 1, Rad 2, ..., men IKKE etter Fullt Hus
+// fordi spillet da avsluttes). Master-UI og agent-portal bruker eventet for
+// å vise Resume-knapp + banner "Pause etter Rad X — trykk Resume".
+//
+// `game1:resumed` — emittes av Game1MasterControlService når master/agent
+// manuelt re-starter draw-engine etter auto-pause. Markerer slutten på
+// paused-sidestate (sett `paused=false`, `paused_at_phase=NULL`).
+
+export const Game1AdminAutoPausedPayloadSchema = z.object({
+  gameId: z.string().min(1),
+  phase: z.number().int().min(1).max(5),
+  pausedAt: z.number().int().nonnegative(),
+});
+export type Game1AdminAutoPausedPayload = z.infer<
+  typeof Game1AdminAutoPausedPayloadSchema
+>;
+
+export const Game1AdminResumedPayloadSchema = z.object({
+  gameId: z.string().min(1),
+  resumedAt: z.number().int().nonnegative(),
+  actorUserId: z.string().min(1),
+  /** Fasen engine returnerer til å trekke (nåværende current_phase). */
+  phase: z.number().int().min(1).max(5),
+  /**
+   * `auto` hvis resume avsluttet en auto-pause (paused_at_phase var satt);
+   * `manual` hvis resume avsluttet en eksplisitt master-pause
+   * (status='paused').
+   */
+  resumeType: z.enum(["auto", "manual"]),
+});
+export type Game1AdminResumedPayload = z.infer<
+  typeof Game1AdminResumedPayloadSchema
+>;

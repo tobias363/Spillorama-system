@@ -45,6 +45,12 @@ export interface AdminHall {
    * Optional for bakoverkompatibilitet med eldre test-fixtures; alltid satt av backend.
    */
   tvToken?: string;
+  /**
+   * TV-kiosk voice-pack valgt for denne hallen (wireframe PDF 14).
+   * Default 'voice1' backend-side; optional i typen for bakoverkompat
+   * med eldre fixtures som ikke setter feltet.
+   */
+  tvVoiceSelection?: "voice1" | "voice2" | "voice3";
   createdAt: string;
   updatedAt: string;
 }
@@ -184,4 +190,37 @@ export function updateHall(id: string, patch: UpdateHallInput): Promise<AdminHal
  */
 export function setHallActive(id: string, isActive: boolean): Promise<AdminHall> {
   return updateHall(id, { isActive });
+}
+
+// ── TV-kiosk voice-pack (wireframe PDF 14) ─────────────────────────────────
+//
+// Hver hall kan velge én av 3 voice-packs for ball-utrop på TV-skjermen.
+// Backend audit-logger hver endring + broadcaster `tv:voice-changed` til
+// hall:<id>:display-rommet så aktive TV-klienter kan reloade pack uten
+// manuell refresh.
+
+export type HallTvVoice = "voice1" | "voice2" | "voice3";
+export const HALL_TV_VOICES: readonly HallTvVoice[] = ["voice1", "voice2", "voice3"] as const;
+
+export interface HallVoiceResult {
+  hallId: string;
+  voice: HallTvVoice;
+}
+
+export function getHallVoice(hallId: string): Promise<HallVoiceResult> {
+  return apiRequest<HallVoiceResult>(
+    `/api/admin/halls/${encodeURIComponent(hallId)}/voice`,
+    { auth: true },
+  );
+}
+
+export function setHallVoice(hallId: string, voice: HallTvVoice): Promise<HallVoiceResult> {
+  return apiRequest<HallVoiceResult>(
+    `/api/admin/halls/${encodeURIComponent(hallId)}/voice`,
+    {
+      method: "PUT",
+      body: { voice },
+      auth: true,
+    },
+  );
 }

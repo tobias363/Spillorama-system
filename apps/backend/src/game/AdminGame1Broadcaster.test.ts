@@ -18,6 +18,8 @@ import {
   type AdminGame1DrawProgressedEvent,
   type AdminGame1PhaseWonEvent,
   type AdminGame1PhysicalTicketWonEvent,
+  type AdminGame1AutoPausedEvent,
+  type AdminGame1ResumedEvent,
 } from "./AdminGame1Broadcaster.js";
 
 test("4d.3: NoopAdminGame1Broadcaster.onStatusChange er trygg no-op", () => {
@@ -50,11 +52,15 @@ test("4d.3+4: broadcaster-port — events har forventet shape (compile + runtime
   const drawEvents: AdminGame1DrawProgressedEvent[] = [];
   const phaseEvents: AdminGame1PhaseWonEvent[] = [];
   const physicalEvents: AdminGame1PhysicalTicketWonEvent[] = [];
+  const autoPausedEvents: AdminGame1AutoPausedEvent[] = [];
+  const resumedEvents: AdminGame1ResumedEvent[] = [];
   const recording: AdminGame1Broadcaster = {
     onStatusChange: (e) => statusEvents.push(e),
     onDrawProgressed: (e) => drawEvents.push(e),
     onPhaseWon: (e) => phaseEvents.push(e),
     onPhysicalTicketWon: (e) => physicalEvents.push(e),
+    onAutoPaused: (e) => autoPausedEvents.push(e),
+    onResumed: (e) => resumedEvents.push(e),
   };
 
   recording.onStatusChange({
@@ -94,6 +100,19 @@ test("4d.3+4: broadcaster-port — events har forventet shape (compile + runtime
     adminApprovalRequired: false,
     at: 2500,
   });
+  // Task 1.1: auto-pause + resumed event shapes.
+  recording.onAutoPaused({
+    gameId: "g1",
+    phase: 1,
+    pausedAt: 3000,
+  });
+  recording.onResumed({
+    gameId: "g1",
+    resumedAt: 4000,
+    actorUserId: "u-admin",
+    phase: 2,
+    resumeType: "auto",
+  });
 
   assert.equal(statusEvents.length, 1);
   assert.equal(statusEvents[0]!.action, "pause");
@@ -105,6 +124,30 @@ test("4d.3+4: broadcaster-port — events har forventet shape (compile + runtime
   assert.equal(physicalEvents.length, 1);
   assert.equal(physicalEvents[0]!.ticketId, "100-1001");
   assert.equal(physicalEvents[0]!.expectedPayoutCents, 10_000);
+  assert.equal(autoPausedEvents.length, 1);
+  assert.equal(autoPausedEvents[0]!.phase, 1);
+  assert.equal(resumedEvents.length, 1);
+  assert.equal(resumedEvents[0]!.resumeType, "auto");
+  assert.equal(resumedEvents[0]!.phase, 2);
+});
+
+test("Task 1.1: NoopAdminGame1Broadcaster.onAutoPaused + onResumed er trygge no-ops", () => {
+  assert.doesNotThrow(() =>
+    NoopAdminGame1Broadcaster.onAutoPaused({
+      gameId: "g1",
+      phase: 1,
+      pausedAt: Date.now(),
+    })
+  );
+  assert.doesNotThrow(() =>
+    NoopAdminGame1Broadcaster.onResumed({
+      gameId: "g1",
+      resumedAt: Date.now(),
+      actorUserId: "u-1",
+      phase: 2,
+      resumeType: "auto",
+    })
+  );
 });
 
 test("PT4: NoopAdminGame1Broadcaster.onPhysicalTicketWon er trygg no-op", () => {

@@ -12,6 +12,8 @@ import { requireSlotProvider } from "../../components/SlotProviderSwitch.js";
 import { openSlotMachineModal } from "./modals/SlotMachineModal.js";
 import { openSettlementModal } from "./modals/SettlementModal.js";
 import { openControlDailyBalanceModal } from "./modals/ControlDailyBalanceModal.js";
+import { openAddMoneyRegisteredUserModal } from "./modals/AddMoneyRegisteredUserModal.js";
+import { openWithdrawRegisteredUserModal } from "./modals/WithdrawRegisteredUserModal.js";
 import { boxClose, boxOpen, contentHeader, escapeHtml, formatNOK } from "./shared.js";
 
 const F5_F6_F8 = new Set(["F5", "F6", "F8"]);
@@ -66,10 +68,10 @@ export function renderCashInOutPage(container: HTMLElement): void {
             <div class="row cashinout-grid">
               <div class="col-sm-4"><button class="btn btn-success btn-block" data-action="slot-machine">${escapeHtml(t("slot_machine"))}</button></div>
               <div class="col-sm-4"><a class="btn btn-success btn-block" href="#/agent/unique-id/add">${escapeHtml(t("add_money"))}<br>${escapeHtml(t("unique_id"))}</a></div>
-              <div class="col-sm-4"><a class="btn btn-success btn-block" href="#/agent/register-user/add">${escapeHtml(t("add_money"))}<br>${escapeHtml(t("registered_user"))} (F5)</a></div>
+              <div class="col-sm-4"><button type="button" class="btn btn-success btn-block" data-action="add-money-registered-user">${escapeHtml(t("add_money"))}<br>${escapeHtml(t("registered_user"))} (F5)</button></div>
               <div class="col-sm-4"><a class="btn btn-success btn-block" href="#/uniqueId">${escapeHtml(t("create"))}<br>${escapeHtml(t("new_unique_id"))}</a></div>
               <div class="col-sm-4"><a class="btn btn-danger btn-block" href="#/agent/unique-id/withdraw">${escapeHtml(t("withdraw"))}<br>${escapeHtml(t("unique_id"))}</a></div>
-              <div class="col-sm-4"><a class="btn btn-danger btn-block" href="#/agent/register-user/withdraw">${escapeHtml(t("withdraw"))}<br>${escapeHtml(t("registered_user"))} (F6)</a></div>
+              <div class="col-sm-4"><button type="button" class="btn btn-danger btn-block" data-action="withdraw-registered-user">${escapeHtml(t("withdraw"))}<br>${escapeHtml(t("registered_user"))} (F6)</button></div>
               <div class="col-sm-4"><a class="btn btn-success btn-block" href="#/agent/sellProduct">${escapeHtml(t("sell"))}<br>${escapeHtml(t("products"))}</a></div>
             </div>
           ${boxClose()}
@@ -125,6 +127,12 @@ function wireActions(container: HTMLElement): void {
         if (provider) openSlotMachineModal(provider);
         break;
       }
+      case "add-money-registered-user":
+        openAddMoneyRegisteredUserModal({ onSuccess: () => void refreshBalance(container) });
+        break;
+      case "withdraw-registered-user":
+        openWithdrawRegisteredUserModal({ onSuccess: () => void refreshBalance(container) });
+        break;
     }
   });
 }
@@ -138,10 +146,10 @@ function wireFunctionKeys(container: HTMLElement): void {
     e.preventDefault();
     switch (e.key) {
       case "F5":
-        window.location.hash = "#/agent/register-user/add";
+        openAddMoneyRegisteredUserModal({ onSuccess: () => void refreshBalance(container) });
         break;
       case "F6":
-        window.location.hash = "#/agent/register-user/withdraw";
+        openWithdrawRegisteredUserModal({ onSuccess: () => void refreshBalance(container) });
         break;
       case "F8":
         window.location.hash = "#/hallSpecificReport";

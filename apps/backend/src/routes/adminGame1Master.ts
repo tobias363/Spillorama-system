@@ -35,6 +35,7 @@ import type {
   MasterActor,
   MasterActionResult,
 } from "../game/Game1MasterControlService.js";
+import type { Game1DrawEngineService } from "../game/Game1DrawEngineService.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -54,6 +55,12 @@ export interface AdminGame1MasterRouterDeps {
   platformService: PlatformService;
   auditLogService: AuditLogService;
   masterControlService: Game1MasterControlService;
+  /**
+   * Task 1.1: valgfri draw-engine for å inkludere engine-state (paused,
+   * paused_at_phase, current_phase) i GET-responsen. Hvis ikke satt faller
+   * responsen tilbake til kun scheduled_game-state (legacy-kontrakt).
+   */
+  drawEngine?: Game1DrawEngineService;
   io?: SocketServer;
 }
 
@@ -133,7 +140,7 @@ function broadcastAction(
 export function createAdminGame1MasterRouter(
   deps: AdminGame1MasterRouterDeps
 ): express.Router {
-  const { platformService, auditLogService, masterControlService, io } = deps;
+  const { platformService, auditLogService, masterControlService, drawEngine, io } = deps;
   const router = express.Router();
 
   async function requirePermission(
@@ -191,6 +198,21 @@ export function createAdminGame1MasterRouter(
       const confirmExcludedHalls = Array.isArray(body.confirmExcludedHalls)
         ? body.confirmExcludedHalls.filter((v: unknown): v is string => typeof v === "string")
         : undefined;
+      // Task 1.5: "agents not ready"-override. Klient kaller /start uten flag
+      // først; dersom backend returnerer HALLS_NOT_READY med `unreadyHalls`,
+      // viser frontend popup og re-kaller /start med samtlige orange hall-IDer
+      // i `confirmUnreadyHalls`. Se Game1MasterControlService.startGame
+      // for audit- og exclude-semantikk.
+      const confirmUnreadyHalls = Array.isArray(body.confirmUnreadyHalls)
+        ? body.confirmUnreadyHalls.filter((v: unknown): v is string => typeof v === "string")
+        : undefined;
+      // Task 1.5 (forward-compat mot HS #451): accept `confirmExcludeRedHalls`
+      // for rød-auto-exclude-mønster. Mappes inn som excluded (samme som
+      // confirmExcludedHalls). Hvis #451 lander kan service-laget bruke
+      // `Game1HallReadyService.getHallStatusForGame` for farge-deteksjon.
+      const confirmExcludeRedHalls = Array.isArray(body.confirmExcludeRedHalls)
+        ? body.confirmExcludeRedHalls.filter((v: unknown): v is string => typeof v === "string")
+        : undefined;
 
       const { masterHallId, groupHallId } = await loadMasterHallId(gameId);
       const masterActor = buildActor(actor, masterHallId);
@@ -198,8 +220,14 @@ export function createAdminGame1MasterRouter(
         gameId,
         actor: masterActor,
       };
-      if (confirmExcludedHalls !== undefined) {
-        startInput.confirmExcludedHalls = confirmExcludedHalls;
+      if (confirmExcludedHalls !== undefined || confirmExcludeRedHalls !== undefined) {
+        startInput.confirmExcludedHalls = [
+          ...(confirmExcludedHalls ?? []),
+          ...(confirmExcludeRedHalls ?? []),
+        ];
+      }
+      if (confirmUnreadyHalls !== undefined) {
+        startInput.confirmUnreadyHalls = confirmUnreadyHalls;
       }
       const result = await masterControlService.startGame(startInput);
 
@@ -448,11 +476,46 @@ export function createAdminGame1MasterRouter(
           .filter((h) => !h.excludedFromGame)
           .every((h) => h.isReady);
 
+      // Task 1.1: inkluder engine-state (paused, paused_at_phase, phase)
+      // når draw-engine er wired inn. Admin-UI bruker feltene for å vise
+      // Resume-knapp + banner ved auto-pause uten å trenge ekstra REST-
+      // kall. Fail-soft: hvis engine.getState kaster (f.eks. engine ikke
+      // startet ennå), faller vi tilbake til engineState=null.
+      let engineState:
+        | null
+        | {
+            isPaused: boolean;
+            pausedAtPhase: number | null;
+            currentPhase: number;
+            drawsCompleted: number;
+            isFinished: boolean;
+          } = null;
+      if (drawEngine) {
+        try {
+          const view = await drawEngine.getState(gameId);
+          if (view) {
+            engineState = {
+              isPaused: view.isPaused,
+              pausedAtPhase: view.pausedAtPhase,
+              currentPhase: view.currentPhase,
+              drawsCompleted: view.drawsCompleted,
+              isFinished: view.isFinished,
+            };
+          }
+        } catch (err) {
+          logger.warn(
+            { err, gameId },
+            "[Task 1.1] drawEngine.getState feilet — returnerer engineState=null"
+          );
+        }
+      }
+
       apiSuccess(res, {
         game: detail.game,
         halls: hallsWithName,
         allReady,
         auditRecent: detail.auditRecent,
+        engineState,
       });
     } catch (error) {
       apiFailure(res, error);

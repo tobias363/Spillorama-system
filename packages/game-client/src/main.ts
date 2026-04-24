@@ -40,3 +40,19 @@ export function unmountGame(): void {
 // Dev mode: auto-mount is handled by the dev lobby in index.html.
 // The lobby logs in via /api/auth/login, gets a real accessToken,
 // and calls mountGame() with correct hallId and credentials.
+
+// Dev-only: load the performance HUD when URL contains `?perfhud=1`.
+// Dynamic import keeps the module out of the prod bundle — Vite tree-shakes
+// the branch under `import.meta.env.DEV === false` and the ES-module loader
+// never resolves it when DEV is false.
+if (
+  import.meta.env.DEV &&
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("perfhud") === "1"
+) {
+  void import("./diagnostics/PerfHud.js").then(({ PerfHud }) => {
+    const hud = new PerfHud();
+    hud.mount();
+    (window as unknown as Record<string, unknown>).__perfhud = hud;
+  });
+}

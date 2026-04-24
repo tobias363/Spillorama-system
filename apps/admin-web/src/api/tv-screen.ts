@@ -103,3 +103,27 @@ export function fetchTvState(hallId: string, tvToken: string): Promise<TvGameSta
 export function fetchTvWinners(hallId: string, tvToken: string): Promise<TvWinnersSummary> {
   return fetchTv<TvWinnersSummary>(tvUrl(hallId, tvToken, "winners"));
 }
+
+// ── Voice-pack (wireframe PDF 14) ───────────────────────────────────────────
+//
+// Public endpoint (ingen token-krav) — TV-klienten kaller det ved mount og
+// etter `tv:voice-changed`-broadcast for å vite hvilken voice-pack som skal
+// lastes. Responsen: `{ voice: 'voice1' | 'voice2' | 'voice3' }`.
+
+export type TvVoice = "voice1" | "voice2" | "voice3";
+
+export async function fetchTvVoice(hallId: string): Promise<TvVoice> {
+  const res = await fetch(`/api/tv/${encodeURIComponent(hallId)}/voice`, {
+    method: "GET",
+    headers: { accept: "application/json" },
+  });
+  if (!res.ok) {
+    const code = res.status === 404 ? "NOT_FOUND" : "HTTP_ERROR";
+    throw new TvApiError(res.status, code, `TV voice endpoint returned ${res.status}`);
+  }
+  const body = (await res.json()) as { ok: boolean; data?: { voice?: string } };
+  const voice = body.data?.voice;
+  if (voice === "voice1" || voice === "voice2" || voice === "voice3") return voice;
+  // Fail-safe fallback — TV skal alltid kunne spille noe.
+  return "voice1";
+}

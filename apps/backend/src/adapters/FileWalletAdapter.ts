@@ -2,14 +2,17 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
+  CommitReservationOptions,
   CreateWalletAccountInput,
   CreditOptions,
+  ReserveOptions,
   TransactionOptions,
   TransferOptions,
   WalletAccount,
   WalletAccountSide,
   WalletAdapter,
   WalletBalance,
+  WalletReservation,
   WalletTransaction,
   WalletTransactionType,
   WalletTransactionSplit,
@@ -340,6 +343,212 @@ export class FileWalletAdapter implements WalletAdapter {
         .reverse()
         .map((tx) => ({ ...tx }));
     });
+  }
+
+  // ── BIN-693 Option B: Wallet-reservasjon ──────────────────────────────────
+  // PR 1 scope: in-memory reservasjoner. Persistens kommer i PR 2 sammen med
+  // Postgres-adapter — inntil da mister file-adapter reservasjoner ved
+  // backend-restart (same som in-memory armed-state i BingoEngine).
+
+  private readonly reservations = new Map<string, WalletReservation>();
+  private readonly reservationByIdempotencyKey = new Map<string, string>();
+
+  async getAvailableBalance(accountId: string): Promise<number> {
+    return this.withLock(async () => {
+      await this.load();
+      const normalized = this.assertAccountId(accountId);
+      const account = this.store.accounts[normalized];
+      if (!account) {
+        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${normalized} finnes ikke.`);
+      }
+      const reserved = this.sumActiveReservations(normalized);
+      return Math.max(0, account.depositBalance + account.winningsBalance - reserved);
+    });
+  }
+
+  async reserve(
+    accountId: string,
+    amount: number,
+    options: ReserveOptions,
+  ): Promise<WalletReservation> {
+    return this.withLock(async () => {
+      await this.load();
+      if (amount <= 0) throw new WalletError("INVALID_INPUT", "amount må være > 0.");
+      const normalized = this.assertAccountId(accountId);
+      const account = this.store.accounts[normalized];
+      if (!account) {
+        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${normalized} finnes ikke.`);
+      }
+
+      const existingId = this.reservationByIdempotencyKey.get(options.idempotencyKey);
+      if (existingId) {
+        const existing = this.reservations.get(existingId);
+        if (existing && existing.status === "active") {
+          if (existing.amount !== amount) {
+            throw new WalletError(
+              "IDEMPOTENCY_MISMATCH",
+              `Reservasjon med samme key (${options.idempotencyKey}) har beløp ${existing.amount}, ikke ${amount}.`,
+            );
+          }
+          return { ...existing };
+        }
+      }
+
+      const available = account.depositBalance + account.winningsBalance - this.sumActiveReservations(normalized);
+      if (available < amount) {
+        throw new WalletError(
+          "INSUFFICIENT_FUNDS",
+          `Wallet ${normalized} har ikke tilstrekkelig tilgjengelig saldo (${available} < ${amount}).`,
+        );
+      }
+
+      const now = new Date();
+      const expiresAt = options.expiresAt ?? new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+      const reservation: WalletReservation = {
+        id: randomUUID(),
+        walletId: normalized,
+        amount,
+        idempotencyKey: options.idempotencyKey,
+        status: "active",
+        roomCode: options.roomCode,
+        gameSessionId: null,
+        createdAt: now.toISOString(),
+        releasedAt: null,
+        committedAt: null,
+        expiresAt,
+      };
+      this.reservations.set(reservation.id, reservation);
+      this.reservationByIdempotencyKey.set(options.idempotencyKey, reservation.id);
+      return { ...reservation };
+    });
+  }
+
+  async increaseReservation(
+    reservationId: string,
+    extraAmount: number,
+  ): Promise<WalletReservation> {
+    return this.withLock(async () => {
+      await this.load();
+      if (extraAmount <= 0) throw new WalletError("INVALID_INPUT", "extraAmount må være > 0.");
+      const existing = this.reservations.get(reservationId);
+      if (!existing) {
+        throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+      }
+      if (existing.status !== "active") {
+        throw new WalletError(
+          "INVALID_STATE",
+          `Reservasjon ${reservationId} er ${existing.status}, kan ikke økes.`,
+        );
+      }
+      const account = this.store.accounts[existing.walletId];
+      if (!account) {
+        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${existing.walletId} finnes ikke.`);
+      }
+      const available = account.depositBalance + account.winningsBalance - this.sumActiveReservations(existing.walletId);
+      if (available < extraAmount) {
+        throw new WalletError(
+          "INSUFFICIENT_FUNDS",
+          `Wallet ${existing.walletId} har ikke tilstrekkelig tilgjengelig saldo for økning (${available} < ${extraAmount}).`,
+        );
+      }
+      const updated: WalletReservation = { ...existing, amount: existing.amount + extraAmount };
+      this.reservations.set(reservationId, updated);
+      return { ...updated };
+    });
+  }
+
+  async releaseReservation(reservationId: string, amount?: number): Promise<WalletReservation> {
+    const existing = this.reservations.get(reservationId);
+    if (!existing) {
+      throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+    }
+    if (existing.status !== "active") {
+      throw new WalletError(
+        "INVALID_STATE",
+        `Reservasjon ${reservationId} er ${existing.status}, kan ikke frigis.`,
+      );
+    }
+    if (amount === undefined || amount >= existing.amount) {
+      const updated: WalletReservation = {
+        ...existing,
+        status: "released",
+        releasedAt: new Date().toISOString(),
+      };
+      this.reservations.set(reservationId, updated);
+      return { ...updated };
+    }
+    if (amount <= 0) throw new WalletError("INVALID_INPUT", "amount må være > 0.");
+    const updated: WalletReservation = {
+      ...existing,
+      amount: existing.amount - amount,
+    };
+    this.reservations.set(reservationId, updated);
+    return { ...updated };
+  }
+
+  async commitReservation(
+    reservationId: string,
+    toAccountId: string,
+    reason: string,
+    options?: CommitReservationOptions,
+  ): Promise<WalletTransferResult> {
+    const existing = this.reservations.get(reservationId);
+    if (!existing) {
+      throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+    }
+    if (existing.status !== "active") {
+      throw new WalletError(
+        "INVALID_STATE",
+        `Reservasjon ${reservationId} er ${existing.status}, kan ikke committes.`,
+      );
+    }
+    const transfer = await this.transfer(
+      existing.walletId,
+      toAccountId,
+      existing.amount,
+      reason,
+      options,
+    );
+    this.reservations.set(reservationId, {
+      ...existing,
+      status: "committed",
+      committedAt: new Date().toISOString(),
+      gameSessionId: options?.gameSessionId ?? null,
+    });
+    return transfer;
+  }
+
+  async listActiveReservations(accountId: string): Promise<WalletReservation[]> {
+    const normalized = this.assertAccountId(accountId);
+    return Array.from(this.reservations.values())
+      .filter((r) => r.walletId === normalized && r.status === "active")
+      .map((r) => ({ ...r }));
+  }
+
+  async listReservationsByRoom(roomCode: string): Promise<WalletReservation[]> {
+    return Array.from(this.reservations.values())
+      .filter((r) => r.roomCode === roomCode)
+      .map((r) => ({ ...r }));
+  }
+
+  async expireStaleReservations(nowMs: number): Promise<number> {
+    const now = new Date(nowMs).toISOString();
+    let expired = 0;
+    for (const [id, r] of this.reservations) {
+      if (r.status === "active" && r.expiresAt < now) {
+        this.reservations.set(id, { ...r, status: "expired", releasedAt: now });
+        expired++;
+      }
+    }
+    return expired;
+  }
+
+  private sumActiveReservations(walletId: string): number {
+    let total = 0;
+    for (const r of this.reservations.values()) {
+      if (r.walletId === walletId && r.status === "active") total += r.amount;
+    }
+    return total;
   }
 
   private async withLock<T>(work: () => Promise<T>): Promise<T> {

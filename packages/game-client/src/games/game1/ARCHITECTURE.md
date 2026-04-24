@@ -83,6 +83,45 @@ farge-palett mot eksisterende design tokens (typisk dypere varianter av
   blink-fiks runde 1 (commit 23caea5b i branch `fix/spill1-visual-polish`)
   — tidligere blink-runder målte DOM-mutasjoner, ikke GPU-shader-cost.
 
+## Performance HUD (dev-mode overlay)
+
+Liten on-screen overlay som viser live runtime-metrics mens du utvikler, slik
+at du umiddelbart ser performance-regresjoner. Implementert i
+[`packages/game-client/src/diagnostics/PerfHud.ts`](../../diagnostics/PerfHud.ts).
+
+**Aktivering:**
+
+- URL-parameter: `?perfhud=1` (default OFF selv i dev for å unngå å forstyrre
+  design-arbeid).
+- Hotkey: `Ctrl+Alt+P` (eller `Cmd+Alt+P` på macOS) toggler HUD-synlighet
+  uten å måtte endre URL.
+- **Kun i dev** (`import.meta.env.DEV === true`) — modulen dynamisk-importeres
+  og strippes automatisk fra prod-bundle (0 KB prod-impact).
+
+**Metrics som vises:**
+
+| Metrik         | Terskel  | Alvor  |
+|----------------|----------|--------|
+| FPS            | < 55     | rød    |
+| Paints/s       | > 30     | rød    |
+| RAF calls/s    | > 130    | gul    |
+| BF count       | > 3      | rød    |
+| Active anims   | > 10     | gul    |
+| Tweens (GSAP)  | > 15     | gul    |
+| Layers         | > 20     | gul    |
+
+Terskler matcher CI budget fra PR #469 (`scripts/performance-budget/*`).
+
+**Hvorfor "BF count" er flagget rødt:**
+Backdrop-filter-elementer over Pixi-canvas er **blink-hovedårsaken** (se
+regel lenger opp i denne filen). HUD-en scanner DOM hvert sekund og
+rapporterer antall elementer der `getComputedStyle(el).backdropFilter !==
+"none"`. Verdi > 3 indikerer regresjon — finn syndebukken via Chrome
+DevTools: Inspector → filtrer "backdrop-filter".
+
+**`window.__perfhud`** er tilgjengelig i console for manuell inspeksjon av
+metrics eller programmatic toggle.
+
 ## Andre invariants (kort-form)
 
 Disse er dokumentert nærmere i `README.md`:

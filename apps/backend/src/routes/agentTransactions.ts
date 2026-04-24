@@ -1,22 +1,26 @@
 /**
  * BIN-583 B3.2: agent-transaksjons-endepunkter.
  *
- *   POST   /api/agent/players/lookup            — søk spiller i hall
- *   GET    /api/agent/players/:id/balance       — wallet-balance
- *   POST   /api/agent/players/:id/cash-in       — add money
- *   POST   /api/agent/players/:id/cash-out      — withdraw
- *   POST   /api/agent/tickets/register          — digital ticket (stub)
- *   GET    /api/agent/physical/inventory        — unsold tickets i hall
- *   POST   /api/agent/physical/sell             — POS-salg
- *   POST   /api/agent/physical/sell/cancel      — counter-tx (10-min-vindu)
- *   GET    /api/agent/transactions/today        — nåværende shift
- *   GET    /api/agent/transactions              — paginert historikk
- *   GET    /api/agent/transactions/:id          — detail
+ *   POST   /api/agent/players/lookup                       — søk spiller i hall
+ *   GET    /api/agent/players/:id/balance                  — wallet-balance
+ *   POST   /api/agent/players/:id/cash-in                  — add money (legacy)
+ *   POST   /api/agent/players/:id/cash-out                 — withdraw (legacy)
+ *   POST   /api/agent/transactions/add-money-user          — WF 17.7 add money
+ *   POST   /api/agent/transactions/withdraw-user           — WF 17.8 withdraw
+ *   GET    /api/agent/transactions/search-users?q=         — WF 17.7/17.8 autocomplete
+ *   POST   /api/agent/tickets/register                     — digital ticket (stub)
+ *   GET    /api/agent/physical/inventory                   — unsold tickets i hall
+ *   POST   /api/agent/physical/sell                        — POS-salg
+ *   POST   /api/agent/physical/sell/cancel                 — counter-tx (10-min-vindu)
+ *   GET    /api/agent/transactions/today                   — nåværende shift
+ *   GET    /api/agent/transactions                         — paginert historikk
+ *   GET    /api/agent/transactions/:id                     — detail
  *
  * RBAC:
- *   - AGENT_CASH_WRITE for cash-in/out
+ *   - AGENT_CASH_WRITE for cash-in/out (inkl. add-money-user, withdraw-user)
  *   - AGENT_TICKET_WRITE for register / sell / cancel
- *   - AGENT_TX_READ for lookup / balance / inventory / list / detail
+ *   - AGENT_TX_READ for lookup / balance / inventory / list / detail /
+ *     search-users
  */
 
 import express from "express";
@@ -76,6 +80,22 @@ function parsePaymentMethod(value: unknown, allowed: readonly string[]): string 
     throw new DomainError("INVALID_INPUT", `paymentMethod må være en av: ${allowed.join(", ")}.`);
   }
   return upper;
+}
+
+/**
+ * Wireframe 17.7/17.8 bruker TitleCase ("Cash"/"Card") i payment-type-
+ * dropdown — normaliserer derfor case-insensitivt men returnerer canonical
+ * TitleCase for å matche DTOen i service-laget og admin-web-modalen.
+ */
+function parsePaymentType(value: unknown, allowed: readonly string[]): string {
+  if (typeof value !== "string") {
+    throw new DomainError("INVALID_INPUT", "paymentType er påkrevd.");
+  }
+  const lower = value.toLowerCase();
+  for (const candidate of allowed) {
+    if (candidate.toLowerCase() === lower) return candidate;
+  }
+  throw new DomainError("INVALID_INPUT", `paymentType må være en av: ${allowed.join(", ")}.`);
 }
 
 export function createAgentTransactionsRouter(deps: AgentTransactionsRouterDeps): express.Router {
@@ -206,6 +226,156 @@ export function createAgentTransactionsRouter(deps: AgentTransactionsRouterDeps)
         userAgent: userAgent(req),
       });
       apiSuccess(res, tx);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── Wireframe 17.7 + 17.8: agent add-money / withdraw — registered user ─
+  //
+  // Forskjellen fra /api/agent/players/:id/cash-(in|out):
+  //   - Target-user MÅ være PLAYER (service-guard kaster TARGET_NOT_PLAYER).
+  //   - Beløp > 10 000 NOK får egen `agent.aml.high_value`-audit-entry.
+  //   - Withdraw > 10 000 NOK krever `requireConfirm=true` på kallet.
+  //   - Search-endepunktet gir PLAYER-autocomplete + wallet-saldo til
+  //     `WithdrawRegisteredUserModal`.
+
+  // ── POST /api/agent/transactions/add-money-user ─────────────────────────
+  router.post("/api/agent/transactions/add-money-user", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "AGENT_CASH_WRITE");
+      if (actor.role !== "AGENT") {
+        throw new DomainError("FORBIDDEN", "Add-money-user kun for AGENT.");
+      }
+      const body = isRecordObject(req.body) ? req.body : {};
+      const targetUserId = mustBeNonEmptyString(body.targetUserId, "targetUserId");
+      const amount = mustBePositiveAmount(body.amount, "amount");
+      const paymentType = parsePaymentType(body.paymentType, ["Cash", "Card"]);
+      const clientRequestId = mustBeNonEmptyString(body.clientRequestId, "clientRequestId");
+      const result = await agentTransactionService.addMoneyToUser({
+        agentUserId: actor.userId,
+        targetUserId,
+        amount,
+        paymentType: paymentType as "Cash" | "Card",
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+        clientRequestId,
+      });
+      void auditLogService.record({
+        actorId: actor.userId,
+        actorType: "AGENT",
+        action: "agent.cash_in_user",
+        resource: "transaction",
+        resourceId: result.transaction.id,
+        details: {
+          targetUserId,
+          amount,
+          paymentType,
+          hallId: result.transaction.hallId,
+          shiftId: result.transaction.shiftId,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+      if (result.amlFlagged) {
+        void auditLogService.record({
+          actorId: actor.userId,
+          actorType: "AGENT",
+          action: "agent.aml.high_value",
+          resource: "transaction",
+          resourceId: result.transaction.id,
+          details: {
+            flow: "add-money-user",
+            amount,
+            threshold: 10_000,
+            targetUserId,
+            hallId: result.transaction.hallId,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        });
+      }
+      apiSuccess(res, { transaction: result.transaction, amlFlagged: result.amlFlagged });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── POST /api/agent/transactions/withdraw-user ──────────────────────────
+  router.post("/api/agent/transactions/withdraw-user", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "AGENT_CASH_WRITE");
+      if (actor.role !== "AGENT") {
+        throw new DomainError("FORBIDDEN", "Withdraw-user kun for AGENT.");
+      }
+      const body = isRecordObject(req.body) ? req.body : {};
+      const targetUserId = mustBeNonEmptyString(body.targetUserId, "targetUserId");
+      const amount = mustBePositiveAmount(body.amount, "amount");
+      // Wireframe-spec: kun Cash på agent-uttak — bank-flow går via egen
+      // amountwithdraw-route. Vi godtar "Cash" case-insensitivt.
+      const paymentType = parsePaymentType(body.paymentType, ["Cash"]);
+      const clientRequestId = mustBeNonEmptyString(body.clientRequestId, "clientRequestId");
+      const requireConfirm = body.requireConfirm === true;
+      const result = await agentTransactionService.withdrawFromUser({
+        agentUserId: actor.userId,
+        targetUserId,
+        amount,
+        paymentType: paymentType as "Cash",
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+        clientRequestId,
+        requireConfirm,
+      });
+      void auditLogService.record({
+        actorId: actor.userId,
+        actorType: "AGENT",
+        action: "agent.cash_out_user",
+        resource: "transaction",
+        resourceId: result.transaction.id,
+        details: {
+          targetUserId,
+          amount,
+          paymentType,
+          hallId: result.transaction.hallId,
+          shiftId: result.transaction.shiftId,
+          requireConfirm,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+      if (result.amlFlagged) {
+        void auditLogService.record({
+          actorId: actor.userId,
+          actorType: "AGENT",
+          action: "agent.aml.high_value",
+          resource: "transaction",
+          resourceId: result.transaction.id,
+          details: {
+            flow: "withdraw-user",
+            amount,
+            threshold: 10_000,
+            targetUserId,
+            hallId: result.transaction.hallId,
+            confirmedByAgent: true,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        });
+      }
+      apiSuccess(res, { transaction: result.transaction, amlFlagged: result.amlFlagged });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── GET /api/agent/transactions/search-users?q=<prefix> ─────────────────
+  router.get("/api/agent/transactions/search-users", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "AGENT_TX_READ");
+      if (actor.role !== "AGENT") {
+        throw new DomainError("FORBIDDEN", "User-search kun for AGENT.");
+      }
+      const q = typeof req.query?.q === "string" ? req.query.q : "";
+      const users = await agentTransactionService.searchUsers(actor.userId, q);
+      apiSuccess(res, { users, query: q });
     } catch (error) {
       apiFailure(res, error);
     }
@@ -393,6 +563,6 @@ export function createAgentTransactionsRouter(deps: AgentTransactionsRouterDeps)
     }
   });
 
-  logger.info("agent-transactions-router initialised (11 endpoints)");
+  logger.info("agent-transactions-router initialised (14 endpoints)");
   return router;
 }

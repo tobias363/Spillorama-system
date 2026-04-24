@@ -2,14 +2,17 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import { getPoolTuning } from "../util/pgPool.js";
 import type {
+  CommitReservationOptions,
   CreateWalletAccountInput,
   CreditOptions,
+  ReserveOptions,
   TransactionOptions,
   TransferOptions,
   WalletAccount,
   WalletAccountSide,
   WalletAdapter,
   WalletBalance,
+  WalletReservation,
   WalletTransaction,
   WalletTransactionSplit,
   WalletTransferResult
@@ -1160,5 +1163,374 @@ export class PostgresWalletAdapter implements WalletAdapter {
 
   private entriesTable(): string {
     return `"${this.schema}"."wallet_entries"`;
+  }
+
+  // ── BIN-693 Option B: Wallet-reservasjon (Postgres SQL-impl) ──────────────
+
+  private reservationsTable(): string {
+    return `"${this.schema}"."app_wallet_reservations"`;
+  }
+
+  private mapReservationRow(row: {
+    id: string;
+    wallet_id: string;
+    amount_cents: string | number;
+    idempotency_key: string;
+    status: WalletReservation["status"];
+    room_code: string;
+    game_session_id: string | null;
+    created_at: Date | string;
+    released_at: Date | string | null;
+    committed_at: Date | string | null;
+    expires_at: Date | string;
+  }): WalletReservation {
+    return {
+      id: row.id,
+      walletId: row.wallet_id,
+      amount: Number(row.amount_cents),
+      idempotencyKey: row.idempotency_key,
+      status: row.status,
+      roomCode: row.room_code,
+      gameSessionId: row.game_session_id,
+      createdAt: typeof row.created_at === "string" ? row.created_at : row.created_at.toISOString(),
+      releasedAt: row.released_at
+        ? typeof row.released_at === "string"
+          ? row.released_at
+          : row.released_at.toISOString()
+        : null,
+      committedAt: row.committed_at
+        ? typeof row.committed_at === "string"
+          ? row.committed_at
+          : row.committed_at.toISOString()
+        : null,
+      expiresAt: typeof row.expires_at === "string" ? row.expires_at : row.expires_at.toISOString(),
+    };
+  }
+
+  async getAvailableBalance(accountId: string): Promise<number> {
+    await this.ensureInitialized();
+    const normalized = this.normalizeAnyAccountId(accountId);
+    const { rows } = await this.pool.query<{ total: string; reserved: string | null }>(
+      `SELECT
+         (COALESCE(a.deposit_balance, 0) + COALESCE(a.winnings_balance, 0))::text AS total,
+         (SELECT COALESCE(SUM(r.amount_cents), 0)
+            FROM ${this.reservationsTable()} r
+            WHERE r.wallet_id = a.id AND r.status = 'active')::text AS reserved
+       FROM ${this.accountsTable()} a
+       WHERE a.id = $1`,
+      [normalized],
+    );
+    const row = rows[0];
+    if (!row) throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${normalized} finnes ikke.`);
+    const total = Number(row.total);
+    const reserved = Number(row.reserved ?? 0);
+    return Math.max(0, total - reserved);
+  }
+
+  async reserve(
+    accountId: string,
+    amount: number,
+    options: ReserveOptions,
+  ): Promise<WalletReservation> {
+    await this.ensureInitialized();
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new WalletError("INVALID_INPUT", "amount må være > 0.");
+    }
+    const normalized = this.normalizeAnyAccountId(accountId);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Lås wallet-row for å beregne available_balance atomisk — hindrer
+      // race mot parallell reserve/transfer fra samme wallet.
+      const account = await this.selectAccountForUpdate(client, normalized);
+      if (!account) {
+        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${normalized} finnes ikke.`);
+      }
+
+      // Idempotens: samme key + beløp → returnér eksisterende aktiv
+      // reservasjon. Annet beløp → IDEMPOTENCY_MISMATCH.
+      const existingByKey = await client.query(
+        `SELECT id, wallet_id, amount_cents, idempotency_key, status, room_code,
+                game_session_id, created_at, released_at, committed_at, expires_at
+           FROM ${this.reservationsTable()}
+           WHERE idempotency_key = $1
+           LIMIT 1`,
+        [options.idempotencyKey],
+      );
+      if (existingByKey.rowCount && existingByKey.rowCount > 0) {
+        const row = existingByKey.rows[0];
+        if (row.status === "active") {
+          if (Number(row.amount_cents) !== amount) {
+            throw new WalletError(
+              "IDEMPOTENCY_MISMATCH",
+              `Reservasjon med samme key (${options.idempotencyKey}) har beløp ${row.amount_cents}, ikke ${amount}.`,
+            );
+          }
+          await client.query("COMMIT");
+          return this.mapReservationRow(row);
+        }
+        // Hvis status != active (released/committed/expired), UNIQUE
+        // constraint ville blokkert INSERT. Kast klart feil.
+        throw new WalletError(
+          "INVALID_STATE",
+          `Idempotency-key ${options.idempotencyKey} er allerede brukt (status=${row.status}).`,
+        );
+      }
+
+      // Beregn sum av aktive reservations på denne walleten (inkludert de
+      // som låses av andre transaksjoner i SELECT FOR UPDATE over).
+      const sumRes = await client.query<{ reserved: string | null }>(
+        `SELECT COALESCE(SUM(amount_cents), 0)::text AS reserved
+           FROM ${this.reservationsTable()}
+           WHERE wallet_id = $1 AND status = 'active'`,
+        [normalized],
+      );
+      const reserved = Number(sumRes.rows[0]?.reserved ?? 0);
+      const total = asMoney(account.deposit_balance) + asMoney(account.winnings_balance);
+      const available = total - reserved;
+      if (available < amount) {
+        throw new WalletError(
+          "INSUFFICIENT_FUNDS",
+          `Wallet ${normalized} har ikke tilstrekkelig tilgjengelig saldo (${available} < ${amount}).`,
+        );
+      }
+
+      const id = randomUUID();
+      const expiresAt = options.expiresAt ?? new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      const insert = await client.query(
+        `INSERT INTO ${this.reservationsTable()}
+           (id, wallet_id, amount_cents, idempotency_key, status, room_code, expires_at)
+         VALUES ($1, $2, $3, $4, 'active', $5, $6)
+         RETURNING id, wallet_id, amount_cents, idempotency_key, status, room_code,
+                   game_session_id, created_at, released_at, committed_at, expires_at`,
+        [id, normalized, amount, options.idempotencyKey, options.roomCode, expiresAt],
+      );
+      await client.query("COMMIT");
+      return this.mapReservationRow(insert.rows[0]);
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async increaseReservation(
+    reservationId: string,
+    extraAmount: number,
+  ): Promise<WalletReservation> {
+    await this.ensureInitialized();
+    if (!Number.isFinite(extraAmount) || extraAmount <= 0) {
+      throw new WalletError("INVALID_INPUT", "extraAmount må være > 0.");
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const resRows = await client.query(
+        `SELECT id, wallet_id, amount_cents, idempotency_key, status, room_code,
+                game_session_id, created_at, released_at, committed_at, expires_at
+           FROM ${this.reservationsTable()}
+           WHERE id = $1
+           FOR UPDATE`,
+        [reservationId],
+      );
+      if (resRows.rowCount === 0) {
+        throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+      }
+      const existing = resRows.rows[0];
+      if (existing.status !== "active") {
+        throw new WalletError(
+          "INVALID_STATE",
+          `Reservasjon ${reservationId} er ${existing.status}, kan ikke økes.`,
+        );
+      }
+      const account = await this.selectAccountForUpdate(client, existing.wallet_id);
+      if (!account) {
+        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${existing.wallet_id} finnes ikke.`);
+      }
+      const sumRes = await client.query<{ reserved: string | null }>(
+        `SELECT COALESCE(SUM(amount_cents), 0)::text AS reserved
+           FROM ${this.reservationsTable()}
+           WHERE wallet_id = $1 AND status = 'active'`,
+        [existing.wallet_id],
+      );
+      const reserved = Number(sumRes.rows[0]?.reserved ?? 0);
+      const total = asMoney(account.deposit_balance) + asMoney(account.winnings_balance);
+      const available = total - reserved;
+      if (available < extraAmount) {
+        throw new WalletError(
+          "INSUFFICIENT_FUNDS",
+          `Wallet ${existing.wallet_id} har ikke tilstrekkelig tilgjengelig saldo for økning (${available} < ${extraAmount}).`,
+        );
+      }
+      const updated = await client.query(
+        `UPDATE ${this.reservationsTable()}
+           SET amount_cents = amount_cents + $1
+           WHERE id = $2
+         RETURNING id, wallet_id, amount_cents, idempotency_key, status, room_code,
+                   game_session_id, created_at, released_at, committed_at, expires_at`,
+        [extraAmount, reservationId],
+      );
+      await client.query("COMMIT");
+      return this.mapReservationRow(updated.rows[0]);
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async releaseReservation(
+    reservationId: string,
+    amount?: number,
+  ): Promise<WalletReservation> {
+    await this.ensureInitialized();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const resRows = await client.query(
+        `SELECT id, wallet_id, amount_cents, idempotency_key, status, room_code,
+                game_session_id, created_at, released_at, committed_at, expires_at
+           FROM ${this.reservationsTable()}
+           WHERE id = $1
+           FOR UPDATE`,
+        [reservationId],
+      );
+      if (resRows.rowCount === 0) {
+        throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+      }
+      const existing = resRows.rows[0];
+      if (existing.status !== "active") {
+        throw new WalletError(
+          "INVALID_STATE",
+          `Reservasjon ${reservationId} er ${existing.status}, kan ikke frigis.`,
+        );
+      }
+      const existingAmount = Number(existing.amount_cents);
+
+      if (amount === undefined || amount >= existingAmount) {
+        const updated = await client.query(
+          `UPDATE ${this.reservationsTable()}
+             SET status = 'released', released_at = NOW()
+             WHERE id = $1
+           RETURNING id, wallet_id, amount_cents, idempotency_key, status, room_code,
+                     game_session_id, created_at, released_at, committed_at, expires_at`,
+          [reservationId],
+        );
+        await client.query("COMMIT");
+        return this.mapReservationRow(updated.rows[0]);
+      }
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new WalletError("INVALID_INPUT", "amount må være > 0.");
+      }
+      const updated = await client.query(
+        `UPDATE ${this.reservationsTable()}
+           SET amount_cents = amount_cents - $1
+           WHERE id = $2
+         RETURNING id, wallet_id, amount_cents, idempotency_key, status, room_code,
+                   game_session_id, created_at, released_at, committed_at, expires_at`,
+        [amount, reservationId],
+      );
+      await client.query("COMMIT");
+      return this.mapReservationRow(updated.rows[0]);
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async commitReservation(
+    reservationId: string,
+    toAccountId: string,
+    reason: string,
+    options?: CommitReservationOptions,
+  ): Promise<WalletTransferResult> {
+    await this.ensureInitialized();
+    // Hent reservasjonen (ingen FOR UPDATE her — transfer() tar egen lås
+    // på begge wallets). Validér status + les beløp før vi går til transfer.
+    const { rows } = await this.pool.query(
+      `SELECT id, wallet_id, amount_cents, status
+         FROM ${this.reservationsTable()}
+         WHERE id = $1`,
+      [reservationId],
+    );
+    if (rows.length === 0) {
+      throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+    }
+    const res = rows[0];
+    if (res.status !== "active") {
+      throw new WalletError(
+        "INVALID_STATE",
+        `Reservasjon ${reservationId} er ${res.status}, kan ikke committes.`,
+      );
+    }
+
+    // Utfør faktisk transfer — samme kode som før (winnings-først,
+    // compliance-ledger, split-entries). Idempotencykey ivaretatt av caller.
+    const transfer = await this.transfer(
+      res.wallet_id,
+      toAccountId,
+      Number(res.amount_cents),
+      reason,
+      options,
+    );
+
+    // Marker reservasjon committed. Hvis dette feiler (sjeldent) har vi
+    // lekket en dobbelt-debit — men transfer selv er idempotent via
+    // idempotencyKey, så retry gir samme tx + commit.
+    await this.pool.query(
+      `UPDATE ${this.reservationsTable()}
+         SET status = 'committed', committed_at = NOW(), game_session_id = $1
+         WHERE id = $2 AND status = 'active'`,
+      [options?.gameSessionId ?? null, reservationId],
+    );
+    return transfer;
+  }
+
+  async listActiveReservations(accountId: string): Promise<WalletReservation[]> {
+    await this.ensureInitialized();
+    const normalized = this.normalizeAnyAccountId(accountId);
+    const { rows } = await this.pool.query(
+      `SELECT id, wallet_id, amount_cents, idempotency_key, status, room_code,
+              game_session_id, created_at, released_at, committed_at, expires_at
+         FROM ${this.reservationsTable()}
+         WHERE wallet_id = $1 AND status = 'active'
+         ORDER BY created_at ASC`,
+      [normalized],
+    );
+    return rows.map((r) => this.mapReservationRow(r));
+  }
+
+  async listReservationsByRoom(roomCode: string): Promise<WalletReservation[]> {
+    await this.ensureInitialized();
+    const { rows } = await this.pool.query(
+      `SELECT id, wallet_id, amount_cents, idempotency_key, status, room_code,
+              game_session_id, created_at, released_at, committed_at, expires_at
+         FROM ${this.reservationsTable()}
+         WHERE room_code = $1
+         ORDER BY created_at ASC`,
+      [roomCode],
+    );
+    return rows.map((r) => this.mapReservationRow(r));
+  }
+
+  async expireStaleReservations(nowMs: number): Promise<number> {
+    await this.ensureInitialized();
+    // `nowMs` godtas for test-ergonomi — i prod bruker vi NOW() for ikke
+    // å ha clock-skew mellom app-server og DB.
+    const cutoff = new Date(nowMs).toISOString();
+    const { rowCount } = await this.pool.query(
+      `UPDATE ${this.reservationsTable()}
+         SET status = 'expired', released_at = NOW()
+         WHERE status = 'active' AND expires_at < $1`,
+      [cutoff],
+    );
+    return rowCount ?? 0;
   }
 }

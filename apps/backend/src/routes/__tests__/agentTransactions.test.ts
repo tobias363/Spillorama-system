@@ -455,3 +455,186 @@ test("POST /physical/sell/cancel — ADMIN kan force utover 10-min", async () =>
     assert.equal(res.json.data.actionType, "TICKET_CANCEL");
   } finally { await ctx.close(); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WIREFRAME 17.7 + 17.8: agent add-money / withdraw — registered user
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("POST /transactions/add-money-user — happy path + agent.cash_in_user audit", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    await ctx.seedPlayer("p1", "hall-a");
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/transactions/add-money-user", token, {
+      targetUserId: "p1", amount: 500, paymentType: "Cash", clientRequestId: "r-add-1",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.transaction.actionType, "CASH_IN");
+    assert.equal(res.json.data.transaction.amount, 500);
+    assert.equal(res.json.data.amlFlagged, false);
+    // Audit fires via fire-and-forget — gi event-loopen en tick til å flushe.
+    await new Promise((r) => setTimeout(r, 20));
+    const events = await ctx.auditStore.list();
+    assert.ok(events.some((e) => e.action === "agent.cash_in_user"));
+    // Under AML-terskel: ingen high_value-event.
+    assert.ok(!events.some((e) => e.action === "agent.aml.high_value"));
+  } finally { await ctx.close(); }
+});
+
+test("POST /transactions/add-money-user — > 10 000 NOK utløser AML-audit", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    await ctx.seedPlayer("p1", "hall-a");
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/transactions/add-money-user", token, {
+      targetUserId: "p1", amount: 15_000, paymentType: "Cash", clientRequestId: "r-add-aml",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.amlFlagged, true);
+    await new Promise((r) => setTimeout(r, 20));
+    const events = await ctx.auditStore.list();
+    const aml = events.find((e) => e.action === "agent.aml.high_value");
+    assert.ok(aml, "expected agent.aml.high_value audit entry");
+    assert.equal(aml!.details.flow, "add-money-user");
+    assert.equal(aml!.details.amount, 15_000);
+  } finally { await ctx.close(); }
+});
+
+test("POST /transactions/add-money-user — mot ADMIN-user får TARGET_NOT_PLAYER", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    ctx.seedAdmin("admin-tok"); // registrerer admin-user i usersById
+    // Finn admin-id fra tokens
+    const adminUser = ctx.tokens.get("admin-tok")!;
+    // Registrer adminen i hallen slik at PLAYER_NOT_AT_HALL ikke maskerer testen.
+    const set = ctx.playerHalls.get(adminUser.id) ?? new Set<string>();
+    set.add("hall-a");
+    ctx.playerHalls.set(adminUser.id, set);
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/transactions/add-money-user", token, {
+      targetUserId: adminUser.id, amount: 100, paymentType: "Cash", clientRequestId: "r-add-admin",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "TARGET_NOT_PLAYER");
+  } finally { await ctx.close(); }
+});
+
+test("POST /transactions/withdraw-user — happy path + agent.cash_out_user audit", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    await ctx.seedPlayer("p1", "hall-a", 500);
+    // Seed shift med kontanter slik at daily-balance-check passerer.
+    await req(ctx.baseUrl, "POST", "/api/agent/players/p1/cash-in", token, {
+      amount: 400, paymentMethod: "CASH", clientRequestId: "r-seed",
+    });
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/transactions/withdraw-user", token, {
+      targetUserId: "p1", amount: 200, paymentType: "Cash", clientRequestId: "r-wd-1",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.transaction.actionType, "CASH_OUT");
+    assert.equal(res.json.data.transaction.amount, 200);
+    assert.equal(res.json.data.amlFlagged, false);
+    await new Promise((r) => setTimeout(r, 20));
+    const events = await ctx.auditStore.list();
+    assert.ok(events.some((e) => e.action === "agent.cash_out_user"));
+  } finally { await ctx.close(); }
+});
+
+test("POST /transactions/withdraw-user — > saldo gir 400", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    await ctx.seedPlayer("p1", "hall-a", 100);
+    // Seed shift med kontanter (så daily-balance-check ikke maskerer testen)
+    await req(ctx.baseUrl, "POST", "/api/agent/players/p1/cash-in", token, {
+      amount: 500, paymentMethod: "CASH", clientRequestId: "r-seed",
+    });
+    // Spilleren har 100 + 500 = 600. Prøver å ta ut 1000.
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/transactions/withdraw-user", token, {
+      targetUserId: "p1", amount: 1_000, paymentType: "Cash", clientRequestId: "r-wd-2",
+    });
+    assert.equal(res.status, 400);
+    assert.ok(
+      res.json.error.code === "INSUFFICIENT_BALANCE" ||
+        res.json.error.code === "INSUFFICIENT_DAILY_BALANCE",
+      `unexpected code ${res.json.error.code}`,
+    );
+  } finally { await ctx.close(); }
+});
+
+test("POST /transactions/withdraw-user — > 10 000 uten requireConfirm gir CONFIRMATION_REQUIRED", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    await ctx.seedPlayer("p1", "hall-a", 20_000);
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/transactions/withdraw-user", token, {
+      targetUserId: "p1", amount: 15_000, paymentType: "Cash", clientRequestId: "r-wd-aml",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "CONFIRMATION_REQUIRED");
+  } finally { await ctx.close(); }
+});
+
+test("POST /transactions/withdraw-user — > 10 000 med requireConfirm=true utløser AML-audit", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    await ctx.seedPlayer("p1", "hall-a", 20_000);
+    // Seed shift-daily-balance via cash-in slik at 15 000-uttak har dekning.
+    await req(ctx.baseUrl, "POST", "/api/agent/players/p1/cash-in", token, {
+      amount: 16_000, paymentMethod: "CASH", clientRequestId: "r-seed",
+    });
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/transactions/withdraw-user", token, {
+      targetUserId: "p1", amount: 15_000, paymentType: "Cash",
+      clientRequestId: "r-wd-aml-ok", requireConfirm: true,
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.amlFlagged, true);
+    await new Promise((r) => setTimeout(r, 20));
+    const events = await ctx.auditStore.list();
+    const aml = events.find((e) => e.action === "agent.aml.high_value");
+    assert.ok(aml, "expected agent.aml.high_value audit entry");
+    assert.equal(aml!.details.flow, "withdraw-user");
+    assert.equal(aml!.details.confirmedByAgent, true);
+  } finally { await ctx.close(); }
+});
+
+test("GET /transactions/search-users — email-prefix matcher PLAYER i hall", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    await ctx.seedPlayer("p-alice", "hall-a", 300);
+    await ctx.seedPlayer("p-bob", "hall-a", 0);
+    await ctx.seedPlayer("p-carol", "hall-b", 99); // annen hall
+    const res = await req(ctx.baseUrl, "GET", "/api/agent/transactions/search-users?q=p-", token);
+    assert.equal(res.status, 200);
+    const users = res.json.data.users as Array<{ id: string; walletBalance: number }>;
+    const ids = users.map((u) => u.id).sort();
+    assert.deepEqual(ids, ["p-alice", "p-bob"]); // ikke p-carol
+    const alice = users.find((u) => u.id === "p-alice");
+    assert.equal(alice?.walletBalance, 300);
+  } finally { await ctx.close(); }
+});
+
+test("GET /transactions/search-users — tom query gir tom liste", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    await ctx.seedPlayer("p1", "hall-a");
+    const res = await req(ctx.baseUrl, "GET", "/api/agent/transactions/search-users?q=", token);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.json.data.users, []);
+  } finally { await ctx.close(); }
+});
+
+test("POST /transactions/add-money-user — uten token → UNAUTHORIZED", async () => {
+  const ctx = await startServer();
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/transactions/add-money-user", undefined, {
+      targetUserId: "p1", amount: 50, paymentType: "Cash", clientRequestId: "r-1",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "UNAUTHORIZED");
+  } finally { await ctx.close(); }
+});

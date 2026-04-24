@@ -47,6 +47,7 @@ import { DomainError } from "./BingoEngine.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { Game1DrawEngineService } from "./Game1DrawEngineService.js";
 import type { AdminGame1Broadcaster } from "./AdminGame1Broadcaster.js";
+import { emitAdminResumed } from "./Game1DrawEngineBroadcast.js";
 import type {
   Game1TicketPurchaseService,
   Game1RefundAllForGameResult,
@@ -61,7 +62,8 @@ export type MasterAuditAction =
   | "stop"
   | "exclude_hall"
   | "include_hall"
-  | "timeout_detected";
+  | "timeout_detected"
+  | "start_game_with_unready_override";
 
 export const MASTER_AUDIT_ACTIONS: readonly MasterAuditAction[] = [
   "start",
@@ -71,6 +73,7 @@ export const MASTER_AUDIT_ACTIONS: readonly MasterAuditAction[] = [
   "exclude_hall",
   "include_hall",
   "timeout_detected",
+  "start_game_with_unready_override",
 ];
 
 export interface MasterActor {
@@ -82,6 +85,23 @@ export interface MasterActor {
 export interface StartGameInput {
   gameId: string;
   confirmExcludedHalls?: string[];
+  /**
+   * Task 1.5: master-override for "agents not ready"-flyt. Hvis noen deltakende
+   * (non-excluded, non-master) haller har `is_ready=false` på start-tidspunktet,
+   * kaster `startGame` en `HALLS_NOT_READY`-DomainError med listen i
+   * `details.unreadyHalls`. Frontend viser popup "Agents not ready yet: …" med
+   * valg [Avbryt] / [Start uansett].
+   *
+   * Hvis master bekrefter override, kaller klienten `/start` på nytt med
+   * samtlige ikke-klare hall-IDer i `confirmUnreadyHalls`. Service ekskluderer
+   * da disse hallene (UPSERT excluded_from_game=true, grunn="unready_override")
+   * og skriver audit-entry `start_game_with_unready_override` med listen +
+   * tidsstempel FØR normal `start`-entry.
+   *
+   * KUN relevant ved initial start (status='purchase_open'|'ready_to_start').
+   * Resume (paused→running) bruker ingen ready-sjekk.
+   */
+  confirmUnreadyHalls?: string[];
   actor: MasterActor;
 }
 
@@ -294,6 +314,35 @@ export class Game1MasterControlService {
     return `"${this.schema}"."app_game1_master_audit"`;
   }
 
+  /**
+   * Task 1.1: tabell-referanse for engine-state. Brukes av `resumeGame` for
+   * å håndtere auto-pause-sidestate (paused=true + paused_at_phase !=
+   * null) samtidig som `scheduled_games.status` håndteres.
+   */
+  private gameStateTable(): string {
+    return `"${this.schema}"."app_game1_game_state"`;
+  }
+
+  /**
+   * Task 1.1: fire-and-forget admin-broadcast av `game1:resumed` etter
+   * DB-commit. Wrap i try/catch slik at en eventuell broadcaster-feil
+   * aldri kan krasje action-responsen.
+   */
+  private notifyResumed(
+    gameId: string,
+    actorUserId: string,
+    phase: number,
+    resumeType: "auto" | "manual"
+  ): void {
+    emitAdminResumed(
+      this.adminBroadcaster,
+      gameId,
+      actorUserId,
+      phase,
+      resumeType
+    );
+  }
+
   async startGame(input: StartGameInput): Promise<MasterActionResult> {
     const result = await this.runInTransaction(async (client) => {
       const game = await this.loadGameForUpdate(client, input.gameId);
@@ -308,6 +357,24 @@ export class Game1MasterControlService {
 
       const readyRows = await this.loadReadySnapshot(client, input.gameId);
 
+      // Task 1.5: compute orange (unready) halls BEFORE status-guard so
+      // `HALLS_NOT_READY` kan returneres med strukturert liste (via
+      // DomainError.details). Orange = not-ready, not-excluded, not master —
+      // master kan ikke være orange (master er alltid klar per definisjon i
+      // state-maskinen; kastes i purchase_open-gren under).
+      const confirmedUnready = new Set(input.confirmUnreadyHalls ?? []);
+      const unreadyHalls = readyRows
+        .filter(
+          (r) =>
+            !r.excluded_from_game &&
+            !r.is_ready &&
+            r.hall_id !== game.master_hall_id
+        )
+        .map((r) => r.hall_id);
+      const uncoveredUnready = unreadyHalls.filter(
+        (h) => !confirmedUnready.has(h)
+      );
+
       if (game.status === "purchase_open") {
         const nonExcluded = readyRows.filter((r) => !r.excluded_from_game);
         if (nonExcluded.length === 0) {
@@ -316,18 +383,101 @@ export class Game1MasterControlService {
             "Ingen deltakende haller er klare."
           );
         }
-        if (!nonExcluded.every((r) => r.is_ready)) {
+
+        // Master-hall er alltid deltaker og må være klar (kan ikke
+        // ekskluderes). Håndteres som blocking feil før unready-override.
+        const masterRow = readyRows.find(
+          (r) => r.hall_id === game.master_hall_id
+        );
+        if (masterRow && !masterRow.is_ready) {
           throw new DomainError(
             "HALLS_NOT_READY",
-            "Ikke alle deltakende haller er klare. Ekskluder manglende haller eller vent."
+            "Master-hallen er ikke klar.",
+            { unreadyHalls: [game.master_hall_id] }
+          );
+        }
+
+        // Task 1.5: tilsvar `confirmExcludedHalls` — hvis orange-listen
+        // ikke er fullstendig dekket av `confirmUnreadyHalls`, kast
+        // HALLS_NOT_READY med listen slik at frontend kan vise popup.
+        if (uncoveredUnready.length > 0) {
+          throw new DomainError(
+            "HALLS_NOT_READY",
+            `Haller er ikke klare: ${uncoveredUnready.join(", ")}.`,
+            { unreadyHalls: uncoveredUnready }
           );
         }
       }
 
-      const excludedHallIds = readyRows
+      // Task 1.5: hvis master har bekreftet override, marker de gjeldende
+      // hallene som excluded_from_game=true (med grunn="unready_override")
+      // FØR start-transisjonen slik at runde-beregning ikke inkluderer
+      // dem. Idempotent: hvis en hall allerede er ekskludert, gjør UPDATE
+      // ingen ting (ON CONFLICT DO UPDATE).
+      const overrideExcluded: string[] = [];
+      if (input.confirmUnreadyHalls && input.confirmUnreadyHalls.length > 0) {
+        for (const hallId of input.confirmUnreadyHalls) {
+          // Bare flytt haller som faktisk var orange (unready) til excluded.
+          // Dersom en hall ikke var i listen (f.eks. pga. race) ignoreres
+          // den stille — override-audit logger samtlige IDer klient sendte.
+          if (!unreadyHalls.includes(hallId)) continue;
+          if (hallId === game.master_hall_id) continue;
+          await client.query(
+            `INSERT INTO ${this.hallReadyTable()}
+               (game_id, hall_id, is_ready, excluded_from_game, excluded_reason)
+             VALUES ($1, $2, false, true, $3)
+             ON CONFLICT (game_id, hall_id) DO UPDATE
+               SET excluded_from_game = true,
+                   excluded_reason    = EXCLUDED.excluded_reason,
+                   updated_at         = now()`,
+            [input.gameId, hallId, "unready_override"]
+          );
+          overrideExcluded.push(hallId);
+        }
+
+        // Skriv override-audit FØR normal start-audit slik at det er
+        // sporbart i hvilken rekkefølge hendelsene skjedde. `unreadyHalls`
+        // = IDer klient sendte; `applied` = faktisk ekskluderte.
+        const overrideAuditId = await this.writeAudit(client, {
+          gameId: input.gameId,
+          action: "start_game_with_unready_override",
+          actor: input.actor,
+          groupHallId: game.group_hall_id,
+          snapshot: this.snapshotReadyRows(readyRows),
+          metadata: {
+            confirmUnreadyHalls: input.confirmUnreadyHalls,
+            appliedExcludedHalls: overrideExcluded,
+            overriddenAt: new Date().toISOString(),
+          },
+        });
+        log.info(
+          {
+            gameId: input.gameId,
+            actorId: input.actor.userId,
+            auditId: overrideAuditId,
+            overrideExcluded,
+          },
+          "master.start.unready_override"
+        );
+      }
+
+      // Re-compute excluded hall-IDs ETTER override-applikering slik at
+      // `confirmExcludedHalls`-sjekken inkluderer nyekskluderte. Unngå
+      // ekstra DB-round-trip hvis ingen override ble kjørt: da er pre-
+      // snapshot (readyRows) fortsatt gyldig.
+      const postRows =
+        overrideExcluded.length > 0
+          ? await this.loadReadySnapshot(client, input.gameId)
+          : readyRows;
+      const excludedHallIds = postRows
         .filter((r) => r.excluded_from_game)
         .map((r) => r.hall_id);
-      const confirmed = new Set(input.confirmExcludedHalls ?? []);
+      const confirmed = new Set([
+        ...(input.confirmExcludedHalls ?? []),
+        // Task 1.5: override-ekskluderte haller er implisitt bekreftet via
+        // `confirmUnreadyHalls`; kaller trenger ikke sende dem dobbelt.
+        ...overrideExcluded,
+      ]);
       const unconfirmed = excludedHallIds.filter((h) => !confirmed.has(h));
       if (unconfirmed.length > 0) {
         throw new DomainError(
@@ -360,7 +510,9 @@ export class Game1MasterControlService {
         snapshot: this.snapshotReadyRows(readyRows),
         metadata: {
           confirmExcludedHalls: input.confirmExcludedHalls ?? [],
+          confirmUnreadyHalls: input.confirmUnreadyHalls ?? [],
           excludedHallIds,
+          overrideExcluded,
         },
       });
 
@@ -587,27 +739,102 @@ export class Game1MasterControlService {
   }
 
   async resumeGame(input: ResumeGameInput): Promise<MasterActionResult> {
+    // Task 1.1: Resume støtter nå to sidestate-varianter (Gap #1 i
+    // MASTER_HALL_DASHBOARD_GAP_2026-04-24.md):
+    //   (a) Manuell master-pause: scheduled_game.status='paused'. Flipp
+    //       tilbake til 'running'.
+    //   (b) Auto-pause etter phase-won: status='running' MEN
+    //       app_game1_game_state.paused=true + paused_at_phase != null.
+    //       Flipp paused-feltene tilbake; status forblir 'running'.
+    //
+    // Denne semantikken beholder eksisterende kontrakt for (a) samtidig som
+    // den låser opp den nye auto-pause-flyten. `resumeType` skilles i
+    // response-eventet for UI-konsistens.
+    let capturedResumeType: "manual" | "auto" | null = null;
+    let capturedPhaseForEvent: number = 1;
     const result = await this.runInTransaction(async (client) => {
       const game = await this.loadGameForUpdate(client, input.gameId);
       this.assertActorIsMaster(input.actor, game);
 
-      if (game.status !== "paused") {
+      // Sjekk auto-pause-state PER SCHEDULED_GAME (samme transaksjon, FOR
+      // UPDATE unødvendig på game_state her siden vi kun skriver paused-
+      // feltet atomisk — men vi trenger å vite om auto-pause gjelder).
+      const { rows: gameStateRows } = await client.query<{
+        paused: boolean;
+        paused_at_phase: number | null;
+        current_phase: number;
+      }>(
+        `SELECT paused, paused_at_phase, current_phase
+           FROM ${this.gameStateTable()}
+           WHERE scheduled_game_id = $1
+           FOR UPDATE`,
+        [input.gameId]
+      );
+      const gsRow = gameStateRows[0];
+
+      const isManualPaused = game.status === "paused";
+      const isAutoPaused =
+        game.status === "running" &&
+        gsRow !== undefined &&
+        gsRow.paused === true;
+
+      if (!isManualPaused && !isAutoPaused) {
         throw new DomainError(
           "GAME_NOT_PAUSED",
-          `Kan kun resume et pauset spill (nåværende status: '${game.status}').`
+          `Kan kun resume et pauset spill (nåværende status: '${game.status}', engine-paused: ${gsRow?.paused ?? false}).`
         );
       }
 
-      const { rows: updated } = await client.query<ScheduledGameRow>(
-        `UPDATE ${this.scheduledGamesTable()}
-            SET status     = 'running',
-                updated_at = now()
-          WHERE id = $1
-          RETURNING id, status, master_hall_id, group_hall_id,
-                    participating_halls_json, actual_start_time, actual_end_time`,
-        [input.gameId]
-      );
-      const row = updated[0];
+      capturedResumeType = isManualPaused ? "manual" : "auto";
+      capturedPhaseForEvent = gsRow?.current_phase ?? 1;
+
+      let row: ScheduledGameRow;
+      if (isManualPaused) {
+        // Case (a): status='paused' → 'running'. Også nullstill auto-pause-
+        // feltene defensivt (normalt er de allerede NULL/false for manuell
+        // pause, men en combined paused-state bør uansett ende i ren
+        // running).
+        const { rows: updated } = await client.query<ScheduledGameRow>(
+          `UPDATE ${this.scheduledGamesTable()}
+              SET status     = 'running',
+                  updated_at = now()
+            WHERE id = $1
+            RETURNING id, status, master_hall_id, group_hall_id,
+                      participating_halls_json, actual_start_time, actual_end_time`,
+          [input.gameId]
+        );
+        row = updated[0]!;
+        if (gsRow !== undefined) {
+          await client.query(
+            `UPDATE ${this.gameStateTable()}
+                SET paused          = false,
+                    paused_at_phase = NULL
+              WHERE scheduled_game_id = $1`,
+            [input.gameId]
+          );
+        }
+      } else {
+        // Case (b): status forblir 'running'. Flipp paused=false +
+        // paused_at_phase=NULL i game_state. last_drawn_at beholdes slik
+        // at auto-tick naturlig trigger neste draw når seconds har passert
+        // (ingen umiddelbar draw-spike når agent trykker Resume).
+        await client.query(
+          `UPDATE ${this.gameStateTable()}
+              SET paused          = false,
+                  paused_at_phase = NULL
+            WHERE scheduled_game_id = $1`,
+          [input.gameId]
+        );
+        // Hent fresh scheduled_game-rad for audit (status er uendret).
+        const { rows: fresh } = await client.query<ScheduledGameRow>(
+          `SELECT id, status, master_hall_id, group_hall_id,
+                  participating_halls_json, actual_start_time, actual_end_time
+             FROM ${this.scheduledGamesTable()}
+             WHERE id = $1`,
+          [input.gameId]
+        );
+        row = fresh[0]!;
+      }
       if (!row) {
         throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke lenger.");
       }
@@ -619,11 +846,19 @@ export class Game1MasterControlService {
         actor: input.actor,
         groupHallId: game.group_hall_id,
         snapshot: this.snapshotReadyRows(readyRows),
-        metadata: {},
+        metadata: {
+          resumeType: capturedResumeType,
+          phase: capturedPhaseForEvent,
+        },
       });
 
       log.info(
-        { gameId: input.gameId, actorId: input.actor.userId, auditId },
+        {
+          gameId: input.gameId,
+          actorId: input.actor.userId,
+          auditId,
+          resumeType: capturedResumeType,
+        },
         "master.resume"
       );
 
@@ -636,11 +871,21 @@ export class Game1MasterControlService {
       };
     });
 
-    // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit.
-    if (this.drawEngine) {
+    // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit. Bare
+    // aktuelt for manuell pause (draw-engine har ikke separat state for
+    // auto-pause utover paused-feltet vi nettopp nullstilte).
+    if (this.drawEngine && capturedResumeType === "manual") {
       await this.drawEngine.resumeGame(input.gameId, input.actor.userId);
     }
     this.notifyStatusChange(result, "resume", input.actor.userId);
+    // Task 1.1: emit `game1:resumed` slik at admin-UI og agent-portal kan
+    // skjule Resume-knapp umiddelbart uten å vente på polling/fresh fetch.
+    this.notifyResumed(
+      result.gameId,
+      input.actor.userId,
+      capturedPhaseForEvent,
+      capturedResumeType ?? "manual"
+    );
     return result;
   }
 

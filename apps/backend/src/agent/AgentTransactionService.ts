@@ -54,6 +54,18 @@ export interface Game1PurchaseCutoffPort {
 /** Default 10-minutters vindu for physical-sale-cancel (match legacy). */
 export const CANCEL_SALE_WINDOW_MS = 10 * 60 * 1000;
 
+/**
+ * Wireframe 17.7/17.8 — AML-terskel for agent add-money/withdraw mot registrert
+ * bruker. Over denne terskelen blir transaksjonen ekstra-audit-logget som
+ * `agent.aml.high_value` og for uttak kreves eksplisitt `requireConfirm=true`
+ * (annen-endpoint-variant i product-kravet).
+ *
+ * 10 000 NOK er pengespill-AML-hvitvaskings-default; valg matcher
+ * AmlService og payments-flows.md. Satt som eksportert konstant slik at
+ * tester kan skrive grenseverdier uten å duplisere magic-number.
+ */
+export const AGENT_USER_CASH_AML_THRESHOLD_NOK = 10_000;
+
 export interface PhysicalTicketInventoryRow {
   uniqueId: string;
   batchId: string;
@@ -71,6 +83,66 @@ export interface CashOpInput {
   notes?: string;
   externalReference?: string;
   clientRequestId: string;
+}
+
+/**
+ * Wireframe 17.7/17.8 — inputformat for agent add-money / withdraw mot en
+ * konkret registrert bruker. Skilt fra `CashOpInput` slik at kallerene
+ * uttrykker intensjon ("add-money-user" vs generisk "cash-op") og slik at
+ * endepunktene kan sette egne validerings-regler (PLAYER-role,
+ * requireConfirm for høy-verdi-uttak).
+ *
+ * paymentType holder wireframe-navngivning ("Cash"/"Card") for add og kun
+ * "Cash" for withdraw (bank-uttak går gjennom en separat amountwithdraw-flyt).
+ */
+export interface AddMoneyToUserInput {
+  agentUserId: string;
+  targetUserId: string;
+  amount: number;
+  paymentType: "Cash" | "Card";
+  notes?: string;
+  clientRequestId: string;
+}
+
+export interface WithdrawFromUserInput {
+  agentUserId: string;
+  targetUserId: string;
+  amount: number;
+  paymentType: "Cash";
+  notes?: string;
+  clientRequestId: string;
+  /**
+   * Wireframe-spec: uttak > AGENT_USER_CASH_AML_THRESHOLD_NOK krever at
+   * kaller eksplisitt bekrefter med requireConfirm=true. Uten flagget
+   * returneres `CONFIRMATION_REQUIRED` og agenten får presentert en second-
+   * opinion-dialog i admin-web-modalen før kallet retryes med flagget satt.
+   */
+  requireConfirm?: boolean;
+}
+
+export interface AgentUserCashResult {
+  transaction: AgentTransaction;
+  /**
+   * Sann når beløpet overstiger AML-terskelen — ruter-laget bruker dette
+   * til å emittere `agent.aml.high_value`-audit-eventet i tillegg til de
+   * ordinære cash-event-rowsene. Vi returnerer et flagg i stedet for at
+   * service skal håndtere audit selv, for at audit-ansvar skal ligge ett
+   * sted (routeren, som allerede logger alle andre agent-events).
+   */
+  amlFlagged: boolean;
+}
+
+/**
+ * Wireframe 17.7/17.8 autocomplete-søk. Identisk format som `lookupPlayers`
+ * men i DTO-shape som matcher admin-web-modalen (username-prefix-søk på
+ * email). Begrenset til agentens hall.
+ */
+export interface AgentUserSearchRow {
+  id: string;
+  email: string;
+  displayName: string;
+  phone: string | null;
+  walletBalance: number;
 }
 
 export interface SellPhysicalInput {
@@ -269,6 +341,114 @@ export class AgentTransactionService {
       otherData: { clientRequestId: input.clientRequestId },
     });
     return tx;
+  }
+
+  // ── Wireframe 17.7: Add Money — Registered User ─────────────────────────
+
+  /**
+   * Wireframe 17.7 — agent legger til penger på en registrert brukers
+   * wallet. Innpakning over `cashIn` med skjerpet validering: brukeren
+   * MÅ være PLAYER (ikke ADMIN/AGENT), og beløp > AML-terskel markeres
+   * for egen audit-entry av kaller.
+   *
+   * Dette er ikke en duplikat av `cashIn` — det er den agent-portal-
+   * spesifikke innflygningsvinkelen som wireframet modalen sier:
+   * sprk med eksplisitt target-user, payment-type (Cash/Card), og
+   * Yes/No-confirm på klient. Eksisterende cash-in-endepunktet har
+   * ingen role-guard mot ADMIN-mål — denne gjør det.
+   */
+  async addMoneyToUser(input: AddMoneyToUserInput): Promise<AgentUserCashResult> {
+    assertPositive(input.amount, "amount");
+    await this.assertTargetIsPlayer(input.targetUserId);
+    const tx = await this.cashIn({
+      agentUserId: input.agentUserId,
+      playerUserId: input.targetUserId,
+      amount: input.amount,
+      paymentMethod: input.paymentType === "Cash" ? "CASH" : "CARD",
+      notes: input.notes,
+      clientRequestId: input.clientRequestId,
+    });
+    return {
+      transaction: tx,
+      amlFlagged: input.amount > AGENT_USER_CASH_AML_THRESHOLD_NOK,
+    };
+  }
+
+  // ── Wireframe 17.8: Withdraw — Registered User ──────────────────────────
+
+  /**
+   * Wireframe 17.8 — agent trekker ut kontanter fra en registrert brukers
+   * wallet. Innpakning over `cashOut` med tre utvidelser:
+   *   1. PLAYER-role-guard (samme som add-money).
+   *   2. paymentType er hardet til "Cash" — bank-uttak går via
+   *      egen amountwithdraw-flyt, ikke agent-shift.
+   *   3. Beløp > AML-terskel krever `requireConfirm=true`; ellers
+   *      kastes CONFIRMATION_REQUIRED. Admin-web-modalen fanger opp
+   *      dette, viser en second-opinion-dialog, og retryer med flagget.
+   */
+  async withdrawFromUser(input: WithdrawFromUserInput): Promise<AgentUserCashResult> {
+    assertPositive(input.amount, "amount");
+    await this.assertTargetIsPlayer(input.targetUserId);
+    const highValue = input.amount > AGENT_USER_CASH_AML_THRESHOLD_NOK;
+    if (highValue && input.requireConfirm !== true) {
+      throw new DomainError(
+        "CONFIRMATION_REQUIRED",
+        "Uttak over 10 000 NOK krever ekstra bekreftelse. Send requireConfirm=true.",
+      );
+    }
+    const tx = await this.cashOut({
+      agentUserId: input.agentUserId,
+      playerUserId: input.targetUserId,
+      amount: input.amount,
+      paymentMethod: "CASH",
+      notes: input.notes,
+      clientRequestId: input.clientRequestId,
+    });
+    return { transaction: tx, amlFlagged: highValue };
+  }
+
+  // ── Wireframe 17.7/17.8 autocomplete search ─────────────────────────────
+
+  /**
+   * Wireframe 17.7/17.8 autocomplete-dropdown. Returnerer inntil 10
+   * PLAYER-konti som matcher prefix mot displayName, email eller phone i
+   * agentens hall, inklusive wallet-saldo for `WithdrawRegisteredUserModal`
+   * som trenger det for max-amount-validering.
+   *
+   * Grensen er senket fra 20 (lookupPlayers-default) til 10 — i praksis
+   * renderer modalen aldri flere enn det uten scrollebar, og responsen er
+   * mindre.
+   */
+  async searchUsers(agentUserId: string, query: string): Promise<AgentUserSearchRow[]> {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return [];
+    const base = await this.lookupPlayers(agentUserId, trimmed);
+    const limited = base.slice(0, 10);
+    const rows: AgentUserSearchRow[] = [];
+    for (const p of limited) {
+      const full = await this.platform.getUserById(p.id);
+      const balance = await this.wallet.getBalance(full.walletId);
+      rows.push({
+        id: p.id,
+        email: p.email,
+        displayName: p.displayName,
+        phone: p.phone,
+        walletBalance: balance,
+      });
+    }
+    return rows;
+  }
+
+  // ── Shared guard for 17.7 + 17.8 ────────────────────────────────────────
+
+  private async assertTargetIsPlayer(targetUserId: string): Promise<void> {
+    const target = await this.platform.getUserById(targetUserId);
+    if (target.role !== "PLAYER") {
+      throw new DomainError(
+        "TARGET_NOT_PLAYER",
+        "Agent-cash-endepunktene kan kun rettes mot PLAYER-konti.",
+      );
+    }
   }
 
   // ── Physical ticket sale ────────────────────────────────────────────────

@@ -137,6 +137,10 @@ export const routes: RouteDef[] = [
   { path: "/ResponsibleGameing", titleKey: "responsible_gaming", roles: ["admin", "super-admin"] },
   { path: "/LinksofOtherAgencies", titleKey: "links_of_other_agencies", roles: ["admin", "super-admin"] },
   { path: "/settings", titleKey: "settings", roles: ["admin", "super-admin"] },
+  // BIN-720 — Profile Settings (selv-service). Tilgjengelig for spiller/player-
+  // roller (og admin for debug). Ingen role-gate her — backend enforcer tilgangs-
+  // regler (må ha PLAYER-role + wallet).
+  { path: "/profile/settings", titleKey: "profile_settings" },
   // BIN-677 — settings sub-pages (maintenance). Edit-route via hash-regex.
   { path: "/maintenance", titleKey: "maintenance_list_title", roles: ["admin", "super-admin"] },
   { path: "/maintenance/new", titleKey: "maintenance_new_window", roles: ["admin", "super-admin"] },
