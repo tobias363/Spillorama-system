@@ -374,7 +374,7 @@
       flex-shrink: 0;
     }
 
-    /* Balance chip */
+    /* Balance chip (deposit saldo) */
     .lobby-balance-chip {
       display: flex; align-items: center; gap: 6px;
       padding: 0 14px;
@@ -393,6 +393,37 @@
       background: #81c784;
       box-shadow: 0 0 6px #81c784;
       flex-shrink: 0;
+    }
+    .lobby-balance-chip .lobby-chip-label {
+      font-weight: 700;
+      color: rgba(255,255,255,0.55);
+      margin-right: 2px;
+    }
+
+    /* Winnings chip (gevinst — gull/orange) */
+    .lobby-winnings-chip {
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 14px;
+      height: 36px;
+      border-radius: 20px;
+      background: rgba(255, 193, 7, 0.08);
+      border: 1px solid rgba(255, 193, 7, 0.32);
+      font-size: 14px; font-weight: 800;
+      color: #ffc857;
+      white-space: nowrap;
+    }
+    .lobby-winnings-chip::before {
+      content: '';
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ffd95a, #f59e0b);
+      box-shadow: 0 0 6px rgba(255, 193, 7, 0.65);
+      flex-shrink: 0;
+    }
+    .lobby-winnings-chip .lobby-chip-label {
+      font-weight: 700;
+      color: rgba(255, 212, 128, 0.75);
+      margin-right: 2px;
     }
 
     /* Lommebok button */
@@ -1168,7 +1199,11 @@
       .lobby-back-btn svg + span { display: none; }
       .lobby-back-btn { padding: 0 10px; height: 32px; }
       .game-bar-right .lobby-topbar-hall-wrap { max-width: 100px; }
-      .game-bar-right .lobby-balance-chip { font-size: 12px; padding: 4px 10px; }
+      .game-bar-right .lobby-balance-chip,
+      .game-bar-right .lobby-winnings-chip { font-size: 12px; padding: 4px 10px; }
+      /* Skjul tekst-label på små skjermer — bare ikon + beløp */
+      .lobby-balance-chip .lobby-chip-label,
+      .lobby-winnings-chip .lobby-chip-label { display: none; }
 
       /* Candy overlay — full bleed on small phones */
       #candy-shell { width: 100vw; height: 100dvh; border-radius: 0; }
@@ -1549,8 +1584,17 @@
 
       <!-- Right: Actions + user -->
       <div class="lobby-topbar-right">
-        <!-- Balance -->
-        <span class="lobby-balance-chip" id="lobby-balance">0 kr</span>
+        <!-- Saldo (deposit) -->
+        <span class="lobby-balance-chip" id="lobby-balance" title="Saldo (innskudd)">
+          <span class="lobby-chip-label">Saldo</span>
+          <span class="lobby-chip-value">0 kr</span>
+        </span>
+
+        <!-- Gevinst (winnings) -->
+        <span class="lobby-winnings-chip" id="lobby-winnings" title="Gevinst (premiepenger)">
+          <span class="lobby-chip-label">Gevinst</span>
+          <span class="lobby-chip-value">0 kr</span>
+        </span>
 
         <!-- Lommebok -->
         <button class="lobby-wallet-btn" type="button" id="lobby-wallet-btn" title="Lommebok">
@@ -1648,8 +1692,17 @@
         </select>
       </div>
 
-      <!-- Saldo -->
-      <span class="lobby-balance-chip" id="game-bar-balance">0 kr</span>
+      <!-- Saldo (deposit) -->
+      <span class="lobby-balance-chip" id="game-bar-balance" title="Saldo (innskudd)">
+        <span class="lobby-chip-label">Saldo</span>
+        <span class="lobby-chip-value">0 kr</span>
+      </span>
+
+      <!-- Gevinst (winnings) -->
+      <span class="lobby-winnings-chip" id="game-bar-winnings" title="Gevinst (premiepenger)">
+        <span class="lobby-chip-label">Gevinst</span>
+        <span class="lobby-chip-value">0 kr</span>
+      </span>
 
       <!-- Lommebok -->
       <button class="lobby-wallet-btn" type="button" onclick="window.ShowSpillvettPanel && window.ShowSpillvettPanel()">
@@ -2363,12 +2416,18 @@
 
     /* ── Game Bar ────────────────────────────────────────────────────── */
 
-    // Syncs saldo + hall from lobby to the game-bar shown while a game
-    // is active.
+    // Syncs saldo + gevinst + hall from lobby to the game-bar shown while a
+    // game is active.
     window.syncGameBar = function() {
-      var lobbyBal = document.getElementById('lobby-balance');
-      var gameBal  = document.getElementById('game-bar-balance');
-      if (lobbyBal && gameBal) gameBal.textContent = lobbyBal.textContent;
+      // Saldo (deposit)
+      var lobbyBalVal = document.querySelector('#lobby-balance .lobby-chip-value');
+      var gameBalVal  = document.querySelector('#game-bar-balance .lobby-chip-value');
+      if (lobbyBalVal && gameBalVal) gameBalVal.textContent = lobbyBalVal.textContent;
+
+      // Gevinst (winnings)
+      var lobbyWinVal = document.querySelector('#lobby-winnings .lobby-chip-value');
+      var gameWinVal  = document.querySelector('#game-bar-winnings .lobby-chip-value');
+      if (lobbyWinVal && gameWinVal) gameWinVal.textContent = lobbyWinVal.textContent;
 
       // Sync hall selector value
       var lobbyHall = document.getElementById('lobby-hall-select');

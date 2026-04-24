@@ -283,17 +283,37 @@
   // dedicated wallet poll every 30 s so balance reflects recent round results.
   var _gameBarWalletInterval = null;
 
+  // Wallet-split: vis deposit-saldo og winnings-gevinst som separate chips.
+  // Backend /api/wallet/me returnerer { balance, depositBalance, winningsBalance }.
+  // `balance` beholdes som total for legacy-compliance; UI viser split.
+  function applyWalletToHeader(account) {
+    if (!account) return;
+    var depositAmt = (typeof account.depositBalance === 'number')
+      ? account.depositBalance
+      : account.balance; // fallback for legacy adapters
+    var winningsAmt = (typeof account.winningsBalance === 'number')
+      ? account.winningsBalance
+      : 0;
+    var depositFormatted = formatKr(depositAmt);
+    var winningsFormatted = formatKr(winningsAmt);
+
+    var lobbyBalVal = document.querySelector('#lobby-balance .lobby-chip-value');
+    var gameBalVal  = document.querySelector('#game-bar-balance .lobby-chip-value');
+    var lobbyWinVal = document.querySelector('#lobby-winnings .lobby-chip-value');
+    var gameWinVal  = document.querySelector('#game-bar-winnings .lobby-chip-value');
+    if (lobbyBalVal) lobbyBalVal.textContent = depositFormatted;
+    if (gameBalVal)  gameBalVal.textContent  = depositFormatted;
+    if (lobbyWinVal) lobbyWinVal.textContent = winningsFormatted;
+    if (gameWinVal)  gameWinVal.textContent  = winningsFormatted;
+  }
+
   // Immediately fetch and update balance (used on hall switch)
   async function refreshBalanceNow() {
     try {
       var wallet = await apiFetch('/api/wallet/me');
       if (wallet?.account) {
         lobbyState.wallet = wallet;
-        var formatted = formatKr(wallet.account.balance);
-        var lobbyBal = document.getElementById('lobby-balance');
-        var gameBal  = document.getElementById('game-bar-balance');
-        if (lobbyBal) lobbyBal.textContent = formatted;
-        if (gameBal)  gameBal.textContent  = formatted;
+        applyWalletToHeader(wallet.account);
       }
     } catch { /* network hiccup — ignore */ }
   }
@@ -305,11 +325,7 @@
         var wallet = await apiFetch('/api/wallet/me');
         if (wallet?.account) {
           lobbyState.wallet = wallet;
-          var formatted = formatKr(wallet.account.balance);
-          var lobbyBal = document.getElementById('lobby-balance');
-          var gameBal  = document.getElementById('game-bar-balance');
-          if (lobbyBal) lobbyBal.textContent = formatted;
-          if (gameBal)  gameBal.textContent  = formatted;
+          applyWalletToHeader(wallet.account);
         }
       } catch { /* network hiccup — ignore */ }
     }, 30000);
@@ -324,29 +340,78 @@
 
   // Real-time balance sync from web game client socket events.
   // The game client dispatches 'spillorama:balanceChanged' on every room:update.
+  //
+  // Event-payload kan være:
+  //   { balance }                                  — legacy (game-client i dag)
+  //   { balance, depositBalance, winningsBalance } — utvidet wallet-split
+  //
+  // Når split-feltene mangler refetcher vi /api/wallet/me (debounced) for å
+  // få autoritativ split. Merk at backend allerede sender split i
+  // wallet-endepunktet — event-utvidelsen er en senere optimalisering.
   var _balanceSyncHandler = null;
+  var _balanceRefetchTimer = null;
+  var _balanceRefreshReqHandler = null;
+
+  function _scheduleBalanceRefetch() {
+    if (_balanceRefetchTimer) return;
+    _balanceRefetchTimer = setTimeout(function () {
+      _balanceRefetchTimer = null;
+      refreshBalanceNow();
+    }, 250); // debounce — rapid room:update bursts collapse to one fetch
+  }
 
   function startGameBarSocketSync() {
     if (_balanceSyncHandler) return;
     _balanceSyncHandler = function (e) {
-      var balance = e.detail && e.detail.balance;
-      if (typeof balance !== 'number') return;
-      var formatted = formatKr(balance);
-      var gameBal = document.getElementById('game-bar-balance');
-      var lobbyBal = document.getElementById('lobby-balance');
-      if (gameBal) gameBal.textContent = formatted;
-      if (lobbyBal) lobbyBal.textContent = formatted;
+      var d = (e && e.detail) || {};
+      var balance = (typeof d.balance === 'number') ? d.balance : null;
+      var hasSplit =
+        typeof d.depositBalance === 'number' &&
+        typeof d.winningsBalance === 'number';
+
+      if (hasSplit) {
+        // Direct apply — no refetch needed
+        var account = {
+          balance: (balance !== null) ? balance : (d.depositBalance + d.winningsBalance),
+          depositBalance: d.depositBalance,
+          winningsBalance: d.winningsBalance
+        };
+        applyWalletToHeader(account);
+        if (lobbyState.wallet && lobbyState.wallet.account) {
+          lobbyState.wallet.account.balance = account.balance;
+          lobbyState.wallet.account.depositBalance = account.depositBalance;
+          lobbyState.wallet.account.winningsBalance = account.winningsBalance;
+        }
+        return;
+      }
+
+      if (balance === null) return;
+      // Optimistic total-update so UI reflects change immediately; deposit/
+      // winnings split is corrected by the debounced refetch below.
       if (lobbyState.wallet && lobbyState.wallet.account) {
         lobbyState.wallet.account.balance = balance;
       }
+      _scheduleBalanceRefetch();
+    };
+    _balanceRefreshReqHandler = function () {
+      _scheduleBalanceRefetch();
     };
     window.addEventListener('spillorama:balanceChanged', _balanceSyncHandler);
+    window.addEventListener('spillorama:balanceRefreshRequested', _balanceRefreshReqHandler);
   }
 
   function stopGameBarSocketSync() {
     if (_balanceSyncHandler) {
       window.removeEventListener('spillorama:balanceChanged', _balanceSyncHandler);
       _balanceSyncHandler = null;
+    }
+    if (_balanceRefreshReqHandler) {
+      window.removeEventListener('spillorama:balanceRefreshRequested', _balanceRefreshReqHandler);
+      _balanceRefreshReqHandler = null;
+    }
+    if (_balanceRefetchTimer) {
+      clearTimeout(_balanceRefetchTimer);
+      _balanceRefetchTimer = null;
     }
   }
 
@@ -381,18 +446,12 @@
     if (!lobbyEl) return;
 
     // Top bar
-    const balanceEl = document.getElementById('lobby-balance');
     const userNameEl = document.getElementById('lobby-user-name');
     const hallSelectEl = document.getElementById('lobby-hall-select');
 
-    if (balanceEl && lobbyState.wallet?.account) {
-      balanceEl.textContent = formatKr(lobbyState.wallet.account.balance);
-    }
-
-    // Keep game-bar balance in sync whenever lobby data refreshes
-    var gameBarBalEl = document.getElementById('game-bar-balance');
-    if (gameBarBalEl && lobbyState.wallet?.account) {
-      gameBarBalEl.textContent = formatKr(lobbyState.wallet.account.balance);
+    // Saldo (deposit) + Gevinst (winnings) — begge i lobby + game-bar
+    if (lobbyState.wallet?.account) {
+      applyWalletToHeader(lobbyState.wallet.account);
     }
 
     if (userNameEl && lobbyState.user) {

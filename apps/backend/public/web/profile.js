@@ -206,10 +206,26 @@
       if (balanceEl && wallet?.account) {
         balanceEl.textContent = formatKr(wallet.account.balance);
       }
-      // Also update lobby balance
-      var lobbyBal = document.getElementById('lobby-balance');
-      if (lobbyBal && wallet?.account) {
-        lobbyBal.textContent = formatKr(wallet.account.balance);
+      // Also update lobby + game-bar header chips (saldo + gevinst)
+      if (wallet?.account) {
+        var depositAmt = (typeof wallet.account.depositBalance === 'number')
+          ? wallet.account.depositBalance
+          : wallet.account.balance;
+        var winningsAmt = (typeof wallet.account.winningsBalance === 'number')
+          ? wallet.account.winningsBalance
+          : 0;
+        var depositFormatted = formatKr(depositAmt);
+        var winningsFormatted = formatKr(winningsAmt);
+        var headerTargets = [
+          ['#lobby-balance .lobby-chip-value', depositFormatted],
+          ['#game-bar-balance .lobby-chip-value', depositFormatted],
+          ['#lobby-winnings .lobby-chip-value', winningsFormatted],
+          ['#game-bar-winnings .lobby-chip-value', winningsFormatted]
+        ];
+        for (var i = 0; i < headerTargets.length; i++) {
+          var el = document.querySelector(headerTargets[i][0]);
+          if (el) el.textContent = headerTargets[i][1];
+        }
       }
 
       if (txEl) {
