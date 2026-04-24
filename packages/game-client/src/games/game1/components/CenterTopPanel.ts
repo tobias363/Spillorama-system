@@ -3,6 +3,25 @@ import type { HtmlOverlayManager } from "./HtmlOverlayManager.js";
 import type { PatternDefinition, PatternResult } from "@spillorama/shared-types/game";
 import { PatternMiniGrid } from "./PatternMiniGrid.js";
 
+/** Injisér CSS-animasjon for won-pill-flash én gang per dokument. */
+function ensurePatternWonStyles(): void {
+  if (typeof document === "undefined") return;
+  if (document.getElementById("pattern-won-flash-styles")) return;
+  const s = document.createElement("style");
+  s.id = "pattern-won-flash-styles";
+  s.textContent = `
+@keyframes pattern-won-flash {
+  0%   { background: rgba(76, 175, 80, 0.55); box-shadow: 0 0 24px rgba(76, 175, 80, 0.8), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.08); }
+  60%  { background: rgba(76, 175, 80, 0.25); box-shadow: 0 0 12px rgba(76, 175, 80, 0.4), 0 4px 10px rgba(0,0,0,0.5); transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+.prize-pill.pattern-won-flash {
+  animation: pattern-won-flash 0.9s ease-out;
+}
+`;
+  document.head.appendChild(s);
+}
+
 export interface CenterTopCallbacks {
   onShowCalledNumbers?: () => void;
   onPreBuy?: () => void;
@@ -48,6 +67,7 @@ export class CenterTopPanel {
   private activePatternId: string | null = null;
 
   constructor(overlay: HtmlOverlayManager, callbacks: CenterTopCallbacks = {}) {
+    ensurePatternWonStyles();
     this.callbacks = callbacks;
 
     // Visual styling (border, gradient, shadow) moved to `top-group-wrapper`
@@ -222,6 +242,13 @@ export class CenterTopPanel {
 
   private lastAmountByPatternId = new Map<string, number>();
   private lastPatternsSignature: string | null = null;
+  /** Sett med pattern-id-er som var `isWon` i forrige render. Brukes for å
+   *  detektere hvilke patterns som akkurat nå transisjonerte fra
+   *  ikke-vunnet → vunnet, slik at pillen kan flash-animeres. */
+  private prevWonIds = new Set<string>();
+  /** Map fra patternId → DOM-pill, populert under rebuild. Brukes av
+   *  `animateWinFlash` for å finne riktig pill etter rebuild. */
+  private patternPillById = new Map<string, HTMLDivElement>();
 
   updatePatterns(patterns: PatternDefinition[], patternResults: PatternResult[], prizePool = 0): void {
     // Pre-game (ingen aktiv game) → serverens `patterns` er tom. Vis likevel
@@ -240,6 +267,7 @@ export class CenterTopPanel {
     this.lastPatternsSignature = signature;
 
     this.prizeListEl.innerHTML = "";
+    this.patternPillById.clear();
 
     // Find first un-won pattern.
     let currentPatternIdx = 0;
@@ -248,18 +276,16 @@ export class CenterTopPanel {
     }
     const currentPattern = patterns[currentPatternIdx] ?? null;
 
-    // Swap the mini-grid to the active pattern's design.
+    // Swap the mini-grid to the active pattern's design — animert. Første
+    // gang (ingen eksisterende grid): bare fade in. Ved fase-transisjon:
+    // scale+fade-out gammelt, destroy, create nytt, scale+fade-in.
     if (currentPattern && currentPattern.id !== this.activePatternId) {
       console.debug("[blink] CenterTop.miniGrid swap", {
         fromId: this.activePatternId,
         toId: currentPattern.id,
         toDesign: currentPattern.design,
       });
-      if (this.activeGrid) this.activeGrid.destroy();
-      this.activeGrid = new PatternMiniGrid();
-      this.activeGrid.setDesign(currentPattern.design);
-      this.gridHostEl.innerHTML = "";
-      this.gridHostEl.appendChild(this.activeGrid.root);
+      this.swapMiniGrid(currentPattern.design);
       this.activePatternId = currentPattern.id;
     } else if (!currentPattern && this.activeGrid) {
       this.activeGrid.destroy();
@@ -327,6 +353,7 @@ export class CenterTopPanel {
       }
 
       this.prizeListEl.appendChild(pill);
+      this.patternPillById.set(pattern.id, pill);
 
       // Flash payout changes (PR-5 C3).
       seenIds.add(pattern.id);
@@ -340,6 +367,63 @@ export class CenterTopPanel {
     for (const id of Array.from(this.lastAmountByPatternId.keys())) {
       if (!seenIds.has(id)) this.lastAmountByPatternId.delete(id);
     }
+
+    // Fase-progresjon: detektér patterns som akkurat nå ble vunnet (isWon
+    // flippet fra false → true siden forrige render). Animér pillen med en
+    // grønn flash som viser "denne fasen er akkurat ferdig, nå går vi videre".
+    const currentWonIds = new Set(
+      patternResults.filter((r) => r.isWon).map((r) => r.patternId),
+    );
+    for (const id of currentWonIds) {
+      if (this.prevWonIds.has(id)) continue;
+      const pill = this.patternPillById.get(id);
+      if (pill) this.animateWinFlash(pill);
+    }
+    this.prevWonIds = currentWonIds;
+  }
+
+  /** Animér overgang fra gammel mini-grid til ny: scale+fade-out, destroy,
+   *  create nytt, scale+fade-in. Første gang (ingen eksisterende grid):
+   *  bare fade-in det nye. */
+  private swapMiniGrid(newDesign: number): void {
+    const old = this.activeGrid;
+    const buildAndShow = (): void => {
+      const next = new PatternMiniGrid();
+      next.setDesign(newDesign);
+      this.gridHostEl.innerHTML = "";
+      this.gridHostEl.appendChild(next.root);
+      this.activeGrid = next;
+      gsap.fromTo(
+        next.root,
+        { opacity: 0, scale: 0.82 },
+        { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(1.6)" },
+      );
+    };
+    if (!old) {
+      buildAndShow();
+      return;
+    }
+    gsap.killTweensOf(old.root);
+    gsap.to(old.root, {
+      opacity: 0,
+      scale: 0.82,
+      duration: 0.22,
+      ease: "power2.in",
+      onComplete: () => {
+        old.destroy();
+        buildAndShow();
+      },
+    });
+  }
+
+  /** Grønn flash-animasjon på en pill som akkurat ble vunnet (fase-overgang).
+   *  Bruker CSS keyframe `pattern-won-flash` (0.9s). */
+  private animateWinFlash(pill: HTMLDivElement): void {
+    pill.classList.remove("pattern-won-flash");
+    // Reflow for å re-trigge animasjonen hvis klassen allerede var på pillen.
+    void pill.offsetWidth;
+    pill.classList.add("pattern-won-flash");
+    setTimeout(() => pill.classList.remove("pattern-won-flash"), 900);
   }
 
   private flashAmount(span: HTMLSpanElement): void {

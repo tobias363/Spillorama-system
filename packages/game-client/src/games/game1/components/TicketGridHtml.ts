@@ -29,6 +29,10 @@ export class TicketGridHtml {
   /** Cache of the last rendered tickets' identity + colour, keyed by id. */
   private lastSignature: string | null = null;
   private cancelable = false;
+  /** Antall live (spillende) brett — første N av `tickets`. Pre-round-brett
+   *  (index ≥ liveCount) skal IKKE merkes av `markNumberOnAll`. Oppdateres
+   *  av `setTickets`. */
+  private liveCount = 0;
   private onCancelTicket: ((ticketId: string) => void) | null;
 
   constructor(opts: TicketGridHtmlOptions = {}) {
@@ -136,10 +140,12 @@ export class TicketGridHtml {
 
     if (signature === this.lastSignature) {
       // Same shape — just refresh marks from state (in case we missed any).
+      this.liveCount = liveCount;
       this.applyMarks(opts.state, liveCount);
       return;
     }
     this.cancelable = opts.cancelable;
+    this.liveCount = liveCount;
     this.rebuild(tickets, opts, liveCount);
     // Assign signature AFTER rebuild — rebuild() calls clear() which resets
     // lastSignature, so setting it beforehand gets overwritten.
@@ -148,13 +154,17 @@ export class TicketGridHtml {
     this.updateScrollMask();
   }
 
-  /** Mark a newly-drawn number across every ticket in the grid. Returns true
-   *  if at least one ticket actually matched — caller uses this to gate a
-   *  one-shot "mark" sound effect. */
+  /** Mark a newly-drawn number across every LIVE ticket. Returns true if at
+   *  least one live ticket actually matched — caller gates et one-shot "mark"-
+   *  lydeffekt på returverdien.
+   *
+   *  Pre-round-brett (index ≥ liveCount) ignoreres: de spiller ikke i nåværende
+   *  runde og skal ikke ha marks før de blir live ved neste round-start. */
   markNumberOnAll(number: number): boolean {
     let any = false;
-    for (const t of this.tickets) {
-      if (t.markNumber(number)) any = true;
+    for (let i = 0; i < this.tickets.length; i++) {
+      if (i >= this.liveCount) continue;
+      if (this.tickets[i].markNumber(number)) any = true;
     }
     return any;
   }
@@ -238,26 +248,26 @@ export class TicketGridHtml {
   }
 
   private applyMarks(state: GameState, liveCount: number): void {
-    // `myMarks` / drawnNumbers apply ONLY to live brett. Pre-round brett
-    // (index >= liveCount) stay unmarked — they're a preview for next round,
-    // owner decision 2026-04-19: "selvfølgelig ikke disse bongene aktive i
-    // den trekningen".
-    const marksByIndex = state.myMarks ?? [];
+    // Live brett (index < liveCount) får ALLTID alle trukne tall applisert.
+    // Tidligere versjon prioriterte `state.myMarks[i]` først og falt tilbake
+    // til `drawnNumbers` kun hvis myMarks var tom — det ga "tilfeldig
+    // marking" når rebuild nullstilte ticket-state og myMarks var ufullstendig
+    // (f.eks. rett etter rebuild, eller når backend ikke hadde synket per-
+    // ticket-marks). `BingoTicketHtml.markNumber` er idempotent og matcher
+    // kun celler som faktisk inneholder tallet, så `drawnNumbers` er trygg
+    // autoritativ kilde uansett rebuild-state.
+    //
+    // Pre-round brett (index ≥ liveCount) forblir umerket — de er preview for
+    // neste runde. Eier-beslutning 2026-04-19: "selvfølgelig ikke disse
+    // bongene aktive i den trekningen".
     const activePattern = activePatternFromState(state.patterns, state.patternResults);
+    const drawn = state.drawnNumbers ?? [];
     for (let i = 0; i < this.tickets.length; i++) {
       const ticket = this.tickets[i];
       const isLive = i < liveCount;
       if (isLive) {
-        const marks = marksByIndex[i];
-        if (marks && marks.length > 0) {
-          ticket.markNumbers(marks);
-        } else if (state.drawnNumbers && state.drawnNumbers.length > 0) {
-          ticket.markNumbers(state.drawnNumbers);
-        }
+        if (drawn.length > 0) ticket.markNumbers(drawn);
         if (state.myLuckyNumber) ticket.highlightLuckyNumber(state.myLuckyNumber);
-        // Fase-aktiv pattern styrer "igjen"-teller i footer. Pre-round-
-        // bonger beholder whole-card-telling (null) — de spiller ikke i
-        // aktiv runde.
         ticket.setActivePattern(activePattern);
       } else {
         ticket.setActivePattern(null);

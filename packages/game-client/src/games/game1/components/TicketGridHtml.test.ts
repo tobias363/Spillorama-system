@@ -148,11 +148,13 @@ describe("TicketGridHtml", () => {
     expect(headerRemaining.textContent).toContain("24");
   });
 
-  it("propagates markNumberOnAll to every ticket", () => {
+  it("propagates markNumberOnAll to every LIVE ticket (pre-round ignored)", () => {
+    // liveTicketCount: 2 — begge brett er live, begge skal få mark-kall.
     grid.setTickets([makeTicket(0, "Small Yellow"), makeTicket(1, "Small White")], {
       cancelable: false,
       entryFee: 10,
       state: makeState(),
+      liveTicketCount: 2,
     });
     // i=0 ticket has number 7 in its grid; i=1 ticket has number 17.
     grid.markNumberOnAll(7);
@@ -160,6 +162,26 @@ describe("TicketGridHtml", () => {
       (e) => (e as HTMLElement).textContent,
     );
     // First ticket (had 7) shows 23 remaining, second (no 7) still 24.
+    expect(toGoTexts[0]).toContain("23");
+    expect(toGoTexts[1]).toContain("24");
+  });
+
+  it("markNumberOnAll skips pre-round tickets (index ≥ liveCount)", () => {
+    // liveTicketCount: 1 — bare første brett er live. Andre brett er pre-round.
+    grid.setTickets([makeTicket(0, "Small Yellow"), makeTicket(1, "Small White")], {
+      cancelable: false,
+      entryFee: 10,
+      state: makeState(),
+      liveTicketCount: 1,
+    });
+    grid.markNumberOnAll(7);
+    const toGoTexts = Array.from(grid.root.querySelectorAll(".ticket-togo")).map(
+      (e) => (e as HTMLElement).textContent,
+    );
+    // Live-brettet (i=0) fikk marken selv om det ikke inneholdt 7... vent,
+    // det INNEHOLDER 7 per makeTicket. Live-brett markeres. Pre-round-brett
+    // (i=1) skal IKKE markeres selv om det potensielt inneholder tallet.
+    // I dette testoppsettet inneholder ikke i=1 tallet 7, så "24" uansett.
     expect(toGoTexts[0]).toContain("23");
     expect(toGoTexts[1]).toContain("24");
   });
