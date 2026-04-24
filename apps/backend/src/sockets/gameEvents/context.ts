@@ -259,7 +259,27 @@ export function buildSocketContext(socket: Socket, base: RegistryContext): Socke
       return { roomCode, playerId: player.id };
     }
 
-    // Admin: still accept payload playerId but verify it exists
+    // Admin-sti (to modus):
+    //   1) Self-play: admin har selv en player-rad i rommet (via walletId-match
+    //      fra room:create). Behandler som vanlig spiller – derive fra token.
+    //      Dette lar en admin-bruker teste Spill 1 uten å måtte populere
+    //      `playerId` i hver payload fra klienten.
+    //   2) Agent/operator-modus: admin handler på vegne av annen spiller
+    //      (agent-portal, check-bingo osv). Da SKAL `playerId` være i payload.
+    const adminSnapshot = engine.getRoomSnapshot(roomCode);
+    const adminPlayer = adminSnapshot.players.find((p) => p.walletId === user.walletId);
+    if (adminPlayer) {
+      // Admin er selv spiller – samme anti-spoof-sjekk som over.
+      const clientPlayerId = typeof payload?.playerId === "string" ? payload.playerId.trim() : "";
+      if (clientPlayerId && clientPlayerId !== adminPlayer.id) {
+        console.warn(
+          `SECURITY: admin playerId mismatch — client sent "${clientPlayerId}" but token resolves to "${adminPlayer.id}" (user ${user.id}, room ${roomCode})`,
+        );
+      }
+      return { roomCode, playerId: adminPlayer.id };
+    }
+
+    // Admin acting on behalf of someone else: require explicit playerId.
     const playerId = mustBeNonEmptyString(payload?.playerId, "playerId");
     base.assertUserCanActAsPlayer(user, roomCode, playerId);
     return { roomCode, playerId };
