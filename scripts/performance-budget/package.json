@@ -1,0 +1,18 @@
+{
+  "name": "@spillorama/performance-budget",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Performance budget CI-gate for Spill 1. Collects runtime metrics from a headless Chromium against the game-client preview build, diffs them against a checked-in baseline, and fails CI when a PR regresses on paint-count, RAF-rate, backdrop-filter density, or any other tracked metric.",
+  "type": "module",
+  "scripts": {
+    "collect": "tsx collect-metrics.ts",
+    "compare": "tsx compare.ts",
+    "check": "tsx check.ts",
+    "baseline": "tsx collect-metrics.ts --write-baseline",
+    "serve": "tsx serve.ts"
+  },
+  "dependencies": {
+    "puppeteer": "^24.0.0",
+    "tsx": "^4.19.2"
+  }
+}

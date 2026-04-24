@@ -1,0 +1,155 @@
+name: Performance Budget
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      # Run when anything that could affect runtime perf changes:
+      # game-client source, the preview entry (which the gate measures
+      # against), static web-shell CSS/HTML (backdrop-filters live
+      # here), or the budget tooling itself.
+      - "packages/game-client/**"
+      - "packages/shared-types/**"
+      - "apps/backend/public/web/**"
+      - "scripts/performance-budget/**"
+      - ".github/workflows/performance-budget.yml"
+  # Let maintainers refresh the baseline via `workflow_dispatch` and
+  # catch accidental regressions on `main` as a secondary safety net.
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/game-client/**"
+      - "packages/shared-types/**"
+      - "apps/backend/public/web/**"
+      - "scripts/performance-budget/**"
+      - ".github/workflows/performance-budget.yml"
+
+concurrency:
+  # Cancel in-flight runs for the same PR — a second push supersedes
+  # the first. Keep main-branch runs independent.
+  group: perf-budget-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  performance-budget:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # Cache Puppeteer's Chromium download separately from npm — it's
+      # ~170MB and doesn't change between runs unless we bump the
+      # puppeteer major. The scripts/performance-budget/package-lock.json
+      # pins the version so the cache key is stable.
+      - name: Cache Puppeteer Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('scripts/performance-budget/package.json') }}
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build shared-types
+        # game-client's package.json exports "types": "./src/*.ts" but
+        # "import": "./dist/*.js". tsc (moduleResolution: bundler) is
+        # fine with the source, but Vite/Rollup follow the "import"
+        # field and need the compiled dist/ to resolve the subpath
+        # exports (e.g. `@spillorama/shared-types/socket-events`).
+        # See ci.yml + compliance-gate.yml for the same pattern.
+        run: npm --prefix packages/shared-types run build
+
+      - name: Build game-client (preview + main)
+        # The perf-budget probe navigates to /web/games/preview.html
+        # which must be present in apps/backend/public/web/games/. The
+        # build step also produces the main game-client bundle used by
+        # the shell, so we keep the standard `npm -w` invocation.
+        run: npm -w @spillorama/game-client run build
+
+      - name: Install performance-budget dependencies
+        # Isolated package.json — no workspace entry, so we install
+        # separately. `--no-audit --no-fund` keeps CI logs quiet.
+        run: npm --prefix scripts/performance-budget install --no-audit --no-fund
+
+      - name: Run metrics collector
+        id: collect
+        run: npm --prefix scripts/performance-budget run collect
+
+      - name: Compare against baseline
+        id: compare
+        continue-on-error: true
+        run: npm --prefix scripts/performance-budget run compare
+
+      - name: Upload artifacts
+        # Always upload so reviewers can pull raw metrics even on green
+        # runs (useful when tracking gradual drift under the budget).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-budget-report
+          path: |
+            scripts/performance-budget/report.json
+            scripts/performance-budget/report.md
+          retention-days: 14
+
+      - name: Post PR comment
+        # PR comments only — the same file is still uploaded as an
+        # artifact on push-to-main runs.
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'scripts/performance-budget/report.md';
+            if (!fs.existsSync(path)) {
+              core.warning('No perf-budget report.md produced — skipping PR comment.');
+              return;
+            }
+            const body = fs.readFileSync(path, 'utf8');
+            const marker = '<!-- spill1-perf-budget-comment -->';
+            const full = `${marker}\n${body}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: full,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: full,
+              });
+            }
+
+      - name: Enforce budget
+        # Fail the job last so the comment is posted first. The compare
+        # step's exit code is captured via `continue-on-error` above.
+        if: steps.compare.outcome == 'failure'
+        run: |
+          echo "::error::Spill 1 performance budget exceeded. See the PR comment for details."
+          exit 1
