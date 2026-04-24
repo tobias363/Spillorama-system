@@ -247,15 +247,19 @@ LEGACY_1_TO_1_MAPPING §9 lister 24 MVP-PR-er. Basert på PDF 16+17 bør §9 **o
 
 **Tilleggs-scope: +4 PR-er, +16 dager til Fase 1**. Totalt Fase 1 MVP = 28 PR-er.
 
-### 5.3 Åpne spørsmål til Tobias
+### 5.3 Åpne spørsmål til Tobias — BESVART 2026-04-24
 
-1. **Settlement-regel "Norsk Tipping Dag ikke i rapport, kun Totalt"** — wireframe sier dette, men §8.7 i MAPPING sier manuell innlegging. Er dette korrekt at kun Totalt reflekteres? (Implikasjon: DAG-feltet er kun display, ikke summert inn i Sum-rad)
-2. **Withdraw XML-format** — per-hall eller samlet per-agent-XML? Wireframe 16.20 nevner begge alternativer uten å velge.
-3. **Transfer Hall Access** (17.19) — hvordan skal dette fungere? (agent A logger ut → agent B tar over aktiv hall?) Er dette pilot-relevant eller post-pilot?
-4. **Unique ID balance-accumulation-regel** fra 17.10 (170+200=370) — er dette korrekt slik wireframe beskriver? Eller overskriver nytt add-money gammel verdi? Nåværende backend `AgentTransactionService.ts` må verifiseres.
-5. **"Cash-out kun current day"** (17.35) — skal denne håndheves i UI eller kun backend? Hva hvis shift går over midnatt?
-6. **Hall Specific Report "Elvis Replacement Amount"** (17.36) — hva refererer dette til? Elvis er ikke nevnt annetsteds i wireframes. Er dette et spesielt ticket-oppgradings-konsept?
-7. **Role Management 16 moduler** (16.6) — wireframe lister 16 moduler inkludert "Accounting" som 16. modul. Skal denne inkluderes i nåværende matrix-UI (som per §3.1 i MAPPING sier "15 moduler")?
+Alle 7 spørsmål er avklart av PM (Tobias). Svarene er autoritative.
+
+1. **✅ LÅST — Norsk Tipping/Rikstoto Dag-felt:** Også summeres i Totalt (ikke kun display). Dag + Total = samlet rapporterings-sum.
+2. **✅ LÅST — Withdraw XML-format:** Én samlet XML per agent, med alle hallene kombinert. Ikke per-hall.
+3. **✅ LÅST — Transfer Hall Access (17.19):** Pilot-relevant. Legacy-flyt 1:1 (agent-initiert fra master-hall → target-hall aksepterer direkte, 60s TTL, ingen admin-mellomtrinn). Implementert i Task 1.6 (`feat/game1-transfer-hall-access`, PR #453).
+4. **✅ LÅST — Unique ID balance-accumulation:** Akkumulerer, 170+200=370. Innbetaling legges alltid på top av eksisterende saldo, aldri overskriv. Backend `AgentTransactionService.ts` må verifiseres for denne regelen.
+5. **✅ LÅST — "Cash-out kun current day" (17.35):** UI-håndheving (gray-out-knapp). Agent ser umiddelbart at bonger fra tidligere dager ikke kan kontant-utbetales. Backend også blokkerer som defence-in-depth. Håndteres i `apps/backend/src/routes/adminPhysicalTicketsRewardAll.ts` + UI i `AgentCheckForBingoPage.ts`.
+6. **✅ LÅST — Elvis Replacement Amount (17.36):** Beholdes i rapport. Dette er total fee-inntekt fra Spill 1 Elvis-variant-byttefee (se `elvisReplace` i `packages/game-client/src/games/game1/logic/SocketActions.ts`). Jo mer rapport-funksjonalitet, jo bedre drifts-kontroll. Skal inkluderes i Hall Specific Report.
+7. **✅ LÅST — Role Management 16 moduler:** Accounting-modul UTSATT til post-pilot per PM-beslutning ("vi må ikke ha regnskapstilgangen nå"). Spores i Linear som **BIN-692** i prosjektet "Post-pilot backlog — Wireframe + Audit deferred". I pilot: behold 15-modul-matrix; i post-pilot: legg til Accounting som 16. modul.
+
+**Implikasjon for pilot-scope:** P0-listen uendret. P1 gap #18 (Role Management) nedgraderes til post-pilot (se Linear BIN-692). Gaps #19 (Transfer Hall Access) er allerede implementert via Task 1.6. Q1-Q2-Q4-Q5 krever oppdatering av eksisterende PR-er eller små mikro-fixer.
 
 ---
 
