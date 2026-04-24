@@ -149,11 +149,13 @@ export class BingoTicketHtml {
 
     this.root = document.createElement("div");
     Object.assign(this.root.style, {
-      // Bong fyller grid-cellen fullt ut — visuell horisontal luft mellom
-      // bonger = CSS column-gap (ikke ubrukt cellplass). Høyden følger bredden
-      // via aspect-ratio for å bevare 4:5-proporsjonene (240×300 design).
-      width: "100%",
-      aspectRatio: `${this.cardWidth} / ${this.cardHeight}`,
+      // Bong.jsx-port: faste dimensjoner 240×300 (matcher referanse-design).
+      // `justifySelf: center` sentraliserer bongen i grid-cellen når
+      // cellen er bredere enn 240px (skjer på brede skjermer med
+      // `repeat(5, 1fr)`-grid). Hindrer stretching + kutting av innhold.
+      width: `${this.cardWidth}px`,
+      height: `${this.cardHeight}px`,
+      justifySelf: "center",
       perspective: "1000px",
       cursor: "pointer",
       userSelect: "none",
