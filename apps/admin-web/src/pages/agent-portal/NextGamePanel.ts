@@ -50,6 +50,18 @@ import {
   AgentHallSocket,
   type AgentHallEvent,
 } from "./agentHallSocket.js";
+import {
+  fetchAgentGame1CurrentGame,
+  startAgentGame1,
+  resumeAgentGame1,
+  type Spill1CurrentGameResponse,
+} from "../../api/agent-game1.js";
+import {
+  AgentGame1Socket,
+  type AgentGame1StatusUpdate,
+} from "./agentGame1Socket.js";
+import { renderSpill1AgentStatus } from "./Spill1AgentStatus.js";
+import { renderSpill1AgentControls } from "./Spill1AgentControls.js";
 
 const POLL_INTERVAL_MS = 5_000;
 const DEFAULT_COUNTDOWN_SECONDS = 120;
@@ -66,6 +78,14 @@ interface PanelState {
   selfReady: boolean;
   /** Jackpot-potensial for runden (feature-flag / spillkonfig). Default false. */
   jackpotArmed: boolean;
+  /**
+   * Task 1.4: Spill 1 scheduled_game-data for agentens hall. Null hvis ingen
+   * aktiv Spill 1-runde — da faller vi tilbake til room-code-baserte rooms
+   * (Spill 2/3). Fetch parallelt med listAgentRooms i refresh().
+   */
+  spill1: Spill1CurrentGameResponse | null;
+  spill1Error: string | null;
+  spill1LastStatusEvent: AgentGame1StatusUpdate | null;
 }
 
 let state: PanelState = initialState();
@@ -73,6 +93,7 @@ let activeContainer: HTMLElement | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let hallSocket: AgentHallSocket | null = null;
+let spill1Socket: AgentGame1Socket | null = null;
 
 function initialState(): PanelState {
   return {
@@ -85,6 +106,9 @@ function initialState(): PanelState {
     countdownTick: 0,
     selfReady: false,
     jackpotArmed: false,
+    spill1: null,
+    spill1Error: null,
+    spill1LastStatusEvent: null,
   };
 }
 
@@ -96,6 +120,7 @@ export function mountNextGamePanel(container: HTMLElement): void {
   void refresh();
   startPolling();
   startSocket();
+  startSpill1Socket();
 
   const observer = new MutationObserver(() => {
     if (!document.body.contains(container)) {
@@ -110,6 +135,7 @@ export function unmountNextGamePanel(): void {
   stopPolling();
   stopCountdown();
   stopSocket();
+  stopSpill1Socket();
   activeContainer = null;
 }
 
@@ -190,8 +216,60 @@ function stopSocket(): void {
   }
 }
 
+function startSpill1Socket(): void {
+  if (spill1Socket) return;
+  try {
+    spill1Socket = new AgentGame1Socket({
+      onStatusUpdate: (evt) => {
+        state.spill1LastStatusEvent = evt;
+        void refreshSpill1();
+      },
+      onDrawProgressed: () => {
+        // Agent-portalen trenger ikke per-kule-render her — polling henter
+        // aktuell status. Men event trigger refresh for umiddelbar status-
+        // opprydding (f.eks. når status flipper fra running → paused).
+        void refreshSpill1();
+      },
+      onPhaseWon: () => {
+        void refreshSpill1();
+      },
+      onFallbackActive: (active) => {
+        // Gjenbruk eksisterende fallback-banner (state.socketFallback) —
+        // hvis enten room-socket eller admin-game1-socket er nede vises
+        // samme varsel. Polling tar over uansett.
+        state.socketFallback = active;
+        rerender();
+      },
+    });
+    if (state.spill1?.currentGame) {
+      spill1Socket.subscribe(state.spill1.currentGame.id);
+    }
+  } catch {
+    // Socket-oppkobling kan feile i test-kontekst — la polling ta over.
+    spill1Socket = null;
+  }
+}
+
+function stopSpill1Socket(): void {
+  if (spill1Socket) {
+    try {
+      spill1Socket.dispose();
+    } catch {
+      // ignorer
+    }
+    spill1Socket = null;
+  }
+}
+
 async function refresh(): Promise<void> {
   if (!activeContainer) return;
+  // Task 1.4: parallell fetch — room-basert (Spill 2/3) + scheduled_games-
+  // basert (Spill 1). Begge kan feile uavhengig og påvirker ikke hverandre.
+  await Promise.all([refreshRooms(), refreshSpill1()]);
+  rerender();
+}
+
+async function refreshRooms(): Promise<void> {
   try {
     const rooms = await listAgentRooms();
     state.rooms = rooms;
@@ -206,6 +284,28 @@ async function refresh(): Promise<void> {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
       stopPolling();
     }
+  }
+}
+
+async function refreshSpill1(): Promise<void> {
+  try {
+    const data = await fetchAgentGame1CurrentGame();
+    state.spill1 = data;
+    state.spill1Error = null;
+    if (data.currentGame && spill1Socket) {
+      spill1Socket.subscribe(data.currentGame.id);
+    }
+  } catch (err) {
+    // Agent uten hall eller SUPPORT-rollen gir 403 — vi kveler det uten å
+    // vise feil-banner (Spill 1-UI bare skjules). Andre feil lagres i
+    // spill1Error-flagget for rendering.
+    if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+      state.spill1 = null;
+      state.spill1Error = null;
+      return;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    state.spill1Error = msg;
   }
   rerender();
 }
@@ -233,12 +333,46 @@ function render(container: HTMLElement): void {
     <section class="content" data-marker="agent-next-game-panel">
       ${renderSocketBanner()}
       ${renderErrorBanner()}
+      ${renderSpill1Block()}
       ${renderNoRoom()}
       ${renderCurrentGame()}
       ${renderActions()}
       ${renderReadyPanel()}
     </section>`;
   wireButtons(container);
+  wireSpill1Buttons(container);
+}
+
+function renderSpill1Block(): string {
+  const spill1 = state.spill1;
+  if (!spill1 || !spill1.currentGame) return "";
+  const statusHtml = renderSpill1AgentStatus({
+    currentGame: spill1.currentGame,
+    halls: spill1.halls,
+    hallId: spill1.hallId,
+    isMasterAgent: spill1.isMasterAgent,
+    allReady: spill1.allReady,
+  });
+  const excludedHallIds = spill1.halls
+    .filter((h) => h.excludedFromGame)
+    .map((h) => h.hallId);
+  const controlsHtml = renderSpill1AgentControls({
+    currentGame: spill1.currentGame,
+    isMasterAgent: spill1.isMasterAgent,
+    allReady: spill1.allReady,
+    excludedHallIds,
+  });
+  const errorBanner = state.spill1Error
+    ? `<div class="alert alert-warning" data-marker="spill1-error-banner">
+         <small>${escapeHtml(state.spill1Error)}</small>
+       </div>`
+    : "";
+  return `
+    <section data-marker="spill1-block">
+      ${errorBanner}
+      ${statusHtml}
+      ${controlsHtml}
+    </section>`;
 }
 
 function renderHeader(): string {
@@ -469,6 +603,62 @@ function wireButtons(container: HTMLElement): void {
     "click",
     () => { void onBroadcastReady(); },
   );
+}
+
+function wireSpill1Buttons(container: HTMLElement): void {
+  container.querySelector<HTMLButtonElement>('[data-action="spill1-start"]')?.addEventListener(
+    "click",
+    () => { void onSpill1Start(); },
+  );
+  container.querySelector<HTMLButtonElement>('[data-action="spill1-resume"]')?.addEventListener(
+    "click",
+    () => { void onSpill1Resume(); },
+  );
+}
+
+async function onSpill1Start(): Promise<void> {
+  const spill1 = state.spill1;
+  if (!spill1 || !spill1.currentGame) return;
+  if (!spill1.isMasterAgent) {
+    Toast.warning("Kun master-hall-agent kan starte Spill 1.");
+    return;
+  }
+  const excludedHallIds = spill1.halls
+    .filter((h) => h.excludedFromGame)
+    .map((h) => h.hallId);
+  let confirmExcludedHalls: string[] | undefined;
+  if (excludedHallIds.length > 0) {
+    const ok = window.confirm(
+      `Bekreft ekskluderte haller:\n${excludedHallIds.join(", ")}`
+    );
+    if (!ok) return;
+    confirmExcludedHalls = excludedHallIds;
+  }
+  try {
+    await startAgentGame1(confirmExcludedHalls);
+    Toast.success("Spill 1 startet");
+    await refreshSpill1();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    Toast.error(msg);
+  }
+}
+
+async function onSpill1Resume(): Promise<void> {
+  const spill1 = state.spill1;
+  if (!spill1 || !spill1.currentGame) return;
+  if (!spill1.isMasterAgent) {
+    Toast.warning("Kun master-hall-agent kan resume Spill 1.");
+    return;
+  }
+  try {
+    await resumeAgentGame1();
+    Toast.success("Spill 1 fortsatt");
+    await refreshSpill1();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    Toast.error(msg);
+  }
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────

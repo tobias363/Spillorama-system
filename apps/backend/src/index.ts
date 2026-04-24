@@ -79,6 +79,7 @@ import { MiniGameMysteryEngine } from "./game/minigames/MiniGameMysteryEngine.js
 import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAdapter.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
+import { createAgentGame1Router } from "./routes/agentGame1.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
@@ -1494,6 +1495,17 @@ app.use(createAdminGame1MasterRouter({
   // bruker feltene til å vise Resume-knapp + auto-pause-banner.
   drawEngine: game1DrawEngineService,
   io,
+}));
+// Task 1.4 (2026-04-24): foren agent-portal + master-konsoll mot
+// scheduled_games-paradigmet. 4 endepunkter under /api/agent/game1/* som
+// gir agenten et hall-scoped view over samme state og reuser
+// Game1MasterControlService + Game1HallReadyService. Master-hall-agent
+// kan starte/resume direkte fra agent-portal; ikke-master-agent får 403.
+app.use(createAgentGame1Router({
+  platformService,
+  masterControlService: game1MasterControlService,
+  hallReadyService: game1HallReadyService,
+  pool: platformService.getPool(),
 }));
 // GAME1_SCHEDULE PR 4a: ticket-purchase-router for Game 1. 3 endepunkter —
 // POST /api/game1/purchase, POST /api/game1/purchase/:id/refund,
