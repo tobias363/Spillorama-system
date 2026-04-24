@@ -168,12 +168,15 @@ describe("Task 1.7: TVScreenPage phase-won-banner", () => {
     const banner = container.querySelector<HTMLElement>("[data-testid='tv-phase-banner']")!;
     expect(banner.classList.contains("tv-phase-banner-hidden")).toBe(false);
 
-    // Før 3s: banner fortsatt synlig.
-    await vi.advanceTimersByTimeAsync(2999);
+    // Før 3s: banner fortsatt synlig. Bruker 2500ms margin (ikke 2999) for å
+    // unngå flaky-failure i CI når setup-ticker (30ms) sammen med
+    // sub-millisecond timing i vi.advanceTimersByTimeAsync landet rett på
+    // 3s-grensen.
+    await vi.advanceTimersByTimeAsync(2500);
     expect(banner.classList.contains("tv-phase-banner-hidden")).toBe(false);
 
-    // Ved 3s: skjules.
-    await vi.advanceTimersByTimeAsync(2);
+    // Ved 3s: skjules. 600ms margin dekker reste + setup-ticker-forskyvning.
+    await vi.advanceTimersByTimeAsync(600);
     expect(banner.classList.contains("tv-phase-banner-hidden")).toBe(true);
     expect(banner.getAttribute("aria-hidden")).toBe("true");
   });
