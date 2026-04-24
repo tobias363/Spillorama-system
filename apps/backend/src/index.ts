@@ -89,6 +89,10 @@ import { createAdminAmlRouter } from "./routes/adminAml.js";
 import { AmlService } from "./compliance/AmlService.js";
 import { createAdminSecurityRouter } from "./routes/adminSecurity.js";
 import { SecurityService } from "./compliance/SecurityService.js";
+import { createAdminWithdrawXmlRouter } from "./routes/adminWithdrawXml.js";
+import { WithdrawXmlExportService } from "./admin/WithdrawXmlExportService.js";
+import { AccountingEmailService } from "./admin/AccountingEmailService.js";
+import { createXmlExportDailyTickJob } from "./jobs/xmlExportDailyTick.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createAdminAgentsRouter } from "./routes/adminAgents.js";
 import { createAdminAgentPermissionsRouter } from "./routes/adminAgentPermissions.js";
@@ -316,6 +320,7 @@ const {
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
   jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
   jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
+  jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -440,6 +445,15 @@ const securityService = new SecurityService({
 // venter på init uansett.
 void securityService.warmBlockedIpCache().catch((err) => {
   console.warn("[BIN-587 B3-security] blocked-IP cache warm-up failed:", err);
+});
+
+// Withdraw XML-export-service (wireframe 16.20). Bygger XML-batcher av
+// ACCEPTED bank-uttak. `AccountingEmailService` wires til emailService
+// senere (etter at emailService er instansiert lengre ned).
+const withdrawXmlExportService = new WithdrawXmlExportService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+  exportDir: (process.env.WITHDRAW_XML_EXPORT_DIR ?? "").trim() || undefined,
 });
 
 // BIN-587 B4a: physical papirbillett-admin. Agent-POS-salget (BIN-583)
@@ -663,6 +677,16 @@ const cmsService = new CmsService({
 // (EmailService blir stub uten SMTP_HOST; audit bruker in-memory uten
 // DB-backing). Agent 3 vil wire ADMIN-side audit-kall i påfølgende PR.
 const emailService = new EmailService();
+
+// Accounting email dispatcher for Withdraw XML-batcher (wireframe 16.20).
+// Bruker eksisterende `app_withdraw_email_allowlist` (via securityService)
+// som regnskaps-CC-liste. PM-beslutning 2026-04-24 — ingen ny tabell.
+const accountingEmailService = new AccountingEmailService({
+  emailService,
+  securityService,
+  xmlExportService: withdrawXmlExportService,
+});
+
 // BIN-FCM: Firebase Cloud Messaging push-service. Kjører no-op uten
 // FIREBASE_CREDENTIALS_JSON (matcher EmailService-mønsteret) — dev-miljø
 // kan starte uten Firebase-credentials, mens prod må sette env-var.
@@ -939,6 +963,21 @@ jobScheduler.register({
     pool: platformService.getPool(),
     schema: pgSchema,
     fcmPushService,
+  }),
+});
+
+// Withdraw XML-eksport daglig cron (wireframe 16.20). Genererer én XML
+// per agent av ACCEPTED bank-uttak og sender som vedlegg til
+// regnskaps-allowlisten. PM-krav 2026-04-24: daglig kl 23:00 lokal tid.
+jobScheduler.register({
+  name: "xml-export-daily",
+  description: "Generate daily withdraw XML batches per agent + email to accounting allowlist (wireframe 16.20).",
+  intervalMs: jobXmlExportDailyIntervalMs,
+  enabled: jobXmlExportDailyEnabled,
+  run: createXmlExportDailyTickJob({
+    xmlExportService: withdrawXmlExportService,
+    accountingEmailService,
+    runAtHourLocal: jobXmlExportDailyRunAtHour,
   }),
 });
 
@@ -1230,6 +1269,13 @@ app.use(createAdminSecurityRouter({
   platformService,
   auditLogService,
   securityService,
+}));
+// Withdraw XML-eksport admin-endepunkter (wireframe 16.20).
+app.use(createAdminWithdrawXmlRouter({
+  platformService,
+  auditLogService,
+  xmlExportService: withdrawXmlExportService,
+  accountingEmailService,
 }));
 app.use(createAdminPhysicalTicketsRouter({
   platformService,

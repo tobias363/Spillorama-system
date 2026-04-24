@@ -44,12 +44,25 @@ export interface EmailServiceConfig {
   url: string | undefined;
 }
 
+/**
+ * Withdraw XML-export batches support attachments. Kept minimal so the
+ * transporter contract stays simple — only `filename` + `content` is
+ * required, content can be string or Buffer. contentType is optional
+ * (nodemailer infers from extension when absent).
+ */
+export interface EmailAttachment {
+  filename: string;
+  content: string | Buffer;
+  contentType?: string;
+}
+
 export interface SendEmailInput {
   to: string;
   subject: string;
   html: string;
   text: string;
   from?: string;
+  attachments?: EmailAttachment[];
 }
 
 export interface SendTemplateInput {
@@ -107,6 +120,7 @@ export interface EmailTransporter {
     subject: string;
     html: string;
     text: string;
+    attachments?: EmailAttachment[];
   }): Promise<{ messageId?: string }>;
 }
 
@@ -168,6 +182,7 @@ export class EmailService {
       subject: input.subject,
       html: input.html,
       text: input.text,
+      attachments: input.attachments,
     });
     return { messageId: info.messageId ?? null, skipped: false };
   }

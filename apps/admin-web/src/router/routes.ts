@@ -113,6 +113,7 @@ export const routes: RouteDef[] = [
   { path: "/withdraw/history/hall", titleKey: "withdraw_history_hall", module: "Withdraw Management" },
   { path: "/withdraw/history/bank", titleKey: "withdraw_history_bank", module: "Withdraw Management" },
   { path: "/withdraw/list/emails", titleKey: "add_email_account", module: "Withdraw Management" },
+  { path: "/withdraw/xml-batches", titleKey: "withdraw_xml_batches", module: "Withdraw Management" },
 
   { path: "/leaderboard", titleKey: "leaderboard_tier_list_title" },
   // BIN-668 — Leaderboard tier CRUD. `/leaderboard/edit/:id` via hash-regex.

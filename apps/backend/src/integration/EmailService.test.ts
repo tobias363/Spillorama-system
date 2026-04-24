@@ -11,6 +11,7 @@ import {
   EmailService,
   previewTemplate,
   type EmailTransporter,
+  type EmailAttachment,
 } from "./EmailService.js";
 
 interface CapturedMessage {
@@ -19,6 +20,7 @@ interface CapturedMessage {
   subject: string;
   html: string;
   text: string;
+  attachments?: EmailAttachment[];
 }
 
 function createFakeTransporter(): { transporter: EmailTransporter; messages: CapturedMessage[] } {
@@ -192,4 +194,33 @@ test("BIN-588 previewTemplate: returns subject/html/text triple without sending"
   assert.match(out.html, /Hei <strong>A<\/strong>/);
   assert.match(out.text, /https:\/\/x/);
   assert.match(out.html, /Lenken utløper om 2 time/);
+});
+
+test("EmailService: attachments videresendes til transporter", async () => {
+  const { transporter, messages } = createFakeTransporter();
+  const svc = new EmailService({
+    transporter,
+    config: {
+      host: "smtp.test", port: 587, secure: false, user: undefined, pass: undefined,
+      from: "from@x.no", url: undefined,
+    },
+  });
+  const attachment: EmailAttachment = {
+    filename: "test.xml",
+    content: "<xml/>",
+    contentType: "application/xml",
+  };
+  await svc.sendEmail({
+    to: "a@b.no",
+    subject: "Med vedlegg",
+    html: "<p>x</p>",
+    text: "x",
+    attachments: [attachment],
+  });
+  assert.equal(messages.length, 1);
+  assert.ok(messages[0].attachments);
+  assert.equal(messages[0].attachments!.length, 1);
+  assert.equal(messages[0].attachments![0].filename, "test.xml");
+  assert.equal(messages[0].attachments![0].content, "<xml/>");
+  assert.equal(messages[0].attachments![0].contentType, "application/xml");
 });
