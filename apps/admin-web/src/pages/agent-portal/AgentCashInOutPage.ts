@@ -1,13 +1,13 @@
 // Agent-portal Cash In/Out Management (legacy V1.0 skjerm 17.x).
 //
 // I V1.0-wireframe har denne siden 6 knapper (Unique ID, Registered User,
-// Sell Products, Shift Log Out, Today's Sales Report). Denne implementasjonen
-// leverer Wireframe Gap #9 (Shift Log Out-popup med checkboxer +
-// "View Cashout Details"-modal per PDF 17.6).
+// Sell Products, Shift Log Out, Today's Sales Report). Implementasjonen
+// vokser inn i de seks knappene gradvis:
+//   - Wireframe Gap #4 (Register Sold Tickets, PDF 15.2 / 17.15)
+//   - Wireframe Gap #9 (Shift Log Out-popup med checkboxer +
+//     "View Cashout Details"-modal per PDF 17.6).
 //
-// De øvrige knappene er ute av scope for Gap #9 — vi beholder side-skjellet
-// slik at "Shift Log Out"-knappen er funksjonell, og de andre knappene
-// kommer i etterfølgende PR-er.
+// De øvrige knappene fylles inn i etterfølgende PR-er.
 
 import { t } from "../../i18n/I18n.js";
 import { Toast } from "../../components/Toast.js";
@@ -18,6 +18,7 @@ import {
   type AgentShiftLogoutFlags,
 } from "../../api/agent-shift.js";
 import { openPendingCashoutsModal } from "./PendingCashoutsModal.js";
+import { openRegisterSoldTicketsModal } from "./modals/RegisterSoldTicketsModal.js";
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -40,7 +41,13 @@ export function mountAgentCashInOut(container: HTMLElement): void {
         <div class="box-body">
           <p>${escapeHtml(t("agent_cash_in_out_description"))}</p>
           <div class="btn-group-vertical" role="group" aria-label="cash-in-out-actions"
+            data-marker="agent-cash-actions"
             style="display:flex; flex-direction:column; gap:8px; max-width:360px;">
+            <button type="button" class="btn btn-primary"
+                    data-marker="btn-register-sold-tickets"
+                    data-action="register-sold-tickets">
+              <i class="fa fa-ticket"></i> ${escapeHtml(t("register_sold_tickets_button"))}
+            </button>
             <button type="button" class="btn btn-danger" data-action="shift-log-out">
               <i class="fa fa-sign-out"></i> ${escapeHtml(t("agent_cash_in_out_shift_log_out"))}
             </button>
@@ -48,6 +55,20 @@ export function mountAgentCashInOut(container: HTMLElement): void {
         </div>
       </div>
     </section>`;
+
+  const registerBtn = container.querySelector<HTMLButtonElement>(
+    '[data-marker="btn-register-sold-tickets"]',
+  );
+  registerBtn?.addEventListener("click", () => {
+    // Hent gameId fra url-param eller prompt. Pilot: prompt.
+    // (I senere PR hentes gameId fra NextGamePanel-staten eller fra en
+    // dropdown over pågående spill.)
+    const gameId = window.prompt(t("enter_game_id"));
+    if (!gameId || !gameId.trim()) return;
+    openRegisterSoldTicketsModal({
+      gameId: gameId.trim(),
+    });
+  });
 
   const logoutBtn = container.querySelector<HTMLButtonElement>('[data-action="shift-log-out"]');
   logoutBtn?.addEventListener("click", () => {

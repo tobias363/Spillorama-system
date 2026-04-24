@@ -125,6 +125,8 @@ import { AgentOpenDayService } from "./agent/AgentOpenDayService.js";
 import { HallAccountReportService } from "./compliance/HallAccountReportService.js";
 import { createAgentOkBingoRouter } from "./routes/agentOkBingo.js";
 import { createAgentBingoRouter } from "./routes/agentBingo.js";
+import { createAgentTicketRegistrationRouter } from "./routes/agentTicketRegistration.js";
+import { TicketRegistrationService } from "./agent/TicketRegistrationService.js";
 import { OkBingoTicketService } from "./agent/OkBingoTicketService.js";
 import { SqlServerOkBingoApiClient } from "./integration/okbingo/SqlServerOkBingoApiClient.js";
 import { StubOkBingoApiClient } from "./integration/okbingo/StubOkBingoApiClient.js";
@@ -1090,6 +1092,13 @@ const game1HallReadyService = new Game1HallReadyService({
   schema: pgSchema,
 });
 
+// BIN-GAP#4: Register Sold Tickets scanner (wireframe 15.2/17.15). Per-game
+// per-hall per-ticket-type registrering med carry-forward mellom runder.
+const ticketRegistrationService = new TicketRegistrationService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+
 // GAME1_SCHEDULE PR 3: master-control service. Håndterer master-start/pause/
 // resume/stop + hall-exclude/include med regulatorisk audit (app_game1_master_audit).
 const game1MasterControlService = new Game1MasterControlService({
@@ -1984,6 +1993,19 @@ app.use(createAgentBingoRouter({
   agentShiftService,
   auditLogService,
   engine,
+}));
+
+// BIN-GAP#4: Register Sold Tickets scanner (wireframe 15.2/17.15).
+//   GET  /api/agent/ticket-registration/:gameId/initial-ids
+//   POST /api/agent/ticket-registration/:gameId/final-ids
+//   GET  /api/agent/ticket-registration/:gameId/summary
+app.use(createAgentTicketRegistrationRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  auditLogService,
+  ticketRegistrationService,
+  game1HallReadyService,
 }));
 
 // BIN-582: Metronia/OK-Bingo auto-close-cron. Registeres her fordi den
