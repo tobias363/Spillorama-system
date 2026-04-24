@@ -128,6 +128,10 @@ import type { OkBingoApiClient } from "./integration/okbingo/OkBingoApiClient.js
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
+import {
+  PostgresShiftPendingPayoutPort,
+  PostgresShiftTicketRangePort,
+} from "./agent/ports/ShiftLogoutPorts.js";
 import { AgentTransactionService } from "./agent/AgentTransactionService.js";
 import { PostgresAgentTransactionStore } from "./agent/AgentTransactionStore.js";
 import { AgentSettlementService } from "./agent/AgentSettlementService.js";
@@ -739,7 +743,22 @@ const agentStore = new PostgresAgentStore({
   schema: pgSchema,
 });
 const agentService = new AgentService({ platformService, agentStore });
-const agentShiftService = new AgentShiftService({ agentStore, agentService });
+// Wireframe Gap #9: Shift Log Out-porter for flagging av pending cashouts
+// + ticket-ranges ved logout med checkbox-valg.
+const shiftPendingPayoutPort = new PostgresShiftPendingPayoutPort({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const shiftTicketRangePort = new PostgresShiftTicketRangePort({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const agentShiftService = new AgentShiftService({
+  agentStore,
+  agentService,
+  pendingPayoutPort: shiftPendingPayoutPort,
+  ticketRangePort: shiftTicketRangePort,
+});
 
 // BIN-583 B3.2: agent cash-ops + ticket sale + transaction-log.
 // PhysicalTicketService er instansiert litt senere (linje ~267); vi
