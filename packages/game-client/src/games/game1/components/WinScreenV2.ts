@@ -8,7 +8,8 @@
  *   3. Etter fontene er ferdig: headline + stor gevinst-tekst + subline
  *      fades inn med translateY/scale. Gevinst teller opp over 2.2s med
  *      cubic-ease-out.
- *   4. "Spill av på nytt" + "Skru av" knapper fades inn sist.
+ *   4. "Tilbake"-knapp fades inn sist (regel-endring 2026-04-24 Tobias:
+ *      erstattet "Spill av på nytt" + "Skru av"). Auto-close etter 12s.
  *
  * Vises for `isMe` vinn med claimType === "BINGO" (Fullt Hus). Mindre
  * premier (fase 1-4) bruker {@link WinPopup}.
@@ -21,6 +22,9 @@ const LUCKY_CLOVER_URL = "/web/games/assets/game1/design/lucky-clover.png";
 const FOSS_DURATION_MS = 3600;
 const LOGO_COUNT = 70;
 const COUNT_UP_DURATION_MS = 2200;
+/** Auto-close delay: 12s total (regel-endring 2026-04-24 Tobias). Måles fra
+ *  showtidspunkt, ikke fra tekst-fade-in — gir spilleren ~8s med tekst synlig. */
+const AUTO_CLOSE_DELAY_MS = 12000;
 
 function ensureWinScreenStyles(): void {
   if (typeof document === "undefined") return;
@@ -92,7 +96,7 @@ export interface WinScreenV2Options {
   logoSrc?: string;
   headline?: string;
   subline?: string;
-  onReplay?: () => void;
+  /** Trigget av Tilbake-knappen ELLER auto-close etter 12s. */
   onDismiss?: () => void;
 }
 
@@ -102,6 +106,7 @@ export class WinScreenV2 {
   private rafId: number | null = null;
   private countUpRaf: number | null = null;
   private textActiveTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(parent: HTMLElement) {
     this.parent = parent;
@@ -245,12 +250,15 @@ export class WinScreenV2 {
       marginTop: "60px",
     });
 
-    const replayBtn = document.createElement("button");
-    replayBtn.innerHTML = `<span style="font-size:9px;margin-right:8px;">▶</span>Spill av på nytt`;
-    Object.assign(replayBtn.style, {
+    // Tilbake-knapp (erstatter "Spill av på nytt" + "Skru av" 2026-04-24).
+    // Samme handler som auto-close: hide() + onDismiss(). Spiller kan trykke
+    // for å hoppe over 12-sekunders-ventingen.
+    const backBtn = document.createElement("button");
+    backBtn.textContent = "Tilbake";
+    Object.assign(backBtn.style, {
       border: "none",
       borderRadius: "999px",
-      padding: "14px 28px",
+      padding: "14px 36px",
       background: "linear-gradient(180deg, #f5c842 0%, #d89818 100%)",
       color: "#2a1400",
       fontSize: "12px",
@@ -260,35 +268,12 @@ export class WinScreenV2 {
       cursor: "pointer",
       boxShadow: "0 6px 24px rgba(245,184,65,0.4), inset 0 1px 0 rgba(255,255,255,0.4)",
       textTransform: "uppercase",
-      display: "inline-flex",
-      alignItems: "center",
     });
-    replayBtn.addEventListener("click", () => {
-      opts.onReplay?.();
-      this.restartAnimation(particleNodes);
-    });
-    btnRow.appendChild(replayBtn);
-
-    const dismissBtn = document.createElement("button");
-    dismissBtn.textContent = "Skru av";
-    Object.assign(dismissBtn.style, {
-      border: "1px solid rgba(245,232,216,0.22)",
-      borderRadius: "999px",
-      padding: "14px 28px",
-      background: "rgba(0,0,0,0.3)",
-      color: "rgba(245,232,216,0.85)",
-      fontSize: "12px",
-      fontWeight: "600",
-      letterSpacing: "0.14em",
-      fontFamily: "'Poppins', sans-serif",
-      cursor: "pointer",
-      textTransform: "uppercase",
-    });
-    dismissBtn.addEventListener("click", () => {
+    backBtn.addEventListener("click", () => {
       this.hide();
       opts.onDismiss?.();
     });
-    btnRow.appendChild(dismissBtn);
+    btnRow.appendChild(backBtn);
     textCol.appendChild(btnRow);
 
     root.appendChild(textCol);
@@ -308,6 +293,14 @@ export class WinScreenV2 {
       btnRow.style.animation = "v2-fade-in 0.8s ease-out 0.8s both";
       this.startCountUp(opts.amount, amountEl);
     }, FOSS_DURATION_MS);
+
+    // Auto-close etter 12s (regel-endring 2026-04-24 Tobias). Måles fra
+    // show-tid, ikke fra tekst-fade-in, så spiller ser fontene + tekst +
+    // count-up innen tilgjengelig vindu. Tilbake-knappen overstyrer.
+    this.autoCloseTimer = setTimeout(() => {
+      this.hide();
+      opts.onDismiss?.();
+    }, AUTO_CLOSE_DELAY_MS);
   }
 
   hide(): void {
@@ -322,6 +315,10 @@ export class WinScreenV2 {
     if (this.textActiveTimer !== null) {
       clearTimeout(this.textActiveTimer);
       this.textActiveTimer = null;
+    }
+    if (this.autoCloseTimer !== null) {
+      clearTimeout(this.autoCloseTimer);
+      this.autoCloseTimer = null;
     }
     if (this.root) {
       this.root.remove();
@@ -453,11 +450,4 @@ export class WinScreenV2 {
     this.countUpRaf = requestAnimationFrame(step);
   }
 
-  private restartAnimation(
-    particleNodes: Array<{ node: HTMLDivElement; particle: FountainParticle }>,
-  ): void {
-    // Stopp eksisterende rAF og start fontene-animasjonen på nytt.
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
-    this.startFountain(particleNodes);
-  }
 }

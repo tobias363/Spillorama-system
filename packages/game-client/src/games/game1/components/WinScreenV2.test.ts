@@ -65,16 +65,24 @@ describe("WinScreenV2", () => {
     expect(parent.children.length).toBe(0);
   });
 
-  it("Skru av-knapp trigger onDismiss + fjerner scene", () => {
+  it("Tilbake-knapp trigger onDismiss + fjerner scene", () => {
     let dismissed = false;
     screen.show({ amount: 100, onDismiss: () => { dismissed = true; } });
-    const dismissBtn = Array.from(parent.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Skru av",
+    const backBtn = Array.from(parent.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Tilbake",
     );
-    expect(dismissBtn).not.toBeUndefined();
-    dismissBtn!.click();
+    expect(backBtn).not.toBeUndefined();
+    backBtn!.click();
     expect(dismissed).toBe(true);
     expect(parent.children.length).toBe(0);
+  });
+
+  it("kun Tilbake-knapp — ingen Spill av på nytt / Skru av (regel-endring 2026-04-24)", () => {
+    screen.show({ amount: 100 });
+    const buttonTexts = Array.from(parent.querySelectorAll("button")).map(
+      (b) => b.textContent?.trim(),
+    );
+    expect(buttonTexts).toEqual(["Tilbake"]);
   });
 
   it("destroy() er idempotent", () => {

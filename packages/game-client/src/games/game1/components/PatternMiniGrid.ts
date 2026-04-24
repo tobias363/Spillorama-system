@@ -151,9 +151,13 @@ export class PatternMiniGrid {
   }
 
   /**
-   * Generér alle kandidat-kombinasjoner for fasen:
+   * Generér kandidat-kombinasjoner for fase-animasjonen:
    *   - fase 1: 5 rader + 5 kolonner (10 enkeltlinjer — rad ELLER kolonne)
-   *   - fase 2-4: C(5, phase) kombinasjoner av VERTIKALE kolonner
+   *   - fase 2-4: KUN adjacent horisontale rader (side-om-side). Regel fra
+   *     Tobias 2026-04-24: viser alltid sammenhengende rader slik at spiller
+   *     ser tydelig hvor mange rader som spilles om. Vinner-detektering
+   *     godtar fortsatt alle C(5,k) rad-kombinasjoner (via shared-types
+   *     PHASE_*_MASKS), men animasjonen cycler kun adjacent-variantene.
    *
    * Eksponert for testing. Private i praksis.
    */
@@ -165,9 +169,17 @@ export class PatternMiniGrid {
       return combos;
     }
     if (phase < 2 || phase > 4) return [];
-    return choose(GRID_SIZE, phase).map((cols) =>
-      cols.map((c) => ({ axis: "col" as const, index: c })),
-    );
+    // Adjacent vindu: rad-start fra 0 til GRID_SIZE - phase. Fase 2 → 4 vinduer
+    // (0-1, 1-2, 2-3, 3-4), fase 3 → 3 vinduer, fase 4 → 2 vinduer.
+    const combos: Line[][] = [];
+    for (let start = 0; start + phase <= GRID_SIZE; start++) {
+      const rows: Line[] = [];
+      for (let r = start; r < start + phase; r++) {
+        rows.push({ axis: "row" as const, index: r });
+      }
+      combos.push(rows);
+    }
+    return combos;
   }
 
   /** Farg alle celler i de gitte linjene (rader eller kolonner), minus center.
@@ -239,24 +251,6 @@ function rowCellIndices(row: number): number[] {
 /** Celle-indekser (row-major) for en gitt kolonne. */
 function colCellIndices(col: number): number[] {
   return [0, 1, 2, 3, 4].map((r) => r * GRID_SIZE + col);
-}
-
-/** Alle k-kombinasjoner av indeksene 0..n-1, i leksikografisk orden. */
-function choose(n: number, k: number): number[][] {
-  const result: number[][] = [];
-  const recurse = (start: number, picked: number[]): void => {
-    if (picked.length === k) {
-      result.push([...picked]);
-      return;
-    }
-    for (let i = start; i < n; i++) {
-      picked.push(i);
-      recurse(i + 1, picked);
-      picked.pop();
-    }
-  };
-  recurse(0, []);
-  return result;
 }
 
 // Inject CSS keyframe én gang per dokument.
