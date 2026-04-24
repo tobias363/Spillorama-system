@@ -11,6 +11,18 @@ import { LoadingOverlay } from "../../components/LoadingOverlay.js";
 import { preloadGameAssets } from "../../core/preloadGameAssets.js";
 import { ToastNotification } from "./components/ToastNotification.js";
 import { PauseOverlay } from "./components/PauseOverlay.js";
+import { WinPopup } from "./components/WinPopup.js";
+import { WinScreenV2 } from "./components/WinScreenV2.js";
+import { classifyPhaseFromPatternName, Spill1Phase } from "@spillorama/shared-types/spill1-patterns";
+
+/** Map Spill1Phase-enum til rad-antall (1-4 for linje-vinn). */
+const PHASE_TO_ROWS: Readonly<Record<Spill1Phase, number>> = {
+  [Spill1Phase.Phase1]: 1,
+  [Spill1Phase.Phase2]: 2,
+  [Spill1Phase.Phase3]: 3,
+  [Spill1Phase.Phase4]: 4,
+  [Spill1Phase.FullHouse]: 5,
+};
 import { SettingsPanel, type Game1Settings } from "./components/SettingsPanel.js";
 import { MarkerBackgroundPanel } from "./components/MarkerBackgroundPanel.js";
 import { GamePlanPanel } from "./components/GamePlanPanel.js";
@@ -51,6 +63,10 @@ class Game1Controller implements GameController {
   private loader: LoadingOverlay | null = null;
   private toast: ToastNotification | null = null;
   private pauseOverlay: PauseOverlay | null = null;
+  /** Fase 1-4 vinn-popup (Bong-design, port av WinPopup.jsx). */
+  private winPopup: WinPopup | null = null;
+  /** Fullt Hus fullskjerm-scene (Bong-design, port av WinScreenV2.jsx). */
+  private winScreen: WinScreenV2 | null = null;
   private settingsPanel: SettingsPanel | null = null;
   private markerBgPanel: MarkerBackgroundPanel | null = null;
   private gamePlanPanel: GamePlanPanel | null = null;
@@ -75,6 +91,8 @@ class Game1Controller implements GameController {
     this.loader.setState("CONNECTING");
     this.toast = new ToastNotification(overlayContainer);
     this.pauseOverlay = new PauseOverlay(overlayContainer);
+    this.winPopup = new WinPopup(overlayContainer);
+    this.winScreen = new WinScreenV2(overlayContainer);
     this.settingsPanel = new SettingsPanel(overlayContainer);
     // Wire settings panel to AudioManager
     this.syncSettingsToAudio(this.settingsPanel.getSettings());
@@ -235,6 +253,10 @@ class Game1Controller implements GameController {
     this.toast = null;
     this.pauseOverlay?.destroy();
     this.pauseOverlay = null;
+    this.winPopup?.destroy();
+    this.winPopup = null;
+    this.winScreen?.destroy();
+    this.winScreen = null;
     this.settingsPanel?.destroy();
     this.settingsPanel = null;
     this.markerBgPanel?.destroy();
@@ -404,15 +426,35 @@ class Game1Controller implements GameController {
     const winnerCount = result.winnerCount ?? winnerIds.length;
 
     if (isMe) {
-      const firstLine = isFullHouse
-        ? "Du vant Fullt Hus!"
-        : `Du vant ${result.patternName}!`;
-      const secondLine = winnerCount > 1
-        ? `Din gevinst: ${result.payoutAmount} kr (premien delt på ${winnerCount} spillere som vant samtidig)`
-        : `Gevinst: ${result.payoutAmount} kr`;
-
-      this.toast?.win(`${firstLine}\n${secondLine}`, 5000);
       this.deps.audio.playBingoSound();
+
+      // BIN-696 / Bong-design 2026-04-24:
+      //   - Fullt Hus (BINGO)  → fullskjerm WinScreenV2 med fontene + count-up
+      //   - Fase 1-4 (LINE)    → WinPopup med logo, gevinst, shared-info
+      // Erstatter den tidligere toast-meldingen for isMe-scenariet. Toast
+      // fortsetter som generell annonsering (`phaseMsg` over) for alle.
+      const shared = winnerCount > 1;
+      const payout = result.payoutAmount ?? 0;
+      if (isFullHouse) {
+        this.winScreen?.show({
+          amount: payout,
+          shared,
+          sharedCount: winnerCount,
+          onDismiss: () => { /* no-op — EndScreen transition er styrt av onGameEnded */ },
+        });
+      } else {
+        // `rows` = fase-nummer (1-4 for linje-vinn). classifyPhaseFromPatternName
+        // mapper "Row 1" → Phase1, etc. PHASE_TO_ROWS mapper videre til tall.
+        // Fallback til 1 for ukjent pattern-navn.
+        const phase = classifyPhaseFromPatternName(result.patternName);
+        const rows = phase ? PHASE_TO_ROWS[phase] : 1;
+        this.winPopup?.show({
+          rows: Math.min(4, rows),
+          amount: payout,
+          shared,
+          sharedCount: winnerCount,
+        });
+      }
     }
 
     telemetry.trackEvent("pattern_won", {
