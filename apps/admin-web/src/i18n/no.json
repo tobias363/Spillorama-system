@@ -2904,6 +2904,7 @@
   "diff_warn_over_100_nok": "Advarsel: differanse mellom shift er over 100 kr og må forklares i notat.",
   "notes_required_for_large_diff": "Notat kreves når differanse mellom shift er over 100 kr.",
   "upload_receipt": "Last opp bilag",
+  "download_receipt": "Last ned bilag",
   "no_receipt_uploaded": "Ingen bilag lastet opp",
   "bilag_too_large": "Filen er for stor (max 10 MB).",
   "bilag_wrong_format": "Ugyldig filformat. Tillatt: PDF, JPG, PNG.",

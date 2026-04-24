@@ -473,7 +473,11 @@ export class AgentSettlementService {
     };
   }
 
-  /** Bygger PDF-input fra settlement + assosiert hall. */
+  /** Bygger PDF-input fra settlement + assosiert hall.
+   *
+   * Wireframe Gap #2: inkluderer 15-rad breakdown + bilag-metadata +
+   * admin-edit audit-info, slik at generert PDF speiler hele settlementen.
+   */
   async buildPdfInput(settlementId: string, generatedBy: string): Promise<{
     businessDate: string;
     generatedAt: string;
@@ -488,6 +492,18 @@ export class AgentSettlementService {
     }>;
     totals: { cashIn: number; cashOut: number; net: number };
     signatoryName: string | null;
+    breakdownRows: Array<{ label: string; inAmount: number; outAmount: number }>;
+    bilagMeta: {
+      filename: string;
+      mime: string;
+      sizeBytes: number;
+      uploadedAt: string;
+    } | null;
+    editAudit: {
+      editedByName: string;
+      editedAt: string;
+      reason: string;
+    } | null;
   }> {
     const settlement = await this.getSettlementById(settlementId);
     let hallName = settlement.hallId;
@@ -517,6 +533,41 @@ export class AgentSettlementService {
     } catch {
       signatoryName = null;
     }
+
+    // Wireframe Gap #2: 15-rad breakdown → PDF-rader (NOK)
+    const breakdownRows = buildBreakdownRows(settlement.machineBreakdown);
+
+    // Wireframe Gap #2: bilag-metadata (binær downloades separat via receipt-endpoint)
+    const bilagMeta = settlement.bilagReceipt
+      ? {
+          filename: settlement.bilagReceipt.filename,
+          mime: settlement.bilagReceipt.mime,
+          sizeBytes: settlement.bilagReceipt.sizeBytes,
+          uploadedAt: settlement.bilagReceipt.uploadedAt,
+        }
+      : null;
+
+    // Wireframe Gap #2: admin-edit audit-info
+    let editAudit: {
+      editedByName: string;
+      editedAt: string;
+      reason: string;
+    } | null = null;
+    if (settlement.editedByUserId && settlement.editedAt) {
+      let editedByName = settlement.editedByUserId;
+      try {
+        const editor = await this.platform.getUserById(settlement.editedByUserId);
+        editedByName = editor.displayName;
+      } catch {
+        // fallback: bruk id
+      }
+      editAudit = {
+        editedByName,
+        editedAt: settlement.editedAt,
+        reason: settlement.editReason ?? "",
+      };
+    }
+
     return {
       businessDate: settlement.businessDate,
       generatedAt: new Date().toISOString(),
@@ -524,8 +575,47 @@ export class AgentSettlementService {
       halls: [{ hallId: settlement.hallId, hallName, cashIn, cashOut, net, lineItems }],
       totals: { cashIn, cashOut, net },
       signatoryName,
+      breakdownRows,
+      bilagMeta,
+      editAudit,
     };
   }
+}
+
+// ── Helpers (module-scope) ─────────────────────────────────────────────────
+
+/** Wireframe Gap #2: mapper 15-rad breakdown (øre) → PDF-rader (NOK). */
+const BREAKDOWN_ROW_LABELS: Record<string, string> = {
+  metronia: "Metronia",
+  ok_bingo: "OK Bingo",
+  franco: "Franco",
+  otium: "Otium",
+  norsk_tipping_dag: "Norsk Tipping Dag",
+  norsk_tipping_totall: "Norsk Tipping Totall",
+  rikstoto_dag: "Norsk Rikstoto Dag",
+  rikstoto_totall: "Norsk Rikstoto Totall",
+  rekvisita: "Rekvisita",
+  servering: "Servering/kaffe",
+  bilag: "Bilag",
+  bank: "Bank",
+  gevinst_overfoering_bank: "Gevinst overf. bank",
+  annet: "Annet",
+};
+
+function buildBreakdownRows(
+  breakdown: MachineBreakdown | null | undefined
+): Array<{ label: string; inAmount: number; outAmount: number }> {
+  if (!breakdown?.rows) return [];
+  const rows: Array<{ label: string; inAmount: number; outAmount: number }> = [];
+  for (const [key, row] of Object.entries(breakdown.rows)) {
+    if (!row) continue;
+    rows.push({
+      label: BREAKDOWN_ROW_LABELS[key] ?? key,
+      inAmount: round2((row.in_cents ?? 0) / 100),
+      outAmount: round2((row.out_cents ?? 0) / 100),
+    });
+  }
+  return rows;
 }
 
 export function computeDiffSeverity(diff: number, diffPct: number): DiffSeverity {

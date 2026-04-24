@@ -31,6 +31,8 @@ const NEW_KEYS = [
   "player_id",
   "payout_cross_game_aggregate_pending",
   "payout_ticket_detail_backend_pending",
+  // Wireframe Gap #2
+  "download_receipt",
 ];
 
 describe("PR-A4b i18n keys", () => {
