@@ -182,4 +182,26 @@ describe("BIN-527 outgoing payloads conform to shared-types schemas", () => {
     const result = ChatMessageSchema.safeParse(broadcast);
     assert.ok(result.success, `chat:message invalid: ${JSON.stringify(result.error?.issues, null, 2)}`);
   });
+
+  // Regresjon for "playerId mangler" (2026-04-24): en ADMIN-bruker som selv
+  // står i rommet (via room:create → engine.createRoom legger admin inn som
+  // player) skal kunne utføre spiller-handlinger uten å måtte sende
+  // `playerId` i payload — klient-flyten gjør det aldri. Før fiksen feilet
+  // bet:arm med INVALID_INPUT "playerId mangler." på admin-sti i context.ts.
+  test("admin self-play: bet:arm lykkes uten playerId i payload", async () => {
+    const admin = await server.connectClient("token-admin");
+
+    const createAck = await admin.emit<AckResponse<{ roomCode: string; playerId: string }>>(
+      "room:create",
+      { hallId: "hall-test" },
+    );
+    assert.ok(createAck.ok, `room:create failed: ${createAck.error?.message}`);
+    const roomCode = createAck.data!.roomCode;
+    assert.ok(createAck.data!.playerId, "admin should be assigned a playerId on room:create");
+
+    // Ingen playerId i payload — skal likevel gå gjennom fordi admin selv
+    // er player (walletId-match) i rommet.
+    const armAck = await admin.emit<AckResponse>("bet:arm", { roomCode, armed: true });
+    assert.ok(armAck.ok, `bet:arm failed for admin self-play: ${armAck.error?.message}`);
+  });
 });
