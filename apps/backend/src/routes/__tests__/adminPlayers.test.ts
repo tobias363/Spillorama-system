@@ -16,6 +16,7 @@ import {
   type PersistedAuditEvent,
 } from "../../compliance/AuditLogService.js";
 import { EmailService } from "../../integration/EmailService.js";
+import { EmailQueue } from "../../integration/EmailQueue.js";
 import type {
   PlatformService,
   PublicAppUser,
@@ -73,13 +74,15 @@ interface Ctx {
     }>;
   };
   usersById: Map<string, AppUser>;
+  /** BIN-702: eksponert hvis `withEmailQueue=true` i startServer-opts. */
+  emailQueue: EmailQueue | null;
   close: () => Promise<void>;
 }
 
 async function startServer(
   users: Record<string, PublicAppUser>,
   seedUsers: AppUser[] = [],
-  opts?: { withBankId?: boolean }
+  opts?: { withBankId?: boolean; withEmailQueue?: boolean }
 ): Promise<Ctx> {
   const auditStore = new InMemoryAuditLogStore();
   const auditLogService = new AuditLogService(auditStore);
@@ -348,6 +351,10 @@ async function startServer(
       } as unknown as BankIdKycAdapter)
     : null;
 
+  const emailQueue = opts?.withEmailQueue
+    ? new EmailQueue({ emailService })
+    : null;
+
   const app = express();
   app.use(express.json());
   app.use(
@@ -355,6 +362,7 @@ async function startServer(
       platformService,
       auditLogService,
       emailService,
+      emailQueue: emailQueue ?? undefined,
       bankIdAdapter,
       webBaseUrl: "https://test.example",
       supportEmail: "support@test.example",
@@ -372,7 +380,11 @@ async function startServer(
       playerUpdates,
     },
     usersById,
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    emailQueue,
+    close: () => {
+      emailQueue?.stop();
+      return new Promise((resolve) => server.close(() => resolve()));
+    },
   };
 }
 
@@ -514,6 +526,95 @@ test("BIN-587 B2.2: POST reject krever reason", async () => {
     assert.equal(noReason.status, 400);
     assert.equal(noReason.json.error.code, "INVALID_INPUT");
     assert.equal(ctx.spies.rejects.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-702: POST approve med emailQueue enqueuer i stedet for å sende direkte", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1", kycStatus: "PENDING", email: "alice@test.no" })],
+    { withEmailQueue: true }
+  );
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players/p-1/approve", "admin-tok", {});
+    assert.equal(res.status, 200);
+
+    // Gi fire-and-forget-enqueue tid til å fullføre
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.ok(ctx.emailQueue, "emailQueue skal være wiret");
+    const pending = await ctx.emailQueue!.list({ status: "pending" });
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0]!.template, "kyc-approved");
+    assert.equal(pending[0]!.to, "alice@test.no");
+
+    // E-post SKAL IKKE være sendt direkte ennå — køen sender asynkront
+    assert.equal(ctx.spies.sentEmails.length, 0);
+
+    // Process queue → sendTemplate kalles via EmailService
+    const processRes = await ctx.emailQueue!.processNext();
+    assert.equal(processRes.result, "sent");
+    assert.equal(ctx.spies.sentEmails.length, 1);
+    assert.equal(ctx.spies.sentEmails[0]!.template, "kyc-approved");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-702: POST reject med emailQueue enqueuer kyc-rejected m/reason", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1", kycStatus: "PENDING", email: "bob@test.no" })],
+    { withEmailQueue: true }
+  );
+  try {
+    const res = await req(ctx.baseUrl, "POST", "/api/admin/players/p-1/reject", "admin-tok", {
+      reason: "Ugyldig fødselsnummer — ikke BankID-match",
+    });
+    assert.equal(res.status, 200);
+
+    await new Promise((r) => setTimeout(r, 20));
+    const pending = await ctx.emailQueue!.list({ status: "pending" });
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0]!.template, "kyc-rejected");
+    assert.equal(
+      pending[0]!.context.reason,
+      "Ugyldig fødselsnummer — ikke BankID-match"
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-702: POST reject avviser reason under 10 tegn", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-1", kycStatus: "PENDING" })]
+  );
+  try {
+    const tooShort = await req(ctx.baseUrl, "POST", "/api/admin/players/p-1/reject", "admin-tok", {
+      reason: "kort",
+    });
+    assert.equal(tooShort.status, 400);
+    assert.equal(tooShort.json.error.code, "INVALID_INPUT");
+    assert.match(tooShort.json.error.message, /minst 10 tegn/);
+    assert.equal(ctx.spies.rejects.length, 0);
+
+    // 9 tegn rejected
+    const nineChars = await req(ctx.baseUrl, "POST", "/api/admin/players/p-1/reject", "admin-tok", {
+      reason: "123456789",
+    });
+    assert.equal(nineChars.status, 400);
+    assert.equal(ctx.spies.rejects.length, 0);
+
+    // 10 tegn akseptert
+    const ok = await req(ctx.baseUrl, "POST", "/api/admin/players/p-1/reject", "admin-tok", {
+      reason: "1234567890",
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ctx.spies.rejects.length, 1);
   } finally {
     await ctx.close();
   }
