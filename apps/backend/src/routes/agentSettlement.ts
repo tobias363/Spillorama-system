@@ -1,19 +1,21 @@
 /**
- * BIN-583 B3.3: agent + admin settlement-endepunkter.
+ * BIN-583 B3.3 + K1: agent + admin settlement-endepunkter.
  *
- *   POST /api/agent/shift/control-daily-balance     pre-close sjekk
- *   POST /api/agent/shift/close-day                  fullfør oppgjør
- *   GET  /api/agent/shift/settlement-date            forventet dato + pending check
- *   GET  /api/agent/shift/:shiftId/settlement        agentens egen
- *   GET  /api/agent/shift/:shiftId/settlement.pdf    PDF-eksport
+ *   POST /api/agent/shift/control-daily-balance         pre-close sjekk
+ *   POST /api/agent/shift/close-day                      fullfør oppgjør
+ *                                                        (K1: +machineBreakdown, +bilagReceipt)
+ *   GET  /api/agent/shift/settlement-date                forventet dato + pending check
+ *   GET  /api/agent/shift/:shiftId/settlement            agentens egen
+ *   GET  /api/agent/shift/:shiftId/settlement.pdf        PDF-eksport
+ *   POST /api/agent/settlements/:settlementId/receipt    K1: upload bilag PDF/JPG
  *
- *   GET  /api/admin/shifts/settlements               paginert liste
- *   GET  /api/admin/shifts/:shiftId/settlement       admin-detail
- *   GET  /api/admin/shifts/:shiftId/settlement.pdf   admin-PDF
- *   PUT  /api/admin/shifts/:shiftId/settlement       admin-edit
+ *   GET  /api/admin/shifts/settlements                   paginert liste
+ *   GET  /api/admin/shifts/:shiftId/settlement           admin-detail
+ *   GET  /api/admin/shifts/:shiftId/settlement.pdf       admin-PDF
+ *   PUT  /api/admin/shifts/:shiftId/settlement           admin-edit (K1: også breakdown/bilag)
  *
  * RBAC:
- *   - AGENT_SETTLEMENT_WRITE: control-daily-balance, close-day
+ *   - AGENT_SETTLEMENT_WRITE: control-daily-balance, close-day, POST receipt
  *   - AGENT_SETTLEMENT_READ : alle GET-endepunkter (AGENT begrenset til egne)
  *   - AGENT_SETTLEMENT_FORCE: PUT (admin-edit)
  */
@@ -146,6 +148,8 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
         settlementNote: typeof body.settlementNote === "string" ? body.settlementNote : undefined,
         isForceRequested: body.isForceRequested === true,
         otherData: isRecordObject(body.otherData) ? body.otherData : undefined,
+        machineBreakdown: body.machineBreakdown, // validert i service
+        bilagReceipt: body.bilagReceipt,         // validert i service
       });
       void auditLogService.record({
         actorId: actor.userId,
@@ -230,6 +234,41 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
         `attachment; filename="settlement-${settlement.businessDate}-${settlement.id}.pdf"`
       );
       res.status(200).end(pdfBytes);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── POST /api/agent/settlements/:settlementId/receipt ────────────────────
+  // K1: agent laster opp bilag (PDF/JPG) til egen settlement. Admin kan også
+  // bruke dette endpointet for å replace. Max 10 MB (service validerer).
+  router.post("/api/agent/settlements/:settlementId/receipt", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "AGENT_SETTLEMENT_WRITE");
+      const settlementId = mustBeNonEmptyString(req.params.settlementId, "settlementId");
+      const body = isRecordObject(req.body) ? req.body : {};
+      const updated = await agentSettlementService.uploadBilagReceipt({
+        settlementId,
+        uploaderUserId: actor.userId,
+        uploaderRole: actor.role,
+        receipt: body.receipt ?? body, // aksepter både { receipt: {...} } og rå-objekt
+        reason: typeof body.reason === "string" ? body.reason : undefined,
+      });
+      void auditLogService.record({
+        actorId: actor.userId,
+        actorType: mapRoleToActorType(actor.role),
+        action: "agent.settlement.bilag-uploaded",
+        resource: "settlement",
+        resourceId: settlementId,
+        details: {
+          filename: updated.bilagReceipt?.filename ?? null,
+          mime: updated.bilagReceipt?.mime ?? null,
+          sizeBytes: updated.bilagReceipt?.sizeBytes ?? null,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+      apiSuccess(res, updated);
     } catch (error) {
       apiFailure(res, error);
     }
@@ -330,6 +369,14 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
         patch.settlementNote = body.settlementNote === null ? null : String(body.settlementNote);
       }
       if (isRecordObject(body.otherData)) patch.otherData = body.otherData;
+      // K1: breakdown + bilag — service validerer shape. null bilag → nullstill.
+      if (body.machineBreakdown !== undefined) {
+        // Cast gjennom — service.validateMachineBreakdown kaster hvis ugyldig.
+        patch.machineBreakdown = body.machineBreakdown as unknown as Parameters<AgentSettlementService["editSettlement"]>[0]["patch"]["machineBreakdown"];
+      }
+      if (body.bilagReceipt !== undefined) {
+        patch.bilagReceipt = body.bilagReceipt as unknown as Parameters<AgentSettlementService["editSettlement"]>[0]["patch"]["bilagReceipt"];
+      }
 
       const edited = await agentSettlementService.editSettlement({
         settlementId: existing.id,
@@ -354,6 +401,6 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
     }
   });
 
-  logger.info("agent-settlement-router initialised (9 endpoints)");
+  logger.info("agent-settlement-router initialised (10 endpoints)");
   return router;
 }

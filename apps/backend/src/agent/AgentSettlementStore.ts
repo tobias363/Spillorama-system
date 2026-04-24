@@ -4,9 +4,17 @@
  * Settlement-rader er nesten-immutable: bare admin-edit-flyten kan
  * mutere etter opprettelse, og det skjer kun via dedikert update-metode
  * som logger edited_by + edited_at + edit_reason. Ingen DELETE.
+ *
+ * K1 utvidelse: `machineBreakdown` + `bilagReceipt` speiler wireframes
+ * PDF 13 §13.5 og PDF 15 §15.8 (se MachineBreakdownTypes nedenfor).
  */
 
 import type { Pool } from "pg";
+import {
+  emptyMachineBreakdown,
+  type MachineBreakdown,
+  type BilagReceipt,
+} from "./MachineBreakdownTypes.js";
 
 export interface AgentSettlement {
   id: string;
@@ -32,6 +40,10 @@ export interface AgentSettlement {
   editedAt: string | null;
   editReason: string | null;
   otherData: Record<string, unknown>;
+  /** K1: strukturert 15-rad maskin-breakdown pr wireframe. Tom hvis ikke utfylt. */
+  machineBreakdown: MachineBreakdown;
+  /** K1: opplastet bilag (PDF/JPG). NULL hvis ikke opplastet. */
+  bilagReceipt: BilagReceipt | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -57,6 +69,10 @@ export interface InsertSettlementInput {
   closedByUserId: string;
   isForced: boolean;
   otherData?: Record<string, unknown>;
+  /** K1: 15-rad maskin-breakdown. Tom hvis ikke sendt. */
+  machineBreakdown?: MachineBreakdown;
+  /** K1: bilag PDF/JPG. NULL hvis ikke opplastet. */
+  bilagReceipt?: BilagReceipt | null;
 }
 
 export interface UpdateSettlementInput {
@@ -66,6 +82,10 @@ export interface UpdateSettlementInput {
   totalDropSafe?: number;
   settlementNote?: string | null;
   otherData?: Record<string, unknown>;
+  /** K1: tillate admin å oppdatere breakdown etter avstemning. */
+  machineBreakdown?: MachineBreakdown;
+  /** K1: tillate admin å erstatte/nullstille bilag. */
+  bilagReceipt?: BilagReceipt | null;
 }
 
 export interface ListSettlementFilter {
@@ -111,6 +131,8 @@ interface Row {
   edited_at: Date | string | null;
   edit_reason: string | null;
   other_data: unknown;
+  machine_breakdown: unknown;
+  bilag_receipt: unknown;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -147,6 +169,60 @@ function asJsonObject(value: unknown): Record<string, unknown> {
   return {};
 }
 
+function asMachineBreakdown(value: unknown): MachineBreakdown {
+  const raw = asJsonObject(value);
+  // Tolerant parse — hvis rad er garbage, default til tom. Skjer kun for
+  // historiske rader (migrasjon gir DEFAULT '{}'::jsonb).
+  const rows: MachineBreakdown["rows"] = {};
+  const rawRows = raw.rows;
+  if (rawRows && typeof rawRows === "object" && !Array.isArray(rawRows)) {
+    for (const [k, v] of Object.entries(rawRows as Record<string, unknown>)) {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const r = v as Record<string, unknown>;
+        const inC = r.in_cents;
+        const outC = r.out_cents;
+        if (typeof inC === "number" && typeof outC === "number") {
+          (rows as Record<string, { in_cents: number; out_cents: number }>)[k] = {
+            in_cents: inC,
+            out_cents: outC,
+          };
+        }
+      }
+    }
+  }
+  return {
+    rows,
+    ending_opptall_kassie_cents:
+      typeof raw.ending_opptall_kassie_cents === "number" ? raw.ending_opptall_kassie_cents : 0,
+    innskudd_drop_safe_cents:
+      typeof raw.innskudd_drop_safe_cents === "number" ? raw.innskudd_drop_safe_cents : 0,
+    difference_in_shifts_cents:
+      typeof raw.difference_in_shifts_cents === "number" ? raw.difference_in_shifts_cents : 0,
+  };
+}
+
+function asBilagReceipt(value: unknown): BilagReceipt | null {
+  if (value === null || value === undefined) return null;
+  const raw = typeof value === "string"
+    ? (() => { try { return JSON.parse(value); } catch { return null; } })()
+    : value;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.mime !== "string" || typeof r.filename !== "string"
+      || typeof r.dataUrl !== "string" || typeof r.sizeBytes !== "number"
+      || typeof r.uploadedAt !== "string" || typeof r.uploadedByUserId !== "string") {
+    return null;
+  }
+  return {
+    mime: r.mime as BilagReceipt["mime"],
+    filename: r.filename,
+    dataUrl: r.dataUrl,
+    sizeBytes: r.sizeBytes,
+    uploadedAt: r.uploadedAt,
+    uploadedByUserId: r.uploadedByUserId,
+  };
+}
+
 export interface PostgresAgentSettlementStoreOptions {
   pool: Pool;
   schema?: string;
@@ -171,9 +247,9 @@ export class PostgresAgentSettlementStore implements AgentSettlementStore {
          withdraw_from_total_balance, total_drop_safe,
          shift_cash_in_total, shift_cash_out_total, shift_card_in_total,
          shift_card_out_total, settlement_note, closed_by_user_id,
-         is_forced, other_data)
+         is_forced, other_data, machine_breakdown, bilag_receipt)
        VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10, $11, $12, $13,
-               $14, $15, $16, $17, $18, $19, $20::jsonb)
+               $14, $15, $16, $17, $18, $19, $20::jsonb, $21::jsonb, $22::jsonb)
        RETURNING *`,
       [
         input.id, input.shiftId, input.agentUserId, input.hallId, input.businessDate,
@@ -183,6 +259,8 @@ export class PostgresAgentSettlementStore implements AgentSettlementStore {
         input.shiftCashInTotal, input.shiftCashOutTotal, input.shiftCardInTotal,
         input.shiftCardOutTotal, input.settlementNote ?? null, input.closedByUserId,
         input.isForced, JSON.stringify(input.otherData ?? {}),
+        JSON.stringify(input.machineBreakdown ?? emptyMachineBreakdown()),
+        input.bilagReceipt ? JSON.stringify(input.bilagReceipt) : null,
       ]
     );
     return this.map(rows[0]!);
@@ -247,6 +325,16 @@ export class PostgresAgentSettlementStore implements AgentSettlementStore {
     if (patch.totalDropSafe !== undefined) setField("total_drop_safe", patch.totalDropSafe);
     if (patch.settlementNote !== undefined) setField("settlement_note", patch.settlementNote);
     if (patch.otherData !== undefined) setField("other_data", patch.otherData, true);
+    if (patch.machineBreakdown !== undefined) setField("machine_breakdown", patch.machineBreakdown, true);
+    if (patch.bilagReceipt !== undefined) {
+      // Hvis null → NULL i DB (nullstill bilag). Ellers JSONB-blob.
+      if (patch.bilagReceipt === null) {
+        params.push(null);
+        sets.push(`bilag_receipt = $${params.length}`);
+      } else {
+        setField("bilag_receipt", patch.bilagReceipt, true);
+      }
+    }
     if (sets.length === 0) {
       const existing = await this.getById(id);
       if (!existing) throw new Error("[BIN-583] settlement not found");
@@ -298,6 +386,8 @@ export class PostgresAgentSettlementStore implements AgentSettlementStore {
       editedAt: row.edited_at ? asIso(row.edited_at) : null,
       editReason: row.edit_reason,
       otherData: asJsonObject(row.other_data),
+      machineBreakdown: asMachineBreakdown(row.machine_breakdown),
+      bilagReceipt: asBilagReceipt(row.bilag_receipt),
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at),
     };
@@ -341,6 +431,8 @@ export class InMemoryAgentSettlementStore implements AgentSettlementStore {
       editedAt: null,
       editReason: null,
       otherData: input.otherData ?? {},
+      machineBreakdown: input.machineBreakdown ?? emptyMachineBreakdown(),
+      bilagReceipt: input.bilagReceipt ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -383,6 +475,8 @@ export class InMemoryAgentSettlementStore implements AgentSettlementStore {
     if (patch.totalDropSafe !== undefined) row.totalDropSafe = patch.totalDropSafe;
     if (patch.settlementNote !== undefined) row.settlementNote = patch.settlementNote;
     if (patch.otherData !== undefined) row.otherData = { ...patch.otherData };
+    if (patch.machineBreakdown !== undefined) row.machineBreakdown = patch.machineBreakdown;
+    if (patch.bilagReceipt !== undefined) row.bilagReceipt = patch.bilagReceipt;
     row.editedByUserId = editedByUserId;
     row.editedAt = new Date().toISOString();
     row.editReason = reason;

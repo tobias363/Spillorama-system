@@ -446,3 +446,219 @@ test("threshold-konstanter eksportert riktig", () => {
   assert.equal(DIFF_NOTE_THRESHOLD_NOK, 500);
   assert.equal(DIFF_FORCE_THRESHOLD_NOK, 1000);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// K1: MACHINE BREAKDOWN + BILAG RECEIPT
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("K1 closeDay: aksepterer full 15-rad breakdown", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  const breakdown = {
+    rows: {
+      metronia: { in_cents: 481000, out_cents: 174800 },
+      ok_bingo: { in_cents: 362000, out_cents: 162500 },
+      franco: { in_cents: 477000, out_cents: 184800 },
+      rekvisita: { in_cents: 2500, out_cents: 0 },
+      servering: { in_cents: 26000, out_cents: 0 },
+      bank: { in_cents: 81400, out_cents: 81400 },
+    },
+    ending_opptall_kassie_cents: 461300,
+    innskudd_drop_safe_cents: 0,
+    difference_in_shifts_cents: 0,
+  };
+  const settlement = await ctx.service.closeDay({
+    agentUserId: "a1", agentRole: "AGENT",
+    reportedCashCount: 0,
+    machineBreakdown: breakdown,
+  });
+  assert.equal(settlement.machineBreakdown.rows.metronia?.in_cents, 481000);
+  assert.equal(settlement.machineBreakdown.rows.ok_bingo?.out_cents, 162500);
+  assert.equal(settlement.machineBreakdown.ending_opptall_kassie_cents, 461300);
+});
+
+test("K1 closeDay: ugyldig breakdown avvises med INVALID_INPUT", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await assert.rejects(
+    ctx.service.closeDay({
+      agentUserId: "a1", agentRole: "AGENT",
+      reportedCashCount: 0,
+      machineBreakdown: { rows: { metronia: { in_cents: -1, out_cents: 0 } } },
+    }),
+    (err) => err instanceof DomainError && err.code === "INVALID_INPUT"
+  );
+});
+
+test("K1 closeDay: ukjent maskin-nøkkel i breakdown avvises", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await assert.rejects(
+    ctx.service.closeDay({
+      agentUserId: "a1", agentRole: "AGENT",
+      reportedCashCount: 0,
+      machineBreakdown: { rows: { fantasi_maskin: { in_cents: 0, out_cents: 0 } } },
+    }),
+    (err) => err instanceof DomainError && err.code === "INVALID_INPUT"
+  );
+});
+
+test("K1 closeDay: uten breakdown (legacy-flyt) fortsatt OK", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  const settlement = await ctx.service.closeDay({
+    agentUserId: "a1", agentRole: "AGENT",
+    reportedCashCount: 0,
+  });
+  // Default tom breakdown (backward-compat).
+  assert.deepEqual(settlement.machineBreakdown.rows, {});
+  assert.equal(settlement.bilagReceipt, null);
+});
+
+test("K1 closeDay: bilag kan sendes inn direkte", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  const receipt = {
+    mime: "application/pdf",
+    filename: "bilag.pdf",
+    dataUrl: "data:application/pdf;base64,JVBERi0=",
+    sizeBytes: 1000,
+    uploadedAt: "2026-04-23T10:00:00.000Z",
+    uploadedByUserId: "a1",
+  };
+  const settlement = await ctx.service.closeDay({
+    agentUserId: "a1", agentRole: "AGENT",
+    reportedCashCount: 0,
+    bilagReceipt: receipt,
+  });
+  assert.equal(settlement.bilagReceipt?.filename, "bilag.pdf");
+  assert.equal(settlement.bilagReceipt?.mime, "application/pdf");
+});
+
+test("K1 uploadBilagReceipt: AGENT laster opp på egen settlement", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  const settlement = await ctx.service.closeDay({
+    agentUserId: "a1", agentRole: "AGENT",
+    reportedCashCount: 0,
+  });
+  const updated = await ctx.service.uploadBilagReceipt({
+    settlementId: settlement.id,
+    uploaderUserId: "a1",
+    uploaderRole: "AGENT",
+    receipt: {
+      mime: "image/jpeg",
+      filename: "receipt.jpg",
+      dataUrl: "data:image/jpeg;base64,/9j/4AAQ=",
+      sizeBytes: 2048,
+      uploadedAt: "2026-04-23T11:00:00Z",
+      uploadedByUserId: "a1",
+    },
+  });
+  assert.equal(updated.bilagReceipt?.mime, "image/jpeg");
+  assert.equal(updated.bilagReceipt?.sizeBytes, 2048);
+  assert.ok(updated.editedAt); // applyEdit setter edited_at
+});
+
+test("K1 uploadBilagReceipt: AGENT kan IKKE laste opp på andre agents settlement", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedAgent("a2", "hall-a");
+  const settlement = await ctx.service.closeDay({
+    agentUserId: "a1", agentRole: "AGENT",
+    reportedCashCount: 0,
+  });
+  await assert.rejects(
+    ctx.service.uploadBilagReceipt({
+      settlementId: settlement.id,
+      uploaderUserId: "a2",
+      uploaderRole: "AGENT",
+      receipt: {
+        mime: "application/pdf",
+        filename: "x.pdf",
+        dataUrl: "data:application/pdf;base64,AAAA",
+        sizeBytes: 100,
+        uploadedAt: "2026-04-23T10:00:00Z",
+        uploadedByUserId: "a2",
+      },
+    }),
+    (err) => err instanceof DomainError && err.code === "FORBIDDEN"
+  );
+});
+
+test("K1 uploadBilagReceipt: HALL_OPERATOR avvises (read-only)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  const settlement = await ctx.service.closeDay({
+    agentUserId: "a1", agentRole: "AGENT",
+    reportedCashCount: 0,
+  });
+  await assert.rejects(
+    ctx.service.uploadBilagReceipt({
+      settlementId: settlement.id,
+      uploaderUserId: "ho-1",
+      uploaderRole: "HALL_OPERATOR",
+      receipt: {
+        mime: "application/pdf",
+        filename: "x.pdf",
+        dataUrl: "data:application/pdf;base64,AAAA",
+        sizeBytes: 100,
+        uploadedAt: "2026-04-23T10:00:00Z",
+        uploadedByUserId: "ho-1",
+      },
+    }),
+    (err) => err instanceof DomainError && err.code === "FORBIDDEN"
+  );
+});
+
+test("K1 editSettlement: admin kan oppdatere breakdown + audit-logges", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  const settlement = await ctx.service.closeDay({
+    agentUserId: "a1", agentRole: "AGENT",
+    reportedCashCount: 0,
+  });
+  const edited = await ctx.service.editSettlement({
+    settlementId: settlement.id,
+    editedByUserId: "admin-1",
+    editorRole: "ADMIN",
+    reason: "Korrigerte breakdown etter avstemning",
+    patch: {
+      machineBreakdown: {
+        rows: { metronia: { in_cents: 10000, out_cents: 5000 } },
+        ending_opptall_kassie_cents: 5000,
+        innskudd_drop_safe_cents: 0,
+        difference_in_shifts_cents: 0,
+      },
+    },
+  });
+  assert.equal(edited.machineBreakdown.rows.metronia?.in_cents, 10000);
+  assert.equal(edited.editReason, "Korrigerte breakdown etter avstemning");
+});
+
+test("K1 listSettlementsByHall: filtrerer og returnerer i dato-orden", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.service.closeDay({
+    agentUserId: "a1", agentRole: "AGENT", reportedCashCount: 0,
+  });
+  const list = await ctx.service.listSettlementsByHall("hall-a", { limit: 10 });
+  assert.equal(list.length, 1);
+  assert.equal(list[0]!.hallId, "hall-a");
+});
+
+test("K1 computeBreakdownTotals: eksponert via service", async () => {
+  const ctx = makeSetup();
+  const totals = ctx.service.computeBreakdownTotals({
+    rows: {
+      metronia: { in_cents: 100, out_cents: 30 },
+      bank: { in_cents: 50, out_cents: 50 },
+    },
+    ending_opptall_kassie_cents: 0,
+    innskudd_drop_safe_cents: 0,
+    difference_in_shifts_cents: 0,
+  });
+  assert.equal(totals.totalInCents, 150);
+  assert.equal(totals.totalOutCents, 80);
+  assert.equal(totals.totalSumCents, 70);
+});
