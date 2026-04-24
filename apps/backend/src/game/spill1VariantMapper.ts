@@ -22,12 +22,24 @@
  * Design-dok: docs/architecture/spill1-variantconfig-admin-coupling.md
  */
 
-import type { GameVariantConfig, PatternConfig, TicketTypeConfig } from "./variantConfig.js";
+import type {
+  CustomPatternDefinition,
+  GameVariantConfig,
+  PatternConfig,
+  TicketTypeConfig,
+} from "./variantConfig.js";
 import {
   DEFAULT_NORSK_BINGO_CONFIG,
   DEFAULT_QUICKBINGO_CONFIG,
   PATTERNS_BY_COLOR_DEFAULT_KEY,
 } from "./variantConfig.js";
+import {
+  buildSubVariantPresetPatterns,
+  isSpill1SubVariantType,
+  type PresetCustomPattern,
+  type PresetPatternConfig,
+  type Spill1SubVariantType,
+} from "@spillorama/shared-types";
 
 // ── Public input-type (defensive shape) ─────────────────────────────────────
 
@@ -39,11 +51,35 @@ import {
  */
 export interface Spill1ConfigInput {
   /**
-   * BIN-689: Sub-variant-valg fra admin-UI. "norsk-bingo" (default/undefined)
-   * = standard 5-fase; "kvikkis" = hurtig-bingo med kun Fullt Hus-fase.
-   * Tolket av mapperen for å velge riktig default-patterns-liste.
+   * BIN-689 + Bølge K4: Sub-variant-valg fra admin-UI.
+   *
+   * Historiske verdier (bakoverkompat):
+   *   - "norsk-bingo" (default/undefined) = standard 5-fase
+   *   - "kvikkis" = hurtig-bingo (kun Fullt Hus, 1000 kr fast)
+   *
+   * Nye verdier (K4, papir-plan):
+   *   - "tv-extra"         = 3 concurrent patterns (Bilde/Ramme/Fullt Hus)
+   *   - "ball-x-10"        = Fullt Hus = 1250 + ball×10
+   *   - "super-nils"       = Fullt Hus per BINGO-kolonne (B/I/N/G/O)
+   *   - "spillernes-spill" = Rad N = Rad 1 × N (multiplier-chain)
+   *   - "standard"         = alias for "norsk-bingo" (klargjørende)
+   *
+   * For de 5 preset-variantene ignorerer mapperen admin-UI-en sitt manuelle
+   * `prizePerPattern`-input og bruker hardkodet papir-regel-preset. Dette
+   * gjør presetene forutsigbare og konsistente med papir-spesifikasjonen —
+   * admin slipper å taste inn beløp per farge per fase for hver variant.
+   *
+   * "standard"/"norsk-bingo" respekterer admin-UI sitt `prizePerPattern`-
+   * input uendret (samme som før K4).
    */
-  subVariant?: "norsk-bingo" | "kvikkis";
+  subVariant?:
+    | "norsk-bingo"
+    | "standard"
+    | "kvikkis"
+    | "tv-extra"
+    | "ball-x-10"
+    | "super-nils"
+    | "spillernes-spill";
   ticketColors?: ReadonlyArray<Spill1TicketColorInput>;
   jackpot?: {
     prizeByColor?: Record<string, number>;
@@ -117,6 +153,78 @@ const PATTERN_ORDER: readonly string[] = ["row_1", "row_2", "row_3", "row_4", "f
 
 /** BIN-689: Fase-rekkefølge for Kvikkis = kun Fullt Hus. */
 const PATTERN_ORDER_KVIKKIS: readonly string[] = ["full_house"];
+
+/**
+ * Bølge K4: Oversett admin-UI subVariant-string til den kanoniske
+ * `Spill1SubVariantType` fra shared-types. Returnerer null for
+ * "norsk-bingo"/undefined/ukjente verdier så mapperen bruker legacy-
+ * pathen (admin-UI prizePerPattern respekteres).
+ *
+ * Merknad: "standard" er også preset-variant — den har samme patterns
+ * som legacy-pathen ville gitt med default-input, men går via preset-
+ * grenen for konsistens (samme `winningType: "fixed"` for alle faser).
+ */
+function resolvePresetVariant(
+  subVariant: Spill1ConfigInput["subVariant"],
+): Spill1SubVariantType | null {
+  if (!subVariant) return null;
+  // Legacy-alias: "norsk-bingo" er ikke en preset — bruk legacy-pathen
+  // (admin-UI prizePerPattern overrider default-beløp).
+  if (subVariant === "norsk-bingo") return null;
+  if (isSpill1SubVariantType(subVariant)) return subVariant;
+  return null;
+}
+
+// ── Preset → PatternConfig-konvertering ─────────────────────────────────────
+
+/**
+ * Konverter `PresetPatternConfig` fra shared-types til engine-side
+ * `PatternConfig`. Setter `design` basert på fase-rekkefølge (matcher
+ * legacy rendering-kontrakt: 0 = custom/full_house, 1-4 = row 1-4).
+ */
+function presetPatternToConfig(
+  preset: PresetPatternConfig,
+  orderIndex: number,
+): PatternConfig {
+  // design-konvensjon matcher patternConfigForPhase:
+  //   full_house → 0, row_N → N.
+  const isFull = preset.name === "Fullt Hus" && preset.claimType === "BINGO";
+  const design = isFull ? 0 : orderIndex + 1;
+  const out: PatternConfig = {
+    name: preset.name,
+    claimType: preset.claimType,
+    prizePercent: preset.prizePercent,
+    design,
+  };
+  if (preset.winningType) out.winningType = preset.winningType;
+  if (typeof preset.prize1 === "number") out.prize1 = preset.prize1;
+  if (typeof preset.phase1Multiplier === "number")
+    out.phase1Multiplier = preset.phase1Multiplier;
+  if (typeof preset.minPrize === "number") out.minPrize = preset.minPrize;
+  if (preset.columnPrizesNok) out.columnPrizesNok = { ...preset.columnPrizesNok };
+  if (typeof preset.baseFullHousePrizeNok === "number")
+    out.baseFullHousePrizeNok = preset.baseFullHousePrizeNok;
+  if (typeof preset.ballValueMultiplier === "number")
+    out.ballValueMultiplier = preset.ballValueMultiplier;
+  return out;
+}
+
+/**
+ * Konverter `PresetCustomPattern` fra shared-types til engine-side
+ * `CustomPatternDefinition`. Brukes av TV Extra og andre concurrent-
+ * patterns-varianter.
+ */
+function presetCustomToConfig(
+  preset: PresetCustomPattern,
+): CustomPatternDefinition {
+  const base = presetPatternToConfig(preset, 0);
+  return {
+    ...base,
+    patternId: preset.patternId,
+    mask: preset.mask,
+    concurrent: true,
+  };
+}
 
 // ── Helper: slug → TicketTypeConfig ─────────────────────────────────────────
 
@@ -230,6 +338,25 @@ export function buildVariantConfigFromSpill1Config(
   spill1: Spill1ConfigInput | null | undefined,
   fallback?: GameVariantConfig,
 ): GameVariantConfig {
+  // Bølge K4: Preset-variant-detection. Når admin velger en preset-variant
+  // (kvikkis/tv-extra/ball-x-10/super-nils/spillernes-spill/standard)
+  // bruker mapperen hardkodet papir-regel-preset i stedet for å lese
+  // prizePerPattern fra admin-UI. Dette gjør presetene forutsigbare og
+  // forenkler admin-UX (én dropdown → komplett spill-konfig).
+  //
+  // "norsk-bingo"/undefined følger legacy-pathen der admin-UI kan
+  // overstyre default-beløp per farge + fase.
+  //
+  // **Eksplisitt fallback overrider preset-routing** — når caller sender
+  // en `fallback`-parameter (typisk gjort i eksisterende tester og i
+  // spesial-tilfeller) respekteres dens `patterns[]` som autoritativ.
+  // Preset-pathen er ren admin-UI-drevet og aktiveres bare når caller
+  // IKKE har angitt en eksplisitt fallback. Dette bevarer bakoverkompat
+  // for eksisterende tester (BIN-689 Kvikkis-test m.fl.).
+  const presetVariant =
+    fallback === undefined ? resolvePresetVariant(spill1?.subVariant) : null;
+  const preset = presetVariant ? buildSubVariantPresetPatterns(presetVariant) : null;
+
   // BIN-689: Kvikkis-routing. Hvis `subVariant === "kvikkis"` og ingen
   // eksplisitt fallback er angitt, bruk DEFAULT_QUICKBINGO_CONFIG så
   // patterns-listen blir 1-entry (Fullt Hus) i stedet for 5-fase.
@@ -237,7 +364,19 @@ export function buildVariantConfigFromSpill1Config(
   const resolvedFallback: GameVariantConfig =
     fallback ??
     (spill1?.subVariant === "kvikkis" ? DEFAULT_QUICKBINGO_CONFIG : DEFAULT_NORSK_BINGO_CONFIG);
-  const fallbackPatterns = resolvedFallback.patterns;
+
+  // K4 preset-patterns: hvis admin har valgt en preset-variant, konverter
+  // presets til engine-side PatternConfig-array. Brukes som `fallbackPatterns`
+  // slik at per-farge-matrisen i patternsByColor bygges fra preset-beløpene.
+  const presetPatterns: PatternConfig[] | null = preset
+    ? preset.patterns.map((p, i) => presetPatternToConfig(p, i))
+    : null;
+  const presetCustomPatterns: CustomPatternDefinition[] | null =
+    preset?.customPatterns && preset.customPatterns.length > 0
+      ? preset.customPatterns.map((cp) => presetCustomToConfig(cp))
+      : null;
+
+  const fallbackPatterns = presetPatterns ?? resolvedFallback.patterns;
   const patternOrder =
     spill1?.subVariant === "kvikkis" ? PATTERN_ORDER_KVIKKIS : PATTERN_ORDER;
 
@@ -265,11 +404,20 @@ export function buildVariantConfigFromSpill1Config(
     // Unngå duplikater hvis admin-UI har sendt samme farge to ganger.
     if (ticketTypes.some((t) => t.name === ticketType.name)) continue;
     ticketTypes.push(ticketType);
-    patternsByColor[ticketType.name] = buildPatternsForColor(
-      tc.prizePerPattern,
-      fallbackPatterns,
-      patternOrder,
-    );
+
+    // K4: For preset-varianter er premiene papir-regel-låst og identiske
+    // på tvers av farger — vi kopierer preset-patternene inn per farge
+    // (slik at `patternsByColor[color]` alltid har en entry for admin-
+    // valgte farger). Admin kan ikke overstyre preset-beløp per farge.
+    if (presetPatterns) {
+      patternsByColor[ticketType.name] = presetPatterns.map((p) => ({ ...p }));
+    } else {
+      patternsByColor[ticketType.name] = buildPatternsForColor(
+        tc.prizePerPattern,
+        fallbackPatterns,
+        patternOrder,
+      );
+    }
   }
 
   // Hvis admin ikke har valgt noen farger → fall tilbake til fallback.ticketTypes.
@@ -291,11 +439,30 @@ export function buildVariantConfigFromSpill1Config(
       ? spill1.elvis.replaceTicketPriceNok
       : resolvedFallback.replaceAmount;
 
-  return {
+  // K4: TV Extra-variant bruker `customPatterns` (concurrent) i stedet for
+  // sekvensielle patterns. Når customPatterns er satt, må engine bruke dem
+  // direkte — patternsByColor ignoreres (se BingoEngine.ts-semantikk).
+  // Mutually exclusive med patternsByColor per backend-validator.
+  //
+  // For TV Extra sletter vi patternsByColor (unntatt __default__ som
+  // engine trenger for ukjente farger) siden engine bruker customPatterns
+  // som autoritativ pattern-kilde.
+  const shouldUseCustomPatterns =
+    presetCustomPatterns !== null && presetCustomPatterns.length > 0;
+
+  const baseReturn: GameVariantConfig = {
     ...resolvedFallback,
     ticketTypes: finalTicketTypes,
-    patterns: fallbackPatterns.map((p) => ({ ...p })), // flat fallback beholdes
-    patternsByColor,
+    patterns: shouldUseCustomPatterns
+      ? [] // TV Extra: tom flat-array, engine bruker customPatterns
+      : fallbackPatterns.map((p) => ({ ...p })),
+    ...(shouldUseCustomPatterns
+      ? {
+          customPatterns: presetCustomPatterns!.map((cp) => ({ ...cp })),
+          // customPatterns + patternsByColor er mutually exclusive i engine.
+          // Dropp patternsByColor for TV Extra.
+        }
+      : { patternsByColor }),
     ...(jackpot
       ? { jackpot }
       : resolvedFallback.jackpot
@@ -304,6 +471,7 @@ export function buildVariantConfigFromSpill1Config(
     ...(typeof luckyNumberPrize === "number" ? { luckyNumberPrize } : {}),
     ...(typeof replaceAmount === "number" ? { replaceAmount } : {}),
   };
+  return baseReturn;
 }
 
 /**

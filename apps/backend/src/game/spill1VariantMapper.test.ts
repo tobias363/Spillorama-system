@@ -434,3 +434,279 @@ test("BIN-689: Kvikkis — jackpot-feltet overføres som før", () => {
 test("BIN-689: DEFAULT_QUICKBINGO_CONFIG-import er bundet (smoke)", () => {
   assert.equal(DEFAULT_QUICKBINGO_CONFIG.patterns.length, 1);
 });
+
+// ── Bølge K4: Preset-variant-mapper (5 nye sub-varianter) ──────────────────
+//
+// Disse testene dekker integrasjonen mellom admin-UI subVariant-valg og
+// backend PatternConfig. For hver av de 5 preset-variantene verifiseres:
+//   - Riktig antall patterns genereres
+//   - winningType er korrekt satt per fase
+//   - Papir-regel-beløp er speilet eksakt
+//   - patternsByColor får preset-verdier for alle valgte farger
+//   - TV Extra: customPatterns brukes i stedet for patternsByColor
+
+test("K4: subVariant='kvikkis' → 1 fixed-pattern med 1000 kr (ingen admin-override)", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "kvikkis",
+    ticketColors: [{ color: "small_yellow", priceNok: 20, prizePerPattern: {} }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  // Preset: 1 pattern (Fullt Hus) per farge.
+  const perColor = vc.patternsByColor?.["Small Yellow"];
+  assert.ok(perColor, "Small Yellow skal ha preset-patterns");
+  assert.equal(perColor!.length, 1);
+  assert.equal(perColor![0]!.name, "Fullt Hus");
+  assert.equal(perColor![0]!.winningType, "fixed");
+  assert.equal(perColor![0]!.prize1, 1000);
+});
+
+test("K4: subVariant='kvikkis' ignorerer admin prizePerPattern-override (preset er autoritativ)", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "kvikkis",
+    ticketColors: [
+      {
+        color: "small_yellow",
+        priceNok: 20,
+        // Admin prøver å overstyre — preset skal vinne.
+        prizePerPattern: { full_house: { mode: "fixed", amount: 99999 } },
+      },
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"];
+  assert.equal(perColor![0]!.prize1, 1000, "preset 1000 kr, ikke admin 99999 kr");
+});
+
+test("K4: subVariant='ball-x-10' → Fullt Hus = ball-value-multiplier (1250 + ball×10)", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "ball-x-10",
+    ticketColors: [{ color: "small_yellow", priceNok: 30, prizePerPattern: {} }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor.length, 5, "Ball × 10 beholder 5 sekvensielle faser");
+  const fullHouse = perColor[4]!;
+  assert.equal(fullHouse.winningType, "ball-value-multiplier");
+  assert.equal(fullHouse.baseFullHousePrizeNok, 1250);
+  assert.equal(fullHouse.ballValueMultiplier, 10);
+});
+
+test("K4: subVariant='super-nils' → Fullt Hus = column-specific (B=500 I=700 N=1000 G=700 O=500)", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "super-nils",
+    ticketColors: [{ color: "small_yellow", priceNok: 30, prizePerPattern: {} }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor.length, 5);
+  const fullHouse = perColor[4]!;
+  assert.equal(fullHouse.winningType, "column-specific");
+  assert.deepEqual(fullHouse.columnPrizesNok, {
+    B: 500,
+    I: 700,
+    N: 1000,
+    G: 700,
+    O: 500,
+  });
+});
+
+test("K4: subVariant='spillernes-spill' → 5 multiplier-chain-patterns m/ riktig multipliers", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "spillernes-spill",
+    ticketColors: [{ color: "small_yellow", priceNok: 50, prizePerPattern: {} }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor.length, 5);
+  for (const p of perColor) {
+    assert.equal(p.winningType, "multiplier-chain");
+  }
+  assert.equal(perColor[0]!.prizePercent, 3, "fase 1 = 3% av pool");
+  assert.equal(perColor[0]!.phase1Multiplier, undefined, "fase 1 er cascade-base");
+  assert.equal(perColor[1]!.phase1Multiplier, 2);
+  assert.equal(perColor[2]!.phase1Multiplier, 3);
+  assert.equal(perColor[3]!.phase1Multiplier, 4);
+  assert.equal(perColor[4]!.phase1Multiplier, 10);
+  // Min-gulv: 50/50/100/100/500.
+  assert.equal(perColor[0]!.minPrize, 50);
+  assert.equal(perColor[4]!.minPrize, 500);
+});
+
+test("K4: subVariant='tv-extra' → customPatterns settes, patternsByColor DROPPES", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "tv-extra",
+    ticketColors: [{ color: "small_yellow", priceNok: 30, prizePerPattern: {} }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  // TV Extra bruker customPatterns, ikke sekvensielle patterns.
+  assert.ok(vc.customPatterns, "customPatterns skal settes");
+  assert.equal(vc.customPatterns!.length, 3);
+  // patternsByColor må være droppet (mutually exclusive i engine).
+  assert.equal(
+    vc.patternsByColor,
+    undefined,
+    "patternsByColor skal være fraværende for TV Extra",
+  );
+  // Flat patterns-array skal være tom (customPatterns er autoritativ).
+  assert.equal(vc.patterns.length, 0);
+});
+
+test("K4: TV Extra customPatterns har Bilde/Ramme/Fullt Hus med 500/1000/3000 kr", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "tv-extra",
+    ticketColors: [{ color: "small_yellow", priceNok: 30, prizePerPattern: {} }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const custom = vc.customPatterns!;
+  const byId = new Map(custom.map((cp) => [cp.patternId, cp]));
+  assert.equal(byId.get("bilde")?.prize1, 500);
+  assert.equal(byId.get("ramme")?.prize1, 1000);
+  assert.equal(byId.get("full_house")?.prize1, 3000);
+  // Alle skal ha winningType: "fixed" og concurrent: true.
+  for (const cp of custom) {
+    assert.equal(cp.winningType, "fixed");
+    assert.equal(cp.concurrent, true);
+    assert.ok(cp.mask > 0);
+  }
+});
+
+test("K4: subVariant='standard' → 5 fixed-patterns m/ 100/200/200/200/1000 kr", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "standard",
+    ticketColors: [{ color: "small_yellow", priceNok: 20, prizePerPattern: {} }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor.length, 5);
+  const amounts = perColor.map((p) => p.prize1);
+  assert.deepEqual(amounts, [100, 200, 200, 200, 1000]);
+});
+
+test("K4: preset-variant — flere farger får samme preset-patterns", () => {
+  const input: Spill1ConfigInput = {
+    subVariant: "super-nils",
+    ticketColors: [
+      { color: "small_yellow", priceNok: 30, prizePerPattern: {} },
+      { color: "small_white", priceNok: 30, prizePerPattern: {} },
+      { color: "small_purple", priceNok: 30, prizePerPattern: {} },
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const yellow = vc.patternsByColor?.["Small Yellow"]!;
+  const white = vc.patternsByColor?.["Small White"]!;
+  const purple = vc.patternsByColor?.["Small Purple"]!;
+  for (const palette of [yellow, white, purple]) {
+    assert.equal(palette[4]!.winningType, "column-specific");
+    assert.deepEqual(palette[4]!.columnPrizesNok, {
+      B: 500, I: 700, N: 1000, G: 700, O: 500,
+    });
+  }
+});
+
+test("K4: subVariant='norsk-bingo' beholder legacy-semantikk (admin prizePerPattern respekteres)", () => {
+  // norsk-bingo er IKKE en preset — admin kan overstyre beløp per farge.
+  const input: Spill1ConfigInput = {
+    subVariant: "norsk-bingo",
+    ticketColors: [
+      {
+        color: "small_yellow",
+        priceNok: 20,
+        prizePerPattern: {
+          row_1: { mode: "fixed", amount: 150 }, // override
+          full_house: { mode: "fixed", amount: 1500 }, // override
+        },
+      },
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor[0]!.prize1, 150, "admin override respekteres for norsk-bingo");
+  assert.equal(perColor[4]!.prize1, 1500);
+});
+
+test("K4: ukjent subVariant-verdi → fallback til norsk-bingo-legacy-path", () => {
+  const input = {
+    subVariant: "not-a-real-variant",
+    ticketColors: [{ color: "small_yellow", priceNok: 20, prizePerPattern: {} }],
+  } as unknown as Spill1ConfigInput;
+  const vc = buildVariantConfigFromSpill1Config(input);
+  // Ingen preset → faller tilbake til default 5 patterns.
+  assert.equal(vc.patternsByColor?.["Small Yellow"]?.length, 5);
+});
+
+test("K4: eksplisitt fallback overrider preset-routing (test-API bakoverkompat)", () => {
+  // Når caller angir eksplisitt fallback, skal preset-pathen IKKE aktiveres.
+  // Bevarer den eksisterende Kvikkis-test-oppførselen for BIN-689.
+  const input: Spill1ConfigInput = {
+    subVariant: "ball-x-10",
+    ticketColors: [{ color: "small_yellow", priceNok: 30, prizePerPattern: {} }],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input, DEFAULT_NORSK_BINGO_CONFIG);
+  // Fallback brukes → 5 default-patterns, ingen ball-value-multiplier.
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor.length, 5);
+  const fullHouse = perColor[4]!;
+  assert.notEqual(fullHouse.winningType, "ball-value-multiplier");
+});
+
+test("K4: preset-pattern-navn matcher engine-regex (Fullt Hus, N Rad/Rader, Bilde, Ramme)", () => {
+  for (const sv of ["kvikkis", "ball-x-10", "super-nils", "spillernes-spill", "standard"] as const) {
+    const vc = buildVariantConfigFromSpill1Config({
+      subVariant: sv,
+      ticketColors: [{ color: "small_yellow", priceNok: 20, prizePerPattern: {} }],
+    });
+    const pats = vc.patternsByColor?.["Small Yellow"] ?? [];
+    for (const p of pats) {
+      const ok =
+        p.name === "1 Rad" ||
+        p.name === "2 Rader" ||
+        p.name === "3 Rader" ||
+        p.name === "4 Rader" ||
+        p.name === "Fullt Hus";
+      assert.ok(ok, `ukjent pattern-navn for ${sv}: ${p.name}`);
+    }
+  }
+  // TV Extra-sjekk separat siden den bruker customPatterns.
+  const tv = buildVariantConfigFromSpill1Config({
+    subVariant: "tv-extra",
+    ticketColors: [{ color: "small_yellow", priceNok: 30, prizePerPattern: {} }],
+  });
+  for (const cp of tv.customPatterns ?? []) {
+    const ok =
+      cp.name === "Bilde" ||
+      cp.name === "Ramme" ||
+      cp.name === "Fullt Hus";
+    assert.ok(ok, `ukjent TV Extra pattern-navn: ${cp.name}`);
+  }
+});
+
+test("K4: preset-variant renderer design-felt korrekt (0=full_house, 1-4=row)", () => {
+  const vc = buildVariantConfigFromSpill1Config({
+    subVariant: "spillernes-spill",
+    ticketColors: [{ color: "small_yellow", priceNok: 50, prizePerPattern: {} }],
+  });
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor[0]!.design, 1, "1 Rad");
+  assert.equal(perColor[1]!.design, 2, "2 Rader");
+  assert.equal(perColor[2]!.design, 3, "3 Rader");
+  assert.equal(perColor[3]!.design, 4, "4 Rader");
+  assert.equal(perColor[4]!.design, 0, "Fullt Hus");
+});
+
+test("K4 regresjon: admin-UI som ikke bruker subVariant (tom/undefined) får legacy-oppførsel", () => {
+  // Ingen subVariant satt — mapperen skal bruke default 5-fase og
+  // respektere admin prizePerPattern hvis gitt.
+  const input: Spill1ConfigInput = {
+    ticketColors: [
+      {
+        color: "small_yellow",
+        priceNok: 20,
+        prizePerPattern: { row_1: { mode: "percent", amount: 10 } },
+      },
+    ],
+  };
+  const vc = buildVariantConfigFromSpill1Config(input);
+  const perColor = vc.patternsByColor?.["Small Yellow"]!;
+  assert.equal(perColor.length, 5);
+  assert.equal(perColor[0]!.prizePercent, 10, "percent-mode fra admin respektert");
+});

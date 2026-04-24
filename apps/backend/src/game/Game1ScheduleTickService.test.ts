@@ -398,6 +398,144 @@ test("K1-C: spawnUpcomingGame1Games UTEN extra.luckyBonus → ingen luckyBonus-n
   );
 });
 
+// ── Bølge K4: Spill 1 sub-variant-preset pass-through ───────────────────────
+
+test("K4: spawnUpcomingGame1Games fletter subGame.extra.spill1Variant inn i ticket_config_json", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-k4",
+            name: "K4 plan",
+            hall_ids_json: {
+              masterHallId: "hall-m",
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-k4" },
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-k4",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "Super-NILS round",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+                ticketTypesData: { ticketType: ["Small Yellow"] },
+                jackpotData: {},
+                extra: {
+                  spill1Variant: "super-nils",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("SELECT daily_schedule_id"),
+        rows: [],
+      },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  await svc.spawnUpcomingGame1Games(fixedNow);
+
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  assert.ok(inserts.length > 0);
+  const firstInsert = inserts[0]!;
+  const ticketJson = JSON.parse(firstInsert.params[10] as string);
+  assert.equal(
+    ticketJson.spill1Variant,
+    "super-nils",
+    "spill1Variant pass-through til ticket_config_json",
+  );
+});
+
+test("K4: ukjent spill1Variant filtreres bort (fail-open for legacy/invalid)", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-k4b",
+            name: "K4 invalid",
+            hall_ids_json: {
+              masterHallId: "hall-m",
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-k4b" },
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-k4b",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "Bad variant",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+                ticketTypesData: {},
+                jackpotData: {},
+                extra: { spill1Variant: "unknown-variant" },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("SELECT daily_schedule_id"),
+        rows: [],
+      },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  await svc.spawnUpcomingGame1Games(fixedNow);
+
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  const ticketJson = JSON.parse(inserts[0]!.params[10] as string);
+  assert.equal(
+    ticketJson.spill1Variant,
+    undefined,
+    "ukjent variant-verdi sanitized bort — ingen key satt",
+  );
+});
+
 test("spawnUpcomingGame1Games: idempotent — hopper over eksisterende rader", async () => {
   const { pool } = createStubPool({
     responses: [

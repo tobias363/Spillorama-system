@@ -35,6 +35,12 @@ import {
   type MysterySubGameConfig,
   type SubGameType,
 } from "../../../../../../packages/shared-types/src/ticket-colors.js";
+import {
+  SPILL1_SUB_VARIANT_TYPES,
+  SPILL1_SUB_VARIANT_I18N_KEYS,
+  isSpill1SubVariantType,
+  type Spill1SubVariantType,
+} from "../../../../../../packages/shared-types/src/spill1-sub-variants.js";
 
 const TIME_RE = /^$|^[0-9]{2}:[0-9]{2}$/;
 
@@ -103,6 +109,23 @@ interface SubGameRowState {
    * MYSTERY (priceOptions-sub-game). Rendrer forskjellig UI.
    */
   subGameType: SubGameType;
+  /**
+   * Bølge K4 (2026-04-23): Spill 1 sub-variant-preset. Når satt, overstyrer
+   * denne det manuelle prizePerPattern-oppsettet i admin-UI og bruker
+   * hardkodet papir-regel-preset fra `SPILL1_SUB_VARIANT_DEFAULTS`:
+   *   - standard          = 100/200/200/200/1000 kr (norsk 5-fase)
+   *   - kvikkis           = kun Fullt Hus, 1000 kr
+   *   - tv-extra          = 3 concurrent (Bilde 500, Ramme 1000, FH 3000)
+   *   - ball-x-10         = FH = 1250 + ball×10
+   *   - super-nils        = FH per BINGO-kolonne (B/I/N/G/O)
+   *   - spillernes-spill  = Rad N = Rad 1 × N (multiplier-chain)
+   *
+   * Lagres i `slot.extra.spill1Variant` for å ikke konflikte med eksisterende
+   * `subGameType`-felt (som diskriminerer STANDARD vs MYSTERY). `undefined`
+   * betyr "ikke satt" — mapperen faller tilbake til legacy-path der admin
+   * kan overstyre premier per farge.
+   */
+  spill1Variant: Spill1SubVariantType | "";
   /** Valgte farger (subset av TICKET_COLORS). Stables i samme rekkefølge. */
   selectedColors: Set<TicketColor>;
   /** Per-farge rad-pris-innputt (alle som strings for å kunne være tomme). */
@@ -133,6 +156,10 @@ function emptyRow(): SubGameRowState {
     luckyBonusAmount: "",
     luckyBonusEnabled: false,
     subGameType: "STANDARD",
+    // K4: default tom — legacy-oppførsel (admin kan overstyre premier per
+    // farge i Spill1Config.ts). Når admin velger en preset fra dropdown,
+    // settes feltet til én av SPILL1_SUB_VARIANT_TYPES-verdiene.
+    spill1Variant: "",
     selectedColors: new Set(),
     rowPrizesByColor: {},
     mysteryPriceOptions: "",
@@ -205,12 +232,23 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
       }
     }
     // Ekstra-JSON-visning skal ikke duplisere strukturerte felter.
-    // Lag en kopi uten rowPrizesByColor + mysteryConfig + luckyBonus.
+    // Lag en kopi uten rowPrizesByColor + mysteryConfig + luckyBonus +
+    // spill1Variant (K4).
     const rest: Record<string, unknown> = { ...sg.extra };
     delete rest.rowPrizesByColor;
     delete rest.mysteryConfig;
     delete rest.luckyBonus;
+    delete rest.spill1Variant;
     extraForJson = Object.keys(rest).length > 0 ? rest : undefined;
+  }
+
+  // Bølge K4: hent ut Spill 1 sub-variant-preset fra extra.spill1Variant.
+  // Ukjente/ugyldige verdier faller tilbake til "" (legacy-modus).
+  let spill1Variant: Spill1SubVariantType | "" = "";
+  if (sg.extra && typeof sg.extra.spill1Variant === "string") {
+    if (isSpill1SubVariantType(sg.extra.spill1Variant)) {
+      spill1Variant = sg.extra.spill1Variant;
+    }
   }
 
   // Agent IJ — hent ut strukturerte jackpotDraw/jackpotPrize hvis satt.
@@ -263,6 +301,7 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
     luckyBonusAmount,
     luckyBonusEnabled,
     subGameType: sg.subGameType === "MYSTERY" ? "MYSTERY" : "STANDARD",
+    spill1Variant,
     selectedColors,
     rowPrizesByColor,
     mysteryPriceOptions,
@@ -436,11 +475,25 @@ function rowStateToSubgame(
     luckyBonusForExtra = { amountCents, enabled: state.luckyBonusEnabled };
   }
 
-  if (hasColorPrizes || mysteryConfig || luckyBonusForExtra) {
+  // Bølge K4: Spill 1-preset-variant. Kun lagres hvis admin eksplisitt
+  // har valgt en av SPILL1_SUB_VARIANT_TYPES — tom string betyr
+  // "ikke satt" og vi skal ikke emitere feltet (legacy-modus).
+  const spill1VariantForExtra: Spill1SubVariantType | null =
+    state.spill1Variant && isSpill1SubVariantType(state.spill1Variant)
+      ? state.spill1Variant
+      : null;
+
+  if (
+    hasColorPrizes ||
+    mysteryConfig ||
+    luckyBonusForExtra ||
+    spill1VariantForExtra
+  ) {
     const merged: Record<string, unknown> = { ...(slot.extra ?? {}) };
     if (hasColorPrizes) merged.rowPrizesByColor = rowPrizesByColor;
     if (mysteryConfig) merged.mysteryConfig = mysteryConfig;
     if (luckyBonusForExtra) merged.luckyBonus = luckyBonusForExtra;
+    if (spill1VariantForExtra) merged.spill1Variant = spill1VariantForExtra;
     slot.extra = merged;
     // Bruk shared validator for å fail-fast før POST — gir sam e feilmelding
     // som backend ville gitt.
@@ -543,10 +596,29 @@ export function mountSubGamesListEditor(
       return `<option value="${tp}"${selected}>${label}</option>`;
     }).join("");
 
+    // Bølge K4: Spill 1 sub-variant-preset-dropdown. Tom værdi (første option)
+    // betyr "ikke satt" (legacy-modus) — admin definerer premier per farge
+    // manuelt via rowPrizesByColor-panelet.
+    const spill1VariantOptions = [
+      `<option value="">${escapeHtml(t("spill1_sub_variant_none") || "— Manuell (legacy) —")}</option>`,
+      ...SPILL1_SUB_VARIANT_TYPES.map((v) => {
+        const selected = row.spill1Variant === v ? " selected" : "";
+        const entry = SPILL1_SUB_VARIANT_I18N_KEYS[v];
+        const label = t(entry.key) || entry.fallback;
+        return `<option value="${v}"${selected}>${escapeHtml(label)}</option>`;
+      }),
+    ].join("");
+
     const colorsPanel =
       row.subGameType === "STANDARD"
         ? renderColorsPanel(row, index)
         : renderMysteryPanel(row, index);
+
+    // Når en preset-variant er valgt, skjul per-color pris-input
+    // (premier er papir-regel-låste). Viser bare farge-valg + preset-
+    // beskrivelse for brukeren.
+    const isPresetActive =
+      row.spill1Variant !== "" && row.subGameType === "STANDARD";
 
     return `
       <div class="row" style="margin-top:6px;">
@@ -556,10 +628,61 @@ export function mountSubGamesListEditor(
             ${typeOptions}
           </select>
         </div>
+        <div class="form-group col-sm-5">
+          <label for="sg-spill1var-${index}">
+            ${escapeHtml(t("schedule_subgames_spill1_variant_label") || "Spill 1 variant")}
+          </label>
+          <select id="sg-spill1var-${index}" class="form-control input-sm" data-sg-field="spill1Variant">
+            ${spill1VariantOptions}
+          </select>
+          <p class="help-block" style="margin-top:2px;font-size:11px;">
+            ${escapeHtml(
+              t("schedule_subgames_spill1_variant_hint") ||
+              "Velg papir-regel-preset (Kvikkis/TV Extra/Ball×10/Super-NILS/Spillernes spill). Tom = manuell konfig.",
+            )}
+          </p>
+        </div>
       </div>
+      ${isPresetActive ? renderPresetInfo(row) : ""}
       <div class="sg-colors-panel" data-sg-index="${index}">
         ${colorsPanel}
       </div>`;
+  }
+
+  /**
+   * Bølge K4: Vis papir-regel-beløp for valgt preset-variant (read-only info).
+   *
+   * Admin slipper å taste inn premier når de velger en preset — denne boksen
+   * viser de hardkodede beløpene så admin vet hva engine vil betale ut.
+   * Fremtidig PR kan legge til "override"-toggle for å låse opp individuelle
+   * farger for tilpasning.
+   */
+  function renderPresetInfo(row: SubGameRowState): string {
+    if (!row.spill1Variant) return "";
+    const info: Record<Spill1SubVariantType, string> = {
+      "standard": "Standard 5-fase: 100 / 200 / 200 / 200 / 1000 kr",
+      "kvikkis": "Kvikkis: Førstemann med full bong vinner 1000 kr",
+      "tv-extra": "TV Extra: Bilde 500 kr, Ramme 1000 kr, Full House 3000 kr (concurrent)",
+      "ball-x-10": "Ball × 10: Full House = 1250 kr + siste ball × 10 kr",
+      "super-nils": "Super-NILS: Full House per kolonne — B=500, I=700, N=1000, G=700, O=500 kr",
+      "spillernes-spill":
+        "Spillernes spill: Rad N = Rad 1 × N. Rad 1 = 3% av pool (min 50 kr). Full House = 10 × Rad 1 (min 500 kr).",
+    };
+    const text = info[row.spill1Variant];
+    if (!text) return "";
+    return `
+      <fieldset style="border:1px solid #e8e8e8;border-radius:3px;padding:6px 8px;margin-top:4px;background:#eef5ff;">
+        <legend style="font-size:12px;padding:0 4px;color:#0a5;">
+          ${escapeHtml(t("schedule_subgames_spill1_variant_preview_legend") || "Preset-oppsett (papir-regel)")}
+        </legend>
+        <p style="font-size:12px;margin:4px 0;color:#333;">${escapeHtml(text)}</p>
+        <p class="help-block" style="margin-top:2px;font-size:11px;color:#666;">
+          ${escapeHtml(
+            t("schedule_subgames_spill1_variant_preview_hint") ||
+            "Disse beløpene er låst av presetet. Fjern presetet (velg “Manuell (legacy)”) for å redigere premier per farge manuelt.",
+          )}
+        </p>
+      </fieldset>`;
   }
 
   function renderColorsPanel(row: SubGameRowState, index: number): string {
@@ -871,6 +994,14 @@ export function mountSubGamesListEditor(
             const v = (el as HTMLSelectElement).value;
             row.subGameType = v === "MYSTERY" ? "MYSTERY" : "STANDARD";
             render(); // re-rendre for å bytte panel (farger <-> mystery)
+            return;
+          }
+          // Bølge K4: spill1Variant-dropdown. Må re-rendre slik at
+          // preset-info-boksen vises/skjules.
+          if (field === "spill1Variant") {
+            const raw = (el as HTMLSelectElement).value;
+            row.spill1Variant = isSpill1SubVariantType(raw) ? raw : "";
+            render();
             return;
           }
           if (field === "mysteryYellowDoubles") {

@@ -161,6 +161,36 @@ function extractLuckyBonusFromExtra(
   return null;
 }
 
+/**
+ * Bølge K4 (2026-04-23): Plukk ut Spill 1 sub-variant-preset fra
+ * subGame.extra.spill1Variant. Symmetrisk med admin-web
+ * `SubGamesListEditor.ts` som lagrer feltet etter type-guard.
+ *
+ * Verdien serialiseres inn i `ticket_config_json.spill1Variant` og leses
+ * tilbake ved game-spawn (bindVariantConfigForRoom-pathen, eller fremtidige
+ * konsumentnoder). Ukjente/ugyldige verdier ignoreres (fail-open) så
+ * legacy-schedules fortsatt fungerer uendret.
+ *
+ * Kun kanoniske verdier fra `SPILL1_SUB_VARIANT_TYPES` (shared-types)
+ * passerer filteret. Returnerer null når feltet mangler.
+ */
+function extractSpill1VariantFromExtra(
+  extra: Record<string, unknown> | undefined
+): string | null {
+  if (!extra || typeof extra !== "object") return null;
+  const raw = extra.spill1Variant;
+  if (typeof raw !== "string") return null;
+  const allowed = new Set([
+    "standard",
+    "kvikkis",
+    "tv-extra",
+    "ball-x-10",
+    "super-nils",
+    "spillernes-spill",
+  ]);
+  return allowed.has(raw) ? raw : null;
+}
+
 interface ExistingRowKey {
   daily_schedule_id: string;
   scheduled_day: string; // 'YYYY-MM-DD'
@@ -654,11 +684,21 @@ export class Game1ScheduleTickService {
           // i ticket_config_json så Game1DrawEngineService/Game1LuckyBonusService
           // kan lese den ved drawNext. Legacy bevares (jackpotData-kolonne).
           const luckyBonusFromExtra = extractLuckyBonusFromExtra(sg.extra);
+          // Bølge K4: pass-through av spill1Variant-preset fra schedule-nivå
+          // til ticket_config_json. Admin velger preset i
+          // SubGamesListEditor-dropdown og lagret i extra.spill1Variant;
+          // vi propagerer inn i ticket_config_json så fremtidige konsumentnoder
+          // (Game1DrawEngineService + bindVariantConfigForRoom) kan la preset
+          // overstyre GameManagement-level subVariant ved game-spawn.
+          const spill1VariantFromExtra = extractSpill1VariantFromExtra(sg.extra);
           const ticketConfigMerged: Record<string, unknown> = {
             ...(sg.ticketTypesData ?? {}),
           };
           if (luckyBonusFromExtra) {
             ticketConfigMerged.luckyBonus = luckyBonusFromExtra;
+          }
+          if (spill1VariantFromExtra) {
+            ticketConfigMerged.spill1Variant = spill1VariantFromExtra;
           }
 
           try {
