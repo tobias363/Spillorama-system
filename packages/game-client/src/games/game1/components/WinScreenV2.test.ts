@@ -4,7 +4,7 @@
  * WinScreenV2 (Fullt Hus fullskjerm) — port av WinScreenV2.jsx.
  * Dekker: mount/unmount, shared-info, rAF-cleanup ved destroy.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WinScreenV2 } from "./WinScreenV2.js";
 
 function container(): HTMLElement {
@@ -97,5 +97,33 @@ describe("WinScreenV2", () => {
     screen.destroy();
     screen.show({ amount: 200 });
     expect(parent.textContent).toContain("BINGO! DU VANT");
+  });
+
+  it("auto-close etter 5s (regel-endring 2026-04-24 rev 2)", () => {
+    vi.useFakeTimers();
+    let dismissed = false;
+    screen.show({ amount: 100, onDismiss: () => { dismissed = true; } });
+    expect(parent.children.length).toBeGreaterThan(0);
+    vi.advanceTimersByTime(4999);
+    expect(parent.children.length).toBeGreaterThan(0);
+    expect(dismissed).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(parent.children.length).toBe(0);
+    expect(dismissed).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("manuell Tilbake overstyrer auto-close timer (ingen dobbel onDismiss)", () => {
+    vi.useFakeTimers();
+    let dismissCount = 0;
+    screen.show({ amount: 100, onDismiss: () => { dismissCount++; } });
+    const backBtn = Array.from(parent.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Tilbake",
+    )!;
+    backBtn.click();
+    expect(dismissCount).toBe(1);
+    vi.advanceTimersByTime(6000);
+    expect(dismissCount).toBe(1);
+    vi.useRealTimers();
   });
 });

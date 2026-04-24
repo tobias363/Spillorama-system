@@ -3,28 +3,34 @@
  *
  * Sekvens:
  *   1. Partikkel-fontene (70 firkløver-logoer) skytes opp nedenfra og faller
- *      tilbake med tyngdekraft (FOSS_DURATION_MS = 3600ms). rAF-animert.
+ *      tilbake med tyngdekraft (FOSS_DURATION_MS = 1600ms). rAF-animert.
  *   2. Flash-radial-gradient overlay fades inn/ut samtidig (v2-flash).
  *   3. Etter fontene er ferdig: headline + stor gevinst-tekst + subline
- *      fades inn med translateY/scale. Gevinst teller opp over 2.2s med
- *      cubic-ease-out.
+ *      fades inn med translateY/scale. Gevinst teller opp over 1.5s.
  *   4. "Tilbake"-knapp fades inn sist (regel-endring 2026-04-24 Tobias:
- *      erstattet "Spill av på nytt" + "Skru av"). Auto-close etter 12s.
+ *      erstattet "Spill av på nytt" + "Skru av"). Auto-close etter 5s.
  *
  * Vises for `isMe` vinn med claimType === "BINGO" (Fullt Hus). Mindre
  * premier (fase 1-4) bruker {@link WinPopup}.
  *
  * Shared-variant: Hvis flere spillere vant Fullt Hus samtidig, vises en
  * shared-info-linje under amount som forklarer at premien er delt.
+ *
+ * Timing-regel (2026-04-24 Tobias, rev 2): auto-close 5s totalt (ned fra
+ * 12s) for å matche fase 1-4-popup-tempoet. Fontene + count-up ble samtidig
+ * komprimert (3.6s→1.6s fontene, 2.2s→1.5s count-up) slik at spilleren
+ * rekker å se den endelige gevinsten innenfor 5s-vinduet før auto-close.
+ * Tilbake-knappen overstyrer alltid.
  */
 
 const LUCKY_CLOVER_URL = "/web/games/assets/game1/design/lucky-clover.png";
-const FOSS_DURATION_MS = 3600;
+const FOSS_DURATION_MS = 1600;
 const LOGO_COUNT = 70;
-const COUNT_UP_DURATION_MS = 2200;
-/** Auto-close delay: 12s total (regel-endring 2026-04-24 Tobias). Måles fra
- *  showtidspunkt, ikke fra tekst-fade-in — gir spilleren ~8s med tekst synlig. */
-const AUTO_CLOSE_DELAY_MS = 12000;
+const COUNT_UP_DURATION_MS = 1500;
+/** Auto-close delay: 5s total (regel-endring 2026-04-24 rev 2 Tobias).
+ *  Fountain (1.6s) + count-up (1.5s) = 3.1s sekvens → 1.9s tekst stille
+ *  før close. Tilbake-knappen overstyrer. */
+const AUTO_CLOSE_DELAY_MS = 5000;
 
 function ensureWinScreenStyles(): void {
   if (typeof document === "undefined") return;
@@ -96,7 +102,7 @@ export interface WinScreenV2Options {
   logoSrc?: string;
   headline?: string;
   subline?: string;
-  /** Trigget av Tilbake-knappen ELLER auto-close etter 12s. */
+  /** Trigget av Tilbake-knappen ELLER auto-close etter 5s. */
   onDismiss?: () => void;
 }
 
@@ -252,7 +258,7 @@ export class WinScreenV2 {
 
     // Tilbake-knapp (erstatter "Spill av på nytt" + "Skru av" 2026-04-24).
     // Samme handler som auto-close: hide() + onDismiss(). Spiller kan trykke
-    // for å hoppe over 12-sekunders-ventingen.
+    // for å hoppe over 5-sekunders-ventingen.
     const backBtn = document.createElement("button");
     backBtn.textContent = "Tilbake";
     Object.assign(backBtn.style, {
@@ -294,9 +300,9 @@ export class WinScreenV2 {
       this.startCountUp(opts.amount, amountEl);
     }, FOSS_DURATION_MS);
 
-    // Auto-close etter 12s (regel-endring 2026-04-24 Tobias). Måles fra
-    // show-tid, ikke fra tekst-fade-in, så spiller ser fontene + tekst +
-    // count-up innen tilgjengelig vindu. Tilbake-knappen overstyrer.
+    // Auto-close etter 5s (regel-endring 2026-04-24 rev 2 Tobias). Måles
+    // fra show-tid. Fountain + count-up er komprimert til 3.1s så sluttbeløpet
+    // er synlig ~1.9s før close. Tilbake-knappen overstyrer.
     this.autoCloseTimer = setTimeout(() => {
       this.hide();
       opts.onDismiss?.();
