@@ -47,6 +47,7 @@ import { DomainError } from "./BingoEngine.js";
 import { logger as rootLogger } from "../util/logger.js";
 import type { Game1DrawEngineService } from "./Game1DrawEngineService.js";
 import type { AdminGame1Broadcaster } from "./AdminGame1Broadcaster.js";
+import { emitAdminResumed } from "./Game1DrawEngineBroadcast.js";
 import type {
   Game1TicketPurchaseService,
   Game1RefundAllForGameResult,
@@ -292,6 +293,35 @@ export class Game1MasterControlService {
 
   private masterAuditTable(): string {
     return `"${this.schema}"."app_game1_master_audit"`;
+  }
+
+  /**
+   * Task 1.1: tabell-referanse for engine-state. Brukes av `resumeGame` for
+   * å håndtere auto-pause-sidestate (paused=true + paused_at_phase !=
+   * null) samtidig som `scheduled_games.status` håndteres.
+   */
+  private gameStateTable(): string {
+    return `"${this.schema}"."app_game1_game_state"`;
+  }
+
+  /**
+   * Task 1.1: fire-and-forget admin-broadcast av `game1:resumed` etter
+   * DB-commit. Wrap i try/catch slik at en eventuell broadcaster-feil
+   * aldri kan krasje action-responsen.
+   */
+  private notifyResumed(
+    gameId: string,
+    actorUserId: string,
+    phase: number,
+    resumeType: "auto" | "manual"
+  ): void {
+    emitAdminResumed(
+      this.adminBroadcaster,
+      gameId,
+      actorUserId,
+      phase,
+      resumeType
+    );
   }
 
   async startGame(input: StartGameInput): Promise<MasterActionResult> {
@@ -587,27 +617,102 @@ export class Game1MasterControlService {
   }
 
   async resumeGame(input: ResumeGameInput): Promise<MasterActionResult> {
+    // Task 1.1: Resume støtter nå to sidestate-varianter (Gap #1 i
+    // MASTER_HALL_DASHBOARD_GAP_2026-04-24.md):
+    //   (a) Manuell master-pause: scheduled_game.status='paused'. Flipp
+    //       tilbake til 'running'.
+    //   (b) Auto-pause etter phase-won: status='running' MEN
+    //       app_game1_game_state.paused=true + paused_at_phase != null.
+    //       Flipp paused-feltene tilbake; status forblir 'running'.
+    //
+    // Denne semantikken beholder eksisterende kontrakt for (a) samtidig som
+    // den låser opp den nye auto-pause-flyten. `resumeType` skilles i
+    // response-eventet for UI-konsistens.
+    let capturedResumeType: "manual" | "auto" | null = null;
+    let capturedPhaseForEvent: number = 1;
     const result = await this.runInTransaction(async (client) => {
       const game = await this.loadGameForUpdate(client, input.gameId);
       this.assertActorIsMaster(input.actor, game);
 
-      if (game.status !== "paused") {
+      // Sjekk auto-pause-state PER SCHEDULED_GAME (samme transaksjon, FOR
+      // UPDATE unødvendig på game_state her siden vi kun skriver paused-
+      // feltet atomisk — men vi trenger å vite om auto-pause gjelder).
+      const { rows: gameStateRows } = await client.query<{
+        paused: boolean;
+        paused_at_phase: number | null;
+        current_phase: number;
+      }>(
+        `SELECT paused, paused_at_phase, current_phase
+           FROM ${this.gameStateTable()}
+           WHERE scheduled_game_id = $1
+           FOR UPDATE`,
+        [input.gameId]
+      );
+      const gsRow = gameStateRows[0];
+
+      const isManualPaused = game.status === "paused";
+      const isAutoPaused =
+        game.status === "running" &&
+        gsRow !== undefined &&
+        gsRow.paused === true;
+
+      if (!isManualPaused && !isAutoPaused) {
         throw new DomainError(
           "GAME_NOT_PAUSED",
-          `Kan kun resume et pauset spill (nåværende status: '${game.status}').`
+          `Kan kun resume et pauset spill (nåværende status: '${game.status}', engine-paused: ${gsRow?.paused ?? false}).`
         );
       }
 
-      const { rows: updated } = await client.query<ScheduledGameRow>(
-        `UPDATE ${this.scheduledGamesTable()}
-            SET status     = 'running',
-                updated_at = now()
-          WHERE id = $1
-          RETURNING id, status, master_hall_id, group_hall_id,
-                    participating_halls_json, actual_start_time, actual_end_time`,
-        [input.gameId]
-      );
-      const row = updated[0];
+      capturedResumeType = isManualPaused ? "manual" : "auto";
+      capturedPhaseForEvent = gsRow?.current_phase ?? 1;
+
+      let row: ScheduledGameRow;
+      if (isManualPaused) {
+        // Case (a): status='paused' → 'running'. Også nullstill auto-pause-
+        // feltene defensivt (normalt er de allerede NULL/false for manuell
+        // pause, men en combined paused-state bør uansett ende i ren
+        // running).
+        const { rows: updated } = await client.query<ScheduledGameRow>(
+          `UPDATE ${this.scheduledGamesTable()}
+              SET status     = 'running',
+                  updated_at = now()
+            WHERE id = $1
+            RETURNING id, status, master_hall_id, group_hall_id,
+                      participating_halls_json, actual_start_time, actual_end_time`,
+          [input.gameId]
+        );
+        row = updated[0]!;
+        if (gsRow !== undefined) {
+          await client.query(
+            `UPDATE ${this.gameStateTable()}
+                SET paused          = false,
+                    paused_at_phase = NULL
+              WHERE scheduled_game_id = $1`,
+            [input.gameId]
+          );
+        }
+      } else {
+        // Case (b): status forblir 'running'. Flipp paused=false +
+        // paused_at_phase=NULL i game_state. last_drawn_at beholdes slik
+        // at auto-tick naturlig trigger neste draw når seconds har passert
+        // (ingen umiddelbar draw-spike når agent trykker Resume).
+        await client.query(
+          `UPDATE ${this.gameStateTable()}
+              SET paused          = false,
+                  paused_at_phase = NULL
+            WHERE scheduled_game_id = $1`,
+          [input.gameId]
+        );
+        // Hent fresh scheduled_game-rad for audit (status er uendret).
+        const { rows: fresh } = await client.query<ScheduledGameRow>(
+          `SELECT id, status, master_hall_id, group_hall_id,
+                  participating_halls_json, actual_start_time, actual_end_time
+             FROM ${this.scheduledGamesTable()}
+             WHERE id = $1`,
+          [input.gameId]
+        );
+        row = fresh[0]!;
+      }
       if (!row) {
         throw new DomainError("GAME_NOT_FOUND", "Spillet finnes ikke lenger.");
       }
@@ -619,11 +724,19 @@ export class Game1MasterControlService {
         actor: input.actor,
         groupHallId: game.group_hall_id,
         snapshot: this.snapshotReadyRows(readyRows),
-        metadata: {},
+        metadata: {
+          resumeType: capturedResumeType,
+          phase: capturedPhaseForEvent,
+        },
       });
 
       log.info(
-        { gameId: input.gameId, actorId: input.actor.userId, auditId },
+        {
+          gameId: input.gameId,
+          actorId: input.actor.userId,
+          auditId,
+          resumeType: capturedResumeType,
+        },
         "master.resume"
       );
 
@@ -636,11 +749,21 @@ export class Game1MasterControlService {
       };
     });
 
-    // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit.
-    if (this.drawEngine) {
+    // GAME1_SCHEDULE PR 4b: delegér til draw-engine POST-commit. Bare
+    // aktuelt for manuell pause (draw-engine har ikke separat state for
+    // auto-pause utover paused-feltet vi nettopp nullstilte).
+    if (this.drawEngine && capturedResumeType === "manual") {
       await this.drawEngine.resumeGame(input.gameId, input.actor.userId);
     }
     this.notifyStatusChange(result, "resume", input.actor.userId);
+    // Task 1.1: emit `game1:resumed` slik at admin-UI og agent-portal kan
+    // skjule Resume-knapp umiddelbart uten å vente på polling/fresh fetch.
+    this.notifyResumed(
+      result.gameId,
+      input.actor.userId,
+      capturedPhaseForEvent,
+      capturedResumeType ?? "manual"
+    );
     return result;
   }
 

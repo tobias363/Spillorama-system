@@ -62,6 +62,16 @@ export async function renderGame1MasterConsole(
     onDrawProgressed: () => {
       void refresh(container, gameId);
     },
+    // Task 1.1: auto-pause etter phase-won → UI må vise Resume-knapp
+    // umiddelbart. refresh() henter fresh engineState + viser banner.
+    onAutoPaused: () => {
+      void refresh(container, gameId);
+    },
+    // Task 1.1: manuell resume → UI må skjule Resume-knapp og banner
+    // umiddelbart. refresh() henter oppdatert engineState.
+    onResumed: () => {
+      void refresh(container, gameId);
+    },
     onFallbackActive: (active) => {
       if (active) {
         startPolling(container, gameId);
@@ -115,6 +125,8 @@ function renderShell(gameId: string): string {
           </p>
         </section>
         <section class="content">
+          <!-- Task 1.1: auto-pause-banner (skjult når ikke paused). -->
+          <div id="g1-master-auto-pause-banner" style="display:none;"></div>
           <div id="g1-master-game-info"
                class="panel panel-default"
                style="padding:16px;"></div>
@@ -133,10 +145,58 @@ function renderShell(gameId: string): string {
   `;
 }
 
+/**
+ * Task 1.1: auto-pause-banner rendret øverst i console. Vises når engine
+ * er auto-paused (engineState.isPaused=true OG pausedAtPhase != null) ELLER
+ * manuelt paused (game.status='paused'). Skjules i alle andre tilstander.
+ */
+function renderAutoPauseBanner(
+  container: HTMLElement,
+  detail: Game1GameDetail
+): void {
+  const host = container.querySelector<HTMLElement>(
+    "#g1-master-auto-pause-banner"
+  );
+  if (!host) return;
+
+  const engine = detail.engineState ?? null;
+  const autoPaused =
+    engine !== null && engine.isPaused && engine.pausedAtPhase !== null;
+  const manualPaused = detail.game.status === "paused";
+
+  if (!autoPaused && !manualPaused) {
+    host.style.display = "none";
+    host.innerHTML = "";
+    return;
+  }
+
+  host.style.display = "block";
+  host.style.marginBottom = "16px";
+  const phase = autoPaused ? engine!.pausedAtPhase : engine?.currentPhase ?? 1;
+  const messageKey = autoPaused
+    ? "game1_master_auto_pause_banner"
+    : "game1_master_manual_pause_banner";
+  const fallback = autoPaused
+    ? `Spillet er pause etter fase ${phase} — trykk Resume for å fortsette`
+    : "Spillet er pause — trykk Resume for å fortsette";
+  const rawMsg = t(messageKey);
+  const msg = rawMsg === messageKey ? fallback : rawMsg.replace("{phase}", String(phase));
+
+  host.innerHTML = `
+    <div class="alert alert-warning" style="margin-bottom:0;" role="status" aria-live="polite">
+      <strong style="display:inline-block;margin-right:8px;">
+        <i class="fa fa-pause-circle" aria-hidden="true"></i>
+      </strong>
+      <span data-testid="g1-master-pause-banner-text">${escapeHtml(msg)}</span>
+    </div>
+  `;
+}
+
 async function refresh(container: HTMLElement, gameId: string): Promise<void> {
   try {
     const detail = await fetchGame1Detail(gameId);
     lastDetail = detail;
+    renderAutoPauseBanner(container, detail);
     renderGameInfo(container, detail);
     renderHalls(container, detail);
     renderActions(container, detail);
@@ -253,11 +313,20 @@ function renderActions(container: HTMLElement, detail: Game1GameDetail): void {
   const host = container.querySelector<HTMLElement>("#g1-master-actions");
   if (!host) return;
   const status = detail.game.status;
+  const engine = detail.engineState ?? null;
+  // Task 1.1: auto-pause er en sidestate. isAutoPaused=true betyr
+  // status='running' + engine.paused=true (paused_at_phase satt).
+  const isAutoPaused =
+    engine !== null && engine.isPaused && engine.pausedAtPhase !== null;
   const canStart =
     status === "ready_to_start" ||
     (status === "purchase_open" && detail.allReady);
-  const canPause = status === "running";
-  const canResume = status === "paused";
+  // Pause-knapp er kun aktuell når engine faktisk trekker kuler. Når auto-
+  // paused er draw-engine allerede stoppet, så det er meningsløst å pause
+  // på nytt.
+  const canPause = status === "running" && !isAutoPaused;
+  // Resume-knapp aktiveres for begge paused-varianter (Task 1.1).
+  const canResume = status === "paused" || isAutoPaused;
   const canStop = ["purchase_open", "ready_to_start", "running", "paused"].includes(
     status
   );

@@ -47,9 +47,12 @@ export class ChatPanelV2 {
       marginLeft: "auto",
       display: "flex",
       flexDirection: "column",
-      background: "rgba(10,2,2,0.55)",
+      // KRITISK: Ingen backdrop-filter — `#chat-panel.g1-chat-panel` er
+      // full-høyde sidebar over Pixi-canvas og blur-shader re-kjøres per
+      // frame. Erstattet med solid semi-transparent bg. Se ARCHITECTURE.md
+      // (2026-04-24 blink-regresjon).
+      background: "rgba(10, 2, 2, 0.92)",
       borderLeft: "1px solid rgba(200,70,70,0.4)",
-      backdropFilter: "blur(4px)",
       height: "100%",
       transition: "width 0.25s ease-in-out",
       overflow: "hidden",

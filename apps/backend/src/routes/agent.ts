@@ -13,6 +13,8 @@
  *   POST /api/agent/shift/end             — avslutt aktiv shift
  *   GET  /api/agent/shift/current         — hent aktiv shift
  *   GET  /api/agent/shift/history         — paginert shift-logg
+ *   POST /api/agent/shift/logout          — Gap #9: logout med checkbox-flagg
+ *   GET  /api/agent/shift/pending-cashouts — Gap #9: pending cashouts for logout-modal
  *
  * Audit-log-hooks:
  *   - Alle handlinger logges via AuditLogService med actor_type='AGENT'
@@ -367,6 +369,81 @@ export function createAgentRouter(deps: AgentRouterDeps): express.Router {
     }
   });
 
-  logger.info("agent-router initialised (11 endpoints)");
+  // ── POST /api/agent/shift/logout ────────────────────────────────────────
+  // Wireframe Gap #9 (PDF 17.6): logout med opt-in checkbox-flagg.
+  //
+  // Body-shape:
+  //   { distributeWinnings?: boolean,
+  //     transferRegisterTickets?: boolean,
+  //     logoutNotes?: string | null }
+  //
+  // Uten flagg = backwards-compat med eksisterende /shift/end-flyt. Med
+  // flagg = pending cashouts og/eller ticket-ranges merkes for overtagelse
+  // av neste agent.
+  router.post("/api/agent/shift/logout", async (req, res) => {
+    try {
+      const actor = await requireAgent(req);
+      const body = (req.body ?? {}) as {
+        distributeWinnings?: unknown;
+        transferRegisterTickets?: unknown;
+        logoutNotes?: unknown;
+      };
+      const flags: {
+        distributeWinnings?: boolean;
+        transferRegisterTickets?: boolean;
+        logoutNotes?: string | null;
+      } = {};
+      if (body.distributeWinnings !== undefined) {
+        flags.distributeWinnings = Boolean(body.distributeWinnings);
+      }
+      if (body.transferRegisterTickets !== undefined) {
+        flags.transferRegisterTickets = Boolean(body.transferRegisterTickets);
+      }
+      if (body.logoutNotes !== undefined) {
+        flags.logoutNotes = typeof body.logoutNotes === "string"
+          ? body.logoutNotes.slice(0, 1000)
+          : null;
+      }
+      const result = await agentShiftService.logout(actor.userId, flags);
+      void auditLogService.record({
+        actorId: actor.userId,
+        actorType: "AGENT",
+        action: "agent.shift.logout",
+        resource: "shift",
+        resourceId: result.shift.id,
+        details: {
+          hallId: result.shift.hallId,
+          distributeWinnings: flags.distributeWinnings ?? false,
+          transferRegisterTickets: flags.transferRegisterTickets ?? false,
+          pendingCashoutsFlagged: result.pendingCashoutsFlagged,
+          ticketRangesFlagged: result.ticketRangesFlagged,
+          hasLogoutNotes: typeof flags.logoutNotes === "string" && flags.logoutNotes.length > 0,
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+      apiSuccess(res, {
+        shift: result.shift,
+        pendingCashoutsFlagged: result.pendingCashoutsFlagged,
+        ticketRangesFlagged: result.ticketRangesFlagged,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── GET /api/agent/shift/pending-cashouts ───────────────────────────────
+  // Wireframe Gap #9: "View Cashout Details"-lenke i logout-popup.
+  router.get("/api/agent/shift/pending-cashouts", async (req, res) => {
+    try {
+      const actor = await requireAgent(req);
+      const pendingCashouts = await agentShiftService.listPendingCashouts(actor.userId);
+      apiSuccess(res, { pendingCashouts, count: pendingCashouts.length });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  logger.info("agent-router initialised (13 endpoints)");
   return router;
 }

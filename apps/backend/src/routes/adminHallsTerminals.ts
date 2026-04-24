@@ -12,7 +12,7 @@ import {
 import type { AdminSubRouterDeps } from "./adminShared.js";
 
 export function createAdminHallsTerminalsRouter(deps: AdminSubRouterDeps): express.Router {
-  const { platformService, hallCashLedger, helpers } = deps;
+  const { platformService, hallCashLedger, io, helpers } = deps;
   const { auditAdmin, requireAdminPermissionUser } = helpers;
   const router = express.Router();
 
@@ -205,6 +205,51 @@ export function createAdminHallsTerminalsRouter(deps: AdminSubRouterDeps): expre
       await platformService.revokeHallDisplayToken(tokenId, hallId);
       auditAdmin(req, adminUser, "hall.display_token.revoke", "hall", hallId, { tokenId });
       apiSuccess(res, { ok: true });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── TV-kiosk voice-pack (wireframe PDF 14) ────────────────────────────────
+  //
+  // Hver hall har én valgt stemme (voice1 / voice2 / voice3). GET returnerer
+  // nåværende; PUT setter ny + broadcaster `tv:voice-changed` til
+  // `hall:<id>:display` så aktive TV-klienter kan re-laste voice-pack uten
+  // full page reload.
+
+  router.get("/api/admin/halls/:hallId/voice", async (req, res) => {
+    try {
+      await requireAdminPermissionUser(req, "HALL_READ");
+      const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+      const hall = await platformService.getHall(hallId);
+      const voice = await platformService.getTvVoice(hall.id);
+      apiSuccess(res, { hallId: hall.id, voice });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  router.put("/api/admin/halls/:hallId/voice", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "HALL_WRITE");
+      const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+      const voiceRaw = req.body?.voice;
+      if (typeof voiceRaw !== "string") {
+        apiFailure(res, new Error("voice må være en string: voice1 | voice2 | voice3"));
+        return;
+      }
+      const hall = await platformService.setTvVoice(hallId, voiceRaw);
+      // Audit — legacy-sporet trenger å vite hvem som endret stemmen og når.
+      auditAdmin(req, adminUser, "hall.tv_voice.update", "hall", hall.id, {
+        voice: hall.tvVoiceSelection,
+      });
+      // Broadcast til TV-klienter i denne hallen så de reloader voice-pack.
+      // Lytterne er i `hall:<id>:display`-rommet (BIN-498 socket).
+      io.to(`hall:${hall.id}:display`).emit("tv:voice-changed", {
+        hallId: hall.id,
+        voice: hall.tvVoiceSelection,
+      });
+      apiSuccess(res, { hallId: hall.id, voice: hall.tvVoiceSelection });
     } catch (error) {
       apiFailure(res, error);
     }

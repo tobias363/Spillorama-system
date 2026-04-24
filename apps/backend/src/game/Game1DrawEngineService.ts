@@ -104,6 +104,7 @@ import {
   emitAdminDrawProgressed,
   emitAdminPhaseWon,
   emitAdminPhysicalTicketWon,
+  emitAdminAutoPaused,
 } from "./Game1DrawEngineBroadcast.js";
 import { resolvePatternsForColor } from "./spill1VariantMapper.js";
 import type { GameVariantConfig } from "./variantConfig.js";
@@ -144,6 +145,23 @@ export interface Game1GameStateView {
   lastDrawnAt: Date | null;
   isFinished: boolean; // scheduled_game.status='completed'
   isPaused: boolean;
+  /**
+   * Task 1.1: auto-pause ved phase-won. Gap #1 i MASTER_HALL_DASHBOARD_GAP_2026-04-24.md.
+   *
+   * Sidecar til `isPaused`. Når engine auto-pauser seg etter phase-won
+   * settes `pausedAtPhase` = fasen som akkurat ble vunnet; ved Resume
+   * nullstilles feltet. `null` betyr "ikke auto-paused" (kan fortsatt
+   * være manuelt-paused via master-pause, da er `isPaused=true` men
+   * `pausedAtPhase=null`).
+   */
+  pausedAtPhase: number | null;
+  /**
+   * Task 1.1: true hvis siste `drawNext()`-kall var et no-op fordi
+   * engine er auto-paused. Brukes av route-laget til å returnere
+   * `{ pausedAutomatically: true }` i drawNext-responsen uten å
+   * endre den persisterte state-viewet. Default false.
+   */
+  pausedAutomatically?: boolean;
   drawnBalls: number[]; // I trekk-rekkefølge (tom hvis ingen draws ennå)
 }
 
@@ -304,6 +322,12 @@ interface GameStateRow {
   last_drawn_at: Date | string | null;
   next_auto_draw_at: Date | string | null;
   paused: boolean;
+  /**
+   * Task 1.1: fasen som akkurat ble vunnet når engine auto-pauset seg.
+   * NULL i hvilende tilstand og etter Resume. Se migration
+   * `20260502000000_game1_auto_pause_on_phase.sql`.
+   */
+  paused_at_phase: number | null;
   engine_started_at: Date | string;
   engine_ended_at: Date | string | null;
 }
@@ -710,6 +734,11 @@ export class Game1DrawEngineService {
     emitAdminPhysicalTicketWon(this.adminBroadcaster, evt);
   }
 
+  /** Task 1.1: Delegate-wrapper mot `emitAdminAutoPaused`. */
+  private notifyAutoPaused(scheduledGameId: string, phase: number): void {
+    emitAdminAutoPaused(this.adminBroadcaster, scheduledGameId, phase);
+  }
+
   // ── Table helpers ─────────────────────────────────────────────────────────
 
   private scheduledGamesTable(): string {
@@ -898,6 +927,12 @@ export class Game1DrawEngineService {
     // da hopper vi over player-broadcast (admin-broadcast går uansett).
     let capturedRoomCode: string | null = null;
 
+    // Task 1.1: Gap #1 — fanget phase som akkurat ble vunnet slik at
+    // notifyAutoPaused kan kalles POST-commit. Kun satt når phaseWon
+    // trigget auto-pause (ikke når Fullt Hus avslutter runden — da er
+    // spillet completed, ikke pauset).
+    let capturedAutoPausedPhase: number | null = null;
+
     return this.runInTransaction(async (client) => {
       const state = await this.loadGameStateForUpdate(client, scheduledGameId);
       if (!state) {
@@ -1013,15 +1048,42 @@ export class Game1DrawEngineService {
         ? state.current_phase + 1
         : state.current_phase;
 
+      // Task 1.1: Auto-pause ved phase-won. Gap #1 i
+      // MASTER_HALL_DASHBOARD_GAP_2026-04-24.md.
+      //
+      // Trigger-condition: phaseWon er true OG bingoWon er false (Fullt Hus
+      // avslutter runden — ingen pause trengs). Effekt: sett paused=true
+      // + paused_at_phase = fasen som akkurat ble vunnet. Dette blokkerer
+      // både videre `drawNext()`-kall (guard linje ~938) OG auto-tick
+      // (WHERE-filter `gs.paused = false` i Game1AutoDrawTickService).
+      //
+      // paused_at_phase brukes av master-UI for banner-tekst ("Pause
+      // etter Rad N") og av Resume-flyten (`resumeGame` må tillate
+      // running+paused-state og nullstille feltet).
+      const autoPauseTriggered = phaseResult.phaseWon && !bingoWon;
+      if (autoPauseTriggered) {
+        capturedAutoPausedPhase = state.current_phase;
+      }
+
       await client.query(
         `UPDATE ${this.gameStateTable()}
             SET draws_completed   = $2,
                 last_drawn_ball   = $3,
                 last_drawn_at     = now(),
                 current_phase     = $4,
-                engine_ended_at   = CASE WHEN $5::boolean THEN now() ELSE engine_ended_at END
+                engine_ended_at   = CASE WHEN $5::boolean THEN now() ELSE engine_ended_at END,
+                paused            = CASE WHEN $6::boolean THEN true ELSE paused END,
+                paused_at_phase   = CASE WHEN $6::boolean THEN $7::int ELSE paused_at_phase END
           WHERE scheduled_game_id = $1`,
-        [scheduledGameId, nextSequence, ball, newPhase, isFinished]
+        [
+          scheduledGameId,
+          nextSequence,
+          ball,
+          newPhase,
+          isFinished,
+          autoPauseTriggered,
+          autoPauseTriggered ? state.current_phase : null,
+        ]
       );
 
       // Hvis Fullt Hus vunnet eller maxDraws nådd → marker scheduled_game som completed.
@@ -1119,6 +1181,17 @@ export class Game1DrawEngineService {
           capturedPhaseResult.winnerIds,
           view.drawsCompleted
         );
+      }
+      // Task 1.1: admin auto-paused-broadcast etter phase-won som trigger
+      // auto-pause. Går ETTER phase-won slik at UI får begge events i
+      // deterministic rekkefølge (phase-won for payout-animasjon, så
+      // auto-paused for Resume-knapp). IKKE emit når Fullt Hus avslutter
+      // runden — da er spillet ferdig, ikke pauset.
+      if (capturedAutoPausedPhase !== null) {
+        this.notifyAutoPaused(scheduledGameId, capturedAutoPausedPhase);
+        // Merk view-et så route-laget kan returnere { pausedAutomatically:true }
+        // uten å måtte korrelere med auto-paused-eventet.
+        view.pausedAutomatically = true;
       }
       // PR-C4: spiller-broadcast til default-namespace. Samme rekkefølge som
       // admin-broadcast (draw:new → pattern:won → room:update) slik at
@@ -2534,6 +2607,13 @@ export class Game1DrawEngineService {
           : new Date(state.last_drawn_at),
       isFinished,
       isPaused: Boolean(state.paused),
+      // Task 1.1: paused_at_phase kan være null (hvile / manuell pause) eller
+      // tall (auto-paused etter phase-won). Master-UI bruker feltet for å
+      // vise banner-tekst uten å sammenligne draws_completed.
+      pausedAtPhase:
+        state.paused_at_phase === null || state.paused_at_phase === undefined
+          ? null
+          : Number(state.paused_at_phase),
       drawnBalls: draws.map((d) => d.ball),
     };
   }

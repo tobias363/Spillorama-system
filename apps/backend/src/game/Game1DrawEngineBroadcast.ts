@@ -167,6 +167,64 @@ export function emitAdminPhaseWon(
 }
 
 /**
+ * Task 1.1: fire-and-forget admin-broadcast for auto-pause etter phase-won.
+ * Kalles POST-commit fra `Game1DrawEngineService.drawNext()` når phaseWon
+ * utløser `paused=true + paused_at_phase=current_phase`. Eventet er
+ * ADDITIV til `game1:phase-won` som fortsatt emittes i samme sekvens —
+ * admin-UI bruker `game1:auto-paused` for å vise Resume-knapp uten å
+ * måtte hente fresh DB-state.
+ */
+export function emitAdminAutoPaused(
+  adminBroadcaster: AdminGame1Broadcaster | null,
+  scheduledGameId: string,
+  phase: number
+): void {
+  if (!adminBroadcaster) return;
+  try {
+    adminBroadcaster.onAutoPaused({
+      gameId: scheduledGameId,
+      phase,
+      pausedAt: Date.now(),
+    });
+  } catch (err) {
+    log.warn(
+      { err, scheduledGameId, phase },
+      "adminBroadcaster.onAutoPaused kastet — ignorert"
+    );
+  }
+}
+
+/**
+ * Task 1.1: fire-and-forget admin-broadcast for manuell resume.
+ * Kalles POST-commit fra `Game1MasterControlService.resumeGame()`.
+ * `resumeType='auto'` = avsluttet en auto-pause; `'manual'` = avsluttet
+ * en eksplisitt master-pause (status='paused' → 'running').
+ */
+export function emitAdminResumed(
+  adminBroadcaster: AdminGame1Broadcaster | null,
+  scheduledGameId: string,
+  actorUserId: string,
+  phase: number,
+  resumeType: "auto" | "manual"
+): void {
+  if (!adminBroadcaster) return;
+  try {
+    adminBroadcaster.onResumed({
+      gameId: scheduledGameId,
+      resumedAt: Date.now(),
+      actorUserId,
+      phase,
+      resumeType,
+    });
+  } catch (err) {
+    log.warn(
+      { err, scheduledGameId, actorUserId, resumeType },
+      "adminBroadcaster.onResumed kastet — ignorert"
+    );
+  }
+}
+
+/**
  * PT4: fire-and-forget admin-broadcast for fysisk-bong-vinn.
  * Kalles POST-commit slik at broadcast IKKE sendes hvis transaksjonen
  * ruller tilbake.

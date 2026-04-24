@@ -457,3 +457,62 @@ test("pool-query-feil propagerer til caller (kontraktstest for JobScheduler)", a
       err instanceof Error && err.message.includes("connection lost"),
   );
 });
+
+// ── Task 1.1: auto-pause regresjon ──────────────────────────────────────────
+
+test("Task 1.1: paused game filtreres bort av SELECT — ingen drawNext trigges", async () => {
+  // Legacy-paritet (Gap #1 i MASTER_HALL_DASHBOARD_GAP_2026-04-24.md): etter
+  // at Game1DrawEngineService.drawNext setter paused=true + paused_at_phase
+  // ved phase-won skal auto-tick-servicen SKIP rundetak. Dette testes via
+  // stub-pool-en som returnerer en tom rows-array (simulerer DB-filter
+  // `gs.paused = false`); selv ved en gammel last_drawn_at skal ingen draw
+  // trigges.
+  //
+  // Kontraktstest: denne låser at auto-tick-loopen aldri vil "race" med
+  // auto-pause-logikken og trekke en ekstra kule etter en phase-winner.
+  const { service, called, queries } = makeService([]); // tom = paused filtrert av DB
+  const r = await service.tick();
+  assert.equal(r.checked, 0, "ingen paused games skal matches");
+  assert.equal(r.drawsTriggered, 0);
+  assert.equal(called.length, 0);
+  // Dobbelsjekk at SELECT-en fortsatt filtrerer på paused=false (regresjons-
+  // gard mot at noen fjerner WHERE-klausulen).
+  const sql = queries[0]!.sql;
+  assert.ok(
+    sql.includes("gs.paused = false"),
+    "SELECT må filtrere på paused=false for å unngå tick på auto-paused games"
+  );
+});
+
+test("Task 1.1: paused_at_phase != null endrer ikke tick-kontrakten (ekstra-defensive)", async () => {
+  // Stub-pool som simulerer DB som returnerer en rad DESPITE filter (f.eks.
+  // om noen ved uhell fjerner `paused = false` fra WHERE). Da ville
+  // tick-servicen kalle drawNext, som igjen ville kaste GAME_PAUSED.
+  // Denne testen låser feil-isolasjon slik at GAME_PAUSED kun plasseres i
+  // errorMessages, tick-en fortsetter for andre games.
+  const now = Date.now();
+  const oldAt = new Date(now - 10_000);
+  const { pool } = createStubPool([
+    {
+      id: "g-paused",
+      ticket_config_json: { seconds: 5 },
+      draws_completed: 3,
+      last_drawn_at: oldAt,
+      engine_started_at: oldAt,
+    },
+  ] as unknown[]);
+  const { service: drawEngine } = makeFakeDrawEngine({
+    throwOnIds: ["g-paused"],
+  });
+  // drawNext throwOnIds simulerer GAME_PAUSED kastet av drawNext-guard.
+  // Tick-servicen skal fange denne og merke den som error (ikke krasje).
+  const service = new Game1AutoDrawTickService({
+    pool: pool as never,
+    drawEngine,
+  });
+  const r = await service.tick();
+  assert.equal(r.checked, 1);
+  assert.equal(r.errors, 1);
+  assert.equal(r.drawsTriggered, 0);
+  assert.ok(r.errorMessages?.[0]?.includes("g-paused"));
+});

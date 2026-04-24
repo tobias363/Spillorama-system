@@ -446,5 +446,40 @@ export class HttpWalletAdapter implements WalletAdapter {
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
     return `${normalizedPrefix}${normalizedPath}`;
   }
+
+  // ── BIN-693 Option B: Wallet-reservasjon (stubs) ──────────────────────────
+  // HttpWalletAdapter ruter til ekstern wallet-API. Full impl krever at
+  // remote API støtter reserve/release/commit-endpoints. Scope for PR 2+.
+
+  async getAvailableBalance(accountId: string): Promise<number> {
+    return this.getBalance(accountId);
+  }
+
+  async reserve(): Promise<never> {
+    throw new WalletError(
+      "NOT_IMPLEMENTED",
+      "HttpWalletAdapter.reserve — krever remote API-støtte. Ikke implementert.",
+    );
+  }
+
+  async releaseReservation(): Promise<never> {
+    throw new WalletError("NOT_IMPLEMENTED", "HttpWalletAdapter.releaseReservation — ikke implementert.");
+  }
+
+  async commitReservation(): Promise<never> {
+    throw new WalletError("NOT_IMPLEMENTED", "HttpWalletAdapter.commitReservation — ikke implementert.");
+  }
+
+  async listActiveReservations(): Promise<never[]> {
+    return [];
+  }
+
+  async listReservationsByRoom(): Promise<never[]> {
+    return [];
+  }
+
+  async expireStaleReservations(): Promise<number> {
+    return 0;
+  }
 }
 
