@@ -212,14 +212,14 @@ test("PR-P2: fase 1 gulv aktiveres når pool er lav", async () => {
 
 test("PR-P2: fase 2 = fase 1 × 2 (60 × 2 = 120 kr, over 50 kr gulv)", async () => {
   // 2 spillere × entryFee=1000 → pool=2000. Fase 1 = 60, fase 2 = 120 kr.
-  // Fase 2 krever 2 vertikale kolonner. Delt på 2 vinnere → 60 kr hver.
+  // Fase 2 krever 2 horisontale rader. Delt på 2 vinnere → 60 kr hver.
   const { engine, roomCode, hostId } = await setupRoom(1000, 2);
-  // Kol 0 + kol 1 = {1,2,3,4,5, 16,17,18,19,20}. Dette vinner både rad 0
-  // (som også gir fase 1) og 2 vertikale kolonner (gir fase 2).
+  // Rad 0 + rad 1 = {1,16,31,46,61, 2,17,32,47,62}. Dette vinner både fase 1
+  // (1 rad) og fase 2 (2 rader).
   prioritiseDrawBag(
     engine,
     roomCode,
-    [1, 2, 3, 4, 5, 16, 17, 18, 19, 20]
+    [1, 16, 31, 46, 61, 2, 17, 32, 47, 62]
   );
   for (let i = 0; i < 10; i += 1) {
     await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
@@ -248,7 +248,7 @@ test("PR-P2: fase 1 gulv-justert base brukes som cascade-basis for fase 2", asyn
   prioritiseDrawBag(
     engine,
     roomCode,
-    [1, 2, 3, 4, 5, 16, 17, 18, 19, 20]
+    [1, 16, 31, 46, 61, 2, 17, 32, 47, 62]
   );
   for (let i = 0; i < 10; i += 1) {
     await engine.drawNextNumber({ roomCode, actorPlayerId: hostId });
@@ -321,7 +321,7 @@ test("PR-P2: fase 2 gulv aktiveres når fase 1 × 2 < fase 2 min", async () => {
     },
   });
   // Pool=1000, fase 1 gulv=50, fase 2 = 50×2 = 100 < 500 gulv → brukes 500.
-  prioritiseDrawBag(engine, roomCode, [1, 2, 3, 4, 5, 16, 17, 18, 19, 20]);
+  prioritiseDrawBag(engine, roomCode, [1, 16, 31, 46, 61, 2, 17, 32, 47, 62]);
   for (let i = 0; i < 10; i += 1) {
     await engine.drawNextNumber({ roomCode, actorPlayerId: hostId! });
   }

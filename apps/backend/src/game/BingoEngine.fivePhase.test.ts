@@ -3,9 +3,9 @@
  *
  * Avklart av Tobias 2026-04-20:
  *   - Fase 1 ("1 Rad"): ≥1 horisontal rad ELLER ≥1 vertikal kolonne
- *   - Fase 2 ("2 Rader"): ≥2 hele vertikale kolonner (KUN loddrett)
- *   - Fase 3 ("3 Rader"): ≥3 hele vertikale kolonner
- *   - Fase 4 ("4 Rader"): ≥4 hele vertikale kolonner
+ *   - Fase 2 ("2 Rader"): ≥2 hele horisontale rader (KUN vannrett)
+ *   - Fase 3 ("3 Rader"): ≥3 hele horisontale rader
+ *   - Fase 4 ("4 Rader"): ≥4 hele horisontale rader
  *   - Fase 5 ("Fullt Hus"): alle 25 felt merket
  *
  *   Ingen diagonaler teller i noen fase.
@@ -227,18 +227,18 @@ test("BIN-694: Fase 1 vinnes av VERTIKAL kolonne (ikke bare horisontal)", async 
   assert.equal(game.status, "RUNNING");
 });
 
-test("BIN-694: Fase 2 krever 2 VERTIKALE kolonner — 2 horisontale rader er IKKE nok", async () => {
+test("BIN-694: Fase 2 krever 2 HORISONTALE rader — 2 vertikale kolonner er IKKE nok", async () => {
   const { engine, roomCode, hostId } = await setupRoom();
   await engine.startGame({
     roomCode, actorPlayerId: hostId, entryFee: 10, ticketsPerPlayer: 1,
     payoutPercent: 80, gameType: "standard", variantConfig: DEFAULT_NORSK_BINGO_CONFIG,
   });
 
-  // Først: trekk hele rad 0 (fase 1 vunnet via horisontal)
-  // Deretter: trekk hele rad 1 (bruker har 2 horisontale rader nå — MEN fase 2 krever kolonner)
+  // Først: trekk hele kol 0 (fase 1 vunnet via vertikal)
+  // Deretter: trekk hele kol 1 (bruker har 2 vertikale kolonner nå — MEN fase 2 krever rader)
   prioritiseDrawBag(engine, roomCode, [
-    1, 16, 31, 46, 61,   // rad 0
-    2, 17, 32, 47, 62,   // rad 1
+    1, 2, 3, 4, 5,         // kol 0
+    16, 17, 18, 19, 20,    // kol 1
   ]);
 
   for (let i = 0; i < 10; i += 1) {
@@ -249,8 +249,8 @@ test("BIN-694: Fase 2 krever 2 VERTIKALE kolonner — 2 horisontale rader er IKK
   const game = snapshot.currentGame!;
   const phase1 = game.patternResults?.find((r) => r.patternName === "1 Rad");
   const phase2 = game.patternResults?.find((r) => r.patternName === "2 Rader");
-  assert.equal(phase1?.isWon, true, "fase 1 skal være vunnet av rad 0");
-  assert.equal(phase2?.isWon, false, "fase 2 skal IKKE være vunnet — horisontale rader teller ikke");
+  assert.equal(phase1?.isWon, true, "fase 1 skal være vunnet av kol 0");
+  assert.equal(phase2?.isWon, false, "fase 2 skal IKKE være vunnet — vertikale kolonner teller ikke");
 });
 
 test("BIN-694: E2E full sekvens — 1 Rad → 2 → 3 → 4 Rader → Fullt Hus, kun Fullt Hus avslutter", async () => {
@@ -260,15 +260,17 @@ test("BIN-694: E2E full sekvens — 1 Rad → 2 → 3 → 4 Rader → Fullt Hus,
     payoutPercent: 80, gameType: "standard", variantConfig: DEFAULT_NORSK_BINGO_CONFIG,
   });
 
-  // Merk kolonne 0, 1, 2, 3, 4 i rekkefølge → fase 1 etter kol 0, fase 2
-  // etter kol 1, fase 3 etter kol 2, fase 4 etter kol 3, Fullt Hus etter kol 4.
-  // (Fase 1 aksepterer også horisontal rad, men kolonne 0 oppfyller også det).
+  // Merk rad 0, 1, 2, 3, 4 i rekkefølge → fase 1 etter rad 0, fase 2
+  // etter rad 1, fase 3 etter rad 2, fase 4 etter rad 3, Fullt Hus etter rad 4.
+  // (Fase 1 aksepterer også vertikal kolonne, men rad 0 oppfyller også det).
+  // Ticket GRID_A: grid[r][c] = ((r * 5 + c)) mapped to real tall. Rad r har tall
+  // { (r+1), 16+r, 31+r, 46+r, 61+r } (kol c kommer fra (c*15)+r+1-serien).
   prioritiseDrawBag(engine, roomCode, [
-    1, 2, 3, 4, 5,         // kol 0  → fase 1 vunnet (1 kolonne ≥ 1)
-    16, 17, 18, 19, 20,    // kol 1  → fase 2 vunnet (2 kolonner)
-    31, 32, 33, 34,        // kol 2 (midtcellen er free, så 4 tall holder) → fase 3
-    46, 47, 48, 49, 50,    // kol 3  → fase 4
-    61, 62, 63, 64, 65,    // kol 4  → Fullt Hus
+    1, 16, 31, 46, 61,     // rad 0  → fase 1 vunnet (1 rad ≥ 1)
+    2, 17, 32, 47, 62,     // rad 1  → fase 2 vunnet (2 rader)
+    3, 18, 48, 63,         // rad 2 (midtcellen er free, så 4 tall holder) → fase 3
+    4, 19, 33, 49, 64,     // rad 3  → fase 4
+    5, 20, 34, 50, 65,     // rad 4  → Fullt Hus
   ]);
 
   const phaseSnapshots: Array<{ afterBall: number; wonPhases: string[]; status: string }> = [];
@@ -285,39 +287,39 @@ test("BIN-694: E2E full sekvens — 1 Rad → 2 → 3 → 4 Rader → Fullt Hus,
     if (snap.currentGame?.status === "ENDED") break;
   }
 
-  // Etter 5 baller (kol 0 komplett) skal fase 1 være vunnet, runden fortsetter.
+  // Etter 5 baller (rad 0 komplett) skal fase 1 være vunnet, runden fortsetter.
   assert.deepEqual(phaseSnapshots[4].wonPhases, ["1 Rad"]);
   assert.equal(phaseSnapshots[4].status, "RUNNING");
 
-  // Etter 10 baller (kol 0 + 1 komplett) skal fase 1 + 2 være vunnet.
+  // Etter 10 baller (rad 0 + 1 komplett) skal fase 1 + 2 være vunnet.
   assert.deepEqual(phaseSnapshots[9].wonPhases, ["1 Rad", "2 Rader"]);
   assert.equal(phaseSnapshots[9].status, "RUNNING");
 
-  // Etter 14 baller (kol 0 + 1 + 2 komplett — midten er free) skal fase 3 også være vunnet.
+  // Etter 14 baller (rad 0 + 1 + 2 komplett — midten er free) skal fase 3 også være vunnet.
   assert.deepEqual(phaseSnapshots[13].wonPhases, ["1 Rad", "2 Rader", "3 Rader"]);
   assert.equal(phaseSnapshots[13].status, "RUNNING");
 
-  // Etter 19 baller (kol 0 + 1 + 2 + 3) skal fase 4 også være vunnet.
+  // Etter 19 baller (rad 0 + 1 + 2 + 3) skal fase 4 også være vunnet.
   assert.deepEqual(phaseSnapshots[18].wonPhases, ["1 Rad", "2 Rader", "3 Rader", "4 Rader"]);
   assert.equal(phaseSnapshots[18].status, "RUNNING", "runden skal IKKE ha sluttet før Fullt Hus");
 
-  // Etter 24 baller (alle 5 kolonner komplett = Fullt Hus) skal runden være avsluttet.
+  // Etter 24 baller (alle 5 rader komplett = Fullt Hus) skal runden være avsluttet.
   const last = phaseSnapshots[phaseSnapshots.length - 1];
   assert.deepEqual(last.wonPhases, ["1 Rad", "2 Rader", "3 Rader", "4 Rader", "Fullt Hus"]);
   assert.equal(last.status, "ENDED", "Fullt Hus skal avslutte runden");
 });
 
-test("BIN-694: Fase 2 vinnes av 2 hele VERTIKALE kolonner", async () => {
+test("BIN-694: Fase 2 vinnes av 2 hele HORISONTALE rader", async () => {
   const { engine, roomCode, hostId } = await setupRoom();
   await engine.startGame({
     roomCode, actorPlayerId: hostId, entryFee: 10, ticketsPerPlayer: 1,
     payoutPercent: 80, gameType: "standard", variantConfig: DEFAULT_NORSK_BINGO_CONFIG,
   });
 
-  // Kolonne 0 (1,2,3,4,5) → fase 1 vunnet. Kolonne 1 (16,17,18,19,20) → fase 2 vunnet.
+  // Rad 0 (1,16,31,46,61) → fase 1 vunnet. Rad 1 (2,17,32,47,62) → fase 2 vunnet.
   prioritiseDrawBag(engine, roomCode, [
-    1, 2, 3, 4, 5,        // kolonne 0
-    16, 17, 18, 19, 20,   // kolonne 1
+    1, 16, 31, 46, 61,    // rad 0
+    2, 17, 32, 47, 62,    // rad 1
   ]);
 
   for (let i = 0; i < 10; i += 1) {
@@ -328,8 +330,8 @@ test("BIN-694: Fase 2 vinnes av 2 hele VERTIKALE kolonner", async () => {
   const game = snapshot.currentGame!;
   const phase1 = game.patternResults?.find((r) => r.patternName === "1 Rad");
   const phase2 = game.patternResults?.find((r) => r.patternName === "2 Rader");
-  assert.equal(phase1?.isWon, true, "fase 1 vunnet av kolonne 0");
-  assert.equal(phase2?.isWon, true, "fase 2 vunnet av kolonne 0+1");
+  assert.equal(phase1?.isWon, true, "fase 1 vunnet av rad 0");
+  assert.equal(phase2?.isWon, true, "fase 2 vunnet av rad 0+1");
   assert.equal(game.status, "RUNNING", "fase 3 gjenstår");
 });
 
