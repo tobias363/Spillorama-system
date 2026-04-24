@@ -1026,4 +1026,222 @@ describe("SubGamesListEditor (fix/schedule-structured-subgames)", () => {
       { name: "Custom", startTime: "12:00", endTime: "12:30", minseconds: 7 },
     ]);
   });
+
+  // ── Bølge K4 (2026-04-23): Spill 1 sub-variant-preset-dropdown ─────────────
+
+  it("K4: variant-dropdown har 7 options (tom + 6 presets)", async () => {
+    installFetch(() => successResponse({}));
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    const select = document.querySelector<HTMLSelectElement>(
+      '[data-sg-field="spill1Variant"]'
+    );
+    expect(select).not.toBeNull();
+    const values = Array.from(select!.options).map((o) => o.value);
+    expect(values).toEqual([
+      "", // Manuell (legacy)
+      "standard",
+      "kvikkis",
+      "tv-extra",
+      "ball-x-10",
+      "super-nils",
+      "spillernes-spill",
+    ]);
+  });
+
+  it("K4: default variant = tom (legacy-modus) — ingen preview-boks vises", async () => {
+    installFetch(() => successResponse({}));
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    const select = document.querySelector<HTMLSelectElement>(
+      '[data-sg-field="spill1Variant"]'
+    );
+    expect(select!.value).toBe("");
+    // Preview-fieldset (renderPresetInfo) skal ikke eksistere når feltet er tomt.
+    const previews = document.querySelectorAll(".sg-row fieldset");
+    const previewLegends = Array.from(previews).flatMap((f) =>
+      Array.from(f.querySelectorAll("legend")).map((l) => l.textContent ?? "")
+    );
+    expect(
+      previewLegends.some((t) => t.includes("Preset-oppsett"))
+    ).toBe(false);
+  });
+
+  it("K4: velge 'kvikkis' trigger re-render + viser preview-boks med 1000 kr info", async () => {
+    installFetch(() => successResponse({}));
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    const select = document.querySelector<HTMLSelectElement>(
+      '[data-sg-field="spill1Variant"]'
+    );
+    select!.value = "kvikkis";
+    select!.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    // Preview-tekst skal inneholde "Kvikkis" og "1000 kr"
+    const row = document.querySelector<HTMLElement>(".sg-row")!;
+    const text = row.textContent ?? "";
+    expect(text).toContain("Kvikkis");
+    expect(text).toContain("1000");
+  });
+
+  it("K4: POST inkluderer extra.spill1Variant når preset valgt", async () => {
+    const fetchMock = installFetch((_url, init) => {
+      if (init && init.method === "POST") {
+        return successResponse({
+          id: "sch-new",
+          scheduleName: "K4 test",
+          scheduleNumber: "SN",
+          scheduleType: "Auto",
+          luckyNumberPrize: 0,
+          status: "active",
+          isAdminSchedule: false,
+          manualStartTime: "",
+          manualEndTime: "",
+          subGames: [],
+          createdBy: null,
+          createdAt: "2026-04-23T00:00:00.000Z",
+          updatedAt: "2026-04-23T00:00:00.000Z",
+        });
+      }
+      return successResponse({});
+    });
+
+    await openScheduleEditorModal({ mode: "create" });
+    await flush();
+
+    // Fill name + add row + pick variant.
+    const name = document.querySelector<HTMLInputElement>("#sch-name");
+    name!.value = "K4 test";
+    name!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    document
+      .querySelector<HTMLButtonElement>('[data-sg-action="add"]')!
+      .click();
+    await flush();
+
+    const variantSelect = document.querySelector<HTMLSelectElement>(
+      '[data-sg-field="spill1Variant"]'
+    );
+    variantSelect!.value = "ball-x-10";
+    variantSelect!.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    // Name-feltet må fylles etter re-render.
+    const sgName = document.querySelector<HTMLInputElement>(
+      '[data-sg-field="name"]'
+    );
+    sgName!.value = "Ball × 10 round";
+    sgName!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    getConfirmButton().click();
+    await flush();
+    await flush();
+
+    const postCall = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === "POST"
+    );
+    expect(postCall).toBeTruthy();
+    const body = JSON.parse((postCall![1] as RequestInit).body as string);
+    expect(body.subGames).toHaveLength(1);
+    const sg = body.subGames[0];
+    expect(sg.name).toBe("Ball × 10 round");
+    expect(sg.extra?.spill1Variant).toBe("ball-x-10");
+  });
+
+  it("K4: round-trip — edit-mode laster spill1Variant fra extra og viser i dropdown", async () => {
+    installFetch((url) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      if (urlStr.includes("/api/admin/schedules/sch-1")) {
+        return successResponse({
+          id: "sch-1",
+          scheduleName: "Existing",
+          scheduleNumber: "SN",
+          scheduleType: "Auto",
+          luckyNumberPrize: 0,
+          status: "active",
+          isAdminSchedule: false,
+          manualStartTime: "",
+          manualEndTime: "",
+          subGames: [
+            {
+              name: "Super-NILS round",
+              startTime: "19:00",
+              endTime: "19:30",
+              extra: { spill1Variant: "super-nils" },
+            },
+          ],
+          createdBy: null,
+          createdAt: "2026-04-23T00:00:00.000Z",
+          updatedAt: "2026-04-23T00:00:00.000Z",
+        });
+      }
+      return successResponse({});
+    });
+
+    await openScheduleEditorModal({ mode: "edit", scheduleId: "sch-1" });
+    await flush();
+
+    const select = document.querySelector<HTMLSelectElement>(
+      '[data-sg-field="spill1Variant"]'
+    );
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe("super-nils");
+
+    // Preview-tekst skal vise Super-NILS info.
+    const row = document.querySelector<HTMLElement>(".sg-row")!;
+    expect(row.textContent).toContain("Super-NILS");
+  });
+
+  it("K4: ugyldig extra.spill1Variant faller tilbake til tom (type-guard)", async () => {
+    installFetch((url) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      if (urlStr.includes("/api/admin/schedules/sch-2")) {
+        return successResponse({
+          id: "sch-2",
+          scheduleName: "Legacy",
+          scheduleNumber: "SN",
+          scheduleType: "Auto",
+          luckyNumberPrize: 0,
+          status: "active",
+          isAdminSchedule: false,
+          manualStartTime: "",
+          manualEndTime: "",
+          subGames: [
+            {
+              name: "Legacy",
+              extra: { spill1Variant: "not-a-real-variant" }, // bad value
+            },
+          ],
+          createdBy: null,
+          createdAt: "2026-04-23T00:00:00.000Z",
+          updatedAt: "2026-04-23T00:00:00.000Z",
+        });
+      }
+      return successResponse({});
+    });
+
+    await openScheduleEditorModal({ mode: "edit", scheduleId: "sch-2" });
+    await flush();
+
+    const select = document.querySelector<HTMLSelectElement>(
+      '[data-sg-field="spill1Variant"]'
+    );
+    expect(select!.value).toBe("");
+  });
 });
