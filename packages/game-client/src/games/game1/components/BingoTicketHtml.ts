@@ -362,7 +362,7 @@ export class BingoTicketHtml {
 
     // × cancel-knapp — absolutt posisjonert øverst til høyre slik at den ikke
     // forstyrrer header-layout. Vises kun når cancelable + ticket har id.
-    if (showCancel) {
+    if (this.opts.cancelable && this.opts.ticket.id) {
       const btn = document.createElement("button");
       btn.textContent = "\u00d7";
       btn.setAttribute("aria-label", "Avbestill brett");
