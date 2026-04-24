@@ -652,9 +652,19 @@ fortsette. Ingen timeout-basert auto-resume. Konsistent med legacy
 
 ### B.2 Per-agent ready (§7.2)
 
-**LÅST: behold P0.** Wireframe krever eksplisitt
-_"Agents not ready yet: Agent 1, 2, 4"_-popup
-(kilde: `LEGACY_1_TO_1_MAPPING:149`). Dette er pilot-krav, ikke utsettbart.
+**LÅST: kun ved INITIAL start-of-round, ikke mellom faser.**
+
+- **Start-of-round** (før Rad 1): wireframe krever
+  _"Agents not ready yet: Agent 1, 2, 4"_-popup
+  (kilde: `LEGACY_1_TO_1_MAPPING:149`). Per-hall 🔴/🟠/🟢-status må
+  være grønn/rød før Start-knappen aktiveres. Pilot-krav.
+- **Mellom faser** (post-LINE, pre-BINGO): **master alene avgjør.**
+  Ingen re-bekreftelse fra andre haller. Master trykker Resume
+  ubetinget — spillet fortsetter umiddelbart. Se B.8.
+
+Konsekvens: Task 1.2 ("reset ready mellom faser") er **annullert**
+2026-04-24 etter presisering fra Tobias. Gap #2 i §5 nedgraderes til
+"POLICY: reset ikke nødvendig — master er autoritativ mellom faser".
 
 ### B.3 `transferHallAccess`-semantikk (§7.3)
 
@@ -698,9 +708,19 @@ post-pilot documentation only.
 ### B.8 `isPaused` sidestate (§7.8)
 
 **LÅST: teknisk beslutning delegert til implementerende agent.**
-Product-kravet er: agent må kunne manuelt stoppe + starte spillet, og
-auto-stop ved LINE-vinn. Om det løses med `status='paused'` eller
-`status='running' + isPaused=true` er intern.
+Product-kravet er:
+
+- Agent/master må kunne manuelt stoppe + starte spillet.
+- Auto-stop ved LINE-vinn (og hver påfølgende phase-vinn).
+- Master trykker Resume → spillet fortsetter **ubetinget** (ingen
+  re-ready-sjekk fra andre haller mellom faser — se B.2).
+
+Om det løses med `status='paused'` eller `status='running' +
+isPaused=true` er intern.
+
+**Ingen ekstra autoriserings-sjekk mellom faser.** Resume-endepunkter
+skal IKKE kreve `HALLS_NOT_READY`-guard; bare status-flip +
+broadcast.
 
 ### B.9 Jackpot daglig akkumulering (§7.9)
 
@@ -733,8 +753,10 @@ estimat. Flyten er:
 - Ingen manuell override nødvendig — alt er faktisk regnskap.
 - Digital-only haller (ingen fysiske bonger) får `finalScanDone=true`
   automatisk og kan gå grønn på `readyConfirmed` alene.
-- Mellom faser (B.8 auto-pause): bare `readyConfirmed` nullstilles.
-  Scan-data beholdes — ingen ny-scan nødvendig mellom LINE og BINGO.
+- **Mellom faser (B.8 auto-pause): ingenting nullstilles.** Scan-data
+  beholdes, `readyConfirmed` beholdes. Det skal aldri selges bonger
+  under trekning, så re-scan er aldri nødvendig. Master trykker Resume
+  ubetinget (se B.2).
 
 Implementert i `feat/game1-hall-status-color-scan-flow` (Task HS).
 
@@ -747,9 +769,9 @@ Oppdateres av PM når hver Bølge 1-task åpnes som PR.
 | Task | Branch / PR | Status |
 |------|-------------|--------|
 | 1.1 Auto-pause ved phase-won | `feat/game1-auto-pause-phase-won` | 🟡 Agent jobber |
-| 1.2 Reset ready mellom faser | `feat/game1-reset-ready-between-phases` | 🟡 Agent jobber |
+| 1.2 Reset ready mellom faser | — | ❌ **Annullert 2026-04-24** (B.2/B.8 — master alene) |
 | HS Hall-status farge + scan-flyt | `feat/game1-hall-status-color-scan-flow` | 🟡 Agent jobber |
 | 1.4 Foren agent-portal + master-konsoll | — | ⏳ Ikke startet |
-| 1.5 "Agents not ready"-popup + override | — | ⏳ Ikke startet |
+| 1.5 "Agents not ready"-popup + override (kun start-of-round) | — | ⏳ Ikke startet |
 | 1.6 `transferHallAccess` master-overføring | — | ⏳ Ikke startet |
 | 1.7 TV ready-status + phase-won-banner | — | ⏳ Ikke startet |
