@@ -1720,6 +1720,8 @@
   "enter_reason": "Enter Reason",
   "reason_required": "Reason Is Required",
   "can_not_reject_without_reason": "Cannot reject without reason",
+  "reject_reason_too_short": "Reason must be at least {{min}} characters.",
+  "characters": "characters",
   "pep_fields_are_required": "PEP-related fields are mandatory when player id PEP. Ensure all fields are filled",
   "verify": "Verify",
   "unverify": "Unverify",

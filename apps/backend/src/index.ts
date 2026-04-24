@@ -22,6 +22,7 @@ import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 import { PaymentRequestService } from "./payments/PaymentRequestService.js";
 import { AuthTokenService } from "./auth/AuthTokenService.js";
 import { EmailService } from "./integration/EmailService.js";
+import { EmailQueue } from "./integration/EmailQueue.js";
 import {
   AuditLogService,
   InMemoryAuditLogStore,
@@ -678,6 +679,14 @@ const cmsService = new CmsService({
 // DB-backing). Agent 3 vil wire ADMIN-side audit-kall i påfølgende PR.
 const emailService = new EmailService();
 
+// BIN-702: e-post-kø med retry. Moderator-handlinger (KYC-approve/reject
+// osv.) bruker `emailQueue.enqueue()` via `adminPlayers`-routeren slik at
+// en kortvarig SMTP-feil ikke får varselet til å forsvinne. Kjører et
+// enkelt 1s-intervall i prod; i tester wires køen direkte og processNext
+// kalles deterministisk.
+const emailQueue = new EmailQueue({ emailService });
+emailQueue.runLoop();
+
 // Accounting email dispatcher for Withdraw XML-batcher (wireframe 16.20).
 // Bruker eksisterende `app_withdraw_email_allowlist` (via securityService)
 // som regnskaps-CC-liste. PM-beslutning 2026-04-24 — ingen ny tabell.
@@ -1256,6 +1265,7 @@ app.use(createAdminPlayersRouter({
   platformService,
   auditLogService,
   emailService,
+  emailQueue,
   bankIdAdapter,
   webBaseUrl,
   supportEmail,

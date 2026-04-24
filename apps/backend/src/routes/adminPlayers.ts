@@ -39,6 +39,7 @@ import type {
 } from "../platform/PlatformService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { EmailService } from "../integration/EmailService.js";
+import type { EmailQueue } from "../integration/EmailQueue.js";
 import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
 import {
   assertAdminPermission,
@@ -62,6 +63,12 @@ export interface AdminPlayersRouterDeps {
   platformService: PlatformService;
   auditLogService: AuditLogService;
   emailService: EmailService;
+  /**
+   * BIN-702: valgfri e-post-kø med retry. Hvis ikke satt faller routeren
+   * tilbake til direkte `emailService.sendTemplate()`-kall (eksisterende
+   * fire-and-forget-oppførsel). Wiret inn i prod via `index.ts`.
+   */
+  emailQueue?: EmailQueue;
   /** BIN-587 B2.3: for bankid-reverify. Null hvis BankID ikke er konfigurert. */
   bankIdAdapter: BankIdKycAdapter | null;
   /** Base-URL brukt til å bygge resubmit-lenker (sendt i reject-e-post). */
@@ -126,19 +133,40 @@ function parseKycStatus(raw: unknown): KycStatus {
   throw new DomainError("INVALID_INPUT", "status må være UNVERIFIED, PENDING, VERIFIED eller REJECTED.");
 }
 
-function parseReason(raw: unknown, field = "reason"): string {
+/**
+ * BIN-702: KYC-begrunnelse må være meningsfull — legacy-wireframe viste
+ * en åpen tekstboks som lot admin godta "x" eller "nei". Nye UI-krav fra
+ * pilot-hall: minst 10 tegn, maks 500. Min-lengde håndheves her slik at
+ * både UI-modalen og evt. direkte API-klienter får samme feilmelding.
+ */
+function parseReason(
+  raw: unknown,
+  field = "reason",
+  opts: { minLength?: number } = {}
+): string {
+  const minLength = opts.minLength ?? 0;
   const r = mustBeNonEmptyString(raw, field);
+  if (minLength > 0 && r.length < minLength) {
+    throw new DomainError(
+      "INVALID_INPUT",
+      `${field} må være minst ${minLength} tegn.`
+    );
+  }
   if (r.length > 500) {
     throw new DomainError("INVALID_INPUT", `${field} er for lang (maks 500 tegn).`);
   }
   return r;
 }
 
+/** BIN-702: minimum lengde på KYC-reject-begrunnelse (legacy-paritet). */
+export const KYC_REJECT_REASON_MIN_LENGTH = 10;
+
 export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.Router {
   const {
     platformService,
     auditLogService,
     emailService,
+    emailQueue,
     bankIdAdapter,
     webBaseUrl,
     supportEmail,
@@ -167,25 +195,45 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
     opts?: { reason?: string }
   ): Promise<void> {
     const base = webBaseUrl.replace(/\/+$/, "");
-    try {
-      if (kind === "approved") {
-        await emailService.sendTemplate({
-          to: user.email,
-          template: "kyc-approved",
-          context: { username: user.displayName, supportEmail },
-        });
-      } else {
-        await emailService.sendTemplate({
-          to: user.email,
-          template: "kyc-rejected",
-          context: {
+    const template: "kyc-approved" | "kyc-rejected" =
+      kind === "approved" ? "kyc-approved" : "kyc-rejected";
+    const context =
+      kind === "approved"
+        ? { username: user.displayName, supportEmail }
+        : {
             username: user.displayName,
             reason: opts?.reason ?? "",
             resubmitLink: `${base}/kyc/resubmit`,
             supportEmail,
-          },
+          };
+
+    // BIN-702: hvis e-post-kø er wiret, enqueue i stedet for direkte send.
+    // Køen håndterer retry + dead-letter ved SMTP-feil, slik at et
+    // midlertidig avbrudd ikke betyr at spilleren aldri får beskjed.
+    if (emailQueue) {
+      try {
+        await emailQueue.enqueue({
+          to: user.email,
+          template,
+          context,
         });
+      } catch (err) {
+        logger.warn(
+          { err, kind, userId: user.email },
+          "[BIN-702] KYC e-post enqueue failed (non-blocking)"
+        );
       }
+      return;
+    }
+
+    // Fallback: direkte send. Beholdes for bakoverkompatibilitet og for
+    // mindre tester som ikke setter opp en kø.
+    try {
+      await emailService.sendTemplate({
+        to: user.email,
+        template,
+        context,
+      });
     } catch (err) {
       logger.warn({ err, kind, userId: user.email }, "[BIN-587 B2.2] KYC e-post failed (non-blocking)");
     }
@@ -645,7 +693,9 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
       if (!isRecordObject(req.body)) {
         throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
       }
-      const reason = parseReason(req.body.reason);
+      const reason = parseReason(req.body.reason, "reason", {
+        minLength: KYC_REJECT_REASON_MIN_LENGTH,
+      });
       const updated = await platformService.rejectKycAsAdmin({
         userId,
         actorId: actor.id,

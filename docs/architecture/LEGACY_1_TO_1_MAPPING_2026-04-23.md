@@ -94,7 +94,7 @@ Legend:
 |---|---|---|---|
 | Dashboard KPI | 🟡 | Top 5 Players mangler, ongoing-tabs kun Game 1 (ikke 2/3/4/5) | 🎯 |
 | Players Approved | 🟢 | — | |
-| Players Pending + **Approve/Reject-flyt** | 🟡 | Modal med mandatory reason + auto-email til spiller mangler | 🎯 |
+| Players Pending + **Approve/Reject-flyt** | 🟢 | Modal m/mandatory reason (min 10 tegn) + auto-email via retry-kø (BIN-702) | 🎯 |
 | Players Rejected | 🟡 | Listing finnes, View-detalj + Delete mangler | |
 | **Import Player (Excel)** | 🔴 | xls/xlsx bulk-import med Hall Number-mapping (Zerlyn→0, 100→100 Hamar osv.) | |
 | Agent Management | 🟢 | Unassign-before-deactivate-check må verifiseres | |

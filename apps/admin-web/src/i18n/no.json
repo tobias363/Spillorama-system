@@ -1711,6 +1711,8 @@
   "enter_reason": "Skriv inn grunn",
   "reason_required": "Grunn er påkrevd",
   "can_not_reject_without_reason": "Kan ikke avvise uten grunn",
+  "reject_reason_too_short": "Begrunnelsen må være minst {{min}} tegn.",
+  "characters": "tegn",
   "pep_fields_are_required": "PEP-relaterte felter er obligatoriske når spilleren er PEP. Sørg for at alle felt er fylt ut",
   "verify": "Verifisere",
   "unverify": "Opphev bekreftelse",
