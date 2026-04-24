@@ -71,6 +71,19 @@ export const IdempotencyKeys = {
     `g1-pot-${params.potId}-${params.scheduledGameId}`,
 
   /**
+   * Game1LuckyBonusService — én per (scheduledGameId, winnerId) for lucky
+   * number bonus-credit. Se apps/backend/src/game/Game1LuckyBonusService.ts
+   * + kall-sted i Game1DrawEngineService.payoutLuckyBonusForFullHouseWinners.
+   * Format: `g1-lucky-bonus-{scheduledGameId}-{winnerId}`
+   * (byte-identisk mot PM-spec fra K1-C-task).
+   */
+  game1LuckyBonus: (params: {
+    scheduledGameId: string;
+    winnerId: string;
+  }): string =>
+    `g1-lucky-bonus-${params.scheduledGameId}-${params.winnerId}`,
+
+  /**
    * Game1TicketPurchaseService.purchase — én per purchaseIdempotencyKey fra klient.
    * Se apps/backend/src/game/Game1TicketPurchaseService.ts.
    */

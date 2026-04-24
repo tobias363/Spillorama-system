@@ -259,6 +259,145 @@ test("spawnUpcomingGame1Games: happy path — spawner én rad per subGame i vind
   assert.equal(firstInsert.params[14], "group-1");
 });
 
+test("K1-C: spawnUpcomingGame1Games fletter subGame.extra.luckyBonus inn i ticket_config_json", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-1",
+            name: "Plan A",
+            hall_ids_json: {
+              masterHallId: "hall-m",
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-lb" },
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-lb",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "LB Test",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+                ticketTypesData: { ticketType: ["Small Yellow"] },
+                jackpotData: {},
+                extra: {
+                  luckyBonus: { amountCents: 10000, enabled: true },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("SELECT daily_schedule_id"),
+        rows: [],
+      },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  await svc.spawnUpcomingGame1Games(fixedNow);
+
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  assert.ok(inserts.length > 0, "minst 1 spawn");
+  const firstInsert = inserts[0]!;
+  // params[10] = ticket_config_json (JSON-string).
+  const ticketJson = JSON.parse(firstInsert.params[10] as string);
+  assert.deepEqual(
+    ticketJson.luckyBonus,
+    { amountCents: 10000, enabled: true },
+    "luckyBonus fra extra flettet inn i ticket_config_json"
+  );
+  // Eksisterende ticketTypesData-felt må bevares ved siden av.
+  assert.deepEqual(ticketJson.ticketType, ["Small Yellow"]);
+});
+
+test("K1-C: spawnUpcomingGame1Games UTEN extra.luckyBonus → ingen luckyBonus-nøkkel", async () => {
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-1",
+            name: "Plan A",
+            hall_ids_json: {
+              masterHallId: "hall-m",
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: "2026-05-10T23:59:59.000Z",
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-nolb" },
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("FROM ") && sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-nolb",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "No LB",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+                ticketTypesData: { ticketType: ["Small Yellow"] },
+                jackpotData: {},
+              },
+            ],
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("SELECT daily_schedule_id"),
+        rows: [],
+      },
+    ],
+  });
+
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  await svc.spawnUpcomingGame1Games(fixedNow);
+
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  const firstInsert = inserts[0]!;
+  const ticketJson = JSON.parse(firstInsert.params[10] as string);
+  assert.equal(
+    ticketJson.luckyBonus,
+    undefined,
+    "uten extra.luckyBonus → ingen nøkkel satt (bakoverkompat)"
+  );
+});
+
 test("spawnUpcomingGame1Games: idempotent — hopper over eksisterende rader", async () => {
   const { pool } = createStubPool({
     responses: [

@@ -61,8 +61,15 @@ import type { Game1TicketPurchaseService, Game1TicketPurchaseRow } from "./Game1
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { Game1PayoutService, Game1WinningAssignment } from "./Game1PayoutService.js";
 import type { Game1JackpotService, Game1JackpotConfig } from "./Game1JackpotService.js";
+import {
+  Game1LuckyBonusService,
+  resolveLuckyBonusConfig,
+  type Game1LuckyBonusConfig,
+} from "./Game1LuckyBonusService.js";
 import type { Game1PotService } from "./pot/Game1PotService.js";
 import type { WalletAdapter } from "../adapters/WalletAdapter.js";
+import { WalletError } from "../adapters/WalletAdapter.js";
+import { IdempotencyKeys } from "./idempotency.js";
 import {
   runAccumulatingPotEvaluation,
   computeOrdinaryWinCentsByHallPerColor,
@@ -241,6 +248,30 @@ export interface Game1DrawEngineServiceOptions {
    * master-stop-responsen.
    */
   bingoEngine?: BingoEngine;
+  /**
+   * K1-C: Lucky Number Bonus-service. Evaluerer om en Fullt Hus-vinners
+   * valgte lykketall matcher ballen som utløste winnet (legacy
+   * GameProcess.js:420-429). Pure service — DI så engine-testen kan stubbe.
+   *
+   * Valgfri: hvis null og sub-game ikke har `luckyBonus`-config → ingen
+   * bonus beregnes eller utbetales (bakoverkompat for test + miljøer uten
+   * bonus-pilot). Wallet-credit skjer via samme `WalletAdapter` som pot-
+   * evaluator.
+   */
+  luckyBonusService?: Game1LuckyBonusService;
+  /**
+   * K1-C: lookup-port som gir tilbake spillerens valgte lykketall for en
+   * (roomCode, userId). Lucky-numbers lagres i `RoomStateManager`-memory
+   * (se apps/backend/src/util/roomState.ts), så engine trenger en port for
+   * å nå frem uten sirkulær import.
+   *
+   * Returner `null` eller `undefined` hvis spilleren ikke har valgt lucky.
+   * Kalles synkront i payout-flyt — skal være O(1) lookup.
+   */
+  luckyNumberLookup?: (args: {
+    roomCode: string;
+    userId: string;
+  }) => number | null | undefined;
 }
 
 // ── Internal row shapes ─────────────────────────────────────────────────────
@@ -458,6 +489,15 @@ export class Game1DrawEngineService {
    * uendret).
    */
   private bingoEngine: BingoEngine | null;
+  /**
+   * K1-C: Lucky Number Bonus. Null = feature av (bakoverkompat). Begge må
+   * være satt for at bonus skal utbetales: service beregner, lookup-port
+   * gir spillerens valgte lykketall for rommet.
+   */
+  private luckyBonusService: Game1LuckyBonusService | null;
+  private luckyNumberLookup:
+    | ((args: { roomCode: string; userId: string }) => number | null | undefined)
+    | null;
 
   constructor(options: Game1DrawEngineServiceOptions) {
     this.pool = options.pool;
@@ -483,6 +523,8 @@ export class Game1DrawEngineService {
     this.potDailyTickService = options.potDailyTickService ?? null;
     this.walletAdapter = options.walletAdapter ?? null;
     this.bingoEngine = options.bingoEngine ?? null;
+    this.luckyBonusService = options.luckyBonusService ?? null;
+    this.luckyNumberLookup = options.luckyNumberLookup ?? null;
     // PR-T3 Spor 4: fail-closed — hvis potService wired ved konstruksjon uten
     // walletAdapter → ugyldig konfig. (Late-binding via setters er unntak for
     // test-oppsett og sirkulær wiring; der ansvarliggjøres caller for å sette
@@ -930,7 +972,9 @@ export class Game1DrawEngineService {
         state.current_phase,
         nextSequence,
         game.ticket_config_json,
-        game.game_config_json
+        game.game_config_json,
+        ball,
+        game.room_code
       );
 
       // PR 4d.4: capture for post-commit admin-broadcast.
@@ -1710,7 +1754,9 @@ export class Game1DrawEngineService {
     currentPhase: number,
     drawSequenceAtWin: number,
     ticketConfigJson: unknown,
-    gameConfigJson: unknown
+    gameConfigJson: unknown,
+    lastBall: number,
+    roomCode: string | null
   ): Promise<{
     phaseWon: boolean;
     winnerCount: number;
@@ -1912,6 +1958,32 @@ export class Game1DrawEngineService {
           },
         });
       }
+    }
+
+    // K1-C: Lucky Number Bonus. Utløses kun ved Fullt Hus hvor ballen som
+    // traff winnet (`lastBall`) === spillerens registrerte lucky. Bonus
+    // utbetales per kvalifisert vinner I TILLEGG til ordinær premie +
+    // jackpot. Idempotent via `g1-lucky-bonus-{scheduledGameId}-{winnerId}`.
+    //
+    // Legacy-ref: GameProcess.js:420-429 (lucky-bonus-utløser) +
+    // GameProcess.js:5960-6100 (processLuckyNumberBonus utbetalings-flyt).
+    //
+    // Fail-closed: service/lookup-port ikke satt → hopper over bonus.
+    // Bonus-config NULL (ikke konfigurert i sub-game) → hopper over.
+    if (
+      currentPhase === TOTAL_PHASES &&
+      winners.length > 0 &&
+      this.luckyBonusService !== null
+    ) {
+      await this.payoutLuckyBonusForFullHouseWinners({
+        client,
+        scheduledGameId,
+        winners,
+        lastBall,
+        drawSequenceAtWin,
+        roomCode,
+        ticketConfigJson,
+      });
     }
 
     // PR-C2 Spor 4: evaluér akkumulerende pot-er (Innsatsen + Jackpott)
@@ -2164,6 +2236,167 @@ export class Game1DrawEngineService {
         jackpotAmountCentsPerWinner: jackpotAmount,
         phaseName: phaseDisplayName(currentPhase),
       });
+    }
+  }
+
+  /**
+   * K1-C: Lucky Number Bonus for Fullt Hus-vinnere. Utbetales I TILLEGG til
+   * ordinær premie + jackpot når (`lastBall === player.luckyNumber`).
+   *
+   * Legacy-referanse: GameProcess.js:420-429 (trigger-conditions) +
+   * GameProcess.js:5960-6100 (utbetalings-flyt + per-player dedupe).
+   *
+   * Flyt:
+   *   1) For hver unik (userId) blant vinnere, slå opp luckyNumber via
+   *      `luckyNumberLookup`-porten mot room-state.
+   *   2) Evaluér bonus via `Game1LuckyBonusService.evaluate` — respekterer
+   *      enabled-flag + amountCents + phase + luckyNumber match.
+   *   3) Hvis trigget → wallet.credit til vinnerens winnings-konto med
+   *      idempotency-key `g1-lucky-bonus-{scheduledGameId}-{winnerId}`.
+   *      Wallet-feil → throw DomainError → hele drawNext-transaksjonen
+   *      ruller tilbake (regulatorisk §11 fail-closed).
+   *   4) Audit-entry `game1.lucky_number_bonus_won` per utbetaling.
+   *
+   * Dedupe: en spiller kan vinne Fullt Hus på flere assignments samtidig,
+   * men bonus skal kun utbetales ÉN gang per (scheduledGameId, winnerId)
+   * (legacy gjør samme dedupe i processLuckyNumberBonus via
+   * multiLuckyBonusWinningArray.reduce).
+   */
+  private async payoutLuckyBonusForFullHouseWinners(args: {
+    client: PoolClient;
+    scheduledGameId: string;
+    winners: Array<Game1WinningAssignment & { userId: string }>;
+    lastBall: number;
+    drawSequenceAtWin: number;
+    roomCode: string | null;
+    ticketConfigJson: unknown;
+  }): Promise<void> {
+    const {
+      client,
+      scheduledGameId,
+      winners,
+      lastBall,
+      drawSequenceAtWin,
+      roomCode,
+      ticketConfigJson,
+    } = args;
+
+    // Guard: service eller lookup-port ikke satt → feature av (bakoverkompat).
+    // walletAdapter trengs for wallet.credit — hopp over ellers (samme
+    // mønster som pot-evaluator-wiring).
+    if (!this.luckyBonusService) return;
+    if (!this.luckyNumberLookup) return;
+    if (!this.walletAdapter) return;
+
+    // Resolve bonus-config fra sub-game. Null → feature av for dette spillet.
+    const bonusConfig: Game1LuckyBonusConfig | null = resolveLuckyBonusConfig(
+      ticketConfigJson
+    );
+    if (!bonusConfig || !bonusConfig.enabled || bonusConfig.amountCents <= 0) {
+      return;
+    }
+
+    // roomCode er NULL for spill ingen spiller har joinet — ingen lucky-
+    // numbers kan da finnes. Kun fysiske bonger kan være vinnere, og de har
+    // ikke lucky-number i dagens modell.
+    if (!roomCode) return;
+
+    // Dedupe: én bonus per unik userId per spill. Første vinner-assignment
+    // tas som canonical (samme pattern som legacy multiLuckyBonusWinningArray).
+    const seenUserIds = new Set<string>();
+    const uniqueWinners: Array<Game1WinningAssignment & { userId: string }> = [];
+    for (const w of winners) {
+      if (seenUserIds.has(w.userId)) continue;
+      seenUserIds.add(w.userId);
+      uniqueWinners.push(w);
+    }
+
+    for (const winner of uniqueWinners) {
+      const luckyNumber = this.luckyNumberLookup({
+        roomCode,
+        userId: winner.userId,
+      });
+
+      const ev = this.luckyBonusService.evaluate({
+        winnerId: winner.userId,
+        luckyNumber,
+        fullHouseTriggerBall: lastBall,
+        phase: TOTAL_PHASES,
+        bonusConfig,
+      });
+
+      if (!ev.triggered) continue;
+
+      // Wallet-credit. PR-W2: `to: "winnings"` — gevinst fra spill.
+      // Wallet-feil ruller tilbake hele drawNext-transaksjonen
+      // (regulatorisk §11 fail-closed).
+      let walletTxId: string | null = null;
+      try {
+        const tx = await this.walletAdapter.credit(
+          winner.walletId,
+          ev.bonusCents / 100,
+          `Spill 1 Lucky Number Bonus — spill ${scheduledGameId}`,
+          {
+            idempotencyKey: IdempotencyKeys.game1LuckyBonus({
+              scheduledGameId,
+              winnerId: winner.userId,
+            }),
+            to: "winnings",
+          }
+        );
+        walletTxId = tx.id;
+      } catch (err) {
+        log.error(
+          {
+            err,
+            scheduledGameId,
+            winnerId: winner.userId,
+            walletId: winner.walletId,
+            bonusCents: ev.bonusCents,
+          },
+          "[K1-C] Lucky Number Bonus wallet.credit feilet — ruller tilbake draw-transaksjon"
+        );
+        if (err instanceof WalletError) {
+          throw new DomainError(
+            "PAYOUT_WALLET_CREDIT_FAILED",
+            `Lucky bonus-credit feilet for vinner ${winner.userId}: ${err.message} (code=${err.code})`
+          );
+        }
+        throw new DomainError(
+          "PAYOUT_WALLET_CREDIT_FAILED",
+          `Lucky bonus-credit feilet for vinner ${winner.userId}: ${(err as Error).message ?? "ukjent"}`
+        );
+      }
+
+      // Audit (fire-and-forget). Matcher PM-spec for task K1-C:
+      // action `game1.lucky_number_bonus_won` med { luckyNumber,
+      // fullHouseBall, bonusCents }.
+      this.fireAudit({
+        actorId: winner.userId,
+        action: "game1.lucky_number_bonus_won",
+        resourceId: scheduledGameId,
+        details: {
+          luckyNumber: luckyNumber ?? null,
+          fullHouseBall: lastBall,
+          bonusCents: ev.bonusCents,
+          drawSequenceAtWin,
+          walletTransactionId: walletTxId,
+          hallId: winner.hallId,
+          ticketColor: winner.ticketColor,
+        },
+      });
+
+      log.info(
+        {
+          scheduledGameId,
+          winnerId: winner.userId,
+          luckyNumber,
+          lastBall,
+          bonusCents: ev.bonusCents,
+          walletTxId,
+        },
+        "[K1-C] Lucky Number Bonus paid"
+      );
     }
   }
 
