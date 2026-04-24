@@ -21,6 +21,21 @@
     "check:all": "npm run check && npm run build && npm run test:compliance",
     "deploy:backend": "bash infra/deploy-backend.sh",
     "matrix:generate": "tsx scripts/generate-parity-matrix.ts",
-    "matrix:check": "tsx scripts/generate-parity-matrix.ts --check"
+    "matrix:check": "tsx scripts/generate-parity-matrix.ts --check",
+    "lint:css": "stylelint \"**/*.css\" --allow-empty-input",
+    "lint:no-backdrop-js": "node scripts/stylelint-rules/lint-no-backdrop-js.mjs",
+    "lint:blink": "npm run lint:css && npm run lint:no-backdrop-js",
+    "test:stylelint": "node --test \"scripts/stylelint-rules/__tests__/*.mjs\"",
+    "prepare": "husky || true && node scripts/setup-husky.mjs || true"
+  },
+  "lint-staged": {
+    "**/*.css": "stylelint --fix",
+    "**/*.{ts,tsx,mts,cts}": "bash -c 'npm run --silent lint:no-backdrop-js'"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "stylelint": "^17.9.0",
+    "stylelint-config-standard": "^40.0.0"
   }
 }
