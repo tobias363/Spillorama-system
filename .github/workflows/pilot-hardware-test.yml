@@ -110,9 +110,17 @@ jobs:
         if: steps.detect.outputs.has_perf_budget == 'true'
         run: npm ci --no-audit --no-fund
 
+      - name: Build shared-types
+        if: steps.detect.outputs.has_perf_budget == 'true'
+        run: npm --prefix packages/shared-types run build
+
       - name: Build web bundle for preview
         if: steps.detect.outputs.has_perf_budget == 'true'
         run: npm run build:games
+
+      - name: Install performance-budget dependencies
+        if: steps.detect.outputs.has_perf_budget == 'true'
+        run: npm --prefix scripts/performance-budget install --no-audit --no-fund
 
       - name: Collect metrics under pilot-hw throttle
         if: steps.detect.outputs.has_perf_budget == 'true'
