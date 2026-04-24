@@ -4,7 +4,7 @@
  * WinPopup (fase 1-4 vinn) — port av WinPopup.jsx.
  * Dekker: mount/unmount, rows/amount/shared-visning, hide rydder DOM.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WinPopup } from "./WinPopup.js";
 
 function container(): HTMLElement {
@@ -88,5 +88,34 @@ describe("WinPopup", () => {
     popup.show({ rows: 1, amount: 100, shared: true, sharedCount: 1 });
     expect(parent.textContent).toContain("1 person");
     expect(parent.textContent).not.toContain("1 personer");
+  });
+
+  it("auto-close etter 3s (regel-endring 2026-04-24)", () => {
+    vi.useFakeTimers();
+    let closed = false;
+    popup.show({ rows: 1, amount: 100, onClose: () => { closed = true; } });
+    expect(parent.children.length).toBeGreaterThan(0);
+    vi.advanceTimersByTime(2999);
+    expect(parent.children.length).toBeGreaterThan(0);
+    expect(closed).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(parent.children.length).toBe(0);
+    expect(closed).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("manuell Lukk overstyrer auto-close timer", () => {
+    vi.useFakeTimers();
+    let closeCount = 0;
+    popup.show({ rows: 1, amount: 100, onClose: () => { closeCount++; } });
+    const lukkBtn = Array.from(parent.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Lukk",
+    )!;
+    lukkBtn.click();
+    expect(closeCount).toBe(1);
+    // Auto-close må IKKE trigge på toppen — ellers får vi dobbel onClose.
+    vi.advanceTimersByTime(5000);
+    expect(closeCount).toBe(1);
+    vi.useRealTimers();
   });
 });
