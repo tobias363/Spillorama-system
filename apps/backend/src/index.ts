@@ -127,6 +127,9 @@ import { createAgentOkBingoRouter } from "./routes/agentOkBingo.js";
 import { createAgentBingoRouter } from "./routes/agentBingo.js";
 import { createAgentTicketRegistrationRouter } from "./routes/agentTicketRegistration.js";
 import { TicketRegistrationService } from "./agent/TicketRegistrationService.js";
+import { createAgentUniqueIdsRouter } from "./routes/agentUniqueIds.js";
+import { UniqueIdService } from "./agent/UniqueIdService.js";
+import { PostgresUniqueIdStore } from "./agent/UniqueIdStore.js";
 import { OkBingoTicketService } from "./agent/OkBingoTicketService.js";
 import { SqlServerOkBingoApiClient } from "./integration/okbingo/SqlServerOkBingoApiClient.js";
 import { StubOkBingoApiClient } from "./integration/okbingo/StubOkBingoApiClient.js";
@@ -2006,6 +2009,24 @@ app.use(createAgentTicketRegistrationRouter({
   auditLogService,
   ticketRegistrationService,
   game1HallReadyService,
+}));
+
+// Wireframe gaps #8/#10/#11 (2026-04-24): Agent Unique ID cards flow.
+// Covers V1.0 wireframes 17.9 (Create), 17.10 (Add Money),
+// 17.11/17.28 (Withdraw), 17.26 (Details + Re-Generate).
+const uniqueIdStore = new PostgresUniqueIdStore({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const uniqueIdService = new UniqueIdService({
+  store: uniqueIdStore,
+  agentService,
+});
+app.use(createAgentUniqueIdsRouter({
+  platformService,
+  agentService,
+  uniqueIdService,
+  auditLogService,
 }));
 
 // BIN-582: Metronia/OK-Bingo auto-close-cron. Registeres her fordi den

@@ -159,9 +159,9 @@ describe("Agent-portal placeholder-sider", () => {
   //   - /agent/games → nextGamePanel.test.ts (#431)
   //   - /agent/physical-cashout → agentBingoPages.test.ts (#433)
   //   - /agent/cash-in-out → cashInOutShiftLogout.test.ts (Wireframe Gap #9)
+  //   - /agent/unique-id → agentUniqueId.test.ts (wireframe gaps #8/#10/#11)
   const placeholders = [
     { name: "physical-tickets", mount: mountAgentPhysicalTickets, titleKey: "add_physical_tickets" },
-    { name: "unique-id", mount: mountAgentUniqueId, titleKey: "agent_unique_id_management" },
   ];
 
   for (const p of placeholders) {
@@ -202,6 +202,19 @@ describe("Agent-portal placeholder-sider", () => {
     // Shift Log Out-knappen må være på siden.
     const logoutBtn = container.querySelector<HTMLButtonElement>('[data-action="shift-log-out"]');
     expect(logoutBtn).toBeTruthy();
+  });
+
+  it("unique-id: rendrer full implementation (ikke placeholder)", () => {
+    const container = document.getElementById("c")!;
+    mountAgentUniqueId(container);
+    const crumb = container.querySelector<HTMLAnchorElement>(".breadcrumb a[href='#/agent/dashboard']");
+    expect(crumb).toBeTruthy();
+    expect(container.querySelector("section.content-header h1")).toBeTruthy();
+    expect(container.querySelector("[data-marker='coming-soon']")).toBeNull();
+    // Har de tre hoved-action-knappene.
+    expect(container.querySelector('[data-testid="btn-create-unique-id"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="btn-add-money"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="btn-withdraw"]')).toBeTruthy();
   });
 
   // Unngå unused-warning — brukt som "hjelper" referanse.
