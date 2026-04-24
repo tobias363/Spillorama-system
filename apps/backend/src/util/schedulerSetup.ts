@@ -31,6 +31,10 @@ export interface SchedulerCallbackDeps {
   setBingoSettingsEffectiveFromMs: (ms: number) => void;
   /** BIN-445: Get active variant config for a room. */
   getVariantConfig?: (roomCode: string) => { gameType: string; config: import("../game/variantConfig.js").GameVariantConfig } | null;
+  /** BIN-693: reservation-id per player in room (for commit at startGame). */
+  getReservationIdsByPlayer?: (roomCode: string) => Record<string, string>;
+  /** BIN-693: clear reservation-mapping after game starts (committed) or aborts (released). */
+  clearReservationIdsForRoom?: (roomCode: string) => void;
 }
 
 export interface PendingBingoSettingsUpdate {
@@ -116,8 +120,10 @@ export function createSchedulerCallbacks(deps: SchedulerCallbackDeps) {
           armedPlayerSelections: deps.getArmedPlayerSelections(roomCode),
           gameType: variantInfo?.gameType,
           variantConfig: variantInfo?.config,
+          reservationIdByPlayer: deps.getReservationIdsByPlayer?.(roomCode),
         });
         deps.disarmAllPlayers(roomCode);
+        deps.clearReservationIdsForRoom?.(roomCode);
         deps.clearDisplayTicketCache(roomCode);
       } catch (error) {
         if (error instanceof DomainError && (

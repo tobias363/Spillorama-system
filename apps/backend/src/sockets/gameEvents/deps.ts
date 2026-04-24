@@ -105,4 +105,21 @@ export interface GameEventsDeps {
    * returnerer `NOT_SUPPORTED` hvis den mangler.
    */
   voucherRedemptionService?: import("../../compliance/VoucherRedemptionService.js").VoucherRedemptionService;
+
+  // ── BIN-693 Option B: Wallet-reservasjon ─────────────────────────────────
+
+  /**
+   * Wallet-adapter for reserve/release/commit-flyten (Option B). Optional
+   * fordi test-servere som ikke bruker reservation-flyten kan kjøre uten.
+   * Callers (bet:arm, ticket:cancel) sjekker adapter.reserve før kall.
+   */
+  walletAdapter?: import("../../adapters/WalletAdapter.js").WalletAdapter;
+
+  /** BIN-693: playerId → walletId. Brukes til å finne wallet for reserve. */
+  getWalletIdForPlayer?: (roomCode: string, playerId: string) => string | null;
+
+  /** BIN-693: roomState reservation-tracking per (room, player). */
+  getReservationId?: (roomCode: string, playerId: string) => string | null;
+  setReservationId?: (roomCode: string, playerId: string, reservationId: string) => void;
+  clearReservationId?: (roomCode: string, playerId: string) => void;
 }

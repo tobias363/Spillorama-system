@@ -253,6 +253,13 @@ export interface WalletAdapter {
   /** Opprett reservasjon. Kaster INSUFFICIENT_FUNDS / IDEMPOTENCY_MISMATCH. */
   reserve?: (accountId: string, amount: number, options: ReserveOptions) => Promise<WalletReservation>;
 
+  /**
+   * Øk eksisterende aktiv reservasjon med `extraAmount`. Additive bet:arm-
+   * flyt bruker dette når spiller kjøper flere bonger enn allerede reservert
+   * for rommet. Kaster INSUFFICIENT_FUNDS hvis tilgjengelig saldo er for lav.
+   */
+  increaseReservation?: (reservationId: string, extraAmount: number) => Promise<WalletReservation>;
+
   /** Frigi reservasjon. Full (amount omitted) eller partial prorata. */
   releaseReservation?: (reservationId: string, amount?: number) => Promise<WalletReservation>;
 

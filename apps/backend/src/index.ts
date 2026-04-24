@@ -853,6 +853,15 @@ const schedulerCallbacks = createSchedulerCallbacks({
   setPendingBingoSettingsUpdate: (u) => { pendingBingoSettingsUpdate = u; },
   getBingoSettingsEffectiveFromMs: () => bingoSettingsEffectiveFromMs,
   setBingoSettingsEffectiveFromMs: (ms) => { bingoSettingsEffectiveFromMs = ms; },
+  // BIN-694 (forrige fix): scheduler trenger variantConfig for fase-progresjon.
+  getVariantConfig: (code) => roomState.getVariantConfig(code),
+  // BIN-693 Option B: pass reservation-mapping til startGame så commit
+  // kjøres mot wallet-reservation i stedet for fresh transfer.
+  getReservationIdsByPlayer: (code) => roomState.getAllReservationIds(code),
+  clearReservationIdsForRoom: (code) => {
+    const ids = roomState.reservationIdByPlayerByRoom.get(code);
+    if (ids) ids.clear();
+  },
 });
 
 drawScheduler = new DrawScheduler({
@@ -2009,6 +2018,20 @@ const registerGameEvents = createGameEventHandlers({
   chatMessageStore,
   // BIN-587 B4b follow-up: dep for socket-event `voucher:redeem`.
   voucherRedemptionService,
+  // BIN-693 Option B: wallet-reservasjon-wiring.
+  walletAdapter,
+  getWalletIdForPlayer: (roomCode, playerId) => {
+    try {
+      const snap = engine.getRoomSnapshot(roomCode);
+      const player = snap.players.find((p) => p.id === playerId);
+      return player?.walletId ?? null;
+    } catch {
+      return null;
+    }
+  },
+  getReservationId: (code, pid) => roomState.getReservationId(code, pid),
+  setReservationId: (code, pid, rid) => roomState.setReservationId(code, pid, rid),
+  clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.

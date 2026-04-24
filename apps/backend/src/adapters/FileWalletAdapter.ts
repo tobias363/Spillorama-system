@@ -423,6 +423,40 @@ export class FileWalletAdapter implements WalletAdapter {
     });
   }
 
+  async increaseReservation(
+    reservationId: string,
+    extraAmount: number,
+  ): Promise<WalletReservation> {
+    return this.withLock(async () => {
+      await this.load();
+      if (extraAmount <= 0) throw new WalletError("INVALID_INPUT", "extraAmount må være > 0.");
+      const existing = this.reservations.get(reservationId);
+      if (!existing) {
+        throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+      }
+      if (existing.status !== "active") {
+        throw new WalletError(
+          "INVALID_STATE",
+          `Reservasjon ${reservationId} er ${existing.status}, kan ikke økes.`,
+        );
+      }
+      const account = this.store.accounts[existing.walletId];
+      if (!account) {
+        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${existing.walletId} finnes ikke.`);
+      }
+      const available = account.depositBalance + account.winningsBalance - this.sumActiveReservations(existing.walletId);
+      if (available < extraAmount) {
+        throw new WalletError(
+          "INSUFFICIENT_FUNDS",
+          `Wallet ${existing.walletId} har ikke tilstrekkelig tilgjengelig saldo for økning (${available} < ${extraAmount}).`,
+        );
+      }
+      const updated: WalletReservation = { ...existing, amount: existing.amount + extraAmount };
+      this.reservations.set(reservationId, updated);
+      return { ...updated };
+    });
+  }
+
   async releaseReservation(reservationId: string, amount?: number): Promise<WalletReservation> {
     const existing = this.reservations.get(reservationId);
     if (!existing) {

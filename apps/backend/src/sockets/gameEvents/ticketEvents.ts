@@ -208,6 +208,38 @@ export function registerTicketEvents(ctx: SocketContext): void {
         throw new DomainError("TICKET_NOT_FOUND", `Ingen pre-round billett med id=${ticketId}.`);
       }
 
+      // BIN-693 Option B: frigi prorata fra wallet-reservasjonen. Hvis
+      // fullyDisarmed → full release (klarer reservation-mapping også).
+      // Ellers: delta × entryFee.
+      const adapter = deps.walletAdapter;
+      if (adapter?.releaseReservation && deps.getReservationId && deps.clearReservationId) {
+        const resId = deps.getReservationId(roomCode, playerId);
+        if (resId) {
+          try {
+            if (result.fullyDisarmed) {
+              await adapter.releaseReservation(resId);
+              deps.clearReservationId(roomCode, playerId);
+            } else {
+              const entryFee = deps.getRoomConfiguredEntryFee(roomCode);
+              const releasedKr = result.removedTicketIds.length * entryFee;
+              if (releasedKr > 0) {
+                await adapter.releaseReservation(resId, releasedKr);
+              }
+            }
+          } catch {
+            // Race med expiry/commit — trygg å ignorere, UI viser oppdatert
+            // saldo neste tick.
+          }
+        }
+      }
+
+      // BIN-693: refresh player.balance etter release så room:update viser
+      // oppdatert available_balance umiddelbart.
+      const walletId = deps.getWalletIdForPlayer?.(roomCode, playerId);
+      if (walletId) {
+        await engine.refreshPlayerBalancesForWallet(walletId);
+      }
+
       await emitRoomUpdate(roomCode);
       ackSuccess(callback, result);
     } catch (error) {

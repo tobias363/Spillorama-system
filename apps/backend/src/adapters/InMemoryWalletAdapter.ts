@@ -337,6 +337,34 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     return { ...reservation };
   }
 
+  async increaseReservation(
+    reservationId: string,
+    extraAmount: number,
+  ): Promise<WalletReservation> {
+    this.assertPositiveAmount(extraAmount);
+    const existing = this.reservations.get(reservationId);
+    if (!existing) {
+      throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+    }
+    if (existing.status !== "active") {
+      throw new WalletError(
+        "INVALID_STATE",
+        `Reservasjon ${reservationId} er ${existing.status}, kan ikke økes.`,
+      );
+    }
+    const account = await this.ensureAccountInternal(existing.walletId);
+    const available = account.depositBalance + account.winningsBalance - this.sumActiveReservations(existing.walletId);
+    if (available < extraAmount) {
+      throw new WalletError(
+        "INSUFFICIENT_FUNDS",
+        `Wallet ${existing.walletId} har ikke tilstrekkelig tilgjengelig saldo for økning (${available} < ${extraAmount}).`,
+      );
+    }
+    const updated: WalletReservation = { ...existing, amount: existing.amount + extraAmount };
+    this.reservations.set(reservationId, updated);
+    return { ...updated };
+  }
+
   async releaseReservation(
     reservationId: string,
     amount?: number,

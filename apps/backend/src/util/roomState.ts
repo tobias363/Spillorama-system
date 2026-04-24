@@ -51,6 +51,15 @@ export class RoomStateManager {
   readonly armedPlayerSelectionsByRoom = new Map<string, Map<string, TicketSelection[]>>();
   readonly displayTicketCache = new Map<string, Ticket[]>();
   readonly variantByRoom = new Map<string, RoomVariantInfo>();
+  /**
+   * BIN-693 Option B: reservasjons-id per (roomCode, playerId). Opprettes ved
+   * første bet:arm, økes ved påfølgende arm-calls, reduseres ved ticket:cancel,
+   * commites ved startGame, frigis ved game-abort eller player-disarm.
+   *
+   * In-memory — hvis backend restarter mister vi mapping men ekspiry-tick
+   * sweep'er reservasjoner i DB etter TTL (30 min). Samme som armedPlayerIds.
+   */
+  readonly reservationIdByPlayerByRoom = new Map<string, Map<string, string>>();
 
   // ── Armed players ──────────────────────────────────────────────────────────
 
@@ -96,11 +105,41 @@ export class RoomStateManager {
   disarmPlayer(roomCode: string, playerId: string): void {
     this.armedPlayerIdsByRoom.get(roomCode)?.delete(playerId);
     this.armedPlayerSelectionsByRoom.get(roomCode)?.delete(playerId);
+    this.reservationIdByPlayerByRoom.get(roomCode)?.delete(playerId);
   }
 
   disarmAllPlayers(roomCode: string): void {
     this.armedPlayerIdsByRoom.get(roomCode)?.clear();
     this.armedPlayerSelectionsByRoom.get(roomCode)?.clear();
+    this.reservationIdByPlayerByRoom.get(roomCode)?.clear();
+  }
+
+  // ── BIN-693 Option B: Reservation tracking ───────────────────────────────
+
+  getReservationId(roomCode: string, playerId: string): string | null {
+    return this.reservationIdByPlayerByRoom.get(roomCode)?.get(playerId) ?? null;
+  }
+
+  setReservationId(roomCode: string, playerId: string, reservationId: string): void {
+    let map = this.reservationIdByPlayerByRoom.get(roomCode);
+    if (!map) {
+      map = new Map();
+      this.reservationIdByPlayerByRoom.set(roomCode, map);
+    }
+    map.set(playerId, reservationId);
+  }
+
+  clearReservationId(roomCode: string, playerId: string): void {
+    this.reservationIdByPlayerByRoom.get(roomCode)?.delete(playerId);
+  }
+
+  /** Snapshot av alle reservation-id'er i rommet (playerId → reservationId). */
+  getAllReservationIds(roomCode: string): Record<string, string> {
+    const map = this.reservationIdByPlayerByRoom.get(roomCode);
+    if (!map) return {};
+    const out: Record<string, string> = {};
+    for (const [pid, rid] of map) out[pid] = rid;
+    return out;
   }
 
   // ── Lucky numbers ──────────────────────────────────────────────────────────
