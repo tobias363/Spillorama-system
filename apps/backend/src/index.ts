@@ -43,6 +43,7 @@ import { parseBingoSettingsPatch, normalizeBingoSchedulerSettings } from "./util
 import { getPrimaryRoomForHall, findPlayerInRoomByWallet, buildRoomUpdatePayload as buildRoomUpdatePayloadHelper, buildLeaderboard as buildLeaderboardHelper, type RoomUpdatePayload } from "./util/roomHelpers.js";
 import { RoomStateManager } from "./util/roomState.js";
 import { toDrawSchedulerSettings, createSchedulerCallbacks, createDailyReportScheduler, type PendingBingoSettingsUpdate } from "./util/schedulerSetup.js";
+import { WalletReservationExpiryService } from "./wallet/WalletReservationExpiryService.js";
 import { loadBingoRuntimeConfig } from "./util/envConfig.js";
 import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
@@ -876,6 +877,19 @@ drawScheduler = new DrawScheduler({
 drawScheduler.start();
 
 const dailyReportScheduler = createDailyReportScheduler({ engine, enabled: dailyReportJobEnabled, intervalMs: dailyReportJobIntervalMs });
+
+// BIN-693 Option B: Wallet-reservasjons-expiry-tick.
+const walletReservationExpiryTickMs = Math.max(
+  60_000,
+  Number(process.env.WALLET_RESERVATION_EXPIRY_TICK_MS ?? 300_000),
+);
+const walletReservationExpiryService = new WalletReservationExpiryService({
+  walletAdapter,
+  tickIntervalMs: walletReservationExpiryTickMs,
+  onTick: (count) => {
+    if (count > 0) console.log(`[wallet-reservation-expiry] expired ${count} stale reservations`);
+  },
+});
 
 // ── BIN-582: Legacy-cron ports (Swedbank sync, BankID expiry, RG cleanup) ────
 
@@ -2167,6 +2181,7 @@ const PORT = Number(process.env.PORT ?? 4000);
 
   dailyReportScheduler.start();
   jobScheduler.start();
+  walletReservationExpiryService.start();
 
   // BIN-170: Load rooms from Redis on startup (if Redis provider)
   if (roomStateProvider === "redis") {
