@@ -30,11 +30,11 @@ Uten Agent-portalen kan bingoverten ikke operere en fysisk hall. Dette er nå id
 | 12 | `WF_B_Spillorama Agent-Daily balance & settlement V1.0 - 30.08.2024.pdf` | 2024-08-30 | 20 | Add Daily Balance, Settlement (Metronia/OK Bingo/Franco/Otium/Norsk Tipping/Rikstoto/Rekvisita/Kaffe/Bank) |
 | 13 | `WF_B_Spillorama Screen Saver setting.pdf` | 2024-11 | 2 | Screen Saver på/av + multi-image + per-image tid |
 | 14 | `WF_B_Spillorama Agent V1.0- 06.01.2025 (1).pdf` | 2025-01-06 | 30 | Siste Agent-portal-design |
-| 15 | `WF_B_Spillorama Agent V1.0 - 14.10.2024 (1).pdf.crdownload` | 2024-10-14 | — | **Ufullstendig nedlasting** |
-| 16 | `WF_B_Spillorama Admin V1.0 - 13-09-2024 (1).pdf.crdownload` | 2024-09-13 | — | **Ufullstendig nedlasting** |
+| 15 | `WF_B_Spillorama Admin V1.0 - 13-09-2024.pdf` | 2024-09-13 | 21 | Admin V1.0: Approved Players+Import Excel, Hall Number, Ongoing Schedule (agents-not-ready-popup), Winners public display, Role Management, Close Day for Game 4+5, Deposit/Withdraw Request+History, Withdraw XML, Hall Account Report+Settlement (kilde til §4-6 nedenfor) |
+| 16 | `WF_B_Spillorama Agent V1.0 - 14-10-2024.pdf` | 2024-10-14 | 30 | Agent V1.0 (mellomversjon mellom #11 og #14). Identisk struktur med #14 men tidligere polish. Bekrefter 1:1 paritet av dashboard, Cash In/Out, Settlement, Unique ID, Physical Cashout, Players Management, Unique ID Transaction History, Hall Specific Report, Order Report |
 | 17 | `WF_F_Game 2 & 3_V1.0.pdf` | ukjent | — | **Ikke lest** |
 
-**Handling:** de to `.crdownload`-filene må re-lastes før fullstendig kartlegging.
+**Handling:** PDF 15 + 16 integrert 2026-04-24 — se [WIREFRAME_PDF16_17_GAPS_2026-04-24.md](./WIREFRAME_PDF16_17_GAPS_2026-04-24.md) for gap-analyse. PDF 17 (`WF_F_Game 2 & 3_V1.0.pdf`) gjenstår å leses.
 
 ---
 

@@ -1,9 +1,9 @@
 # Spillorama Wireframe Catalog
 
-**Version**: 2026-04-23  
-**Purpose**: Complete reference documentation of all 15 legacy Spillorama bingo system wireframes  
+**Version**: 2026-04-24  
+**Purpose**: Complete reference documentation of all 17 legacy Spillorama bingo system wireframes  
 **Scope**: Admin panel and Agent/Bingovert portal  
-**Total PDFs**: 15 (245+ pages)  
+**Total PDFs**: 17 (295+ pages)  
 **Date Range**: 2023-03 to 2025-01  
 
 ---
@@ -25,6 +25,8 @@
 13. [PDF 13: Agent Daily Balance & Settlement](#pdf-13-agent-daily-balance--settlement)
 14. [PDF 14: Screen Saver Setting](#pdf-14-screen-saver-setting)
 15. [PDF 15: Agent V1.0 Latest](#pdf-15-agent-v10-latest)
+16. [PDF 16: Admin V1.0 (13.09.2024)](#pdf-16-admin-v10-13092024)
+17. [PDF 17: Agent V1.0 (14.10.2024)](#pdf-17-agent-v10-14102024)
 
 ---
 
@@ -1705,6 +1707,1071 @@ Complete agent portal with game scheduling, ticket registration, physical cashou
 
 ---
 
+## PDF 16: Admin V1.0 (13.09.2024)
+
+**Date**: 13.09.2024  
+**Pages**: 21  
+**Scope**: Admin-panel konsolideringspakke: Approved Players + Import Excel, Hall Management (Hall Number-kolonne), Ongoing Schedule (Agents-not-ready-popup), Winners public-display, Role Management (15 moduler), Close Day for Game 1/4/5, Deposit Request & History (Pay in Hall + Vipps/Card), Withdraw in Hall/Bank/History, Hall Account Report + Settlement (Metronia/OK Bingo/Franco/Otium + Norsk Tipping/Rikstoto + Rekvisita/Kaffe/Bilag/Bank).  
+**Source**: `docs/wireframes/WF_B_Spillorama_Admin_V1.0_13-09-2024.pdf`
+
+### Purpose
+Konsolidert Admin V1.0-leveranse som dokumenterer den helhetlige administrasjons-panel-flyten i september 2024, inkludert alle sub-tabs under Players/Hall/Game/Report-menyene, samt Role Management-matrisen som styrer agent-tilganger. Denne PDF-en er den første som viser alle Settlement/Withdraw-flyter samlet.
+
+### Key Screens
+
+#### 16.1 Approved Players — Import Excel
+**Purpose**: Bulk-import av eksisterende spillere fra legacy-ark via Excel-opplasting  
+**Layout**: Tabellvisning (Username, Email, Phone Number, Hall Name, Approved by, Available Balance (kr), Status, Action) med Import Excel-knapp øverst
+
+**Fields**:
+- Import Excel-knapp (markørt A) — åpner filvelger for .xls/.xlsx
+- Filter-tabs: All / Active / Inactive (status)
+- Dropdown: Hall Name
+- Search by username
+
+**Tables**:
+- Kolonner: Username, Email, Phone Number, Hall Name, Approved by, Available Balance (kr), Status (Active/Inactive/Blocked), Action (kebab-menu med View/Edit/Delete)
+
+**Business Rules** (fra notes på pdf-side 1):
+- Excel-ark valideres mot skjema, støtter .xls/.xlsx
+- Duplikat-Photo ID ikke krevd — systemet skal akseptere oppføringer uten Photo ID
+- Enten Phone Number ELLER Email Address kreves per spiller (eller begge)
+- Kun kunder merket som Customer Number + Username importeres; resten går til error-rapport
+- Validering: e-post-format, duplikat-sjekk, header-row sjekk
+- Feedback: bekreftelses-popup med antall importert og feil-liste
+- Ved manglende Hall ID mappes spilleren inn basert på **Hall Number**-kolonnen:
+  - 0-99 → main hall
+  - 100-119 → Hamar 100
+  - 120-139 → Hønefoss 120
+  - 140-159 → Ringsaker (via 140)
+  - 160-179 → (brand)
+  - 180-199 → Lillehammer
+  - osv. i 20-trinn opp til 840
+  - Eks: `47-100-01` → hall 47 (Hamar 100), spiller-nr 01 i denne hallen
+- Note: Import av phone number + export skal kun være for admin, ikke agent-panel
+- Passordet genereres ved første innlogging (reset-link via mail)
+- Firstname/Lastname parses: 2 ord → first/last, 3 ord → first/mid/last, 4 ord → first two + last two
+
+**Query Notes** (fra pdf):
+- "Hva gjør man hvis spilleren allerede finnes med samme hall ID som ikke bør importeres?" — Svar: Spillere settes til "Inactive Hall", agent kan flytte dem.
+- "Er alle importerte spillere ansett som Online Player?" — Svar: Ja, begge kan spille både i hall og online.
+
+#### 16.2 Hall Management (med Hall Number-kolonne)
+**Purpose**: CRUD-vy over alle haller med ny **Hall Number**-kolonne (markørt B)  
+**Layout**: Data-tabell med Search + "+Add Hall"-knapp
+
+**Tables**:
+- Kolonner: Hall Id, Hall Name, **Hall Number** (101, 102, ...), IP Address, Address, City, Group of Hall, Status, Action (edit/delete)
+
+**Business Rules**:
+- "Hall number vil bli lagt til i kolonnen" (notat B)
+- Add Hall-knapp åpner creation-page (se 16.3)
+
+#### 16.3 Add Hall (form)
+**Purpose**: Opprett ny hall med Hall Number som nytt felt  
+**Layout**: Vertikalt form-layout
+
+**Fields**:
+- Hall Name (tekst)
+- **Hall Number** (numerisk, nytt felt)
+- IP Address
+- Address
+- City
+- Status (dropdown: Active/Inactive)
+
+**Buttons**:
+- Submit (grønn) / Cancel (rød)
+
+#### 16.4 Ongoing Schedule — Agents Not Ready-popup
+**Purpose**: Start-game-confirmations med agent-ready-sjekk  
+**Layout**: Schedule-vy (Schedule Name, Schedule Type: Manual, Date + Sub Game Details + Scheduled Game-liste) med modal popup
+
+**Popup content**:
+- "Attention! Some agents are not yet ready to play. Are you sure you want to start the game now?"
+- "**Agents not ready yet**: Agent 1, Agent 2, Agent 4"
+- Buttons: Start / Cancel
+
+**Business Rules**:
+- Confirmation popup skal liste agentene som ikke er klare
+- Implementeres både i Agent og Admin-panel
+
+**Tables (bakgrunn)**:
+- Sub Game-tabell: Sub Game ID, (Name), Start Time, End Time, Price, Prize, Total winning in the game, Status (Ongoing/Upcoming/Completed), Action (view/start/pause/info)
+- Scheduled Game-tabell: Game ID, Start Date, Day, Start Time — End Time, Schedule Name, Schedule Type (Auto/Manual)
+
+#### 16.5 Winners — Public Display (Admin-view)
+**Purpose**: Stor-skjerm-vy for vinnere med KPI-bokser og pattern-tabell  
+**Layout**: Spillorama-logo header + 3 store bokser med tall + tabell til høyre
+
+**KPI-bokser**:
+- "Total Numbers Withdrawn: 74"
+- "Full House Winners: 1"
+- "Patterns Won: 5"
+
+**Tables**:
+- Kolonner: Patterns (Row 1-5), Total number of players won, Winning Amount on a ticket, **Hall Belongs To** (ny kolonne: Thomas Hall / Bingo Hall)
+
+**Business Rules**:
+- Admin ser: Patterns included for completed games, Total number of players won in total, Corresponding prize amounts on a ticket
+- Hall Belongs To-kolonne viser opprinnelses-hallen for vinneren
+
+#### 16.6 Role Management — Agent Role Permission Table
+**Purpose**: Fine-grained tilgangsstyring per agent per modul  
+**Layout**: Form med Agent Name-dropdown + matrise
+
+**Fields**:
+- Agent Name (tekst, eks: "James")
+
+**Matrix**:
+- Rader (15 moduler): Player Management, Schedule Management, Game Creation Management, Saved Game List, Physical Ticket Management, Unique ID Management, Report Management, Wallet Management, Transaction Management, Withdraw Management, Product Management, Hall Account Report, Hall Account Report — Settlement, Hall Account Specific report, Payout Management, Accounting
+- Kolonner (5 actions): Create, Edit, View, Delete, Block/Unblock
+
+**Buttons**:
+- ADD / CANCEL
+
+**Business Rules** (fra notes):
+- Default: alle agenter får Player Management-tilgang
+- Schedule Management: Admin-schedules er read-only for agenter. Agenter kan lage/edite egne schedules. Agents-of-same-hall deler schedules.
+- Game Creation Management: Agent kan kun legge til haller i sin egen Group of Hall
+- Saved Game List: Agent ser games lagret av seg selv + admin. **Master-hall-agenter har default access.**
+- Hall Account Report: Agent ser kun sin egen hall. Games laget av agenter listes for admin + egen agent + intended recipients. Agenter kan lage games for alle haller i sin logged-in Group of Hall.
+- Cash In/Out Management: by default (alltid på)
+
+#### 16.7 Close Day — Papir Bingo (Game 1) list
+**Purpose**: List av Close Day-schedules per daily schedule ID  
+**Layout**: Dropdown (Choose a Game: Papir bingo) + tabell med "+Create Daily Schedule"-knapp
+
+**Tables**:
+- Kolonner: Daily Schedule Id, Start Date and End Date, Time Slot, Group Of Halls (dropdown: eg "Thomas GOH"), Master Hall (eg "Bingo Hall"), Status (Active), **Action** (4 ikoner: start/edit/stop/close-days)
+
+**Business Rules**:
+- Stop-ikon (markørt A) åpner confirm-popup for close days
+- Note: "Currently displayed for Game 1 only; will be implemented for All Game 1, 2, 3, 4 & 5"
+
+#### 16.8 View Close Days (per Daily Schedule)
+**Purpose**: List av lukkede dager for en gitt schedule  
+**Layout**: Header (Game Name: Papir Bingo, Daily Schedule ID) + tabell + ADD-knapp
+
+**Tables**:
+- Kolonner: Close Date, Start Time, End Time, Action (edit/delete)
+
+**Buttons**:
+- ADD (åpner 16.9)
+
+#### 16.9 Add Close Day — Date Picker Popup
+**Purpose**: Legg til close day(s) med start/slutt dato+tid  
+**Layout**: To kolonner (Start Date & Time / End Date & Time) hver med kalender + tidvelger
+
+**Fields**:
+- Start Date (kalender)
+- Start Time (tt:mm)
+- End Date (kalender)
+- End Time (tt:mm)
+
+**Buttons**:
+- Save
+
+**Business Rules**:
+- Admin velger start/slutt for spill-lukking; spillere ser "Closed" for valgte dager
+- **Case 1: Single Close Day** — samme dato, 00:00 → 23:59
+- **Case 2: Multiple consecutive days** — Start 25/01 00:00, End 28/01 23:59 → 4 sammenhengende dager lukket
+- **Case 3: Random multiple days** — legg til hver dag separat (Save for 25/01, Save for 28/01)
+- "Currently displayed for Game 1 only; will be implemented for All Game 1, 2, 3, 4 & 5"
+
+#### 16.10 Edit Close Day Popup
+**Purpose**: Rediger en eksisterende lukkedag  
+**Layout**: Samme som 16.9, pre-fylt med eksisterende verdier
+
+#### 16.11 Remove Close Day Confirmation Popup
+**Purpose**: Bekreft fjerning av lukkedag  
+**Content**:
+- Header: "Alert!!"
+- Melding: "Are you sure you want to remove this closed day?"
+- Buttons: Yes (grønn) / No (rød)
+
+#### 16.12 Close Day — Data Bingo (Game 4) list
+**Purpose**: Samme liste-vy som 16.7 men for Game 4 (Data Bingo)  
+**Layout**: Dropdown (Choose a Game: Data Bingo) + tabell
+
+**Tables**:
+- Kolonner: Game Id, Pattern Name (dropdown: Jackpot), Pattern Price (dropdown: 12000), Action (A: edit, B: close-day)
+
+**Business Rules**:
+- Edit-knapp åpner editor-side med Start Date/Time + End Date/Time-kolonner
+- Close Day-knapp går til 16.8
+
+#### 16.13 Game Creation — Game 4 (Data Bingo) Edit Form
+**Purpose**: Edit Start/End Date & Time, time-periods, patterns, bet amount  
+**Layout**: Form med flere seksjoner
+
+**Fields**:
+- Start Date and Time (kalender)
+- End Date and Time (kalender)
+- Dag-velger (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
+- Time Period per dag: Start Time + End Time (eks: 18:12)
+
+**Pattern Name & It's Prize table (10 slots)**:
+- Jackpot 120, O 20, Jackpot 100
+- Double H 8, M 30, Jackpot 500
+- 2L 200, Jackpot 20, Jackpot 100
+- Pyram 20, Jackpot 4, Jackpot 10
+- V 40, Jackpot 15, Jackpot 40
+
+**Bet Amount**:
+- 4 tickets × 4 rows med bet-beløp-input (1-4)
+
+**Fields**:
+- Total Seconds to display single ball (1-18 balls: 0.5s, 19-33 balls: 1s)
+- Bot Game (checkbox)
+- No. of Games (numerisk)
+
+**Buttons**:
+- Save / Cancel
+
+**Business Rules**:
+- Game 4 er single player → ingen ny schedule ID genereres ved edit; timings overrides kun
+- Note: "Close day functionality will be implemented for All Game 1, 2, 3, 4 & 5"
+
+#### 16.14 Game Creation — Game 5 (SpinnGo) Edit Form
+**Purpose**: Tilsvarende 16.13 men for Game 5 (SpinnGo)  
+**Layout**: Schedule-tabell (Game Id, Pattern Name dropdown: Jackpot 1, Pattern Price dropdown: 200) med edit/close-action
+
+**Form fields** (ved edit):
+- Start Date and Time / End Date and Time
+- Dag-velger (Mon-Sun)
+- Time Period per dag
+- Pattern Name & It's Prize (14 slots: Jackpot 1-3, Pattern 1-14 — Double H, 2L, Pyram, V)
+- Total Seconds to display single ball
+- Total Balls to Withdraw
+- Bot Game checkbox
+- No. of Games
+
+**Buttons**:
+- Save / Cancel
+
+#### 16.15 Deposit Request — Pay in Hall
+**Purpose**: Admin approval-queue for deposit-requests av typen "Pay in Hall"  
+**Layout**: Filter-bar (Start/End Date, Search, Select Type dropdown Pay in Hall/Vipps/Card) + CSV/Excel-export + Refresh Table + tabell
+
+**Tables**:
+- Kolonner: Order Number, Username, Date & Time, Hall Name, Deposit Amount, Status (Pending/Approved), Action (check/x)
+
+**Business Rules**:
+- For action: admin får confirmation-popup ved approve/reject
+- Note: "This same process will be applicable for Agent users as well"
+
+#### 16.16 Deposit Request — Vipps/Card
+**Purpose**: Samme som 16.15 men for Vipps/Card-deposits  
+**Tables**:
+- Kolonner: Order Number, Username, Date & Time, Hall Name, Deposit Amount, Status
+- Ingen Action-kolonne (Vipps/Card er auto-approved)
+
+#### 16.17 Deposit History — Pay in Hall
+**Purpose**: Historikk-liste over Pay in Hall-deposits (alle statuser)  
+**Tables**:
+- Kolonner: Order Number, **Transaction ID** (nytt), Username, Date & Time, Hall Name, Deposit Amount, Status
+
+#### 16.18 Deposit History — Vipps/Card
+**Purpose**: Samme som 16.17 men for Vipps/Card  
+**Tables**:
+- Kolonner: Order Number, Transaction ID, Username, Date & Time, Hall Name, Deposit Amount, Status
+
+#### 16.19 Withdraw in Hall
+**Purpose**: Approve/Reject-queue for withdrawals der spilleren henter kontant i hall  
+**Layout**: Filter-bar (Start/End Date, Search) + CSV/Excel-export + tabell
+
+**Tables**:
+- Kolonner: Username, Withdraw Amount, Hall Name, Date & Time, Status (Pending), Action (check/x)
+
+#### 16.20 Withdraw in Bank — XML Export
+**Purpose**: Approve/Reject-queue for bank-withdrawals med XML-fil-generering for regnskap  
+**Layout**: Filter-bar + CSV/Excel-export + tabell
+
+**Tables**:
+- Kolonner: Date & Time, Username, Account Number (eks 1234567890), Withdraw Amount (4000), Status, Action (check/x)
+
+**Business Rules** (Query-boks):
+- "Hver dag om morgenen må XML-fil genereres og sendes til:
+  1. Hver tilgjengelig agent i event (samme e-post), eller kun designert agent
+  2. Enten per-hall XML eller samlet hall-spesifikk XML"
+- Note: "This same process will be applicable for Agent users as well"
+
+#### 16.21 Withdraw History
+**Purpose**: Historikk over alle withdrawals (Hall + Bank kombinert)  
+**Layout**: Filter-bar (Start/End, Search, **Select Withdraw Type** dropdown: Withdraw in Hall / Withdraw in Bank)
+
+**Tables**:
+- Kolonner: Date & Time, Transaction ID, Username, Account Number, Hall Name, Amount, Status (Pending/Approved)
+
+#### 16.22 Hall Account Report — Liste over haller
+**Purpose**: Admin ser alle hall-account-rapporter (én rad per hall)  
+**Layout**: Sidebar-entry "Hall Account Report" (markørt A) med sub-items (Hall Account report — View, Hall Account report — Settlement report)
+
+**Tables**:
+- Kolonner: Hall Id, Hall Name, Action (View-ikon)
+
+**Business Rules**:
+- View-ikon redirecter til 16.23 for den hallen
+
+#### 16.23 Hall Account Report — View (per hall)
+**Purpose**: Daglig Bingonett-regnskap for én hall over valgt periode  
+**Layout**: Filter (From/To + Search + Real/Bot-dropdown) + Download + stor tabell
+
+**Tables (kolonner)**:
+- Date, Day, Resultat Bingonet, Metronia, OK bingo, Francs, **Otium** (ny?), Radio Bingo, Norsk Tipping, Norsk Rikstoto, **Rekvisita**, **Kaffe-penger**, **Bilag**, **Gevinst overf. Bank**, Bank terminal, Innskudd dropsafe, Inn/ut kasse, **Diff**, **Kommentarer**
+
+**Sum-row**: Sum For UKE (total)
+
+**Business Rules**:
+- Filter: From/To date
+- Filter: Real / Bot (radio)
+- Download PDF iht dato
+- Note: "If multiple agent submit the settlement, that settlement should be added in the list of the particular day"
+
+#### 16.24 Hall Account Report — Settlement Report
+**Purpose**: Samme som 16.23 men med Action-kolonne (edit/download) per day  
+**Tables**:
+- Samme kolonner som 16.23 + Action (edit-ikon + download-receipt-ikon)
+- Comment-kolonne med tekst "Bilag (Upload receipt)"
+
+**Business Rules**:
+- Admin kan edit settlementen + download receipt som ble lastet opp
+- Hvis multiple agents submitter settlement → alle legges i listen den dagen
+- Hvis agent submitter edit → edit amount reflekteres i hall account report
+
+#### 16.25 Settlement — Edit Popup (1:1 lik Agent Settlement)
+**Purpose**: Admin kan editere en gitt dag sin settlement (popup identisk med Agent-popup 17.10)  
+**Layout**: Modal med 3 seksjoner (Machine Breakdown, Shift Delta, Notice)
+
+**Header**:
+- Hall: Game of Hall
+- Date: (dato-input)
+- Name: (hall-navn auto-fyllt)
+
+**Machine Breakdown Table**:
+- Rader: Metronia (Machine ID), OK Bingo (Machine ID), Franco (Machine ID), Otium (Machine ID), Norsk Tipping Dag (add as machine ID), Norsk Tipping Totalt, Norsk Rikstoto Dag (add as machine ID), Norsk Rikstoto Totalt, Rekvisita (Props), Servering/kaffepenger (Servings + coffee), Bilag (recipt), Bank (Bank), Gevinst overføring bank (prices transferred via bank), Annet (Other), **Totalt (Total)**
+- Kolonner: IN, OUT, **Sum (til kasse-fil)**
+
+**Bilag-rad**: har "Upload receipt"-ikon/knapp
+
+**Shift Delta-seksjon**:
+- Endring opptall kasse (difference daily balance):
+  - Kasse start skift (30558)
+  - Kasse endt skift (før dropp) (46169)
+  - Endring (6613 = formel-resultat)
+- Fordeling av endring opptall kasse på dropsafe og kasse:
+  - Innskudd dropsafe (settlement til kasse-fil) (1000)
+  - Påfyll/ut kasse (withdraw from t…) (5613)
+  - Totalt (Total dropsafe/payfyll) (6613)
+- **Difference in shifts** (11)
+
+**Notice**:
+- Fritt tekstfelt
+
+**Buttons**:
+- Update (admin-versjon) / Submit (agent-versjon 17.10)
+
+**Business Rules**:
+- Dato kan editeres ved submit
+- Navn auto-fetches
+- Beløp: IN/OUT for Metronia/OK Bingo/Franco/Otium/Norsk Tipping Dag/Norsk Rikstoto Dag; kun IN for Rekvisita, Serving, **Bilag**, Bank; kun OUT for Gevinst overføring
+- **Norsk Tipping Dag reflekteres IKKE i rapport**, kun Totalt
+- **Norsk Rikstoto Dag reflekteres IKKE i rapport**, kun Totalt
+- Bilag har upload-receipt
+- Formel Endring: `Kasse endt - Kasse start = Endring` (eks: 46169-30558 = 6613)
+- Difference in shifts: `(Totalt dropsafe+kasse – Endring) + Endring – Totalt Sum (kasse-fil)` (eks: (6613-6613) + 6613 - 6602 = 11)
+- "If agent 1 submitter settlement og agent 2 også, differanse + sum vises i hall account report"
+
+---
+
+## PDF 17: Agent V1.0 (14.10.2024)
+
+**Date**: 14.10.2024  
+**Pages**: 30  
+**Scope**: Agent-portal V1.0 (MELLOMVERSJON mellom PDF 11 Agent V2.0 10.07.2024 og PDF 15 Agent V1.0 Latest 06.01.2025). Dekker Dashboard, Cash In/Out Management, Add/Withdraw Unique ID, Add/Withdraw Registered User, Create New Unique ID, Sell Products, Register More/Sold Tickets, Next Game-panel (Start/PAUSE/Ready-check), Check for Bingo, Physical Cashout, Players Management, Add Physical Ticket, Unique ID List + Details + Transaction History, Order History, Past Game Winning History, Sold Ticket, Hall Specific Report, Hall Account Report + Settlement.  
+**Source**: `docs/wireframes/WF_B_Spillorama_Agent_V1.0_14-10-2024.pdf`
+
+### Purpose
+Komplett agent-portal-spec som mellomledd mellom V2.0 (10.07.2024, 30 sider) og "Latest" (06.01.2025, 30 sider). Denne versjonen inneholder endelig **Settlement**-popup-struktur og definerer **Register Sold Tickets**-flyten med `Final ID of stack`-scanner. Strukturelt lik V1.0 Latest, med mindre polish-forskjeller.
+
+### Key Screens
+
+#### 17.1 Agent Dashboard
+**Purpose**: Landing page for agent med KPI + latest requests + top players + ongoing games  
+**Layout**: Top header (Group of Hall Name - Hall Name, Cash In/Out-knapp, Language toggle, Notification-bjelle, Profile) + 4 hovedseksjoner
+
+**Header**:
+- Sidenavigation toggle (hamburger, markørt G)
+- Group of Hall Name — Hall Name (linket, markørt C)
+- **Cash In/Out** (knapp, markørt I)
+- **Language toggle** (NO/EN, markørt J)
+- Notification-bjelle
+- Profile (markørt H, dropdown: Profile)
+
+**Sidebar (markørt A)**:
+- Dashboard
+- Players Management (v)
+- Game Management (v)
+
+**Widget: Total Number of Approved Players** (markørt B):
+- Stor tall-boks (eks: 250)
+
+**Widget: Latest Requests** (markørt D):
+- Med `-` og `x` til å minimize/close
+- Header: "Total Pending Requests: 10"
+- Tabell: Username, Email ID, Requested Date and Time
+- 5 rader
+- Link: "View all Pending Request"
+
+**Widget: Top 5 Players** (markørt E):
+- Profil-avatar + Username × 5 spillere
+- Click → redirect til View Profile
+
+**Widget: Ongoing Games** (markørt F):
+- Tabs: Game 1, Game 2, Game 3, Game 4
+- Tabell: Main Game ID, Game Name, Start Date & Time, End Date & Time, Price per Ticket, Price of Lucky Number, Notification Start Time, Total seconds to display ball, No of minimum tickets to start the game, Status (Active)
+- "View all Games"-link
+
+**Business Rules**:
+- Language toggle: switch between English/Norwegian (statisk UI + dynamisk data som hall-navn)
+- Periodic popup every 10-15 min for pending deposit requests ("Cash In/Cash Out" tab displays pending count)
+
+#### 17.2 Cash In/Out Management — Main View
+**Purpose**: Hovedvy for agent cash-operasjoner (shift, pengehandling, game-kontroll)  
+**Layout**: Header + Cash-balanse-panel + 6 knapper + Next Game-panel + Ongoing Game-panel + Completed Games
+
+**Top header**:
+- Cash In/Out Management-tittel
+- **Back**-knapp (markørt M)
+- **Shift Log Out**-knapp (markørt F)
+- **Shift End**-knapp (vises i enkelte flyter)
+
+**Cash Balance Panel (markørt B)**:
+- "Agent Name: Nsongka Thomas"
+- Tabell (Title × Amount):
+  - Total Cash Balance: 23000
+  - Total Cash In: 20000
+  - Total Cash Out: 30000
+  - Daily Balance: 20000 (markørt C)
+- **Add Daily Balance** (markørt D) — åpner popup 17.5
+- **Control Daily Balance** — åpner popup 17.3
+- **Settlement**-knapp — åpner popup 17.10
+- **Today's Sales Report**-knapp (markørt E)
+
+**Cash In/Out Buttons (markørt F, 6 stk)**:
+- Add Money — Unique ID (grønn)
+- Add Money — Registered user (grønn)
+- Create New Unique ID (grønn)
+- Withdraw — Unique ID (rød)
+- Withdraw — Registered user (rød)
+- Sell Products (grønn)
+
+**Next Game Panel (markørt: "Next Game: Game No. Game Name")**:
+- Register More Tickets (brun)
+- Register Sold Tickets (grønn)
+- **Start Next Game** (blå, stor) — "Next Game: Color Draft"
+- **i**-knapp (lilla) — "Next Game: Color Draft" (info popup med Ready/Not Ready agents, markørt N)
+
+**Ongoing Game Panel**:
+- "Ongoing Game: Game No. Game Name"
+- **SOLD TICKETS OF EACH TYPE** (markørt H):
+  - My Halls: "SW23, LW.45, SY4; LY32, 32SP, 15LP" (Small White 23, Large White 45, etc.)
+  - Group Of Halls: "SW93, LW.98, SY24; LY78, 89SP, 115LP"
+- **PAUSE Game and check for Bingo** (blå)
+- Resume Game (brun)
+- i-knapp (lilla)
+- See all drawn numbers (markørt K)
+- Siste trukne ball (markørt I, rund)
+- Total balls drawn (markørt J, stor tall-boks)
+
+**Completed Games**:
+- Tabell: Sub game ID, Sub Game Name (eks: Mystery), Start Time, Action (view-ikoner)
+
+#### 17.3 Control Daily Balance Popup
+**Purpose**: Submit shift-rapport med daily balance + total cash balance  
+**Layout**: Modal popup
+
+**Fields**:
+- Daily balance (numerisk)
+- Total cash balance (numerisk)
+
+**Buttons**:
+- Submit
+
+#### 17.4 Settlement Popup (1:1 identisk med 16.25)
+Se 16.25 for full spec. Agent-versjonen har "Submit"-knapp i stedet for "Update".
+
+**Business Rules (unikt for agent)**:
+- "If agent 1 submitter settlement og agent 2 også submitter → differansen kommer i hall account report"
+
+#### 17.5 Add Daily Balance Popup
+**Purpose**: Agent legger til start-skift-balance (kun på skift-start)  
+**Layout**: Modal popup
+
+**Fields**:
+- "Current Balance: 0 kr"
+- Enter Balance (numerisk)
+
+**Buttons**:
+- ADD / Cancel
+
+**Business Rules**:
+- "Vi administrerer ikke noen safe-balance for agenter i denne versjonen"
+- Agent kan KUN legge til balance hvis session ikke startet eller session er logged ut fra forrige agent
+
+#### 17.6 Shift Log Out Popup
+**Purpose**: Confirm logout av skift  
+**Layout**: Modal popup
+
+**Content**:
+- "Are you sure you want to logout?"
+- Checkbox: **Distribute winnings to all physical players**
+- Checkbox: **Do you want to transfer the register ticket to next agent.**
+- Link: ">> View Cashout Details"
+
+**Buttons**:
+- Yes / Cancel
+
+**Business Rules**:
+- Distribute winnings checkbox: ved hake → alle pending cash-outs markeres som rewarded i systemet
+- Transfer register ticket: register-ticket overføres til neste agent
+- View Cashout Details: åpner cashout-data for hver ticket spilt under shiftet
+
+#### 17.7 Add Money — Registered User Popup
+**Purpose**: Agent legger til balance på registrert spiller  
+**Fields**:
+- Enter Username
+- Add Amount (med "Current Balance: 2000kr" til høyre)
+- Select Payment Type (dropdown: Cash/Card)
+
+**Buttons**:
+- ADD / Cancel
+
+**Business Rules**:
+- Agent klikker ADD → confirmation popup → system oppdaterer player wallet + daily balance
+- Cancel uten oppdateringer
+- Note: "When agent add balance in player's account, system will update Daily Balance and player wallet amount"
+
+#### 17.8 Withdraw — Registered User Popup
+**Purpose**: Agent trekker ut balance fra registrert spiller  
+**Fields**:
+- Enter Username
+- Add Amount (med "Current Balance: 2000kr")
+- Select Payment Type (dropdown)
+
+**Buttons**:
+- Withdraw / Cancel
+
+#### 17.9 Create New Unique ID
+**Purpose**: Generer unikt ticket-ID for walk-in spiller uten konto  
+**Layout**: Skjema-side (ikke popup, full side)
+
+**Fields**:
+- Unique ID Purchase Date and Time (kalender+tid)
+- Unique ID Expiry Date and Time (kalender+tid)
+- Balance Amount (numerisk)
+- Hours Validity (numerisk, **default minimum 24 hours**)
+- Payment Type (dropdown: Cash/Card)
+
+**Buttons**:
+- PRINT / CANCEL
+
+**Business Rules**:
+- Start Date+Time = current date/time by default (editable)
+- End Date+Time agent må velge
+- Balance Amount agent skriver inn
+- Hours Validity: basert på Start-End, **minimum 24 timer** for å kunne spille
+- Payment Type: Cash/Card
+- Note: "Unique ID vil være aktiv mellom start-slutt. Unique ID er generert per hall"
+- Note: "Ettersom en agent kan ha flere haller, må agent velges først i Admin"
+- PRINT: agent kan printe ID etter generering. Hvis PRINT trykkes og det er tom for balanse, vises notis — ID kan ikke brukes å spille.
+- CANCEL: etter generering kan agent ikke avbryte (ID er allerede opprettet)
+- Agent kan legge til mer balanse til eksisterende Unique ID via "Add Money to the Existing"
+
+#### 17.10 Add Money — Unique ID Popup
+**Purpose**: Legg til balanse på eksisterende Unique ID  
+**Fields**:
+- Enter Unique ID
+- Add Amount
+- Select Payment Type (dropdown)
+
+**Buttons**:
+- Yes / No
+
+**Business Rules**:
+- Yes → entered amount legges til i wallet. Hvis spiller spiller når pengene legges til, får player "If the player is playing the game by entering it"-notice
+- No → retur til forrige side
+- For Example: Agent genererer Unique ID med 200kr payment status **Online**. Ut av 200kr hadde spilleren 100kr igjen. Så hvis agenten legger til 200kr, vises **170kr** for Unique ID som Unique ID-oppretting-kostnad (?) og **200kr** er payment status **Cash**
+- I slutten er remaining balance 170kr + 200kr nyatt = begge wallets
+
+#### 17.11 Withdraw — Unique ID Popup
+**Purpose**: Trekk ut balanse fra Unique ID (kun Cash)  
+**Fields**:
+- Enter Unique ID
+- Add Amount ("Current Balance: 2000kr")
+- Select Payment Type (dropdown — **kun cash-option tilgjengelig** for Unique ID)
+
+**Buttons**:
+- Withdraw / Cancel
+
+**Business Rules**:
+- Kun Cash-option for Unique ID withdraw
+- Cancel redirecter til forrige side
+
+#### 17.12 Sell Products (Kiosk)
+**Purpose**: Kjop av kaffe/sjokolade/ris etc. via agent-kasse  
+**Layout**: Horisontal rad med produkter + produkt-kurv + totalsum + payment
+
+**Fields**:
+- Produktknapper (Coffee, Choclate (2), Rice, Coffee) med `-` ikon for decrement
+- Cart-ikon (handlekurv) til venstre
+- "Total Order Amount: 80" til høyre
+- Cash / Card knapper (markørt D)
+
+**Business Rules**:
+- Agent velger kvantum via `-`-ikon per produkt
+- Minus deselekter produktet
+- Agent ser antall selected produkter
+- Payment: Cash / Card-knapp → submit order
+- Cash-transaksjon oppdaterer total cash og total daily balance
+
+#### 17.13 Register More Tickets Popup
+**Purpose**: Agent skanner/registrerer nye fysiske tickets (stack-nivå)  
+**Layout**: Modal popup
+
+**Fields**:
+- Initial ID of the stack (numerisk) — pilikon → Final ID of the stack
+- Scan / Submit knapper
+
+**Scanned Tickets Table**:
+- Kolonner: Ticket Type, Initial ID, Final ID, Tickets Sold, Action (edit/delete)
+- Eksisterende typer: Small Yellow (1-100), Small White (101-200), Large Yellow (201-300), Large White (301-400), Small Purple (401-500), Large purple (501-600)
+
+**Business Rules**:
+- Agent kan åpne popup ved F1 (hotkey) eller klikke "Register More Tickets"
+- Agent kan scanne eller sette inn initial+final ID
+- Scan: auto-fill Initial ID → system oppdaterer Final ID basert på stack-tellet (eks 100, 150)
+- "Hall og scanned tickets må matche med info i physical ticket database, ellers error"
+- Agent må registrere tickets hver dag før schedule starter
+- Note: Ved Hot key "F1" kan agent registrere mer ticket til listen
+
+#### 17.14 Register More Tickets — Edit Popup
+**Purpose**: Rediger en eksisterende ticket-stack  
+**Fields**:
+- Initial ID of the stack (1)
+- Scan / Submit
+
+#### 17.15 Register Sold Tickets Popup
+**Purpose**: Agent registrerer solgte tickets før next game starter  
+**Layout**: Modal popup
+
+**Header**:
+- "Game: Wheel of Fortune" (tittel på neste spill)
+
+**Fields**:
+- Final ID of the stack (numerisk)
+- Scan / Submit knapper
+
+**Sold Tickets Table**:
+- Kolonner: Ticket Type, Initial ID, Final ID, Action (delete)
+- Eksempel: Small Yellow (1-10), Small White (101-20)
+
+**Buttons**:
+- Submit / Cancel
+
+**Business Rules** (utdrag fra notes):
+- Agent kan se navn på next game
+- Agent ser liste av alle ticket types tilgjengelig for dette spillet
+- For hver ticket type kan agent skrive inn eller scanne ticket ID
+- Ved scanning: system sjekker Initial ID av scanned tickets, alle subsequent scanned settes som Final ID
+- Ved entering: system evaluerer ID i range
+- System validerer automatisk at alle tickets med ID < given er merket som solgt
+- **Pre-game scanning eksempel**: 100 tickets (1-100) med yellow designert Small Yellow; 101-200 for Large Yellow. Ved 9:00 AM Wheel of Fortune-starting: agent scanner 10 Small Yellow (ID 1-10 som er solgt). Agent skriver "11" for å scanne → system informerer at tickets 1-10 er sold, resterende 11-100 carry-forward til next game. Neste game 10:00: 20 nye, agent scanner 31 → system vet 11-20 er sold. Osv.
+- Note: "Scan module registrerer kun for NEXT game"
+- Hotkeys: F1 = submit ticket + add til liste; Enter = submit scan ticket; Cancel = cancel scan ticket
+
+#### 17.16 Next Game — Start Flow (variant 1: Bingo mid-game)
+**Purpose**: Agent starter next game eller pauser nåværende for Bingo-check  
+**Layout**: Main CashInOut page + **Check for Bingo**-popup
+
+**Check for Bingo Popup**:
+- "Enter Ticket Number" (input)
+- GO-knapp
+
+**Business Rules**:
+- Agent trykker "PAUSE Game and check for Bingo" → popup
+- Agent skriver ticket-nummer → GO → pattern-validerer → viser 17.22 (5x5 grid med patterns)
+
+#### 17.17 Next Game — Hall Info Ready/Not Ready-popup (variant 2: Pre-start sjekk)
+**Purpose**: Agent ser hvilke haller i group-of-halls som er klare før start  
+**Layout**: Main + **Hall Info**-popup
+
+**Hall Info Popup**:
+- Header: "Ready to go" + hall-liste (eks: Gullerene Bingos)
+- Header: "Not ready yet" + hall-liste (Centre, Notodden bingohal)
+
+**Business Rules**:
+- Popup vises ved klikk på "i"-knappen ved Start Next Game
+- Agent ser hvilke haller som er klare til å spille
+
+#### 17.18 Next Game — Are You Ready (variant 3)
+**Purpose**: Master hall signaliserer "Ready" til group-of-halls  
+**Layout**: Main CashInOut page med stor "Are You Ready?"-knapp
+
+**Buttons**:
+- Are You Ready? (stor knapp)
+- Ready to Go (grønn) — sekundær
+- Check for Bingo (stor blå)
+
+**Business Rules**:
+- Master-hall-agent trykker "Are You Ready?" for å signalisere klar
+- Når alle haller i GoH er klare → spillet kan starte fra master
+- Next Game-panel viser "Game ID Game Name (Non — Master Hall)"
+
+#### 17.19 Next Game — Register Next Tickets (variant 4: Before start)
+**Purpose**: Agent sees "Register More Tickets + Register Sold Tickets + Start Next Game + i" kombinert med "Completed Games"-tabell  
+**Layout**: Main CashInOut page med alle Next Game-knapper + ekstra Transfer Hall Access + Countdown Timer-widgets
+
+**Transfer Hall Access widget**:
+- Velg hall fra dropdown (eks Hall 1, Hall 2, Hall 3)
+- Submit-knapp
+
+**Countdown Timer widget**:
+- Count (dropdown: 2 min, 3 min, etc.)
+- Launch-knapp
+
+**Business Rules**:
+- Transfer Hall Access: agent kan overføre hall-kontroll til annen agent (delegering)
+- Countdown Timer: agent setter 2-min / 3-min pre-start timer for neste spill
+
+#### 17.20 Players Management — Approved Players (Agent-view)
+**Purpose**: Samme som Admin Approved Players men agent ser kun sin hall  
+**Layout**: Tabell med Import Excel + Filter (All) + search
+
+**Tables**:
+- Kolonner: Username, Email ID, Phone Number, Approved by, Available Balance (in Kr), Status, Action (menu: View Profile, Edit Profile, Add Balance, Transaction History, Game Details, Block/Unblock, Delete)
+
+**Business Rules** (fra notes):
+- 3 options: approve/reject players, pending requests, rejected requests (markørt A)
+- Action-menu har **"Add Balance"** (opener popup)
+- Ny note: **"We need to hide the POINTS data from the Admin/Agent Panel as well"** (markørt D)
+
+#### 17.21 Players Management — Add Balance Popup
+**Purpose**: Agent legger til balance til en spiller fra players-liste  
+**Layout**: Modal popup (samme som 17.7 Add Money — Registered User)
+
+**Fields**:
+- Username or User ID (readonly, fra row)
+- "Current Balance: 1000 kr"
+- Enter Balance (numerisk)
+
+**Buttons**:
+- ADD / Cancel
+
+**Business Rules**:
+- Samme som Add Money — Registered User
+- Ved ADD: confirmation popup, player wallet + daily balance oppdateres
+- "Ved add balance i player's account, system oppdaterer Daily Balance og player wallet amount"
+
+#### 17.22 Add Physical Tickets (agent-view)
+**Purpose**: Agent registrerer fysisk ticket-stack før spill starter  
+**Layout**: Form med Scanned Tickets-tabell
+
+**Fields**:
+- Initial ID of the stack (numerisk)
+- Final ID of the stack (numerisk)
+- Pilikon → Scan / Submit
+
+**Tables**:
+- Kolonner: Ticket Type, Initial ID, Final ID, Tickets Sold, Action (delete)
+- Rader: Small Yellow (1-100, 10 sold), Small White (101-200, 20 sold), Large Yellow (201-300, 10 sold), Large White (301-400, 40 sold), Small Purple (401-500, 0 sold), Large purple (501-600, 0 sold)
+
+**Business Rules**:
+- Agent kan registrere tickets ved å sette inn eller scanne Initial ID av stacks
+- System evaluerer ID og gjør tickets available for sale
+- Note: "Hall og scanned tickets må matche physical ticket database"
+- Agent må registrere tickets hver dag **før schedule starter**
+- Pre-game eksempel som i 17.13/17.15
+- Note: "Tickets added by one agent er automatisk available for andre agents i samme hall"
+
+#### 17.23 View Sub Game Details (agent)
+**Purpose**: Agent ser detaljer for et spesifikt sub-game (pre-game-config + sold tickets)  
+**Layout**: Form m/felles skjema + to nested tabeller
+
+**Fields**:
+- Sub Game (textbox: Wheel of Fortune)
+- Start Time / End Time (markørt B)
+- Notification Start Time (30s)
+- Total Seconds to display Single ball (4 Seconds, Ent Time: 9:20 AM)
+
+**Ticket Color / Type and Price**:
+- Small Yellow (10), Large Yellow (20)
+
+**Game Name: Row/Pattern Prize**:
+- Small Yellow: Row 1, Row 2, Row 3, Row 4, Full House (alle med Price-input)
+- Large Yellow: samme
+
+**Total Numbers displayed already (markørt C)**:
+- "10, 45, 74, 16, 25, 66, 33, 56, 45, 21, 70, 63, 67, 22, 53, 30, 44, 67, 3, 7, 21"
+
+**User Type selector + search (markørt E-F)**:
+- User Type dropdown: Online user / Unique ID
+
+**Online User Tickets Table (markørt D)**:
+- Kolonner: Player Name, User Type, Start Date & Time, Game Name, Ticket Color/Type, Ticket Number, Ticket Price, Ticket Purchased From (Wallet/Points), Winning Pattern (Row 1-Row 4 + dropdown), Total Winnings, **Spin Wheel Winnings** (input), **Treasure Chest Winnings** (input), Mystery Winnings, Action (view-ikon)
+
+**Physical Ticket Table (markørt G-H-I)**:
+- Kolonner: Ticket Number, Unique ID, **User Type (Physical Ticket User)**, Start Date & Time, Game Name, Ticket Color/Type, Ticket Price, Winning Pattern, Total Winnings, Spin Wheel Winnings, Treasure Chest Winnings, Mystery Winnings, Action (view/edit)
+- "Add Physical Ticket"-knapp (markørt I) — åpner 17.22
+
+**Business Rules**:
+- Admin kan view sub-game details med fields above
+- Admin kan view total numbers displayed already
+- Admin kan view ticket details fra Unique ID og Online user
+- Agent kan entre winnings for Spin Wheel + Treasure Chest på vegne av spilleren
+- Agent kan filter liste på Group of Hall + Hall
+- Agent kan add physical ticket kun for next upcoming game
+
+#### 17.24 Add Physical Ticket Popup (inne i Sub Game Details)
+**Purpose**: Legg til physical ticket til et sub-game direkte fra detail-view  
+**Layout**: Modal popup
+
+**Fields**:
+- Game (textbox, pre-fylt: Wheel of Fortune)
+- Final ID of the Stack (numerisk)
+- Scan / Submit
+
+**Scanned Tickets Table**:
+- Kolonner: Ticket Type, Initial ID, Final ID, Action (delete)
+- Rader: Small Yellow (1-10), Small White (101-20)
+
+**Buttons**:
+- Submit / Cancel
+
+**Business Rules**:
+- Note: "Physical ticket player får auto-cashout fra systemet så fort winnings er klare"
+
+#### 17.25 Unique ID List
+**Purpose**: Liste av alle Unique IDs agent har opprettet (eller alle i hallen)  
+**Layout**: Filter-bar (From/To date, Search, Reset) + tabell
+
+**Fields** (markørt):
+- Date range picker (From/To, markørt C)
+- Search-input (markørt E)
+- Reset (markørt D)
+
+**Tables**:
+- Kolonner: Unique ID, Created by (Ag 1/Admin), Purchase Date and Time, Expiry Date and Time, Balance Amount, Status of Unique ID (Active/Inactive), Action (3 ikoner: View, Transaction History, Withdraw — markørt F)
+
+**Business Rules**:
+- Hvis agent's assigned hall+agent matcher hallen som opprettet Unique ID → view+edit access
+- Agent som deler hall kan access andre agents' Unique IDs
+
+#### 17.26 Unique ID Details (View Action)
+**Purpose**: Detalj-vy av en spesifikk Unique ID  
+**Layout**: Field-grid med flere seksjoner
+
+**Fields (A-H)**:
+- Unique ID (B): 13343
+- Unique ID Purchase Date (C): 01-09-2020, 4:00
+- Unique ID Expiry Date (D): 02-09-2020, 4:00
+- Hours Validity (E): 24 hours
+- Status (F): Active (grønn)
+- Total Balance (G): 100 kr
+- Overall Winnings (H): 700 kr
+- **Choose Game Type (I)** (dropdown: Game 1/2/3/4)
+
+**Per-game Details Table (markørt J)**:
+- Kolonner: Game ID, Child Game ID, Unique Ticket ID, Ticket Price, Ticket Purchased from (Wallet/Points), Winning Amount (kr), Winning Row
+
+**Buttons (K-L)**:
+- Print (K) — print hele Unique ID-data
+- Re-Generate Unique ID (L) — generer ticket igjen hvis print feilet
+- Back
+
+**Business Rules**:
+- For Game 2: Game ID, Child Game ID, Unique Ticket ID, Ticket Price, Ticket Purchased from, Winning Amount (kr), Winning Row
+- "Winning amount + row calculation = existing"
+- Re-generate: kun for å printe ticket igjen ved print-feil
+
+#### 17.27 Unique ID — Transaction History
+**Purpose**: Vis alle transaksjoner for én Unique ID  
+**Layout**: Filter (From/To + Search + Reset) + tabell
+
+**Tables (markørt B-C)**:
+- Kolonner: Order Number, Transaction ID, Date and Time, **Transaction Type** (Credit/Debit, markørt C), Amount, Status
+- 5 example rows (OD1-OD5 med Credit/Debit)
+
+**Business Rules**:
+- Agent ser transaksjoner inkl purchased tickets, winnings, losses, added balance, withdrawals
+- Date range filter + Reset
+
+#### 17.28 Unique ID — Withdraw Popup
+**Purpose**: Withdraw fra Unique ID-liste  
+**Layout**: Modal popup
+
+**Fields**:
+- Unique ID: 21345 (readonly)
+- Balance: 2000 (readonly)
+- Enter Amount (numerisk)
+
+**Buttons**:
+- Withdraw / Cancel
+
+**Business Rules**:
+- Note: "Kun cash option som withdraw type"
+- Ved Withdraw: blir addet til Cash Out History av Unique ID
+
+#### 17.29 Order History (for Sell Products)
+**Purpose**: List av alle product-orders fra 17.12  
+**Layout**: Filter (From/To, Search, Reset, Payment Type dropdown) + tabell
+
+**Tables**:
+- Kolonner: Order ID, Date and Time, Player Name, Total Order, Payment Type (Cash/Card), Action (view)
+
+**Business Rules**:
+- Payment Type filter: Cash / Online payment
+- View-action åpner 17.30
+- Note: "Order History table will be added for the Admin portal as well. Just 2 new columns will be added in the reports"
+
+#### 17.30 View Order Details
+**Purpose**: Detalj-vy av en product-order  
+**Layout**: Form med felt + produkt-tabell
+
+**Fields**:
+- Order ID: 123456789543
+- Player Name: Player 1
+- Order Date and Time: 19/7/2023 13:00
+- Payment Type: Cash
+
+**Tables**:
+- Kolonner: Product Name, Image, Price per quantity, Quantity, Total Amount
+- Eks: Name 1 (image + 40 + 2 + 80), Name 2 (image + 400 + 1 + 400), Name 5 (image + 40 + 1 + 40)
+- Total Order: 520
+
+#### 17.31 Sold Ticket List
+**Purpose**: Liste av alle tickets solgt av agent (pre-game + during game)  
+**Layout**: Filter (From/To, Search, Ticket Type dropdown) + tabell
+
+**Filter Options (markørt D)**:
+- Physical / Terminal / Web
+
+**Tables**:
+- Kolonner: Date and Time, Ticket ID, Ticket Type (Physical/Terminal/Web), Ticket Color (Red/Yellow/Blue), Ticket Price, Winning Pattern
+
+**Business Rules**:
+- Agent kan filtere på ticket-type (Physical/Terminal/Web)
+- Search by Ticket ID
+
+#### 17.32 Past Game Winning History
+**Purpose**: Historikk av alle winning tickets  
+**Layout**: Filter (From/To, Search) + tabell
+
+**Tables**:
+- Kolonner: Date and Time, Ticket ID, Ticket Type, Ticket Color, Ticket Price, Winning Pattern
+
+**Business Rules**:
+- Historical data per-hall
+- Search by Ticket ID
+
+#### 17.33 Physical Cashout — Daily List
+**Purpose**: List over fysiske tickets som trenger cashout  
+**Layout**: Filter (Select Date From/To) + tabell
+
+**Tables**:
+- Kolonner: Date, Game Name, Sub Game Name - Id, Total Winnings, Pending Cashout, Action (view)
+- 7 example rows (13-17/02/2024)
+
+#### 17.34 Physical Cashout — Sub Game Detail
+**Purpose**: Cashout-vy for alle tickets i et sub-game  
+**Layout**: Header (Date, Sub Game Name: Traffic Light) + search + tabell + totals + Reward All
+
+**Tables**:
+- Kolonner: Physical Ticket No, Ticket Type (Small Yellow/Large Yellow/Red etc.), Ticket Price (10/20), Winning Pattern (dropdown), Total Winning (100), Rewarded Amount (100), Pending Amount (0), Action (bank-ikon)
+- 7 rader
+
+**Totals**:
+- Total Winnings: 1000 Kr
+- Rewarded: 600 Kr
+- Pending: 400 Kr
+
+**Buttons**:
+- Reward All (pay ut alle pending)
+
+#### 17.35 Physical Cashout — Per-Ticket Popup
+**Purpose**: Per-ticket detail med bingo-grid + pattern-status  
+**Layout**: Modal med 5x5 grid + Winning Patterns-tabell
+
+**Grid**:
+- 5x5 rutenett (25 grønne celler)
+- Markerte celler: 1, 23, 56
+- Pil-indikator som viser pattern
+
+**Header**:
+- "153915" (ticket-ID) + X-lukkeknapp
+
+**Winning Patterns Table**:
+- Raw 1: 100kr — Status: Cashout
+- Raw 2: 100kr — Status: Rewarded
+
+**Business Rules**:
+- Cashout-status: admin har betalt
+- Rewarded-status: vinning allerede gitt
+- Note: "Cash-out option kun available for current day only. Etter day ends kan agent ikke cashout eller endre status"
+
+#### 17.36 Hall Specific Report
+**Purpose**: Per-hall detaljert omsetnings-rapport per spill-type  
+**Layout**: Filter (From/To, **User Type**, Group of Hall Name, Hall Name, Search, Reset) + stor tabell med 5 game-seksjoner
+
+**Tables**:
+- Grouped columns per game (Game 1 / Game 2 / Game 3 / Game 4 / Game 5)
+- Per-game kolonner: OMS (omsetning), UTD (utdelt), Payout(%), RES (resultat)
+- Kolonner først: Group Of Hall Name, Hall Name, Agent, Elvis Replacement Amount (eks: 1300)
+- 5 rader (Spillorama Notodden GOH x3 haller + Thomas Agent1)
+
+**Business Rules**:
+- Filter: Game Type, Group of Hall Name, Hall Name
+- Note: "Ensure ticket upgrades registreres i Elvis-ticket-kolonnen som sales + income generert blir correctly tracked"
+
+#### 17.37 Order Report (under Hall Specific)
+**Purpose**: Per-agent order-rapport  
+**Tables**:
+- Kolonner: Date and Time, Agent Name, Game of Hall, Hall Name, Cash, Card, Customer Number, Total
+
+**Business Rules**:
+- Filter: Game Type, Group of Hall Name, Hall Name
+- Search by agent name
+
+#### 17.38 Hall Account Report (Agent-view)
+**Purpose**: Agent ser daglig regnskap for sin hall (read-only copy av 16.23)  
+**Layout**: Samme som 16.23 men uten edit  
+**Tables**: Samme kolonner som 16.23
+
+**Business Rules**:
+- Filter: From/To, Year / Bot (radio)
+- Download PDF
+- Note: "If multiple agent submit settlement, settlement should be added in list"
+
+#### 17.39 Hall Account Report — Settlement Report (Agent)
+**Purpose**: Samme som 16.24 (Admin Settlement Report) men med agent's perspective + Edit/download receipt-action  
+**Layout**: Samme som 16.24
+
+**Tables**: Samme kolonner som 16.24 + Action (edit + download receipt)
+
+**Business Rules**:
+- Agent kan se Hall Account Report + view details av settlement som er addet av agent
+- Columns: Date, Day, Resultat Bingonet, Metronia, OK bingo, Francs, Otium, Radio Bingo, Norsk Tipping, Norsk Rikstoto, Rekvisita, Kaffe-penger, Bilag, Gevinst overf. Bank, Bank terminal, Innskudd dropsafe, Inn/ut kasse, Diff, Kommentarer, Bilag (Upload receipt action)
+- Note: "Hvis multiple agent submitter settlement, addes i list for den dagen"
+- Note: "Hvis agent edit settlement, edit amount reflekteres i hall account report"
+
+#### 17.40 Settlement Popup (Agent - identisk 1:1 med 16.25)
+Se 16.25 for full spec.
+
+**Business Rules (unikt for agent)**:
+- Submit-knapp (ikke Update som hos admin)
+
+---
+
 ## Cross-System Patterns
 
 ### Common Navigation
@@ -1745,7 +2812,7 @@ Complete agent portal with game scheduling, ticket registration, physical cashou
 
 ## Document Notes
 
-**This catalog documents 15 PDFs totaling 245+ pages of wireframes. Each screen description includes:**
+**This catalog documents 17 PDFs totaling 295+ pages of wireframes. Each screen description includes:**
 - Purpose (what the screen does)
 - Layout (how elements are arranged)
 - Fields (input elements with labels and validation)
@@ -1755,6 +2822,6 @@ Complete agent portal with game scheduling, ticket registration, physical cashou
 
 **Screen descriptions are detailed enough to enable 1:1 implementation without visual styling specifications. Colors, fonts, and visual design are explicitly excluded.**
 
-**Last Updated**: 2026-04-23  
-**Status**: Complete extraction of all 15 PDFs
+**Last Updated**: 2026-04-24 (PDF 16 + PDF 17 integrated)  
+**Status**: Complete extraction of all 17 PDFs
 
