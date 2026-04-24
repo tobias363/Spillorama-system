@@ -157,28 +157,30 @@ export function mountTvScreenPage(
   // er TV-URL-token, ikke display-token), fall vi tilbake til socket-løs
   // modus — voice-endringer blir da bare synlig ved page-reload eller på
   // neste poll av /voice-endepunktet.
-  try {
-    const voiceSocket = io(window.location.origin, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-    });
-    instance.voiceSocket = voiceSocket;
-    voiceSocket.on("tv:voice-changed", (payload: { hallId?: string; voice?: string }) => {
-      if (instance.destroyed) return;
-      if (!payload || payload.hallId !== hallId) return;
-      const v = payload.voice;
-      if (v !== "voice1" && v !== "voice2" && v !== "voice3") return;
-      applyVoice(instance, v, voiceSelect);
-    });
-    voiceSocket.on("connect", () => {
-      // Forsøk subscribe via tvToken som display-token. Feil ignoreres —
-      // vi kan fortsatt motta rom-bredde events via polling fallback.
-      voiceSocket.emit("admin-display:login", { token: tvToken }, (_resp: unknown) => {
-        voiceSocket.emit("admin-display:subscribe", { hallId }, () => {});
+  if (!options.disableSocket) {
+    try {
+      const voiceSocket = io(window.location.origin, {
+        transports: ["websocket", "polling"],
+        reconnection: true,
       });
-    });
-  } catch {
-    // socket.io-client finnes kanskje ikke i test-miljø — fortsett uten live-oppdatering.
+      instance.voiceSocket = voiceSocket;
+      voiceSocket.on("tv:voice-changed", (payload: { hallId?: string; voice?: string }) => {
+        if (instance.destroyed) return;
+        if (!payload || payload.hallId !== hallId) return;
+        const v = payload.voice;
+        if (v !== "voice1" && v !== "voice2" && v !== "voice3") return;
+        applyVoice(instance, v, voiceSelect);
+      });
+      voiceSocket.on("connect", () => {
+        // Forsøk subscribe via tvToken som display-token. Feil ignoreres —
+        // vi kan fortsatt motta rom-bredde events via polling fallback.
+        voiceSocket.emit("admin-display:login", { token: tvToken }, (_resp: unknown) => {
+          voiceSocket.emit("admin-display:subscribe", { hallId }, () => {});
+        });
+      });
+    } catch {
+      // socket.io-client finnes kanskje ikke i test-miljø — fortsett uten live-oppdatering.
+    }
   }
 
   const tick = async (): Promise<void> => {

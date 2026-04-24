@@ -24,40 +24,52 @@ function mkContainer(): HTMLElement {
 }
 
 function mockFetchState(participatingHalls: Array<{ hallId: string; hallName: string; color: "red" | "orange" | "green"; playerCount: number }>) {
+  // mockImplementation gir en frisk Response per call så body ikke låses
+  // mellom fetchTvVoice (PR #477) og fetchTvState (Task 1.7).
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          data: {
-            hall: { id: "hall-1", name: "Test Hall" },
-            currentGame: {
-              id: "sg-1",
-              name: "Test Game",
-              number: 1,
-              startAt: "2026-04-24T20:00:00Z",
-              ballsDrawn: [],
-              lastBall: null,
+    vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.endsWith("/voice")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ ok: true, data: { voice: "voice1" } }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: {
+              hall: { id: "hall-1", name: "Test Hall" },
+              currentGame: {
+                id: "sg-1",
+                name: "Test Game",
+                number: 1,
+                startAt: "2026-04-24T20:00:00Z",
+                ballsDrawn: [],
+                lastBall: null,
+              },
+              patterns: [
+                { name: "1 Rad", phase: 1, playersWon: 0, prize: 0, highlighted: false },
+                { name: "2 Rader", phase: 2, playersWon: 0, prize: 0, highlighted: false },
+                { name: "3 Rader", phase: 3, playersWon: 0, prize: 0, highlighted: false },
+                { name: "4 Rader", phase: 4, playersWon: 0, prize: 0, highlighted: false },
+                { name: "Fullt Hus", phase: 5, playersWon: 0, prize: 0, highlighted: false },
+              ],
+              drawnCount: 0,
+              totalBalls: 75,
+              nextGame: null,
+              countdownToNextGame: null,
+              status: "drawing",
+              participatingHalls,
             },
-            patterns: [
-              { name: "1 Rad", phase: 1, playersWon: 0, prize: 0, highlighted: false },
-              { name: "2 Rader", phase: 2, playersWon: 0, prize: 0, highlighted: false },
-              { name: "3 Rader", phase: 3, playersWon: 0, prize: 0, highlighted: false },
-              { name: "4 Rader", phase: 4, playersWon: 0, prize: 0, highlighted: false },
-              { name: "Fullt Hus", phase: 5, playersWon: 0, prize: 0, highlighted: false },
-            ],
-            drawnCount: 0,
-            totalBalls: 75,
-            nextGame: null,
-            countdownToNextGame: null,
-            status: "drawing",
-            participatingHalls,
-          },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      )
-    )
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+    })
   );
 }
 

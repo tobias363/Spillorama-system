@@ -35,40 +35,52 @@ function mockFetchWithHalls(
     playerCount: number;
   }> = []
 ) {
+  // mockImplementation gir en frisk Response per call så body ikke låses
+  // mellom fetchTvVoice (PR #477) og fetchTvState (Task 1.7).
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          data: {
-            hall: { id: "hall-1", name: "Test Hall" },
-            currentGame: {
-              id: "sg-1",
-              name: "Test Game",
-              number: 1,
-              startAt: "2026-04-24T20:00:00Z",
-              ballsDrawn: [],
-              lastBall: null,
+    vi.fn().mockImplementation((url: string) => {
+      if (typeof url === "string" && url.endsWith("/voice")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ ok: true, data: { voice: "voice1" } }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: {
+              hall: { id: "hall-1", name: "Test Hall" },
+              currentGame: {
+                id: "sg-1",
+                name: "Test Game",
+                number: 1,
+                startAt: "2026-04-24T20:00:00Z",
+                ballsDrawn: [],
+                lastBall: null,
+              },
+              patterns: [
+                { name: "1 Rad", phase: 1, playersWon: 0, prize: 0, highlighted: false },
+                { name: "2 Rader", phase: 2, playersWon: 0, prize: 0, highlighted: false },
+                { name: "3 Rader", phase: 3, playersWon: 0, prize: 0, highlighted: false },
+                { name: "4 Rader", phase: 4, playersWon: 0, prize: 0, highlighted: false },
+                { name: "Fullt Hus", phase: 5, playersWon: 0, prize: 0, highlighted: false },
+              ],
+              drawnCount: 0,
+              totalBalls: 75,
+              nextGame: null,
+              countdownToNextGame: null,
+              status: "drawing",
+              participatingHalls,
             },
-            patterns: [
-              { name: "1 Rad", phase: 1, playersWon: 0, prize: 0, highlighted: false },
-              { name: "2 Rader", phase: 2, playersWon: 0, prize: 0, highlighted: false },
-              { name: "3 Rader", phase: 3, playersWon: 0, prize: 0, highlighted: false },
-              { name: "4 Rader", phase: 4, playersWon: 0, prize: 0, highlighted: false },
-              { name: "Fullt Hus", phase: 5, playersWon: 0, prize: 0, highlighted: false },
-            ],
-            drawnCount: 0,
-            totalBalls: 75,
-            nextGame: null,
-            countdownToNextGame: null,
-            status: "drawing",
-            participatingHalls,
-          },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } }
-      )
-    )
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      );
+    })
   );
 }
 
@@ -258,12 +270,23 @@ describe("Task 1.7: TVScreenPage phase-won-banner", () => {
   });
 
   it("poll overrider socket-live-color (server er autoritativ)", async () => {
-    // Initial state: oransje.
+    // Initial state: oransje. Bruk mockImplementation-routing så fetchTvVoice
+    // (PR #477) får sin egen response og ikke kannibaliserer state-mocks.
+    let stateCallCount = 0;
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === "string" && url.endsWith("/voice")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ ok: true, data: { voice: "voice1" } }),
+              { status: 200, headers: { "content-type": "application/json" } }
+            )
+          );
+        }
+        // State-call: orange begge poll (server autoritativ).
+        stateCallCount += 1;
+        return Promise.resolve(
           new Response(
             JSON.stringify({
               ok: true,
@@ -281,33 +304,12 @@ describe("Task 1.7: TVScreenPage phase-won-banner", () => {
                 ],
               },
             }),
-            { status: 200 }
+            { status: 200, headers: { "content-type": "application/json" } }
           )
-        )
-        .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({
-              ok: true,
-              data: {
-                hall: { id: "hall-1", name: "Test Hall" },
-                currentGame: null,
-                patterns: [],
-                drawnCount: 0,
-                totalBalls: 75,
-                nextGame: null,
-                countdownToNextGame: null,
-                status: "waiting",
-                // Andre poll: server rapporterer fortsatt oransje — socket sier grønn,
-                // men neste poll bekrefter oransje (autoritativ).
-                participatingHalls: [
-                  { hallId: "hall-a", hallName: "Hall Alfa", color: "orange", playerCount: 5 },
-                ],
-              },
-            }),
-            { status: 200 }
-          )
-        )
+        );
+      })
     );
+    void stateCallCount; // brukt for fremtidig assertions; foreløpig bare for sporing.
 
     const captured: CapturedHandlers = {};
     spySocket(captured);
