@@ -412,6 +412,36 @@ export class AgentSettlementService {
     return computeBreakdownTotals(breakdown);
   }
 
+  /**
+   * K1 wireframe 17.40 — kalkuler shift-delta-felter:
+   *   difference_in_shifts = shift_start_to_end - innskudd_drop_safe - ending_opptall_kassie
+   *
+   * Speiler klient-kalkulasjonen i SettlementBreakdownModal. Backend-service
+   * eksponerer det så PDF-eksport og rapport-bygging kan bruke samme logikk.
+   * Alle beløp i øre (integer) for å unngå float-feil.
+   */
+  static calculateShiftDelta(input: {
+    shiftStartToEndCents: number;
+    innskuddDropSafeCents: number;
+    endingOpptallKassieCents: number;
+  }): {
+    differenceInShiftsCents: number;
+  } {
+    if (!Number.isInteger(input.shiftStartToEndCents)) {
+      throw new DomainError("INVALID_INPUT", "shiftStartToEndCents må være et heltall (øre).");
+    }
+    if (!Number.isInteger(input.innskuddDropSafeCents) || input.innskuddDropSafeCents < 0) {
+      throw new DomainError("INVALID_INPUT", "innskuddDropSafeCents må være et ikke-negativt heltall.");
+    }
+    if (!Number.isInteger(input.endingOpptallKassieCents) || input.endingOpptallKassieCents < 0) {
+      throw new DomainError("INVALID_INPUT", "endingOpptallKassieCents må være et ikke-negativt heltall.");
+    }
+    return {
+      differenceInShiftsCents:
+        input.shiftStartToEndCents - input.innskuddDropSafeCents - input.endingOpptallKassieCents,
+    };
+  }
+
   // ── Read paths ──────────────────────────────────────────────────────────
 
   async getSettlementByShiftId(shiftId: string): Promise<AgentSettlement | null> {

@@ -61,6 +61,11 @@ export interface BingoRuntimeConfig {
   // BIN-FCM: FCM push-notification cron (legacy sendGameStartNotifications)
   jobGameStartNotificationsEnabled: boolean;
   jobGameStartNotificationsIntervalMs: number;
+  // Withdraw XML-eksport-cron (wireframe 16.20). Daglig batch av
+  // ACCEPTED bank-uttak per agent.
+  jobXmlExportDailyEnabled: boolean;
+  jobXmlExportDailyIntervalMs: number;
+  jobXmlExportDailyRunAtHour: number;
   // Storage
   usePostgresBingoAdapter: boolean;
   checkpointConnectionString: string;
@@ -179,6 +184,24 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     parsePositiveIntEnv(process.env.JOB_GAME_START_NOTIFICATIONS_INTERVAL_MS, 60_000),
   );
 
+  // Withdraw XML-eksport daglig cron. PM-krav 2026-04-24: daglig generering
+  // kl 23:00 lokal tid. Default OFF for å unngå oppstartfeil i miljøer uten
+  // SMTP eller allowlist — prod må sette JOB_XML_EXPORT_DAILY_ENABLED=true.
+  const jobXmlExportDailyEnabled = parseBooleanEnv(
+    process.env.JOB_XML_EXPORT_DAILY_ENABLED,
+    false,
+  );
+  // Polling-intervall (jobben selv sjekker klokkeslett + date-key).
+  // Default 15 min — balansen mellom responsivitet og DB-belastning.
+  const jobXmlExportDailyIntervalMs = Math.max(
+    60_000,
+    parsePositiveIntEnv(process.env.JOB_XML_EXPORT_DAILY_INTERVAL_MS, 15 * 60 * 1000),
+  );
+  const jobXmlExportDailyRunAtHour = Math.min(
+    23,
+    Math.max(0, parsePositiveIntEnv(process.env.JOB_XML_EXPORT_DAILY_RUN_AT_HOUR, 23)),
+  );
+
   // BIN-159/BIN-240: PostgreSQL checkpointing
   const checkpointConnectionString = process.env.APP_PG_CONNECTION_STRING?.trim() || process.env.WALLET_PG_CONNECTION_STRING?.trim() || "";
   const usePostgresBingoAdapter = parseBooleanEnv(process.env.BINGO_CHECKPOINT_ENABLED, true) && checkpointConnectionString.length > 0;
@@ -230,6 +253,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
     jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
     jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
+    jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,
