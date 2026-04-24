@@ -36,3 +36,9 @@ assets spingo/
 # BIN-614 admin-web
 apps/admin-web/node_modules/
 apps/admin-web/dist/
+
+# Performance-budget transient outputs (report generated per-run;
+# baseline.json is checked in, report.json / report.md are not).
+scripts/performance-budget/report.json
+scripts/performance-budget/report.md
+scripts/performance-budget/package-lock.json

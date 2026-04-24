@@ -26,6 +26,10 @@
     "lint:no-backdrop-js": "node scripts/stylelint-rules/lint-no-backdrop-js.mjs",
     "lint:blink": "npm run lint:css && npm run lint:no-backdrop-js",
     "test:stylelint": "node --test \"scripts/stylelint-rules/__tests__/*.mjs\"",
+    "perf:check": "npm --prefix scripts/performance-budget run check",
+    "perf:collect": "npm --prefix scripts/performance-budget run collect",
+    "perf:compare": "npm --prefix scripts/performance-budget run compare",
+    "perf:baseline": "npm --prefix scripts/performance-budget run baseline",
     "prepare": "husky || true && node scripts/setup-husky.mjs || true"
   },
   "lint-staged": {

@@ -1,0 +1,33 @@
+{
+  "description": "Spill 1 performance budget — refresh with `npm run perf:baseline` after an intentional change. Reviewers must check the `current` diff carefully; see scripts/performance-budget/README.md for the review protocol.",
+  "_note": "Initial budget set by the performance-budget-ci-gate PR. `current` values are placeholders derived from a pre-fix reference run; they will be rewritten by the first post-merge `npm run perf:baseline` on main once the backdrop-filter regression is resolved. The `max` values are intentionally generous so the gate does not false-positive before the first real baseline lands.",
+  "scenarios": {
+    "spill1_idle": {
+      "backdropFilterCount": { "current": 2, "max": 3 },
+      "cssAnimationCount": { "current": 0, "max": 5 },
+      "infiniteAnimationCount": { "current": 0, "max": 1 },
+      "rafCallsPerSec": { "current": 60, "max": 130 },
+      "paintCountPer2s": { "current": 3, "max": 30 },
+      "gsapActiveTweens": { "current": -1, "max": -1 },
+      "longAnimationFrames": { "current": 0, "max": 2 }
+    },
+    "spill1_buy_popup": {
+      "backdropFilterCount": { "current": 2, "max": 4 },
+      "cssAnimationCount": { "current": 0, "max": 6 },
+      "infiniteAnimationCount": { "current": 0, "max": 1 },
+      "rafCallsPerSec": { "current": 60, "max": 140 },
+      "paintCountPer2s": { "current": 3, "max": 40 },
+      "gsapActiveTweens": { "current": -1, "max": -1 },
+      "longAnimationFrames": { "current": 0, "max": 3 }
+    },
+    "spill1_during_draw": {
+      "backdropFilterCount": { "current": 2, "max": 4 },
+      "cssAnimationCount": { "current": 0, "max": 6 },
+      "infiniteAnimationCount": { "current": 0, "max": 1 },
+      "rafCallsPerSec": { "current": 60, "max": 180 },
+      "paintCountPer2s": { "current": 3, "max": 60 },
+      "gsapActiveTweens": { "current": -1, "max": -1 },
+      "longAnimationFrames": { "current": 0, "max": 5 }
+    }
+  }
+}
