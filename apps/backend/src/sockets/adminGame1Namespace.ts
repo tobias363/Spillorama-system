@@ -12,7 +12,10 @@
  * Events (kun server → client):
  *   - game1:status-update    — ved master-action (start/pause/resume/stop osv)
  *   - game1:draw-progressed  — ved drawNext() i engine
- *   - game1:phase-won        — utsatt til 4d.4
+ *   - game1:phase-won        — fase-fullføring (fra drawNext, 4d.4)
+ *   - game1:physical-ticket-won — fysisk bong vinnes (fra drawNext, PT4)
+ *   - game1:auto-paused      — auto-pause etter phase-won (Task 1.1)
+ *   - game1:resumed          — manuell resume av master/agent (Task 1.1)
  *
  * Klient flyt:
  *   1. Connect med auth.token = admin-JWT (via accessToken-mekanikk som
@@ -35,6 +38,8 @@ import {
   type Game1AdminDrawProgressedPayload,
   type Game1AdminPhaseWonPayload,
   type Game1AdminPhysicalTicketWonPayload,
+  type Game1AdminAutoPausedPayload,
+  type Game1AdminResumedPayload,
 } from "@spillorama/shared-types/socket-events";
 import type {
   AdminGame1Broadcaster,
@@ -42,6 +47,8 @@ import type {
   AdminGame1DrawProgressedEvent,
   AdminGame1PhaseWonEvent,
   AdminGame1PhysicalTicketWonEvent,
+  AdminGame1AutoPausedEvent,
+  AdminGame1ResumedEvent,
 } from "../game/AdminGame1Broadcaster.js";
 import { logger as rootLogger } from "../util/logger.js";
 
@@ -210,6 +217,52 @@ export function createAdminGame1Namespace(
       } catch (err) {
         log.warn(
           { err, event: "game1:phase-won", gameId: event.gameId },
+          "admin broadcast failed — service fortsetter uansett"
+        );
+      }
+    },
+    /**
+     * Task 1.1: auto-pause etter phase-won. Mottakere (master-console +
+     * agent-portal) bruker eventet for å vise Resume-knapp + banner
+     * "Pause etter Rad N".
+     */
+    onAutoPaused(event: AdminGame1AutoPausedEvent): void {
+      try {
+        const payload: Game1AdminAutoPausedPayload = {
+          gameId: event.gameId,
+          phase: event.phase,
+          pausedAt: event.pausedAt,
+        };
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:auto-paused", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:auto-paused", gameId: event.gameId },
+          "admin broadcast failed — service fortsetter uansett"
+        );
+      }
+    },
+    /**
+     * Task 1.1: manuell resume (fra auto-pause eller manuell pause).
+     * Payload.resumeType skiller de to casene slik at UI kan vise
+     * konsistent tekst ("Fortsetter Rad N+1" vs "Tar opp igjen").
+     */
+    onResumed(event: AdminGame1ResumedEvent): void {
+      try {
+        const payload: Game1AdminResumedPayload = {
+          gameId: event.gameId,
+          resumedAt: event.resumedAt,
+          actorUserId: event.actorUserId,
+          phase: event.phase,
+          resumeType: event.resumeType,
+        };
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:resumed", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:resumed", gameId: event.gameId },
           "admin broadcast failed — service fortsetter uansett"
         );
       }

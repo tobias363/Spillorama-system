@@ -208,8 +208,10 @@ export class CenterTopPanel {
     const btn = document.createElement("button");
     btn.textContent = label;
     Object.assign(btn.style, {
-      background: overrides?.background ?? "rgba(120, 20, 20, 0.4)",
-      backdropFilter: "blur(6px)",
+      // KRITISK: Ingen backdrop-filter her — elementet ligger over Pixi-canvas
+      // og blur-shader re-kjøres per frame (60-120 fps). Se ARCHITECTURE.md
+      // seksjon "Ingen backdrop-filter over Pixi-canvas" (2026-04-24).
+      background: overrides?.background ?? "rgba(30, 12, 12, 0.92)",
       border: `1px solid ${overrides?.borderColor ?? "rgba(255, 100, 100, 0.2)"}`,
       borderRadius: "10px",
       padding: "9px 12px",
@@ -231,7 +233,7 @@ export class CenterTopPanel {
     });
     btn.addEventListener("mouseleave", () => {
       if (btn.disabled) return;
-      btn.style.background = overrides?.background ?? "rgba(120, 20, 20, 0.4)";
+      btn.style.background = overrides?.background ?? "rgba(30, 12, 12, 0.92)";
       btn.style.borderColor = overrides?.borderColor ?? "rgba(255, 100, 100, 0.2)";
       btn.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 100, 100, 0.1)";
       btn.style.transform = "";
@@ -317,8 +319,10 @@ export class CenterTopPanel {
       const pill = document.createElement("div");
       pill.className = "prize-pill";
       Object.assign(pill.style, {
-        background: "rgba(120, 20, 20, 0.4)",
-        backdropFilter: "blur(6px)",
+        // KRITISK: Ingen backdrop-filter — `.prize-pill` ligger over Pixi-canvas
+        // og tvinger GPU til å re-kjøre blur-shader per frame. Se
+        // ARCHITECTURE.md (2026-04-24 blink-regresjon).
+        background: "rgba(30, 12, 12, 0.92)",
         border: "1px solid rgba(255, 100, 100, 0.2)",
         boxShadow: "0 4px 8px rgba(0,0,0,0.4)",
         borderRadius: "14px",
@@ -473,7 +477,7 @@ export class CenterTopPanel {
 
     setTimeout(() => {
       btn.textContent = originalText;
-      btn.style.background = "rgba(120, 20, 20, 0.4)";
+      btn.style.background = "rgba(30, 12, 12, 0.92)";
       btn.disabled = false;
       btn.style.cursor = "pointer";
       btn.style.opacity = "1";

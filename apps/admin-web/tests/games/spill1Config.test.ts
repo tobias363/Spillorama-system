@@ -446,12 +446,13 @@ describe("buildSpill1Payload with Kvikkis", () => {
 // ── BIN-690 M1: mini-games config ───────────────────────────────────────────
 
 describe("SPILL1_MINI_GAME_TYPES", () => {
-  it("inkluderer alle 4 mini-game-typer for M1 framework", () => {
+  it("inkluderer alle 5 mini-game-typer for M1-M6 framework", () => {
     expect(SPILL1_MINI_GAME_TYPES).toEqual([
       "wheel",
       "chest",
       "colordraft",
       "oddsen",
+      "mystery",
     ]);
   });
 });
@@ -466,7 +467,7 @@ describe("validateSpill1Config: miniGames", () => {
 
   it("accepterer alle kjente mini-game-typer", () => {
     const c = validConfig();
-    c.miniGames = ["wheel", "chest", "colordraft", "oddsen"];
+    c.miniGames = ["wheel", "chest", "colordraft", "oddsen", "mystery"];
     const res = validateSpill1Config(c, "Test");
     expect(res.ok).toBe(true);
   });

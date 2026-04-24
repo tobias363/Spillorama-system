@@ -40,6 +40,7 @@ import { isHallRoute, mountHallRoute } from "./pages/hall/index.js";
 import { isGroupHallRoute, mountGroupHallRoute } from "./pages/groupHall/index.js";
 import { isCmsRoute, mountCmsRoute } from "./pages/cms/index.js";
 import { isSettingsRoute, mountSettingsRoute } from "./pages/settings/index.js";
+import { isProfileRoute, mountProfileRoute } from "./pages/profile/index.js";
 import { isSystemInformationRoute, mountSystemInformationRoute } from "./pages/systemInformation/index.js";
 import { isAuditLogRoute, mountAuditLogRoute } from "./pages/auditLog/index.js";
 import { isOtherGamesRoute, mountOtherGamesRoute } from "./pages/otherGames/index.js";
@@ -262,6 +263,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
       }
       if (isSettingsRoute(bare)) {
         mountSettingsRoute(container, bare);
+        return;
+      }
+      if (isProfileRoute(bare)) {
+        mountProfileRoute(container, bare);
         return;
       }
       if (isSystemInformationRoute(bare)) {
@@ -547,6 +552,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (isSettingsRoute(route.path)) {
     mountSettingsRoute(container, route.path);
+    return;
+  }
+  if (isProfileRoute(route.path)) {
+    mountProfileRoute(container, route.path);
     return;
   }
   if (isSystemInformationRoute(route.path)) {

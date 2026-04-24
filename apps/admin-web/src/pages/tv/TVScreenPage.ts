@@ -11,21 +11,29 @@
  * banner (Patterns_Txt) og current/next-game sub-header
  * (Current_Game_Name_Txt + Next_Game_Name_Txt fra BingoHallDisplay.cs).
  *
- * Voice-valg persisteres i localStorage per hall (`tv_voice_<hallId>`).
- * Audio-filene eksisterer ikke ennå — dropdownen er placeholder til
- * separat voice-pack-feature.
+ * Voice-valg (wireframe PDF 14, 2026-04-24): hentes fra backend ved mount
+ * (`GET /api/tv/:hallId/voice`) og refreshes på `tv:voice-changed`-event
+ * som broadcasts av admin via `hall:<id>:display`-rommet. TV-klienten
+ * spiller ball-utrop fra `/assets/tv-voices/<voice>/<ball>.mp3` (filene
+ * finnes ikke i repo ennå — se README for manglende assets).
  */
 
 import "./tv-screen.css";
+import { io, type Socket } from "socket.io-client";
 import {
   fetchTvState,
+  fetchTvVoice,
   type TvGameState,
+  type TvVoice,
 } from "../../api/tv-screen.js";
 
 const POLL_INTERVAL_MS = 2000;
 const WINNERS_SWITCH_DELAY_MS = 30_000;
-const VOICES = ["voice-1", "voice-2", "voice-3"] as const;
-type Voice = (typeof VOICES)[number];
+const VOICE_OPTIONS: ReadonlyArray<{ value: TvVoice; label: string }> = [
+  { value: "voice1", label: "Voice 1" },
+  { value: "voice2", label: "Voice 2" },
+  { value: "voice3", label: "Voice 3" },
+];
 
 interface ActiveInstance {
   hallId: string;
@@ -34,6 +42,12 @@ interface ActiveInstance {
   switchTimeoutId: number | null;
   previousStatus: TvGameState["status"] | null;
   destroyed: boolean;
+  /** Aktiv voice-pack — set når fetchTvVoice resolverer eller endret av socket-event. */
+  voice: TvVoice;
+  /** Cache med pre-lastede Audio-objekter, keyed på ball-nummer (1..75). */
+  audioCache: Map<number, HTMLAudioElement>;
+  /** Optional socket for live voice-updates. Hvis connect feiler, fall-back til polling. */
+  socket: Socket | null;
 }
 
 let active: ActiveInstance | null = null;
@@ -47,28 +61,20 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
       <div class="tv-subheader" id="tv-subheader" data-testid="tv-subheader"></div>
       <div class="tv-voice-select">
         <label for="tv-voice">Voice:</label>
-        <select id="tv-voice" data-testid="tv-voice-select">
-          <option value="voice-1">Voice 1</option>
-          <option value="voice-2">Voice 2</option>
-          <option value="voice-3">Voice 3</option>
+        <select id="tv-voice" data-testid="tv-voice-select" disabled>
+          ${VOICE_OPTIONS.map(
+            (o) => `<option value="${o.value}">${o.label}</option>`
+          ).join("")}
         </select>
+        <span class="tv-voice-note" data-testid="tv-voice-note">Stemme styres av admin</span>
       </div>
       <div id="tv-body" class="tv-loading">Laster...</div>
     </div>
   `;
 
-  // Voice select: restore from localStorage + persist på endring.
-  const voiceSelect = root.querySelector<HTMLSelectElement>("#tv-voice");
-  if (voiceSelect) {
-    const stored = readVoice(hallId);
-    voiceSelect.value = stored;
-    voiceSelect.addEventListener("change", () => {
-      writeVoice(hallId, voiceSelect.value as Voice);
-    });
-  }
-
   const bodyEl = root.querySelector<HTMLElement>("#tv-body")!;
   const subHeaderEl = root.querySelector<HTMLElement>("#tv-subheader")!;
+  const voiceSelect = root.querySelector<HTMLSelectElement>("#tv-voice");
 
   const instance: ActiveInstance = {
     hallId,
@@ -77,8 +83,55 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
     switchTimeoutId: null,
     previousStatus: null,
     destroyed: false,
+    voice: "voice1",
+    audioCache: new Map(),
+    socket: null,
   };
   active = instance;
+
+  // Fetch initial voice config + seed audio cache. Fail-safe: fallback til
+  // voice1 hvis endepunktet er nede, TV må alltid kunne spille noe.
+  void (async () => {
+    try {
+      const voice = await fetchTvVoice(hallId);
+      if (instance.destroyed) return;
+      applyVoice(instance, voice, voiceSelect);
+    } catch {
+      if (instance.destroyed) return;
+      applyVoice(instance, "voice1", voiceSelect);
+    }
+  })();
+
+  // Socket subscription for live voice-updates. Admin-siden emitter
+  // `tv:voice-changed` til hall:<id>:display når operatoren endrer stemme;
+  // vi joiner dét rommet via `admin-display:login` + `admin-display:subscribe`
+  // hvis tvToken også er gyldig som display-token. Hvis login feiler (token
+  // er TV-URL-token, ikke display-token), fall vi tilbake til socket-løs
+  // modus — voice-endringer blir da bare synlig ved page-reload eller på
+  // neste poll av /voice-endepunktet.
+  try {
+    const socket = io(window.location.origin, {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+    });
+    instance.socket = socket;
+    socket.on("tv:voice-changed", (payload: { hallId?: string; voice?: string }) => {
+      if (instance.destroyed) return;
+      if (!payload || payload.hallId !== hallId) return;
+      const v = payload.voice;
+      if (v !== "voice1" && v !== "voice2" && v !== "voice3") return;
+      applyVoice(instance, v, voiceSelect);
+    });
+    socket.on("connect", () => {
+      // Forsøk subscribe via tvToken som display-token. Feil ignoreres —
+      // vi kan fortsatt motta rom-bredde events via polling fallback.
+      socket.emit("admin-display:login", { token: tvToken }, (_resp: unknown) => {
+        socket.emit("admin-display:subscribe", { hallId }, () => {});
+      });
+    });
+  } catch {
+    // socket.io-client finnes kanskje ikke i test-miljø — fortsett uten live-oppdatering.
+  }
 
   const tick = async (): Promise<void> => {
     if (instance.destroyed) return;
@@ -87,6 +140,10 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
       if (instance.destroyed) return;
       renderSubHeader(subHeaderEl, state);
       renderState(bodyEl, state);
+      // Hvis vi har en ny ball (lastBall endret), spill voice-utropet.
+      if (state.currentGame?.lastBall != null) {
+        playBallAudio(instance, state.currentGame.lastBall);
+      }
       // Auto-switch til winners-siden når siste game er ended. Hopper bare én
       // gang per transition (guard på previousStatus) så vi ikke starter
       // nye timers før vi har vært tilbake til drawing/waiting.
@@ -110,7 +167,50 @@ export function unmountTvScreenPage(): void {
   active.destroyed = true;
   if (active.intervalId) window.clearInterval(active.intervalId);
   if (active.switchTimeoutId) window.clearTimeout(active.switchTimeoutId);
+  if (active.socket) {
+    try { active.socket.disconnect(); } catch { /* no-op */ }
+  }
+  active.audioCache.clear();
   active = null;
+}
+
+/** Last ned + cache en <audio> for hver ball i valgt voice-pack. */
+function applyVoice(instance: ActiveInstance, voice: TvVoice, select: HTMLSelectElement | null): void {
+  instance.voice = voice;
+  instance.audioCache.clear();
+  if (select) select.value = voice;
+}
+
+/**
+ * Spill av ball-utrop for en gitt ball. Lat-laster Audio-elementet ved
+ * første forespørsel og cacher det så re-draws (samme ball) ikke trigger
+ * nytt nettverksrundtur. Feil ignoreres — TV-rendering skal ikke blokkeres
+ * av manglende audio-filer (som i dag; se README).
+ */
+let lastPlayedBall: { ball: number; hallId: string } | null = null;
+function playBallAudio(instance: ActiveInstance, ball: number): void {
+  // Dedup: samme ball to ganger på rad spilles ikke igjen (polling kan
+  // returnere samme lastBall over flere ticks).
+  if (lastPlayedBall && lastPlayedBall.ball === ball && lastPlayedBall.hallId === instance.hallId) {
+    return;
+  }
+  lastPlayedBall = { ball, hallId: instance.hallId };
+  try {
+    let audio = instance.audioCache.get(ball);
+    if (!audio) {
+      // Filene serveres statisk av backend: apps/backend/public/tv-voices/
+      // (`app.use(express.static(publicDir))` plukker dem opp). De er ikke
+      // sjekket inn i repo ennå — se README i voice-kat. for manglende
+      // assets; TV-rendering skal ikke blokkeres av fravær.
+      audio = new Audio(`/tv-voices/${instance.voice}/${ball}.mp3`);
+      audio.preload = "auto";
+      instance.audioCache.set(ball, audio);
+    }
+    audio.currentTime = 0;
+    void audio.play().catch(() => { /* Audio-fil mangler — ignorer. */ });
+  } catch {
+    // AudioContext-feil i gamle nettlesere — ignorer.
+  }
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────
@@ -331,28 +431,7 @@ function scheduleWinnersSwitch(instance: ActiveInstance): void {
   }, WINNERS_SWITCH_DELAY_MS);
 }
 
-// ── Voice-valg persistering (localStorage per hall) ───────────────────
-
-function voiceKey(hallId: string): string {
-  return `tv_voice_${hallId}`;
-}
-
-function readVoice(hallId: string): Voice {
-  try {
-    const raw = window.localStorage.getItem(voiceKey(hallId));
-    if (raw && (VOICES as readonly string[]).includes(raw)) {
-      return raw as Voice;
-    }
-  } catch {
-    // localStorage kan være blokkert i kiosk-modus — fall tilbake til default.
-  }
-  return "voice-1";
-}
-
-function writeVoice(hallId: string, voice: Voice): void {
-  try {
-    window.localStorage.setItem(voiceKey(hallId), voice);
-  } catch {
-    // No-op — ikke kritisk.
-  }
-}
+// Voice-valg per hall: nå server-managed (se applyVoice ovenfor).
+// Tidligere localStorage-bakte readVoice/writeVoice er fjernet fordi
+// wireframe PDF 14 krever at admin (ikke TV-operatoren foran skjermen)
+// eier valget, og at endringer slår inn på alle TV-er i hallen samtidig.

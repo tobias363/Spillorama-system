@@ -325,6 +325,98 @@ describe("PR 4d.3: /admin-game1 namespace — auth + subscribe + broadcast", () 
       await disconnect(admin);
     }
   });
+
+  // ── Task 1.1: auto-pause + resumed broadcast ─────────────────────────────
+
+  test("Task 1.1: broadcaster.onAutoPaused leveres som game1:auto-paused", async () => {
+    const admin = await connect(fixture.url, "tok-admin");
+    try {
+      await new Promise((r) =>
+        admin.emit("game1:subscribe", { gameId: "sg-AP" }, r)
+      );
+
+      const received = waitForEvent<{
+        gameId: string;
+        phase: number;
+        pausedAt: number;
+      }>(admin, "game1:auto-paused");
+
+      fixture.broadcaster.onAutoPaused({
+        gameId: "sg-AP",
+        phase: 1,
+        pausedAt: 1_700_000_000_000,
+      });
+
+      const payload = await received;
+      assert.equal(payload.gameId, "sg-AP");
+      assert.equal(payload.phase, 1);
+      assert.equal(payload.pausedAt, 1_700_000_000_000);
+    } finally {
+      await disconnect(admin);
+    }
+  });
+
+  test("Task 1.1: broadcaster.onResumed leveres som game1:resumed med resumeType", async () => {
+    const admin = await connect(fixture.url, "tok-admin");
+    try {
+      await new Promise((r) =>
+        admin.emit("game1:subscribe", { gameId: "sg-RS" }, r)
+      );
+
+      const received = waitForEvent<{
+        gameId: string;
+        resumedAt: number;
+        actorUserId: string;
+        phase: number;
+        resumeType: "auto" | "manual";
+      }>(admin, "game1:resumed");
+
+      fixture.broadcaster.onResumed({
+        gameId: "sg-RS",
+        resumedAt: 1_700_000_100_000,
+        actorUserId: "user-admin",
+        phase: 2,
+        resumeType: "auto",
+      });
+
+      const payload = await received;
+      assert.equal(payload.gameId, "sg-RS");
+      assert.equal(payload.resumeType, "auto");
+      assert.equal(payload.phase, 2);
+      assert.equal(payload.actorUserId, "user-admin");
+    } finally {
+      await disconnect(admin);
+    }
+  });
+
+  test("Task 1.1: auto-paused til annen gameId leveres IKKE til subscriberen", async () => {
+    const admin = await connect(fixture.url, "tok-admin");
+    try {
+      await new Promise((r) =>
+        admin.emit("game1:subscribe", { gameId: "sg-X" }, r)
+      );
+
+      let received = false;
+      admin.on("game1:auto-paused", () => {
+        received = true;
+      });
+
+      fixture.broadcaster.onAutoPaused({
+        gameId: "sg-OTHER",
+        phase: 1,
+        pausedAt: Date.now(),
+      });
+
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(
+        received,
+        false,
+        "auto-paused for annen gameId skal ikke leveres"
+      );
+    } finally {
+      await disconnect(admin);
+    }
+  });
 });
 
 // Silence pino warnings in test output (we intentionally trigger auth failures)

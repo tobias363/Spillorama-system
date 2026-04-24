@@ -76,12 +76,53 @@ export interface AdminGame1PhysicalTicketWonEvent {
   at: number;
 }
 
+/**
+ * Task 1.1: auto-pause ved phase-won. Gap #1 i
+ * docs/architecture/MASTER_HALL_DASHBOARD_GAP_2026-04-24.md.
+ *
+ * Emittes av `Game1DrawEngineService.drawNext()` etter at en fase er vunnet
+ * (og Fullt Hus IKKE er nådd — da ender spillet istedenfor å pause).
+ * Mottakere på admin-siden bruker eventet for å vise Resume-knapp +
+ * banner "Pause etter Rad N — trykk Resume for å fortsette".
+ *
+ * Merk: `AdminGame1PhaseWonEvent` emittes fortsatt for samme fase — auto-
+ * pause er en TILLEGGS-signal til master-UI, ikke en erstatning.
+ */
+export interface AdminGame1AutoPausedEvent {
+  gameId: string;
+  /** Fasen som akkurat ble vunnet og utløste auto-pause (1..4). */
+  phase: number;
+  /** Unix-ms. */
+  pausedAt: number;
+}
+
+/**
+ * Task 1.1: emittes av `Game1MasterControlService.resumeGame()` etter at
+ * master/agent manuelt har trykket Resume. Dekker både (a) manuell-pause
+ * (status='paused' → 'running') og (b) auto-pause (paused=true →
+ * paused=false) — `resumeType` skiller dem for UI-tekst.
+ */
+export interface AdminGame1ResumedEvent {
+  gameId: string;
+  /** Unix-ms. */
+  resumedAt: number;
+  actorUserId: string;
+  /** `current_phase` engine vender tilbake til å trekke kuler for. */
+  phase: number;
+  /** 'auto' = avsluttet auto-pause; 'manual' = avsluttet eksplisitt master-pause. */
+  resumeType: "auto" | "manual";
+}
+
 export interface AdminGame1Broadcaster {
   onStatusChange(event: AdminGame1StatusChangeEvent): void;
   onDrawProgressed(event: AdminGame1DrawProgressedEvent): void;
   onPhaseWon(event: AdminGame1PhaseWonEvent): void;
   /** PT4: fysisk-bong vinn-broadcast. */
   onPhysicalTicketWon(event: AdminGame1PhysicalTicketWonEvent): void;
+  /** Task 1.1: auto-pause etter phase-won. */
+  onAutoPaused(event: AdminGame1AutoPausedEvent): void;
+  /** Task 1.1: manuell resume (fra auto-pause eller manuell pause). */
+  onResumed(event: AdminGame1ResumedEvent): void;
 }
 
 /** No-op fallback — brukes i tester uten socket-miljø + ved manglende injeksjon. */
@@ -90,4 +131,6 @@ export const NoopAdminGame1Broadcaster: AdminGame1Broadcaster = {
   onDrawProgressed: () => undefined,
   onPhaseWon: () => undefined,
   onPhysicalTicketWon: () => undefined,
+  onAutoPaused: () => undefined,
+  onResumed: () => undefined,
 };

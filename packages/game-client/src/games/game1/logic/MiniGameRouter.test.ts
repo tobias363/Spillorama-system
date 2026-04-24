@@ -26,6 +26,7 @@ const wheelMock = vi.fn();
 const chestMock = vi.fn();
 const colorDraftMock = vi.fn();
 const oddsenMock = vi.fn();
+const mysteryMock = vi.fn();
 
 vi.mock("../components/WheelOverlay.js", () => ({
   WheelOverlay: vi.fn().mockImplementation((...args) => {
@@ -49,6 +50,12 @@ vi.mock("../components/OddsenOverlay.js", () => ({
   OddsenOverlay: vi.fn().mockImplementation((...args) => {
     oddsenMock(...args);
     return makeFakeOverlay("oddsen");
+  }),
+}));
+vi.mock("../components/MysteryGameOverlay.js", () => ({
+  MysteryGameOverlay: vi.fn().mockImplementation((...args) => {
+    mysteryMock(...args);
+    return makeFakeOverlay("mystery");
   }),
 }));
 
@@ -99,7 +106,7 @@ function makeDeps(
 }
 
 function makeTrigger(
-  miniGameType: "wheel" | "chest" | "colordraft" | "oddsen",
+  miniGameType: "wheel" | "chest" | "colordraft" | "oddsen" | "mystery",
   payload: Readonly<Record<string, unknown>> = {},
   resultId = "mgr-test-1",
 ): MiniGameTriggerPayload {
@@ -107,7 +114,7 @@ function makeTrigger(
 }
 
 function makeResult(
-  miniGameType: "wheel" | "chest" | "colordraft" | "oddsen",
+  miniGameType: "wheel" | "chest" | "colordraft" | "oddsen" | "mystery",
   payoutCents = 0,
   resultJson: Readonly<Record<string, unknown>> = {},
   resultId = "mgr-test-1",
@@ -121,6 +128,7 @@ describe("MiniGameRouter — onTrigger overlay dispatch", () => {
     chestMock.mockReset();
     colorDraftMock.mockReset();
     oddsenMock.mockReset();
+    mysteryMock.mockReset();
   });
 
   it("creates WheelOverlay for miniGameType=wheel", () => {
@@ -147,6 +155,14 @@ describe("MiniGameRouter — onTrigger overlay dispatch", () => {
     const { deps } = makeDeps();
     new MiniGameRouter(deps).onTrigger(makeTrigger("oddsen"));
     expect(oddsenMock).toHaveBeenCalledOnce();
+  });
+
+  it("creates MysteryGameOverlay for miniGameType=mystery", () => {
+    const { deps } = makeDeps();
+    new MiniGameRouter(deps).onTrigger(makeTrigger("mystery"));
+    expect(mysteryMock).toHaveBeenCalledOnce();
+    expect(wheelMock).not.toHaveBeenCalled();
+    expect(chestMock).not.toHaveBeenCalled();
   });
 
   it("passes bridge to pause-aware overlays (wheel + chest)", () => {
@@ -192,6 +208,7 @@ describe("MiniGameRouter — onChoice → socket.sendMiniGameChoice", () => {
     chestMock.mockReset();
     colorDraftMock.mockReset();
     oddsenMock.mockReset();
+    mysteryMock.mockReset();
   });
 
   it("emits mini_game:choice with the active resultId + choiceJson", async () => {
@@ -228,6 +245,18 @@ describe("MiniGameRouter — onChoice → socket.sendMiniGameChoice", () => {
     });
   });
 
+  it("passes directions[] for mystery", async () => {
+    const { deps, root, sendMiniGameChoice } = makeDeps();
+    new MiniGameRouter(deps).onTrigger(makeTrigger("mystery", {}, "mgr-m1"));
+    const overlay = root.children[0] as FakeOverlay;
+    const directions = ["up", "down", "up", "down", "up"];
+    await overlay._onChoice?.({ directions });
+    expect(sendMiniGameChoice).toHaveBeenCalledWith({
+      resultId: "mgr-m1",
+      choiceJson: { directions },
+    });
+  });
+
   it("shows error on overlay + does NOT dismiss on socket-error (fail-closed)", async () => {
     const sendMiniGameChoice = vi.fn().mockResolvedValue({
       ok: false,
@@ -259,6 +288,7 @@ describe("MiniGameRouter — onResult animation", () => {
     chestMock.mockReset();
     colorDraftMock.mockReset();
     oddsenMock.mockReset();
+    mysteryMock.mockReset();
   });
 
   it("dispatches result to the active overlay when resultId matches", () => {
@@ -302,6 +332,7 @@ describe("MiniGameRouter — dismiss + destroy", () => {
     chestMock.mockReset();
     colorDraftMock.mockReset();
     oddsenMock.mockReset();
+    mysteryMock.mockReset();
   });
 
   it("dismiss destroys the overlay and clears activeResultId", () => {

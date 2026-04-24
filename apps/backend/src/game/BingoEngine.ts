@@ -2190,6 +2190,31 @@ export class BingoEngine {
     return this.compliance.setPlayerLossLimits(input);
   }
 
+  /**
+   * BIN-720: Self-service loss-limit oppdatering med 48h-queue for økninger.
+   * Brukes av `ProfileSettingsService` — skiller seg fra admin-varianten
+   * ved at økninger får en eksplisitt `effectiveFromMs` istedenfor dag/
+   * måned-grense.
+   */
+  async setPlayerLossLimitsWithEffectiveAt(input: {
+    walletId: string;
+    hallId: string;
+    daily?: { value: number; effectiveFromMs: number };
+    monthly?: { value: number; effectiveFromMs: number };
+    dailyDecrease?: number;
+    monthlyDecrease?: number;
+  }): Promise<PlayerComplianceSnapshot> {
+    return this.compliance.setPlayerLossLimitsWithEffectiveAt(input);
+  }
+
+  /**
+   * BIN-720: 48h-queue cron-hjelper. Promoterer pending loss-limit → active
+   * hvis `effectiveFromMs <= nowMs`. Returnerer true hvis en endring skjedde.
+   */
+  async promotePendingLossLimitIfDue(walletId: string, hallId: string, nowMs: number): Promise<boolean> {
+    return this.compliance.promotePendingLossLimitIfDue(walletId, hallId, nowMs);
+  }
+
   async setTimedPause(input: {
     walletId: string;
     durationMs?: number;

@@ -36,6 +36,22 @@ export interface AdminGame1DrawProgressed {
   at: number;
 }
 
+/** Task 1.1: auto-pause etter phase-won. */
+export interface AdminGame1AutoPaused {
+  gameId: string;
+  phase: number;
+  pausedAt: number;
+}
+
+/** Task 1.1: manuell resume (auto- eller master-pause). */
+export interface AdminGame1Resumed {
+  gameId: string;
+  resumedAt: number;
+  actorUserId: string;
+  phase: number;
+  resumeType: "auto" | "manual";
+}
+
 export interface AdminGame1SocketOptions {
   /** Base-URL for Socket.IO-serveren. Default: window.location.origin. */
   baseUrl?: string;
@@ -47,6 +63,10 @@ export interface AdminGame1SocketOptions {
   disconnectGraceMs?: number;
   onStatusUpdate: (payload: AdminGame1StatusUpdate) => void;
   onDrawProgressed: (payload: AdminGame1DrawProgressed) => void;
+  /** Task 1.1: valgfri — master-console bruker den, eksterne konsumenter kan hoppe over. */
+  onAutoPaused?: (payload: AdminGame1AutoPaused) => void;
+  /** Task 1.1: valgfri — master-console bruker den. */
+  onResumed?: (payload: AdminGame1Resumed) => void;
   onFallbackActive: (fallbackActive: boolean) => void;
   /** Testing-hook: bytte ut io-factory for å slippe ekte nettverks-call. */
   _ioFactory?: typeof io;
@@ -54,7 +74,14 @@ export interface AdminGame1SocketOptions {
 
 export class AdminGame1Socket {
   private readonly socket: Socket;
-  private readonly options: Required<Omit<AdminGame1SocketOptions, "_ioFactory">> & {
+  private readonly options: {
+    baseUrl: string;
+    disconnectGraceMs: number;
+    onStatusUpdate: (payload: AdminGame1StatusUpdate) => void;
+    onDrawProgressed: (payload: AdminGame1DrawProgressed) => void;
+    onAutoPaused?: (payload: AdminGame1AutoPaused) => void;
+    onResumed?: (payload: AdminGame1Resumed) => void;
+    onFallbackActive: (fallbackActive: boolean) => void;
     _ioFactory: typeof io;
   };
   private currentGameId: string | null = null;
@@ -68,6 +95,8 @@ export class AdminGame1Socket {
       disconnectGraceMs: options.disconnectGraceMs ?? 10_000,
       onStatusUpdate: options.onStatusUpdate,
       onDrawProgressed: options.onDrawProgressed,
+      onAutoPaused: options.onAutoPaused,
+      onResumed: options.onResumed,
       onFallbackActive: options.onFallbackActive,
       _ioFactory: options._ioFactory ?? io,
     };
@@ -115,6 +144,25 @@ export class AdminGame1Socket {
       (payload: AdminGame1DrawProgressed) => {
         if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
         this.options.onDrawProgressed(payload);
+      }
+    );
+
+    // Task 1.1: auto-pause + resume subscriptions. Callback er valgfri —
+    // hvis eksterne konsumenter ikke registrerer håndtering, faller event
+    // igjennom stille.
+    this.socket.on(
+      "game1:auto-paused",
+      (payload: AdminGame1AutoPaused) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onAutoPaused?.(payload);
+      }
+    );
+
+    this.socket.on(
+      "game1:resumed",
+      (payload: AdminGame1Resumed) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onResumed?.(payload);
       }
     );
   }

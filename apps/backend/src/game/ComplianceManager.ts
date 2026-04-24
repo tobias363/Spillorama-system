@@ -337,6 +337,92 @@ export class ComplianceManager {
     return this.getPlayerCompliance(walletId, hallId);
   }
 
+  /**
+   * BIN-720: Profile-settings-variant av `setPlayerLossLimits` der callsite
+   * oppgir `effectiveFromMs` selv (48h-queue fra Profile Settings API).
+   *
+   * Splittet fra `setPlayerLossLimits` slik at:
+   *   - Gameplay-admin-paths (per-hall admin-justering) fortsetter å bruke
+   *     dag/måned-grense-default (setPlayerLossLimits).
+   *   - Spiller-self-service-paths (PDF 8 wireframe) kan sette 48h-forsinkelse
+   *     ved økning (denne metoden).
+   *
+   * Senking aktiveres fortsatt umiddelbart. Økning lagres som pending.
+   */
+  async setPlayerLossLimitsWithEffectiveAt(input: {
+    walletId: string;
+    hallId: string;
+    daily?: { value: number; effectiveFromMs: number };
+    monthly?: { value: number; effectiveFromMs: number };
+    /** Direkte senking (aktiveres umiddelbart). */
+    dailyDecrease?: number;
+    monthlyDecrease?: number;
+  }): Promise<PlayerComplianceSnapshot> {
+    const walletId = input.walletId.trim();
+    if (!walletId) throw new DomainError("INVALID_INPUT", "walletId mangler.");
+    const hallId = input.hallId.trim();
+    if (!hallId) throw new DomainError("INVALID_INPUT", "hallId mangler.");
+
+    const nowMs = Date.now();
+    const current = this.getEffectiveLossLimits(walletId, hallId, nowMs);
+    const currentPending = this.getPendingLossLimitChange(walletId, hallId, nowMs);
+
+    const nextLimits: LossLimits = { ...current };
+    const nextPending: PendingLossLimitChange = {
+      daily: currentPending?.daily ? { ...currentPending.daily } : undefined,
+      monthly: currentPending?.monthly ? { ...currentPending.monthly } : undefined
+    };
+
+    if (input.dailyDecrease !== undefined) {
+      const n = Math.floor(input.dailyDecrease);
+      if (!Number.isFinite(n) || n < 0) throw new DomainError("INVALID_INPUT", "daily må være 0 eller større.");
+      if (n > this.regulatoryLossLimits.daily) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `dailyLossLimit kan ikke være høyere enn regulatorisk grense (${this.regulatoryLossLimits.daily}).`
+        );
+      }
+      nextLimits.daily = n;
+      delete nextPending.daily;
+    }
+    if (input.monthlyDecrease !== undefined) {
+      const n = Math.floor(input.monthlyDecrease);
+      if (!Number.isFinite(n) || n < 0) throw new DomainError("INVALID_INPUT", "monthly må være 0 eller større.");
+      if (n > this.regulatoryLossLimits.monthly) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `monthlyLossLimit kan ikke være høyere enn regulatorisk grense (${this.regulatoryLossLimits.monthly}).`
+        );
+      }
+      nextLimits.monthly = n;
+      delete nextPending.monthly;
+    }
+    if (input.daily) {
+      const n = Math.floor(input.daily.value);
+      if (n > this.regulatoryLossLimits.daily) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `dailyLossLimit kan ikke være høyere enn regulatorisk grense (${this.regulatoryLossLimits.daily}).`
+        );
+      }
+      nextPending.daily = { value: n, effectiveFromMs: input.daily.effectiveFromMs };
+    }
+    if (input.monthly) {
+      const n = Math.floor(input.monthly.value);
+      if (n > this.regulatoryLossLimits.monthly) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          `monthlyLossLimit kan ikke være høyere enn regulatorisk grense (${this.regulatoryLossLimits.monthly}).`
+        );
+      }
+      nextPending.monthly = { value: n, effectiveFromMs: input.monthly.effectiveFromMs };
+    }
+
+    this.personalLossLimitsByScope.set(this.makeLossScopeKey(walletId, hallId), nextLimits);
+    await this.persistLossLimitState(walletId, hallId, nextLimits, nextPending);
+    return this.getPlayerCompliance(walletId, hallId);
+  }
+
   async setTimedPause(input: {
     walletId: string;
     durationMs?: number;
@@ -599,6 +685,25 @@ export class ComplianceManager {
     const limits = this.getEffectiveLossLimits(walletId, hallId);
     const netLoss = this.calculateNetLoss(walletId, nowMs, hallId);
     return (netLoss.daily + entryFee) > limits.daily || (netLoss.monthly + entryFee) > limits.monthly;
+  }
+
+  /**
+   * BIN-720: eksplisitt-nowMs-variant av promote-pending-lookup brukt av
+   * ProfileSettingsService.flushPendingLossLimits. Kaller
+   * `resolveLossLimitState` (privat) via `getEffectiveLossLimits` slik at
+   * pending → active-promoteringen og rydd-oppen i pending-tabellen
+   * også trigger persistence-write. Returnerer true hvis en endring
+   * faktisk skjedde.
+   */
+  async promotePendingLossLimitIfDue(walletId: string, hallId: string, nowMs: number): Promise<boolean> {
+    const scopeKey = this.makeLossScopeKey(walletId.trim(), hallId.trim());
+    const pendingBefore = this.pendingLossLimitChangesByScope.get(scopeKey);
+    if (!pendingBefore) return false;
+    const dailyDue = pendingBefore.daily && pendingBefore.daily.effectiveFromMs <= nowMs;
+    const monthlyDue = pendingBefore.monthly && pendingBefore.monthly.effectiveFromMs <= nowMs;
+    if (!dailyDue && !monthlyDue) return false;
+    this.getEffectiveLossLimits(walletId, hallId, nowMs);
+    return true;
   }
 
   getEffectiveLossLimits(walletId: string, hallId?: string, nowMs = Date.now()): LossLimits {

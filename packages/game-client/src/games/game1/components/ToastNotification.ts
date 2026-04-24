@@ -46,6 +46,10 @@ export class ToastNotification {
     const colors = TOAST_COLORS[type];
     const el = document.createElement("div");
     Object.assign(el.style, {
+      // KRITISK: Ingen backdrop-filter — toaster hover over Pixi-canvas og
+      // tvinger GPU til å re-kjøre blur-shader per frame. TOAST_COLORS har
+      // allerede ~95% opak bg, så visuell effekt er minimal. Se
+      // ARCHITECTURE.md (2026-04-24 blink-regresjon).
       background: colors.bg,
       border: `1.5px solid ${colors.border}`,
       borderRadius: "10px",
@@ -55,7 +59,6 @@ export class ToastNotification {
       fontWeight: "600",
       fontFamily: "inherit",
       textAlign: "center",
-      backdropFilter: "blur(4px)",
       boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
       opacity: "0",
       transform: "translateY(-10px)",

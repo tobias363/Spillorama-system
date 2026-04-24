@@ -148,3 +148,58 @@ export function getShiftSettlement(shiftId: string): Promise<Settlement> {
 export function getShiftSettlementPdfUrl(shiftId: string): string {
   return `/api/agent/shift/${encodeURIComponent(shiftId)}/settlement.pdf`;
 }
+
+// ───────── Wireframe Gap #9: Shift Log Out med checkboxer ─────────
+
+export interface AgentShiftLogoutFlags {
+  distributeWinnings?: boolean;
+  transferRegisterTickets?: boolean;
+  logoutNotes?: string | null;
+}
+
+export interface AgentShiftLogoutResponse {
+  /** Den oppdaterte shiften (isActive=false, logged_out=true). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  shift: any;
+  /** Antall pending cashouts som ble flagget for neste agent. */
+  pendingCashoutsFlagged: number;
+  /** Antall åpne ticket-ranges som ble flagget for neste agent. */
+  ticketRangesFlagged: number;
+}
+
+/** POST /api/agent/shift/logout — Gap #9 (wireframe PDF 17.6). */
+export function agentShiftLogout(
+  flags: AgentShiftLogoutFlags = {}
+): Promise<AgentShiftLogoutResponse> {
+  return apiRequest<AgentShiftLogoutResponse>("/api/agent/shift/logout", {
+    method: "POST",
+    body: flags,
+    auth: true,
+  });
+}
+
+export interface AgentPendingCashoutSummary {
+  id: string;
+  ticketId: string;
+  hallId: string;
+  scheduledGameId: string;
+  patternPhase: string;
+  expectedPayoutCents: number;
+  color: string;
+  detectedAt: string;
+  verifiedAt: string | null;
+  adminApprovalRequired: boolean;
+}
+
+export interface AgentPendingCashoutsResponse {
+  pendingCashouts: AgentPendingCashoutSummary[];
+  count: number;
+}
+
+/** GET /api/agent/shift/pending-cashouts — brukt av logout-popup "View Cashout Details". */
+export function agentListPendingCashouts(): Promise<AgentPendingCashoutsResponse> {
+  return apiRequest<AgentPendingCashoutsResponse>(
+    "/api/agent/shift/pending-cashouts",
+    { auth: true }
+  );
+}

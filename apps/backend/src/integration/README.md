@@ -51,6 +51,9 @@ Registered in `integration/templates/index.ts`:
 | `verify-email`              | New-account e-mail verification        |
 | `reset-password`            | Password-reset link                    |
 | `bankid-expiry-reminder`    | BankID/KYC re-verification reminder    |
+| `role-changed`              | Admin changed user role                |
+| `kyc-approved`              | KYC moderator approved player          |
+| `kyc-rejected`              | KYC moderator rejected player (m/årsak)|
 
 Adding a new template:
 
@@ -69,6 +72,45 @@ The engine is deliberately small — no partials, no helpers, no else — becaus
 the legacy templates we're porting only used this subset. If we need more
 features later, swap in the real `handlebars` npm module behind the same
 `renderTemplate` signature.
+
+## EmailQueue (BIN-702)
+
+Fire-and-forget kø med automatisk retry for transaksjonelle e-poster. Brukt
+av `adminPlayers`-routeren så moderator-handlinger (KYC-approve/reject) aldri
+mister en e-post hvis SMTP-serveren er midlertidig nede.
+
+### Oppførsel
+
+- `enqueue()` returnerer umiddelbart — endepunktet blokkerer ikke.
+- En bakgrunns-loop (`runLoop()`) plukker pending-oppføringer og sender via
+  `EmailService.sendTemplate()`.
+- Feiler transporten, reschedulerer oppføringen med exponential backoff
+  (`backoffBaseMs * 2^(attempt-1)`, default 1s).
+- Etter `maxAttempts` forsøk (default 5) markeres oppføringen som `dead` og
+  logges tydelig slik at ops kan plukke den opp.
+
+### Bruk
+
+```ts
+import { EmailQueue } from "./integration/EmailQueue.js";
+
+const emailQueue = new EmailQueue({ emailService });
+emailQueue.runLoop();  // start bakgrunns-worker (1s-intervall)
+
+// Fra f.eks. adminPlayers-routeren:
+await emailQueue.enqueue({
+  to: user.email,
+  template: "kyc-approved",
+  context: { username: user.displayName, supportEmail },
+});
+```
+
+### Persistering (framtidig)
+
+Nåværende implementasjon er in-memory. DB-persistering planlagt som BIN-703
+(samme interface, `PostgresEmailQueueStore` erstatter `InMemoryEmailQueueStore`).
+Inntil da: kø-oppføringer tapes ved restart — akseptert fordi KYC-mail er
+idempotent og admin kan re-trigge manuelt via "Resend email"-knapp (BIN-704).
 
 ## externalGameWallet.ts
 

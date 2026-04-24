@@ -64,6 +64,22 @@ export interface Game1GameDetail {
   halls: Game1HallDetail[];
   allReady: boolean;
   auditRecent: Game1MasterAuditEntry[];
+  /**
+   * Task 1.1: engine-state speiling. Satt når draw-engine er startet
+   * (status='running'|'paused'). Brukes av Game1MasterConsole til å
+   * vise auto-pause-banner + aktivere Resume-knapp.
+   *
+   * Valgfri i type fordi eksisterende backend-responser ikke alltid
+   * inkluderer feltet ennå; UI faller bakover til `game.status`-sjekk
+   * når engineState mangler.
+   */
+  engineState?: {
+    isPaused: boolean;
+    pausedAtPhase: number | null;
+    currentPhase: number;
+    drawsCompleted: number;
+    isFinished: boolean;
+  } | null;
 }
 
 export async function fetchGame1Detail(gameId: string): Promise<Game1GameDetail> {
