@@ -384,3 +384,141 @@ test("PUT /admin/shifts/:shiftId/settlement — AGENT får 400 FORBIDDEN", async
     assert.equal(res.json.error.code, "FORBIDDEN");
   } finally { await ctx.close(); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// K1: MACHINE BREAKDOWN + BILAG RECEIPT
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("K1 POST /shift/close-day — med 15-rad breakdown + bilag", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, {
+      reportedCashCount: 0,
+      machineBreakdown: {
+        rows: {
+          metronia: { in_cents: 481000, out_cents: 174800 },
+          ok_bingo: { in_cents: 362000, out_cents: 162500 },
+          franco: { in_cents: 477000, out_cents: 184800 },
+          rekvisita: { in_cents: 2500, out_cents: 0 },
+          servering: { in_cents: 26000, out_cents: 0 },
+          bank: { in_cents: 81400, out_cents: 81400 },
+        },
+        ending_opptall_kassie_cents: 461300,
+        innskudd_drop_safe_cents: 0,
+        difference_in_shifts_cents: 0,
+      },
+      bilagReceipt: {
+        mime: "application/pdf",
+        filename: "bilag-2026-04-23.pdf",
+        dataUrl: "data:application/pdf;base64,JVBERi0xLjQ=",
+        sizeBytes: 1024,
+        uploadedAt: "2026-04-23T10:00:00.000Z",
+        uploadedByUserId: "a1",
+      },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.machineBreakdown.rows.metronia.in_cents, 481000);
+    assert.equal(res.json.data.bilagReceipt.mime, "application/pdf");
+    assert.equal(res.json.data.bilagReceipt.filename, "bilag-2026-04-23.pdf");
+  } finally { await ctx.close(); }
+});
+
+test("K1 POST /shift/close-day — ugyldig breakdown gir INVALID_INPUT", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    const res = await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, {
+      reportedCashCount: 0,
+      machineBreakdown: { rows: { metronia: { in_cents: -100, out_cents: 0 } } },
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally { await ctx.close(); }
+});
+
+test("K1 POST /settlements/:id/receipt — agent laster opp bilag på egen", async () => {
+  const ctx = await startServer();
+  try {
+    const { token } = await ctx.seedAgent("a1", "hall-a");
+    const cd = await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, { reportedCashCount: 0 });
+    const settlementId = cd.json.data.id;
+    const up = await req(ctx.baseUrl, "POST", `/api/agent/settlements/${settlementId}/receipt`, token, {
+      receipt: {
+        mime: "image/jpeg",
+        filename: "receipt.jpg",
+        dataUrl: "data:image/jpeg;base64,/9j/4AAQ=",
+        sizeBytes: 2000,
+        uploadedAt: "2026-04-23T11:00:00Z",
+        uploadedByUserId: "a1",
+      },
+    });
+    assert.equal(up.status, 200);
+    assert.equal(up.json.data.bilagReceipt.filename, "receipt.jpg");
+    await new Promise((r) => setTimeout(r, 30));
+    const events = await ctx.auditStore.list();
+    assert.ok(events.find((e) => e.action === "agent.settlement.bilag-uploaded"));
+  } finally { await ctx.close(); }
+});
+
+test("K1 POST /settlements/:id/receipt — agent kan IKKE laste opp på andre agents", async () => {
+  const ctx = await startServer();
+  try {
+    const { token: tokA } = await ctx.seedAgent("a1", "hall-a", "tok-a1");
+    const { token: tokB } = await ctx.seedAgent("a2", "hall-a", "tok-a2");
+    const cd = await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", tokA, { reportedCashCount: 0 });
+    const settlementId = cd.json.data.id;
+    const up = await req(ctx.baseUrl, "POST", `/api/agent/settlements/${settlementId}/receipt`, tokB, {
+      receipt: {
+        mime: "application/pdf",
+        filename: "x.pdf",
+        dataUrl: "data:application/pdf;base64,AAAA",
+        sizeBytes: 100,
+        uploadedAt: "2026-04-23T10:00:00Z",
+        uploadedByUserId: "a2",
+      },
+    });
+    assert.equal(up.status, 400);
+    assert.equal(up.json.error.code, "FORBIDDEN");
+  } finally { await ctx.close(); }
+});
+
+test("K1 PUT /admin/shifts/:shiftId/settlement — admin oppdaterer breakdown", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, { reportedCashCount: 0 });
+    ctx.seedAdmin("admin-tok");
+    const res = await req(ctx.baseUrl, "PUT", `/api/admin/shifts/${shiftId}/settlement`, "admin-tok", {
+      reason: "Korrigert breakdown etter avstemning",
+      machineBreakdown: {
+        rows: { metronia: { in_cents: 10000, out_cents: 5000 } },
+        ending_opptall_kassie_cents: 5000,
+        innskudd_drop_safe_cents: 0,
+        difference_in_shifts_cents: 0,
+      },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.machineBreakdown.rows.metronia.in_cents, 10000);
+  } finally { await ctx.close(); }
+});
+
+test("K1 GET /shift/:shiftId/settlement — returnerer breakdown + bilag-felter", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, {
+      reportedCashCount: 0,
+      machineBreakdown: {
+        rows: { bank: { in_cents: 81400, out_cents: 81400 } },
+        ending_opptall_kassie_cents: 0,
+        innskudd_drop_safe_cents: 0,
+        difference_in_shifts_cents: 0,
+      },
+    });
+    const res = await req(ctx.baseUrl, "GET", `/api/agent/shift/${shiftId}/settlement`, token);
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.machineBreakdown.rows.bank.in_cents, 81400);
+    assert.equal(res.json.data.bilagReceipt, null);
+  } finally { await ctx.close(); }
+});
