@@ -522,3 +522,239 @@ test("K1 GET /shift/:shiftId/settlement — returnerer breakdown + bilag-felter"
     assert.equal(res.json.data.bilagReceipt, null);
   } finally { await ctx.close(); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wireframe Gap #2: receipt download (16.24) + PDF embed
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function reqBinary(
+  baseUrl: string,
+  method: string,
+  path: string,
+  token?: string,
+): Promise<{ status: number; contentType?: string; bodyBytes?: Uint8Array; contentDisposition?: string; errorJson?: unknown }> {
+  const res = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  const contentType = res.headers.get("content-type") ?? undefined;
+  const contentDisposition = res.headers.get("content-disposition") ?? undefined;
+  if (contentType?.startsWith("application/json")) {
+    return { status: res.status, contentType, errorJson: await res.json() };
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  return { status: res.status, contentType, contentDisposition, bodyBytes: bytes };
+}
+
+test("Gap#2 GET /admin/shifts/:shiftId/settlement/receipt — returnerer bilag-binær", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, {
+      reportedCashCount: 0,
+      bilagReceipt: {
+        mime: "application/pdf",
+        filename: "bilag-test.pdf",
+        dataUrl: "data:application/pdf;base64,JVBERi0xLjQKJeLjz9MK", // "%PDF-1.4\n...."
+        sizeBytes: 20,
+        uploadedAt: "2026-04-23T10:00:00.000Z",
+        uploadedByUserId: "a1",
+      },
+    });
+    ctx.seedAdmin("admin-tok");
+    const res = await reqBinary(
+      ctx.baseUrl,
+      "GET",
+      `/api/admin/shifts/${shiftId}/settlement/receipt`,
+      "admin-tok",
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.contentType?.startsWith("application/pdf"), true);
+    assert.ok(res.bodyBytes && res.bodyBytes.length > 0);
+    // PDF magic bytes "%PDF"
+    assert.equal(res.bodyBytes![0], 0x25);
+    assert.equal(res.bodyBytes![1], 0x50);
+    assert.equal(res.bodyBytes![2], 0x44);
+    assert.equal(res.bodyBytes![3], 0x46);
+    // Content-Disposition attachment med sanitized filename
+    assert.ok(res.contentDisposition?.includes("bilag-test.pdf"));
+
+    // Audit-logg ble skrevet
+    await new Promise((r) => setTimeout(r, 30));
+    const events = await ctx.auditStore.list();
+    assert.ok(events.find((e) => e.action === "agent.settlement.bilag-downloaded"));
+  } finally { await ctx.close(); }
+});
+
+test("Gap#2 GET /admin/shifts/:shiftId/settlement/receipt — 400 når bilag mangler", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, { reportedCashCount: 0 });
+    ctx.seedAdmin("admin-tok");
+    const res = await reqBinary(
+      ctx.baseUrl,
+      "GET",
+      `/api/admin/shifts/${shiftId}/settlement/receipt`,
+      "admin-tok",
+    );
+    assert.equal(res.status, 400);
+    const err = (res.errorJson as { error?: { code?: string } }).error?.code;
+    assert.equal(err, "BILAG_NOT_FOUND");
+  } finally { await ctx.close(); }
+});
+
+test("Gap#2 GET /admin/shifts/:shiftId/settlement/receipt — AGENT får 400 FORBIDDEN", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, { reportedCashCount: 0 });
+    const res = await reqBinary(
+      ctx.baseUrl,
+      "GET",
+      `/api/admin/shifts/${shiftId}/settlement/receipt`,
+      token,
+    );
+    assert.equal(res.status, 400);
+    const err = (res.errorJson as { error?: { code?: string } }).error?.code;
+    assert.equal(err, "FORBIDDEN");
+  } finally { await ctx.close(); }
+});
+
+test("Gap#2 GET /agent/shift/:shiftId/settlement/receipt — agent kan laste egen", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, {
+      reportedCashCount: 0,
+      bilagReceipt: {
+        mime: "image/jpeg",
+        filename: "bilag.jpg",
+        dataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
+        sizeBytes: 14,
+        uploadedAt: "2026-04-23T10:00:00.000Z",
+        uploadedByUserId: "a1",
+      },
+    });
+    const res = await reqBinary(
+      ctx.baseUrl,
+      "GET",
+      `/api/agent/shift/${shiftId}/settlement/receipt`,
+      token,
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.contentType?.startsWith("image/jpeg"), true);
+    assert.ok(res.bodyBytes && res.bodyBytes.length > 0);
+  } finally { await ctx.close(); }
+});
+
+test("Gap#2 GET /agent/shift/:shiftId/settlement/receipt — annen agent får 400 FORBIDDEN", async () => {
+  const ctx = await startServer();
+  try {
+    const { token: tokA, shiftId: shiftA } = await ctx.seedAgent("a1", "hall-a", "tok-a1");
+    const { token: tokB } = await ctx.seedAgent("a2", "hall-a", "tok-a2");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", tokA, {
+      reportedCashCount: 0,
+      bilagReceipt: {
+        mime: "image/png",
+        filename: "r.png",
+        dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+        sizeBytes: 10,
+        uploadedAt: "2026-04-23T10:00:00.000Z",
+        uploadedByUserId: "a1",
+      },
+    });
+    const res = await reqBinary(
+      ctx.baseUrl,
+      "GET",
+      `/api/agent/shift/${shiftA}/settlement/receipt`,
+      tokB,
+    );
+    assert.equal(res.status, 400);
+    const err = (res.errorJson as { error?: { code?: string } }).error?.code;
+    assert.equal(err, "FORBIDDEN");
+  } finally { await ctx.close(); }
+});
+
+test("Gap#2 admin-edit audit chain: close → edit → list har editedByUserId + editedAt", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, {
+      reportedCashCount: 0,
+      machineBreakdown: {
+        rows: { metronia: { in_cents: 5000, out_cents: 2000 } },
+        ending_opptall_kassie_cents: 3000,
+        innskudd_drop_safe_cents: 0,
+        difference_in_shifts_cents: 0,
+      },
+    });
+    ctx.seedAdmin("admin-tok");
+    const editRes = await req(ctx.baseUrl, "PUT", `/api/admin/shifts/${shiftId}/settlement`, "admin-tok", {
+      reason: "Wireframe Gap#2 — admin justert breakdown",
+      machineBreakdown: {
+        rows: { metronia: { in_cents: 7000, out_cents: 2000 } },
+        ending_opptall_kassie_cents: 5000,
+        innskudd_drop_safe_cents: 0,
+        difference_in_shifts_cents: 0,
+      },
+    });
+    assert.equal(editRes.status, 200);
+    assert.equal(editRes.json.data.machineBreakdown.rows.metronia.in_cents, 7000);
+    assert.equal(editRes.json.data.editReason, "Wireframe Gap#2 — admin justert breakdown");
+    assert.ok(editRes.json.data.editedByUserId);
+    assert.ok(editRes.json.data.editedAt);
+
+    // Audit-logg viser edit-handling
+    await new Promise((r) => setTimeout(r, 30));
+    const events = await ctx.auditStore.list();
+    const editEvent = events.find((e) => e.action === "agent.settlement.edit");
+    assert.ok(editEvent);
+    assert.equal(editEvent!.resourceId, editRes.json.data.id);
+    assert.ok((editEvent!.details as { fields?: string[] }).fields?.includes("machineBreakdown"));
+
+    // Listen reflekterer edit
+    const listRes = await req(ctx.baseUrl, "GET", "/api/admin/shifts/settlements?hallId=hall-a", "admin-tok");
+    assert.equal(listRes.status, 200);
+    const listed = listRes.json.data.settlements[0];
+    assert.ok(listed.editedByUserId);
+    assert.equal(listed.editReason, "Wireframe Gap#2 — admin justert breakdown");
+  } finally { await ctx.close(); }
+});
+
+test("Gap#2 GET /admin/shifts/:shiftId/settlement.pdf — PDF inkluderer breakdown+bilag-info", async () => {
+  const ctx = await startServer();
+  try {
+    const { token, shiftId } = await ctx.seedAgent("a1", "hall-a");
+    await req(ctx.baseUrl, "POST", "/api/agent/shift/close-day", token, {
+      reportedCashCount: 0,
+      machineBreakdown: {
+        rows: {
+          metronia: { in_cents: 481000, out_cents: 174800 },
+          ok_bingo: { in_cents: 362000, out_cents: 162500 },
+        },
+        ending_opptall_kassie_cents: 0,
+        innskudd_drop_safe_cents: 0,
+        difference_in_shifts_cents: 0,
+      },
+      bilagReceipt: {
+        mime: "application/pdf",
+        filename: "bilag-test.pdf",
+        dataUrl: "data:application/pdf;base64,JVBERi0xLjQ=",
+        sizeBytes: 1024,
+        uploadedAt: "2026-04-23T10:00:00.000Z",
+        uploadedByUserId: "a1",
+      },
+    });
+    ctx.seedAdmin("admin-tok");
+    const res = await req(ctx.baseUrl, "GET", `/api/admin/shifts/${shiftId}/settlement.pdf`, "admin-tok");
+    assert.equal(res.status, 200);
+    assert.equal(res.contentType?.startsWith("application/pdf"), true);
+    assert.ok(res.bodyBytes && res.bodyBytes.length > 200);
+    // PDF magic "%PDF" - sanity
+    assert.equal(res.bodyBytes![0], 0x25);
+    // PDF inneholder nå maskin-breakdown + bilag-info (vi kan ikke inspisere
+    // indre strenger uten pdf-parser, men lengden er større pga ekstra innhold)
+    assert.ok(res.bodyBytes!.length > 1500, "PDF med breakdown+bilag-info bør være > 1.5 KB");
+  } finally { await ctx.close(); }
+});
