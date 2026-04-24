@@ -154,9 +154,9 @@ export class DomainError extends Error {
   /**
    * Valgfri strukturert kontekst som API-laget propagerer til klient via
    * `toPublicError(err).details`. Brukes f.eks. av `HALLS_NOT_READY` for å
-   * returnere `{ unreadyHalls: [...] }` slik at frontend kan rendre listen
-   * i override-popupen uten ekstra round-trip (Task 1.5 — agents-not-ready
-   * popup + override).
+   * returnere `{ unreadyHalls: [...] }` (Task 1.5 — agents-not-ready popup),
+   * og av `JACKPOT_CONFIRM_REQUIRED` for å returnere nåværende pot-saldo
+   * uten at klient må gjøre et ekstra API-kall (MASTER_PLAN §2.3).
    */
   public readonly details?: Record<string, unknown>;
 

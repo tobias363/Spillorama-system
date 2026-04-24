@@ -33,6 +33,7 @@ import {
   stopGame1,
   type Game1GameDetail,
   type Game1HallDetail,
+  type Game1JackpotState,
 } from "../../../api/admin-game1-master.js";
 import { AdminGame1Socket } from "./adminGame1Socket.js";
 
@@ -221,7 +222,10 @@ function renderGameInfo(container: HTMLElement, detail: Game1GameDetail): void {
   const host = container.querySelector<HTMLElement>("#g1-master-game-info");
   if (!host) return;
   const game = detail.game;
+  // MASTER_PLAN §2.3: vis jackpot-banner i header når state finnes.
+  const jackpotBanner = renderJackpotBanner(detail.jackpot);
   host.innerHTML = `
+    ${jackpotBanner}
     <h3 style="margin-top:0;">${escapeHtml(game.customGameName ?? game.subGameName)}</h3>
     <table class="table table-condensed" style="margin-bottom:0;">
       <tbody>
@@ -244,6 +248,40 @@ function renderGameInfo(container: HTMLElement, detail: Game1GameDetail): void {
       </tbody>
     </table>
   `;
+}
+
+/**
+ * MASTER_PLAN §2.3 — header-banner som viser current jackpot-amount.
+ * Returnerer tom streng når jackpot-state mangler (backend ikke wired).
+ */
+function renderJackpotBanner(jackpot: Game1JackpotState | null): string {
+  if (!jackpot) return "";
+  const kr = formatCentsAsNok(jackpot.currentAmountCents);
+  const capKr = formatCentsAsNok(jackpot.maxCapCents);
+  const atCap = jackpot.currentAmountCents >= jackpot.maxCapCents;
+  const labelClass = atCap ? "label-warning" : "label-success";
+  const capHint = atCap
+    ? ` <span class="${labelClass}" style="margin-left:6px;">MAX</span>`
+    : "";
+  return `
+    <div id="g1-master-jackpot-banner"
+         data-test="jackpot-banner"
+         style="background:#fff3cd;border:1px solid #f0ad4e;padding:8px 12px;margin-bottom:12px;border-radius:4px;">
+      <strong style="font-size:14px;">
+        ${escapeHtml(t("game1_master_jackpot_label"))}:
+        <span data-test="jackpot-amount" style="font-size:16px;color:#8a6d3b;">${escapeHtml(kr)}</span>${capHint}
+      </strong>
+      <small class="text-muted" style="margin-left:12px;">
+        ${escapeHtml(t("game1_master_jackpot_cap_hint"))}: ${escapeHtml(capKr)}
+      </small>
+    </div>
+  `;
+}
+
+/** Format øre → "24 560 kr" med norsk tusen-separator. */
+function formatCentsAsNok(cents: number): string {
+  const nok = Math.round(cents / 100);
+  return `${nok.toLocaleString("nb-NO")} kr`;
 }
 
 function renderHalls(container: HTMLElement, detail: Game1GameDetail): void {
@@ -416,32 +454,52 @@ async function onStart(container: HTMLElement, detail: Game1GameDetail): Promise
     confirmExcludedHalls = excludedHallIds;
   }
 
-  // Task 1.5: agents-not-ready popup + override-flyt.
-  // 1) Kall /start uten `confirmUnreadyHalls`.
-  // 2) Hvis backend svarer HALLS_NOT_READY med `details.unreadyHalls`, vis
-  //    popup "Noen haller er ikke klare" med liste + [Avbryt]/[Start uansett].
-  // 3) Ved [Start uansett] re-kall /start med `confirmUnreadyHalls`-listen.
-  try {
-    await startGame1(detail.game.id, { confirmExcludedHalls });
-    Toast.success(t("saved"));
-    await refresh(container, detail.game.id);
-  } catch (err) {
-    if (err instanceof ApiError && err.code === "HALLS_NOT_READY") {
-      const unready = extractUnreadyHalls(err);
-      if (unready.length > 0) {
+  // Task 1.5 + MASTER_PLAN §2.3 — kombinert override-flyt:
+  //   1) Kall /start uten override.
+  //   2) HALLS_NOT_READY → popup med unready-liste + [Avbryt]/[Start uansett];
+  //      ved [Start uansett] re-kall med `confirmUnreadyHalls`.
+  //   3) JACKPOT_CONFIRM_REQUIRED → popup med pot-amount + thresholds;
+  //      ved bekreft re-kall med `jackpotConfirmed=true`.
+  //   Hver error håndteres én gang per onStart-kjøring; backend validerer
+  //   typisk én ting av gangen, så et 2. retry (etter at f.eks.
+  //   confirmUnreadyHalls er satt og det fortsatt kreves jackpot-confirm)
+  //   plukkes opp i den andre catch-blokka under.
+  let confirmedUnreadyHalls: string[] | undefined;
+  let jackpotConfirmed = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await startGame1(
+        detail.game.id,
+        { confirmExcludedHalls, confirmUnreadyHalls: confirmedUnreadyHalls },
+        jackpotConfirmed || undefined
+      );
+      Toast.success(t("saved"));
+      await refresh(container, detail.game.id);
+      return;
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "HALLS_NOT_READY" && !confirmedUnreadyHalls) {
+        const unready = extractUnreadyHalls(err);
+        if (unready.length === 0) {
+          Toast.error(err.message);
+          return;
+        }
         const proceed = await promptNotReadyDialog(detail, unready);
         if (!proceed) return;
-        await callAction(container, detail.game.id, async () => {
-          await startGame1(detail.game.id, {
-            confirmExcludedHalls,
-            confirmUnreadyHalls: unready,
-          });
-        });
-        return;
+        confirmedUnreadyHalls = unready;
+        continue;
       }
+      if (err instanceof ApiError && err.code === "JACKPOT_CONFIRM_REQUIRED" && !jackpotConfirmed) {
+        const jackpotFromError = extractJackpotFromError(err);
+        const jackpot = jackpotFromError ?? detail.jackpot;
+        const confirmed = await openJackpotConfirmPopup(jackpot);
+        if (!confirmed) return;
+        jackpotConfirmed = true;
+        continue;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      Toast.error(msg);
+      return;
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    Toast.error(msg);
   }
 }
 
@@ -515,6 +573,112 @@ function promptNotReadyDialog(
       onClose: () => finish(false),
     });
   });
+}
+
+/**
+ * MASTER_PLAN §2.3 — trekk ut jackpot-felt fra ApiError.details hvis
+ * backend leverte dem. Faller tilbake til null slik at caller bruker
+ * detail.jackpot fra siste fetch.
+ */
+function extractJackpotFromError(err: ApiError): Game1JackpotState | null {
+  const d = err.details;
+  if (!d) return null;
+  const amount = Number(d.jackpotAmountCents);
+  const cap = Number(d.maxCapCents);
+  const incr = Number(d.dailyIncrementCents);
+  const thresholdsRaw = Array.isArray(d.drawThresholds) ? d.drawThresholds : [];
+  const thresholds: number[] = [];
+  for (const v of thresholdsRaw) {
+    const n = typeof v === "number" ? v : Number(v);
+    if (Number.isFinite(n)) thresholds.push(n);
+  }
+  if (!Number.isFinite(amount)) return null;
+  return {
+    currentAmountCents: amount,
+    maxCapCents: Number.isFinite(cap) ? cap : 3_000_000,
+    dailyIncrementCents: Number.isFinite(incr) ? incr : 400_000,
+    drawThresholds: thresholds.length > 0 ? thresholds : [50, 55, 56, 57],
+    lastAccumulationDate: "",
+  };
+}
+
+/**
+ * MASTER_PLAN §2.3 — jackpot-confirm-popup. Viser current pot-amount +
+ * draw-thresholds. Returner true når master bekrefter, false ved avbryt.
+ */
+async function openJackpotConfirmPopup(
+  jackpot: Game1JackpotState | null
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const body = document.createElement("div");
+    body.innerHTML = renderJackpotConfirmDialog(jackpot);
+    Modal.open({
+      title: t("game1_master_jackpot_confirm_title"),
+      content: body,
+      size: "sm",
+      backdrop: "static",
+      keyboard: true,
+      className: "modal-jackpot-confirm",
+      buttons: [
+        {
+          label: t("no_cancle"),
+          variant: "default",
+          action: "cancel",
+          onClick: () => resolve(false),
+        },
+        {
+          label: t("game1_master_jackpot_confirm_start"),
+          variant: "success",
+          action: "confirm",
+          onClick: () => resolve(true),
+        },
+      ],
+      onClose: () => resolve(false),
+    });
+  });
+}
+
+function renderJackpotConfirmDialog(jackpot: Game1JackpotState | null): string {
+  if (!jackpot) {
+    return `
+      <p>${escapeHtml(t("game1_master_jackpot_confirm_no_state"))}</p>
+    `;
+  }
+  const amountKr = formatCentsAsNok(jackpot.currentAmountCents);
+  const capKr = formatCentsAsNok(jackpot.maxCapCents);
+  const incrKr = formatCentsAsNok(jackpot.dailyIncrementCents);
+  const thresholds = jackpot.drawThresholds.join(", ");
+  return `
+    <div data-test="jackpot-confirm-body">
+      <div style="text-align:center;padding:16px 0;background:#fff3cd;border:1px solid #f0ad4e;border-radius:4px;margin-bottom:16px;">
+        <div style="font-size:12px;color:#8a6d3b;">
+          ${escapeHtml(t("game1_master_jackpot_label"))}
+        </div>
+        <div data-test="jackpot-confirm-amount" style="font-size:28px;font-weight:bold;color:#8a6d3b;">
+          ${escapeHtml(amountKr)}
+        </div>
+      </div>
+      <table class="table table-condensed" style="margin-bottom:12px;">
+        <tbody>
+          <tr>
+            <td style="width:50%;">${escapeHtml(t("game1_master_jackpot_max_cap"))}</td>
+            <td><strong>${escapeHtml(capKr)}</strong></td>
+          </tr>
+          <tr>
+            <td>${escapeHtml(t("game1_master_jackpot_daily_increment"))}</td>
+            <td>${escapeHtml(incrKr)}</td>
+          </tr>
+          <tr>
+            <td>${escapeHtml(t("game1_master_jackpot_draw_thresholds"))}</td>
+            <td data-test="jackpot-confirm-thresholds"><code>${escapeHtml(thresholds)}</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="text-muted" style="font-size:13px;">
+        ${escapeHtml(t("game1_master_jackpot_confirm_hint"))}
+      </p>
+    </div>
+  `;
 }
 
 async function onPause(container: HTMLElement, gameId: string): Promise<void> {

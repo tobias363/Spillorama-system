@@ -44,6 +44,19 @@ export interface Game1MasterAuditEntry {
   createdAt: string;
 }
 
+/**
+ * MASTER_PLAN §2.3 — jackpot-state for hall-gruppen spillet tilhører.
+ * Vises i master-konsoll-header og brukt som source-of-truth for
+ * confirm-popup pre-start.
+ */
+export interface Game1JackpotState {
+  currentAmountCents: number;
+  maxCapCents: number;
+  dailyIncrementCents: number;
+  drawThresholds: number[];
+  lastAccumulationDate: string;
+}
+
 export interface Game1GameDetail {
   game: {
     id: string;
@@ -80,6 +93,11 @@ export interface Game1GameDetail {
     drawsCompleted: number;
     isFinished: boolean;
   } | null;
+  /**
+   * MASTER_PLAN §2.3 — nåværende jackpot-state. null hvis jackpot-service
+   * ikke er wired i backend (legacy-mode) eller hall-gruppen mangler state.
+   */
+  jackpot: Game1JackpotState | null;
 }
 
 export async function fetchGame1Detail(gameId: string): Promise<Game1GameDetail> {
@@ -106,8 +124,9 @@ export interface StartGame1Overrides {
 
 export async function startGame1(
   gameId: string,
-  overrides?: StartGame1Overrides | string[]
-): Promise<Game1MasterActionResponse> {
+  overrides?: StartGame1Overrides | string[],
+  jackpotConfirmed?: boolean
+): Promise<Game1MasterActionResponse & { jackpotAmountCents?: number | null }> {
   const body: Record<string, unknown> = {};
   // Backward-compat: tidligere signatur `startGame1(gameId, confirmExcludedHalls?)`
   // støttes fortsatt.
@@ -124,9 +143,25 @@ export async function startGame1(
       body.confirmExcludeRedHalls = overrides.confirmExcludeRedHalls;
     }
   }
-  return apiRequest<Game1MasterActionResponse>(
+  if (jackpotConfirmed === true) {
+    body.jackpotConfirmed = true;
+  }
+  return apiRequest<Game1MasterActionResponse & { jackpotAmountCents?: number | null }>(
     `/api/admin/game1/games/${encodeURIComponent(gameId)}/start`,
     { method: "POST", auth: true, body }
+  );
+}
+
+/**
+ * MASTER_PLAN §2.3 — fetch jackpot-state direkte (uten å gå via game-detail).
+ * Null når jackpot-service ikke er wired i backend.
+ */
+export async function fetchGame1JackpotState(
+  hallGroupId: string
+): Promise<{ jackpot: (Game1JackpotState & { hallGroupId: string }) | null }> {
+  return apiRequest<{ jackpot: (Game1JackpotState & { hallGroupId: string }) | null }>(
+    `/api/admin/game1/jackpot-state/${encodeURIComponent(hallGroupId)}`,
+    { auth: true }
   );
 }
 
