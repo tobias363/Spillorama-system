@@ -2909,6 +2909,7 @@
   "diff_warn_over_100_nok": "Warning: difference between shifts exceeds 100 NOK and must be explained in notes.",
   "notes_required_for_large_diff": "Note required when difference between shifts exceeds 100 NOK.",
   "upload_receipt": "Upload receipt",
+  "download_receipt": "Download receipt",
   "no_receipt_uploaded": "No receipt uploaded",
   "bilag_too_large": "File is too large (max 10 MB).",
   "bilag_wrong_format": "Invalid file format. Allowed: PDF, JPG, PNG.",

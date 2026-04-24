@@ -270,6 +270,21 @@ export interface SettlementHallSection {
   lineItems: readonly SettlementLineItem[];
 }
 
+/** Wireframe Gap #2: 15-rad maskin/kategori-breakdown til PDF. */
+export interface SettlementBreakdownRow {
+  label: string;
+  inAmount: number;
+  outAmount: number;
+}
+
+/** Wireframe Gap #2: bilag-metadata i PDF (faktisk binær hentes separat). */
+export interface SettlementBilagMeta {
+  filename: string;
+  mime: string;
+  sizeBytes: number;
+  uploadedAt: string;
+}
+
 export interface DailyCashSettlementInput {
   /** Operating day (end-of-day snapshot). */
   businessDate: string | Date;
@@ -288,6 +303,16 @@ export interface DailyCashSettlementInput {
   };
   /** Optional signature slot for the operator. */
   signatoryName?: string | null;
+  /** Wireframe Gap #2: 15-rad maskin/kategori-breakdown (IN/OUT/Sum). */
+  breakdownRows?: readonly SettlementBreakdownRow[];
+  /** Wireframe Gap #2: bilag-metadata (filnavn, mime, størrelse). */
+  bilagMeta?: SettlementBilagMeta | null;
+  /** Wireframe Gap #2: admin-edit audit-info (editedBy/editedAt/reason). */
+  editAudit?: {
+    editedByName: string;
+    editedAt: string;
+    reason: string;
+  } | null;
 }
 
 /**
@@ -336,6 +361,60 @@ export async function generateDailyCashSettlementPdf(input: DailyCashSettlementI
         );
       }
     }
+  }
+
+  // Wireframe Gap #2: 15-rad maskin-breakdown (hvis tilgjengelig)
+  if (input.breakdownRows && input.breakdownRows.length > 0) {
+    writeSectionTitle(doc, "Maskin-breakdown (15 rader)");
+    doc.font("Helvetica").fontSize(10).fillColor("#213c3a");
+    writeMonospaceRow(
+      doc,
+      "Maskin".padEnd(26) +
+        "IN".padStart(12) +
+        "OUT".padStart(12) +
+        "Sum".padStart(12),
+    );
+    writeMonospaceRow(doc, "-".repeat(62));
+    let sumIn = 0;
+    let sumOut = 0;
+    for (const row of input.breakdownRows) {
+      sumIn += row.inAmount;
+      sumOut += row.outAmount;
+      writeMonospaceRow(
+        doc,
+        fit(row.label, 26).padEnd(26) +
+          formatCurrency(row.inAmount).padStart(12) +
+          formatCurrency(row.outAmount).padStart(12) +
+          formatCurrency(row.inAmount - row.outAmount).padStart(12),
+      );
+    }
+    writeMonospaceRow(doc, "-".repeat(62));
+    writeMonospaceRow(
+      doc,
+      "Total".padEnd(26) +
+        formatCurrency(sumIn).padStart(12) +
+        formatCurrency(sumOut).padStart(12) +
+        formatCurrency(sumIn - sumOut).padStart(12),
+    );
+  }
+
+  // Wireframe Gap #2: bilag-metadata
+  if (input.bilagMeta) {
+    writeSectionTitle(doc, "Bilag (opplastet kvittering)");
+    doc.font("Helvetica").fontSize(10).fillColor("#213c3a");
+    doc.text(`Filnavn: ${input.bilagMeta.filename}`);
+    doc.text(`Filtype: ${input.bilagMeta.mime}`);
+    doc.text(`Størrelse: ${Math.round(input.bilagMeta.sizeBytes / 1024)} KB`);
+    doc.text(`Lastet opp: ${formatDateTime(input.bilagMeta.uploadedAt)}`);
+  }
+
+  // Wireframe Gap #2: admin-edit audit-info
+  if (input.editAudit) {
+    writeSectionTitle(doc, "Admin-redigering");
+    doc.font("Helvetica").fontSize(10).fillColor("#b8550e");
+    doc.text(`Redigert av: ${input.editAudit.editedByName}`);
+    doc.text(`Tidspunkt: ${formatDateTime(input.editAudit.editedAt)}`);
+    doc.text(`Grunn: ${input.editAudit.reason}`);
   }
 
   if (input.signatoryName) {

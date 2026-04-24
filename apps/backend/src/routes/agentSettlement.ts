@@ -1,5 +1,5 @@
 /**
- * BIN-583 B3.3 + K1: agent + admin settlement-endepunkter.
+ * BIN-583 B3.3 + K1 + Wireframe Gap #2 (16.24): agent + admin settlement-endepunkter.
  *
  *   POST /api/agent/shift/control-daily-balance         pre-close sjekk
  *   POST /api/agent/shift/close-day                      fullfør oppgjør
@@ -7,11 +7,13 @@
  *   GET  /api/agent/shift/settlement-date                forventet dato + pending check
  *   GET  /api/agent/shift/:shiftId/settlement            agentens egen
  *   GET  /api/agent/shift/:shiftId/settlement.pdf        PDF-eksport
+ *   GET  /api/agent/shift/:shiftId/settlement/receipt    bilag download (stream)
  *   POST /api/agent/settlements/:settlementId/receipt    K1: upload bilag PDF/JPG
  *
  *   GET  /api/admin/shifts/settlements                   paginert liste
  *   GET  /api/admin/shifts/:shiftId/settlement           admin-detail
  *   GET  /api/admin/shifts/:shiftId/settlement.pdf       admin-PDF
+ *   GET  /api/admin/shifts/:shiftId/settlement/receipt   bilag download (stream)
  *   PUT  /api/admin/shifts/:shiftId/settlement           admin-edit (K1: også breakdown/bilag)
  *
  * RBAC:
@@ -401,6 +403,111 @@ export function createAgentSettlementRouter(deps: AgentSettlementRouterDeps): ex
     }
   });
 
-  logger.info("agent-settlement-router initialised (10 endpoints)");
+  // ── GET /api/agent/shift/:shiftId/settlement/receipt ────────────────────
+  // Wireframe Gap #2: download-receipt-action (16.24). Streamer den opplastede
+  // bilagen (PDF/JPG/PNG) tilbake som binær. Ingen bilag → 404.
+  router.get("/api/agent/shift/:shiftId/settlement/receipt", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "AGENT_SETTLEMENT_READ");
+      const shiftId = mustBeNonEmptyString(req.params.shiftId, "shiftId");
+      const settlement = await agentSettlementService.getSettlementByShiftId(shiftId);
+      if (!settlement) {
+        throw new DomainError("SETTLEMENT_NOT_FOUND", "Ingen settlement for denne shiften.");
+      }
+      if (actor.role === "AGENT" && settlement.agentUserId !== actor.userId) {
+        throw new DomainError("FORBIDDEN", "Du har ikke tilgang til denne settlementen.");
+      }
+      const bilag = settlement.bilagReceipt;
+      if (!bilag) {
+        throw new DomainError("BILAG_NOT_FOUND", "Ingen bilag lastet opp for denne settlementen.");
+      }
+      const bytes = decodeDataUrl(bilag.dataUrl, bilag.mime);
+      void auditLogService.record({
+        actorId: actor.userId,
+        actorType: mapRoleToActorType(actor.role),
+        action: "agent.settlement.bilag-downloaded",
+        resource: "settlement",
+        resourceId: settlement.id,
+        details: { shiftId, filename: bilag.filename, mime: bilag.mime },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+      res.setHeader("Content-Type", bilag.mime);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${sanitizeFilename(bilag.filename)}"`
+      );
+      res.status(200).end(bytes);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── GET /api/admin/shifts/:shiftId/settlement/receipt ───────────────────
+  router.get("/api/admin/shifts/:shiftId/settlement/receipt", async (req, res) => {
+    try {
+      const actor = await requirePermission(req, "AGENT_SETTLEMENT_READ");
+      if (actor.role === "AGENT") {
+        throw new DomainError("FORBIDDEN", "AGENT bruker /api/agent/shift/-endepunktene.");
+      }
+      const shiftId = mustBeNonEmptyString(req.params.shiftId, "shiftId");
+      const settlement = await agentSettlementService.getSettlementByShiftId(shiftId);
+      if (!settlement) {
+        throw new DomainError("SETTLEMENT_NOT_FOUND", "Ingen settlement.");
+      }
+      const bilag = settlement.bilagReceipt;
+      if (!bilag) {
+        throw new DomainError("BILAG_NOT_FOUND", "Ingen bilag lastet opp.");
+      }
+      const bytes = decodeDataUrl(bilag.dataUrl, bilag.mime);
+      void auditLogService.record({
+        actorId: actor.userId,
+        actorType: mapRoleToActorType(actor.role),
+        action: "agent.settlement.bilag-downloaded",
+        resource: "settlement",
+        resourceId: settlement.id,
+        details: { shiftId, filename: bilag.filename, mime: bilag.mime, source: "admin" },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+      res.setHeader("Content-Type", bilag.mime);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${sanitizeFilename(bilag.filename)}"`
+      );
+      res.status(200).end(bytes);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  logger.info("agent-settlement-router initialised (12 endpoints)");
   return router;
+}
+
+// ── Helpers (module-scoped, ikke avhengig av closure) ───────────────────────
+
+/**
+ * Decode data:{mime};base64,{payload} → Buffer.
+ * Kaster DomainError hvis shape ikke matcher eller mime ikke matcher forventet.
+ */
+function decodeDataUrl(dataUrl: string, expectedMime: string): Buffer {
+  const prefix = `data:${expectedMime};base64,`;
+  if (!dataUrl.startsWith(prefix)) {
+    throw new DomainError(
+      "BILAG_CORRUPT",
+      `Bilag har ukjent format (forventet ${expectedMime}).`
+    );
+  }
+  const payload = dataUrl.slice(prefix.length);
+  try {
+    return Buffer.from(payload, "base64");
+  } catch {
+    throw new DomainError("BILAG_CORRUPT", "Kunne ikke dekode bilag.");
+  }
+}
+
+/** Filter ut path-separatorer + quotes for Content-Disposition. */
+function sanitizeFilename(name: string): string {
+  return name.replace(/[\\/"<>|]/g, "_").slice(0, 128);
 }
