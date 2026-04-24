@@ -71,6 +71,29 @@ export interface AdminGame1HallStatusUpdate {
   at: number;
 }
 
+/** Task 1.6: transfer-event payload (speiler Game1TransferRequestPayload). */
+export interface AdminGame1TransferRequest {
+  requestId: string;
+  gameId: string;
+  fromHallId: string;
+  toHallId: string;
+  initiatedByUserId: string;
+  initiatedAtMs: number;
+  validTillMs: number;
+  status: "pending" | "approved" | "rejected" | "expired";
+  respondedByUserId: string | null;
+  respondedAtMs: number | null;
+  rejectReason: string | null;
+}
+
+export interface AdminGame1MasterChanged {
+  gameId: string;
+  previousMasterHallId: string;
+  newMasterHallId: string;
+  transferRequestId: string;
+  at: number;
+}
+
 export interface AdminGame1SocketOptions {
   /** Base-URL for Socket.IO-serveren. Default: window.location.origin. */
   baseUrl?: string;
@@ -89,6 +112,12 @@ export interface AdminGame1SocketOptions {
   /** TASK HS: per-hall farge/scan-oppdatering. Valgfri for bakoverkompat. */
   onHallStatusUpdate?: (payload: AdminGame1HallStatusUpdate) => void;
   onFallbackActive: (fallbackActive: boolean) => void;
+  /** Task 1.6: transfer-request opprettet (fra nåværende master). */
+  onTransferRequest?: (payload: AdminGame1TransferRequest) => void;
+  onTransferApproved?: (payload: AdminGame1TransferRequest) => void;
+  onTransferRejected?: (payload: AdminGame1TransferRequest) => void;
+  onTransferExpired?: (payload: AdminGame1TransferRequest) => void;
+  onMasterChanged?: (payload: AdminGame1MasterChanged) => void;
   /** Testing-hook: bytte ut io-factory for å slippe ekte nettverks-call. */
   _ioFactory?: typeof io;
 }
@@ -112,6 +141,7 @@ export class AdminGame1Socket {
   private disposed = false;
 
   constructor(options: AdminGame1SocketOptions) {
+    const noop = () => undefined;
     this.options = {
       baseUrl: options.baseUrl ?? window.location.origin,
       disconnectGraceMs: options.disconnectGraceMs ?? 10_000,
@@ -121,6 +151,11 @@ export class AdminGame1Socket {
       onResumed: options.onResumed,
       onHallStatusUpdate: options.onHallStatusUpdate ?? (() => undefined),
       onFallbackActive: options.onFallbackActive,
+      onTransferRequest: options.onTransferRequest ?? noop,
+      onTransferApproved: options.onTransferApproved ?? noop,
+      onTransferRejected: options.onTransferRejected ?? noop,
+      onTransferExpired: options.onTransferExpired ?? noop,
+      onMasterChanged: options.onMasterChanged ?? noop,
       _ioFactory: options._ioFactory ?? io,
     };
 
@@ -195,6 +230,43 @@ export class AdminGame1Socket {
       (payload: AdminGame1HallStatusUpdate) => {
         if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
         this.options.onHallStatusUpdate(payload);
+      }
+    );
+
+    // Task 1.6: transfer-hall-events.
+    this.socket.on(
+      "game1:transfer-request",
+      (payload: AdminGame1TransferRequest) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onTransferRequest?.(payload);
+      }
+    );
+    this.socket.on(
+      "game1:transfer-approved",
+      (payload: AdminGame1TransferRequest) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onTransferApproved?.(payload);
+      }
+    );
+    this.socket.on(
+      "game1:transfer-rejected",
+      (payload: AdminGame1TransferRequest) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onTransferRejected?.(payload);
+      }
+    );
+    this.socket.on(
+      "game1:transfer-expired",
+      (payload: AdminGame1TransferRequest) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onTransferExpired?.(payload);
+      }
+    );
+    this.socket.on(
+      "game1:master-changed",
+      (payload: AdminGame1MasterChanged) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onMasterChanged?.(payload);
       }
     );
   }

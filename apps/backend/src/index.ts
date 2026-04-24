@@ -60,6 +60,9 @@ import { Game1PayoutService } from "./game/Game1PayoutService.js";
 import { Game1JackpotService } from "./game/Game1JackpotService.js";
 import { Game1JackpotStateService } from "./game/Game1JackpotStateService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
+import { Game1TransferHallService } from "./game/Game1TransferHallService.js";
+import { Game1TransferExpiryTickService } from "./game/Game1TransferExpiryTickService.js";
+import { createGame1TransferExpiryTickJob } from "./jobs/game1TransferExpiryTick.js";
 import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
 import { createJackpotDailyTickJob } from "./jobs/jackpotDailyTick.js";
 import { FcmPushService } from "./notifications/FcmPushService.js";
@@ -82,6 +85,7 @@ import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAd
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
 import { createAgentGame1Router } from "./routes/agentGame1.js";
+import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
@@ -338,6 +342,7 @@ const {
   jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
   jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
+  jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
   jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
   jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
   jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
@@ -1308,6 +1313,26 @@ jobScheduler.register({
   run: createGame1AutoDrawTickJob({ service: game1AutoDrawTickService }),
 });
 
+// Task 1.6: runtime master-overføring — service + expiry-tick. Expiry-tick
+// default ON (60s TTL må håndheves). Broadcast-hook late-bindes etter at
+// adminGame1Handle.broadcaster finnes (se senere i index.ts).
+const game1TransferHallService = new Game1TransferHallService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const game1TransferExpiryTickService = new Game1TransferExpiryTickService({
+  service: game1TransferHallService,
+});
+jobScheduler.register({
+  name: "game1-transfer-expiry-tick",
+  description: "Utløp pending master-transfer-requests (Task 1.6, 60s TTL).",
+  intervalMs: jobGame1TransferExpiryTickIntervalMs,
+  enabled: jobGame1TransferExpiryTickEnabled,
+  run: createGame1TransferExpiryTickJob({
+    service: game1TransferExpiryTickService,
+  }),
+});
+
 // ── Mount routers ─────────────────────────────────────────────────────────────
 
 const bingoSettingsState = {
@@ -1571,6 +1596,29 @@ app.use(createAgentGame1Router({
   masterControlService: game1MasterControlService,
   hallReadyService: game1HallReadyService,
   pool: platformService.getPool(),
+}));
+// Task 1.6: runtime master-overføring — 4 endepunkter (request/approve/
+// reject/GET active). Broadcast-hooks wires up nedenfor etter
+// adminGame1Handle eksisterer.
+const adminGame1MasterTransferBroadcastHooks = {
+  onRequestCreated: undefined as
+    | ((r: import("./game/Game1TransferHallService.js").TransferRequest) => void)
+    | undefined,
+  onApproved: undefined as
+    | ((p: {
+        request: import("./game/Game1TransferHallService.js").TransferRequest;
+        previousMasterHallId: string;
+        newMasterHallId: string;
+      }) => void)
+    | undefined,
+  onRejected: undefined as
+    | ((r: import("./game/Game1TransferHallService.js").TransferRequest) => void)
+    | undefined,
+};
+app.use(createAdminGame1MasterTransferRouter({
+  platformService,
+  transferService: game1TransferHallService,
+  broadcastHooks: adminGame1MasterTransferBroadcastHooks,
 }));
 // GAME1_SCHEDULE PR 4a: ticket-purchase-router for Game 1. 3 endepunkter —
 // POST /api/game1/purchase, POST /api/game1/purchase/:id/refund,
@@ -2380,6 +2428,44 @@ const adminGame1Handle = createAdminGame1Namespace({
 });
 game1MasterControlService.setAdminBroadcaster(adminGame1Handle.broadcaster);
 game1DrawEngineService.setAdminBroadcaster(adminGame1Handle.broadcaster);
+
+// Task 1.6: late-bind transfer-broadcast-hooks etter adminGame1Handle finnes.
+// Hook-ene mapper service-responsen til broadcast-event-shape.
+const toTransferEvent = (
+  r: import("./game/Game1TransferHallService.js").TransferRequest
+): import("./game/AdminGame1Broadcaster.js").AdminGame1TransferRequestEvent => ({
+  requestId: r.id,
+  gameId: r.gameId,
+  fromHallId: r.fromHallId,
+  toHallId: r.toHallId,
+  initiatedByUserId: r.initiatedByUserId,
+  initiatedAtMs: new Date(r.initiatedAt).getTime(),
+  validTillMs: new Date(r.validTill).getTime(),
+  status: r.status,
+  respondedByUserId: r.respondedByUserId,
+  respondedAtMs: r.respondedAt ? new Date(r.respondedAt).getTime() : null,
+  rejectReason: r.rejectReason,
+});
+adminGame1MasterTransferBroadcastHooks.onRequestCreated = (req) => {
+  adminGame1Handle.broadcaster.onTransferRequest(toTransferEvent(req));
+};
+adminGame1MasterTransferBroadcastHooks.onApproved = (payload) => {
+  const event = toTransferEvent(payload.request);
+  adminGame1Handle.broadcaster.onTransferApproved(event);
+  adminGame1Handle.broadcaster.onMasterChanged({
+    gameId: payload.request.gameId,
+    previousMasterHallId: payload.previousMasterHallId,
+    newMasterHallId: payload.newMasterHallId,
+    transferRequestId: payload.request.id,
+    at: Date.now(),
+  });
+};
+adminGame1MasterTransferBroadcastHooks.onRejected = (req) => {
+  adminGame1Handle.broadcaster.onTransferRejected(toTransferEvent(req));
+};
+game1TransferExpiryTickService.setBroadcastHook((req) => {
+  adminGame1Handle.broadcaster.onTransferExpired(toTransferEvent(req));
+});
 
 // PR-C4: spiller-broadcaster for default-namespace. Speiler admin-broadcast
 // slik at spiller-klient mottar `draw:new` / `pattern:won` / `room:update`

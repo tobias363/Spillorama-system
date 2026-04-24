@@ -61,6 +61,13 @@ test("4d.3+4: broadcaster-port — events har forventet shape (compile + runtime
     onPhysicalTicketWon: (e) => physicalEvents.push(e),
     onAutoPaused: (e) => autoPausedEvents.push(e),
     onResumed: (e) => resumedEvents.push(e),
+    // Task 1.6: no-ops i denne kontrakt-sjekken; spesifikke tester ligger i
+    // AdminGame1Namespace.transferHall.test.ts og TransferHallService-tester.
+    onTransferRequest: () => undefined,
+    onTransferApproved: () => undefined,
+    onTransferRejected: () => undefined,
+    onTransferExpired: () => undefined,
+    onMasterChanged: () => undefined,
   };
 
   recording.onStatusChange({

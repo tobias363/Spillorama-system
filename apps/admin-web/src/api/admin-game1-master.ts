@@ -299,3 +299,71 @@ export async function stopGame1(
     }
   );
 }
+
+// ── Task 1.6: runtime master-hall-overføring ───────────────────────────────
+
+export type Game1TransferStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "expired";
+
+export interface Game1TransferRequest {
+  id: string;
+  gameId: string;
+  fromHallId: string;
+  toHallId: string;
+  initiatedByUserId: string;
+  initiatedAt: string;
+  validTill: string;
+  status: Game1TransferStatus;
+  respondedByUserId: string | null;
+  respondedAt: string | null;
+  rejectReason: string | null;
+}
+
+export interface Game1TransferApproveResponse {
+  request: Game1TransferRequest;
+  previousMasterHallId: string;
+  newMasterHallId: string;
+}
+
+export async function requestGame1MasterTransfer(
+  gameId: string,
+  toHallId: string
+): Promise<{ request: Game1TransferRequest }> {
+  return apiRequest<{ request: Game1TransferRequest }>(
+    `/api/admin/game1/games/${encodeURIComponent(gameId)}/transfer-master/request`,
+    { method: "POST", auth: true, body: { toHallId } }
+  );
+}
+
+export async function approveGame1MasterTransfer(
+  requestId: string
+): Promise<Game1TransferApproveResponse> {
+  return apiRequest<Game1TransferApproveResponse>(
+    `/api/admin/game1/master-transfers/${encodeURIComponent(requestId)}/approve`,
+    { method: "POST", auth: true, body: {} }
+  );
+}
+
+export async function rejectGame1MasterTransfer(
+  requestId: string,
+  reason?: string
+): Promise<{ request: Game1TransferRequest }> {
+  const body: Record<string, unknown> = {};
+  if (reason !== undefined && reason.trim()) body.reason = reason.trim();
+  return apiRequest<{ request: Game1TransferRequest }>(
+    `/api/admin/game1/master-transfers/${encodeURIComponent(requestId)}/reject`,
+    { method: "POST", auth: true, body }
+  );
+}
+
+export async function fetchActiveGame1Transfer(
+  gameId: string
+): Promise<{ request: Game1TransferRequest | null }> {
+  return apiRequest<{ request: Game1TransferRequest | null }>(
+    `/api/admin/game1/games/${encodeURIComponent(gameId)}/transfer-request`,
+    { auth: true }
+  );
+}

@@ -40,12 +40,38 @@ export interface AgentRoomUpdate {
   [key: string]: unknown;
 }
 
+/** Task 1.6: master-transfer-event mottatt på default-namespace hall-rom. */
+export interface AgentTransferRequest {
+  requestId: string;
+  gameId: string;
+  fromHallId: string;
+  toHallId: string;
+  initiatedByUserId: string;
+  initiatedAtMs: number;
+  validTillMs: number;
+  status: "pending" | "approved" | "rejected" | "expired";
+  respondedByUserId: string | null;
+  respondedAtMs: number | null;
+  rejectReason: string | null;
+}
+
 export interface AgentHallSocketOptions {
   baseUrl?: string;
   disconnectGraceMs?: number;
+  /**
+   * Task 1.6: agentens egen hallId. Hvis satt, emitter socketen
+   * `admin-display:subscribe { hallId }` ved tilkobling slik at server
+   * joiner `hall:<hallId>:display`-rommet og transfer-events fanges opp.
+   */
+  hallId?: string | null;
   onHallEvent: (evt: AgentHallEvent) => void;
   onRoomUpdate?: (evt: AgentRoomUpdate) => void;
   onFallbackActive?: (active: boolean) => void;
+  /** Task 1.6: master-transfer events levert til hall-display-rom. */
+  onTransferRequest?: (evt: AgentTransferRequest) => void;
+  onTransferApproved?: (evt: AgentTransferRequest) => void;
+  onTransferRejected?: (evt: AgentTransferRequest) => void;
+  onTransferExpired?: (evt: AgentTransferRequest) => void;
   /** Testing-hook: bytte ut io-factory for å slippe ekte nettverkskall. */
   _ioFactory?: typeof io;
 }
@@ -53,11 +79,26 @@ export interface AgentHallSocketOptions {
 export class AgentHallSocket {
   private readonly socket: Socket;
   private readonly options: Required<
-    Omit<AgentHallSocketOptions, "_ioFactory" | "onRoomUpdate" | "onFallbackActive">
+    Omit<
+      AgentHallSocketOptions,
+      | "_ioFactory"
+      | "onRoomUpdate"
+      | "onFallbackActive"
+      | "onTransferRequest"
+      | "onTransferApproved"
+      | "onTransferRejected"
+      | "onTransferExpired"
+      | "hallId"
+    >
   > & {
     _ioFactory: typeof io;
+    hallId: string | null;
     onRoomUpdate: (evt: AgentRoomUpdate) => void;
     onFallbackActive: (active: boolean) => void;
+    onTransferRequest: (evt: AgentTransferRequest) => void;
+    onTransferApproved: (evt: AgentTransferRequest) => void;
+    onTransferRejected: (evt: AgentTransferRequest) => void;
+    onTransferExpired: (evt: AgentTransferRequest) => void;
   };
   private currentRoomCode: string | null = null;
   private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,12 +106,18 @@ export class AgentHallSocket {
   private disposed = false;
 
   constructor(options: AgentHallSocketOptions) {
+    const noop = () => undefined;
     this.options = {
       baseUrl: options.baseUrl ?? (typeof window !== "undefined" ? window.location.origin : ""),
       disconnectGraceMs: options.disconnectGraceMs ?? 10_000,
+      hallId: options.hallId ?? null,
       onHallEvent: options.onHallEvent,
       onRoomUpdate: options.onRoomUpdate ?? (() => {}),
       onFallbackActive: options.onFallbackActive ?? (() => {}),
+      onTransferRequest: options.onTransferRequest ?? noop,
+      onTransferApproved: options.onTransferApproved ?? noop,
+      onTransferRejected: options.onTransferRejected ?? noop,
+      onTransferExpired: options.onTransferExpired ?? noop,
       _ioFactory: options._ioFactory ?? io,
     };
 
@@ -88,6 +135,9 @@ export class AgentHallSocket {
         this.fallbackActive = false;
         this.options.onFallbackActive(false);
       }
+      // Task 1.6: ingen subscribe nødvendig — backend emitter også globalt
+      // via io.emit(...) slik at agent-portal kan filtrere klient-side på
+      // toHallId/fromHallId mot options.hallId.
     });
 
     this.socket.on("disconnect", () => {
@@ -108,6 +158,34 @@ export class AgentHallSocket {
       if (!this.currentRoomCode) return;
       if (payload.roomCode && payload.roomCode !== this.currentRoomCode) return;
       this.options.onRoomUpdate(payload);
+    });
+
+    // Task 1.6: transfer-events. Backend emitter globalt (`io.emit`) med
+    // hall-filter, så vi filtrerer klient-side på agentens egen hallId.
+    // Hvis `options.hallId` ikke er satt, leverer vi alle events (backwards-
+    // compat for test-kontekst).
+    const isEventRelevant = (payload: AgentTransferRequest): boolean => {
+      if (!options.hallId) return true;
+      return (
+        payload.toHallId === options.hallId ||
+        payload.fromHallId === options.hallId
+      );
+    };
+    this.socket.on("game1:transfer-request", (payload: AgentTransferRequest) => {
+      if (!isEventRelevant(payload)) return;
+      this.options.onTransferRequest(payload);
+    });
+    this.socket.on("game1:transfer-approved", (payload: AgentTransferRequest) => {
+      if (!isEventRelevant(payload)) return;
+      this.options.onTransferApproved(payload);
+    });
+    this.socket.on("game1:transfer-rejected", (payload: AgentTransferRequest) => {
+      if (!isEventRelevant(payload)) return;
+      this.options.onTransferRejected(payload);
+    });
+    this.socket.on("game1:transfer-expired", (payload: AgentTransferRequest) => {
+      if (!isEventRelevant(payload)) return;
+      this.options.onTransferExpired(payload);
     });
   }
 

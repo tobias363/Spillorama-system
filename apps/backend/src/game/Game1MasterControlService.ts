@@ -64,7 +64,12 @@ export type MasterAuditAction =
   | "exclude_hall"
   | "include_hall"
   | "timeout_detected"
-  | "start_game_with_unready_override";
+  | "start_game_with_unready_override"
+  // Task 1.6: runtime master-overføring. Se Game1TransferHallService.
+  | "transfer_request"
+  | "transfer_approved"
+  | "transfer_rejected"
+  | "transfer_expired";
 
 export const MASTER_AUDIT_ACTIONS: readonly MasterAuditAction[] = [
   "start",
@@ -75,6 +80,10 @@ export const MASTER_AUDIT_ACTIONS: readonly MasterAuditAction[] = [
   "include_hall",
   "timeout_detected",
   "start_game_with_unready_override",
+  "transfer_request",
+  "transfer_approved",
+  "transfer_rejected",
+  "transfer_expired",
 ];
 
 export interface MasterActor {

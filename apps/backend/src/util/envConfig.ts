@@ -58,6 +58,9 @@ export interface BingoRuntimeConfig {
   // GAME1_SCHEDULE PR 4c: auto-draw-tick for Game 1 (fixed seconds-intervall)
   jobGame1AutoDrawEnabled: boolean;
   jobGame1AutoDrawIntervalMs: number;
+  // Task 1.6: master-transfer expiry tick (60s TTL håndheving)
+  jobGame1TransferExpiryTickEnabled: boolean;
+  jobGame1TransferExpiryTickIntervalMs: number;
   // BIN-FCM: FCM push-notification cron (legacy sendGameStartNotifications)
   jobGameStartNotificationsEnabled: boolean;
   jobGameStartNotificationsIntervalMs: number;
@@ -177,6 +180,18 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   // tick-intervallet bare polles. Default 1000 ms matcher "global 1s tick".
   const jobGame1AutoDrawIntervalMs = Math.max(500, parsePositiveIntEnv(process.env.GAME1_AUTO_DRAW_INTERVAL_MS, 1_000));
 
+  // Task 1.6: transfer-expiry-tick — default ON siden 60s TTL på master-
+  // transfer-requests ellers ikke håndheves. Intervall 5s er grovt nok (TTL
+  // er 60s) og billig (én UPDATE per tick).
+  const jobGame1TransferExpiryTickEnabled = parseBooleanEnv(
+    process.env.GAME1_TRANSFER_EXPIRY_TICK_ENABLED,
+    true,
+  );
+  const jobGame1TransferExpiryTickIntervalMs = Math.max(
+    1_000,
+    parsePositiveIntEnv(process.env.GAME1_TRANSFER_EXPIRY_TICK_INTERVAL_MS, 5_000),
+  );
+
   // BIN-FCM: FCM push-notification cron for pre-game-varsler.
   // Legacy kjørte hver 1min (60s). Default ON når FIREBASE_CREDENTIALS_JSON
   // er satt — service-laget kjører i no-op-modus uten credentials, så
@@ -278,6 +293,7 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
     jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
+    jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
     jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
     jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
     jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
