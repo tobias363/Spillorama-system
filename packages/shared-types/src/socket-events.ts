@@ -382,7 +382,12 @@ export type MiniGamePlayResult = MiniGamePlayResultT;
  * `apps/backend/src/game/minigames/types.ts:MiniGameType`. Intentionally
  * separate from the legacy `MiniGameType` above.
  */
-export type M6MiniGameType = "wheel" | "chest" | "colordraft" | "oddsen";
+export type M6MiniGameType =
+  | "wheel"
+  | "chest"
+  | "colordraft"
+  | "oddsen"
+  | "mystery";
 
 /** Server → Client: trigger payload for a newly activated mini-game. */
 export interface MiniGameTriggerPayload {
@@ -395,6 +400,8 @@ export interface MiniGameTriggerPayload {
    *    - chest:      { chestCount, prizeRange, hasDiscreteTiers }
    *    - colordraft: { numberOfSlots, targetColor, slotColors, winPrizeNok, consolationPrizeNok }
    *    - oddsen:     { validNumbers, potSmallNok, potLargeNok, resolveAtDraw }
+   *    - mystery:    { middleNumber, resultNumber, prizeListNok, maxRounds,
+   *                    autoTurnFirstMoveSec, autoTurnOtherMoveSec }
    */
   readonly payload: Readonly<Record<string, unknown>>;
   /** Optional client-side countdown in seconds. */
@@ -409,6 +416,8 @@ export interface MiniGameChoicePayload extends AuthenticatedSocketPayload {
    *    - chest:      { chosenIndex: number }
    *    - colordraft: { chosenIndex: number }
    *    - oddsen:     { chosenNumber: number }
+   *    - mystery:    { directions: ("up"|"down")[] } (1..5 elements; joker
+   *                    terminates early so <5 is valid)
    */
   readonly choiceJson: Readonly<Record<string, unknown>>;
 }
@@ -425,6 +434,8 @@ export interface MiniGameResultPayload {
    *    - colordraft: { chosenIndex, chosenColor, targetColor, matched, prizeAmountKroner, allSlotColors, numberOfSlots }
    *    - oddsen:     { chosenNumber, oddsenStateId, chosenForGameId, ticketSizeAtWin, potAmountNokIfHit, validNumbers, payoutDeferred: true }
    *                    (resolved outcome arrives via separate event in the next game)
+   *    - mystery:    { middleNumber, resultNumber, rounds: MysteryRoundResult[],
+   *                    finalPriceIndex, prizeAmountKroner, jokerTriggered }
    */
   readonly resultJson: Readonly<Record<string, unknown>>;
 }

@@ -186,7 +186,7 @@ Klient-siden er delt mellom `MiniGameRouter` (event-dispatch + socket-wrapper) o
   [client]  SpilloramaSocket.on("miniGameTrigger")
     → GameBridge.emit("miniGameTrigger")
     → MiniGameRouter.onTrigger()
-    → instansierer overlay (wheel / chest / colordraft / oddsen)
+    → instansierer overlay (wheel / chest / colordraft / oddsen / mystery)
     → overlay.show(payload)
     ▼
   [client]  spilleren velger → overlay.onChoice({...})
@@ -215,6 +215,7 @@ Klient-siden er delt mellom `MiniGameRouter` (event-dispatch + socket-wrapper) o
 | `chest` | `{ chestCount, prizeRange: {minNok, maxNok}, hasDiscreteTiers }` | `{ chosenIndex: number }` | `{ chosenIndex, prizeAmountKroner, allValuesKroner, chestCount }` |
 | `colordraft` | `{ numberOfSlots, targetColor, slotColors: string[], winPrizeNok, consolationPrizeNok }` | `{ chosenIndex: number }` | `{ chosenIndex, chosenColor, targetColor, matched, prizeAmountKroner, allSlotColors, numberOfSlots }` |
 | `oddsen` | `{ validNumbers, potSmallNok, potLargeNok, resolveAtDraw }` | `{ chosenNumber: number }` | Fase 1: `{ chosenNumber, oddsenStateId, chosenForGameId, ticketSizeAtWin, potAmountNokIfHit, payoutDeferred: true }` — `payoutCents === 0`. Fase 2 (neste spill): `{ chosenNumber, resolvedOutcome: "hit"\|"miss", potAmountKroner }`. |
+| `mystery` | `{ middleNumber, resultNumber, prizeListNok: number[6], maxRounds: 5, autoTurnFirstMoveSec, autoTurnOtherMoveSec }` | `{ directions: ("up"\|"down")[] }` (1-5 elementer; joker terminerer tidlig) | `{ middleNumber, resultNumber, rounds: MysteryRoundResult[], finalPriceIndex, prizeAmountKroner, jokerTriggered }` |
 
 ### Oddsen — cross-round semantics
 

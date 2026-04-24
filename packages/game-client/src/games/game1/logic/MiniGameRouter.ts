@@ -11,6 +11,7 @@ import { WheelOverlay } from "../components/WheelOverlay.js";
 import { TreasureChestOverlay } from "../components/TreasureChestOverlay.js";
 import { ColorDraftOverlay } from "../components/ColorDraftOverlay.js";
 import { OddsenOverlay } from "../components/OddsenOverlay.js";
+import { MysteryGameOverlay } from "../components/MysteryGameOverlay.js";
 
 /**
  * BIN-690 PR-M6: MiniGameRouter for the scheduled-games framework.
@@ -53,7 +54,8 @@ type MiniGameOverlay =
   | WheelOverlay
   | TreasureChestOverlay
   | ColorDraftOverlay
-  | OddsenOverlay;
+  | OddsenOverlay
+  | MysteryGameOverlay;
 
 /**
  * Error shape passed to overlays when a socket emit fails. Keeps the overlay
@@ -116,6 +118,8 @@ export class MiniGameRouter {
           return new ColorDraftOverlay(w, h);
         case "oddsen":
           return new OddsenOverlay(w, h);
+        case "mystery":
+          return new MysteryGameOverlay(w, h);
         default: {
           // Exhaustive-check: if a new type is added to the union the compiler
           // will flag this default. At runtime, unknown types are a protocol

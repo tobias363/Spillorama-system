@@ -185,10 +185,16 @@ export interface ElvisConfig {
  *   - "chest"      — Skattekisten (M3)
  *   - "colordraft" — Fargekladden, 12-luker (M4)
  *   - "oddsen"     — Oddsen, cross-round ball-number-bet (M5)
+ *   - "mystery"    — Mystery Game, 5-runders opp/ned-gjetting (M6)
  *
- * M1-framework støtter alle typer; konkrete implementasjoner lander i M2-M5.
+ * M1-framework støtter alle typer; konkrete implementasjoner lander i M2-M6.
  */
-export type Spill1MiniGameType = "wheel" | "chest" | "colordraft" | "oddsen";
+export type Spill1MiniGameType =
+  | "wheel"
+  | "chest"
+  | "colordraft"
+  | "oddsen"
+  | "mystery";
 
 /** Alle tilgjengelige mini-game-typer (for UI-iterasjon). */
 export const SPILL1_MINI_GAME_TYPES: readonly Spill1MiniGameType[] = [
@@ -196,6 +202,7 @@ export const SPILL1_MINI_GAME_TYPES: readonly Spill1MiniGameType[] = [
   "chest",
   "colordraft",
   "oddsen",
+  "mystery",
 ] as const;
 
 /** Timing-felter — sekunder mellom trekninger. */
