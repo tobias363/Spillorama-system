@@ -49,6 +49,27 @@ describe("IdempotencyKeys — byte-identitet mot legacy template-literals", () =
     assert.equal(key, "game1-purchase:client-abc:debit");
   });
 
+  test("game1LuckyBonus matcher `g1-lucky-bonus-{scheduledGameId}-{winnerId}` (K1-C PM-spec)", () => {
+    const key = IdempotencyKeys.game1LuckyBonus({
+      scheduledGameId: "sg-7",
+      winnerId: "user-42",
+    });
+    assert.equal(key, "g1-lucky-bonus-sg-7-user-42");
+    assert.match(key, IDEMPOTENCY_KEY_FORMAT);
+  });
+
+  test("game1LuckyBonus: determinisme — samme input → samme key", () => {
+    const a = IdempotencyKeys.game1LuckyBonus({ scheduledGameId: "s1", winnerId: "w1" });
+    const b = IdempotencyKeys.game1LuckyBonus({ scheduledGameId: "s1", winnerId: "w1" });
+    assert.equal(a, b);
+  });
+
+  test("game1LuckyBonus: forskjellige winners → forskjellige keys", () => {
+    const a = IdempotencyKeys.game1LuckyBonus({ scheduledGameId: "s1", winnerId: "w1" });
+    const b = IdempotencyKeys.game1LuckyBonus({ scheduledGameId: "s1", winnerId: "w2" });
+    assert.notEqual(a, b);
+  });
+
   test("game1RefundCredit matcher `game1-refund:{purchaseId}:credit`", () => {
     const key = IdempotencyKeys.game1RefundCredit({ purchaseId: "g1p-xyz" });
     assert.equal(key, "game1-refund:g1p-xyz:credit");

@@ -124,6 +124,41 @@ interface ScheduleSubGame {
   notificationStartTime?: string;
   ticketTypesData?: Record<string, unknown>;
   jackpotData?: Record<string, unknown>;
+  /**
+   * K1-C: fri-form sub-game-extra (admin-web SubGamesListEditor). Inneholder
+   * bl.a. `rowPrizesByColor`, `mysteryConfig`, og `luckyBonus` (som K1-C
+   * bruker). Merk at bare `luckyBonus` kopieres inn i ticket_config_json —
+   * resten konsumeres av andre tjenester eller er rent admin-metadata.
+   */
+  extra?: Record<string, unknown>;
+}
+
+/**
+ * K1-C: Les luckyBonus-config ut av subGame.extra. Returnerer null hvis
+ * mangler eller ugyldig. Formatet er symmetrisk med admin-web
+ * `SubGamesListEditor.ts` (serialiserer { amountCents, enabled }).
+ * resolveLuckyBonusConfig i Game1LuckyBonusService leser denne shapen
+ * tilbake ved drawNext-tid.
+ */
+function extractLuckyBonusFromExtra(
+  extra: Record<string, unknown> | undefined
+): { amountCents: number; enabled: boolean } | null {
+  if (!extra || typeof extra !== "object") return null;
+  const lb = extra.luckyBonus as Record<string, unknown> | undefined;
+  if (!lb || typeof lb !== "object" || Array.isArray(lb)) return null;
+  const amountRaw = lb.amountCents;
+  const enabledRaw = lb.enabled;
+  const amountCents =
+    typeof amountRaw === "number" && Number.isFinite(amountRaw)
+      ? Math.floor(amountRaw)
+      : 0;
+  const enabled = enabledRaw === true;
+  // Bevar disabled-config (amount satt men enabled=false) slik at admin
+  // kan toggle av uten å miste beløp-konfigurasjonen.
+  if (amountCents > 0 || enabled) {
+    return { amountCents, enabled };
+  }
+  return null;
 }
 
 interface ExistingRowKey {
@@ -615,6 +650,17 @@ export class Game1ScheduleTickService {
               })()
             : null;
 
+          // K1-C: plukk ut luckyBonus-config fra subGame.extra og flett inn
+          // i ticket_config_json så Game1DrawEngineService/Game1LuckyBonusService
+          // kan lese den ved drawNext. Legacy bevares (jackpotData-kolonne).
+          const luckyBonusFromExtra = extractLuckyBonusFromExtra(sg.extra);
+          const ticketConfigMerged: Record<string, unknown> = {
+            ...(sg.ticketTypesData ?? {}),
+          };
+          if (luckyBonusFromExtra) {
+            ticketConfigMerged.luckyBonus = luckyBonusFromExtra;
+          }
+
           try {
             await this.pool.query(
               `INSERT INTO ${this.scheduledGamesTable()}
@@ -640,7 +686,7 @@ export class Game1ScheduleTickService {
                 startTs.toISOString(),
                 endTs.toISOString(),
                 notificationStartSeconds,
-                JSON.stringify(sg.ticketTypesData ?? {}),
+                JSON.stringify(ticketConfigMerged),
                 JSON.stringify(sg.jackpotData ?? {}),
                 schedule.schedule_type,
                 hallIds.masterHallId,

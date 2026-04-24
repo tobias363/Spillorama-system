@@ -84,6 +84,21 @@ interface SubGameRowState {
   jackpotDraw: string;
   jackpotPrize: string;
   /**
+   * K1-C: Lucky Number Bonus-konfig. `luckyBonusAmount` i kr (admin-input),
+   * konverteres til øre ved persist. Kun utløses ved Fullt Hus hvor ballen
+   * som traff winnet === spillerens valgte lykketall.
+   *
+   * `luckyBonusEnabled` er eksplisitt av/på-bryter — selv om beløp > 0 må
+   * admin sette enabled=true for at bonus skal utløses (samme mønster som
+   * andre feature-flags i sub-game-config).
+   *
+   * Speiles inn/ut av `slot.extra.luckyBonus = { amountCents, enabled }`
+   * for å ikke konflikte med eksisterende `jackpotData`-struktur. Mapperen
+   * leser `luckyBonus` fra ticket_config_json ved game-spawn.
+   */
+  luckyBonusAmount: string;
+  luckyBonusEnabled: boolean;
+  /**
    * feat/schedule-8-colors-mystery: STANDARD (pattern-sub-game) eller
    * MYSTERY (priceOptions-sub-game). Rendrer forskjellig UI.
    */
@@ -115,6 +130,8 @@ function emptyRow(): SubGameRowState {
     extraJson: "",
     jackpotDraw: "",
     jackpotPrize: "",
+    luckyBonusAmount: "",
+    luckyBonusEnabled: false,
     subGameType: "STANDARD",
     selectedColors: new Set(),
     rowPrizesByColor: {},
@@ -144,6 +161,8 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
   > = {};
   let mysteryPriceOptions = "";
   let mysteryYellowDoubles = false;
+  let luckyBonusAmount = "";
+  let luckyBonusEnabled = false;
   let extraForJson: Record<string, unknown> | undefined = sg.extra;
 
   if (sg.extra) {
@@ -172,11 +191,25 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
         mysteryYellowDoubles = mc.yellowDoubles;
       }
     }
+    // K1-C: Lucky Number Bonus. Stored i extra.luckyBonus som
+    // { amountCents, enabled }. UI tar kr-input (delt på 100).
+    const lb = sg.extra.luckyBonus as
+      | { amountCents?: number; enabled?: boolean }
+      | undefined;
+    if (lb && typeof lb === "object" && !Array.isArray(lb)) {
+      if (typeof lb.amountCents === "number" && lb.amountCents > 0) {
+        luckyBonusAmount = String(Math.round(lb.amountCents / 100));
+      }
+      if (typeof lb.enabled === "boolean") {
+        luckyBonusEnabled = lb.enabled;
+      }
+    }
     // Ekstra-JSON-visning skal ikke duplisere strukturerte felter.
-    // Lag en kopi uten rowPrizesByColor + mysteryConfig.
+    // Lag en kopi uten rowPrizesByColor + mysteryConfig + luckyBonus.
     const rest: Record<string, unknown> = { ...sg.extra };
     delete rest.rowPrizesByColor;
     delete rest.mysteryConfig;
+    delete rest.luckyBonus;
     extraForJson = Object.keys(rest).length > 0 ? rest : undefined;
   }
 
@@ -227,6 +260,8 @@ function subgameToRowState(sg: ScheduleSubgame): SubGameRowState {
         : "",
     jackpotDraw,
     jackpotPrize,
+    luckyBonusAmount,
+    luckyBonusEnabled,
     subGameType: sg.subGameType === "MYSTERY" ? "MYSTERY" : "STANDARD",
     selectedColors,
     rowPrizesByColor,
@@ -381,10 +416,31 @@ function rowStateToSubgame(
     }
   }
 
-  if (hasColorPrizes || mysteryConfig) {
+  // K1-C: Lucky Number Bonus. Strukturert felt konverteres fra kr (admin)
+  // til øre og serialiseres i slot.extra.luckyBonus = {amountCents, enabled}.
+  let luckyBonusForExtra: { amountCents: number; enabled: boolean } | null = null;
+  const lbRaw = state.luckyBonusAmount.trim();
+  if (lbRaw || state.luckyBonusEnabled) {
+    let amountKr = 0;
+    if (lbRaw) {
+      const n = Number(lbRaw);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new Error(
+          `${t("schedule_subgames_row_label")} ${rowIndex + 1}: luckyBonusAmount må være >= 0`
+        );
+      }
+      amountKr = n;
+    }
+    // amountCents = round(amountKr * 100) for å unngå flyttal-drift.
+    const amountCents = Math.round(amountKr * 100);
+    luckyBonusForExtra = { amountCents, enabled: state.luckyBonusEnabled };
+  }
+
+  if (hasColorPrizes || mysteryConfig || luckyBonusForExtra) {
     const merged: Record<string, unknown> = { ...(slot.extra ?? {}) };
     if (hasColorPrizes) merged.rowPrizesByColor = rowPrizesByColor;
     if (mysteryConfig) merged.mysteryConfig = mysteryConfig;
+    if (luckyBonusForExtra) merged.luckyBonus = luckyBonusForExtra;
     slot.extra = merged;
     // Bruk shared validator for å fail-fast før POST — gir sam e feilmelding
     // som backend ville gitt.
@@ -698,6 +754,38 @@ export function mountSubGamesListEditor(
             </div>
           </div>
         </fieldset>
+        <fieldset style="border:1px solid #e8e8e8;border-radius:3px;padding:6px 8px;margin-top:4px;background:#fff;">
+          <legend style="font-size:12px;padding:0 4px;color:#333;">
+            ${escapeHtml(t("schedule_subgames_lucky_bonus_legend"))}
+          </legend>
+          <div class="row">
+            <div class="form-group col-sm-6">
+              <label for="sg-lbamt-${index}" style="font-size:12px;">
+                ${escapeHtml(t("schedule_subgames_lucky_bonus_amount"))}
+              </label>
+              <input type="number" id="sg-lbamt-${index}"
+                     class="form-control input-sm"
+                     data-sg-field="luckyBonusAmount"
+                     min="0" step="1"
+                     placeholder="0"
+                     value="${escapeHtml(row.luckyBonusAmount)}">
+              <p class="help-block" style="margin-top:2px;font-size:11px;">
+                ${escapeHtml(t("schedule_subgames_lucky_bonus_amount_hint"))}
+              </p>
+            </div>
+            <div class="form-group col-sm-6">
+              <label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;margin-top:22px;">
+                <input type="checkbox" id="sg-lben-${index}"
+                       data-sg-field="luckyBonusEnabled"
+                       ${row.luckyBonusEnabled ? "checked" : ""}>
+                <span>${escapeHtml(t("schedule_subgames_lucky_bonus_enabled"))}</span>
+              </label>
+              <p class="help-block" style="margin-top:2px;font-size:11px;">
+                ${escapeHtml(t("schedule_subgames_lucky_bonus_enabled_hint"))}
+              </p>
+            </div>
+          </div>
+        </fieldset>
         ${renderSubGameTypeAndColors(row, index)}
         <details class="sg-advanced" style="margin-top:4px;">
           <summary style="cursor:pointer;font-size:12px;color:#555;">
@@ -787,6 +875,10 @@ export function mountSubGamesListEditor(
           }
           if (field === "mysteryYellowDoubles") {
             row.mysteryYellowDoubles = (el as HTMLInputElement).checked;
+            return;
+          }
+          if (field === "luckyBonusEnabled") {
+            row.luckyBonusEnabled = (el as HTMLInputElement).checked;
             return;
           }
           // Default: string-field.
