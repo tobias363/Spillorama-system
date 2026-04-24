@@ -853,6 +853,7 @@ const schedulerCallbacks = createSchedulerCallbacks({
   setPendingBingoSettingsUpdate: (u) => { pendingBingoSettingsUpdate = u; },
   getBingoSettingsEffectiveFromMs: () => bingoSettingsEffectiveFromMs,
   setBingoSettingsEffectiveFromMs: (ms) => { bingoSettingsEffectiveFromMs = ms; },
+  getVariantConfig: (code) => roomState.getVariantConfig(code),
 });
 
 drawScheduler = new DrawScheduler({
