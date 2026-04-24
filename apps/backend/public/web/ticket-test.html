@@ -14,6 +14,8 @@
 <div class="viewport-info" id="vp"></div>
 <h3>Ticket grid — real rendering ved ulike viewport-bredder</h3>
 <div class="grid" id="grid"></div>
+<h3>Med cancel-knapp (cancelable=true) — pris skal ikke overlappe ×</h3>
+<div class="grid" id="grid-cancel"></div>
 
 <script type="module">
 document.getElementById('vp').textContent = `Viewport: ${window.innerWidth} × ${window.innerHeight}`;
@@ -33,7 +35,7 @@ const UNMARKED_BG = 'rgba(255,255,255,0.55)';
 
 const CARD_W = 240, CARD_H = 300;
 
-function makeTicket(color, label, price, nums, markedSet) {
+function makeTicket(color, label, price, nums, markedSet, cancelable = false) {
   const palette = BONG_COLORS[color];
   const ticket = document.createElement('div');
   Object.assign(ticket.style, {
@@ -74,8 +76,14 @@ function makeTicket(color, label, price, nums, markedSet) {
   header.appendChild(nameEl);
   const priceEl = document.createElement('div');
   priceEl.textContent = `${price} kr`;
-  priceEl.style.cssText = 'font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;';
+  priceEl.style.cssText = `font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;margin-right:${cancelable ? '18px' : '0'};`;
   header.appendChild(priceEl);
+  if (cancelable) {
+    const btn = document.createElement('button');
+    btn.textContent = '\u00d7';
+    btn.style.cssText = `position:absolute;top:-4px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(0,0,0,0.25);color:${palette.text};font-size:12px;font-weight:700;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;`;
+    header.appendChild(btn);
+  }
   front.appendChild(header);
 
   // Grid
@@ -135,6 +143,10 @@ const colors = [['yellow', 'Large Yellow', 60], ['purple', 'Small Purple', 20], 
 const gridContainer = document.getElementById('grid');
 for (const [c, label, price] of colors) {
   gridContainer.appendChild(makeTicket(c, label, price, nums, marked));
+}
+const gridCancel = document.getElementById('grid-cancel');
+for (const [c, label, price] of colors) {
+  gridCancel.appendChild(makeTicket(c, label, price, nums, marked, true));
 }
 </script>
 </body>

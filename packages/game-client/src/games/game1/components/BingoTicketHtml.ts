@@ -349,16 +349,20 @@ export class BingoTicketHtml {
 
     const price = document.createElement("div");
     price.className = "ticket-header-price";
+    const showCancel = this.opts.cancelable && this.opts.ticket.id;
     Object.assign(price.style, {
       fontSize: "12px",
       fontWeight: "600",
       fontVariantNumeric: "tabular-nums",
+      // × cancel-knapp er absolutt-posisjonert og tar ikke plass i flex-flow.
+      // Skyv prisen til venstre når krysset vises, ellers overlapper "kr".
+      marginRight: showCancel ? "18px" : "0",
     });
     header.appendChild(price);
 
     // × cancel-knapp — absolutt posisjonert øverst til høyre slik at den ikke
     // forstyrrer header-layout. Vises kun når cancelable + ticket har id.
-    if (this.opts.cancelable && this.opts.ticket.id) {
+    if (showCancel) {
       const btn = document.createElement("button");
       btn.textContent = "\u00d7";
       btn.setAttribute("aria-label", "Avbestill brett");
