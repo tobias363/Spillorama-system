@@ -239,6 +239,7 @@ export const adminSidebar: SidebarNode[] = [
       { kind: "leaf", id: "withdrawHistoryHall", path: "/withdraw/history/hall", icon: "fa fa-circle-o", labelKey: "withdraw_history_hall" },
       { kind: "leaf", id: "withdrawHistoryBank", path: "/withdraw/history/bank", icon: "fa fa-circle-o", labelKey: "withdraw_history_bank" },
       { kind: "leaf", id: "withdrawEmails", path: "/withdraw/list/emails", icon: "fa fa-circle-o", labelKey: "add_email_account" },
+      { kind: "leaf", id: "withdrawXmlBatches", path: "/withdraw/xml-batches", icon: "fa fa-file-code-o", labelKey: "withdraw_xml_batches" },
     ],
   },
 

@@ -6,6 +6,7 @@
 //   /withdraw/history/bank     → bank-withdraw history
 //   /withdraw/history/hall     → hall-withdraw history
 //   /withdraw/list/emails      → accountant-CC email allowlist
+//   /withdraw/xml-batches      → XML-eksport-batcher (wireframe 16.20)
 //
 // Scope-drop (PR-B4-PLAN §1, PM-beslutning):
 //   - withdrawAmount.html (legacy duplicate av bank+hall requests)
@@ -14,6 +15,7 @@
 import { renderRequestsPage } from "./RequestsPage.js";
 import { renderHistoryPage } from "./HistoryPage.js";
 import { renderEmailsPage } from "./EmailsPage.js";
+import { renderXmlBatchesPage } from "./XmlBatchesPage.js";
 
 const AMOUNTWITHDRAW_ROUTES = new Set<string>([
   "/withdraw/requests/bank",
@@ -21,6 +23,7 @@ const AMOUNTWITHDRAW_ROUTES = new Set<string>([
   "/withdraw/history/bank",
   "/withdraw/history/hall",
   "/withdraw/list/emails",
+  "/withdraw/xml-batches",
 ]);
 
 export function isAmountwithdrawRoute(path: string): boolean {
@@ -56,6 +59,9 @@ export function mountAmountwithdrawRoute(container: HTMLElement, path: string): 
       return;
     case "/withdraw/list/emails":
       renderEmailsPage(container);
+      return;
+    case "/withdraw/xml-batches":
+      renderXmlBatchesPage(container);
       return;
     default:
       container.innerHTML = `<div class="box box-danger"><div class="box-body">Unknown amountwithdraw route: ${path}</div></div>`;
