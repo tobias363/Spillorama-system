@@ -548,6 +548,60 @@ export class StaticTicketService {
     };
   }
 
+  /**
+   * BIN-17.32 "Past Game Winning History":
+   * Lister billetter som er utbetalt (paid_out_at != NULL) innenfor et
+   * dato-vindu, valgfritt filtrert på hall + ticket-serial-prefix.
+   *
+   * Merk:
+   *   - Returnerer pre-trimmet liste; callsite (routes/agentReportsPastWinning.ts)
+   *     kjører den videre gjennom `buildPastWinningHistory` for sortering +
+   *     pagination. Grunnen er å holde DB-queryen rask og legge forretnings-
+   *     logikken i en pure funksjon for testbarhet.
+   *   - Max 5000 rader per oppslag — tunge perioder bør spesifisere en
+   *     ticketId-prefix (vanlig agent-flow: fra daglig receipt-scan).
+   */
+  async listPaidOutInRange(filter: {
+    hallId?: string;
+    from: string;
+    to: string;
+    ticketIdPrefix?: string;
+  }): Promise<StaticTicket[]> {
+    if (!filter.from?.trim()) {
+      throw new DomainError("INVALID_INPUT", "from er påkrevd.");
+    }
+    if (!filter.to?.trim()) {
+      throw new DomainError("INVALID_INPUT", "to er påkrevd.");
+    }
+    const conditions: string[] = [
+      "paid_out_at IS NOT NULL",
+      "paid_out_at >= $1",
+      "paid_out_at <= $2",
+    ];
+    const params: unknown[] = [filter.from, filter.to];
+    if (filter.hallId?.trim()) {
+      params.push(filter.hallId.trim());
+      conditions.push(`hall_id = $${params.length}`);
+    }
+    if (filter.ticketIdPrefix?.trim()) {
+      params.push(`%${filter.ticketIdPrefix.trim()}%`);
+      conditions.push(`ticket_serial ILIKE $${params.length}`);
+    }
+    const { rows } = await this.pool.query<StaticTicketRow>(
+      `SELECT id, hall_id, ticket_serial, ticket_color, ticket_type, card_matrix,
+              is_purchased, purchased_at, imported_at,
+              sold_by_user_id, sold_from_range_id, responsible_user_id,
+              sold_to_scheduled_game_id, reserved_by_range_id,
+              paid_out_at, paid_out_amount_cents, paid_out_by_user_id
+       FROM ${this.table()}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY paid_out_at DESC
+       LIMIT 5000`,
+      params,
+    );
+    return rows.map((r) => this.map(r));
+  }
+
   // ── Mapping ──────────────────────────────────────────────────────────────
 
   private map(r: StaticTicketRow): StaticTicket {

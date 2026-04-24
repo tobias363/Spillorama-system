@@ -154,9 +154,9 @@ export class DomainError extends Error {
   /**
    * Valgfri strukturert kontekst som API-laget propagerer til klient via
    * `toPublicError(err).details`. Brukes f.eks. av `HALLS_NOT_READY` for å
-   * returnere `{ unreadyHalls: [...] }` slik at frontend kan rendre listen
-   * i override-popupen uten ekstra round-trip (Task 1.5 — agents-not-ready
-   * popup + override).
+   * returnere `{ unreadyHalls: [...] }` (Task 1.5 — agents-not-ready popup),
+   * og av `JACKPOT_CONFIRM_REQUIRED` for å returnere nåværende pot-saldo
+   * uten at klient må gjøre et ekstra API-kall (MASTER_PLAN §2.3).
    */
   public readonly details?: Record<string, unknown>;
 
@@ -1607,6 +1607,10 @@ export class BingoEngine {
       gameId: room.currentGame?.id,
       playerId: player.id,
       walletId: player.walletId,
+      // BIN-17.36: mark this STAKE-entry as a replacement fee (Elvis / swap
+      // mellom runder) so the Hall Specific Report kan sum "Elvis Replacement
+      // Amount" separately. Vanlig buy-in STAKE har ikke denne flaggen.
+      metadata: { isReplacement: true },
     });
     return { debitedAmount: debit };
   }

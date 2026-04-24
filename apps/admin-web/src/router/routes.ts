@@ -164,6 +164,8 @@ export const routes: RouteDef[] = [
   { path: "/agent/physical-cashout", titleKey: "agent_physical_cashout_title", roles: ["agent", "hall-operator"] },
   // Agent-portal Check-for-Bingo (P0 pilot-blokker).
   { path: "/agent/bingo-check", titleKey: "agent_check_bingo", roles: ["agent", "hall-operator"] },
+  // BIN-17.32 — Past Game Winning History (agent-view).
+  { path: "/agent/past-winning-history", titleKey: "past_game_winning_history", roles: ["agent", "hall-operator"] },
   // PR-B1: cash-inout sub-pages. Exact matches only — use query string for
   // row-scoped deep-links (e.g. `#/agent/sellPhysicalTickets?gameId=X`).
   { path: "/agent/sellPhysicalTickets", titleKey: "register_sold_ticket", roles: ["agent"] },

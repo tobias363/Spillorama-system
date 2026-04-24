@@ -13,7 +13,8 @@ export class ApiError extends Error {
   /**
    * Task 1.5: strukturert detalj-nyttelast som backend kan legge på
    * DomainError — propagerer via `toPublicError(err).details`. Brukes bl.a.
-   * av `HALLS_NOT_READY` til å sende `{ unreadyHalls: string[] }` slik at
+   * av `HALLS_NOT_READY` til å sende `{ unreadyHalls: string[] }` og av
+   * `JACKPOT_CONFIRM_REQUIRED` for å sende current pot-amount, slik at
    * frontend kan rendre popup uten ekstra round-trip.
    */
   details?: Record<string, unknown>;

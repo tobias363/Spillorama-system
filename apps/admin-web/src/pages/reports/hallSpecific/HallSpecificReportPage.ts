@@ -1,24 +1,49 @@
-// PR-A4a (BIN-645) — /hallSpecificReport.
+// BIN-17.36 — Hall Specific Report (per-hall aggregate).
 //
-// Legacy: report/hallReport.html (997 linjer). Hall-spesifikk rapport på
-// tvers av spill. Legacy har 2 tabeller (orderTable + myTable) — vi
-// kollapser til én daily-rapport + hall-velger, siden backend tilbyr
-// /api/admin/reports/halls/:hallId/daily.
+// Wireframe: docs/wireframes/WF_B_Spillorama_Agent_V1.0_14-10-2024.pdf §17.36
+// PM-låst (Appendix B): Elvis Replacement Amount-kolonne må beholdes.
+//
+// Tidligere (BIN-645 PR-A4a) var dette et skelett basert på daily-report
+// endepunktet. Nå treffer den dedikert /api/admin/reports/hall-specific som
+// leverer per-hall aggregat med Group Of Hall Name, Hall Name, Agent,
+// Elvis Replacement Amount + per-Game (Game 1-5) OMS/UTD/Payout%/RES.
+//
+// Eksport: CSV via DataTable.csvExport (transform flater per-game ut til
+// separate kolonner for CSV-vennlighet).
 
 import { DataTable } from "../../../components/DataTable.js";
 import { t } from "../../../i18n/I18n.js";
-import { getHallDailyReport } from "../../../api/admin-reports.js";
-import { listHalls, type AdminHall } from "../../../api/dashboard.js";
+import {
+  getHallSpecificReport,
+  type HallSpecificReportRow,
+  type HallSpecificGame,
+} from "../../../api/admin-reports.js";
 import {
   defaultDateRange,
-  formatCurrency,
   renderReportShell,
   toIsoDate,
 } from "../shared/reportShell.js";
 import { escapeHtml } from "../../games/common/escape.js";
-import type { HallAccountRow } from "../../../../../../packages/shared-types/src/reports.js";
 
-export async function renderHallSpecificReportPage(container: HTMLElement): Promise<void> {
+const GAMES: HallSpecificGame[] = ["game1", "game2", "game3", "game4", "game5"];
+
+function formatKr(value: number): string {
+  return value.toLocaleString("no-NO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatPct(value: number): string {
+  return `${value.toLocaleString("no-NO", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })} %`;
+}
+
+export async function renderHallSpecificReportPage(
+  container: HTMLElement
+): Promise<void> {
   const tableHostId = "hall-specific-report-table";
   container.innerHTML = renderReportShell({
     title: t("hall_specific_reports"),
@@ -31,17 +56,8 @@ export async function renderHallSpecificReportPage(container: HTMLElement): Prom
   const { from, to } = defaultDateRange();
   let currentFrom = toIsoDate(from);
   let currentTo = toIsoDate(to);
-  let currentHallId = "";
-  let halls: AdminHall[] = [];
 
-  try {
-    halls = await listHalls();
-    currentHallId = halls[0]?.id ?? "";
-  } catch {
-    // Continue without halls — user sees empty dropdown.
-  }
-
-  const handle = DataTable.mount<HallAccountRow>(host, {
+  const handle = DataTable.mount<HallSpecificReportRow>(host, {
     rows: [],
     emptyMessage: t("no_data_available_in_table"),
     className: "hall-specific-report",
@@ -54,74 +70,87 @@ export async function renderHallSpecificReportPage(container: HTMLElement): Prom
         void reload();
       },
     },
-    toolbar: {
-      extra: (slot) => {
-        const label = document.createElement("label");
-        label.style.cssText = "display:flex;flex-direction:column;font-size:12px;";
-        label.textContent = t("hall");
-        const select = document.createElement("select");
-        select.className = "form-control input-sm";
-        select.innerHTML = halls
-          .map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.name)}</option>`)
-          .join("");
-        select.value = currentHallId;
-        select.addEventListener("change", () => {
-          currentHallId = select.value;
-          void reload();
-        });
-        label.append(select);
-        slot.append(label);
-      },
-    },
     csvExport: {
       filename: `hall-specific-${currentFrom}_${currentTo}`,
+      transform: (r) => {
+        const base: Record<string, string | number | null> = {
+          [t("group_of_hall_name")]: r.groupOfHallName ?? "",
+          [t("hall_name")]: r.hallName,
+          [t("agent")]: r.agentDisplayName ?? "",
+          [t("elvis_replace_amount")]: r.elvisReplacementAmount,
+        };
+        for (const g of GAMES) {
+          base[t(`${g}_oms`)] = r.games[g].oms;
+          base[t(`${g}_utd`)] = r.games[g].utd;
+          base[t(`${g}_payout_pct`)] = r.games[g].payoutPct;
+          base[t(`${g}_res`)] = r.games[g].res;
+        }
+        return base;
+      },
     },
     columns: [
-      { key: "date", title: t("date") },
-      { key: "gameType", title: t("game_type"), render: (r) => r.gameType ?? "ALL" },
       {
-        key: "ticketsSoldCents",
-        title: t("gross_turnover"),
-        align: "right",
-        render: (r) => formatCurrency(r.ticketsSoldCents),
+        key: "groupOfHallName",
+        title: t("group_of_hall_name"),
+        render: (r) => escapeHtml(r.groupOfHallName ?? "—"),
       },
       {
-        key: "winningsPaidCents",
-        title: t("prizes_paid"),
-        align: "right",
-        render: (r) => formatCurrency(r.winningsPaidCents),
+        key: "hallName",
+        title: t("hall_name"),
+        render: (r) => escapeHtml(r.hallName),
       },
       {
-        key: "netRevenueCents",
-        title: t("net"),
-        align: "right",
-        render: (r) => formatCurrency(r.netRevenueCents),
+        key: "agentDisplayName",
+        title: t("agent"),
+        render: (r) => escapeHtml(r.agentDisplayName ?? "—"),
       },
       {
-        key: "cashInCents",
-        title: t("amount_in"),
+        key: "elvisReplacementAmount",
+        title: t("elvis_replace_amount"),
         align: "right",
-        render: (r) => formatCurrency(r.cashInCents),
+        render: (r) => escapeHtml(formatKr(r.elvisReplacementAmount)),
       },
-      {
-        key: "cashOutCents",
-        title: t("amount_out"),
-        align: "right",
-        render: (r) => formatCurrency(r.cashOutCents),
-      },
+      // Per-game-kolonner. Vi viser kun OMS/UTD/Payout%/RES per spill som en
+      // kompakt gruppe (4 kolonner per spill = 20 game-kolonner + 4 meta =
+      // 24 totalt). Wireframe har samme bredde.
+      ...GAMES.flatMap((g) => [
+        {
+          key: `${g}Oms` as keyof HallSpecificReportRow & string,
+          title: t(`${g}_oms`),
+          align: "right" as const,
+          render: (r: HallSpecificReportRow) =>
+            escapeHtml(formatKr(r.games[g].oms)),
+        },
+        {
+          key: `${g}Utd` as keyof HallSpecificReportRow & string,
+          title: t(`${g}_utd`),
+          align: "right" as const,
+          render: (r: HallSpecificReportRow) =>
+            escapeHtml(formatKr(r.games[g].utd)),
+        },
+        {
+          key: `${g}PayoutPct` as keyof HallSpecificReportRow & string,
+          title: t(`${g}_payout_pct`),
+          align: "right" as const,
+          render: (r: HallSpecificReportRow) =>
+            escapeHtml(formatPct(r.games[g].payoutPct)),
+        },
+        {
+          key: `${g}Res` as keyof HallSpecificReportRow & string,
+          title: t(`${g}_res`),
+          align: "right" as const,
+          render: (r: HallSpecificReportRow) =>
+            escapeHtml(formatKr(r.games[g].res)),
+        },
+      ]),
     ],
   });
 
   async function reload(): Promise<void> {
-    if (!currentHallId) {
-      handle.setRows([]);
-      return;
-    }
     try {
-      const res = await getHallDailyReport({
-        hallId: currentHallId,
-        dateFrom: currentFrom,
-        dateTo: currentTo,
+      const res = await getHallSpecificReport({
+        from: currentFrom,
+        to: currentTo,
       });
       handle.setRows(res.rows);
     } catch (err) {

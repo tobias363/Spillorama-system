@@ -322,6 +322,62 @@ export async function getGame1ManagementReport(
   return apiRequest<Game1ManagementReportResponse>(path, { auth: true });
 }
 
+// ── 12. /api/admin/reports/hall-specific — Hall Specific Report (17.36) ────
+// BIN-17.36: per-hall aggregate med Elvis Replacement + Game 1-5 kolonner.
+// PM-låst (Appendix B): Elvis Replacement-kolonne må beholdes.
+
+export type HallSpecificGame = "game1" | "game2" | "game3" | "game4" | "game5";
+
+export interface HallSpecificGameAggregate {
+  oms: number;
+  utd: number;
+  payoutPct: number;
+  res: number;
+}
+
+export interface HallSpecificReportRow {
+  hallId: string;
+  hallName: string;
+  groupOfHallId: string | null;
+  groupOfHallName: string | null;
+  agentDisplayName: string | null;
+  elvisReplacementAmount: number;
+  games: Record<HallSpecificGame, HallSpecificGameAggregate>;
+}
+
+export interface HallSpecificReportTotals {
+  elvisReplacementAmount: number;
+  games: Record<HallSpecificGame, HallSpecificGameAggregate>;
+}
+
+export interface HallSpecificReportResponse {
+  from: string;
+  to: string;
+  generatedAt: string;
+  rows: HallSpecificReportRow[];
+  totals: HallSpecificReportTotals;
+}
+
+export interface HallSpecificReportQuery {
+  from?: string;
+  to?: string;
+  hallIds?: string[];
+}
+
+export async function getHallSpecificReport(
+  q: HallSpecificReportQuery,
+): Promise<HallSpecificReportResponse> {
+  const qs = buildQs({
+    from: q.from,
+    to: q.to,
+    hallIds: q.hallIds && q.hallIds.length > 0 ? q.hallIds.join(",") : undefined,
+  });
+  const path = qs
+    ? `/api/admin/reports/hall-specific?${qs}`
+    : "/api/admin/reports/hall-specific";
+  return apiRequest<HallSpecificReportResponse>(path, { auth: true });
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 function buildQs(obj: object): string {

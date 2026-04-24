@@ -53,6 +53,7 @@ import { mountAgentCashInOut } from "./pages/agent-portal/AgentCashInOutPage.js"
 import { mountAgentUniqueId } from "./pages/agent-portal/AgentUniqueIdPage.js";
 import { mountAgentPhysicalCashout } from "./pages/agent-portal/AgentPhysicalCashoutPage.js";
 import { mountAgentCheckForBingo } from "./pages/agent-portal/AgentCheckForBingoPage.js";
+import { renderPastGameWinningHistoryPage } from "./pages/agent-portal/PastGameWinningHistoryPage.js";
 import { isTvRoute, mountTvRoute } from "./pages/tv/index.js";
 
 const MAINTENANCE_MODE = false;
@@ -388,6 +389,7 @@ const AGENT_PORTAL_PATHS = new Set<string>([
   "/agent/unique-id",
   "/agent/physical-cashout",
   "/agent/bingo-check",
+  "/agent/past-winning-history",
 ]);
 
 function renderPage(container: HTMLElement, route: RouteDef, session: Session): void | Promise<void> {
@@ -434,6 +436,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (route.path === "/agent/bingo-check") {
     mountAgentCheckForBingo(container);
+    return;
+  }
+  if (route.path === "/agent/past-winning-history") {
+    void renderPastGameWinningHistoryPage(container);
     return;
   }
   if (isCashInOutRoute(route.path)) {

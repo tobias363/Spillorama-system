@@ -249,17 +249,53 @@ describe("report pages — wired to merged backend endpoints", () => {
     expect(txt.replace(/\s/g, " ")).toContain("1 000,00");
   });
 
-  it("HallSpecificReportPage renders with hall-dropdown", async () => {
-    let call = 0;
+  it("HallSpecificReportPage renders per-hall rows with Elvis + Game 1-5 kolonner (17.36)", async () => {
+    // BIN-17.36 replaces the hall-dropdown skeleton with a multi-hall aggregate
+    // response from /api/admin/reports/hall-specific. Sjekk at:
+    //   - 2 date-inputs (from/to)
+    //   - Elvis Replacement-kolonne rendres i <thead>
+    //   - Ingen <select> (den gamle dropdown-modellen er erstattet)
     globalThis.fetch = (async () => {
-      call += 1;
-      // First: halls, second: daily
-      if (call === 1) return okJson([{ id: "h1", name: "Hall 1", isActive: true }]);
-      return okJson({ hallId: "h1", dateFrom: "", dateTo: "", gameType: null, rows: [], count: 0 });
+      return okJson({
+        from: "2026-04-01T00:00:00.000Z",
+        to: "2026-04-30T23:59:59.999Z",
+        generatedAt: new Date().toISOString(),
+        rows: [
+          {
+            hallId: "h1",
+            hallName: "Hall 1",
+            groupOfHallId: null,
+            groupOfHallName: null,
+            agentDisplayName: null,
+            elvisReplacementAmount: 42,
+            games: {
+              game1: { oms: 100, utd: 50, payoutPct: 50, res: 50 },
+              game2: { oms: 0, utd: 0, payoutPct: 0, res: 0 },
+              game3: { oms: 0, utd: 0, payoutPct: 0, res: 0 },
+              game4: { oms: 0, utd: 0, payoutPct: 0, res: 0 },
+              game5: { oms: 0, utd: 0, payoutPct: 0, res: 0 },
+            },
+          },
+        ],
+        totals: {
+          elvisReplacementAmount: 42,
+          games: {
+            game1: { oms: 100, utd: 50, payoutPct: 50, res: 50 },
+            game2: { oms: 0, utd: 0, payoutPct: 0, res: 0 },
+            game3: { oms: 0, utd: 0, payoutPct: 0, res: 0 },
+            game4: { oms: 0, utd: 0, payoutPct: 0, res: 0 },
+            game5: { oms: 0, utd: 0, payoutPct: 0, res: 0 },
+          },
+        },
+      });
     }) as typeof fetch;
     const c = document.createElement("div");
     await renderHallSpecificReportPage(c);
-    expect(c.querySelector("select")).not.toBeNull();
     expect(c.querySelectorAll("input[type=date]").length).toBe(2);
+    // Elvis-kolonne skal være i header (PM-låst Appendix B).
+    const headerText = c.querySelector("thead")?.textContent ?? "";
+    expect(/Elvis/i.test(headerText)).toBe(true);
+    // Skal ha per-Game OMS/UTD (20 kolonner) — verifiser minst Game 1 OMS.
+    expect(/OMS/i.test(headerText)).toBe(true);
   });
 });

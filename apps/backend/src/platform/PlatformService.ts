@@ -1807,6 +1807,35 @@ export class PlatformService {
   }
 
   /**
+   * BIN-17.36 Hall Specific Report: list ALLE schedule-slots (parent + child)
+   * på tvers av haller. Brukes av hall-specific-rapporten for å kategorisere
+   * ledger-entries per game-slot (Game 1-5). Max 20_000 rader — systemet har
+   * typisk <10_000 aktive + inaktive slots.
+   */
+  async listAllScheduleSlots(options?: { hallIds?: string[] }): Promise<ScheduleSlot[]> {
+    await this.ensureInitialized();
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (options?.hallIds && options.hallIds.length > 0) {
+      params.push(options.hallIds);
+      conditions.push(`hall_id = ANY($${params.length}::text[])`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const { rows } = await this.pool.query<ScheduleSlotRow>(
+      `SELECT id, hall_id, game_type, display_name, day_of_week, start_time::text,
+              prize_description, max_tickets, is_active, sort_order, variant_config,
+              parent_schedule_id, sub_game_sequence, sub_game_number,
+              created_at, updated_at
+       FROM ${this.scheduleTable()}
+       ${where}
+       ORDER BY hall_id ASC, sort_order ASC, id ASC
+       LIMIT 20000`,
+      params
+    );
+    return rows.map((r) => this.mapScheduleSlot(r));
+  }
+
+  /**
    * BIN-BOT-01: Query schedule-log rows by date-window + optional hall.
    * Complements listScheduleLogForSlots (which takes a slot-id list) —
    * this one is used by the Game1 management report where we don't know

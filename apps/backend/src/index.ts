@@ -58,8 +58,10 @@ import { Game1RecoveryService } from "./game/Game1RecoveryService.js";
 import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
 import { Game1PayoutService } from "./game/Game1PayoutService.js";
 import { Game1JackpotService } from "./game/Game1JackpotService.js";
+import { Game1JackpotStateService } from "./game/Game1JackpotStateService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
 import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
+import { createJackpotDailyTickJob } from "./jobs/jackpotDailyTick.js";
 import { FcmPushService } from "./notifications/FcmPushService.js";
 import { createGameStartNotificationsJob } from "./jobs/gameStartNotifications.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
@@ -195,6 +197,8 @@ import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
 import { createAdminReportsGame1ManagementRouter } from "./routes/adminReportsGame1Management.js";
+import { createAdminReportsHallSpecificRouter } from "./routes/adminReportsHallSpecific.js";
+import { createAgentReportsPastWinningRouter } from "./routes/agentReportsPastWinning.js";
 import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRedFlagPlayers.js";
 import { createAdminPlayersTopRouter } from "./routes/adminPlayersTop.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
@@ -333,6 +337,7 @@ const {
   jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
   jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
   jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
+  jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -1101,6 +1106,30 @@ const game1MasterControlService = new Game1MasterControlService({
   schema: pgSchema,
 });
 
+// MASTER_PLAN §2.3 — daglig-akkumulerende jackpot-state (Appendix B.9).
+// Starter 2000 kr, +4000/dag, max 30k. State per hall-gruppe.
+const game1JackpotStateService = new Game1JackpotStateService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+// Late-bind slik at master-control kan bruke servicen for pre-start-confirm.
+game1MasterControlService.setJackpotStateService(game1JackpotStateService);
+
+// MASTER_PLAN §2.3 / Appendix B.9 — daglig jackpot-akkumulering (+4000/dag).
+// Kjøres 00:15 lokal tid for å unngå midnatt-race med andre daglige jobs.
+// Default OFF — PM aktiverer i staging via JOB_JACKPOT_DAILY_ENABLED=true.
+jobScheduler.register({
+  name: "jackpot-daily-tick",
+  description: "Daglig +4000 kr akkumulering på Spill 1 Jackpott per hall-gruppe (MASTER_PLAN §2.3).",
+  intervalMs: jobJackpotDailyIntervalMs,
+  enabled: jobJackpotDailyEnabled,
+  run: createJackpotDailyTickJob({
+    service: game1JackpotStateService,
+    runAtHourLocal: jobJackpotDailyRunAtHour,
+    runAtMinuteLocal: jobJackpotDailyRunAtMinute,
+  }),
+});
+
 // PR-T1 Spor 4: akkumulerende pot-service (Jackpott + Innsatsen). Konstrueres
 // FØR Game1TicketPurchaseService fordi sistnevnte trenger PotSalesHookPort
 // for å akkumulere andel av salg etter vellykket kjøp (PR-T3). Service
@@ -1504,6 +1533,7 @@ app.use(createAdminGame1MasterRouter({
   // bruker feltene til å vise Resume-knapp + auto-pause-banner.
   drawEngine: game1DrawEngineService,
   io,
+  jackpotStateService: game1JackpotStateService,
 }));
 // Task 1.4 (2026-04-24): foren agent-portal + master-konsoll mot
 // scheduled_games-paradigmet. 4 endepunkter under /api/agent/game1/* som
@@ -1887,6 +1917,21 @@ app.use(createAdminReportsGame1ManagementRouter({
   platformService,
   engine,
   hallGroupService,
+}));
+// BIN-17.36: "Hall Specific Report" (admin) — per-hall aggregat med
+// Elvis Replacement (PM-låst Appendix B) + Game 1-5 OMS/UTD/Payout%/RES.
+app.use(createAdminReportsHallSpecificRouter({
+  platformService,
+  engine,
+  hallGroupService,
+  agentService,
+}));
+// BIN-17.32: "Past Game Winning History" (agent) — vinner-historikk per hall.
+app.use(createAgentReportsPastWinningRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  staticTicketService,
 }));
 // BIN-651: red-flag players report (AML + regulatorisk AuditLog on view).
 // Paginert liste over red-flaggede spillere med flag-årsak + siste aktivitet.
