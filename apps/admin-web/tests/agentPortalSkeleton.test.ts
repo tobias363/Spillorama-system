@@ -158,9 +158,9 @@ describe("Agent-portal placeholder-sider", () => {
   // pilot-blokkere er implementert:
   //   - /agent/games → nextGamePanel.test.ts (#431)
   //   - /agent/physical-cashout → agentBingoPages.test.ts (#433)
+  //   - /agent/cash-in-out → cashInOutShiftLogout.test.ts (Wireframe Gap #9)
   const placeholders = [
     { name: "physical-tickets", mount: mountAgentPhysicalTickets, titleKey: "add_physical_tickets" },
-    { name: "cash-in-out", mount: mountAgentCashInOut, titleKey: "agent_cash_in_out_management" },
     { name: "unique-id", mount: mountAgentUniqueId, titleKey: "agent_unique_id_management" },
   ];
 
@@ -189,6 +189,19 @@ describe("Agent-portal placeholder-sider", () => {
     // Har game-id-input-skjema.
     expect(container.querySelector("#agent-cashout-form")).toBeTruthy();
     expect(container.querySelector("#agent-cashout-gameId")).toBeTruthy();
+  });
+
+  it("cash-in-out: rendrer full implementation med Shift Log Out-knapp (Gap #9)", () => {
+    const container = document.getElementById("c")!;
+    mountAgentCashInOut(container);
+    // Har breadcrumb + tittel, men IKKE coming-soon-marker.
+    const crumb = container.querySelector<HTMLAnchorElement>(".breadcrumb a[href='#/agent/dashboard']");
+    expect(crumb).toBeTruthy();
+    expect(container.querySelector("section.content-header h1")).toBeTruthy();
+    expect(container.querySelector("[data-marker='coming-soon']")).toBeNull();
+    // Shift Log Out-knappen må være på siden.
+    const logoutBtn = container.querySelector<HTMLButtonElement>('[data-action="shift-log-out"]');
+    expect(logoutBtn).toBeTruthy();
   });
 
   // Unngå unused-warning — brukt som "hjelper" referanse.
