@@ -15,6 +15,7 @@
  *   3. Toggling pause → resume resumes ticking.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import gsap from "gsap";
 import { CenterBall } from "./CenterBall.js";
 
 function getDisplayedText(ball: CenterBall): string {
@@ -92,6 +93,79 @@ describe("CenterBall.startCountdown — pause-hook (Unity scheduler 672-696)", (
     const snapshot = getDisplayedText(ball);
     vi.advanceTimersByTime(5_000);
     expect(getDisplayedText(ball)).toBe(snapshot);
+    ball.destroy();
+  });
+});
+
+describe("CenterBall idle-tween-kontrakt (round 4 Pixi blink-fiks)", () => {
+  // Tidligere kjørte CenterBall en infinite yoyo-tween på `.y` (4px opp/ned,
+  // `repeat: -1, yoyo: true`) fra første swapTexture og for hver state-
+  // overgang. Det ga per-frame Pixi-redraw på containeren konstant — selv
+  // når spillet ikke skjedde noe. Nå: idle = statisk. Bob kjøres kun som
+  // én-shot etter showNumber (4px yoyo, repeat: 1 → ~2.4s totalt).
+  //
+  // Vi bruker vitest' fake timers IKKE her — gsap har egen Ticker som
+  // leser performance.now(). Testen asserter at etter mount + state-
+  // overganger (ikke showNumber), er ingen gsap-tween aktiv på CenterBall.
+
+  it("nymountet CenterBall har ingen aktiv tween på y etter initial load", async () => {
+    const ball = new CenterBall({ getState: () => ({ isPaused: false }) });
+    // Vent én microtask så swapTexture-promise settles i happy-dom.
+    await Promise.resolve();
+    await Promise.resolve();
+    const tweens = gsap.getTweensOf(ball);
+    const active = tweens.filter((t) => t.isActive());
+    expect(active).toHaveLength(0);
+    ball.destroy();
+  });
+
+  it("setBaseY uten forutgående showNumber starter IKKE en tween", () => {
+    const ball = new CenterBall({ getState: () => ({ isPaused: false }) });
+    ball.setBaseY(100);
+    const active = gsap.getTweensOf(ball).filter((t) => t.isActive());
+    expect(active).toHaveLength(0);
+    ball.destroy();
+  });
+
+  it("showWaiting starter IKKE en tween (idle må være statisk)", () => {
+    const ball = new CenterBall({ getState: () => ({ isPaused: false }) });
+    ball.setBaseY(100);
+    ball.showWaiting();
+    const active = gsap.getTweensOf(ball).filter((t) => t.isActive());
+    expect(active).toHaveLength(0);
+    ball.destroy();
+  });
+
+  it("setNumber (state-restore) starter IKKE en tween", () => {
+    const ball = new CenterBall({ getState: () => ({ isPaused: false }) });
+    ball.setBaseY(100);
+    ball.setNumber(42);
+    const active = gsap.getTweensOf(ball).filter((t) => t.isActive());
+    expect(active).toHaveLength(0);
+    ball.destroy();
+  });
+
+  it("startCountdown starter IKKE en tween på y (bare interval-tikking)", () => {
+    const ball = new CenterBall({ getState: () => ({ isPaused: false }) });
+    ball.setBaseY(100);
+    ball.startCountdown(5_000);
+    const active = gsap.getTweensOf(ball).filter((t) => t.isActive());
+    expect(active).toHaveLength(0);
+    ball.stopCountdown();
+    ball.destroy();
+  });
+
+  it("showNumber trigger bob-tween, men den dør naturlig (repeat: 1, ikke -1)", () => {
+    const ball = new CenterBall({ getState: () => ({ isPaused: false }) });
+    ball.setBaseY(100);
+    ball.showNumber(7);
+    // Tween(s) skal være aktive umiddelbart etter showNumber (scale + alpha +
+    // senere bob). Ingen av dem har `repeat: -1` → de avslutter seg selv.
+    const all = gsap.getTweensOf(ball).concat(gsap.getTweensOf(ball.scale));
+    for (const t of all) {
+      // vars.repeat er GSAP's kanoniske felt for repeat-count. -1 = infinite.
+      expect(t.vars.repeat === -1).toBe(false);
+    }
     ball.destroy();
   });
 });

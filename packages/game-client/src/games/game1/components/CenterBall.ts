@@ -18,6 +18,12 @@ interface PauseAwareBridge {
  * Animation (mockup-parity):
  *  - scale(0.6) + alpha(0) on number swap
  *  - fade/scale back to 1 with back-overshoot (cubic-bezier 0.34, 1.56, 0.64, 1)
+ *  - etter scale-in: én kort "bob" (4px yoyo i 2.4s, repeat: 1) som
+ *    gir "just-drew"-liv-signal. Tidligere kjørte dette uendelig i idle
+ *    (`repeat: -1, yoyo: true`) og trigget per-frame Pixi-redraw på
+ *    containeren selv når spillet ikke skjedde noe (round 4 blink-fiks
+ *    2026-04-24). Idle = statisk nå; ingen bob ved setNumber/
+ *    showWaiting/startCountdown/initial mount.
  *
  * Countdown mode + pause-awareness: unchanged from prior implementation
  * (Game1GamePlayPanel.SocketFlow.cs:672-696 mirrors the freeze).
@@ -80,7 +86,6 @@ export class CenterBall extends Container {
         this.ballSprite.width = BALL_SIZE;
         this.ballSprite.height = BALL_SIZE;
         this.addChildAt(this.ballSprite, 0);
-        this.startIdleFloat();
       }
     } catch {
       console.warn(`[CenterBall] Could not load ${url}`);
@@ -106,7 +111,7 @@ export class CenterBall extends Container {
       y: 1,
       duration: 0.4,
       ease: "back.out(1.7)",
-      onComplete: () => this.startIdleFloat(),
+      onComplete: () => this.bobOnce(),
     });
   }
 
@@ -117,7 +122,7 @@ export class CenterBall extends Container {
     this.numberText.text = number !== null ? String(number).padStart(2, "0") : "";
     this.numberText.style.fontSize = 50;
     if (number !== null) void this.swapTexture(getBallAssetPath(number));
-    if (!this.idleTween) this.startIdleFloat();
+    // Ingen bob — state-restore skal ikke gi "just-drew"-liv-signal.
   }
 
   getNumber(): number | null {
@@ -131,7 +136,6 @@ export class CenterBall extends Container {
 
     if (millisUntilStart <= 0) {
       this.numberText.text = "...";
-      this.startIdleFloat();
       return;
     }
 
@@ -150,8 +154,6 @@ export class CenterBall extends Container {
       }
       this.updateCountdownDisplay();
     }, 250);
-
-    this.startIdleFloat();
   }
 
   setBridge(bridge: PauseAwareBridge): void {
@@ -163,7 +165,6 @@ export class CenterBall extends Container {
     this.currentNumber = null;
     this.numberText.text = "...";
     this.numberText.style.fontSize = 44;
-    this.startIdleFloat();
   }
 
   stopCountdown(): void {
@@ -184,9 +185,8 @@ export class CenterBall extends Container {
   }
 
   /**
-   * Anchor the idle-float animation to an explicit base Y. Prevents the
-   * yoyo tween from "drifting" upward when re-triggered mid-animation
-   * (every showNumber / showWaiting / startCountdown restart).
+   * Anker bob-animasjonen til eksplisitt base Y. Hvis en pågående bob
+   * kjører, drepes den så neste showNumber starter fra ny base.
    */
   setBaseY(y: number): void {
     this.baseY = y;
@@ -194,13 +194,14 @@ export class CenterBall extends Container {
     if (this.idleTween) {
       this.idleTween.kill();
       this.idleTween = null;
-      this.startIdleFloat();
     }
   }
 
-  private startIdleFloat(): void {
+  /** Kort "just-drew"-bob: 4px opp → ned, single-shot (ca 2.4s totalt).
+   *  Kjøres kun fra showNumber.onComplete. Ingen repeat: -1 — idle er
+   *  statisk slik at Pixi ikke re-rendrer containeren per-frame uten grunn. */
+  private bobOnce(): void {
     this.idleTween?.kill();
-    // Cache baseY on first run if PlayScreen hasn't called setBaseY yet.
     if (this.baseY === null) this.baseY = this.y;
     this.y = this.baseY;
     this.idleTween = gsap.fromTo(
@@ -208,10 +209,13 @@ export class CenterBall extends Container {
       { y: this.baseY },
       {
         y: this.baseY - 4,
-        duration: 2.4,
+        duration: 1.2,
         ease: "sine.inOut",
         yoyo: true,
-        repeat: -1,
+        repeat: 1,
+        onComplete: () => {
+          this.idleTween = null;
+        },
       },
     );
   }
