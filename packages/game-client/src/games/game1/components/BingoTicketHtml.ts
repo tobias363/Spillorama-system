@@ -257,10 +257,15 @@ export class BingoTicketHtml {
     this.updateToGo();
   }
 
-  /** Highlight a specific number (usually the player's lucky number). */
+  /** Highlight a specific number (usually the player's lucky number).
+   *  Idempotent — if the cell already carries the lucky flag we skip paint
+   *  to avoid a style-rewrite per room:update-tick. */
   highlightLuckyNumber(number: number): void {
     const idx = this.findCellIndex(number);
-    if (idx >= 0) this.cellNodes[idx].dataset.lucky = "true";
+    if (idx < 0) return;
+    const cell = this.cellNodes[idx];
+    if (cell.dataset.lucky === "true") return;
+    cell.dataset.lucky = "true";
     this.paintCell(idx);
   }
 

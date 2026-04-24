@@ -36,10 +36,24 @@ function ensureMiniGridStyles(): void {
   if (document.getElementById("mini-grid-cell-styles")) return;
   const s = document.createElement("style");
   s.id = "mini-grid-cell-styles";
+  // Round 3 blink-fix (2026-04-24): tidligere brukte `.mini-cell.hit` en
+  // per-celle `scale(1→1.06) 0.5s alternate`-pulse. CSS-animasjoner er
+  // stateless per-element, så hver gang en celle byttet fra normal→hit
+  // (hvert sekund under fase-cycling) startet pulsen på nytt fra scale 1.
+  // Det ga en synlig "pop" når nye celler ble farget inn, selv om diff-
+  // gaten i highlightLines allerede hindret style-writes på UENDREDE
+  // celler.
+  //
+  // Valgt løsning: gradient-sveip på `.mini-cell.hit` via
+  // `background-position`-animasjon. Sveipet er ankret til container-nivå
+  // (større background-size enn cellen), så når en ny celle legges til
+  // `.hit` får den samme position-offset som naboene — ingen visuell
+  // restart. Eliminerer den største gjenværende "blink"-kilden i top-
+  // panelet. Beholder scale-utseende via statisk transform for fylde.
   s.textContent = `
-@keyframes pattern-pulse {
-  from { transform: scale(1); }
-  to   { transform: scale(1.06); }
+@keyframes pattern-sweep {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
 }
 .mini-cell {
   width: ${CELL_SIZE}px;
@@ -54,10 +68,20 @@ function ensureMiniGridStyles(): void {
    * transitionstart-events for hver cell-swap. */
 }
 .mini-cell.hit {
-  background: ${FILL_BG};
+  /* Bred gradient (300% av cellens bredde) sveipes via background-position.
+   * Phase-locket via inline animation-delay (negativ, per cell-index)
+   * så en celle som bytter fra normal->hit mid-cycle hopper inn i pågående
+   * sveip i stedet for å restarte fra position: 0%. Longhand-properties
+   * brukes så inline animation-delay ikke blir overstyrt av animation-
+   * shorthanden. */
+  background: linear-gradient(90deg, #f1c40f, #d35400, #f1c40f, #d35400);
+  background-size: 300% 100%;
   border-color: #ffcc00;
   box-shadow: inset 0 0 4px rgba(255,255,255,0.4), 0 0 4px rgba(255,150,0,0.5);
-  animation: pattern-pulse 0.5s ease-in-out infinite alternate;
+  animation-name: pattern-sweep;
+  animation-duration: 3s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
 }
 `;
   document.head.appendChild(s);
@@ -91,6 +115,15 @@ export class PatternMiniGrid {
     for (let i = 0; i < CELL_COUNT; i++) {
       const cell = document.createElement("div");
       cell.className = "mini-cell";
+      // Phase-lock sweepet per cell-posisjon: negativ `animation-delay`
+      // hopper inn i pågående sveip i stedet for å starte fra 0. Uten
+      // dette ville hver nye `.hit`-celle starte sveipet sitt på nytt
+      // (CSS-animasjoner er stateless per-element) og gitt den "pop"-
+      // effekten vi prøver å eliminere. Med delta = cell-index / total
+      // × cycle-lengde er alle celler deterministisk fordelt over
+      // sveipets faser.
+      const offsetSec = ((i % CELL_COUNT) / CELL_COUNT) * 3;
+      cell.style.animationDelay = `-${offsetSec.toFixed(3)}s`;
       if (i === CENTER_INDEX) {
         // Free-space marker (mockup `Asset 4.png` — roulette/clover icon).
         const icon = document.createElement("img");

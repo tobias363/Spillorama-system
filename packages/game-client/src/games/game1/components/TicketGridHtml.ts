@@ -28,6 +28,13 @@ export class TicketGridHtml {
   private ticketById = new Map<string, BingoTicketHtml>();
   /** Cache of the last rendered tickets' identity + colour, keyed by id. */
   private lastSignature: string | null = null;
+  /** Mark-state signature (drawn-count + last-drawn + lucky + activePattern).
+   *  Used by setTickets to skip `applyMarks` when nothing that affects marks
+   *  has changed since the last call. Backend sends room:update every ~1.2s
+   *  during drawing; without this short-circuit we re-iterate every live
+   *  ticket × every drawn number on every state-tick even when nothing is
+   *  new (BIN-blink round 3). */
+  private lastMarkStateSig: string | null = null;
   private cancelable = false;
   /** Antall live (spillende) brett — første N av `tickets`. Pre-round-brett
    *  (index ≥ liveCount) skal IKKE merkes av `markNumberOnAll`. Oppdateres
@@ -137,11 +144,17 @@ export class TicketGridHtml {
   ): void {
     const liveCount = opts.liveTicketCount ?? 0;
     const signature = this.computeSignature(tickets, opts.cancelable, liveCount);
+    const markSig = this.computeMarkStateSig(opts.state, liveCount);
 
     if (signature === this.lastSignature) {
-      // Same shape — just refresh marks from state (in case we missed any).
+      // Same shape — only re-apply marks when the mark-state actually changed.
+      // Backend sends room:update ~1.2s/tick; without this short-circuit we
+      // iterate every live ticket × every drawn number on every tick.
       this.liveCount = liveCount;
-      this.applyMarks(opts.state, liveCount);
+      if (markSig !== this.lastMarkStateSig) {
+        this.applyMarks(opts.state, liveCount);
+        this.lastMarkStateSig = markSig;
+      }
       return;
     }
     this.cancelable = opts.cancelable;
@@ -151,6 +164,7 @@ export class TicketGridHtml {
     // lastSignature, so setting it beforehand gets overwritten.
     this.lastSignature = signature;
     this.applyMarks(opts.state, liveCount);
+    this.lastMarkStateSig = markSig;
     this.updateScrollMask();
   }
 
@@ -186,6 +200,7 @@ export class TicketGridHtml {
     this.ticketById.clear();
     this.gridEl.innerHTML = "";
     this.lastSignature = "__empty__";
+    this.lastMarkStateSig = null;
   }
 
   destroy(): void {
@@ -200,6 +215,19 @@ export class TicketGridHtml {
     parts.push(`c=${cancelable ? 1 : 0}`);
     parts.push(`l=${liveCount}`);
     return parts.join("|");
+  }
+
+  /** Summerer alt i GameState som påvirker mark-rendering. Backend appender
+   *  bare til `drawnNumbers`, så {length, last} er tilstrekkelig uten full
+   *  join. Lucky-number og active-pattern-id dekker resten av markerings-
+   *  triggerne. PatternResults-endring gir ny active-pattern → ny sig. */
+  private computeMarkStateSig(state: GameState, liveCount: number): string {
+    const drawn = state.drawnNumbers ?? [];
+    const last = drawn.length > 0 ? drawn[drawn.length - 1] : "_";
+    const lucky = state.myLuckyNumber ?? "_";
+    const active = activePatternFromState(state.patterns, state.patternResults);
+    const activeId = active?.id ?? "_";
+    return `d=${drawn.length}:${last}|lu=${lucky}|ap=${activeId}|l=${liveCount}`;
   }
 
   private rebuild(

@@ -633,7 +633,24 @@ export class CenterTopPanel {
   }
 
   destroy(): void {
-    if (this.activeGrid) this.activeGrid.destroy();
+    // BIN-blink-permanent-fix: kill alle pågående GSAP-tweens på våre egne
+    // DOM-elementer FØR remove(). Zombie-tweens som fortsetter å mutere
+    // style på destroyed elementer er klassisk blink-kilde (GSAP holder
+    // referanse til noden, ticker fortsetter å oppdatere style).
+    //
+    // Killing by target ramme inn alle fromTo/to-tweens startet av
+    // flashAmount (span inni pill) og swapMiniGrid (next.root/old.root).
+    // Vi dekker root-subtree med én kjøring på hver pill + grid-host.
+    gsap.killTweensOf(this.root);
+    for (const { pill, label } of this.patternPillById.values()) {
+      gsap.killTweensOf(pill);
+      gsap.killTweensOf(label);
+    }
+    gsap.killTweensOf(this.gridHostEl);
+    if (this.activeGrid) {
+      gsap.killTweensOf(this.activeGrid.root);
+      this.activeGrid.destroy();
+    }
     this.activeGrid = null;
     this.root.remove();
   }
