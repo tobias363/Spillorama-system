@@ -1,14 +1,15 @@
-// PR-A4b (BIN-659) + K1 wire-up — /report/settlement/:hallId page.
+// PR-A4b (BIN-659) + K1 wire-up + Wireframe Gap #2 — /report/settlement/:hallId page.
 //
 // Scope: LIST of settlements for a hall (date-range filterable), with per-row
-// View + Edit + PDF actions. View/Edit now opens the full 15-row wireframe-
-// paritet SettlementBreakdownModal (PDF 16.25 / 17.40) instead of the legacy
-// 5-field edit-form. Admin edits flow through PUT /api/admin/shifts/:shiftId/
-// settlement (with `reason` audit-field) inside the modal.
+// View + Edit + PDF + Receipt-download actions. View/Edit opens the full 15-row
+// wireframe-paritet SettlementBreakdownModal (PDF 16.25 / 17.40). Admin edits
+// flow through PUT /api/admin/shifts/:shiftId/settlement (with `reason` audit-
+// field) inside the modal. Download-receipt er 4-action iht wireframe 16.24.
 //
 // Backend:
 //   - GET /api/admin/shifts/settlements?hallId=X&fromDate&toDate&limit
 //   - GET /api/admin/shifts/:shiftId/settlement.pdf (window.open)
+//   - GET /api/admin/shifts/:shiftId/settlement/receipt (window.open — bilag-binær)
 //   - GET /api/admin/shifts/:shiftId/settlement (prefill modal)
 //   - PUT /api/admin/shifts/:shiftId/settlement (edit — 15-row breakdown)
 
@@ -16,6 +17,7 @@ import { DataTable } from "../../components/DataTable.js";
 import { t } from "../../i18n/I18n.js";
 import {
   buildSettlementPdfUrl,
+  buildSettlementReceiptUrl,
   getSettlement,
   listSettlements,
   type AdminSettlement,
@@ -107,10 +109,19 @@ export async function renderSettlementPage(
         key: "id",
         title: t("actions"),
         align: "center",
-        render: (r) =>
-          `<button type="button" class="btn btn-info btn-xs btn-rounded" data-act="view" data-shift="${escapeHtml(r.shiftId)}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye"></i></button> ` +
-          `<button type="button" class="btn btn-warning btn-xs btn-rounded" data-act="edit" data-shift="${escapeHtml(r.shiftId)}" title="${escapeHtml(t("edit_settlement"))}"><i class="fa fa-pencil"></i></button> ` +
-          `<button type="button" class="btn btn-default btn-xs btn-rounded" data-act="pdf" data-shift="${escapeHtml(r.shiftId)}" title="PDF"><i class="fa fa-file-pdf-o"></i></button>`,
+        render: (r) => {
+          const hasReceipt = Boolean(r.bilagReceipt);
+          const receiptTitle = hasReceipt
+            ? escapeHtml(t("download_receipt") || "Download receipt")
+            : escapeHtml(t("no_receipt_uploaded") || "Ingen bilag lastet opp");
+          const receiptDisabled = hasReceipt ? "" : "disabled";
+          return (
+            `<button type="button" class="btn btn-info btn-xs btn-rounded" data-act="view" data-shift="${escapeHtml(r.shiftId)}" title="${escapeHtml(t("view"))}"><i class="fa fa-eye"></i></button> ` +
+            `<button type="button" class="btn btn-warning btn-xs btn-rounded" data-act="edit" data-shift="${escapeHtml(r.shiftId)}" title="${escapeHtml(t("edit_settlement"))}"><i class="fa fa-pencil"></i></button> ` +
+            `<button type="button" class="btn btn-default btn-xs btn-rounded" data-act="pdf" data-shift="${escapeHtml(r.shiftId)}" title="PDF"><i class="fa fa-file-pdf-o"></i></button> ` +
+            `<button type="button" class="btn btn-success btn-xs btn-rounded" data-act="receipt" data-shift="${escapeHtml(r.shiftId)}" title="${receiptTitle}" ${receiptDisabled}><i class="fa fa-download"></i></button>`
+          );
+        },
       },
     ],
   });
@@ -120,11 +131,17 @@ export async function renderSettlementPage(
       "button[data-act]"
     );
     if (!btn) return;
+    // Disabled-knapper (f.eks. receipt uten bilag) skal ikke utføre aksjon.
+    if (btn.disabled) return;
     const shiftId = btn.dataset.shift ?? "";
     if (!shiftId) return;
     const act = btn.dataset.act;
     if (act === "pdf") {
       window.open(buildSettlementPdfUrl(shiftId), "_blank");
+    } else if (act === "receipt") {
+      // Wireframe Gap #2: download-receipt-action (16.24). Browser håndterer
+      // download-dialog basert på Content-Disposition attachment-header.
+      window.open(buildSettlementReceiptUrl(shiftId), "_blank");
     } else if (act === "view" || act === "edit") {
       void openFullBreakdownModal(shiftId, act === "edit", () => reload());
     }

@@ -174,6 +174,15 @@ export function buildSettlementPdfUrl(shiftId: string): string {
   return `/api/admin/shifts/${encodeURIComponent(shiftId)}/settlement.pdf`;
 }
 
+// ── Bilag-receipt URL helper (Wireframe Gap #2) ─────────────────────────────
+// Bilag downloadet som binær-stream (mime speiler opplastet fil).
+// Backend: apps/backend/src/routes/agentSettlement.ts
+//   GET /api/admin/shifts/:shiftId/settlement/receipt
+
+export function buildSettlementReceiptUrl(shiftId: string): string {
+  return `/api/admin/shifts/${encodeURIComponent(shiftId)}/settlement/receipt`;
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 function buildQs(obj: object): string {
