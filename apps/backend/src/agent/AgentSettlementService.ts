@@ -36,11 +36,27 @@ import type {
   UpdateSettlementInput,
 } from "./AgentSettlementStore.js";
 import type { HallCashLedger } from "./HallCashLedger.js";
+import {
+  validateMachineBreakdown,
+  validateBilagReceipt,
+  computeBreakdownTotals,
+  type MachineBreakdown,
+  type BilagReceipt,
+} from "./MachineBreakdownTypes.js";
 
 export const DIFF_NOTE_THRESHOLD_NOK = 500;
 export const DIFF_NOTE_THRESHOLD_PCT = 5;
 export const DIFF_FORCE_THRESHOLD_NOK = 1000;
 export const DIFF_FORCE_THRESHOLD_PCT = 10;
+
+/**
+ * K1 wireframe-regel (PDF 15 §15.8):
+ * "Difference must be explained if > 100 NOK" — gjelder `difference_in_shifts`
+ * felt i maskin-breakdown, ikke `daily_balance_difference`. Håndheves i UI
+ * som advarsel; service validerer kun øvre grense (1000 NOK tåles uansett
+ * fordi notater er allerede påkrevet ved den grensen).
+ */
+export const SHIFT_DIFF_WARN_THRESHOLD_CENTS = 10_000; // 100 NOK
 
 export type DiffSeverity = "OK" | "NOTE_REQUIRED" | "FORCE_REQUIRED";
 
@@ -61,6 +77,10 @@ export interface CloseDayInput {
   settlementNote?: string;
   isForceRequested?: boolean;
   otherData?: Record<string, unknown>;
+  /** K1: 15-rad maskin-breakdown (wireframe PDF 13 §13.5, PDF 15 §15.8). */
+  machineBreakdown?: unknown; // validert via validateMachineBreakdown
+  /** K1: opplastet bilag (PDF/JPG) som data-URL. */
+  bilagReceipt?: unknown; // validert via validateBilagReceipt
 }
 
 export interface EditSettlementInput {
@@ -161,6 +181,29 @@ export class AgentSettlementService {
     if (!Number.isFinite(input.reportedCashCount) || input.reportedCashCount < 0) {
       throw new DomainError("INVALID_INPUT", "reportedCashCount må være ≥ 0.");
     }
+
+    // K1: valider maskin-breakdown + bilag hvis sendt. Valgfritt ved close-day
+    // — legacy-shifts uten breakdown skal fortsatt kunne lukkes (backward-
+    // compat). Nye agenter bruker UI-en som alltid sender inn.
+    let breakdown: MachineBreakdown | undefined;
+    if (input.machineBreakdown !== undefined && input.machineBreakdown !== null) {
+      try {
+        breakdown = validateMachineBreakdown(input.machineBreakdown);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "machineBreakdown ugyldig.";
+        throw new DomainError("INVALID_INPUT", `machineBreakdown: ${msg}`);
+      }
+    }
+    let receipt: BilagReceipt | undefined;
+    if (input.bilagReceipt !== undefined && input.bilagReceipt !== null) {
+      try {
+        receipt = validateBilagReceipt(input.bilagReceipt);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "bilagReceipt ugyldig.";
+        throw new DomainError("INVALID_INPUT", `bilagReceipt: ${msg}`);
+      }
+    }
+
     await this.agents.requireActiveAgent(input.agentUserId);
     const shift = await this.shifts.getCurrentShift(input.agentUserId);
     if (!shift) {
@@ -239,6 +282,8 @@ export class AgentSettlementService {
         diffPct,
         aggregate,
       },
+      machineBreakdown: breakdown,
+      bilagReceipt: receipt ?? null,
     });
 
     // Transferer daily-balance til hall cash hvis non-zero.
@@ -271,6 +316,48 @@ export class AgentSettlementService {
     return settlement;
   }
 
+  // ── K1: upload bilag-receipt ──────────────────────────────────────────
+  //
+  // Tillatt både før og etter close-day (admin-force ved force-flagget).
+  // AGENT kan laste opp/erstatte på egen settlement. ADMIN kan alltid.
+  // HALL_OPERATOR / SUPPORT: read-only — returner FORBIDDEN.
+
+  async uploadBilagReceipt(input: {
+    settlementId: string;
+    uploaderUserId: string;
+    uploaderRole: UserRole;
+    receipt: unknown;
+    reason?: string;
+  }): Promise<AgentSettlement> {
+    if (input.uploaderRole !== "ADMIN" && input.uploaderRole !== "AGENT") {
+      throw new DomainError("FORBIDDEN", "Kun AGENT eller ADMIN kan laste opp bilag.");
+    }
+    const settlement = await this.settlements.getById(input.settlementId);
+    if (!settlement) {
+      throw new DomainError("SETTLEMENT_NOT_FOUND", "Settlement finnes ikke.");
+    }
+    if (input.uploaderRole === "AGENT" && settlement.agentUserId !== input.uploaderUserId) {
+      throw new DomainError("FORBIDDEN", "AGENT kan bare laste opp bilag på egen settlement.");
+    }
+    let validated: BilagReceipt;
+    try {
+      validated = validateBilagReceipt(input.receipt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "bilag ugyldig.";
+      throw new DomainError("INVALID_INPUT", msg);
+    }
+    // Admin-edit krever begrunnelse; agent-upload på egen settlement nei.
+    const reason = input.uploaderRole === "ADMIN"
+      ? (input.reason?.trim() || "Admin uploaded/replaced bilag")
+      : "Agent self-uploaded bilag";
+    return this.settlements.applyEdit(
+      input.settlementId,
+      { bilagReceipt: validated },
+      input.uploaderUserId,
+      reason
+    );
+  }
+
   // ── Edit settlement (admin force) ───────────────────────────────────────
 
   async editSettlement(input: EditSettlementInput): Promise<AgentSettlement> {
@@ -285,7 +372,44 @@ export class AgentSettlementService {
     if (!existing) {
       throw new DomainError("SETTLEMENT_NOT_FOUND", "Settlement finnes ikke.");
     }
-    return this.settlements.applyEdit(input.settlementId, input.patch, input.editedByUserId, reason);
+    // K1: hvis edit inkluderer breakdown/bilag, valider før skriv.
+    const patch: UpdateSettlementInput = { ...input.patch };
+    if (patch.machineBreakdown !== undefined) {
+      try {
+        patch.machineBreakdown = validateMachineBreakdown(patch.machineBreakdown);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "breakdown ugyldig.";
+        throw new DomainError("INVALID_INPUT", `machineBreakdown: ${msg}`);
+      }
+    }
+    if (patch.bilagReceipt !== undefined && patch.bilagReceipt !== null) {
+      try {
+        patch.bilagReceipt = validateBilagReceipt(patch.bilagReceipt);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "bilag ugyldig.";
+        throw new DomainError("INVALID_INPUT", `bilagReceipt: ${msg}`);
+      }
+    }
+    return this.settlements.applyEdit(input.settlementId, patch, input.editedByUserId, reason);
+  }
+
+  /** K1: convenience wrapper — historisk oversikt for en hall i dato-range. */
+  async listSettlementsByHall(
+    hallId: string,
+    dateRange?: { fromDate?: string; toDate?: string; limit?: number; offset?: number }
+  ): Promise<AgentSettlement[]> {
+    return this.settlements.list({
+      hallId,
+      fromDate: dateRange?.fromDate,
+      toDate: dateRange?.toDate,
+      limit: dateRange?.limit,
+      offset: dateRange?.offset,
+    });
+  }
+
+  /** K1: beregn totaler for en breakdown (convenience — brukes av PDF/report). */
+  computeBreakdownTotals(breakdown: MachineBreakdown): ReturnType<typeof computeBreakdownTotals> {
+    return computeBreakdownTotals(breakdown);
   }
 
   // ── Read paths ──────────────────────────────────────────────────────────

@@ -2863,5 +2863,22 @@
   "pattern_label_row_3": "Rad 3",
   "pattern_label_row_4": "Rad 4",
   "pattern_label_full_house": "Full house",
-  "shift_not_active": "Du må starte en shift før du kan sjekke eller utbetale billetter."
+  "shift_not_active": "Du må starte en shift før du kan sjekke eller utbetale billetter.",
+  "machine": "Maskin",
+  "sum": "Sum",
+  "hall": "Hall",
+  "agent": "Agent",
+  "ending_opptall_kassie": "Opptelling av kasse",
+  "innskudd_drop_safe": "Innskudd drop-safe",
+  "difference_in_shifts": "Differanse mellom shift",
+  "reported_cash_count": "Kontanttelling",
+  "diff_warn_over_100_nok": "Advarsel: differanse mellom shift er over 100 kr og må forklares i notat.",
+  "notes_required_for_large_diff": "Notat kreves når differanse mellom shift er over 100 kr.",
+  "upload_receipt": "Last opp bilag",
+  "no_receipt_uploaded": "Ingen bilag lastet opp",
+  "bilag_too_large": "Filen er for stor (max 10 MB).",
+  "bilag_wrong_format": "Ugyldig filformat. Tillatt: PDF, JPG, PNG.",
+  "uploading": "Laster opp...",
+  "upload_failed": "Opplasting feilet.",
+  "settlement_submitted": "Oppgjør innsendt."
 }

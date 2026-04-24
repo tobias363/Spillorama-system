@@ -2868,5 +2868,22 @@
   "pattern_label_row_3": "Row 3",
   "pattern_label_row_4": "Row 4",
   "pattern_label_full_house": "Full house",
-  "shift_not_active": "You must start a shift before you can check or reward tickets."
+  "shift_not_active": "You must start a shift before you can check or reward tickets.",
+  "machine": "Machine",
+  "sum": "Sum",
+  "hall": "Hall",
+  "agent": "Agent",
+  "ending_opptall_kassie": "Ending opptall kassie",
+  "innskudd_drop_safe": "Innskudd drop-safe",
+  "difference_in_shifts": "Difference in shifts",
+  "reported_cash_count": "Reported cash count",
+  "diff_warn_over_100_nok": "Warning: difference between shifts exceeds 100 NOK and must be explained in notes.",
+  "notes_required_for_large_diff": "Note required when difference between shifts exceeds 100 NOK.",
+  "upload_receipt": "Upload receipt",
+  "no_receipt_uploaded": "No receipt uploaded",
+  "bilag_too_large": "File is too large (max 10 MB).",
+  "bilag_wrong_format": "Invalid file format. Allowed: PDF, JPG, PNG.",
+  "uploading": "Uploading...",
+  "upload_failed": "Upload failed.",
+  "settlement_submitted": "Settlement submitted."
 }
