@@ -32,10 +32,13 @@ import {
   pauseGame1,
   resumeGame1,
   stopGame1,
+  requestGame1MasterTransfer,
+  fetchActiveGame1Transfer,
   type Game1GameDetail,
   type Game1HallDetail,
   type Game1JackpotState,
   type Game1HallStatus,
+  type Game1TransferRequest,
 } from "../../../api/admin-game1-master.js";
 import { AdminGame1Socket } from "./adminGame1Socket.js";
 
@@ -51,6 +54,10 @@ let lastHallStatus = new Map<string, Game1HallStatus>();
 // TASK HS: eksplisitt bekreftelse fra master om at røde haller ekskluderes.
 // Nullstilles når refresh-ing oppdager at hallene ikke er røde lenger.
 let confirmedRedHallIds = new Set<string>();
+// Task 1.6: aktiv transfer-request (pending). Oppdateres via fetchActiveGame1Transfer
+// + socket-events (game1:transfer-request/approved/rejected/expired).
+let activeTransfer: Game1TransferRequest | null = null;
+let transferCountdownTimer: ReturnType<typeof setInterval> | null = null;
 
 export async function renderGame1MasterConsole(
   container: HTMLElement,
@@ -112,6 +119,36 @@ export async function renderGame1MasterConsole(
         stopPolling();
       }
     },
+    // Task 1.6: transfer-events — re-hent transfer-status + re-render panel.
+    onTransferRequest: (payload) => {
+      activeTransfer = transferPayloadToState(payload);
+      renderTransferPanel(container, gameId);
+    },
+    onTransferApproved: (payload) => {
+      activeTransfer = null;
+      stopTransferCountdown();
+      Toast.success(t("game1_master_transfer_approved_toast"));
+      // Ignorer lokalt payload; refresh henter ny master fra backend.
+      void refresh(container, gameId);
+      void payload;
+    },
+    onTransferRejected: (payload) => {
+      activeTransfer = null;
+      stopTransferCountdown();
+      Toast.warning(t("game1_master_transfer_rejected_toast"));
+      renderTransferPanel(container, gameId);
+      void payload;
+    },
+    onTransferExpired: (payload) => {
+      activeTransfer = null;
+      stopTransferCountdown();
+      Toast.warning(t("game1_master_transfer_expired_toast"));
+      renderTransferPanel(container, gameId);
+      void payload;
+    },
+    onMasterChanged: () => {
+      void refresh(container, gameId);
+    },
   });
   activeSocket.subscribe(gameId);
 
@@ -145,6 +182,8 @@ function disposeSocket(): void {
     activeSocket = null;
   }
   lastDetail = null;
+  activeTransfer = null;
+  stopTransferCountdown();
 }
 
 function renderShell(gameId: string): string {
@@ -163,6 +202,9 @@ function renderShell(gameId: string): string {
           <div id="g1-master-game-info"
                class="panel panel-default"
                style="padding:16px;"></div>
+          <div id="g1-master-transfer"
+               class="panel panel-default"
+               style="padding:16px;margin-top:16px;"></div>
           <div id="g1-master-halls"
                class="panel panel-default"
                style="padding:16px;margin-top:16px;"></div>
@@ -253,6 +295,14 @@ async function refresh(container: HTMLElement, gameId: string): Promise<void> {
     renderHalls(container, detail);
     renderActions(container, detail);
     renderAudit(container, detail);
+    // Task 1.6: hent aktiv transfer-state (kan gi null hvis ingen pending).
+    try {
+      const { request } = await fetchActiveGame1Transfer(gameId);
+      activeTransfer = request;
+    } catch {
+      // soft — transfer-endpoint feil skal ikke blokkere rest.
+    }
+    renderTransferPanel(container, gameId);
     const subtitle = container.querySelector<HTMLElement>("#g1-master-subtitle");
     if (subtitle) {
       subtitle.textContent = `${t("game1_master_status")}: ${detail.game.status}`;
@@ -635,6 +685,226 @@ function renderAudit(container: HTMLElement, detail: Game1GameDetail): void {
       <tbody>${rows || `<tr><td colspan="5" class="text-center text-muted">${escapeHtml(t("game1_master_no_audit"))}</td></tr>`}</tbody>
     </table>
   `;
+}
+
+// ── Task 1.6: master-transfer-panel ────────────────────────────────────────
+
+function renderTransferPanel(container: HTMLElement, gameId: string): void {
+  const host = container.querySelector<HTMLElement>("#g1-master-transfer");
+  if (!host) return;
+  const detail = lastDetail;
+  if (!detail) {
+    host.innerHTML = "";
+    return;
+  }
+
+  const masterHallId = detail.game.masterHallId;
+  const masterName =
+    detail.halls.find((h) => h.hallId === masterHallId)?.hallName ??
+    masterHallId;
+
+  if (activeTransfer && activeTransfer.status === "pending") {
+    const targetName =
+      detail.halls.find((h) => h.hallId === activeTransfer!.toHallId)?.hallName ??
+      activeTransfer.toHallId;
+    const remainingSec = Math.max(
+      0,
+      Math.floor((new Date(activeTransfer.validTill).getTime() - Date.now()) / 1000)
+    );
+    host.innerHTML = `
+      <h3 style="margin-top:0;">${escapeHtml(t("game1_master_transfer_section_title"))}</h3>
+      <div class="alert alert-info" style="margin-bottom:0;">
+        <strong>${escapeHtml(t("game1_master_transfer_pending_banner"))}</strong>
+        ${escapeHtml(targetName)}
+        — <span id="g1-transfer-countdown">${remainingSec}</span>
+        ${escapeHtml(t("game1_master_transfer_countdown_suffix"))}
+      </div>`;
+    startTransferCountdown(container);
+    return;
+  }
+
+  stopTransferCountdown();
+
+  const eligibleTargets = detail.halls.filter(
+    (h) => h.hallId !== masterHallId && !h.excludedFromGame
+  );
+  const buttonDisabled = eligibleTargets.length === 0;
+  host.innerHTML = `
+    <h3 style="margin-top:0;">${escapeHtml(t("game1_master_transfer_section_title"))}</h3>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div>
+        <small class="text-muted">${escapeHtml(t("game1_master_transfer_current"))}:</small><br>
+        <code>${escapeHtml(masterHallId)}</code>
+        <small>(${escapeHtml(masterName)})</small>
+      </div>
+      <button class="btn btn-sm btn-default"
+              data-action="transfer-master"
+              ${buttonDisabled ? "disabled" : ""}
+              title="${buttonDisabled ? escapeHtml(t("game1_master_transfer_no_eligible_halls")) : ""}">
+        ${escapeHtml(t("game1_master_transfer_button"))}
+      </button>
+    </div>
+  `;
+  host
+    .querySelector<HTMLButtonElement>('[data-action="transfer-master"]')
+    ?.addEventListener("click", () =>
+      onTransferMaster(container, gameId, detail, eligibleTargets)
+    );
+}
+
+function startTransferCountdown(container: HTMLElement): void {
+  stopTransferCountdown();
+  transferCountdownTimer = setInterval(() => {
+    if (!activeTransfer) {
+      stopTransferCountdown();
+      return;
+    }
+    const remaining = Math.max(
+      0,
+      Math.floor((new Date(activeTransfer.validTill).getTime() - Date.now()) / 1000)
+    );
+    const el = container.querySelector<HTMLElement>("#g1-transfer-countdown");
+    if (el) el.textContent = String(remaining);
+    if (remaining <= 0) {
+      // TTL passert — la backend expiry-tick rydde + emitte. Vi oppdaterer UI
+      // ved event. Hvis event uteblir, neste refresh vil fjerne den.
+      stopTransferCountdown();
+    }
+  }, 1000);
+}
+
+function stopTransferCountdown(): void {
+  if (transferCountdownTimer) {
+    clearInterval(transferCountdownTimer);
+    transferCountdownTimer = null;
+  }
+}
+
+async function onTransferMaster(
+  container: HTMLElement,
+  gameId: string,
+  detail: Game1GameDetail,
+  eligibleTargets: Game1HallDetail[]
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const body = document.createElement("div");
+    body.innerHTML = renderTransferDialog(eligibleTargets);
+    Modal.open({
+      title: t("game1_master_transfer_dialog_title"),
+      content: body,
+      size: "sm",
+      backdrop: "static",
+      keyboard: true,
+      className: "modal-transfer-master",
+      buttons: [
+        {
+          label: t("no_cancle"),
+          variant: "default",
+          action: "cancel",
+          onClick: () => resolve(),
+        },
+        {
+          label: t("game1_master_transfer_submit"),
+          variant: "primary",
+          action: "confirm",
+          dismiss: false,
+          onClick: async (modal) => {
+            const select = body.querySelector<HTMLSelectElement>(
+              "#g1-transfer-target"
+            );
+            const errorHost = body.querySelector<HTMLElement>("#g1-transfer-error");
+            const toHallId = select?.value.trim() ?? "";
+            if (!toHallId) {
+              if (errorHost) {
+                errorHost.textContent = t("game1_master_transfer_target_label");
+                errorHost.style.display = "block";
+              }
+              return;
+            }
+            try {
+              const { request } = await requestGame1MasterTransfer(
+                gameId,
+                toHallId
+              );
+              activeTransfer = request;
+              modal.close("button");
+              resolve();
+              renderTransferPanel(container, gameId);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (errorHost) {
+                errorHost.textContent = msg;
+                errorHost.style.display = "block";
+              }
+              Toast.error(msg);
+            }
+          },
+        },
+      ],
+      onClose: () => resolve(),
+    });
+    void detail;
+  });
+}
+
+function renderTransferDialog(eligibleTargets: Game1HallDetail[]): string {
+  const options = eligibleTargets
+    .map(
+      (h) =>
+        `<option value="${escapeHtml(h.hallId)}">${escapeHtml(
+          h.hallName || h.hallId
+        )} (${escapeHtml(h.hallId)})</option>`
+    )
+    .join("");
+  return `
+    <div>
+      <p>${escapeHtml(t("game1_master_transfer_dialog_intro"))}</p>
+      <div class="form-group">
+        <label for="g1-transfer-target">${escapeHtml(t("game1_master_transfer_target_label"))}</label>
+        <select id="g1-transfer-target" class="form-control">
+          <option value="">${escapeHtml(t("game1_master_transfer_target_placeholder"))}</option>
+          ${options}
+        </select>
+      </div>
+      <p id="g1-transfer-error" class="help-block"
+         style="color:#a94442;display:none;margin-top:4px;"></p>
+    </div>
+  `;
+}
+
+/**
+ * Konverter socket-event-payload (millisekunder) til API-state (ISO-string)
+ * så UI-koden bare forholder seg til Game1TransferRequest-shape.
+ */
+function transferPayloadToState(payload: {
+  requestId: string;
+  gameId: string;
+  fromHallId: string;
+  toHallId: string;
+  initiatedByUserId: string;
+  initiatedAtMs: number;
+  validTillMs: number;
+  status: "pending" | "approved" | "rejected" | "expired";
+  respondedByUserId: string | null;
+  respondedAtMs: number | null;
+  rejectReason: string | null;
+}): Game1TransferRequest {
+  return {
+    id: payload.requestId,
+    gameId: payload.gameId,
+    fromHallId: payload.fromHallId,
+    toHallId: payload.toHallId,
+    initiatedByUserId: payload.initiatedByUserId,
+    initiatedAt: new Date(payload.initiatedAtMs).toISOString(),
+    validTill: new Date(payload.validTillMs).toISOString(),
+    status: payload.status,
+    respondedByUserId: payload.respondedByUserId,
+    respondedAt:
+      payload.respondedAtMs !== null
+        ? new Date(payload.respondedAtMs).toISOString()
+        : null,
+    rejectReason: payload.rejectReason,
+  };
 }
 
 // ── Action handlers ────────────────────────────────────────────────────────

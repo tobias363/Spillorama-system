@@ -75,6 +75,18 @@ export type {
   Game1AdminAutoPausedPayload,
   Game1AdminResumedPayload,
 } from "./schemas.js";
+
+// Task 1.6: master-hall transfer-events (agent-initiert, 60s TTL).
+export {
+  Game1TransferRequestStatusSchema,
+  Game1TransferRequestPayloadSchema,
+  Game1MasterChangedPayloadSchema,
+} from "./schemas.js";
+export type {
+  Game1TransferRequestStatus,
+  Game1TransferRequestPayload,
+  Game1MasterChangedPayload,
+} from "./schemas.js";
 import type {
   RoomUpdatePayload as RoomUpdatePayloadT,
   DrawNewPayload as DrawNewPayloadT,

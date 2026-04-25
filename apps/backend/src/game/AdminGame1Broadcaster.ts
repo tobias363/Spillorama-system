@@ -113,6 +113,36 @@ export interface AdminGame1ResumedEvent {
   resumeType: "auto" | "manual";
 }
 
+/**
+ * Task 1.6: runtime master-overføring. Events sendes til admin-namespace
+ * (game1:<gameId>-rom) + default-namespace (`hall:<hallId>:display`-rom) slik
+ * at både master-konsoll og agent-portal får oppdateringer uten polling.
+ *
+ * Payload-typer speiler `Game1TransferRequestPayload` / `Game1MasterChanged
+ * Payload` fra shared-types.
+ */
+export interface AdminGame1TransferRequestEvent {
+  requestId: string;
+  gameId: string;
+  fromHallId: string;
+  toHallId: string;
+  initiatedByUserId: string;
+  initiatedAtMs: number;
+  validTillMs: number;
+  status: "pending" | "approved" | "rejected" | "expired";
+  respondedByUserId: string | null;
+  respondedAtMs: number | null;
+  rejectReason: string | null;
+}
+
+export interface AdminGame1MasterChangedEvent {
+  gameId: string;
+  previousMasterHallId: string;
+  newMasterHallId: string;
+  transferRequestId: string;
+  at: number;
+}
+
 export interface AdminGame1Broadcaster {
   onStatusChange(event: AdminGame1StatusChangeEvent): void;
   onDrawProgressed(event: AdminGame1DrawProgressedEvent): void;
@@ -123,6 +153,16 @@ export interface AdminGame1Broadcaster {
   onAutoPaused(event: AdminGame1AutoPausedEvent): void;
   /** Task 1.1: manuell resume (fra auto-pause eller manuell pause). */
   onResumed(event: AdminGame1ResumedEvent): void;
+  /** Task 1.6: master-transfer request opprettet. */
+  onTransferRequest(event: AdminGame1TransferRequestEvent): void;
+  /** Task 1.6: master-transfer godkjent av target-hall. */
+  onTransferApproved(event: AdminGame1TransferRequestEvent): void;
+  /** Task 1.6: master-transfer avvist av target-hall. */
+  onTransferRejected(event: AdminGame1TransferRequestEvent): void;
+  /** Task 1.6: master-transfer utløpt (TTL passert). */
+  onTransferExpired(event: AdminGame1TransferRequestEvent): void;
+  /** Task 1.6: master-hall byttet (broadcastes etter approve). */
+  onMasterChanged(event: AdminGame1MasterChangedEvent): void;
 }
 
 /** No-op fallback — brukes i tester uten socket-miljø + ved manglende injeksjon. */
@@ -133,4 +173,9 @@ export const NoopAdminGame1Broadcaster: AdminGame1Broadcaster = {
   onPhysicalTicketWon: () => undefined,
   onAutoPaused: () => undefined,
   onResumed: () => undefined,
+  onTransferRequest: () => undefined,
+  onTransferApproved: () => undefined,
+  onTransferRejected: () => undefined,
+  onTransferExpired: () => undefined,
+  onMasterChanged: () => undefined,
 };
