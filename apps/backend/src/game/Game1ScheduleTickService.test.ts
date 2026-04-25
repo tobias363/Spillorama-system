@@ -1055,3 +1055,300 @@ test("detectMasterTimeout: idempotent — hopper over hvis audit allerede finnes
   const result = await svc.detectMasterTimeout(fixedNow);
   assert.deepEqual(result.gameIds, []);
 });
+
+// ── Audit-funn 2026-04-25: parse-edge-cases + invalid input ─────────────────
+
+test("parseNotificationStartToSeconds: NaN tall-input → 300 (default)", () => {
+  // Number.isFinite-guard fanger NaN (typisk fra Number(undefined)).
+  assert.equal(parseNotificationStartToSeconds(NaN), 300);
+});
+
+test("parseNotificationStartToSeconds: negativt tall → 300 (default)", () => {
+  // Negative ms-verdier gir mening for "n minutter siden", men service
+  // forventer positivt antall sekunder. Service har `>= 0`-guard.
+  assert.equal(parseNotificationStartToSeconds(-60), 300);
+});
+
+test("parseNotificationStartToSeconds: 0 (eksplisitt null sekunder) returneres som 0", () => {
+  // 0 er gyldig sekunder ("åpne purchase straks scheduled time treffes").
+  assert.equal(parseNotificationStartToSeconds(0), 0);
+  assert.equal(parseNotificationStartToSeconds("0"), 0);
+});
+
+test("parseNotificationStartToSeconds: float tall avkortes til heltall (Math.floor)", () => {
+  // 5.7 → 5 (Math.floor). Sekunder er heltall, ikke floats.
+  assert.equal(parseNotificationStartToSeconds(5.7), 5);
+  assert.equal(parseNotificationStartToSeconds(120.9), 120);
+});
+
+test("parseNotificationStartToSeconds: '5h' (uventet suffix) → 300 (default)", () => {
+  // Service støtter kun 'm' og 's' suffix. 'h' faller til default.
+  assert.equal(parseNotificationStartToSeconds("5h"), 300);
+  assert.equal(parseNotificationStartToSeconds("10d"), 300);
+});
+
+test("combineDayAndTime: 2026-02-29 (ikke skuddår) → null (overflow detection)", () => {
+  // 2026 er ikke skuddår, så Feb 29 finnes ikke. Service har overflow-
+  // sjekk for å fange JavaScript's silent rollover (Feb 29 → Mar 1).
+  assert.equal(combineDayAndTime("2026-02-29", "12:00"), null);
+});
+
+test("combineDayAndTime: 2024-02-29 (skuddår) → gyldig dato", () => {
+  // 2024 ER skuddår.
+  const d = combineDayAndTime("2024-02-29", "12:00");
+  assert.ok(d);
+  assert.equal(d!.toISOString(), "2024-02-29T12:00:00.000Z");
+});
+
+test("combineDayAndTime: timer >23 eller minutter >59 → null", () => {
+  assert.equal(combineDayAndTime("2026-05-01", "24:00"), null);
+  assert.equal(combineDayAndTime("2026-05-01", "12:60"), null);
+  assert.equal(combineDayAndTime("2026-05-01", "99:99"), null);
+});
+
+test("combineDayAndTime: midnatt edge (00:00) er gyldig", () => {
+  const d = combineDayAndTime("2026-05-01", "00:00");
+  assert.ok(d);
+  assert.equal(d!.toISOString(), "2026-05-01T00:00:00.000Z");
+});
+
+test("combineDayAndTime: 23:59 (siste minutt på dag) er gyldig", () => {
+  const d = combineDayAndTime("2026-05-01", "23:59");
+  assert.ok(d);
+  assert.equal(d!.toISOString(), "2026-05-01T23:59:00.000Z");
+});
+
+test("resolveScheduleIdForDay: scheduleIdByDay med bare 'mon'-kort-form aksepteres", () => {
+  // Service støtter både full ("monday") og kort form ("mon"). Locker
+  // bakover-kompatibilitet for legacy-konfig.
+  const other = {
+    scheduleIdByDay: {
+      mon: "sid-mon-short",
+    },
+  };
+  assert.equal(resolveScheduleIdForDay(other, 1), "sid-mon-short");
+});
+
+test("resolveScheduleIdForDay: tom string i scheduleId-felt → null", () => {
+  // Tom string skal ikke matche som gyldig scheduleId.
+  assert.equal(resolveScheduleIdForDay({ scheduleId: "" }, 1), null);
+  assert.equal(resolveScheduleIdForDay({ scheduleId: "   " }, 1), null);
+});
+
+test("resolveScheduleIdForDay: trimmer whitespace fra scheduleId", () => {
+  assert.equal(
+    resolveScheduleIdForDay({ scheduleId: "  sid-padded  " }, 1),
+    "sid-padded",
+  );
+});
+
+test("constructor: ugyldig schema-navn (SQL-injection-defens)", () => {
+  // Schema brukes i raw SQL. Locker injection-defens.
+  for (const bad of ["drop'table", "schema; DROP", "1starts-with-digit"]) {
+    assert.throws(
+      () =>
+        new Game1ScheduleTickService({
+          pool: {} as unknown as import("pg").Pool,
+          schema: bad,
+        }),
+      (err: unknown) => err instanceof Error && err.message.includes("schema"),
+    );
+  }
+});
+
+test("openPurchaseForImminentGames: 0 rader oppdatert → returnerer 0", async () => {
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("UPDATE") && sql.includes("purchase_open"),
+        rows: [],
+        rowCount: 0,
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const count = await svc.openPurchaseForImminentGames(fixedNow);
+  assert.equal(count, 0);
+});
+
+test("cancelEndOfDayUnstartedGames: 0 rader → returnerer 0", async () => {
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("UPDATE") && sql.includes("end_of_day_unreached"),
+        rows: [],
+        rowCount: 0,
+      },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const count = await svc.cancelEndOfDayUnstartedGames(fixedNow);
+  assert.equal(count, 0);
+});
+
+test("spawnUpcomingGame1Games: tom subGames-array → 0 spawns, 0 errors", async () => {
+  // Schedule kan ha tomt sub_games_json (admin har slettet alle, men ikke
+  // schedulen). Skal ikke kaste.
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-empty",
+            name: "EmptySched",
+            hall_ids_json: {
+              masterHallId: "hall-m",
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: null,
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-empty" },
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("app_schedules") && sql.includes("sub_games_json"),
+        rows: [
+          {
+            id: "sid-empty",
+            schedule_type: "Manual",
+            sub_games_json: [], // tom
+          },
+        ],
+      },
+      { match: (sql) => sql.includes("SELECT daily_schedule_id"), rows: [] },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.spawnUpcomingGame1Games(fixedNow);
+  assert.equal(result.spawned, 0);
+  assert.equal(result.errors, 0);
+});
+
+test("spawnUpcomingGame1Games: hopper over rader med mangler masterHallId", async () => {
+  const { pool } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-no-master",
+            name: "Plan",
+            hall_ids_json: {
+              // Mangler masterHallId
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: null,
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-1" },
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-1",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "X",
+                startTime: "19:00",
+                endTime: "19:45",
+                notificationStartTime: "5m",
+              },
+            ],
+          },
+        ],
+      },
+      { match: (sql) => sql.includes("SELECT daily_schedule_id"), rows: [] },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.spawnUpcomingGame1Games(fixedNow);
+  assert.equal(result.spawned, 0);
+  assert.ok(result.skippedSchedules > 0, "manglende masterHallId → skippedSchedules");
+});
+
+test("spawnUpcomingGame1Games: hopper over endTime før startTime IKKE gjelder rollover (Service tar overrun)", async () => {
+  // Service har spesial-håndtering for end < start (over midnatt rolling).
+  // Dette er gyldig konfig (sub-game som krysser midnatt).
+  const { pool, queries } = createStubPool({
+    responses: [
+      {
+        match: (sql) => sql.includes("app_daily_schedules"),
+        rows: [
+          {
+            id: "daily-rollover",
+            name: "LateNight",
+            hall_ids_json: {
+              masterHallId: "hall-m",
+              hallIds: ["hall-m"],
+              groupHallIds: ["group-1"],
+            },
+            week_days: 0,
+            start_date: "2026-05-01T00:00:00.000Z",
+            end_date: null,
+            start_time: "09:00",
+            end_time: "23:00",
+            status: "running",
+            stop_game: false,
+            other_data_json: { scheduleId: "sid-roll" },
+          },
+        ],
+      },
+      {
+        match: (sql) => sql.includes("app_schedules"),
+        rows: [
+          {
+            id: "sid-roll",
+            schedule_type: "Manual",
+            sub_games_json: [
+              {
+                name: "Midnight",
+                startTime: "23:00",
+                endTime: "01:00", // ruller over til neste dag
+                notificationStartTime: "5m",
+              },
+            ],
+          },
+        ],
+      },
+      { match: (sql) => sql.includes("SELECT daily_schedule_id"), rows: [] },
+    ],
+  });
+  const svc = Game1ScheduleTickService.forTesting(
+    pool as unknown as import("pg").Pool
+  );
+  const result = await svc.spawnUpcomingGame1Games(fixedNow);
+  // Service skal spawne med endTime rolle over til neste dag, ikke avvise.
+  assert.ok(result.spawned > 0, "rollover-konfig skal spawne, ikke avvises");
+  // Verifiser at end-timestamp er etter start-timestamp.
+  const inserts = queries.filter((q) => q.sql.includes("INSERT INTO"));
+  for (const ins of inserts) {
+    const startTs = new Date(ins.params[7] as string).getTime();
+    const endTs = new Date(ins.params[8] as string).getTime();
+    assert.ok(endTs > startTs, "end_time skal være etter start_time selv ved rollover");
+  }
+});

@@ -764,3 +764,350 @@ test("split-rounding-audit: amount = rest i kroner (ikke øre) — 25 øre = 0.2
   assert.equal(ev.prizePerWinner, 14.28, "1428 øre = 14.28 kr");
   assert.equal(ev.patternName, "1 Rad");
 });
+
+// ── Audit-funn 2026-04-25: ComplianceLedgerPort soft-fail + multi-hall ─────
+
+test("constructor: ugyldig schema-navn (SQL-injection-defens) → DomainError(INVALID_CONFIG)", () => {
+  // Schema-navn brukes i raw SQL strings (`SELECT FROM "schema"."table"`),
+  // så defens mot injection er kritisk. Service har regex-validering;
+  // locker kontrakten mot fremtidige refactors som kan bryte sjekken.
+  const auditLog = new AuditLogService(new InMemoryAuditLogStore());
+  const wallet = makeFakeWallet();
+
+  const badSchemas = [
+    "drop-table;",
+    "schema; DROP TABLE users; --",
+    "schema name with space",
+    "schema'with'quotes",
+    "1starts_with_digit",
+    'schema"with"doublequotes',
+  ];
+  for (const schema of badSchemas) {
+    assert.throws(
+      () =>
+        new Game1PayoutService({
+          walletAdapter: wallet.adapter,
+          auditLogService: auditLog,
+          schema,
+        }),
+      (err) => err instanceof DomainError && err.code === "INVALID_CONFIG",
+      `schema=${schema} skal avvises`,
+    );
+  }
+});
+
+test("constructor: gyldig schema-navn aksepteres (alfanumerisk + underscore)", () => {
+  const auditLog = new AuditLogService(new InMemoryAuditLogStore());
+  const wallet = makeFakeWallet();
+  for (const schema of ["public", "test_env", "_underscore_start", "schema123"]) {
+    assert.doesNotThrow(
+      () =>
+        new Game1PayoutService({
+          walletAdapter: wallet.adapter,
+          auditLogService: auditLog,
+          schema,
+        }),
+      `schema=${schema} skal aksepteres`,
+    );
+  }
+});
+
+test("complianceLedgerPort: PRIZE-entry skrives med korrekt hallId (kjøpe-hallen, ikke master)", async () => {
+  // K1 compliance-fix: hallId fra winner.hallId (kjøpe-hall), ikke master-hall.
+  // Pengespillforskriften §71: hver PRIZE må bindes til hallen der bongen
+  // ble solgt. Multi-hall-test: 3 vinnere fra 3 ulike haller, hver
+  // PRIZE-entry skal ha korrekt per-vinner hallId.
+  const ledgerEvents: Array<{
+    hallId: string; eventType: string; amount: number; playerId?: string;
+  }> = [];
+  const ledgerPort = {
+    async recordComplianceLedgerEvent(input: { hallId: string; eventType: string; amount: number; playerId?: string }) {
+      ledgerEvents.push({
+        hallId: input.hallId,
+        eventType: input.eventType,
+        amount: input.amount,
+        playerId: input.playerId,
+      });
+    },
+  };
+  const wallet = makeFakeWallet();
+  const auditLog = new AuditLogService(new InMemoryAuditLogStore());
+  const service = new Game1PayoutService({
+    walletAdapter: wallet.adapter,
+    auditLogService: auditLog,
+    complianceLedgerPort: ledgerPort,
+    defaultLedgerChannel: "INTERNET",
+  });
+  const { client } = makeFakeClient();
+
+  await service.payoutPhase(client as never, {
+    scheduledGameId: "g1", phase: 1, drawSequenceAtWin: 25, roomCode: "",
+    totalPhasePrizeCents: 30000,
+    winners: [
+      winner({ assignmentId: "a-1", walletId: "w-1", userId: "u-1", hallId: "hall-oslo" }),
+      winner({ assignmentId: "a-2", walletId: "w-2", userId: "u-2", hallId: "hall-bergen" }),
+      winner({ assignmentId: "a-3", walletId: "w-3", userId: "u-3", hallId: "hall-trondheim" }),
+    ],
+    phaseName: "1 Rad",
+  });
+
+  // Hver vinner skal ha sin egen PRIZE-entry med riktig hallId.
+  assert.equal(ledgerEvents.length, 3);
+  const byPlayer = new Map(ledgerEvents.map((e) => [e.playerId, e]));
+  assert.equal(byPlayer.get("u-1")?.hallId, "hall-oslo");
+  assert.equal(byPlayer.get("u-2")?.hallId, "hall-bergen");
+  assert.equal(byPlayer.get("u-3")?.hallId, "hall-trondheim");
+  // Alle skal ha eventType=PRIZE og 100 kr (30000/3 = 10000 øre = 100 kr).
+  for (const e of ledgerEvents) {
+    assert.equal(e.eventType, "PRIZE");
+    assert.equal(e.amount, 100);
+  }
+});
+
+test("complianceLedgerPort: jackpot triggerer separat EXTRA_PRIZE-entry per vinner", async () => {
+  // K1: jackpot er en distinkt eventType (EXTRA_PRIZE) i compliance-ledger,
+  // separert fra ordinær PRIZE. Locker kontrakten slik at compliance-rapport
+  // kan skille mellom basis-payout og jackpot-tillegg.
+  const ledgerEvents: Array<{ eventType: string; amount: number; playerId?: string }> = [];
+  const ledgerPort = {
+    async recordComplianceLedgerEvent(input: { eventType: string; amount: number; playerId?: string; hallId: string }) {
+      ledgerEvents.push({
+        eventType: input.eventType,
+        amount: input.amount,
+        playerId: input.playerId,
+      });
+    },
+  };
+  const wallet = makeFakeWallet();
+  const auditLog = new AuditLogService(new InMemoryAuditLogStore());
+  const service = new Game1PayoutService({
+    walletAdapter: wallet.adapter,
+    auditLogService: auditLog,
+    complianceLedgerPort: ledgerPort,
+  });
+  const { client } = makeFakeClient();
+
+  await service.payoutPhase(client as never, {
+    scheduledGameId: "g1", phase: 5, drawSequenceAtWin: 45, roomCode: "",
+    totalPhasePrizeCents: 100000, // 1000 kr basis-prize
+    jackpotAmountCentsPerWinner: 500000, // 5000 kr jackpot
+    winners: [winner()],
+    phaseName: "Fullt Hus",
+  });
+
+  // 1 PRIZE + 1 EXTRA_PRIZE for én vinner.
+  assert.equal(ledgerEvents.length, 2);
+  const prize = ledgerEvents.find((e) => e.eventType === "PRIZE");
+  const extra = ledgerEvents.find((e) => e.eventType === "EXTRA_PRIZE");
+  assert.ok(prize, "PRIZE-entry skrevet");
+  assert.ok(extra, "EXTRA_PRIZE-entry skrevet");
+  assert.equal(prize!.amount, 1000);
+  assert.equal(extra!.amount, 5000);
+});
+
+test("complianceLedgerPort soft-fail: port-feil ruller IKKE tilbake payout", async () => {
+  // K1 kontrakt: payout (wallet.credit + phase_winners-INSERT) er allerede
+  // committed når compliance-ledger-call gjøres. Hvis ledger-port kaster,
+  // SKAL service fortsatt returnere success — feilen logges som warning.
+  // Dette er konsistent med pengespillforskriften §71 (compliance-rapport
+  // er audit, ikke transaksjonell kontrakt — kan re-genereres manuelt).
+  const ledgerCallCount = { count: 0 };
+  const ledgerPort = {
+    async recordComplianceLedgerEvent() {
+      ledgerCallCount.count += 1;
+      throw new Error("simulated compliance ledger outage");
+    },
+  };
+  const { service, wallet } = makeService();
+  // Override med boom-port via direct constructor.
+  const boomService = new Game1PayoutService({
+    walletAdapter: wallet.adapter,
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    complianceLedgerPort: ledgerPort,
+  });
+  const { client } = makeFakeClient();
+
+  // Skal IKKE kaste — payout fortsetter.
+  const result = await boomService.payoutPhase(client as never, {
+    scheduledGameId: "g1", phase: 1, drawSequenceAtWin: 25, roomCode: "",
+    totalPhasePrizeCents: 50000, winners: [winner()], phaseName: "1 Rad",
+  });
+
+  assert.equal(result.totalWinners, 1);
+  assert.equal(wallet.credits.length, 1, "wallet-credit utført");
+  // Ledger ble forsøkt ringt (1x for PRIZE).
+  assert.equal(ledgerCallCount.count, 1);
+  // Service kjørte til ende — payoutPhase returnerte success.
+  assert.equal(result.winnerRecords[0]!.prizeCents, 50000);
+});
+
+test("complianceLedgerPort: prize=0 skipper PRIZE-entry helt (ikke skriv 0-rader)", async () => {
+  // Compliance-ledger skal kun ha entries for faktisk pengeflyt.
+  // 0-prize → ingen entry (matcher den eksplisitte if(prizePerWinnerCents > 0)
+  // i Game1PayoutService.ts:326).
+  const ledgerEvents: string[] = [];
+  const ledgerPort = {
+    async recordComplianceLedgerEvent(input: { eventType: string }) {
+      ledgerEvents.push(input.eventType);
+    },
+  };
+  const wallet = makeFakeWallet();
+  const service = new Game1PayoutService({
+    walletAdapter: wallet.adapter,
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    complianceLedgerPort: ledgerPort,
+  });
+  const { client } = makeFakeClient();
+
+  // 0 totalPhasePrize + 0 jackpot → ingen ledger-entries.
+  await service.payoutPhase(client as never, {
+    scheduledGameId: "g1", phase: 1, drawSequenceAtWin: 25, roomCode: "",
+    totalPhasePrizeCents: 0,
+    jackpotAmountCentsPerWinner: 0,
+    winners: [winner()], phaseName: "1 Rad",
+  });
+
+  assert.equal(ledgerEvents.length, 0, "0-prize → ingen ledger-entries");
+});
+
+test("complianceLedgerPort: kun jackpot (prize=0) skriver KUN EXTRA_PRIZE, ikke PRIZE", async () => {
+  // Subtilt samspill: prize=0 + jackpot>0 → kun EXTRA_PRIZE, ikke PRIZE.
+  // Service har separate if-guards for hver eventType.
+  const ledgerEvents: string[] = [];
+  const ledgerPort = {
+    async recordComplianceLedgerEvent(input: { eventType: string }) {
+      ledgerEvents.push(input.eventType);
+    },
+  };
+  const wallet = makeFakeWallet();
+  const service = new Game1PayoutService({
+    walletAdapter: wallet.adapter,
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    complianceLedgerPort: ledgerPort,
+  });
+  const { client } = makeFakeClient();
+
+  await service.payoutPhase(client as never, {
+    scheduledGameId: "g1", phase: 5, drawSequenceAtWin: 45, roomCode: "",
+    totalPhasePrizeCents: 0,
+    jackpotAmountCentsPerWinner: 500000,
+    winners: [winner()], phaseName: "Fullt Hus",
+  });
+
+  assert.equal(ledgerEvents.length, 1);
+  assert.equal(ledgerEvents[0], "EXTRA_PRIZE", "kun EXTRA_PRIZE — ingen PRIZE for 0-basis");
+});
+
+test("defaultLedgerChannel: bruker konfig-verdi (HALL eller INTERNET)", async () => {
+  // K1: digital_wallet-vinnere skal få channel=INTERNET; agent-purchase
+  // får HALL. Per-vinner-override er ikke i scope ennå — service-nivå
+  // default styrer alle.
+  const ledgerEvents: string[] = [];
+  const ledgerPort = {
+    async recordComplianceLedgerEvent(input: { channel: string }) {
+      ledgerEvents.push(input.channel);
+    },
+  };
+  const wallet = makeFakeWallet();
+
+  for (const expectedChannel of ["HALL", "INTERNET"] as const) {
+    const eventsForChannel: string[] = [];
+    const localPort = {
+      async recordComplianceLedgerEvent(input: { channel: string }) {
+        eventsForChannel.push(input.channel);
+      },
+    };
+    const service = new Game1PayoutService({
+      walletAdapter: wallet.adapter,
+      auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+      complianceLedgerPort: localPort,
+      defaultLedgerChannel: expectedChannel,
+    });
+    const { client } = makeFakeClient();
+    await service.payoutPhase(client as never, {
+      scheduledGameId: `g-${expectedChannel}`, phase: 1, drawSequenceAtWin: 25, roomCode: "",
+      totalPhasePrizeCents: 50000, winners: [winner()], phaseName: "1 Rad",
+    });
+    assert.equal(eventsForChannel[0], expectedChannel,
+      `defaultLedgerChannel=${expectedChannel} skal brukes`);
+    void ledgerEvents;
+    void ledgerPort;
+  }
+});
+
+test("default-options: når complianceLedgerPort ikke gitt → no-op (ingen kast)", async () => {
+  // Service skal håndtere mangler complianceLedgerPort uten å kaste —
+  // default er NoopComplianceLedgerPort. Locker bakover-kompatibilitet
+  // for moduler som ennå ikke har wired opp K1-port.
+  const wallet = makeFakeWallet();
+  const service = new Game1PayoutService({
+    walletAdapter: wallet.adapter,
+    auditLogService: new AuditLogService(new InMemoryAuditLogStore()),
+    // Ingen complianceLedgerPort.
+  });
+  const { client } = makeFakeClient();
+
+  await assert.doesNotReject(
+    service.payoutPhase(client as never, {
+      scheduledGameId: "g1", phase: 1, drawSequenceAtWin: 25, roomCode: "",
+      totalPhasePrizeCents: 50000, winners: [winner()], phaseName: "1 Rad",
+    }),
+  );
+  assert.equal(wallet.credits.length, 1, "wallet.credit kjørt selv uten ledger-port");
+});
+
+test("split-rounding: rest=0 → ingen audit-event (kun fyrt når nødvendig)", async () => {
+  // SplitRoundingAuditPort skal kun fyrkalle når houseRetainedCents > 0.
+  // Ingen "0 retained"-event-spam.
+  const { service, splitAudit } = makeService();
+  const { client } = makeFakeClient();
+
+  // 4 vinnere × 25 kr = 100 kr, perfekt splittbart, rest = 0.
+  await service.payoutPhase(client as never, {
+    scheduledGameId: "g1", phase: 1, drawSequenceAtWin: 25, roomCode: "",
+    totalPhasePrizeCents: 10000, // 100 kr
+    winners: [
+      winner({ assignmentId: "a-1", walletId: "w-1", userId: "u-1" }),
+      winner({ assignmentId: "a-2", walletId: "w-2", userId: "u-2" }),
+      winner({ assignmentId: "a-3", walletId: "w-3", userId: "u-3" }),
+      winner({ assignmentId: "a-4", walletId: "w-4", userId: "u-4" }),
+    ],
+    phaseName: "1 Rad",
+  });
+
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(splitAudit.events.length, 0, "perfekt split → ingen audit-event");
+});
+
+test("regulatorisk: alle wallet-credits er audit-spurbare via idempotency-key", async () => {
+  // Pengespillforskriften krever at hver utbetaling kan spores med en unik
+  // ID. Game1PayoutService bruker IdempotencyKeys.game1Phase som inneholder
+  // scheduledGameId + phase + assignmentId. Locker kontrakten slik at en
+  // senere refactor ikke kan ende med duplikat- eller mangler-keys.
+  const { service, wallet } = makeService();
+  const { client } = makeFakeClient();
+
+  await service.payoutPhase(client as never, {
+    scheduledGameId: "game-abc", phase: 3, drawSequenceAtWin: 30, roomCode: "",
+    totalPhasePrizeCents: 30000,
+    winners: [
+      winner({ assignmentId: "a-1", walletId: "w-1", userId: "u-1" }),
+      winner({ assignmentId: "a-2", walletId: "w-2", userId: "u-2" }),
+      winner({ assignmentId: "a-3", walletId: "w-3", userId: "u-3" }),
+    ],
+    phaseName: "3 Rader",
+  });
+
+  assert.equal(wallet.credits.length, 3);
+  // Alle har idempotency-key satt.
+  for (const c of wallet.credits) {
+    assert.ok(c.idempotencyKey, "alle credits skal ha idempotency-key");
+    assert.ok(c.idempotencyKey!.includes("game-abc"), "key skal inkludere scheduledGameId");
+    assert.ok(c.idempotencyKey!.includes("3") || c.idempotencyKey!.includes("phase"),
+      "key skal inkludere phase eller fase-prefix");
+  }
+  // Hver key skal være unik (ingen kollisjon mellom 3 vinnere).
+  const keys = wallet.credits.map((c) => c.idempotencyKey);
+  const unique = new Set(keys);
+  assert.equal(unique.size, 3, "ingen duplikat-keys");
+});

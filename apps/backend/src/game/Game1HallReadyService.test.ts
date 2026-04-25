@@ -441,3 +441,272 @@ test("assertPurchaseOpenForHall passerer når game er i ready_to_start/running (
   const svc = Game1HallReadyService.forTesting(pool as never);
   await svc.assertPurchaseOpenForHall("g1", "hall-2"); // should not throw
 });
+
+// ── Audit-funn 2026-04-25: schema-injection + JSONB-string + edge cases ────
+
+test("constructor: ugyldig schema-navn (SQL-injection-defens)", () => {
+  // Schema brukes i raw SQL strings.
+  for (const bad of ["drop'table", "schema; DROP", "1starts-with-digit"]) {
+    assert.throws(
+      () =>
+        new Game1HallReadyService({
+          pool: {} as never,
+          schema: bad,
+        }),
+      (err: unknown) => err instanceof DomainError && err.code === "INVALID_CONFIG",
+      `schema=${bad} skal avvises`,
+    );
+  }
+});
+
+test("getReadyStatusForGame: håndterer JSONB-string (Pool returnerer string)", async () => {
+  // Noen pg-konfigurasjoner returnerer JSONB-felt som string i stedet for
+  // parsed object. Service må parse string-versjonen riktig.
+  const { pool } = createStubPool([
+    {
+      match: (s) => s.includes('FROM "public"."app_game1_scheduled_games"'),
+      rows: [
+        scheduledGameRow({
+          participating_halls_json: JSON.stringify(["hall-1", "hall-2"]),
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("SELECT game_id"),
+      rows: [],
+    },
+  ]);
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  const result = await svc.getReadyStatusForGame("g1");
+  assert.equal(result.length, 2, "string-JSONB parses og returnerer 2 haller");
+});
+
+test("getReadyStatusForGame: korrupt JSONB-string → tom liste (try/catch)", async () => {
+  // Hvis JSONB-stringen er korrupt, parseHallIdsArray returnerer []
+  // (try/catch). master_hall_id er fortsatt med, så vi får 1 result.
+  const { pool } = createStubPool([
+    {
+      match: (s) => s.includes('FROM "public"."app_game1_scheduled_games"'),
+      rows: [
+        scheduledGameRow({
+          participating_halls_json: "{not valid json",
+          master_hall_id: "hall-master",
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("SELECT game_id"),
+      rows: [],
+    },
+  ]);
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  const result = await svc.getReadyStatusForGame("g1");
+  // Bare master-hall, siden parsing av participating-listen feilet.
+  assert.equal(result.length, 1);
+  assert.equal(result[0]!.hallId, "hall-master");
+});
+
+test("allParticipatingHallsReady: alle excluded inkludert master → false (ingen kandidat)", async () => {
+  // Edge: alle haller (inkl master) er excluded. Service har "hasCandidate"-
+  // sjekk → false når ingen non-excluded.
+  const { pool } = createStubPool([
+    {
+      match: (s) => s.includes('FROM "public"."app_game1_scheduled_games"'),
+      rows: [
+        scheduledGameRow({
+          participating_halls_json: ["hall-1", "hall-2"],
+          master_hall_id: "hall-master",
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("SELECT game_id"),
+      rows: [
+        hallReadyRow({ hall_id: "hall-1", excluded_from_game: true }),
+        hallReadyRow({ hall_id: "hall-2", excluded_from_game: true }),
+        hallReadyRow({ hall_id: "hall-master", excluded_from_game: true }),
+      ],
+    },
+  ]);
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  const result = await svc.allParticipatingHallsReady("g1");
+  assert.equal(result, false, "alle excluded → false (ikke ready_to_start-eligible)");
+});
+
+test("markReady: digitalTicketsSold=undefined fall til 0", async () => {
+  // Service har `Math.max(0, Math.floor(input.digitalTicketsSold ?? 0))`.
+  // Locker semantikk: undefined → 0, ikke NaN eller throw.
+  const { pool } = createStubPool([
+    {
+      match: (s) => s.includes('FROM "public"."app_game1_scheduled_games"'),
+      rows: [scheduledGameRow()],
+    },
+    {
+      match: (s) => s.includes('FROM "public"."app_physical_tickets"'),
+      rows: [{ cnt: "0" }],
+    },
+    {
+      match: (s) =>
+        s.includes("SELECT game_id") && s.includes("WHERE game_id = $1 AND hall_id = $2"),
+      rows: [],
+    },
+    {
+      match: (s) => s.includes("ON CONFLICT"),
+      rows: [hallReadyRow({ digital_tickets_sold: 0 })],
+    },
+  ]);
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  const result = await svc.markReady({
+    gameId: "g1",
+    hallId: "hall-2",
+    userId: "u1",
+    // digitalTicketsSold udefiniert
+  });
+  assert.equal(result.digitalTicketsSold, 0);
+});
+
+test("markReady: digitalTicketsSold=-5 (negativ) → klampes til 0", async () => {
+  // Math.max(0, ...) klamper negative til 0. Defens mot rusk-input.
+  const { pool, queries } = createStubPool([
+    {
+      match: (s) => s.includes('FROM "public"."app_game1_scheduled_games"'),
+      rows: [scheduledGameRow()],
+    },
+    {
+      match: (s) => s.includes('FROM "public"."app_physical_tickets"'),
+      rows: [{ cnt: "0" }],
+    },
+    {
+      match: (s) =>
+        s.includes("SELECT game_id") && s.includes("WHERE game_id = $1 AND hall_id = $2"),
+      rows: [],
+    },
+    {
+      match: (s) => s.includes("ON CONFLICT"),
+      rows: [hallReadyRow({ digital_tickets_sold: 0 })],
+    },
+  ]);
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  await svc.markReady({
+    gameId: "g1",
+    hallId: "hall-2",
+    userId: "u1",
+    digitalTicketsSold: -5,
+  });
+  // Verifiser INSERT har 0, ikke -5.
+  const upsert = queries.find((q) => q.sql.includes("ON CONFLICT"));
+  assert.ok(upsert);
+  assert.equal(upsert!.params[3], 0, "negativ digitalTicketsSold klampes til 0");
+});
+
+test("markReady: physical_tickets-tabell mangler (42P01) → fallback til 0 uten kast", async () => {
+  // Dev-environment uten migrasjoner — tabellen finnes ikke. Service har
+  // 42P01-håndtering for å returnere 0 i stedet for å kaste.
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const pool = {
+    query: async (sql: string, params: unknown[] = []) => {
+      queries.push({ sql, params });
+      if (sql.includes('FROM "public"."app_game1_scheduled_games"')) {
+        return { rows: [scheduledGameRow()], rowCount: 1 };
+      }
+      if (sql.includes('FROM "public"."app_physical_tickets"')) {
+        const err = new Error("relation does not exist") as Error & { code: string };
+        err.code = "42P01";
+        throw err;
+      }
+      if (sql.includes("SELECT game_id") && sql.includes("WHERE game_id = $1 AND hall_id = $2")) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes("ON CONFLICT")) {
+        return {
+          rows: [hallReadyRow({ physical_tickets_sold: 0 })],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  // Skal ikke kaste, fallback til 0.
+  const result = await svc.markReady({
+    gameId: "g1",
+    hallId: "hall-2",
+    userId: "u1",
+  });
+  assert.equal(result.physicalTicketsSold, 0);
+});
+
+test("markReady: physical_tickets-tabell andre feil (ikke 42P01) → propagerer", async () => {
+  // Andre DB-feil skal IKKE bli swallowed.
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('FROM "public"."app_game1_scheduled_games"')) {
+        return { rows: [scheduledGameRow()], rowCount: 1 };
+      }
+      if (sql.includes('FROM "public"."app_physical_tickets"')) {
+        const err = new Error("connection lost") as Error & { code: string };
+        err.code = "08006"; // ikke 42P01
+        throw err;
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  await assert.rejects(
+    () => svc.markReady({ gameId: "g1", hallId: "hall-2", userId: "u1" }),
+    (err: unknown) => err instanceof Error && err.message.includes("connection lost"),
+  );
+});
+
+test("getReadyStatusForGame: ingen deltagende haller (kun master) → 1 default-rad", async () => {
+  // Edge: spillet har ingen non-master deltakende haller. master skal
+  // alltid være med i statussen.
+  const { pool } = createStubPool([
+    {
+      match: (s) => s.includes('FROM "public"."app_game1_scheduled_games"'),
+      rows: [
+        scheduledGameRow({
+          participating_halls_json: [],
+          master_hall_id: "hall-master",
+        }),
+      ],
+    },
+    {
+      match: (s) => s.includes("SELECT game_id"),
+      rows: [],
+    },
+  ]);
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  const result = await svc.getReadyStatusForGame("g1");
+  assert.equal(result.length, 1);
+  assert.equal(result[0]!.hallId, "hall-master");
+  assert.equal(result[0]!.isReady, false);
+});
+
+test("getGameGroupId: returnerer group_hall_id fra scheduled_game", async () => {
+  // Helper for socket-broadcast-rom-routing. Locker at det returnerer
+  // group_hall_id, ikke noe annet.
+  const { pool } = createStubPool([
+    {
+      match: (s) => s.includes('FROM "public"."app_game1_scheduled_games"'),
+      rows: [
+        scheduledGameRow({
+          group_hall_id: "grp-special-1",
+          master_hall_id: "hall-master",
+        }),
+      ],
+    },
+  ]);
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  const groupId = await svc.getGameGroupId("g1");
+  assert.equal(groupId, "grp-special-1");
+});
+
+test("getGameGroupId: spill ikke funnet → DomainError(GAME_NOT_FOUND)", async () => {
+  const { pool } = createStubPool([]);
+  const svc = Game1HallReadyService.forTesting(pool as never);
+  await assert.rejects(
+    () => svc.getGameGroupId("ghost"),
+    (err) => err instanceof DomainError && err.code === "GAME_NOT_FOUND",
+  );
+});

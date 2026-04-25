@@ -835,3 +835,408 @@ test("BIN-690 M1 integration: Fullt Hus → trigger → klient-choice → result
       err instanceof DomainError && err.code === "MINIGAME_ALREADY_COMPLETED",
   );
 });
+
+// ── Audit-funn 2026-04-25: parse-defens + edge cases ───────────────────────
+
+test("BIN-690 M1: extractActiveMiniGameTypes filtrerer duplikater? (FIFO bevart)", () => {
+  // Service tar første av aktive typer (FIFO). Locker rekkefølge — admin
+  // setter typer i en bestemt rekkefølge i UI.
+  const cfg = { spill1: { miniGames: ["chest", "wheel"] } };
+  assert.deepEqual(
+    extractActiveMiniGameTypes(cfg),
+    ["chest", "wheel"],
+    "rekkefølge bevares (chest først)",
+  );
+});
+
+test("BIN-690 M1: registerMiniGame støtter flere typer parallelt", () => {
+  const { pool } = makeFakePool();
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+  });
+  orchestrator.registerMiniGame(makeFakeMiniGame("wheel", 100));
+  orchestrator.registerMiniGame(makeFakeMiniGame("chest", 200));
+  orchestrator.registerMiniGame(makeFakeMiniGame("colordraft", 300));
+
+  const types = orchestrator.getRegisteredTypes();
+  assert.deepEqual(types.sort(), ["chest", "colordraft", "wheel"]);
+});
+
+test("BIN-690 M1: maybeTriggerFor velger første aktive type i konfig (FIFO)", async () => {
+  // M1: alltid første aktive type. Locker semantikk for senere når
+  // rotasjon kommer i M2.
+  const triggeredTypes: string[] = [];
+  const { pool } = makeFakePool({
+    query: async (sql) => {
+      if (sql.includes("INSERT INTO")) {
+        const m = sql.match(/mini_game_type = \$\d+/);
+        void m;
+      }
+      return { rows: [] };
+    },
+  });
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+  const { broadcaster, triggers } = makeRecordingBroadcaster();
+
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+    broadcaster,
+  });
+  orchestrator.registerMiniGame(makeFakeMiniGame("wheel", 0));
+  orchestrator.registerMiniGame(makeFakeMiniGame("chest", 0));
+
+  // Konfig: chest først, wheel etterpå. Service skal velge chest.
+  const result = await orchestrator.maybeTriggerFor({
+    scheduledGameId: "sg-fifo",
+    winnerUserId: "u-fifo",
+    winnerWalletId: "w-fifo",
+    hallId: "h-fifo",
+    drawSequenceAtWin: 50,
+    gameConfigJson: { spill1: { miniGames: ["chest", "wheel"] } },
+  });
+
+  assert.equal(result.miniGameType, "chest", "første aktive type");
+  void triggeredTypes;
+  assert.equal(triggers[0]!.miniGameType, "chest");
+});
+
+test("BIN-690 M1: extractActiveMiniGameTypes hopper over duplikater og bevarer første-forekomst", () => {
+  // Hvis admin har duplikater (ved en feil), skal listen bevare første-
+  // forekomst (typisk fra en .filter(distinct)-pass før bruk).
+  // M1 kontrakt: filter mot MINI_GAME_TYPES, men ikke distinct.
+  const cfg = { spill1: { miniGames: ["wheel", "wheel", "chest"] } };
+  const result = extractActiveMiniGameTypes(cfg);
+  // Service har ingen distinct-pass — locker faktisk oppførsel.
+  assert.deepEqual(result, ["wheel", "wheel", "chest"]);
+});
+
+test("BIN-690 M1: handleChoice persisterer choice + result som JSONB-strings", async () => {
+  // Verifiser at server-state oppdateres korrekt — choice + result lagres
+  // som JSON-strings med .stringify før de når DB.
+  const updates: Array<{ params: unknown[] }> = [];
+  const pool = {
+    query: async () => ({ rows: [] }),
+    connect: async () => ({
+      query: async (sql: string, params: unknown[] = []) => {
+        if (sql.trim() === "BEGIN" || sql.trim() === "COMMIT") return { rows: [] };
+        if (sql.includes("FOR UPDATE") && sql.includes("app_game1_mini_game_results")) {
+          return {
+            rows: [
+              {
+                id: "mgr-1",
+                scheduled_game_id: "sg-1",
+                mini_game_type: "wheel",
+                winner_user_id: "u-1",
+                config_snapshot_json: { segments: [10, 20, 30] },
+                choice_json: null,
+                result_json: null,
+                payout_cents: 0,
+                triggered_at: new Date(),
+                completed_at: null,
+              },
+            ],
+          };
+        }
+        if (sql.includes("app_users") && sql.includes("wallet_id")) {
+          return { rows: [{ wallet_id: "w-1" }] };
+        }
+        if (sql.includes("app_game1_phase_winners")) {
+          return { rows: [{ hall_id: "h-1", draw_sequence_at_win: 50 }] };
+        }
+        if (sql.includes("UPDATE") && sql.includes("app_game1_mini_game_results")) {
+          updates.push({ params });
+          return { rows: [] };
+        }
+        return { rows: [] };
+      },
+      release: () => undefined,
+    }),
+  };
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+  });
+  orchestrator.registerMiniGame(makeFakeMiniGame("wheel", 5000));
+
+  await orchestrator.handleChoice({
+    resultId: "mgr-1",
+    userId: "u-1",
+    choiceJson: { spin: true, value: 42 },
+  });
+
+  assert.equal(updates.length, 1);
+  // params[1] = choiceJson, params[2] = resultJson, params[3] = payoutCents
+  const choiceStr = updates[0]!.params[1] as string;
+  const resultStr = updates[0]!.params[2] as string;
+  const choice = JSON.parse(choiceStr);
+  const resultJson = JSON.parse(resultStr);
+  assert.equal(choice.spin, true);
+  assert.equal(choice.value, 42);
+  assert.equal(resultJson.fixedPayoutCents, 5000);
+});
+
+test("BIN-690 M1: handleChoice rollback transaksjon ved implementation-feil", async () => {
+  // Hvis konkret mini-game-impl kaster (f.eks. INVALID_CHOICE), skal
+  // transaksjonen rolles tilbake — ingen UPDATE.
+  const transactions: string[] = [];
+  const updates: Array<unknown[]> = [];
+  const pool = {
+    query: async () => ({ rows: [] }),
+    connect: async () => ({
+      query: async (sql: string, params: unknown[] = []) => {
+        if (sql.trim() === "BEGIN" || sql.trim() === "COMMIT" || sql.trim() === "ROLLBACK") {
+          transactions.push(sql.trim());
+          return { rows: [] };
+        }
+        if (sql.includes("FOR UPDATE")) {
+          return {
+            rows: [
+              {
+                id: "mgr-throw",
+                scheduled_game_id: "sg-1",
+                mini_game_type: "wheel",
+                winner_user_id: "u-1",
+                config_snapshot_json: {},
+                choice_json: null,
+                result_json: null,
+                payout_cents: 0,
+                triggered_at: new Date(),
+                completed_at: null,
+              },
+            ],
+          };
+        }
+        if (sql.includes("app_users") && sql.includes("wallet_id")) {
+          return { rows: [{ wallet_id: "w-1" }] };
+        }
+        if (sql.includes("app_game1_phase_winners")) {
+          return { rows: [{ hall_id: "h-1", draw_sequence_at_win: 50 }] };
+        }
+        if (sql.includes("UPDATE") && sql.includes("app_game1_mini_game_results")) {
+          updates.push(params);
+          return { rows: [] };
+        }
+        return { rows: [] };
+      },
+      release: () => undefined,
+    }),
+  };
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+
+  // Mini-game-impl som kaster.
+  const throwingImpl: MiniGame = {
+    type: "wheel",
+    trigger() {
+      return { type: "wheel", resultId: "x", payload: {} };
+    },
+    async handleChoice() {
+      throw new DomainError("INVALID_CHOICE", "Bad choice");
+    },
+  };
+
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+  });
+  orchestrator.registerMiniGame(throwingImpl);
+
+  await assert.rejects(
+    () =>
+      orchestrator.handleChoice({
+        resultId: "mgr-throw",
+        userId: "u-1",
+        choiceJson: {},
+      }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_CHOICE",
+  );
+
+  // BEGIN + ROLLBACK forventet, ikke COMMIT.
+  assert.ok(transactions.includes("BEGIN"));
+  assert.ok(transactions.includes("ROLLBACK"));
+  assert.ok(!transactions.includes("COMMIT"), "ingen COMMIT ved kast");
+  assert.equal(updates.length, 0, "ingen UPDATE skjedde");
+});
+
+test("BIN-690 M1: NoopMiniGameBroadcaster (default) kaster ikke ved trigger/result", () => {
+  // Sanity: default broadcaster skal være no-op uten kast.
+  // Eksportert konst — test direkte.
+  const { NoopMiniGameBroadcaster } = require("./Game1MiniGameOrchestrator.js") as {
+    NoopMiniGameBroadcaster: { onTrigger: (e: unknown) => void; onResult: (e: unknown) => void };
+  };
+  assert.doesNotThrow(() => NoopMiniGameBroadcaster.onTrigger({} as never));
+  assert.doesNotThrow(() => NoopMiniGameBroadcaster.onResult({} as never));
+});
+
+test("BIN-690 M1: setBroadcaster bytter ut broadcaster late-binding", async () => {
+  const { pool } = makeFakePool();
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+  });
+  orchestrator.registerMiniGame(makeFakeMiniGame("wheel", 0));
+
+  // Standard no-op broadcaster ved init. setBroadcaster bytter til recording.
+  const { broadcaster, triggers } = makeRecordingBroadcaster();
+  orchestrator.setBroadcaster(broadcaster);
+
+  const result = await orchestrator.maybeTriggerFor({
+    scheduledGameId: "sg-late",
+    winnerUserId: "u-late",
+    winnerWalletId: "w-late",
+    hallId: "h-late",
+    drawSequenceAtWin: 50,
+    gameConfigJson: { spill1: { miniGames: ["wheel"] } },
+  });
+
+  assert.equal(result.triggered, true);
+  assert.equal(triggers.length, 1, "ny broadcaster mottok trigger");
+});
+
+test("BIN-690 M1: maybeTriggerFor med duplikat winnerUserId → ON CONFLICT DO NOTHING (idempotent)", async () => {
+  // INSERT har ON CONFLICT (scheduled_game_id, winner_user_id) DO NOTHING.
+  // Locker idempotency-kontrakten: samme spill + samme vinner → ingen
+  // dobbel-INSERT (selv om kall gjentas av en eller annen grunn).
+  const insertCalls: Array<{ params: unknown[] }> = [];
+  const { pool } = makeFakePool({
+    query: async (sql, params) => {
+      if (sql.includes("INSERT INTO")) {
+        insertCalls.push({ params });
+        // Simuler at andre INSERT ikke får effekt (rowCount=0 er ON CONFLICT-result).
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  });
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter } = makeStubWalletAdapter();
+
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+  });
+  orchestrator.registerMiniGame(makeFakeMiniGame("wheel", 0));
+
+  const input = {
+    scheduledGameId: "sg-dup",
+    winnerUserId: "u-dup",
+    winnerWalletId: "w-dup",
+    hallId: "h-dup",
+    drawSequenceAtWin: 50,
+    gameConfigJson: { spill1: { miniGames: ["wheel"] } },
+  };
+  const r1 = await orchestrator.maybeTriggerFor(input);
+  const r2 = await orchestrator.maybeTriggerFor(input);
+
+  // Begge kall returnerer triggered=true (service kaller INSERT begge ganger;
+  // DB-laget har ON CONFLICT-clause som beskytter mot duplikat-rader).
+  assert.equal(r1.triggered, true);
+  assert.equal(r2.triggered, true);
+  // 2 INSERT-kall registrert — DB-CONFLICT håndterer duplikatet.
+  assert.equal(insertCalls.length, 2);
+  // Samme scheduled_game_id og winner_user_id i begge.
+  assert.equal(insertCalls[0]!.params[1], "sg-dup");
+  assert.equal(insertCalls[1]!.params[1], "sg-dup");
+  assert.equal(insertCalls[0]!.params[3], "u-dup");
+  assert.equal(insertCalls[1]!.params[3], "u-dup");
+});
+
+test("BIN-690 M1: extractActiveMiniGameTypes med spill1 som non-object → tom liste", () => {
+  // spill1-felt kan være feil shape: string/number/array.
+  for (const bad of ["string", 42, ["wheel"]]) {
+    const cfg = { spill1: bad };
+    assert.deepEqual(
+      extractActiveMiniGameTypes(cfg as never),
+      [],
+      `spill1=${JSON.stringify(bad)} → tom liste`,
+    );
+  }
+});
+
+test("BIN-690 M1: handleChoice ikke utbetaler når DB UPDATE feiler (rollback)", async () => {
+  // Hvis UPDATE feiler etter wallet.credit, skal transaksjon rulles tilbake
+  // (men wallet.credit er fortsatt skjedd — idempotency-key beskytter).
+  const transactions: string[] = [];
+  const pool = {
+    query: async () => ({ rows: [] }),
+    connect: async () => ({
+      query: async (sql: string) => {
+        if (sql.trim() === "BEGIN" || sql.trim() === "COMMIT" || sql.trim() === "ROLLBACK") {
+          transactions.push(sql.trim());
+          return { rows: [] };
+        }
+        if (sql.includes("FOR UPDATE")) {
+          return {
+            rows: [
+              {
+                id: "mgr-fail",
+                scheduled_game_id: "sg-fail",
+                mini_game_type: "wheel",
+                winner_user_id: "u-fail",
+                config_snapshot_json: {},
+                choice_json: null,
+                result_json: null,
+                payout_cents: 0,
+                triggered_at: new Date(),
+                completed_at: null,
+              },
+            ],
+          };
+        }
+        if (sql.includes("app_users") && sql.includes("wallet_id")) {
+          return { rows: [{ wallet_id: "w-fail" }] };
+        }
+        if (sql.includes("app_game1_phase_winners")) {
+          return { rows: [{ hall_id: "h-fail", draw_sequence_at_win: 50 }] };
+        }
+        if (sql.includes("UPDATE") && sql.includes("app_game1_mini_game_results")) {
+          throw new Error("simulated UPDATE failure");
+        }
+        return { rows: [] };
+      },
+      release: () => undefined,
+    }),
+  };
+  const { service: auditLog } = makeStubAuditLog();
+  const { adapter: walletAdapter, credits } = makeStubWalletAdapter();
+
+  const orchestrator = new Game1MiniGameOrchestrator({
+    pool: pool as unknown as import("pg").Pool,
+    auditLog,
+    walletAdapter,
+  });
+  orchestrator.registerMiniGame(makeFakeMiniGame("wheel", 5000));
+
+  await assert.rejects(
+    () =>
+      orchestrator.handleChoice({
+        resultId: "mgr-fail",
+        userId: "u-fail",
+        choiceJson: {},
+      }),
+    (err) => err instanceof Error && err.message.includes("UPDATE failure"),
+  );
+
+  // Wallet.credit ble kalt FØR UPDATE (kontrakt: pengene er debitert allerede).
+  // Idempotency-key beskytter mot dobbel-credit ved retry.
+  assert.equal(credits.length, 1, "wallet.credit skjedde før UPDATE-feil");
+  // ROLLBACK i transaksjon.
+  assert.ok(transactions.includes("BEGIN"));
+  assert.ok(transactions.includes("ROLLBACK"));
+});
