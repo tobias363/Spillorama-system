@@ -55,7 +55,15 @@ import {
 import { startServer, type ServeHandle } from "./serve.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPORT_PATH = resolve(__dirname, "report.json");
+/**
+ * Output path for the JSON report. Defaults to `report.json` in this
+ * directory. Wrappers (e.g. scripts/pilot-hardware/collect-metrics-pilot-hw.ts)
+ * can override the filename via `PERF_BUDGET_OUT` — relative paths are
+ * resolved against this directory so the companion compare script in the
+ * performance-budget folder can find them, absolute paths are used as-is.
+ * Only the report file is overridable; baseline path is unchanged.
+ */
+const REPORT_PATH = resolve(__dirname, process.env.PERF_BUDGET_OUT ?? "report.json");
 const BASELINE_PATH = resolve(__dirname, "baseline.json");
 
 const STABILIZE_MS = 1500;

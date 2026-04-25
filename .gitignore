@@ -51,3 +51,6 @@ packages/game-client/tests/visual/__output__/
 playwright-report/
 test-results/
 .playwright/
+
+# Pilot-hardware test-profile runtime artefakter
+scripts/performance-budget/report-pilot-hw.json

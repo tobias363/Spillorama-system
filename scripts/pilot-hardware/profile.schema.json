@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pilot Hardware Profile",
+  "description": "Konfigurasjon for å simulere pilot-hardware-begrensning i visuelle regresjons-tester og performance-budget.",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "cpuThrottleRate",
+    "viewport",
+    "monitorRefreshRate",
+    "gpuTier",
+    "chromiumArgs"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": {
+      "type": "string",
+      "description": "Unik identifikator for profilen (brukes i baseline-filnavn og CI-reporting)."
+    },
+    "version": {
+      "type": "string",
+      "description": "Semver — bump når profilen endres slik at baselines må regenereres."
+    },
+    "cpuThrottleRate": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 20,
+      "description": "CDP Emulation.setCPUThrottlingRate-verdi. 4 = 4x slower enn dev-maskin."
+    },
+    "networkThrottling": {
+      "type": "string",
+      "enum": ["No throttling", "Slow 3G", "Fast 3G", "Slow 4G", "Fast 4G"],
+      "description": "Playwright/Puppeteer network preset."
+    },
+    "viewport": {
+      "type": "object",
+      "required": ["width", "height", "deviceScaleFactor"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 320 },
+        "height": { "type": "integer", "minimum": 240 },
+        "deviceScaleFactor": { "type": "number", "minimum": 0.5, "maximum": 3 }
+      }
+    },
+    "monitorRefreshRate": {
+      "type": "integer",
+      "enum": [30, 60, 120, 144],
+      "description": "Target refresh rate. rAF throttles inferred automatisk i test-harnessen."
+    },
+    "gpuTier": {
+      "type": "string",
+      "enum": ["low", "mid", "high"],
+      "description": "Informativ flagg — faktisk GPU-begrensning settes via chromiumArgs."
+    },
+    "chromiumArgs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ekstra Chromium command-line flags som sendes til launchOptions.args."
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

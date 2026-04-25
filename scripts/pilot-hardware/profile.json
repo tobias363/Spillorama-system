@@ -1,0 +1,25 @@
+{
+  "$schema": "./profile.schema.json",
+  "name": "pilot-hw",
+  "version": "1.0.0",
+  "cpuThrottleRate": 4,
+  "networkThrottling": "Fast 3G",
+  "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "deviceScaleFactor": 1
+  },
+  "monitorRefreshRate": 60,
+  "gpuTier": "low",
+  "chromiumArgs": [
+    "--disable-gpu",
+    "--disable-accelerated-2d-canvas",
+    "--disable-accelerated-jpeg-decoding",
+    "--disable-accelerated-mjpeg-decode",
+    "--disable-accelerated-video-decode",
+    "--disable-software-rasterizer",
+    "--disable-features=CalculateNativeWinOcclusion,UseOzonePlatform",
+    "--force-color-profile=srgb"
+  ],
+  "description": "Simulerer typisk Teknobingo-terminal: 4-5 år gammel mini-PC, integrert GPU, 1080p 60Hz. Konservativ — reelt hardware kan være enda svakere. Oppdater etter at faktisk pilot-hardware er verifisert, se docs/engineering/PILOT_HARDWARE_SPECS.md."
+}
