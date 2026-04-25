@@ -167,7 +167,7 @@ function createMockPlatformService() {
       if (!user) throw new Error(`UNAUTHORIZED: unknown test token "${token}"`);
       return { ...user };
     },
-    assertUserEligibleForGameplay: (_user: PublicAppUser): void => { /* noop in dev */ },
+    assertUserEligibleForGameplay: async (_user: PublicAppUser): Promise<void> => { /* noop in dev */ },
     requireActiveHall: async (hallId: string): Promise<HallDefinition> => ({
       id: hallId, slug: hallId, name: `Test Hall ${hallId}`, region: "test", address: "Test",
       isActive: true, clientVariant: "web" as const, tvToken: `tv-${hallId}`,

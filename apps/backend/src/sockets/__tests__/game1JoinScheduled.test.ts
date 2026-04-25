@@ -131,7 +131,7 @@ function makeStubs(overrides: Partial<StubOptions> = {}) {
 
   const platformService = {
     getUserFromAccessToken: async () => opts.user,
-    assertUserEligibleForGameplay: () => {},
+    assertUserEligibleForGameplay: async () => {},
     getPool: () => pool,
   };
 
