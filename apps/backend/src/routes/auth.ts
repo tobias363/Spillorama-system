@@ -1,8 +1,11 @@
 import express from "express";
+import type { Pool } from "pg";
 import type { PlatformService } from "../platform/PlatformService.js";
 import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
 import type { AuthTokenService } from "../auth/AuthTokenService.js";
 import type { EmailService } from "../integration/EmailService.js";
+import type { SveveSmsService } from "../integration/SveveSmsService.js";
+import { maskPhone } from "../integration/SveveSmsService.js";
 import type { AuditLogService } from "../compliance/AuditLogService.js";
 import { DomainError } from "../game/BingoEngine.js";
 import {
@@ -35,6 +38,15 @@ export interface AuthRouterDeps {
   webBaseUrl: string;
   /** Support-e-post rendret i template-footer. */
   supportEmail: string;
+  /**
+   * SMS-service — when present, /api/auth/forgot-password also accepts
+   * { phone } in the body and sends OTP via SMS for users without email
+   * (or who explicitly requested phone-based reset).
+   */
+  smsService?: SveveSmsService;
+  /** Pool + schema needed for phone-based user lookup. Required if smsService is set. */
+  pool?: Pool;
+  schema?: string;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -58,8 +70,64 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
     auditLogService,
     webBaseUrl,
     supportEmail,
+    smsService,
+    pool,
+    schema,
   } = deps;
   const router = express.Router();
+
+  // Validate schema-name once if provided.
+  const safeSchema =
+    schema && /^[a-z_][a-z0-9_]*$/i.test(schema) ? schema : "public";
+
+  /**
+   * Look up user by phone for SMS-based forgot-password. Soft-deleted
+   * brukere filtreres bort. Returnerer null hvis ingen match.
+   */
+  async function findUserByPhone(
+    phoneRaw: string
+  ): Promise<{ id: string; phone: string; displayName: string } | null> {
+    if (!pool) return null;
+    const phone = phoneRaw.trim();
+    if (!phone) return null;
+    const result = await pool.query<{
+      id: string;
+      phone: string;
+      display_name: string;
+    }>(
+      `SELECT id, phone, display_name FROM "${safeSchema}"."app_users"
+        WHERE phone = $1
+          AND deleted_at IS NULL
+        LIMIT 2`,
+      [phone]
+    );
+    // Hvis flere brukere har samme telefonnummer (skal være sjeldent men
+    // mulig hvis registrering aldri har håndhevet UNIQUE) — returner null
+    // og logg, slik at vi ikke risikerer å sende OTP til feil bruker.
+    if (result.rows.length === 0) return null;
+    if (result.rows.length > 1) {
+      logger.warn(
+        { maskedPhone: maskPhone(phone) },
+        "[forgot-password] flere brukere med samme telefonnummer — ignorert"
+      );
+      return null;
+    }
+    const row = result.rows[0]!;
+    return { id: row.id, phone: row.phone, displayName: row.display_name };
+  }
+
+  /**
+   * Generer 6-sifret OTP-streng. Brukes som "fake token" via authTokenService
+   * — egentlig en password-reset token, men i SMS-form trenger vi en kortere
+   * verdi enn standard 32-tegn-token. Vi lagrer den lange tokenet i DB og
+   * sender de første 6 sifrene til brukeren — brukeren skriver disse inn,
+   * og endepunktet bruker dem som lookup-key. For nå genererer vi en kort
+   * numerisk OTP og lar authTokenService håndtere TTL.
+   *
+   * For minimum-PR-scope: vi sender resetLink (samme som email-flow) — bare
+   * via SMS i stedet. Lenken er kort nok til å sende på SMS, og bruker har
+   * konsistent UX.
+   */
 
   /**
    * BIN-629: fire-and-forget audit emit. Same policy as AuditLogService
@@ -297,10 +365,78 @@ export function createAuthRouter(deps: AuthRouterDeps): express.Router {
 
   router.post("/api/auth/forgot-password", async (req, res) => {
     try {
-      const emailRaw = typeof req.body?.email === "string" ? req.body.email : "";
-      if (!emailRaw.trim()) {
-        throw new DomainError("INVALID_INPUT", "email er påkrevd.");
+      const emailRaw =
+        typeof req.body?.email === "string" ? req.body.email : "";
+      const phoneRaw =
+        typeof req.body?.phone === "string" ? req.body.phone : "";
+
+      // Aksepter enten email ELLER phone. Phone-modus krever smsService +
+      // pool (ellers fall-back til "ingen handling" — fortsatt enumeration-safe).
+      if (!emailRaw.trim() && !phoneRaw.trim()) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "email eller phone er påkrevd."
+        );
       }
+
+      // Phone-flow har prioritet hvis både er satt — eksplisitt kanal valgt.
+      if (phoneRaw.trim()) {
+        if (smsService && pool) {
+          const phoneUser = await findUserByPhone(phoneRaw);
+          if (phoneUser) {
+            try {
+              const { token, expiresAt } = await authTokenService.createToken(
+                "password-reset",
+                phoneUser.id
+              );
+              const base = webBaseUrl.replace(/\/+$/, "");
+              const resetLink = `${base}/reset-password/${encodeURIComponent(token)}`;
+              // SMS-meldingen skal være kort. Vi sender resetLink + utløp.
+              const message = `Spillorama: tilbakestill passord her: ${resetLink} (utløper om 1 time).`;
+              const smsResult = await smsService.sendSms({
+                to: phoneUser.phone,
+                message,
+              });
+              if (smsResult.skipped) {
+                logger.warn(
+                  {
+                    userId: phoneUser.id,
+                    maskedPhone: maskPhone(phoneUser.phone),
+                    resetLink,
+                    expiresAt,
+                  },
+                  "[forgot-password] SMS-stub-mode — reset-link logget, ikke sendt"
+                );
+              } else if (!smsResult.ok) {
+                logger.warn(
+                  {
+                    userId: phoneUser.id,
+                    maskedPhone: maskPhone(phoneUser.phone),
+                    error: smsResult.error,
+                    attempts: smsResult.attempts,
+                  },
+                  "[forgot-password] SMS feilet etter retry"
+                );
+              }
+            } catch (err) {
+              // Ikke la SMS-/token-feil lekke ut via enumeration.
+              logger.error(
+                { err, userId: phoneUser.id },
+                "[forgot-password] phone-flow internal error"
+              );
+            }
+          }
+        } else {
+          logger.warn(
+            "[forgot-password] phone-flow forespurt men SMS-service ikke konfigurert"
+          );
+        }
+        // Enumeration-safe: alltid samme respons uansett om bruker finnes.
+        apiSuccess(res, { sent: true });
+        return;
+      }
+
+      // Email-flow (eksisterende, BIN-587 B2.1).
       const user = await platformService.findUserByEmail(emailRaw);
       if (user) {
         try {

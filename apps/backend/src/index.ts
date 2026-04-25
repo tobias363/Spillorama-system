@@ -23,6 +23,7 @@ import { PaymentRequestService } from "./payments/PaymentRequestService.js";
 import { AuthTokenService } from "./auth/AuthTokenService.js";
 import { EmailService } from "./integration/EmailService.js";
 import { EmailQueue } from "./integration/EmailQueue.js";
+import { SveveSmsService } from "./integration/SveveSmsService.js";
 import {
   AuditLogService,
   InMemoryAuditLogStore,
@@ -69,6 +70,7 @@ import { FcmPushService } from "./notifications/FcmPushService.js";
 import { createGameStartNotificationsJob } from "./jobs/gameStartNotifications.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
 import { createAdminNotificationsRouter } from "./routes/adminNotifications.js";
+import { createAdminSmsBroadcastRouter } from "./routes/adminSmsBroadcast.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
@@ -710,6 +712,14 @@ const emailService = new EmailService();
 // kalles deterministisk.
 const emailQueue = new EmailQueue({ emailService });
 emailQueue.runLoop();
+
+// Sveve SMS-service (norsk SMS-leverandør). Kjører i stub-mode hvis
+// SVEVE_API_USER er tom — dev-miljø starter uten å trenge credentials.
+// Brukes til:
+//   1) Forgot-password OTP (auth.ts /api/auth/forgot-password) for users
+//      som velger phone-flow.
+//   2) Admin-broadcast (POST /api/admin/sms/broadcast).
+const smsService = new SveveSmsService();
 
 // Accounting email dispatcher for Withdraw XML-batcher (wireframe 16.20).
 // Bruker eksisterende `app_withdraw_email_allowlist` (via securityService)
@@ -1417,6 +1427,11 @@ app.use(createAuthRouter({
   auditLogService,
   webBaseUrl,
   supportEmail,
+  // Sveve-SMS for forgot-password phone-flow. Faller tilbake til log-only
+  // hvis SVEVE_API_USER er tom (stub-mode).
+  smsService,
+  pool: platformService.getPool(),
+  schema: pgSchema,
 }));
 app.use(createPlayersRouter({
   platformService,
@@ -2176,6 +2191,17 @@ app.use(createNotificationsRouter({ platformService, fcmPushService }));
 app.use(createAdminNotificationsRouter({
   platformService,
   fcmPushService,
+  auditLogService,
+  pool: platformService.getPool(),
+  schema: pgSchema,
+}));
+
+// Sveve SMS-broadcast for ADMIN — sender SMS til spesifiserte spillere via
+// app_users.phone-lookup. Audit-loggen masker telefonnumre + utelater
+// melding-innhold (kun lengde) for å unngå PII-lekkasje.
+app.use(createAdminSmsBroadcastRouter({
+  platformService,
+  smsService,
   auditLogService,
   pool: platformService.getPool(),
   schema: pgSchema,
