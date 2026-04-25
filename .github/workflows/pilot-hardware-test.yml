@@ -1,0 +1,176 @@
+name: Pilot Hardware Test
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    # Nightly kl 02:00 UTC — fanger "slow drift" som kumuleres over flere PR-er
+    # uten at noen individuell PR bryter budget.
+    - cron: '0 2 * * *'
+
+concurrency:
+  group: pilot-hw-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate-profile:
+    name: Validate pilot-hw profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install tsx
+        run: npm install -g tsx
+
+      - name: Validate profile.json + baseline consistency
+        run: tsx scripts/pilot-hardware/validate-profile.ts
+
+  visual-regression-pilot-hw:
+    name: Playwright visual (pilot-hw)
+    needs: validate-profile
+    runs-on: ubuntu-latest
+    # Skip hvis Playwright-config ikke eksisterer ennå (#470 ikke merget).
+    # Vi bruker "hashFiles" for å guard-ta hvor ingen feil logges.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Detect Playwright config presence
+        id: detect
+        run: |
+          if [ -f "packages/game-client/playwright.config.ts" ]; then
+            echo "has_playwright=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_playwright=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Playwright config not found — #470 ikke merget. Skipper visual-regression-pilot-hw (ikke en feil)."
+          fi
+
+      - name: Install root dependencies
+        if: steps.detect.outputs.has_playwright == 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        if: steps.detect.outputs.has_playwright == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests on pilot-hw project
+        if: steps.detect.outputs.has_playwright == 'true'
+        run: npm run test:visual:pilot-hw
+
+      - name: Upload Playwright report
+        if: always() && steps.detect.outputs.has_playwright == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-pilot-hw
+          path: packages/game-client/playwright-report/
+          retention-days: 7
+
+  performance-budget-pilot-hw:
+    name: Performance budget (pilot-hw)
+    needs: validate-profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Detect perf-budget collector presence
+        id: detect
+        run: |
+          if [ -f "scripts/performance-budget/collect-metrics.ts" ]; then
+            echo "has_perf_budget=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_perf_budget=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Performance-budget collector not found — #469 ikke merget. Skipper perf-pilot-hw (ikke en feil)."
+          fi
+
+      - name: Install root dependencies
+        if: steps.detect.outputs.has_perf_budget == 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Build shared-types
+        if: steps.detect.outputs.has_perf_budget == 'true'
+        run: npm --prefix packages/shared-types run build
+
+      - name: Build web bundle for preview
+        if: steps.detect.outputs.has_perf_budget == 'true'
+        run: npm run build:games
+
+      - name: Install performance-budget dependencies
+        if: steps.detect.outputs.has_perf_budget == 'true'
+        run: npm --prefix scripts/performance-budget install --no-audit --no-fund
+
+      - name: Collect metrics under pilot-hw throttle
+        if: steps.detect.outputs.has_perf_budget == 'true'
+        run: npx tsx scripts/pilot-hardware/collect-metrics-pilot-hw.ts
+
+      - name: Compare vs pilot-hw baseline
+        if: steps.detect.outputs.has_perf_budget == 'true'
+        run: npx tsx scripts/pilot-hardware/compare-pilot-hw.ts
+
+      - name: Upload pilot-hw report
+        if: always() && steps.detect.outputs.has_perf_budget == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-report-pilot-hw
+          path: scripts/performance-budget/report-pilot-hw.json
+          retention-days: 30
+
+  comment:
+    name: Sticky comment on PR
+    needs:
+      - visual-regression-pilot-hw
+      - performance-budget-pilot-hw
+    if: github.event_name == 'pull_request' && always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine overall status
+        id: status
+        run: |
+          visual="${{ needs.visual-regression-pilot-hw.result }}"
+          perf="${{ needs.performance-budget-pilot-hw.result }}"
+          # skipped teller som neutral — vi poster ikke FAIL hvis jobb ble skipped.
+          if [ "$visual" = "failure" ] || [ "$perf" = "failure" ]; then
+            echo "status=FAIL" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=PASS" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post sticky comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pilot-hardware-test
+          message: |
+            ## Pilot Hardware Test: ${{ steps.status.outputs.status }}
+
+            | Job | Result |
+            | --- | --- |
+            | Playwright visual (pilot-hw) | `${{ needs.visual-regression-pilot-hw.result }}` |
+            | Performance budget (pilot-hw) | `${{ needs.performance-budget-pilot-hw.result }}` |
+
+            Profile: `pilot-hw` (4x CPU throttle, integrated GPU, 1920x1080 @ 60Hz).
+            Strengere terskler enn dev-baseline — se `scripts/pilot-hardware/baseline-pilot-hw.json`.
+
+            Detaljer: sjekk artifacts `perf-report-pilot-hw` og `playwright-report-pilot-hw`.

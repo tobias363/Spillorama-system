@@ -35,6 +35,8 @@ import type {
   MasterActor,
   MasterActionResult,
 } from "../game/Game1MasterControlService.js";
+import type { Game1DrawEngineService } from "../game/Game1DrawEngineService.js";
+import type { Game1JackpotStateService } from "../game/Game1JackpotStateService.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -54,7 +56,18 @@ export interface AdminGame1MasterRouterDeps {
   platformService: PlatformService;
   auditLogService: AuditLogService;
   masterControlService: Game1MasterControlService;
+  /**
+   * Task 1.1: valgfri draw-engine for å inkludere engine-state (paused,
+   * paused_at_phase, current_phase) i GET-responsen. Hvis ikke satt faller
+   * responsen tilbake til kun scheduled_game-state (legacy-kontrakt).
+   */
+  drawEngine?: Game1DrawEngineService;
   io?: SocketServer;
+  /**
+   * MASTER_PLAN §2.3 — valgfri jackpot-state-service. Når satt tilbyr
+   * routeren GET /jackpot-state og legger jackpot-amount i detail-responsen.
+   */
+  jackpotStateService?: Game1JackpotStateService;
 }
 
 function clientIp(req: express.Request): string | null {
@@ -133,7 +146,14 @@ function broadcastAction(
 export function createAdminGame1MasterRouter(
   deps: AdminGame1MasterRouterDeps
 ): express.Router {
-  const { platformService, auditLogService, masterControlService, io } = deps;
+  const {
+    platformService,
+    auditLogService,
+    masterControlService,
+    drawEngine,
+    io,
+    jackpotStateService,
+  } = deps;
   const router = express.Router();
 
   async function requirePermission(
@@ -191,6 +211,28 @@ export function createAdminGame1MasterRouter(
       const confirmExcludedHalls = Array.isArray(body.confirmExcludedHalls)
         ? body.confirmExcludedHalls.filter((v: unknown): v is string => typeof v === "string")
         : undefined;
+      // Task 1.5: "agents not ready"-override. Klient kaller /start uten flag
+      // først; dersom backend returnerer HALLS_NOT_READY med `unreadyHalls`,
+      // viser frontend popup og re-kaller /start med samtlige orange hall-IDer
+      // i `confirmUnreadyHalls`. Se Game1MasterControlService.startGame
+      // for audit- og exclude-semantikk.
+      const confirmUnreadyHalls = Array.isArray(body.confirmUnreadyHalls)
+        ? body.confirmUnreadyHalls.filter((v: unknown): v is string => typeof v === "string")
+        : undefined;
+      // Task 1.5 (forward-compat mot HS #451): accept `confirmExcludeRedHalls`
+      // for rød-auto-exclude-mønster. Mappes inn som excluded (samme som
+      // confirmExcludedHalls). Hvis #451 lander kan service-laget bruke
+      // `Game1HallReadyService.getHallStatusForGame` for farge-deteksjon.
+      const confirmExcludeRedHalls = Array.isArray(body.confirmExcludeRedHalls)
+        ? body.confirmExcludeRedHalls.filter((v: unknown): v is string => typeof v === "string")
+        : undefined;
+      // MASTER_PLAN §2.3: jackpotConfirmed er et boolean som master sender
+      // etter å ha godkjent pre-start-popup. Når service-laget ser den
+      // mangler og jackpot-service er koblet inn, kastes JACKPOT_CONFIRM_REQUIRED
+      // med current amount i details — klient rendrer popup og re-kaller
+      // endepunktet med jackpotConfirmed=true.
+      const jackpotConfirmed =
+        body.jackpotConfirmed === true || body.jackpotConfirmed === "true";
 
       const { masterHallId, groupHallId } = await loadMasterHallId(gameId);
       const masterActor = buildActor(actor, masterHallId);
@@ -198,8 +240,17 @@ export function createAdminGame1MasterRouter(
         gameId,
         actor: masterActor,
       };
-      if (confirmExcludedHalls !== undefined) {
-        startInput.confirmExcludedHalls = confirmExcludedHalls;
+      if (confirmExcludedHalls !== undefined || confirmExcludeRedHalls !== undefined) {
+        startInput.confirmExcludedHalls = [
+          ...(confirmExcludedHalls ?? []),
+          ...(confirmExcludeRedHalls ?? []),
+        ];
+      }
+      if (confirmUnreadyHalls !== undefined) {
+        startInput.confirmUnreadyHalls = confirmUnreadyHalls;
+      }
+      if (jackpotConfirmed) {
+        startInput.jackpotConfirmed = true;
       }
       const result = await masterControlService.startGame(startInput);
 
@@ -217,6 +268,7 @@ export function createAdminGame1MasterRouter(
         status: result.status,
         actualStartTime: result.actualStartTime,
         auditId: result.auditId,
+        jackpotAmountCents: result.jackpotAmountCents ?? null,
       });
     } catch (error) {
       if (error instanceof DomainError && error.code === "FORBIDDEN" && gameId) {
@@ -448,11 +500,105 @@ export function createAdminGame1MasterRouter(
           .filter((h) => !h.excludedFromGame)
           .every((h) => h.isReady);
 
+      // Task 1.1: inkluder engine-state (paused, paused_at_phase, phase)
+      // når draw-engine er wired inn. Admin-UI bruker feltene for å vise
+      // Resume-knapp + banner ved auto-pause uten å trenge ekstra REST-
+      // kall. Fail-soft: hvis engine.getState kaster (f.eks. engine ikke
+      // startet ennå), faller vi tilbake til engineState=null.
+      let engineState:
+        | null
+        | {
+            isPaused: boolean;
+            pausedAtPhase: number | null;
+            currentPhase: number;
+            drawsCompleted: number;
+            isFinished: boolean;
+          } = null;
+      if (drawEngine) {
+        try {
+          const view = await drawEngine.getState(gameId);
+          if (view) {
+            engineState = {
+              isPaused: view.isPaused,
+              pausedAtPhase: view.pausedAtPhase,
+              currentPhase: view.currentPhase,
+              drawsCompleted: view.drawsCompleted,
+              isFinished: view.isFinished,
+            };
+          }
+        } catch (err) {
+          logger.warn(
+            { err, gameId },
+            "[Task 1.1] drawEngine.getState feilet — returnerer engineState=null"
+          );
+        }
+      }
+
+      // MASTER_PLAN §2.3: inkluder current jackpot-state i detail-responsen
+      // slik at master-UI kan vise den i header uten et ekstra round-trip.
+      let jackpot:
+        | {
+            currentAmountCents: number;
+            maxCapCents: number;
+            dailyIncrementCents: number;
+            drawThresholds: number[];
+            lastAccumulationDate: string;
+          }
+        | null = null;
+      if (jackpotStateService && detail.game.groupHallId) {
+        try {
+          const state = await jackpotStateService.getStateForGroup(
+            detail.game.groupHallId
+          );
+          jackpot = {
+            currentAmountCents: state.currentAmountCents,
+            maxCapCents: state.maxCapCents,
+            dailyIncrementCents: state.dailyIncrementCents,
+            drawThresholds: state.drawThresholds,
+            lastAccumulationDate: state.lastAccumulationDate,
+          };
+        } catch (err) {
+          logger.warn({ err, gameId }, "jackpot-state lookup soft-failed");
+        }
+      }
+
       apiSuccess(res, {
         game: detail.game,
         halls: hallsWithName,
         allReady,
         auditRecent: detail.auditRecent,
+        engineState,
+        jackpot,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── GET /jackpot-state/:hallGroupId (MASTER_PLAN §2.3) ────────────────────
+  //
+  // Lar admin-web hente jackpot-state uavhengig av spesifikt gameId (f.eks.
+  // for hall-gruppe-dashboard eller for å oppdatere header før et spill er
+  // valgt). Null når jackpot-service ikke er koblet inn.
+
+  router.get("/api/admin/game1/jackpot-state/:hallGroupId", async (req, res) => {
+    try {
+      await requirePermission(req, "GAME1_GAME_READ");
+      const hallGroupId = mustBeNonEmptyString(req.params.hallGroupId, "hallGroupId");
+      if (!jackpotStateService) {
+        apiSuccess(res, { jackpot: null });
+        return;
+      }
+      const state = await jackpotStateService.getStateForGroup(hallGroupId);
+      apiSuccess(res, {
+        jackpot: {
+          hallGroupId: state.hallGroupId,
+          currentAmountCents: state.currentAmountCents,
+          maxCapCents: state.maxCapCents,
+          dailyIncrementCents: state.dailyIncrementCents,
+          drawThresholds: state.drawThresholds,
+          lastAccumulationDate: state.lastAccumulationDate,
+        },
       });
     } catch (error) {
       apiFailure(res, error);

@@ -97,6 +97,35 @@ describe("KYC moderation modals", () => {
       expect(document.querySelector(".modal")).toBeTruthy();
     });
 
+    it("BIN-702: avviser reason under 10 tegn, viser min-lengde-feil", async () => {
+      const fetchMock = mockFetch({});
+      openRejectPlayerModal({ player: PLAYER });
+      const textarea = document.querySelector<HTMLTextAreaElement>("#reject-reason")!;
+      textarea.value = "kort"; // 4 tegn
+      const confirmBtn = document.querySelector<HTMLButtonElement>('button[data-action="confirm"]')!;
+      confirmBtn.click();
+      await nextMicrotasks();
+      expect(fetchMock).not.toHaveBeenCalled();
+      const errEl = document.querySelector<HTMLElement>("#reject-error");
+      expect(errEl?.style.display).toBe("block");
+      // Feilmelding nevner antall tegn
+      expect(errEl?.textContent).toMatch(/10/);
+      expect(document.querySelector(".modal")).toBeTruthy();
+    });
+
+    it("BIN-702: live counter oppdateres ved input", () => {
+      openRejectPlayerModal({ player: PLAYER });
+      const textarea = document.querySelector<HTMLTextAreaElement>("#reject-reason")!;
+      const counter = document.querySelector<HTMLElement>("#reject-counter")!;
+      expect(counter.textContent).toBe("0");
+      textarea.value = "Under 10";
+      textarea.dispatchEvent(new Event("input"));
+      expect(counter.textContent).toBe("8");
+      textarea.value = "Ti eller mer tegn her";
+      textarea.dispatchEvent(new Event("input"));
+      expect(counter.textContent).toBe("21");
+    });
+
     it("POSTs /reject with reason and closes on success", async () => {
       const fetchMock = mockFetch({ id: "user-1", kycStatus: "REJECTED" });
       const onRejected = vi.fn();

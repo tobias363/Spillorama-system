@@ -9,6 +9,11 @@
  * Endpoints:
  *   GET /api/tv/:hallId/:tvToken/state    → current game state
  *   GET /api/tv/:hallId/:tvToken/winners  → last completed game winners
+ *   GET /api/tv/:hallId/voice             → voice-pack for denne hallen
+ *
+ * Voice-endepunktet brukes av TV-klienten ved mount for å vite hvilken
+ * stemme som skal lastes. Tokenfri så TV-klienten kan kalle det før
+ * eventuell socket-login; verdien er ikke sensitiv (bare voice1/2/3).
  *
  * Klient-frontend: apps/admin-web/src/pages/tv/*.ts (public routes,
  * utenfor normal auth-gate).
@@ -50,6 +55,27 @@ export function createTvScreenRouter(deps: TvRouterDeps): express.Router {
       const summary = await tvScreenService.getWinners({ id: hall.id, name: hall.name });
       res.json({ ok: true, data: summary });
     } catch (error) {
+      handleError(res, error);
+    }
+  });
+
+  // Voice-config for TV-klient. Ingen token-krav fordi verdien ikke er
+  // sensitiv, men vi returnerer 404 for ukjent hall (samme uniform-404-
+  // policy som de andre TV-endepunktene for å unngå hall-enumeration).
+  router.get("/api/tv/:hallId/voice", async (req, res) => {
+    try {
+      const hallRef = (req.params.hallId ?? "").trim();
+      if (!hallRef) {
+        res.status(404).json({ ok: false, error: { code: "NOT_FOUND" } });
+        return;
+      }
+      const voice = await platformService.getTvVoice(hallRef);
+      res.json({ ok: true, data: { voice } });
+    } catch (error) {
+      if (error instanceof DomainError && error.code === "HALL_NOT_FOUND") {
+        res.status(404).json({ ok: false, error: { code: "NOT_FOUND" } });
+        return;
+      }
       handleError(res, error);
     }
   });

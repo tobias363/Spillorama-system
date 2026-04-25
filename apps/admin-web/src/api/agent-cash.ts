@@ -85,6 +85,75 @@ export function cashOut(playerId: string, body: CashOperationRequest): Promise<C
   });
 }
 
+// ───────── Wireframe 17.7 + 17.8: Add Money / Withdraw — Registered User ─────────
+
+export interface AgentUserSearchRow {
+  id: string;
+  email: string;
+  displayName: string;
+  phone: string | null;
+  walletBalance: number;
+}
+
+export interface AgentUserCashResponse {
+  transaction: {
+    id: string;
+    actionType: string;
+    amount: number;
+    paymentMethod: string;
+    previousBalance: number;
+    afterBalance: number;
+    hallId: string;
+    shiftId: string;
+    createdAt: string;
+  };
+  amlFlagged: boolean;
+}
+
+/**
+ * Wireframe 17.7/17.8: PLAYER-søk i agentens hall. Brukes av autocomplete-
+ * dropdown i AddMoneyRegisteredUserModal + WithdrawRegisteredUserModal.
+ * Returnerer inntil 10 rader inklusive wallet-saldo.
+ */
+export function searchUsersForAgent(query: string): Promise<{ users: AgentUserSearchRow[]; query: string }> {
+  const qs = `?q=${encodeURIComponent(query)}`;
+  return apiRequest(`/api/agent/transactions/search-users${qs}`, { auth: true });
+}
+
+export interface AddMoneyRegisteredUserRequest {
+  targetUserId: string;
+  amount: number;
+  paymentType: "Cash" | "Card";
+  clientRequestId: string;
+  notes?: string;
+}
+
+export interface WithdrawRegisteredUserRequest {
+  targetUserId: string;
+  amount: number;
+  paymentType: "Cash";
+  clientRequestId: string;
+  notes?: string;
+  /** Sendt etter second-opinion-dialog for uttak > 10 000 NOK. */
+  requireConfirm?: boolean;
+}
+
+export function addMoneyToRegisteredUser(body: AddMoneyRegisteredUserRequest): Promise<AgentUserCashResponse> {
+  return apiRequest("/api/agent/transactions/add-money-user", {
+    method: "POST",
+    body,
+    auth: true,
+  });
+}
+
+export function withdrawFromRegisteredUser(body: WithdrawRegisteredUserRequest): Promise<AgentUserCashResponse> {
+  return apiRequest("/api/agent/transactions/withdraw-user", {
+    method: "POST",
+    body,
+    auth: true,
+  });
+}
+
 // ───────── Physical tickets ─────────
 
 export interface PhysicalInventoryItem {

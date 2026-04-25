@@ -36,6 +36,75 @@ import type {
   RoomStatePayload,
 } from "./types.js";
 import type { RoomSnapshot } from "../../game/types.js";
+import type { GameEventsDeps } from "./deps.js";
+
+/**
+ * BIN-693 Option B: reserver delta-beløp for pre-round bong-kjøp.
+ *
+ * `previousWeighted` er antall brett (vektet) allerede armed for denne spilleren
+ * i rommet. `newTotalWeighted` er det ønskede totalen etter denne bet:arm-call.
+ * Delta = (newTotalWeighted - previousWeighted) × entryFee.
+ *
+ * Ved delta > 0: enten increase eksisterende reservation eller opprette ny.
+ * Ved delta ≤ 0: no-op (ticket:cancel håndterer reduksjon).
+ *
+ * Kaster INSUFFICIENT_FUNDS (via adapter) hvis tilgjengelig saldo ikke dekker.
+ * Rullback er idempotent — in-memory armed-state oppdateres først etter
+ * wallet-reserve er committed.
+ */
+async function reservePreRoundDelta(
+  deps: GameEventsDeps,
+  roomCode: string,
+  playerId: string,
+  previousWeighted: number,
+  newTotalWeighted: number,
+): Promise<void> {
+  const adapter = deps.walletAdapter;
+  if (!adapter?.reserve || !adapter.increaseReservation) return; // test-harness
+  if (!deps.getWalletIdForPlayer || !deps.getReservationId || !deps.setReservationId) return;
+
+  const deltaWeighted = newTotalWeighted - previousWeighted;
+  if (deltaWeighted <= 0) return;
+  const entryFee = deps.getRoomConfiguredEntryFee(roomCode);
+  const deltaKr = deltaWeighted * entryFee;
+  if (deltaKr <= 0) return;
+
+  const walletId = deps.getWalletIdForPlayer(roomCode, playerId);
+  if (!walletId) return;
+
+  const existingResId = deps.getReservationId(roomCode, playerId);
+  if (existingResId) {
+    await adapter.increaseReservation(existingResId, deltaKr);
+    return;
+  }
+
+  const reservation = await adapter.reserve(walletId, deltaKr, {
+    idempotencyKey: `arm-${roomCode}-${playerId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    roomCode,
+  });
+  deps.setReservationId(roomCode, playerId, reservation.id);
+}
+
+/** Frigi hele reservasjonen (disarm / cancel-all). */
+async function releasePreRoundReservation(
+  deps: GameEventsDeps,
+  roomCode: string,
+  playerId: string,
+): Promise<void> {
+  const adapter = deps.walletAdapter;
+  if (!adapter?.releaseReservation) return;
+  if (!deps.getReservationId || !deps.clearReservationId) return;
+
+  const resId = deps.getReservationId(roomCode, playerId);
+  if (!resId) return;
+  try {
+    await adapter.releaseReservation(resId);
+  } catch {
+    // Allerede released/committed — trygt å ignorere (ticket:cancel kan
+    // race med disarm). Neste bet:arm lager ny reservation.
+  }
+  deps.clearReservationId(roomCode, playerId);
+}
 
 export function registerRoomEvents(ctx: SocketContext): void {
   const {
@@ -330,14 +399,40 @@ export function registerRoomEvents(ctx: SocketContext): void {
           if (totalWeighted < 1) {
             throw new DomainError("INVALID_INPUT", "Du må velge minst 1 brett.");
           }
+          // BIN-693 Option B: reserver delta-beløpet i wallet FØR vi armer
+          // in-memory. Hvis reserve feiler (INSUFFICIENT_FUNDS), rulles alt
+          // tilbake og spiller får feilmelding uten at armed-state endres.
+          const existingTotal = existing.reduce((acc, s) => acc + s.qty, 0); // weighted-approx
+          const existingWeighted = deps.getArmedPlayerIds(roomCode).includes(playerId)
+            ? (deps.getArmedPlayerTicketCounts(roomCode)[playerId] ?? 0)
+            : 0;
+          await reservePreRoundDelta(
+            deps,
+            roomCode,
+            playerId,
+            existingWeighted,
+            totalWeighted,
+          );
           armPlayer(roomCode, playerId, totalWeighted, merged);
         } else {
           // Backward compat: flat ticketCount
           const ticketCount = Math.min(30, Math.max(1, Math.round(payload.ticketCount ?? 1)));
+          const existingWeighted = deps.getArmedPlayerIds(roomCode).includes(playerId)
+            ? (deps.getArmedPlayerTicketCounts(roomCode)[playerId] ?? 0)
+            : 0;
+          await reservePreRoundDelta(deps, roomCode, playerId, existingWeighted, ticketCount);
           armPlayer(roomCode, playerId, ticketCount);
         }
       } else {
+        // disarm: frigi reservasjon før vi nullstiller in-memory state
+        await releasePreRoundReservation(deps, roomCode, playerId);
         disarmPlayer(roomCode, playerId);
+      }
+      // BIN-693: refresh player.balance til available_balance etter reserve/release,
+      // så room:update-snapshot reflekterer ny saldo-visning umiddelbart.
+      const walletId = deps.getWalletIdForPlayer?.(roomCode, playerId);
+      if (walletId) {
+        await engine.refreshPlayerBalancesForWallet(walletId);
       }
       const snapshot = await emitRoomUpdate(roomCode);
       ackSuccess(callback, { snapshot, armed: wantArmed });

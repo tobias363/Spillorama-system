@@ -17,6 +17,19 @@ export interface TvPatternRow {
   highlighted: boolean;
 }
 
+/**
+ * Task 1.7 (2026-04-24): farge-semantikk for deltakende haller på TV-stripe.
+ * Matcher master-konsollens badge-koder (Appendix B.5 i audit-rapporten).
+ */
+export type TvHallColor = "red" | "orange" | "green";
+
+export interface TvParticipatingHall {
+  hallId: string;
+  hallName: string;
+  color: TvHallColor;
+  playerCount: number;
+}
+
 export interface TvGameState {
   hall: { id: string; name: string };
   currentGame: {
@@ -42,6 +55,12 @@ export interface TvGameState {
     secondsRemaining: number;
   } | null;
   status: "drawing" | "waiting" | "ended";
+  /**
+   * Task 1.7 (2026-04-24): deltakende haller med fargekode + spillerantall.
+   * Tom array når HS-PR ikke er merget (backend faller tilbake til tomt).
+   * TV rendrer badge-stripe kun når lengde > 0.
+   */
+  participatingHalls: TvParticipatingHall[];
 }
 
 export interface TvWinnerRow {
@@ -102,4 +121,28 @@ export function fetchTvState(hallId: string, tvToken: string): Promise<TvGameSta
 
 export function fetchTvWinners(hallId: string, tvToken: string): Promise<TvWinnersSummary> {
   return fetchTv<TvWinnersSummary>(tvUrl(hallId, tvToken, "winners"));
+}
+
+// ── Voice-pack (wireframe PDF 14) ───────────────────────────────────────────
+//
+// Public endpoint (ingen token-krav) — TV-klienten kaller det ved mount og
+// etter `tv:voice-changed`-broadcast for å vite hvilken voice-pack som skal
+// lastes. Responsen: `{ voice: 'voice1' | 'voice2' | 'voice3' }`.
+
+export type TvVoice = "voice1" | "voice2" | "voice3";
+
+export async function fetchTvVoice(hallId: string): Promise<TvVoice> {
+  const res = await fetch(`/api/tv/${encodeURIComponent(hallId)}/voice`, {
+    method: "GET",
+    headers: { accept: "application/json" },
+  });
+  if (!res.ok) {
+    const code = res.status === 404 ? "NOT_FOUND" : "HTTP_ERROR";
+    throw new TvApiError(res.status, code, `TV voice endpoint returned ${res.status}`);
+  }
+  const body = (await res.json()) as { ok: boolean; data?: { voice?: string } };
+  const voice = body.data?.voice;
+  if (voice === "voice1" || voice === "voice2" || voice === "voice3") return voice;
+  // Fail-safe fallback — TV skal alltid kunne spille noe.
+  return "voice1";
 }

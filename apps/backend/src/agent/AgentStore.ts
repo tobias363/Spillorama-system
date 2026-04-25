@@ -76,8 +76,20 @@ export interface AgentShift {
   settledAt: string | null;
   settledByUserId: string | null;
 
+  // Wireframe Gap #9: Shift Log Out-flagg satt fra agent-popup.
+  distributedWinnings: boolean;
+  transferredRegisterTickets: boolean;
+  logoutNotes: string | null;
+
   createdAt: string;
   updatedAt: string;
+}
+
+/** Wireframe Gap #9: Flags til store.endShift — opt-in logout-handlinger. */
+export interface EndShiftFlags {
+  distributeWinnings?: boolean;
+  transferRegisterTickets?: boolean;
+  logoutNotes?: string | null;
 }
 
 export interface StartShiftInput {
@@ -120,7 +132,11 @@ export interface AgentStore {
 
   // Shift ──
   insertShift(input: StartShiftInput): Promise<AgentShift>;
-  endShift(shiftId: string): Promise<AgentShift>;
+  /**
+   * Avslutter aktiv shift.
+   * Wireframe Gap #9: `flags` er valgfri; uten flags = legacy-oppførsel.
+   */
+  endShift(shiftId: string, flags?: EndShiftFlags): Promise<AgentShift>;
   getActiveShiftForUser(userId: string): Promise<AgentShift | null>;
   getShiftById(shiftId: string): Promise<AgentShift | null>;
   listShiftsForUser(userId: string, limit?: number, offset?: number): Promise<AgentShift[]>;
@@ -205,6 +221,10 @@ interface ShiftRow {
   previous_settlement: unknown;
   settled_at: Date | string | null;
   settled_by_user_id: string | null;
+  // Wireframe Gap #9:
+  distributed_winnings: boolean | null;
+  transferred_register_tickets: boolean | null;
+  logout_notes: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -498,17 +518,33 @@ export class PostgresAgentStore implements AgentStore {
     return this.mapShift(rows[0]!);
   }
 
-  async endShift(shiftId: string): Promise<AgentShift> {
-    const { rows } = await this.pool.query<ShiftRow>(
-      `UPDATE ${this.shifts()}
-       SET is_active = false,
-           is_logged_out = true,
-           ended_at = now(),
-           updated_at = now()
+  async endShift(shiftId: string, flags?: EndShiftFlags): Promise<AgentShift> {
+    // Wireframe Gap #9: Logout-flagg + notes er valgfri; uten flags
+    // overskriver vi ikke eksisterende verdier (default = false fra DB).
+    const sets: string[] = [
+      "is_active = false",
+      "is_logged_out = true",
+      "ended_at = now()",
+      "updated_at = now()",
+    ];
+    const params: unknown[] = [];
+    if (flags?.distributeWinnings !== undefined) {
+      params.push(flags.distributeWinnings);
+      sets.push(`distributed_winnings = $${params.length + 1}`);
+    }
+    if (flags?.transferRegisterTickets !== undefined) {
+      params.push(flags.transferRegisterTickets);
+      sets.push(`transferred_register_tickets = $${params.length + 1}`);
+    }
+    if (flags?.logoutNotes !== undefined) {
+      params.push(flags.logoutNotes);
+      sets.push(`logout_notes = $${params.length + 1}`);
+    }
+    const sql = `UPDATE ${this.shifts()}
+       SET ${sets.join(", ")}
        WHERE id = $1 AND is_active
-       RETURNING *`,
-      [shiftId]
-    );
+       RETURNING *`;
+    const { rows } = await this.pool.query<ShiftRow>(sql, [shiftId, ...params]);
     const row = rows[0];
     if (!row) throw new Error("[BIN-583] shift not found or already ended");
     return this.mapShift(row);
@@ -677,6 +713,9 @@ export class PostgresAgentStore implements AgentStore {
       previousSettlement: asJsonObject(row.previous_settlement),
       settledAt: row.settled_at ? asIso(row.settled_at) : null,
       settledByUserId: row.settled_by_user_id,
+      distributedWinnings: Boolean(row.distributed_winnings),
+      transferredRegisterTickets: Boolean(row.transferred_register_tickets),
+      logoutNotes: row.logout_notes,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
@@ -885,6 +924,9 @@ export class InMemoryAgentStore implements AgentStore {
       previousSettlement: {},
       settledAt: null,
       settledByUserId: null,
+      distributedWinnings: false,
+      transferredRegisterTickets: false,
+      logoutNotes: null,
       createdAt: now,
       updatedAt: now
     };
@@ -892,7 +934,7 @@ export class InMemoryAgentStore implements AgentStore {
     return shift;
   }
 
-  async endShift(shiftId: string): Promise<AgentShift> {
+  async endShift(shiftId: string, flags?: EndShiftFlags): Promise<AgentShift> {
     const shift = this.shifts.get(shiftId);
     if (!shift || !shift.isActive) {
       throw new Error("[BIN-583] shift not found or already ended");
@@ -902,6 +944,15 @@ export class InMemoryAgentStore implements AgentStore {
     shift.isLoggedOut = true;
     shift.endedAt = now;
     shift.updatedAt = now;
+    if (flags?.distributeWinnings !== undefined) {
+      shift.distributedWinnings = flags.distributeWinnings;
+    }
+    if (flags?.transferRegisterTickets !== undefined) {
+      shift.transferredRegisterTickets = flags.transferRegisterTickets;
+    }
+    if (flags?.logoutNotes !== undefined) {
+      shift.logoutNotes = flags.logoutNotes;
+    }
     return { ...shift };
   }
 

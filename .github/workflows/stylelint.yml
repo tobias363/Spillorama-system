@@ -1,0 +1,48 @@
+name: Stylelint (blink-hazards)
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: stylelint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-blink-hazards:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root workspace dependencies
+        # Stylelint + stylelint-config-standard are in root devDependencies.
+        # Bruker ci --no-audit --no-fund for reproduserbare builds.
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint CSS (stylelint + blink-hazards plugin)
+        # Feiler pipeline hvis backdrop-filter eller annen blink-regel brytes.
+        # Se docs/engineering/CSS_LINTING.md og
+        # packages/game-client/src/games/game1/ARCHITECTURE.md.
+        run: npm run lint:css
+
+      - name: Lint CSS-in-JS (no-backdrop-js)
+        # Spesial-scan for Object.assign(el.style, { backdropFilter: "blur(...)" })
+        # i .ts-filer siden stylelint ikke dekker CSS-in-JS i dette repoet.
+        run: npm run lint:no-backdrop-js
+
+      - name: Run stylelint-plugin test suite
+        # Verifiserer at selve reglene fanger det de skal (23 tests).
+        run: npm run test:stylelint

@@ -3,6 +3,8 @@
 //
 // Ny stack: Modal.open som kombinerer begge steg i ett skjema
 // (confirm + reason). Backdrop static + keyboard:false. Reason required.
+// BIN-702: tvungen min 10 tegn — matcher backend-validering og
+// legacy-pilot-ønske om meningsfull begrunnelse (ikke bare "nei").
 
 import { Modal, type ModalInstance } from "../../../components/Modal.js";
 import { Toast } from "../../../components/Toast.js";
@@ -10,6 +12,9 @@ import { rejectPlayer, type PlayerSummary } from "../../../api/admin-players.js"
 import { ApiError } from "../../../api/client.js";
 import { t } from "../../../i18n/I18n.js";
 import { escapeHtml } from "../shared.js";
+
+/** BIN-702: minimum lengde på reject-reason (speilet i backend). */
+export const REJECT_REASON_MIN_LENGTH = 10;
 
 export interface RejectPlayerOptions {
   player: Pick<PlayerSummary, "id" | "email" | "displayName">;
@@ -27,20 +32,31 @@ export function openRejectPlayerModal(opts: RejectPlayerOptions): void {
       <div class="form-group">
         <label for="reject-reason">${escapeHtml(t("provide_reason_to_reject"))} *</label>
         <textarea id="reject-reason" name="reason" class="form-control" rows="3"
-                  maxlength="500" placeholder="${escapeHtml(t("enter_reason"))}" required></textarea>
-        <p class="help-block" id="reject-error" style="color:#a94442;display:none;margin-top:4px;">
-          ${escapeHtml(t("can_not_reject_without_reason"))}
+                  minlength="${REJECT_REASON_MIN_LENGTH}" maxlength="500"
+                  placeholder="${escapeHtml(t("enter_reason"))}" required></textarea>
+        <p class="help-block" style="margin-top:4px;color:#777;font-size:12px;">
+          <span id="reject-counter">0</span> / ${REJECT_REASON_MIN_LENGTH}+ ${escapeHtml(t("characters"))}
         </p>
+        <p class="help-block" id="reject-error" style="color:#a94442;display:none;margin-top:4px;"></p>
       </div>
     </form>
   `;
 
+  // Live counter så admin ser hvor langt unna de er min-kravet.
+  const textarea = body.querySelector<HTMLTextAreaElement>("#reject-reason")!;
+  const counterEl = body.querySelector<HTMLElement>("#reject-counter")!;
+  textarea.addEventListener("input", () => {
+    const len = textarea.value.trim().length;
+    counterEl.textContent = String(len);
+    counterEl.style.color = len >= REJECT_REASON_MIN_LENGTH ? "#3c763d" : "#777";
+  });
+
   const submit = async (instance: ModalInstance): Promise<void> => {
-    const textarea = body.querySelector<HTMLTextAreaElement>("#reject-reason")!;
     const errEl = body.querySelector<HTMLElement>("#reject-error")!;
     const reason = textarea.value.trim();
 
     if (!reason) {
+      errEl.textContent = t("can_not_reject_without_reason");
       errEl.style.display = "block";
       textarea.focus();
       // Swallow rather than throw — Modal's re-enable-on-reject path treats
@@ -48,6 +64,14 @@ export function openRejectPlayerModal(opts: RejectPlayerOptions): void {
       // as an unhandled rejection. Returning here keeps the modal open
       // because `dismiss: false` prevents auto-close on success, and we
       // don't call instance.close() unless the POST succeeds.
+      return;
+    }
+    if (reason.length < REJECT_REASON_MIN_LENGTH) {
+      errEl.textContent = t("reject_reason_too_short", {
+        min: REJECT_REASON_MIN_LENGTH,
+      });
+      errEl.style.display = "block";
+      textarea.focus();
       return;
     }
     errEl.style.display = "none";

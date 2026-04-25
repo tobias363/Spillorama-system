@@ -1,0 +1,89 @@
+name: Visual regression
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      # Run on changes to code that can affect Spill 1 visuals, the harness,
+      # Playwright config, or the tests themselves. We intentionally do NOT
+      # trigger on backend-only diffs to keep CI spend bounded.
+      - "packages/game-client/**"
+      - "packages/shared-types/**"
+      - "playwright.config.ts"
+      - "scripts/serve-visual-harness.mjs"
+      - ".github/workflows/visual-regression.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/game-client/**"
+      - "packages/shared-types/**"
+      - "playwright.config.ts"
+      - "scripts/serve-visual-harness.mjs"
+      - ".github/workflows/visual-regression.yml"
+
+concurrency:
+  group: visual-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visual-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browser (chromium only)
+        # Only chromium is needed; we bypass the full browser install to keep
+        # CI wall-time down. `--with-deps` ensures system libs are present on
+        # the clean ubuntu-latest runner.
+        run: npx playwright install --with-deps chromium
+
+      - name: Build shared-types
+        run: npm -w @spillorama/shared-types run build
+
+      - name: Build visual-harness bundle
+        # Produces apps/backend/public/web/games/visual-harness.html plus the
+        # bundled main.js. The serve-visual-harness script (launched by
+        # Playwright's webServer config) reads from this directory.
+        run: npm -w @spillorama/game-client run build:visual-harness
+
+      - name: Run visual regression tests
+        # Full suite across both viewports. Playwright's webServer config
+        # spawns serve-visual-harness.mjs on 127.0.0.1:4173; no extra
+        # `npm run serve` needed here.
+        run: npx playwright test
+        env:
+          CI: "true"
+
+      - name: Upload diff artefacts on failure
+        # Upload the __output__ folder (diffs, traces, videos) so you can
+        # open the diff PNG directly from the PR Checks tab to see exactly
+        # which pixels differ between baseline and actual.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-diffs-${{ github.run_id }}
+          path: packages/game-client/tests/visual/__output__
+          retention-days: 14
+
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: playwright-report
+          retention-days: 14

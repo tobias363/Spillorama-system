@@ -12,7 +12,10 @@
  * Events (kun server → client):
  *   - game1:status-update    — ved master-action (start/pause/resume/stop osv)
  *   - game1:draw-progressed  — ved drawNext() i engine
- *   - game1:phase-won        — utsatt til 4d.4
+ *   - game1:phase-won        — fase-fullføring (fra drawNext, 4d.4)
+ *   - game1:physical-ticket-won — fysisk bong vinnes (fra drawNext, PT4)
+ *   - game1:auto-paused      — auto-pause etter phase-won (Task 1.1)
+ *   - game1:resumed          — manuell resume av master/agent (Task 1.1)
  *
  * Klient flyt:
  *   1. Connect med auth.token = admin-JWT (via accessToken-mekanikk som
@@ -35,6 +38,10 @@ import {
   type Game1AdminDrawProgressedPayload,
   type Game1AdminPhaseWonPayload,
   type Game1AdminPhysicalTicketWonPayload,
+  type Game1AdminAutoPausedPayload,
+  type Game1AdminResumedPayload,
+  type Game1TransferRequestPayload,
+  type Game1MasterChangedPayload,
 } from "@spillorama/shared-types/socket-events";
 import type {
   AdminGame1Broadcaster,
@@ -42,7 +49,12 @@ import type {
   AdminGame1DrawProgressedEvent,
   AdminGame1PhaseWonEvent,
   AdminGame1PhysicalTicketWonEvent,
+  AdminGame1AutoPausedEvent,
+  AdminGame1ResumedEvent,
+  AdminGame1TransferRequestEvent,
+  AdminGame1MasterChangedEvent,
 } from "../game/AdminGame1Broadcaster.js";
+import { emitPhaseWonToHallDisplays } from "./adminDisplayEvents.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const log = rootLogger.child({ module: "admin-game1-namespace" });
@@ -52,9 +64,47 @@ function gameRoomKey(gameId: string): string {
   return `game1:${gameId}`;
 }
 
+/**
+ * Task 1.7: port-grensesnitt for oppslag av deltakende hall-ids per spill.
+ * Brukes av `onPhaseWon` for å fan-out eventet til TV-display-rom i tillegg
+ * til admin-namespace-rommet. Adapteren i `index.ts` binder dette til
+ * `Game1HallReadyService` eller tilsvarende. Hvis ikke satt → fan-out er
+ * disabled (legacy-adferd: kun admin-namespace får phase-won).
+ */
+export interface ParticipatingHallIdsPort {
+  getParticipatingHallIds(gameId: string): Promise<string[]>;
+}
+
+/** Map intern event-shape til wire-payload (Game1TransferRequestPayload). */
+function toTransferPayload(
+  event: AdminGame1TransferRequestEvent
+): Game1TransferRequestPayload {
+  return {
+    requestId: event.requestId,
+    gameId: event.gameId,
+    fromHallId: event.fromHallId,
+    toHallId: event.toHallId,
+    initiatedByUserId: event.initiatedByUserId,
+    initiatedAtMs: event.initiatedAtMs,
+    validTillMs: event.validTillMs,
+    status: event.status,
+    respondedByUserId: event.respondedByUserId,
+    respondedAtMs: event.respondedAtMs,
+    rejectReason: event.rejectReason,
+  };
+}
+
 export interface AdminGame1NamespaceDeps {
   io: SocketServer;
   platformService: PlatformService;
+  /**
+   * Task 1.7 (2026-04-24): valgfri hall-id-oppslagsport. Når satt, speiler
+   * `onPhaseWon` eventet til `hall:<hallId>:display`-rom på default namespace
+   * slik at TV-klienter mottar banner-trigger. Fail-open: hvis porten kaster,
+   * logger vi warn og fortsetter uten display-fan-out (admin-UI får eventet
+   * uansett via eget rom).
+   */
+  participatingHallIdsPort?: ParticipatingHallIdsPort;
 }
 
 export interface AdminGame1NamespaceHandle {
@@ -70,7 +120,7 @@ export interface AdminGame1NamespaceHandle {
 export function createAdminGame1Namespace(
   deps: AdminGame1NamespaceDeps
 ): AdminGame1NamespaceHandle {
-  const { io, platformService } = deps;
+  const { io, platformService, participatingHallIdsPort } = deps;
   const namespace = io.of("/admin-game1");
 
   // JWT-handshake-auth: accessToken i socket.handshake.auth.token (eller
@@ -194,16 +244,16 @@ export function createAdminGame1Namespace(
       }
     },
     onPhaseWon(event: AdminGame1PhaseWonEvent): void {
+      const payload: Game1AdminPhaseWonPayload = {
+        gameId: event.gameId,
+        patternName: event.patternName,
+        phase: event.phase,
+        winnerIds: event.winnerIds,
+        winnerCount: event.winnerCount,
+        drawIndex: event.drawIndex,
+        at: event.at,
+      };
       try {
-        const payload: Game1AdminPhaseWonPayload = {
-          gameId: event.gameId,
-          patternName: event.patternName,
-          phase: event.phase,
-          winnerIds: event.winnerIds,
-          winnerCount: event.winnerCount,
-          drawIndex: event.drawIndex,
-          at: event.at,
-        };
         namespace
           .to(gameRoomKey(event.gameId))
           .emit("game1:phase-won", payload);
@@ -211,6 +261,195 @@ export function createAdminGame1Namespace(
         log.warn(
           { err, event: "game1:phase-won", gameId: event.gameId },
           "admin broadcast failed — service fortsetter uansett"
+        );
+      }
+      // Task 1.7: speil til TV-display-rom (default namespace) slik at
+      // TVen viser banner "BINGO! Rad N". Fan-out-feilene skal aldri
+      // boble opp til service-laget — logg og fortsett.
+      if (participatingHallIdsPort) {
+        void (async () => {
+          try {
+            const hallIds = await participatingHallIdsPort.getParticipatingHallIds(
+              event.gameId
+            );
+            if (hallIds.length > 0) {
+              emitPhaseWonToHallDisplays(io, hallIds, payload);
+            }
+          } catch (err) {
+            log.warn(
+              { err, event: "game1:phase-won", gameId: event.gameId },
+              "TV-display fan-out failed — admin-UI har fått eventet uansett"
+            );
+          }
+        })();
+      }
+    },
+    /**
+     * Task 1.1: auto-pause etter phase-won. Mottakere (master-console +
+     * agent-portal) bruker eventet for å vise Resume-knapp + banner
+     * "Pause etter Rad N".
+     */
+    onAutoPaused(event: AdminGame1AutoPausedEvent): void {
+      try {
+        const payload: Game1AdminAutoPausedPayload = {
+          gameId: event.gameId,
+          phase: event.phase,
+          pausedAt: event.pausedAt,
+        };
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:auto-paused", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:auto-paused", gameId: event.gameId },
+          "admin broadcast failed — service fortsetter uansett"
+        );
+      }
+    },
+    /**
+     * Task 1.6: master-transfer request opprettet. Broadcast:
+     *   - admin-namespace `game1:<gameId>`  → master-konsoll ser pending-banner
+     *   - default-namespace `hall:<toHallId>:display` → agent-portal-popup når
+     *     agentens socket har joint hall-display-rommet (via admin-display:
+     *     subscribe). Agent-portal som ikke har joint rommet faller tilbake
+     *     på polling av `GET .../transfer-request`.
+     *   - default-namespace `hall:<fromHallId>:display` → initiator ser status
+     *   - default-namespace `io.emit(...)` → bred fallback så alle admin-klienter
+     *     kan filtrere på `toHallId`/`fromHallId` mot sin egen hall. Dette
+     *     dekker agent-portalen som ikke joiner display-rommet.
+     */
+    onTransferRequest(event: AdminGame1TransferRequestEvent): void {
+      try {
+        const payload: Game1TransferRequestPayload = toTransferPayload(event);
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:transfer-request", payload);
+        io.to(`hall:${event.toHallId}:display`).emit(
+          "game1:transfer-request",
+          payload
+        );
+        io.to(`hall:${event.fromHallId}:display`).emit(
+          "game1:transfer-request",
+          payload
+        );
+        // Bred fallback — klient-siden filtrerer på hallId.
+        io.emit("game1:transfer-request", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:transfer-request", gameId: event.gameId },
+          "transfer-request broadcast failed"
+        );
+      }
+    },
+    onTransferApproved(event: AdminGame1TransferRequestEvent): void {
+      try {
+        const payload: Game1TransferRequestPayload = toTransferPayload(event);
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:transfer-approved", payload);
+        io.to(`hall:${event.toHallId}:display`).emit(
+          "game1:transfer-approved",
+          payload
+        );
+        io.to(`hall:${event.fromHallId}:display`).emit(
+          "game1:transfer-approved",
+          payload
+        );
+        io.emit("game1:transfer-approved", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:transfer-approved", gameId: event.gameId },
+          "transfer-approved broadcast failed"
+        );
+      }
+    },
+    onTransferRejected(event: AdminGame1TransferRequestEvent): void {
+      try {
+        const payload: Game1TransferRequestPayload = toTransferPayload(event);
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:transfer-rejected", payload);
+        io.to(`hall:${event.fromHallId}:display`).emit(
+          "game1:transfer-rejected",
+          payload
+        );
+        io.emit("game1:transfer-rejected", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:transfer-rejected", gameId: event.gameId },
+          "transfer-rejected broadcast failed"
+        );
+      }
+    },
+    onTransferExpired(event: AdminGame1TransferRequestEvent): void {
+      try {
+        const payload: Game1TransferRequestPayload = toTransferPayload(event);
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:transfer-expired", payload);
+        io.to(`hall:${event.toHallId}:display`).emit(
+          "game1:transfer-expired",
+          payload
+        );
+        io.to(`hall:${event.fromHallId}:display`).emit(
+          "game1:transfer-expired",
+          payload
+        );
+        io.emit("game1:transfer-expired", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:transfer-expired", gameId: event.gameId },
+          "transfer-expired broadcast failed"
+        );
+      }
+    },
+    /**
+     * Task 1.1: manuell resume (fra auto-pause eller manuell pause).
+     * Payload.resumeType skiller de to casene slik at UI kan vise
+     * konsistent tekst ("Fortsetter Rad N+1" vs "Tar opp igjen").
+     */
+    onResumed(event: AdminGame1ResumedEvent): void {
+      try {
+        const payload: Game1AdminResumedPayload = {
+          gameId: event.gameId,
+          resumedAt: event.resumedAt,
+          actorUserId: event.actorUserId,
+          phase: event.phase,
+          resumeType: event.resumeType,
+        };
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:resumed", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:resumed", gameId: event.gameId },
+          "admin broadcast failed — service fortsetter uansett"
+        );
+      }
+    },
+    /**
+     * Task 1.6: master-hall byttet (broadcastes etter approve). Globalt til
+     * game-room — alle haller i linken oppdaterer "Master"-badgen i UI.
+     */
+    onMasterChanged(event: AdminGame1MasterChangedEvent): void {
+      try {
+        const payload: Game1MasterChangedPayload = {
+          gameId: event.gameId,
+          previousMasterHallId: event.previousMasterHallId,
+          newMasterHallId: event.newMasterHallId,
+          transferRequestId: event.transferRequestId,
+          at: event.at,
+        };
+        namespace
+          .to(gameRoomKey(event.gameId))
+          .emit("game1:master-changed", payload);
+        // Globalt default-namespace broadcast så TV-skjerm + hall-UIer i
+        // alle haller kan re-hente hall-status (UI viser master-badge).
+        io.emit("game1:master-changed", payload);
+      } catch (err) {
+        log.warn(
+          { err, event: "game1:master-changed", gameId: event.gameId },
+          "master-changed broadcast failed"
         );
       }
     },

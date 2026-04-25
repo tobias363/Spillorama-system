@@ -41,7 +41,7 @@ import type {
   LossLimits,
   PlayerComplianceSnapshot
 } from "./ComplianceManager.js";
-import type { WalletTransaction } from "../adapters/WalletAdapter.js";
+import type { WalletTransaction, WalletTransferResult } from "../adapters/WalletAdapter.js";
 
 /**
  * PR-W4 wallet-split: returnerer beløpet som skal telles mot tapsgrense for et
@@ -151,10 +151,21 @@ export type {
 
 export class DomainError extends Error {
   public readonly code: string;
+  /**
+   * Valgfri strukturert kontekst som API-laget propagerer til klient via
+   * `toPublicError(err).details`. Brukes f.eks. av `HALLS_NOT_READY` for å
+   * returnere `{ unreadyHalls: [...] }` (Task 1.5 — agents-not-ready popup),
+   * og av `JACKPOT_CONFIRM_REQUIRED` for å returnere nåværende pot-saldo
+   * uten at klient må gjøre et ekstra API-kall (MASTER_PLAN §2.3).
+   */
+  public readonly details?: Record<string, unknown>;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, details?: Record<string, unknown>) {
     super(message);
     this.code = code;
+    if (details !== undefined) {
+      this.details = details;
+    }
   }
 }
 
@@ -200,6 +211,14 @@ interface StartGameInput {
    * legacy clients that don't yet send `name`.
    */
   armedPlayerSelections?: Record<string, Array<{ type: string; qty: number; name?: string }>>;
+  /**
+   * BIN-693 Option B: reservasjons-id per armed spiller. Når satt, commit-er
+   * engine reservasjonen i stedet for å gjøre direkte `walletAdapter.transfer`
+   * — samme netto-effekt, men reservasjonen låses opp i stedet for å trekkes
+   * fra "rå" saldo. Hvis mapping mangler for en spiller: fallback til legacy
+   * transfer-path (samme kode som før).
+   */
+  reservationIdByPlayer?: Record<string, string>;
   /** Win-condition patterns for this round. Defaults to [1 Rad, Full Plate]. */
   patterns?: PatternDefinition[];
   /** Game variant type (from hall_game_schedules.game_type). */
@@ -588,11 +607,15 @@ export class BingoEngine {
     }
     let balance: number;
     try {
-      logger.debug({ walletId }, "getBalance start");
-      balance = await this.walletAdapter.getBalance(walletId);
-      logger.debug({ walletId, balance }, "getBalance OK");
+      // BIN-693: bruker available_balance så klient-visning matcher det som
+      // faktisk er tilgjengelig (total − sum av aktive reservations).
+      logger.debug({ walletId }, "getAvailableBalance start");
+      balance = this.walletAdapter.getAvailableBalance
+        ? await this.walletAdapter.getAvailableBalance(walletId)
+        : await this.walletAdapter.getBalance(walletId);
+      logger.debug({ walletId, balance }, "getAvailableBalance OK");
     } catch (err) {
-      logger.error({ walletId, err }, "getBalance FAILED");
+      logger.error({ walletId, err }, "getAvailableBalance FAILED");
       throw err;
     }
 
@@ -750,18 +773,51 @@ export class BingoEngine {
           } else {
             playerBuyIn = roundCurrency(entryFee * playerTicketCount);
           }
-          const transfer = await this.walletAdapter.transfer(
-            player.walletId,
-            houseAccountId,
-            playerBuyIn,
-            `Bingo buy-in ${room.code} (${playerTicketCount} tickets)`,
-            {
-              idempotencyKey: IdempotencyKeys.adhocBuyIn({
-                gameId,
-                playerId: player.id,
-              }),
+          // BIN-693 Option B: hvis spiller har active reservation, commit
+          // den i stedet for fresh transfer. commitReservation bruker internt
+          // samme transfer-path (winnings-first) så split/ledger-semantikk er
+          // bevart. Fallback til legacy transfer når mapping mangler.
+          const reservationId = input.reservationIdByPlayer?.[player.id];
+          let transfer: WalletTransferResult;
+          if (reservationId && this.walletAdapter.commitReservation) {
+            try {
+              transfer = await this.walletAdapter.commitReservation(
+                reservationId,
+                houseAccountId,
+                `Bingo buy-in ${room.code} (${playerTicketCount} tickets)`,
+                {
+                  gameSessionId: gameId,
+                  idempotencyKey: IdempotencyKeys.adhocBuyIn({ gameId, playerId: player.id }),
+                },
+              );
+            } catch (commitErr) {
+              // Reservasjonen kan være expired/released (sjeldent, men mulig
+              // hvis backend krasjet mellom arm og start). Fall tilbake til
+              // legacy transfer-path så runden kan starte uten data-tap.
+              transfer = await this.walletAdapter.transfer(
+                player.walletId,
+                houseAccountId,
+                playerBuyIn,
+                `Bingo buy-in ${room.code} (${playerTicketCount} tickets, reservation-fallback)`,
+                {
+                  idempotencyKey: IdempotencyKeys.adhocBuyIn({ gameId, playerId: player.id }),
+                },
+              );
             }
-          );
+          } else {
+            transfer = await this.walletAdapter.transfer(
+              player.walletId,
+              houseAccountId,
+              playerBuyIn,
+              `Bingo buy-in ${room.code} (${playerTicketCount} tickets)`,
+              {
+                idempotencyKey: IdempotencyKeys.adhocBuyIn({
+                  gameId,
+                  playerId: player.id,
+                }),
+              }
+            );
+          }
           debitedPlayers.push({ player, fromAccountId: transfer.fromTx.accountId, toAccountId: transfer.toTx.accountId, amount: playerBuyIn });
           player.balance -= playerBuyIn;
           // PR-W4 wallet-split: kun deposit-delen av buy-in teller mot loss-limit
@@ -1551,6 +1607,10 @@ export class BingoEngine {
       gameId: room.currentGame?.id,
       playerId: player.id,
       walletId: player.walletId,
+      // BIN-17.36: mark this STAKE-entry as a replacement fee (Elvis / swap
+      // mellom runder) so the Hall Specific Report kan sum "Elvis Replacement
+      // Amount" separately. Vanlig buy-in STAKE har ikke denne flaggen.
+      metadata: { isReplacement: true },
     });
     return { debitedAmount: debit };
   }
@@ -2145,6 +2205,31 @@ export class BingoEngine {
     return this.compliance.setPlayerLossLimits(input);
   }
 
+  /**
+   * BIN-720: Self-service loss-limit oppdatering med 48h-queue for økninger.
+   * Brukes av `ProfileSettingsService` — skiller seg fra admin-varianten
+   * ved at økninger får en eksplisitt `effectiveFromMs` istedenfor dag/
+   * måned-grense.
+   */
+  async setPlayerLossLimitsWithEffectiveAt(input: {
+    walletId: string;
+    hallId: string;
+    daily?: { value: number; effectiveFromMs: number };
+    monthly?: { value: number; effectiveFromMs: number };
+    dailyDecrease?: number;
+    monthlyDecrease?: number;
+  }): Promise<PlayerComplianceSnapshot> {
+    return this.compliance.setPlayerLossLimitsWithEffectiveAt(input);
+  }
+
+  /**
+   * BIN-720: 48h-queue cron-hjelper. Promoterer pending loss-limit → active
+   * hvis `effectiveFromMs <= nowMs`. Returnerer true hvis en endring skjedde.
+   */
+  async promotePendingLossLimitIfDue(walletId: string, hallId: string, nowMs: number): Promise<boolean> {
+    return this.compliance.promotePendingLossLimitIfDue(walletId, hallId, nowMs);
+  }
+
   async setTimedPause(input: {
     walletId: string;
     durationMs?: number;
@@ -2518,7 +2603,11 @@ export class BingoEngine {
     if (!normalizedWalletId) {
       return [];
     }
-    const balance = await this.walletAdapter.getBalance(normalizedWalletId);
+    // BIN-693: refresh bruker available_balance så klient ser effekt av
+    // reservations (bet:arm trekker saldo umiddelbart i visningen).
+    const balance = this.walletAdapter.getAvailableBalance
+      ? await this.walletAdapter.getAvailableBalance(normalizedWalletId)
+      : await this.walletAdapter.getBalance(normalizedWalletId);
     const affected = new Set<string>();
 
     for (const room of this.rooms.values()) {
@@ -2995,9 +3084,20 @@ export function ballToColumn(
   return null;
 }
 
-export function toPublicError(error: unknown): { code: string; message: string } {
+export function toPublicError(error: unknown): {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+} {
   if (error instanceof DomainError) {
-    return { code: error.code, message: error.message };
+    const payload: { code: string; message: string; details?: Record<string, unknown> } = {
+      code: error.code,
+      message: error.message,
+    };
+    if (error.details !== undefined) {
+      payload.details = error.details;
+    }
+    return payload;
   }
   if (error instanceof WalletError) {
     return { code: error.code, message: error.message };

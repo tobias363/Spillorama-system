@@ -36,6 +36,64 @@ export interface AdminGame1DrawProgressed {
   at: number;
 }
 
+/** Task 1.1: auto-pause etter phase-won. */
+export interface AdminGame1AutoPaused {
+  gameId: string;
+  phase: number;
+  pausedAt: number;
+}
+
+/** Task 1.1: manuell resume (auto- eller master-pause). */
+export interface AdminGame1Resumed {
+  gameId: string;
+  resumedAt: number;
+  actorUserId: string;
+  phase: number;
+  resumeType: "auto" | "manual";
+}
+
+/**
+ * TASK HS: beriket per-hall status-broadcast — farge-kode + scan-data.
+ */
+export interface AdminGame1HallStatusUpdate {
+  gameId: string;
+  hallId: string;
+  hallName: string;
+  color: "red" | "orange" | "green";
+  playerCount: number;
+  startScanDone: boolean;
+  finalScanDone: boolean;
+  readyConfirmed: boolean;
+  soldCount: number;
+  startTicketId: string | null;
+  finalScanTicketId: string | null;
+  excludedFromGame: boolean;
+  at: number;
+}
+
+/** Task 1.6: transfer-event payload (speiler Game1TransferRequestPayload). */
+export interface AdminGame1TransferRequest {
+  requestId: string;
+  gameId: string;
+  fromHallId: string;
+  toHallId: string;
+  initiatedByUserId: string;
+  initiatedAtMs: number;
+  validTillMs: number;
+  status: "pending" | "approved" | "rejected" | "expired";
+  respondedByUserId: string | null;
+  respondedAtMs: number | null;
+  rejectReason: string | null;
+}
+
+export interface AdminGame1MasterChanged {
+  gameId: string;
+  previousMasterHallId: string;
+  newMasterHallId: string;
+  transferRequestId: string;
+  at: number;
+}
+
 export interface AdminGame1SocketOptions {
   /** Base-URL for Socket.IO-serveren. Default: window.location.origin. */
   baseUrl?: string;
@@ -47,14 +105,39 @@ export interface AdminGame1SocketOptions {
   disconnectGraceMs?: number;
   onStatusUpdate: (payload: AdminGame1StatusUpdate) => void;
   onDrawProgressed: (payload: AdminGame1DrawProgressed) => void;
+  /** Task 1.1: valgfri — master-console bruker den, eksterne konsumenter kan hoppe over. */
+  onAutoPaused?: (payload: AdminGame1AutoPaused) => void;
+  /** Task 1.1: valgfri — master-console bruker den. */
+  onResumed?: (payload: AdminGame1Resumed) => void;
+  /** TASK HS: per-hall farge/scan-oppdatering. Valgfri for bakoverkompat. */
+  onHallStatusUpdate?: (payload: AdminGame1HallStatusUpdate) => void;
   onFallbackActive: (fallbackActive: boolean) => void;
+  /** Task 1.6: transfer-request opprettet (fra nåværende master). */
+  onTransferRequest?: (payload: AdminGame1TransferRequest) => void;
+  onTransferApproved?: (payload: AdminGame1TransferRequest) => void;
+  onTransferRejected?: (payload: AdminGame1TransferRequest) => void;
+  onTransferExpired?: (payload: AdminGame1TransferRequest) => void;
+  onMasterChanged?: (payload: AdminGame1MasterChanged) => void;
   /** Testing-hook: bytte ut io-factory for å slippe ekte nettverks-call. */
   _ioFactory?: typeof io;
 }
 
 export class AdminGame1Socket {
   private readonly socket: Socket;
-  private readonly options: Required<Omit<AdminGame1SocketOptions, "_ioFactory">> & {
+  private readonly options: {
+    baseUrl: string;
+    disconnectGraceMs: number;
+    onStatusUpdate: (payload: AdminGame1StatusUpdate) => void;
+    onDrawProgressed: (payload: AdminGame1DrawProgressed) => void;
+    onAutoPaused?: (payload: AdminGame1AutoPaused) => void;
+    onResumed?: (payload: AdminGame1Resumed) => void;
+    onHallStatusUpdate: (payload: AdminGame1HallStatusUpdate) => void;
+    onFallbackActive: (fallbackActive: boolean) => void;
+    onTransferRequest: (payload: AdminGame1TransferRequest) => void;
+    onTransferApproved: (payload: AdminGame1TransferRequest) => void;
+    onTransferRejected: (payload: AdminGame1TransferRequest) => void;
+    onTransferExpired: (payload: AdminGame1TransferRequest) => void;
+    onMasterChanged: (payload: AdminGame1MasterChanged) => void;
     _ioFactory: typeof io;
   };
   private currentGameId: string | null = null;
@@ -63,12 +146,21 @@ export class AdminGame1Socket {
   private disposed = false;
 
   constructor(options: AdminGame1SocketOptions) {
+    const noop = () => undefined;
     this.options = {
       baseUrl: options.baseUrl ?? window.location.origin,
       disconnectGraceMs: options.disconnectGraceMs ?? 10_000,
       onStatusUpdate: options.onStatusUpdate,
       onDrawProgressed: options.onDrawProgressed,
+      onAutoPaused: options.onAutoPaused,
+      onResumed: options.onResumed,
+      onHallStatusUpdate: options.onHallStatusUpdate ?? (() => undefined),
       onFallbackActive: options.onFallbackActive,
+      onTransferRequest: options.onTransferRequest ?? noop,
+      onTransferApproved: options.onTransferApproved ?? noop,
+      onTransferRejected: options.onTransferRejected ?? noop,
+      onTransferExpired: options.onTransferExpired ?? noop,
+      onMasterChanged: options.onMasterChanged ?? noop,
       _ioFactory: options._ioFactory ?? io,
     };
 
@@ -115,6 +207,71 @@ export class AdminGame1Socket {
       (payload: AdminGame1DrawProgressed) => {
         if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
         this.options.onDrawProgressed(payload);
+      }
+    );
+
+    // Task 1.1: auto-pause + resume subscriptions. Callback er valgfri —
+    // hvis eksterne konsumenter ikke registrerer håndtering, faller event
+    // igjennom stille.
+    this.socket.on(
+      "game1:auto-paused",
+      (payload: AdminGame1AutoPaused) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onAutoPaused?.(payload);
+      }
+    );
+
+    this.socket.on(
+      "game1:resumed",
+      (payload: AdminGame1Resumed) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onResumed?.(payload);
+      }
+    );
+
+    // TASK HS: real-time farge/scan-oppdatering per hall.
+    this.socket.on(
+      "game1:hall-status-update",
+      (payload: AdminGame1HallStatusUpdate) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onHallStatusUpdate(payload);
+      }
+    );
+
+    // Task 1.6: transfer-hall-events.
+    this.socket.on(
+      "game1:transfer-request",
+      (payload: AdminGame1TransferRequest) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onTransferRequest?.(payload);
+      }
+    );
+    this.socket.on(
+      "game1:transfer-approved",
+      (payload: AdminGame1TransferRequest) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onTransferApproved?.(payload);
+      }
+    );
+    this.socket.on(
+      "game1:transfer-rejected",
+      (payload: AdminGame1TransferRequest) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onTransferRejected?.(payload);
+      }
+    );
+    this.socket.on(
+      "game1:transfer-expired",
+      (payload: AdminGame1TransferRequest) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onTransferExpired?.(payload);
+      }
+    );
+    this.socket.on(
+      "game1:master-changed",
+      (payload: AdminGame1MasterChanged) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onMasterChanged?.(payload);
       }
     );
   }

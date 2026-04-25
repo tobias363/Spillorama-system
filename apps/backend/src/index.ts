@@ -22,6 +22,8 @@ import { SwedbankPayService } from "./payments/SwedbankPayService.js";
 import { PaymentRequestService } from "./payments/PaymentRequestService.js";
 import { AuthTokenService } from "./auth/AuthTokenService.js";
 import { EmailService } from "./integration/EmailService.js";
+import { EmailQueue } from "./integration/EmailQueue.js";
+import { SveveSmsService } from "./integration/SveveSmsService.js";
 import {
   AuditLogService,
   InMemoryAuditLogStore,
@@ -43,11 +45,13 @@ import { parseBingoSettingsPatch, normalizeBingoSchedulerSettings } from "./util
 import { getPrimaryRoomForHall, findPlayerInRoomByWallet, buildRoomUpdatePayload as buildRoomUpdatePayloadHelper, buildLeaderboard as buildLeaderboardHelper, type RoomUpdatePayload } from "./util/roomHelpers.js";
 import { RoomStateManager } from "./util/roomState.js";
 import { toDrawSchedulerSettings, createSchedulerCallbacks, createDailyReportScheduler, type PendingBingoSettingsUpdate } from "./util/schedulerSetup.js";
+import { WalletReservationExpiryService } from "./wallet/WalletReservationExpiryService.js";
 import { loadBingoRuntimeConfig } from "./util/envConfig.js";
 import { createJobScheduler } from "./jobs/JobScheduler.js";
 import { createSwedbankPaymentSyncJob } from "./jobs/swedbankPaymentSync.js";
 import { createBankIdExpiryReminderJob } from "./jobs/bankIdExpiryReminder.js";
 import { createSelfExclusionCleanupJob } from "./jobs/selfExclusionCleanup.js";
+import { createProfilePendingLossLimitFlushJob } from "./jobs/profilePendingLossLimitFlush.js";
 import { createMachineTicketAutoCloseJob } from "./jobs/machineTicketAutoClose.js";
 import { createLoyaltyMonthlyResetJob } from "./jobs/loyaltyMonthlyReset.js";
 import { createGame1ScheduleTickJob } from "./jobs/game1ScheduleTick.js";
@@ -55,12 +59,18 @@ import { Game1RecoveryService } from "./game/Game1RecoveryService.js";
 import { Game1ScheduleTickService } from "./game/Game1ScheduleTickService.js";
 import { Game1PayoutService } from "./game/Game1PayoutService.js";
 import { Game1JackpotService } from "./game/Game1JackpotService.js";
+import { Game1JackpotStateService } from "./game/Game1JackpotStateService.js";
 import { Game1AutoDrawTickService } from "./game/Game1AutoDrawTickService.js";
+import { Game1TransferHallService } from "./game/Game1TransferHallService.js";
+import { Game1TransferExpiryTickService } from "./game/Game1TransferExpiryTickService.js";
+import { createGame1TransferExpiryTickJob } from "./jobs/game1TransferExpiryTick.js";
 import { createGame1AutoDrawTickJob } from "./jobs/game1AutoDrawTick.js";
+import { createJackpotDailyTickJob } from "./jobs/jackpotDailyTick.js";
 import { FcmPushService } from "./notifications/FcmPushService.js";
 import { createGameStartNotificationsJob } from "./jobs/gameStartNotifications.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
 import { createAdminNotificationsRouter } from "./routes/adminNotifications.js";
+import { createAdminSmsBroadcastRouter } from "./routes/adminSmsBroadcast.js";
 import { LoyaltyPointsHookAdapter } from "./adapters/LoyaltyPointsHookAdapter.js";
 import { Game1HallReadyService } from "./game/Game1HallReadyService.js";
 import { Game1MasterControlService } from "./game/Game1MasterControlService.js";
@@ -76,6 +86,8 @@ import { MiniGameMysteryEngine } from "./game/minigames/MiniGameMysteryEngine.js
 import { Game1TicketPurchasePortAdapter } from "./game/Game1TicketPurchasePortAdapter.js";
 import { createAdminGame1ReadyRouter } from "./routes/adminGame1Ready.js";
 import { createAdminGame1MasterRouter } from "./routes/adminGame1Master.js";
+import { createAgentGame1Router } from "./routes/agentGame1.js";
+import { createAdminGame1MasterTransferRouter } from "./routes/adminGame1MasterTransfer.js";
 import { createGame1PurchaseRouter } from "./routes/game1Purchase.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createAdminRouter } from "./routes/admin.js";
@@ -84,6 +96,8 @@ import { createAdminWalletRouter } from "./routes/adminWallet.js";
 import { createPaymentsRouter } from "./routes/payments.js";
 import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
 import { createPlayersRouter } from "./routes/players.js";
+import { createUserProfileRouter } from "./routes/userProfile.js";
+import { ProfileSettingsService } from "./compliance/ProfileSettingsService.js";
 import { createAdminPlayersRouter } from "./routes/adminPlayers.js";
 import { createAdminAmlRouter } from "./routes/adminAml.js";
 import { AmlService } from "./compliance/AmlService.js";
@@ -117,6 +131,11 @@ import { AgentOpenDayService } from "./agent/AgentOpenDayService.js";
 import { HallAccountReportService } from "./compliance/HallAccountReportService.js";
 import { createAgentOkBingoRouter } from "./routes/agentOkBingo.js";
 import { createAgentBingoRouter } from "./routes/agentBingo.js";
+import { createAgentTicketRegistrationRouter } from "./routes/agentTicketRegistration.js";
+import { TicketRegistrationService } from "./agent/TicketRegistrationService.js";
+import { createAgentUniqueIdsRouter } from "./routes/agentUniqueIds.js";
+import { UniqueIdService } from "./agent/UniqueIdService.js";
+import { PostgresUniqueIdStore } from "./agent/UniqueIdStore.js";
 import { OkBingoTicketService } from "./agent/OkBingoTicketService.js";
 import { SqlServerOkBingoApiClient } from "./integration/okbingo/SqlServerOkBingoApiClient.js";
 import { StubOkBingoApiClient } from "./integration/okbingo/StubOkBingoApiClient.js";
@@ -124,6 +143,10 @@ import type { OkBingoApiClient } from "./integration/okbingo/OkBingoApiClient.js
 import { PostgresAgentStore } from "./agent/AgentStore.js";
 import { AgentService } from "./agent/AgentService.js";
 import { AgentShiftService } from "./agent/AgentShiftService.js";
+import {
+  PostgresShiftPendingPayoutPort,
+  PostgresShiftTicketRangePort,
+} from "./agent/ports/ShiftLogoutPorts.js";
 import { AgentTransactionService } from "./agent/AgentTransactionService.js";
 import { PostgresAgentTransactionStore } from "./agent/AgentTransactionStore.js";
 import { AgentSettlementService } from "./agent/AgentSettlementService.js";
@@ -179,10 +202,13 @@ import { MiniGamesConfigService } from "./admin/MiniGamesConfigService.js";
 import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
 import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminCmsRouter } from "./routes/adminCms.js";
+import { createPublicCmsRouter } from "./routes/publicCms.js";
 import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
 import { createAdminReportsGame1ManagementRouter } from "./routes/adminReportsGame1Management.js";
+import { createAdminReportsHallSpecificRouter } from "./routes/adminReportsHallSpecific.js";
+import { createAgentReportsPastWinningRouter } from "./routes/agentReportsPastWinning.js";
 import { createAdminReportsRedFlagPlayersRouter } from "./routes/adminReportsRedFlagPlayers.js";
 import { createAdminPlayersTopRouter } from "./routes/adminPlayersTop.js";
 import { createAdminVouchersRouter } from "./routes/adminVouchers.js";
@@ -197,6 +223,7 @@ import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { createGame1ScheduledEventHandlers } from "./sockets/game1ScheduledEvents.js";
 import { createAdminGame1Namespace } from "./sockets/adminGame1Namespace.js";
 import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAdapter.js";
+import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { errorReporter } from "./middleware/errorReporter.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
@@ -204,6 +231,7 @@ import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
 import { createAdminHallHandlers } from "./sockets/adminHallEvents.js";
 import { TvScreenService } from "./game/TvScreenService.js";
 import { createTvScreenRouter } from "./routes/tvScreen.js";
+import { createTvVoiceAssetsRouter } from "./routes/tvVoiceAssets.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -274,6 +302,12 @@ app.use(httpRateLimiter.middleware());
 app.get(["/", "/index.html"], (_req, res) => { res.redirect(302, "/web/"); });
 app.use("/admin", express.static(adminWebDir));
 app.use(express.static(publicDir));
+// TV-voice ball-utrop. express.static-mounten over plukker opp eventuelle
+// override-filer i `apps/backend/public/tv-voices/<voice>/<ball>.<ext>` først;
+// hvis ingen override finnes, fall vi tilbake til de eksisterende voice-pakkene
+// i `packages/game-client/public/assets/game1/audio/`. Se router-modulen for
+// mapping voice1/2/3 → no-male/no-female/en.
+app.use(createTvVoiceAssetsRouter({ projectDir }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -319,8 +353,10 @@ const {
   jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
   jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
   jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
+  jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
   jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
   jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
+  jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
 } = cfg;
@@ -678,6 +714,22 @@ const cmsService = new CmsService({
 // DB-backing). Agent 3 vil wire ADMIN-side audit-kall i påfølgende PR.
 const emailService = new EmailService();
 
+// BIN-702: e-post-kø med retry. Moderator-handlinger (KYC-approve/reject
+// osv.) bruker `emailQueue.enqueue()` via `adminPlayers`-routeren slik at
+// en kortvarig SMTP-feil ikke får varselet til å forsvinne. Kjører et
+// enkelt 1s-intervall i prod; i tester wires køen direkte og processNext
+// kalles deterministisk.
+const emailQueue = new EmailQueue({ emailService });
+emailQueue.runLoop();
+
+// Sveve SMS-service (norsk SMS-leverandør). Kjører i stub-mode hvis
+// SVEVE_API_USER er tom — dev-miljø starter uten å trenge credentials.
+// Brukes til:
+//   1) Forgot-password OTP (auth.ts /api/auth/forgot-password) for users
+//      som velger phone-flow.
+//   2) Admin-broadcast (POST /api/admin/sms/broadcast).
+const smsService = new SveveSmsService();
+
 // Accounting email dispatcher for Withdraw XML-batcher (wireframe 16.20).
 // Bruker eksisterende `app_withdraw_email_allowlist` (via securityService)
 // som regnskaps-CC-liste. PM-beslutning 2026-04-24 — ingen ny tabell.
@@ -705,6 +757,30 @@ const auditLogStore: AuditLogStore = platformConnectionString
   : new InMemoryAuditLogStore();
 const auditLogService = new AuditLogService(auditLogStore);
 
+// BIN-720: Profile Settings API — service (router wires mot slutten av
+// filen, sammen med andre app.use-kall). Tilgjengelig kun når
+// responsibleGamingStore er oppsatt; uten RG-persistence kan pending
+// loss-limit-state ikke serialiseres korrekt.
+const profileSettingsService = responsibleGamingStore
+  ? new ProfileSettingsService({
+      pool: platformService.getPool(),
+      schema: pgSchema,
+      engine,
+      rgPersistence: responsibleGamingStore,
+      auditLogService,
+    })
+  : undefined;
+
+// BIN-720 follow-up: wire ProfileSettingsService into PlatformService so
+// `assertUserEligibleForGameplay` gates gameplay on time-based block-
+// myself (1d/7d/30d via blocked_until). Done after construction to
+// break the chicken-and-egg (ProfileSettingsService takes engine, which
+// is independent of PlatformService at runtime). When the service is
+// undefined (no RG-persistence) the gate is a silent no-op.
+if (profileSettingsService) {
+  platformService.setProfileSettingsService(profileSettingsService);
+}
+
 // BIN-583 B3.1: agent-domene (auth + shift + admin-CRUD). Bruker samme
 // Postgres-pool som PlatformService slik at ensureInitialized sikrer
 // schema før første spørring.
@@ -713,7 +789,22 @@ const agentStore = new PostgresAgentStore({
   schema: pgSchema,
 });
 const agentService = new AgentService({ platformService, agentStore });
-const agentShiftService = new AgentShiftService({ agentStore, agentService });
+// Wireframe Gap #9: Shift Log Out-porter for flagging av pending cashouts
+// + ticket-ranges ved logout med checkbox-valg.
+const shiftPendingPayoutPort = new PostgresShiftPendingPayoutPort({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const shiftTicketRangePort = new PostgresShiftTicketRangePort({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const agentShiftService = new AgentShiftService({
+  agentStore,
+  agentService,
+  pendingPayoutPort: shiftPendingPayoutPort,
+  ticketRangePort: shiftTicketRangePort,
+});
 
 // BIN-583 B3.2: agent cash-ops + ticket sale + transaction-log.
 // PhysicalTicketService er instansiert litt senere (linje ~267); vi
@@ -877,6 +968,15 @@ const schedulerCallbacks = createSchedulerCallbacks({
   setPendingBingoSettingsUpdate: (u) => { pendingBingoSettingsUpdate = u; },
   getBingoSettingsEffectiveFromMs: () => bingoSettingsEffectiveFromMs,
   setBingoSettingsEffectiveFromMs: (ms) => { bingoSettingsEffectiveFromMs = ms; },
+  // BIN-694 (forrige fix): scheduler trenger variantConfig for fase-progresjon.
+  getVariantConfig: (code) => roomState.getVariantConfig(code),
+  // BIN-693 Option B: pass reservation-mapping til startGame så commit
+  // kjøres mot wallet-reservation i stedet for fresh transfer.
+  getReservationIdsByPlayer: (code) => roomState.getAllReservationIds(code),
+  clearReservationIdsForRoom: (code) => {
+    const ids = roomState.reservationIdByPlayerByRoom.get(code);
+    if (ids) ids.clear();
+  },
 });
 
 drawScheduler = new DrawScheduler({
@@ -891,6 +991,19 @@ drawScheduler = new DrawScheduler({
 drawScheduler.start();
 
 const dailyReportScheduler = createDailyReportScheduler({ engine, enabled: dailyReportJobEnabled, intervalMs: dailyReportJobIntervalMs });
+
+// BIN-693 Option B: Wallet-reservasjons-expiry-tick.
+const walletReservationExpiryTickMs = Math.max(
+  60_000,
+  Number(process.env.WALLET_RESERVATION_EXPIRY_TICK_MS ?? 300_000),
+);
+const walletReservationExpiryService = new WalletReservationExpiryService({
+  walletAdapter,
+  tickIntervalMs: walletReservationExpiryTickMs,
+  onTick: (count) => {
+    if (count > 0) console.log(`[wallet-reservation-expiry] expired ${count} stale reservations`);
+  },
+});
 
 // ── BIN-582: Legacy-cron ports (Swedbank sync, BankID expiry, RG cleanup) ────
 
@@ -937,6 +1050,18 @@ jobScheduler.register({
     runAtHourLocal: jobRgCleanupRunAtHour,
   }),
 });
+
+// BIN-720: Profile Settings 48h-queue flush. Promoterer pending loss-limit-
+// endringer → active når effectiveFromMs <= now. Polling-intervall 15 min.
+if (profileSettingsService) {
+  jobScheduler.register({
+    name: "profile-pending-loss-limit-flush",
+    description: "Activate pending loss-limit increases when 48h window has passed (BIN-720).",
+    intervalMs: 15 * 60 * 1000,
+    enabled: true,
+    run: createProfilePendingLossLimitFlushJob({ profileSettingsService }),
+  });
+}
 
 // BIN-700: nullstill month_points for alle spillere ved månedskift. Polling-
 // intervall 1 time (default). Idempotent via month_key-sammenligning i
@@ -1004,11 +1129,42 @@ const game1HallReadyService = new Game1HallReadyService({
   schema: pgSchema,
 });
 
+// BIN-GAP#4: Register Sold Tickets scanner (wireframe 15.2/17.15). Per-game
+// per-hall per-ticket-type registrering med carry-forward mellom runder.
+const ticketRegistrationService = new TicketRegistrationService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+
 // GAME1_SCHEDULE PR 3: master-control service. Håndterer master-start/pause/
 // resume/stop + hall-exclude/include med regulatorisk audit (app_game1_master_audit).
 const game1MasterControlService = new Game1MasterControlService({
   pool: platformService.getPool(),
   schema: pgSchema,
+});
+
+// MASTER_PLAN §2.3 — daglig-akkumulerende jackpot-state (Appendix B.9).
+// Starter 2000 kr, +4000/dag, max 30k. State per hall-gruppe.
+const game1JackpotStateService = new Game1JackpotStateService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+// Late-bind slik at master-control kan bruke servicen for pre-start-confirm.
+game1MasterControlService.setJackpotStateService(game1JackpotStateService);
+
+// MASTER_PLAN §2.3 / Appendix B.9 — daglig jackpot-akkumulering (+4000/dag).
+// Kjøres 00:15 lokal tid for å unngå midnatt-race med andre daglige jobs.
+// Default OFF — PM aktiverer i staging via JOB_JACKPOT_DAILY_ENABLED=true.
+jobScheduler.register({
+  name: "jackpot-daily-tick",
+  description: "Daglig +4000 kr akkumulering på Spill 1 Jackpott per hall-gruppe (MASTER_PLAN §2.3).",
+  intervalMs: jobJackpotDailyIntervalMs,
+  enabled: jobJackpotDailyEnabled,
+  run: createJackpotDailyTickJob({
+    service: game1JackpotStateService,
+    runAtHourLocal: jobJackpotDailyRunAtHour,
+    runAtMinuteLocal: jobJackpotDailyRunAtMinute,
+  }),
 });
 
 // PR-T1 Spor 4: akkumulerende pot-service (Jackpott + Innsatsen). Konstrueres
@@ -1186,6 +1342,26 @@ jobScheduler.register({
   run: createGame1AutoDrawTickJob({ service: game1AutoDrawTickService }),
 });
 
+// Task 1.6: runtime master-overføring — service + expiry-tick. Expiry-tick
+// default ON (60s TTL må håndheves). Broadcast-hook late-bindes etter at
+// adminGame1Handle.broadcaster finnes (se senere i index.ts).
+const game1TransferHallService = new Game1TransferHallService({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const game1TransferExpiryTickService = new Game1TransferExpiryTickService({
+  service: game1TransferHallService,
+});
+jobScheduler.register({
+  name: "game1-transfer-expiry-tick",
+  description: "Utløp pending master-transfer-requests (Task 1.6, 60s TTL).",
+  intervalMs: jobGame1TransferExpiryTickIntervalMs,
+  enabled: jobGame1TransferExpiryTickEnabled,
+  run: createGame1TransferExpiryTickJob({
+    service: game1TransferExpiryTickService,
+  }),
+});
+
 // ── Mount routers ─────────────────────────────────────────────────────────────
 
 const bingoSettingsState = {
@@ -1232,9 +1408,32 @@ app.use(async (req, res, next) => {
 // TV Screen + Winners public display. Ingen auth-middleware — kun
 // tvToken-sjekk i route-handler. Mountes før alle auth-gated routere
 // slik at CORS + body-parser er på, men ingen JWT-krav gjelder.
+//
+// Task 1.7: injiser hall-status-port for `participatingHalls`-badge-stripe.
+// Adapteren duck-types `getHallStatusForGame` på `Game1HallReadyService` —
+// metoden introduseres av HS-PR #451. Inntil HS-PR er merget er feature-
+// detection'en false og servicen returnerer tom array (klient viser da
+// ingen badge-stripe, øvrig TV-rendering uendret).
 const tvScreenService = new TvScreenService({
   pool: platformService.getPool(),
   schema: pgSchema,
+  hallStatusPort: {
+    async getHallStatusForGame(gameId: string) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const svc = game1HallReadyService as unknown as {
+        getHallStatusForGame?: (gameId: string) => Promise<Array<{
+          hallId: string;
+          playerCount: number;
+          excludedFromGame: boolean;
+          color: "red" | "orange" | "green";
+        }>>;
+      };
+      if (typeof svc.getHallStatusForGame === "function") {
+        return svc.getHallStatusForGame(gameId);
+      }
+      return [];
+    },
+  },
 });
 app.use(createTvScreenRouter({ platformService, tvScreenService }));
 
@@ -1247,15 +1446,31 @@ app.use(createAuthRouter({
   auditLogService,
   webBaseUrl,
   supportEmail,
+  // Sveve-SMS for forgot-password phone-flow. Faller tilbake til log-only
+  // hvis SVEVE_API_USER er tom (stub-mode).
+  smsService,
+  pool: platformService.getPool(),
+  schema: pgSchema,
 }));
 app.use(createPlayersRouter({
   platformService,
   auditLogService,
 }));
+
+// BIN-720: Profile Settings API (PDF 8 + PDF 9 wireframes). Router wires
+// kun når responsibleGamingStore er tilgjengelig (instansen konstrueres
+// lenger opp i filen, sammen med job-registrering for 48h-flush-cron).
+if (profileSettingsService) {
+  app.use(createUserProfileRouter({
+    platformService,
+    profileSettingsService,
+  }));
+}
 app.use(createAdminPlayersRouter({
   platformService,
   auditLogService,
   emailService,
+  emailQueue,
   bankIdAdapter,
   webBaseUrl,
   supportEmail,
@@ -1398,7 +1613,46 @@ app.use(createAdminGame1MasterRouter({
   platformService,
   auditLogService,
   masterControlService: game1MasterControlService,
+  // Task 1.1 (Gap #1): wire draw-engine slik at GET /games/:gameId kan
+  // returnere engineState (paused, paused_at_phase). Master-console
+  // bruker feltene til å vise Resume-knapp + auto-pause-banner.
+  drawEngine: game1DrawEngineService,
   io,
+  jackpotStateService: game1JackpotStateService,
+}));
+// Task 1.4 (2026-04-24): foren agent-portal + master-konsoll mot
+// scheduled_games-paradigmet. 4 endepunkter under /api/agent/game1/* som
+// gir agenten et hall-scoped view over samme state og reuser
+// Game1MasterControlService + Game1HallReadyService. Master-hall-agent
+// kan starte/resume direkte fra agent-portal; ikke-master-agent får 403.
+app.use(createAgentGame1Router({
+  platformService,
+  masterControlService: game1MasterControlService,
+  hallReadyService: game1HallReadyService,
+  pool: platformService.getPool(),
+}));
+// Task 1.6: runtime master-overføring — 4 endepunkter (request/approve/
+// reject/GET active). Broadcast-hooks wires up nedenfor etter
+// adminGame1Handle eksisterer.
+const adminGame1MasterTransferBroadcastHooks = {
+  onRequestCreated: undefined as
+    | ((r: import("./game/Game1TransferHallService.js").TransferRequest) => void)
+    | undefined,
+  onApproved: undefined as
+    | ((p: {
+        request: import("./game/Game1TransferHallService.js").TransferRequest;
+        previousMasterHallId: string;
+        newMasterHallId: string;
+      }) => void)
+    | undefined,
+  onRejected: undefined as
+    | ((r: import("./game/Game1TransferHallService.js").TransferRequest) => void)
+    | undefined,
+};
+app.use(createAdminGame1MasterTransferRouter({
+  platformService,
+  transferService: game1TransferHallService,
+  broadcastHooks: adminGame1MasterTransferBroadcastHooks,
 }));
 // GAME1_SCHEDULE PR 4a: ticket-purchase-router for Game 1. 3 endepunkter —
 // POST /api/game1/purchase, POST /api/game1/purchase/:id/refund,
@@ -1536,6 +1790,12 @@ app.use(createAdminCmsRouter({
   auditLogService,
   cmsService,
 }));
+// Public (un-authenticated) CMS endpoints — regulatorisk krav: spillere
+// må kunne lese T&C / FAQ / responsible-gaming UTEN konto. Routeren
+// håndhever publish-status (regulatoriske slugs trenger live-versjon;
+// ikke-regulatoriske trenger ikke-tom innhold) og legger på
+// Cache-Control: public, max-age=300 for å avlaste backenden.
+app.use(createPublicCmsRouter({ cmsService }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
 // BingoEngine er konstruert med (`bingoDailyLossLimit` / `bingoMonthlyLossLimit`)
@@ -1772,6 +2032,21 @@ app.use(createAdminReportsGame1ManagementRouter({
   engine,
   hallGroupService,
 }));
+// BIN-17.36: "Hall Specific Report" (admin) — per-hall aggregat med
+// Elvis Replacement (PM-låst Appendix B) + Game 1-5 OMS/UTD/Payout%/RES.
+app.use(createAdminReportsHallSpecificRouter({
+  platformService,
+  engine,
+  hallGroupService,
+  agentService,
+}));
+// BIN-17.32: "Past Game Winning History" (agent) — vinner-historikk per hall.
+app.use(createAgentReportsPastWinningRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  staticTicketService,
+}));
 // BIN-651: red-flag players report (AML + regulatorisk AuditLog on view).
 // Paginert liste over red-flaggede spillere med flag-årsak + siste aktivitet.
 // Skriver `admin.report.red_flag_players.viewed` til AuditLog ved vellykket
@@ -1832,6 +2107,37 @@ app.use(createAgentBingoRouter({
   agentShiftService,
   auditLogService,
   engine,
+}));
+
+// BIN-GAP#4: Register Sold Tickets scanner (wireframe 15.2/17.15).
+//   GET  /api/agent/ticket-registration/:gameId/initial-ids
+//   POST /api/agent/ticket-registration/:gameId/final-ids
+//   GET  /api/agent/ticket-registration/:gameId/summary
+app.use(createAgentTicketRegistrationRouter({
+  platformService,
+  agentService,
+  agentShiftService,
+  auditLogService,
+  ticketRegistrationService,
+  game1HallReadyService,
+}));
+
+// Wireframe gaps #8/#10/#11 (2026-04-24): Agent Unique ID cards flow.
+// Covers V1.0 wireframes 17.9 (Create), 17.10 (Add Money),
+// 17.11/17.28 (Withdraw), 17.26 (Details + Re-Generate).
+const uniqueIdStore = new PostgresUniqueIdStore({
+  pool: platformService.getPool(),
+  schema: pgSchema,
+});
+const uniqueIdService = new UniqueIdService({
+  store: uniqueIdStore,
+  agentService,
+});
+app.use(createAgentUniqueIdsRouter({
+  platformService,
+  agentService,
+  uniqueIdService,
+  auditLogService,
 }));
 
 // BIN-582: Metronia/OK-Bingo auto-close-cron. Registeres her fordi den
@@ -1910,6 +2216,17 @@ app.use(createNotificationsRouter({ platformService, fcmPushService }));
 app.use(createAdminNotificationsRouter({
   platformService,
   fcmPushService,
+  auditLogService,
+  pool: platformService.getPool(),
+  schema: pgSchema,
+}));
+
+// Sveve SMS-broadcast for ADMIN — sender SMS til spesifiserte spillere via
+// app_users.phone-lookup. Audit-loggen masker telefonnumre + utelater
+// melding-innhold (kun lengde) for å unngå PII-lekkasje.
+app.use(createAdminSmsBroadcastRouter({
+  platformService,
+  smsService,
   auditLogService,
   pool: platformService.getPool(),
   schema: pgSchema,
@@ -2055,6 +2372,20 @@ const registerGameEvents = createGameEventHandlers({
   chatMessageStore,
   // BIN-587 B4b follow-up: dep for socket-event `voucher:redeem`.
   voucherRedemptionService,
+  // BIN-693 Option B: wallet-reservasjon-wiring.
+  walletAdapter,
+  getWalletIdForPlayer: (roomCode, playerId) => {
+    try {
+      const snap = engine.getRoomSnapshot(roomCode);
+      const player = snap.players.find((p) => p.id === playerId);
+      return player?.walletId ?? null;
+    } catch {
+      return null;
+    }
+  },
+  getReservationId: (code, pid) => roomState.getReservationId(code, pid),
+  setReservationId: (code, pid, rid) => roomState.setReservationId(code, pid, rid),
+  clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.
@@ -2115,20 +2446,90 @@ const registerGame1ScheduledEvents = createGame1ScheduledEventHandlers({
   bindDefaultVariantConfig: (code, slug) => roomState.bindDefaultVariantConfig(code, slug),
 });
 
+// BIN-MYSTERY Gap D: socket-wire for alle 5 M6 mini-games (wheel, chest,
+// colordraft, oddsen, mystery). Før denne wire-up var setBroadcaster aldri
+// kalt → NoopMiniGameBroadcaster i bruk → klient fikk aldri mini_game-events.
+// `mini_game:choice` lyttes også her — uten wire ble klient-valg aldri sendt
+// til orchestrator.handleChoice().
+const miniGameSocketWire = createMiniGameSocketWire({
+  io,
+  orchestrator: game1MiniGameOrchestrator,
+  platformService,
+});
+game1MiniGameOrchestrator.setBroadcaster(miniGameSocketWire.broadcaster);
+
 io.on("connection", (socket: Socket) => {
   registerGameEvents(socket);
   registerAdminDisplayEvents(socket);
   registerAdminHallEvents(socket);
   registerGame1ScheduledEvents(socket);
+  miniGameSocketWire.register(socket);
 });
 
 // GAME1_SCHEDULE PR 4d.3: `/admin-game1`-namespace for master-konsoll
 // real-time subscribe. Opprettes etter `io` finnes. Broadcaster-porten
 // injisieres late via setAdminBroadcaster slik at service-laget kan
 // konstrueres tidligere uten å kjenne socket-siden.
-const adminGame1Handle = createAdminGame1Namespace({ io, platformService });
+//
+// Task 1.7: injiser hall-id-oppslagsport slik at phase-won speiles til
+// TV-display-rom. Porten er en tynn adapter over
+// `Game1HallReadyService.getReadyStatusForGame` som returnerer listen av
+// haller for et gitt spill. Fail-open: hvis servicen kaster (HS-tabell
+// mangler), logger adapteren warn og returnerer tom array.
+const adminGame1Handle = createAdminGame1Namespace({
+  io,
+  platformService,
+  participatingHallIdsPort: {
+    async getParticipatingHallIds(gameId: string): Promise<string[]> {
+      try {
+        const statuses = await game1HallReadyService.getReadyStatusForGame(gameId);
+        return statuses.map((s) => s.hallId);
+      } catch {
+        return [];
+      }
+    },
+  },
+});
 game1MasterControlService.setAdminBroadcaster(adminGame1Handle.broadcaster);
 game1DrawEngineService.setAdminBroadcaster(adminGame1Handle.broadcaster);
+
+// Task 1.6: late-bind transfer-broadcast-hooks etter adminGame1Handle finnes.
+// Hook-ene mapper service-responsen til broadcast-event-shape.
+const toTransferEvent = (
+  r: import("./game/Game1TransferHallService.js").TransferRequest
+): import("./game/AdminGame1Broadcaster.js").AdminGame1TransferRequestEvent => ({
+  requestId: r.id,
+  gameId: r.gameId,
+  fromHallId: r.fromHallId,
+  toHallId: r.toHallId,
+  initiatedByUserId: r.initiatedByUserId,
+  initiatedAtMs: new Date(r.initiatedAt).getTime(),
+  validTillMs: new Date(r.validTill).getTime(),
+  status: r.status,
+  respondedByUserId: r.respondedByUserId,
+  respondedAtMs: r.respondedAt ? new Date(r.respondedAt).getTime() : null,
+  rejectReason: r.rejectReason,
+});
+adminGame1MasterTransferBroadcastHooks.onRequestCreated = (req) => {
+  adminGame1Handle.broadcaster.onTransferRequest(toTransferEvent(req));
+};
+adminGame1MasterTransferBroadcastHooks.onApproved = (payload) => {
+  const event = toTransferEvent(payload.request);
+  adminGame1Handle.broadcaster.onTransferApproved(event);
+  adminGame1Handle.broadcaster.onMasterChanged({
+    gameId: payload.request.gameId,
+    previousMasterHallId: payload.previousMasterHallId,
+    newMasterHallId: payload.newMasterHallId,
+    transferRequestId: payload.request.id,
+    at: Date.now(),
+  });
+};
+adminGame1MasterTransferBroadcastHooks.onRejected = (req) => {
+  adminGame1Handle.broadcaster.onTransferRejected(toTransferEvent(req));
+};
+game1TransferExpiryTickService.setBroadcastHook((req) => {
+  adminGame1Handle.broadcaster.onTransferExpired(toTransferEvent(req));
+});
 
 // PR-C4: spiller-broadcaster for default-namespace. Speiler admin-broadcast
 // slik at spiller-klient mottar `draw:new` / `pattern:won` / `room:update`
@@ -2190,6 +2591,7 @@ const PORT = Number(process.env.PORT ?? 4000);
 
   dailyReportScheduler.start();
   jobScheduler.start();
+  walletReservationExpiryService.start();
 
   // BIN-170: Load rooms from Redis on startup (if Redis provider)
   if (roomStateProvider === "redis") {

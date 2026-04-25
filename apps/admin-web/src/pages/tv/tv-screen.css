@@ -334,6 +334,19 @@
   cursor: pointer;
 }
 
+/* Wireframe PDF 14: voice styres av admin, dropdownen er read-only på TV. */
+.tv-voice-select select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.tv-voice-note {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.7;
+  font-style: italic;
+}
+
 .tv-loading,
 .tv-error {
   display: flex;
@@ -431,3 +444,166 @@
   letter-spacing: 1px;
 }
 
+/* ── Task 1.7: Badge-stripe for deltakende haller ──────────────────────
+ *
+ * Vises nederst på TVen som en horisontal rad med hall-badges.
+ * Hver badge har en fargesirkel (🔴/🟠/🟢), hall-navn og player-count.
+ * Skjules helt når listen er tom (empty-state).
+ */
+.tv-halls-stripe {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 18px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 215, 0, 0.45);
+  border-radius: 12px;
+  z-index: 100;
+  pointer-events: none; /* ingen interaksjon i kiosk-modus */
+}
+
+.tv-halls-stripe-hidden {
+  display: none;
+}
+
+.tv-hall-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 215, 0, 0.6);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.tv-hall-badge-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+}
+
+.tv-hall-badge-red .tv-hall-badge-dot {
+  background: #e53935;
+  box-shadow: 0 0 8px rgba(229, 57, 53, 0.7);
+}
+
+.tv-hall-badge-orange .tv-hall-badge-dot {
+  background: #fb8c00;
+  box-shadow: 0 0 8px rgba(251, 140, 0, 0.7);
+}
+
+.tv-hall-badge-green .tv-hall-badge-dot {
+  background: #43a047;
+  box-shadow: 0 0 8px rgba(67, 160, 71, 0.7);
+}
+
+.tv-hall-badge-red {
+  border-color: rgba(229, 57, 53, 0.8);
+}
+
+.tv-hall-badge-orange {
+  border-color: rgba(251, 140, 0, 0.8);
+}
+
+.tv-hall-badge-green {
+  border-color: rgba(67, 160, 71, 0.8);
+}
+
+.tv-hall-badge-name {
+  letter-spacing: 0.5px;
+}
+
+.tv-hall-badge-count {
+  display: inline-block;
+  min-width: 24px;
+  padding: 2px 8px;
+  background: rgba(255, 215, 0, 0.15);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffd700;
+  text-align: center;
+}
+
+/* ── Task 1.7: Phase-won-banner ────────────────────────────────────────
+ *
+ * Fullscreen overlay som dekker ball-visning i 3 sekunder når en fase
+ * vinnes. Bakgrunn er halv-transparent sort (0.85) slik at ball-gridet
+ * vises dempet bak. Når banner er aktiv legger vi
+ * `tv-phase-banner-active`-class på body'en for å freeze animasjoner i
+ * ball-ringen.
+ */
+.tv-phase-banner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 10000;
+  animation: tv-phase-banner-fade-in 0.2s ease-out;
+  pointer-events: none;
+}
+
+.tv-phase-banner-hidden {
+  display: none;
+}
+
+.tv-phase-banner-inner {
+  text-align: center;
+  padding: 40px 80px;
+  border: 4px solid #ffd700;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #8b0000 0%, #c00000 50%, #8b0000 100%);
+  box-shadow: 0 0 60px rgba(255, 215, 0, 0.6), 0 0 120px rgba(255, 215, 0, 0.25);
+  animation: tv-phase-banner-pop 0.35s cubic-bezier(0.18, 1.25, 0.6, 1);
+}
+
+.tv-phase-banner-title {
+  font-size: 140px;
+  font-weight: 900;
+  color: #ffd700;
+  letter-spacing: 12px;
+  text-shadow: 4px 4px 8px rgba(0, 0, 0, 0.7);
+  margin-bottom: 16px;
+  line-height: 1;
+}
+
+.tv-phase-banner-pattern {
+  font-size: 72px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 6px;
+  text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.55);
+  text-transform: uppercase;
+}
+
+@keyframes tv-phase-banner-fade-in {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes tv-phase-banner-pop {
+  0%   { transform: scale(0.72); opacity: 0.5; }
+  60%  { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
+/* Freezer animasjoner i ball-grid mens banner vises — tipsas av body-class. */
+.tv-screen-body.tv-phase-banner-active *,
+.tv-screen-body.tv-phase-banner-active *::before,
+.tv-screen-body.tv-phase-banner-active *::after {
+  animation-play-state: paused !important;
+}

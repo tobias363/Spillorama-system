@@ -1,0 +1,14 @@
+{
+  "name": "@spillorama/pilot-hardware-profile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pilot hardware test-profile: CPU-throttle + integrated-GPU-emulering for visuelle regresjons-tester.",
+  "type": "module",
+  "scripts": {
+    "test:profile:validate": "tsx ./validate-profile.ts",
+    "test:compare": "tsx ./compare-pilot-hw.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

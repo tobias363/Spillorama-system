@@ -62,6 +62,45 @@ export interface HallReadyStatusRow {
   excludedReason: string | null;
   createdAt: string;
   updatedAt: string;
+  /** TASK HS: scan-data (NULL inntil scan er utført). */
+  startTicketId: string | null;
+  startScannedAt: string | null;
+  finalScanTicketId: string | null;
+  finalScannedAt: string | null;
+}
+
+/**
+ * TASK HS: beriket per-hall-status for master-dashboard.
+ * Farge-semantikk (låst av Tobias 2026-04-24):
+ *   - red     : playerCount === 0  (ekskluderes auto)
+ *   - orange  : playerCount > 0 && (!finalScanDone || !readyConfirmed)
+ *   - green   : alle spillere telt + slutt-scan gjort + Klar trykket
+ */
+export type HallStatusColor = "red" | "orange" | "green";
+
+export interface HallStatusForGame {
+  hallId: string;
+  playerCount: number;
+  /**
+   * `true` hvis hallen har utført start-scan, eller er en digital-only-hall
+   * (ingen fysiske bonger — ingen scan nødvendig).
+   */
+  startScanDone: boolean;
+  /**
+   * `true` hvis hallen har utført slutt-scan, eller er en digital-only-hall.
+   * Påkrevd for `markReady` i fysisk-bong-scenarioet.
+   */
+  finalScanDone: boolean;
+  readyConfirmed: boolean;
+  excludedFromGame: boolean;
+  excludedReason: string | null;
+  color: HallStatusColor;
+  /** TASK HS: eksakt antall solgte fysiske bonger (final_id - start_id). */
+  soldCount: number;
+  startTicketId: string | null;
+  finalScanTicketId: string | null;
+  digitalTicketsSold: number;
+  physicalTicketsSold: number;
 }
 
 export interface MarkReadyInput {
@@ -76,6 +115,12 @@ export interface UnmarkReadyInput {
   gameId: string;
   hallId: string;
   userId: string;
+}
+
+export interface RecordScanInput {
+  gameId: string;
+  hallId: string;
+  ticketId: string;
 }
 
 export interface Game1HallReadyServiceOptions {
@@ -142,6 +187,11 @@ export class Game1HallReadyService {
    * Mark a hall as ready for a specific game. Idempotent — UPSERT via
    * INSERT ... ON CONFLICT DO UPDATE. Kaster VALIDATION_FAILED hvis
    * spillet ikke finnes, er i feil status, eller hallen ikke deltar.
+   *
+   * TASK HS: hvis hallen har fysisk-bong-salg (physical_tickets_sold > 0
+   * eller start_ticket_id satt), må slutt-scan være utført før markReady
+   * tillates — ellers kaster `FINAL_SCAN_REQUIRED`. Digital-only-haller
+   * (ingen start-scan + 0 fysiske) slipper gjennom.
    */
   async markReady(input: MarkReadyInput): Promise<HallReadyStatusRow> {
     const game = await this.loadScheduledGame(input.gameId);
@@ -163,6 +213,23 @@ export class Game1HallReadyService {
     const physicalSold = await this.countPhysicalSoldForHall(input.gameId, input.hallId);
     const digitalSold = Math.max(0, Math.floor(input.digitalTicketsSold ?? 0));
 
+    // TASK HS: FINAL_SCAN_REQUIRED-guard for fysisk-bong-haller.
+    // Henter eksisterende rad for å vite om start-scan er utført.
+    const existing = await this.loadExistingRow(input.gameId, input.hallId);
+    const hasPhysicalFlow =
+      (existing?.startTicketId != null && existing.startTicketId !== "") ||
+      physicalSold > 0;
+    if (hasPhysicalFlow) {
+      const finalScanDone =
+        existing?.finalScanTicketId != null && existing.finalScanTicketId !== "";
+      if (!finalScanDone) {
+        throw new DomainError(
+          "FINAL_SCAN_REQUIRED",
+          "Skann øverste bong etter salg før du bekrefter klar."
+        );
+      }
+    }
+
     // UPSERT + returnerer rad. `updated_at` settes eksplisitt for ON CONFLICT-
     // grenen så vi ikke stoler på trigger.
     const { rows } = await this.pool.query(
@@ -179,7 +246,9 @@ export class Game1HallReadyService {
              updated_at            = now()
        RETURNING game_id, hall_id, is_ready, ready_at, ready_by_user_id,
                  digital_tickets_sold, physical_tickets_sold,
-                 excluded_from_game, excluded_reason, created_at, updated_at`,
+                 excluded_from_game, excluded_reason, created_at, updated_at,
+                 start_ticket_id, start_scanned_at,
+                 final_scan_ticket_id, final_scanned_at`,
       [input.gameId, input.hallId, input.userId, digitalSold, physicalSold]
     );
     const row = rows[0];
@@ -212,7 +281,9 @@ export class Game1HallReadyService {
        WHERE game_id = $1 AND hall_id = $2
        RETURNING game_id, hall_id, is_ready, ready_at, ready_by_user_id,
                  digital_tickets_sold, physical_tickets_sold,
-                 excluded_from_game, excluded_reason, created_at, updated_at`,
+                 excluded_from_game, excluded_reason, created_at, updated_at,
+                 start_ticket_id, start_scanned_at,
+                 final_scan_ticket_id, final_scanned_at`,
       [input.gameId, input.hallId]
     );
     const row = rows[0];
@@ -241,7 +312,9 @@ export class Game1HallReadyService {
     const { rows } = await this.pool.query(
       `SELECT game_id, hall_id, is_ready, ready_at, ready_by_user_id,
               digital_tickets_sold, physical_tickets_sold,
-              excluded_from_game, excluded_reason, created_at, updated_at
+              excluded_from_game, excluded_reason, created_at, updated_at,
+              start_ticket_id, start_scanned_at,
+              final_scan_ticket_id, final_scanned_at
          FROM ${this.hallReadyTable()}
          WHERE game_id = $1`,
       [gameId]
@@ -270,6 +343,10 @@ export class Game1HallReadyService {
           excludedReason: null,
           createdAt: "",
           updatedAt: "",
+          startTicketId: null,
+          startScannedAt: null,
+          finalScanTicketId: null,
+          finalScannedAt: null,
         });
       }
     }
@@ -332,7 +409,192 @@ export class Game1HallReadyService {
     // PR 3 (master-start) kan utvide med sine egne feilkoder.
   }
 
+  /**
+   * TASK HS: lagrer start-scan-ticketId for hallen. Idempotent — re-scan
+   * oppdaterer `start_scanned_at`.
+   *
+   * Kaster:
+   *   - `GAME_NOT_READY_ELIGIBLE` hvis spillet ikke er i `purchase_open`.
+   *   - `HALL_NOT_PARTICIPATING` hvis hallen ikke deltar.
+   *   - `INVALID_INPUT` hvis ticketId er tomt/whitespace.
+   */
+  async recordStartScan(input: RecordScanInput): Promise<HallReadyStatusRow> {
+    const ticketId = input.ticketId.trim();
+    if (!ticketId) {
+      throw new DomainError("INVALID_INPUT", "ticketId kan ikke være tomt.");
+    }
+    await this.assertGameAndHallForScan(input.gameId, input.hallId);
+
+    const physicalSold = await this.countPhysicalSoldForHall(input.gameId, input.hallId);
+    const { rows } = await this.pool.query(
+      `INSERT INTO ${this.hallReadyTable()}
+         (game_id, hall_id, is_ready, start_ticket_id, start_scanned_at,
+          physical_tickets_sold)
+       VALUES ($1, $2, false, $3, now(), $4)
+       ON CONFLICT (game_id, hall_id) DO UPDATE
+         SET start_ticket_id      = EXCLUDED.start_ticket_id,
+             start_scanned_at     = now(),
+             physical_tickets_sold = EXCLUDED.physical_tickets_sold,
+             updated_at           = now()
+       RETURNING game_id, hall_id, is_ready, ready_at, ready_by_user_id,
+                 digital_tickets_sold, physical_tickets_sold,
+                 excluded_from_game, excluded_reason, created_at, updated_at,
+                 start_ticket_id, start_scanned_at,
+                 final_scan_ticket_id, final_scanned_at`,
+      [input.gameId, input.hallId, ticketId, physicalSold]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("SCAN_FAILED", "Kunne ikke lagre start-scan.");
+    }
+    return mapRowToStatus(row);
+  }
+
+  /**
+   * TASK HS: lagrer slutt-scan-ticketId. Validerer at `ticketId >= start_ticket_id`
+   * (ellers `INVALID_SCAN_RANGE`). Oppdaterer `physical_tickets_sold` eksakt
+   * basert på `final_id - start_id` når begge er numeriske — ellers faller vi
+   * tilbake til `countPhysicalSoldForHall`-databasetelling.
+   */
+  async recordFinalScan(input: RecordScanInput): Promise<HallReadyStatusRow> {
+    const ticketId = input.ticketId.trim();
+    if (!ticketId) {
+      throw new DomainError("INVALID_INPUT", "ticketId kan ikke være tomt.");
+    }
+    await this.assertGameAndHallForScan(input.gameId, input.hallId);
+
+    const existing = await this.loadExistingRow(input.gameId, input.hallId);
+    const startId = existing?.startTicketId?.trim() ?? "";
+    if (!startId) {
+      throw new DomainError(
+        "START_SCAN_REQUIRED",
+        "Skann første bong før slutt-scan."
+      );
+    }
+
+    // Range-validering: numerisk sammenligning hvis begge er parsbare
+    // (vanlig case — bongnumre er sekvensielle heltall). Ellers lexikografisk
+    // fallback for strenger. `final >= start` kreves — lik betyr 0 solgte.
+    const startNum = Number(startId);
+    const finalNum = Number(ticketId);
+    if (Number.isFinite(startNum) && Number.isFinite(finalNum)) {
+      if (finalNum < startNum) {
+        throw new DomainError(
+          "INVALID_SCAN_RANGE",
+          `Slutt-scan (${ticketId}) må være >= start-scan (${startId}).`
+        );
+      }
+    } else if (ticketId < startId) {
+      throw new DomainError(
+        "INVALID_SCAN_RANGE",
+        `Slutt-scan (${ticketId}) må være >= start-scan (${startId}).`
+      );
+    }
+
+    // Eksakt solgt-antall: final_id - start_id når numerisk. Ellers fallback
+    // til DB-count. Lagres i physical_tickets_sold slik at master-UI og audit
+    // ser samme tall.
+    let physicalSold: number;
+    if (Number.isFinite(startNum) && Number.isFinite(finalNum)) {
+      physicalSold = Math.max(0, Math.floor(finalNum - startNum));
+    } else {
+      physicalSold = await this.countPhysicalSoldForHall(input.gameId, input.hallId);
+    }
+
+    const { rows } = await this.pool.query(
+      `UPDATE ${this.hallReadyTable()}
+          SET final_scan_ticket_id = $3,
+              final_scanned_at     = now(),
+              physical_tickets_sold = $4,
+              updated_at           = now()
+        WHERE game_id = $1 AND hall_id = $2
+        RETURNING game_id, hall_id, is_ready, ready_at, ready_by_user_id,
+                  digital_tickets_sold, physical_tickets_sold,
+                  excluded_from_game, excluded_reason, created_at, updated_at,
+                  start_ticket_id, start_scanned_at,
+                  final_scan_ticket_id, final_scanned_at`,
+      [input.gameId, input.hallId, ticketId, physicalSold]
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new DomainError("SCAN_FAILED", "Kunne ikke lagre slutt-scan.");
+    }
+    return mapRowToStatus(row);
+  }
+
+  /**
+   * TASK HS: beriket hall-status-liste for master-dashboard. Beregner
+   * `color` per hall basert på låst farge-semantikk.
+   *
+   * Edge-case: digital-only hall (ingen start_ticket_id + physical_tickets_sold=0)
+   * regnes som `finalScanDone=true` automatisk slik at hallen kan gå grønn
+   * alene på `readyConfirmed`.
+   *
+   * `playerCount = digital_tickets_sold + physical_tickets_sold` — dette er
+   * den samme modellen som scheduler-tick-en og master-audit bruker.
+   */
+  async getHallStatusForGame(gameId: string): Promise<HallStatusForGame[]> {
+    const rows = await this.getReadyStatusForGame(gameId);
+    return rows.map((r) => computeHallStatus(r));
+  }
+
+  /**
+   * TASK HS: hent group_hall_id for et spill. Brukes av route-laget for å
+   * velge broadcast-rom (`group:<groupId>`).
+   */
+  async getGameGroupId(gameId: string): Promise<string> {
+    const game = await this.loadScheduledGame(gameId);
+    return game.group_hall_id;
+  }
+
   // ── Internal helpers ───────────────────────────────────────────────────────
+
+  /**
+   * TASK HS: felles validering for scan-endepunkter. Kaster samme
+   * DomainError-koder som markReady så admin-UI kan dele feilhåndtering.
+   */
+  private async assertGameAndHallForScan(
+    gameId: string,
+    hallId: string
+  ): Promise<void> {
+    const game = await this.loadScheduledGame(gameId);
+    if (game.status !== "purchase_open") {
+      throw new DomainError(
+        "GAME_NOT_READY_ELIGIBLE",
+        `Kan kun scanne i status 'purchase_open' (nåværende: '${game.status}').`
+      );
+    }
+    const participating = parseHallIdsArray(game.participating_halls_json);
+    if (!participating.includes(hallId) && game.master_hall_id !== hallId) {
+      throw new DomainError(
+        "HALL_NOT_PARTICIPATING",
+        "Hallen deltar ikke i dette spillet."
+      );
+    }
+  }
+
+  /**
+   * TASK HS: hent eksisterende rad uten å populere default for fravær. Brukes
+   * av scan-flyten og markReady-guarden for å sjekke om start-scan er utført.
+   */
+  private async loadExistingRow(
+    gameId: string,
+    hallId: string
+  ): Promise<HallReadyStatusRow | null> {
+    const { rows } = await this.pool.query(
+      `SELECT game_id, hall_id, is_ready, ready_at, ready_by_user_id,
+              digital_tickets_sold, physical_tickets_sold,
+              excluded_from_game, excluded_reason, created_at, updated_at,
+              start_ticket_id, start_scanned_at,
+              final_scan_ticket_id, final_scanned_at
+         FROM ${this.hallReadyTable()}
+         WHERE game_id = $1 AND hall_id = $2`,
+      [gameId, hallId]
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return mapRowToStatus(row);
+  }
 
   private async loadScheduledGame(gameId: string): Promise<ScheduledGameRow> {
     const { rows } = await this.pool.query<ScheduledGameRow>(
@@ -389,6 +651,83 @@ function mapRowToStatus(row: Record<string, unknown>): HallReadyStatusRow {
       row.excluded_reason == null ? null : String(row.excluded_reason),
     createdAt: row.created_at == null ? "" : toIso(row.created_at),
     updatedAt: row.updated_at == null ? "" : toIso(row.updated_at),
+    startTicketId: row.start_ticket_id == null ? null : String(row.start_ticket_id),
+    startScannedAt:
+      row.start_scanned_at == null ? null : toIso(row.start_scanned_at),
+    finalScanTicketId:
+      row.final_scan_ticket_id == null ? null : String(row.final_scan_ticket_id),
+    finalScannedAt:
+      row.final_scanned_at == null ? null : toIso(row.final_scanned_at),
+  };
+}
+
+/**
+ * TASK HS: beregn farge-kode for en hall. Eksporteres fra modulen (ikke
+ * klassen) slik at tester kan unit-teste logikken uten DB-stub.
+ *
+ * Regler (låst):
+ *   - `red`     hvis `playerCount === 0`
+ *   - `orange`  hvis `playerCount > 0` og (`!finalScanDone` eller `!readyConfirmed`)
+ *   - `green`   hvis alle betingelser oppfylt
+ *
+ * Digital-only-haller (ingen start-scan + 0 fysiske) regnes som
+ * `finalScanDone=true` automatisk — de kan gå grønn uten å scanne.
+ */
+export function computeHallStatus(row: HallReadyStatusRow): HallStatusForGame {
+  const physical = Number.isFinite(row.physicalTicketsSold)
+    ? row.physicalTicketsSold
+    : 0;
+  const digital = Number.isFinite(row.digitalTicketsSold)
+    ? row.digitalTicketsSold
+    : 0;
+  const playerCount = Math.max(0, physical + digital);
+
+  const hasPhysicalFlow =
+    (row.startTicketId != null && row.startTicketId !== "") || physical > 0;
+
+  const startScanDone = !hasPhysicalFlow
+    ? true
+    : row.startTicketId != null && row.startTicketId !== "";
+  const finalScanDone = !hasPhysicalFlow
+    ? true
+    : row.finalScanTicketId != null && row.finalScanTicketId !== "";
+
+  const readyConfirmed = Boolean(row.isReady);
+
+  let color: HallStatusColor;
+  if (playerCount === 0) {
+    color = "red";
+  } else if (!finalScanDone || !readyConfirmed) {
+    color = "orange";
+  } else {
+    color = "green";
+  }
+
+  // Eksakt solgt-antall: final_id - start_id når begge er numeriske;
+  // ellers fall tilbake til physical_tickets_sold.
+  let soldCount = physical;
+  if (row.startTicketId != null && row.finalScanTicketId != null) {
+    const startNum = Number(row.startTicketId);
+    const finalNum = Number(row.finalScanTicketId);
+    if (Number.isFinite(startNum) && Number.isFinite(finalNum)) {
+      soldCount = Math.max(0, Math.floor(finalNum - startNum));
+    }
+  }
+
+  return {
+    hallId: row.hallId,
+    playerCount,
+    startScanDone,
+    finalScanDone,
+    readyConfirmed,
+    excludedFromGame: row.excludedFromGame,
+    excludedReason: row.excludedReason,
+    color,
+    soldCount,
+    startTicketId: row.startTicketId,
+    finalScanTicketId: row.finalScanTicketId,
+    digitalTicketsSold: digital,
+    physicalTicketsSold: physical,
   };
 }
 

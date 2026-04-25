@@ -193,3 +193,97 @@ export const Game1AdminPhysicalTicketWonPayloadSchema = z.object({
 export type Game1AdminPhysicalTicketWonPayload = z.infer<
   typeof Game1AdminPhysicalTicketWonPayloadSchema
 >;
+
+// ── Task 1.1: auto-pause ved phase-won ──────────────────────────────────────
+// Gap #1 i docs/architecture/MASTER_HALL_DASHBOARD_GAP_2026-04-24.md.
+//
+// `game1:auto-paused` — emittes av Game1DrawEngineService når en phase-won
+// trigget auto-pause (etter Rad 1, Rad 2, ..., men IKKE etter Fullt Hus
+// fordi spillet da avsluttes). Master-UI og agent-portal bruker eventet for
+// å vise Resume-knapp + banner "Pause etter Rad X — trykk Resume".
+//
+// `game1:resumed` — emittes av Game1MasterControlService når master/agent
+// manuelt re-starter draw-engine etter auto-pause. Markerer slutten på
+// paused-sidestate (sett `paused=false`, `paused_at_phase=NULL`).
+
+export const Game1AdminAutoPausedPayloadSchema = z.object({
+  gameId: z.string().min(1),
+  phase: z.number().int().min(1).max(5),
+  pausedAt: z.number().int().nonnegative(),
+});
+export type Game1AdminAutoPausedPayload = z.infer<
+  typeof Game1AdminAutoPausedPayloadSchema
+>;
+
+export const Game1AdminResumedPayloadSchema = z.object({
+  gameId: z.string().min(1),
+  resumedAt: z.number().int().nonnegative(),
+  actorUserId: z.string().min(1),
+  /** Fasen engine returnerer til å trekke (nåværende current_phase). */
+  phase: z.number().int().min(1).max(5),
+  /**
+   * `auto` hvis resume avsluttet en auto-pause (paused_at_phase var satt);
+   * `manual` hvis resume avsluttet en eksplisitt master-pause
+   * (status='paused').
+   */
+  resumeType: z.enum(["auto", "manual"]),
+});
+export type Game1AdminResumedPayload = z.infer<
+  typeof Game1AdminResumedPayloadSchema
+>;
+
+// ── Task 1.6: master-hall transfer-events ───────────────────────────────────
+// Spec: docs/architecture/MASTER_HALL_DASHBOARD_GAP_2026-04-24.md Appendix B.3.
+// Backend-tabell: app_game1_master_transfer_requests (60s TTL, én aktiv per game).
+//
+// Emit-flow:
+//   * requestTransfer  → `game1:transfer-request`    (til target-hall + admin-namespace)
+//   * approveTransfer  → `game1:transfer-approved` + `game1:master-changed`
+//   * rejectTransfer   → `game1:transfer-rejected`   (til initiator)
+//   * expiry-tick      → `game1:transfer-expired`    (til både from + to)
+
+export const Game1TransferRequestStatusSchema = z.enum([
+  "pending",
+  "approved",
+  "rejected",
+  "expired",
+]);
+export type Game1TransferRequestStatus = z.infer<
+  typeof Game1TransferRequestStatusSchema
+>;
+
+/**
+ * Felles payload-shape for transfer-requests i socket-events og REST-responser.
+ * `validTillMs` er `valid_till` konvertert til epoch-ms for klient-countdown.
+ */
+export const Game1TransferRequestPayloadSchema = z.object({
+  requestId: z.string().min(1),
+  gameId: z.string().min(1),
+  fromHallId: z.string().min(1),
+  toHallId: z.string().min(1),
+  initiatedByUserId: z.string().min(1),
+  initiatedAtMs: z.number().int().nonnegative(),
+  validTillMs: z.number().int().nonnegative(),
+  status: Game1TransferRequestStatusSchema,
+  respondedByUserId: z.string().nullable(),
+  respondedAtMs: z.number().int().nonnegative().nullable(),
+  rejectReason: z.string().nullable(),
+});
+export type Game1TransferRequestPayload = z.infer<
+  typeof Game1TransferRequestPayloadSchema
+>;
+
+/**
+ * `game1:master-changed` — broadcastet til game-room når master-hallen er
+ * overført. Alle haller i linken oppdaterer sin UI-badge ("Master"-indikator).
+ */
+export const Game1MasterChangedPayloadSchema = z.object({
+  gameId: z.string().min(1),
+  previousMasterHallId: z.string().min(1),
+  newMasterHallId: z.string().min(1),
+  transferRequestId: z.string().min(1),
+  at: z.number().int().nonnegative(),
+});
+export type Game1MasterChangedPayload = z.infer<
+  typeof Game1MasterChangedPayloadSchema
+>;

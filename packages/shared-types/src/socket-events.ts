@@ -65,6 +65,28 @@ export type { Game1AdminPhaseWonPayload } from "./schemas.js";
 // PT4: admin physical-ticket-won broadcast (fra drawNext + PhysicalTicketPayoutService).
 export { Game1AdminPhysicalTicketWonPayloadSchema } from "./schemas.js";
 export type { Game1AdminPhysicalTicketWonPayload } from "./schemas.js";
+
+// Task 1.1: auto-pause ved phase-won + manuell resume (Gap #1 i MASTER_HALL_DASHBOARD_GAP_2026-04-24.md).
+export {
+  Game1AdminAutoPausedPayloadSchema,
+  Game1AdminResumedPayloadSchema,
+} from "./schemas.js";
+export type {
+  Game1AdminAutoPausedPayload,
+  Game1AdminResumedPayload,
+} from "./schemas.js";
+
+// Task 1.6: master-hall transfer-events (agent-initiert, 60s TTL).
+export {
+  Game1TransferRequestStatusSchema,
+  Game1TransferRequestPayloadSchema,
+  Game1MasterChangedPayloadSchema,
+} from "./schemas.js";
+export type {
+  Game1TransferRequestStatus,
+  Game1TransferRequestPayload,
+  Game1MasterChangedPayload,
+} from "./schemas.js";
 import type {
   RoomUpdatePayload as RoomUpdatePayloadT,
   DrawNewPayload as DrawNewPayloadT,
@@ -382,7 +404,12 @@ export type MiniGamePlayResult = MiniGamePlayResultT;
  * `apps/backend/src/game/minigames/types.ts:MiniGameType`. Intentionally
  * separate from the legacy `MiniGameType` above.
  */
-export type M6MiniGameType = "wheel" | "chest" | "colordraft" | "oddsen";
+export type M6MiniGameType =
+  | "wheel"
+  | "chest"
+  | "colordraft"
+  | "oddsen"
+  | "mystery";
 
 /** Server → Client: trigger payload for a newly activated mini-game. */
 export interface MiniGameTriggerPayload {
@@ -395,6 +422,8 @@ export interface MiniGameTriggerPayload {
    *    - chest:      { chestCount, prizeRange, hasDiscreteTiers }
    *    - colordraft: { numberOfSlots, targetColor, slotColors, winPrizeNok, consolationPrizeNok }
    *    - oddsen:     { validNumbers, potSmallNok, potLargeNok, resolveAtDraw }
+   *    - mystery:    { middleNumber, resultNumber, prizeListNok, maxRounds,
+   *                    autoTurnFirstMoveSec, autoTurnOtherMoveSec }
    */
   readonly payload: Readonly<Record<string, unknown>>;
   /** Optional client-side countdown in seconds. */
@@ -409,6 +438,8 @@ export interface MiniGameChoicePayload extends AuthenticatedSocketPayload {
    *    - chest:      { chosenIndex: number }
    *    - colordraft: { chosenIndex: number }
    *    - oddsen:     { chosenNumber: number }
+   *    - mystery:    { directions: ("up"|"down")[] } (1..5 elements; joker
+   *                    terminates early so <5 is valid)
    */
   readonly choiceJson: Readonly<Record<string, unknown>>;
 }
@@ -425,6 +456,8 @@ export interface MiniGameResultPayload {
    *    - colordraft: { chosenIndex, chosenColor, targetColor, matched, prizeAmountKroner, allSlotColors, numberOfSlots }
    *    - oddsen:     { chosenNumber, oddsenStateId, chosenForGameId, ticketSizeAtWin, potAmountNokIfHit, validNumbers, payoutDeferred: true }
    *                    (resolved outcome arrives via separate event in the next game)
+   *    - mystery:    { middleNumber, resultNumber, rounds: MysteryRoundResult[],
+   *                    finalPriceIndex, prizeAmountKroner, jokerTriggered }
    */
   readonly resultJson: Readonly<Record<string, unknown>>;
 }

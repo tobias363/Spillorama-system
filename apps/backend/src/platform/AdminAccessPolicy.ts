@@ -381,7 +381,21 @@ const ADMIN_ACCESS_POLICY_DEFINITION = {
    *     WRITE / GAME_TYPE_WRITE).
    */
   AGENT_PERMISSION_READ:  ["ADMIN", "SUPPORT"],
-  AGENT_PERMISSION_WRITE: ["ADMIN"]
+  AGENT_PERMISSION_WRITE: ["ADMIN"],
+  /**
+   * Wireframe gaps #8/#10/#11 (2026-04-24): Unique ID card management.
+   * Agent-facing play-cards (V1.0 wireframes 17.9-17.28): create, add-money,
+   * withdraw, re-print, re-generate.
+   *   - UNIQUE_ID_READ : details + list. Alle admin-roller + AGENT (eget
+   *     hall). Hall-scope håndheves i service via assertHallMembership
+   *     (agent) / resolveHallScopeFilter (admin).
+   *   - UNIQUE_ID_WRITE: create / add-money / withdraw / reprint / regenerate.
+   *     AGENT (kassa-flyt) + ADMIN (helpdesk + "ADMIN har alle"-invariant).
+   *     SUPPORT bevisst utelatt (compliance-rolle); HALL_OPERATOR bevisst
+   *     utelatt (drift-rolle, ikke kasse).
+   */
+  UNIQUE_ID_READ:  ["ADMIN", "HALL_OPERATOR", "SUPPORT", "AGENT"],
+  UNIQUE_ID_WRITE: ["ADMIN", "AGENT"]
 } as const;
 
 export type AdminPermission = keyof typeof ADMIN_ACCESS_POLICY_DEFINITION;

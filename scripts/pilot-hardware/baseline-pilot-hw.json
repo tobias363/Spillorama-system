@@ -1,0 +1,40 @@
+{
+  "$schema": "./baseline.schema.json",
+  "profile": "pilot-hw",
+  "profileVersion": "1.0.0",
+  "generatedAt": null,
+  "description": "Strengere terskler enn dev-baseline fordi pilot-hardware-blink er mer merkbart på faktiske terminaler. Verdiene er konservative estimater som må re-kalibreres når vi får målinger fra faktisk pilot-hardware — se docs/engineering/PILOT_HARDWARE_SPECS.md.",
+  "scenarios": {
+    "idle": {
+      "backdropFilterCount": { "max": 2, "devMax": 3 },
+      "paintCountPer2s": { "max": 20, "devMax": 30 },
+      "rafCallsPerSec": { "max": 65, "devMax": 130 },
+      "fpsMin": { "min": 55, "devMin": null },
+      "longAnimationFramesPer2s": { "max": 1, "devMax": 2 },
+      "infiniteAnimationCount": { "max": 2, "devMax": 3 }
+    },
+    "buy-popup": {
+      "backdropFilterCount": { "max": 2, "devMax": 3 },
+      "paintCountPer2s": { "max": 25, "devMax": 35 },
+      "rafCallsPerSec": { "max": 65, "devMax": 130 },
+      "fpsMin": { "min": 50, "devMin": null },
+      "longAnimationFramesPer2s": { "max": 2, "devMax": 3 },
+      "infiniteAnimationCount": { "max": 3, "devMax": 4 }
+    },
+    "during-draw": {
+      "backdropFilterCount": { "max": 2, "devMax": 3 },
+      "paintCountPer2s": { "max": 40, "devMax": 50 },
+      "rafCallsPerSec": { "max": 65, "devMax": 130 },
+      "fpsMin": { "min": 45, "devMin": null },
+      "longAnimationFramesPer2s": { "max": 3, "devMax": 4 },
+      "infiniteAnimationCount": { "max": 5, "devMax": 6 }
+    }
+  },
+  "notes": {
+    "backdropFilterCount": "Strengere (max 2 vs 3) — backdrop-filter-blur er hovedblink-årsak på svake GPU-er.",
+    "paintCountPer2s": "Ca 30% strengere enn dev-baseline — paint-stormer dominerer pilot-hardware-degradering.",
+    "rafCallsPerSec": "60Hz cap + litt headroom (65). Dev-baseline var 130 fordi dev-MacBook kjører 120Hz ProMotion.",
+    "fpsMin": "Ny metric — måler observert FPS (fra PerformanceObserver long-animation-frame). Strengt for idle (55), mildere under draw (45) fordi ball-animasjoner skaper naturlig rAF-bursts.",
+    "longAnimationFramesPer2s": "Nye frames >50ms. På pilot-hardware vil hver >50ms-frame oppleves som visuelt hakk."
+  }
+}

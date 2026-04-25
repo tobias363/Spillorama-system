@@ -137,6 +137,10 @@ export const routes: RouteDef[] = [
   { path: "/ResponsibleGameing", titleKey: "responsible_gaming", roles: ["admin", "super-admin"] },
   { path: "/LinksofOtherAgencies", titleKey: "links_of_other_agencies", roles: ["admin", "super-admin"] },
   { path: "/settings", titleKey: "settings", roles: ["admin", "super-admin"] },
+  // BIN-720 — Profile Settings (selv-service). Tilgjengelig for spiller/player-
+  // roller (og admin for debug). Ingen role-gate her — backend enforcer tilgangs-
+  // regler (må ha PLAYER-role + wallet).
+  { path: "/profile/settings", titleKey: "profile_settings" },
   // BIN-677 — settings sub-pages (maintenance). Edit-route via hash-regex.
   { path: "/maintenance", titleKey: "maintenance_list_title", roles: ["admin", "super-admin"] },
   { path: "/maintenance/new", titleKey: "maintenance_new_window", roles: ["admin", "super-admin"] },
@@ -160,6 +164,8 @@ export const routes: RouteDef[] = [
   { path: "/agent/physical-cashout", titleKey: "agent_physical_cashout_title", roles: ["agent", "hall-operator"] },
   // Agent-portal Check-for-Bingo (P0 pilot-blokker).
   { path: "/agent/bingo-check", titleKey: "agent_check_bingo", roles: ["agent", "hall-operator"] },
+  // BIN-17.32 — Past Game Winning History (agent-view).
+  { path: "/agent/past-winning-history", titleKey: "past_game_winning_history", roles: ["agent", "hall-operator"] },
   // PR-B1: cash-inout sub-pages. Exact matches only — use query string for
   // row-scoped deep-links (e.g. `#/agent/sellPhysicalTickets?gameId=X`).
   { path: "/agent/sellPhysicalTickets", titleKey: "register_sold_ticket", roles: ["agent"] },

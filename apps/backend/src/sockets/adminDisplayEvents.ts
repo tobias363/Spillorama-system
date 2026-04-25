@@ -193,4 +193,46 @@ export function emitHallTvUrl(io: Server, hallId: string, tvUrl: string | null):
   io.to(`hall:${hallId}:display`).emit("hall:tv-url", { hallId, tvUrl });
 }
 
+/**
+ * Task 1.7: TV-fan-out for `game1:phase-won`.
+ *
+ * `/admin-game1`-namespace sender eventet til master-konsollen i `game1:<id>`-
+ * rom (se `adminGame1Namespace.onPhaseWon`). TV-skjermer er koblet til
+ * DEFAULT-namespace via `admin-display:subscribe` og sitter i rom
+ * `hall:<hallId>:display`. For at banner "BINGO! Rad 1" skal dukke opp på
+ * alle TVer i deltakende haller, speiler vi derfor eventet til hvert hall-
+ * display-rom her. Payload er uendret — klient-kontrakt matcher samme
+ * `Game1AdminPhaseWonPayload`-schema.
+ */
+export function emitPhaseWonToHallDisplays(
+  io: Server,
+  hallIds: readonly string[],
+  payload: unknown
+): void {
+  for (const hallId of hallIds) {
+    if (!hallId) continue;
+    io.to(`hall:${hallId}:display`).emit("game1:phase-won", payload);
+  }
+}
+
+/**
+ * Task 1.7: TV-fan-out for `game1:hall-status-update` (fra HS-PR #451).
+ * Samme idé som `emitPhaseWonToHallDisplays`: eventet er master-UI-sentrert,
+ * men TVene skal også reagere på fargeendringer (🔴/🟠/🟢) slik at badge-
+ * stripen oppdaterer seg live uten å vente på neste poll.
+ *
+ * HS-PR bruker allerede `io.to('hall:<id>:display').emit('game1:ready-status-update', …)`
+ * for den legacy-event-navnet. Dette eventet er den nye Task-HS-varianten
+ * (se HS Agent-rapport); emittes fra HS-routeren når scan/ready endrer
+ * fargen. Denne helperen brukes der.
+ */
+export function emitHallStatusUpdateToHallDisplay(
+  io: Server,
+  hallId: string,
+  payload: unknown
+): void {
+  if (!hallId) return;
+  io.to(`hall:${hallId}:display`).emit("game1:hall-status-update", payload);
+}
+
 type DisplaySocketHandlerSnapshot = DisplayStateSnapshot;

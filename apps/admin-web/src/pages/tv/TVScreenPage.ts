@@ -11,21 +11,52 @@
  * banner (Patterns_Txt) og current/next-game sub-header
  * (Current_Game_Name_Txt + Next_Game_Name_Txt fra BingoHallDisplay.cs).
  *
- * Voice-valg persisteres i localStorage per hall (`tv_voice_<hallId>`).
- * Audio-filene eksisterer ikke ennå — dropdownen er placeholder til
- * separat voice-pack-feature.
+ * Voice-valg (wireframe PDF 14, 2026-04-24): hentes fra backend ved mount
+ * (`GET /api/tv/:hallId/voice`) og refreshes på `tv:voice-changed`-event
+ * som broadcasts av admin via `hall:<id>:display`-rommet. TV-klienten
+ * spiller ball-utrop fra `/assets/tv-voices/<voice>/<ball>.mp3` (filene
+ * finnes ikke i repo ennå — se README for manglende assets).
+ *
+ * Task 1.7 (2026-04-24): badge-stripe for deltakende haller + phase-won-
+ * banner. Rendering:
+ *   - Nederst på TVen vises `participatingHalls` som 🔴/🟠/🟢-badges.
+ *   - Ved `game1:phase-won`-socket-event vises en 3s fullscreen banner
+ *     "BINGO! Rad N" over ball-visning (CSS freezer animasjoner).
+ *   - Ved `game1:hall-status-update` oppdateres én badge uten å vente
+ *     på neste poll.
  */
 
 import "./tv-screen.css";
+import { io, type Socket } from "socket.io-client";
 import {
   fetchTvState,
+  fetchTvVoice,
   type TvGameState,
+  type TvVoice,
+  type TvParticipatingHall,
+  type TvHallColor,
 } from "../../api/tv-screen.js";
+import {
+  connectTvScreenSocket,
+  type TvScreenSocketHandle,
+} from "./tvScreenSocket.js";
 
 const POLL_INTERVAL_MS = 2000;
 const WINNERS_SWITCH_DELAY_MS = 30_000;
-const VOICES = ["voice-1", "voice-2", "voice-3"] as const;
-type Voice = (typeof VOICES)[number];
+/** Task 1.7: banner vises i 3s per legacy spec + audit §6 Task 1.7. */
+const PHASE_WON_BANNER_MS = 3000;
+const VOICE_OPTIONS: ReadonlyArray<{ value: TvVoice; label: string }> = [
+  { value: "voice1", label: "Voice 1" },
+  { value: "voice2", label: "Voice 2" },
+  { value: "voice3", label: "Voice 3" },
+];
+
+interface PhaseWonBannerState {
+  patternName: string;
+  phase: number;
+  /** Monotonic sequence for debugging + test hooks (resetes ved mount). */
+  sequence: number;
+}
 
 interface ActiveInstance {
   hallId: string;
@@ -34,12 +65,33 @@ interface ActiveInstance {
   switchTimeoutId: number | null;
   previousStatus: TvGameState["status"] | null;
   destroyed: boolean;
+  /** Aktiv voice-pack — set når fetchTvVoice resolverer eller endret av socket-event. */
+  voice: TvVoice;
+  /** Cache med pre-lastede Audio-objekter, keyed på ball-nummer (1..75). */
+  audioCache: Map<number, HTMLAudioElement>;
+  /** Voice-socket for live voice-updates (PR #477). Hvis connect feiler, fall-back til polling. */
+  voiceSocket: Socket | null;
+  /** Task 1.7: socket-handle for live ready-status/banner. Null hvis disabled. */
+  socket: TvScreenSocketHandle | null;
+  /** Task 1.7: kø av phase-won-events (unngå overlap ved rask rekkefølge). */
+  bannerQueue: PhaseWonBannerState[];
+  bannerTimeoutId: number | null;
+  bannerSequenceCounter: number;
+  /** Task 1.7: siste kjente state — brukes til å re-rendre ved socket-delta. */
+  lastState: TvGameState | null;
+  /** Task 1.7: live-override på badge-farger fra socket-events. */
+  liveHallColors: Map<string, TvHallColor>;
 }
 
 let active: ActiveInstance | null = null;
 
 /** Mount TV-screen. Caller skal garantere at root er tomt. */
-export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: string): void {
+export function mountTvScreenPage(
+  root: HTMLElement,
+  hallId: string,
+  tvToken: string,
+  options: { disableSocket?: boolean } = {}
+): void {
   unmountTvScreenPage();
   root.innerHTML = `
     <div class="tv-host" data-testid="tv-screen-host">
@@ -47,28 +99,24 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
       <div class="tv-subheader" id="tv-subheader" data-testid="tv-subheader"></div>
       <div class="tv-voice-select">
         <label for="tv-voice">Voice:</label>
-        <select id="tv-voice" data-testid="tv-voice-select">
-          <option value="voice-1">Voice 1</option>
-          <option value="voice-2">Voice 2</option>
-          <option value="voice-3">Voice 3</option>
+        <select id="tv-voice" data-testid="tv-voice-select" disabled>
+          ${VOICE_OPTIONS.map(
+            (o) => `<option value="${o.value}">${o.label}</option>`
+          ).join("")}
         </select>
+        <span class="tv-voice-note" data-testid="tv-voice-note">Stemme styres av admin</span>
       </div>
       <div id="tv-body" class="tv-loading">Laster...</div>
+      <div id="tv-halls-stripe" class="tv-halls-stripe" data-testid="tv-halls-stripe"></div>
+      <div id="tv-phase-banner" class="tv-phase-banner tv-phase-banner-hidden" data-testid="tv-phase-banner" aria-hidden="true"></div>
     </div>
   `;
 
-  // Voice select: restore from localStorage + persist på endring.
-  const voiceSelect = root.querySelector<HTMLSelectElement>("#tv-voice");
-  if (voiceSelect) {
-    const stored = readVoice(hallId);
-    voiceSelect.value = stored;
-    voiceSelect.addEventListener("change", () => {
-      writeVoice(hallId, voiceSelect.value as Voice);
-    });
-  }
-
   const bodyEl = root.querySelector<HTMLElement>("#tv-body")!;
   const subHeaderEl = root.querySelector<HTMLElement>("#tv-subheader")!;
+  const voiceSelect = root.querySelector<HTMLSelectElement>("#tv-voice");
+  const hallsStripeEl = root.querySelector<HTMLElement>("#tv-halls-stripe")!;
+  const phaseBannerEl = root.querySelector<HTMLElement>("#tv-phase-banner")!;
 
   const instance: ActiveInstance = {
     hallId,
@@ -77,16 +125,79 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
     switchTimeoutId: null,
     previousStatus: null,
     destroyed: false,
+    voice: "voice1",
+    audioCache: new Map(),
+    voiceSocket: null,
+    socket: null,
+    bannerQueue: [],
+    bannerTimeoutId: null,
+    bannerSequenceCounter: 0,
+    lastState: null,
+    liveHallColors: new Map(),
   };
   active = instance;
+
+  // Fetch initial voice config + seed audio cache. Fail-safe: fallback til
+  // voice1 hvis endepunktet er nede, TV må alltid kunne spille noe.
+  void (async () => {
+    try {
+      const voice = await fetchTvVoice(hallId);
+      if (instance.destroyed) return;
+      applyVoice(instance, voice, voiceSelect);
+    } catch {
+      if (instance.destroyed) return;
+      applyVoice(instance, "voice1", voiceSelect);
+    }
+  })();
+
+  // Socket subscription for live voice-updates. Admin-siden emitter
+  // `tv:voice-changed` til hall:<id>:display når operatoren endrer stemme;
+  // vi joiner dét rommet via `admin-display:login` + `admin-display:subscribe`
+  // hvis tvToken også er gyldig som display-token. Hvis login feiler (token
+  // er TV-URL-token, ikke display-token), fall vi tilbake til socket-løs
+  // modus — voice-endringer blir da bare synlig ved page-reload eller på
+  // neste poll av /voice-endepunktet.
+  if (!options.disableSocket) {
+    try {
+      const voiceSocket = io(window.location.origin, {
+        transports: ["websocket", "polling"],
+        reconnection: true,
+      });
+      instance.voiceSocket = voiceSocket;
+      voiceSocket.on("tv:voice-changed", (payload: { hallId?: string; voice?: string }) => {
+        if (instance.destroyed) return;
+        if (!payload || payload.hallId !== hallId) return;
+        const v = payload.voice;
+        if (v !== "voice1" && v !== "voice2" && v !== "voice3") return;
+        applyVoice(instance, v, voiceSelect);
+      });
+      voiceSocket.on("connect", () => {
+        // Forsøk subscribe via tvToken som display-token. Feil ignoreres —
+        // vi kan fortsatt motta rom-bredde events via polling fallback.
+        voiceSocket.emit("admin-display:login", { token: tvToken }, (_resp: unknown) => {
+          voiceSocket.emit("admin-display:subscribe", { hallId }, () => {});
+        });
+      });
+    } catch {
+      // socket.io-client finnes kanskje ikke i test-miljø — fortsett uten live-oppdatering.
+    }
+  }
 
   const tick = async (): Promise<void> => {
     if (instance.destroyed) return;
     try {
       const state = await fetchTvState(hallId, tvToken);
       if (instance.destroyed) return;
+      instance.lastState = state;
+      // Poll reset'er live-colors (autoritativ fra server).
+      instance.liveHallColors.clear();
       renderSubHeader(subHeaderEl, state);
       renderState(bodyEl, state);
+      // Hvis vi har en ny ball (lastBall endret), spill voice-utropet.
+      if (state.currentGame?.lastBall != null) {
+        playBallAudio(instance, state.currentGame.lastBall);
+      }
+      renderHallsStripe(hallsStripeEl, state.participatingHalls, instance.liveHallColors);
       // Auto-switch til winners-siden når siste game er ended. Hopper bare én
       // gang per transition (guard på previousStatus) så vi ikke starter
       // nye timers før vi har vært tilbake til drawing/waiting.
@@ -103,6 +214,45 @@ export function mountTvScreenPage(root: HTMLElement, hallId: string, tvToken: st
   // Start immediate + interval.
   void tick();
   instance.intervalId = window.setInterval(() => void tick(), POLL_INTERVAL_MS);
+
+  // Task 1.7: socket for live-oppdateringer. Kan disables i tester så vi
+  // slipper socket.io-client-fetch.
+  if (!options.disableSocket) {
+    try {
+      instance.socket = connectTvScreenSocket({
+        hallId,
+        tvToken,
+        handlers: {
+          onHallStatusUpdate: (payload) => {
+            if (instance.destroyed) return;
+            if (payload.color) {
+              instance.liveHallColors.set(payload.hallId, payload.color);
+            }
+            // Re-render kun stripen — resten av state forblir (fra poll).
+            if (instance.lastState) {
+              renderHallsStripe(
+                hallsStripeEl,
+                instance.lastState.participatingHalls,
+                instance.liveHallColors
+              );
+            }
+          },
+          onPhaseWon: (payload) => {
+            if (instance.destroyed) return;
+            enqueuePhaseWonBanner(instance, phaseBannerEl, bodyEl, {
+              patternName: payload.patternName,
+              phase: payload.phase,
+              sequence: ++instance.bannerSequenceCounter,
+            });
+          },
+        },
+      });
+    } catch (err) {
+      // Socket er opt-in — TV fortsetter å polle uansett.
+      // eslint-disable-next-line no-console
+      console.warn("[tv] socket init failed — polling-only mode", err);
+    }
+  }
 }
 
 export function unmountTvScreenPage(): void {
@@ -110,7 +260,58 @@ export function unmountTvScreenPage(): void {
   active.destroyed = true;
   if (active.intervalId) window.clearInterval(active.intervalId);
   if (active.switchTimeoutId) window.clearTimeout(active.switchTimeoutId);
+  if (active.bannerTimeoutId) window.clearTimeout(active.bannerTimeoutId);
+  if (active.voiceSocket) {
+    try { active.voiceSocket.disconnect(); } catch { /* no-op */ }
+  }
+  if (active.socket) {
+    try {
+      active.socket.dispose();
+    } catch {
+      // ignore
+    }
+  }
+  active.audioCache.clear();
   active = null;
+}
+
+/** Last ned + cache en <audio> for hver ball i valgt voice-pack. */
+function applyVoice(instance: ActiveInstance, voice: TvVoice, select: HTMLSelectElement | null): void {
+  instance.voice = voice;
+  instance.audioCache.clear();
+  if (select) select.value = voice;
+}
+
+/**
+ * Spill av ball-utrop for en gitt ball. Lat-laster Audio-elementet ved
+ * første forespørsel og cacher det så re-draws (samme ball) ikke trigger
+ * nytt nettverksrundtur. Feil ignoreres — TV-rendering skal ikke blokkeres
+ * av manglende audio-filer (som i dag; se README).
+ */
+let lastPlayedBall: { ball: number; hallId: string } | null = null;
+function playBallAudio(instance: ActiveInstance, ball: number): void {
+  // Dedup: samme ball to ganger på rad spilles ikke igjen (polling kan
+  // returnere samme lastBall over flere ticks).
+  if (lastPlayedBall && lastPlayedBall.ball === ball && lastPlayedBall.hallId === instance.hallId) {
+    return;
+  }
+  lastPlayedBall = { ball, hallId: instance.hallId };
+  try {
+    let audio = instance.audioCache.get(ball);
+    if (!audio) {
+      // Filene serveres statisk av backend: apps/backend/public/tv-voices/
+      // (`app.use(express.static(publicDir))` plukker dem opp). De er ikke
+      // sjekket inn i repo ennå — se README i voice-kat. for manglende
+      // assets; TV-rendering skal ikke blokkeres av fravær.
+      audio = new Audio(`/tv-voices/${instance.voice}/${ball}.mp3`);
+      audio.preload = "auto";
+      instance.audioCache.set(ball, audio);
+    }
+    audio.currentTime = 0;
+    void audio.play().catch(() => { /* Audio-fil mangler — ignorer. */ });
+  } catch {
+    // AudioContext-feil i gamle nettlesere — ignorer.
+  }
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────
@@ -257,6 +458,106 @@ function renderError(target: HTMLElement, err: unknown): void {
   target.innerHTML = `<div>TV endpoint error: ${escapeHtml(msg)}</div>`;
 }
 
+/**
+ * Task 1.7: badge-stripe nederst på TVen som viser deltakende haller med
+ * fargekode. Kildedata fra `TvGameState.participatingHalls`; socket-overrides
+ * i `liveHallColors` applyed her for å reflektere live fargeendringer uten
+ * å vente på neste poll.
+ *
+ * Tom liste → stripen skjules helt (empty-state ingen UI-visuell støy).
+ */
+function renderHallsStripe(
+  target: HTMLElement,
+  halls: TvParticipatingHall[],
+  liveColors: Map<string, TvHallColor>
+): void {
+  if (!halls || halls.length === 0) {
+    target.innerHTML = "";
+    target.classList.add("tv-halls-stripe-hidden");
+    return;
+  }
+  target.classList.remove("tv-halls-stripe-hidden");
+  const items = halls.map((h) => {
+    const color = liveColors.get(h.hallId) ?? h.color;
+    return `
+      <div class="tv-hall-badge tv-hall-badge-${color}"
+           data-testid="tv-hall-badge"
+           data-hall-id="${escapeHtml(h.hallId)}"
+           data-color="${color}"
+           title="${escapeHtml(h.hallName)} — ${h.playerCount} spillere">
+        <span class="tv-hall-badge-dot"></span>
+        <span class="tv-hall-badge-name">${escapeHtml(h.hallName)}</span>
+        <span class="tv-hall-badge-count" data-testid="tv-hall-badge-count">
+          ${h.playerCount}
+        </span>
+      </div>
+    `;
+  });
+  target.innerHTML = items.join("");
+}
+
+/**
+ * Task 1.7: phase-won-banner-flyt.
+ *
+ * Sekvensen:
+ *   1. `enqueuePhaseWonBanner` legger event i køen. Hvis ingen banner
+ *      vises, starter vi umiddelbart.
+ *   2. `showNextBanner` rendrer banner, freezer ball-grid via
+ *      `tv-phase-banner-active`-class på body'en, og setter timeout til
+ *      `PHASE_WON_BANNER_MS`.
+ *   3. Etter timeout fjernes banner, classen fjernes, og neste banner
+ *      i køen vises om tilgjengelig.
+ *
+ * Edge-case: to phase-won events innen 3s vises sekvensielt (ikke
+ * overlappet) — user ser hver banner tydelig.
+ */
+function enqueuePhaseWonBanner(
+  instance: ActiveInstance,
+  bannerEl: HTMLElement,
+  bodyEl: HTMLElement,
+  entry: PhaseWonBannerState
+): void {
+  instance.bannerQueue.push(entry);
+  if (instance.bannerTimeoutId === null) {
+    showNextBanner(instance, bannerEl, bodyEl);
+  }
+}
+
+function showNextBanner(
+  instance: ActiveInstance,
+  bannerEl: HTMLElement,
+  bodyEl: HTMLElement
+): void {
+  const next = instance.bannerQueue.shift();
+  if (!next) {
+    // Ingen flere i køen — rydd opp.
+    bannerEl.classList.add("tv-phase-banner-hidden");
+    bannerEl.setAttribute("aria-hidden", "true");
+    bannerEl.innerHTML = "";
+    bodyEl.classList.remove("tv-phase-banner-active");
+    return;
+  }
+  bannerEl.classList.remove("tv-phase-banner-hidden");
+  bannerEl.setAttribute("aria-hidden", "false");
+  bannerEl.setAttribute("data-phase", String(next.phase));
+  bannerEl.innerHTML = `
+    <div class="tv-phase-banner-inner">
+      <div class="tv-phase-banner-title" data-testid="tv-phase-banner-title">BINGO!</div>
+      <div class="tv-phase-banner-pattern" data-testid="tv-phase-banner-pattern">
+        ${escapeHtml(next.patternName)}
+      </div>
+    </div>
+  `;
+  // Freeze ball-grid animasjoner mens banner vises.
+  bodyEl.classList.add("tv-phase-banner-active");
+
+  instance.bannerTimeoutId = window.setTimeout(() => {
+    instance.bannerTimeoutId = null;
+    if (instance.destroyed) return;
+    showNextBanner(instance, bannerEl, bodyEl);
+  }, PHASE_WON_BANNER_MS);
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function lastFiveBallsHtml(balls: number[]): string {
@@ -331,28 +632,7 @@ function scheduleWinnersSwitch(instance: ActiveInstance): void {
   }, WINNERS_SWITCH_DELAY_MS);
 }
 
-// ── Voice-valg persistering (localStorage per hall) ───────────────────
-
-function voiceKey(hallId: string): string {
-  return `tv_voice_${hallId}`;
-}
-
-function readVoice(hallId: string): Voice {
-  try {
-    const raw = window.localStorage.getItem(voiceKey(hallId));
-    if (raw && (VOICES as readonly string[]).includes(raw)) {
-      return raw as Voice;
-    }
-  } catch {
-    // localStorage kan være blokkert i kiosk-modus — fall tilbake til default.
-  }
-  return "voice-1";
-}
-
-function writeVoice(hallId: string, voice: Voice): void {
-  try {
-    window.localStorage.setItem(voiceKey(hallId), voice);
-  } catch {
-    // No-op — ikke kritisk.
-  }
-}
+// Voice-valg per hall: nå server-managed (se applyVoice ovenfor).
+// Tidligere localStorage-bakte readVoice/writeVoice er fjernet fordi
+// wireframe PDF 14 krever at admin (ikke TV-operatoren foran skjermen)
+// eier valget, og at endringer slår inn på alle TV-er i hallen samtidig.

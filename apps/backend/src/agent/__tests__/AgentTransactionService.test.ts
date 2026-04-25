@@ -9,7 +9,11 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AgentTransactionService, CANCEL_SALE_WINDOW_MS } from "../AgentTransactionService.js";
+import {
+  AgentTransactionService,
+  CANCEL_SALE_WINDOW_MS,
+  AGENT_USER_CASH_AML_THRESHOLD_NOK,
+} from "../AgentTransactionService.js";
 import { AgentService } from "../AgentService.js";
 import { AgentShiftService } from "../AgentShiftService.js";
 import { InMemoryAgentStore } from "../AgentStore.js";
@@ -795,4 +799,216 @@ test("listTransactionsForCurrentShift returnerer kun denne shifts tx-er", async 
   // Begge tx-er i listen (order ikke garantert ved identiske timestamps).
   const amounts = today.map((t) => t.amount).sort();
   assert.deepEqual(amounts, [50, 75]);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WIREFRAME 17.7 + 17.8: AGENT ADD-MONEY / WITHDRAW — REGISTERED USER
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("addMoneyToUser happy path — Cash krediterer wallet + amlFlagged=false", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  const result = await ctx.service.addMoneyToUser({
+    agentUserId: "a1",
+    targetUserId: "p1",
+    amount: 500,
+    paymentType: "Cash",
+    clientRequestId: "req-add-1",
+  });
+  assert.equal(result.transaction.actionType, "CASH_IN");
+  assert.equal(result.transaction.paymentMethod, "CASH");
+  assert.equal(result.transaction.amount, 500);
+  assert.equal(result.amlFlagged, false);
+  assert.equal(await ctx.wallet.getBalance("wallet-p1"), 500);
+});
+
+test("addMoneyToUser — Card mapper til CARD-paymentMethod", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  const result = await ctx.service.addMoneyToUser({
+    agentUserId: "a1",
+    targetUserId: "p1",
+    amount: 200,
+    paymentType: "Card",
+    clientRequestId: "req-add-2",
+  });
+  assert.equal(result.transaction.paymentMethod, "CARD");
+});
+
+test("addMoneyToUser — beløp over AML-terskel gir amlFlagged=true", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  const result = await ctx.service.addMoneyToUser({
+    agentUserId: "a1",
+    targetUserId: "p1",
+    amount: AGENT_USER_CASH_AML_THRESHOLD_NOK + 1,
+    paymentType: "Cash",
+    clientRequestId: "req-add-aml",
+  });
+  assert.equal(result.amlFlagged, true);
+});
+
+test("addMoneyToUser avviser hvis target er AGENT (ikke PLAYER)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedAgent("a2", "hall-a"); // annen agent, ikke en PLAYER
+  await assert.rejects(
+    ctx.service.addMoneyToUser({
+      agentUserId: "a1",
+      targetUserId: "a2",
+      amount: 100,
+      paymentType: "Cash",
+      clientRequestId: "req-add-forbidden",
+    }),
+    (err) => err instanceof DomainError && err.code === "TARGET_NOT_PLAYER",
+  );
+});
+
+test("withdrawFromUser happy path — debiterer wallet + daily-balance-cover", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  // Agenten må ha kontanter i shift før uttak (daily-balance-check).
+  await ctx.service.cashIn({
+    agentUserId: "a1", playerUserId: "p1", amount: 1_000,
+    paymentMethod: "CASH", clientRequestId: "r-seed",
+  });
+  const result = await ctx.service.withdrawFromUser({
+    agentUserId: "a1",
+    targetUserId: "p1",
+    amount: 300,
+    paymentType: "Cash",
+    clientRequestId: "req-wd-1",
+  });
+  assert.equal(result.transaction.actionType, "CASH_OUT");
+  assert.equal(result.transaction.paymentMethod, "CASH");
+  assert.equal(result.transaction.amount, 300);
+  assert.equal(result.amlFlagged, false);
+  assert.equal(await ctx.wallet.getBalance("wallet-p1"), 700);
+});
+
+test("withdrawFromUser feiler hvis bruker ikke har nok balance", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  // Agenten har kontanter i shift (cash-in 100), men spilleren har bare 50.
+  await seedPlayerBalance(ctx, "p1", 50);
+  await ctx.service.cashIn({
+    agentUserId: "a1", playerUserId: "p1", amount: 100,
+    paymentMethod: "CASH", clientRequestId: "r-seed",
+  });
+  // Etter cash-in har spilleren 150, men vi prøver å trekke 200. Enten
+  // INSUFFICIENT_BALANCE (spiller-wallet < amount) eller
+  // INSUFFICIENT_DAILY_BALANCE (shift-kassa < amount) er akseptabel
+  // feilkode — begge beskytter mot samme problem.
+  await assert.rejects(
+    ctx.service.withdrawFromUser({
+      agentUserId: "a1",
+      targetUserId: "p1",
+      amount: 200,
+      paymentType: "Cash",
+      clientRequestId: "req-wd-overdraw",
+    }),
+    (err) =>
+      err instanceof DomainError &&
+      (err.code === "INSUFFICIENT_BALANCE" || err.code === "INSUFFICIENT_DAILY_BALANCE"),
+  );
+});
+
+test("withdrawFromUser > AML-terskel uten requireConfirm gir CONFIRMATION_REQUIRED", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  await seedPlayerBalance(ctx, "p1", AGENT_USER_CASH_AML_THRESHOLD_NOK + 500);
+  // AML-guarden sparker før daily-balance-guarden — vi trenger derfor
+  // ingen seed av agent-shift-daily-balance her. CONFIRMATION_REQUIRED
+  // bekrefter at service-laget avslår uttaket før det når wallet-laget.
+  await assert.rejects(
+    ctx.service.withdrawFromUser({
+      agentUserId: "a1",
+      targetUserId: "p1",
+      amount: AGENT_USER_CASH_AML_THRESHOLD_NOK + 1,
+      paymentType: "Cash",
+      clientRequestId: "req-wd-aml",
+    }),
+    (err) => err instanceof DomainError && err.code === "CONFIRMATION_REQUIRED",
+  );
+});
+
+test("withdrawFromUser > AML-terskel med requireConfirm=true lykkes + amlFlagged=true", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p1", "hall-a");
+  await seedPlayerBalance(ctx, "p1", AGENT_USER_CASH_AML_THRESHOLD_NOK + 500);
+  // Seed agent-shift-daily-balance så CASH-uttak har dekning.
+  const seedTx = await ctx.service.cashIn({
+    agentUserId: "a1", playerUserId: "p1", amount: 100,
+    paymentMethod: "CASH", clientRequestId: "r-seed",
+  });
+  await ctx.store.applyShiftCashDelta(seedTx.shiftId, {
+    dailyBalance: AGENT_USER_CASH_AML_THRESHOLD_NOK + 500,
+  });
+  const result = await ctx.service.withdrawFromUser({
+    agentUserId: "a1",
+    targetUserId: "p1",
+    amount: AGENT_USER_CASH_AML_THRESHOLD_NOK + 1,
+    paymentType: "Cash",
+    clientRequestId: "req-wd-aml-ok",
+    requireConfirm: true,
+  });
+  assert.equal(result.amlFlagged, true);
+  assert.equal(result.transaction.amount, AGENT_USER_CASH_AML_THRESHOLD_NOK + 1);
+});
+
+test("withdrawFromUser avviser hvis target er AGENT (ikke PLAYER)", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  await ctx.seedAgent("a2", "hall-a");
+  await assert.rejects(
+    ctx.service.withdrawFromUser({
+      agentUserId: "a1",
+      targetUserId: "a2",
+      amount: 100,
+      paymentType: "Cash",
+      clientRequestId: "req-wd-forbidden",
+    }),
+    (err) => err instanceof DomainError && err.code === "TARGET_NOT_PLAYER",
+  );
+});
+
+test("searchUsers returnerer PLAYER-rader med wallet-saldo — maks 10", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p-alfa", "hall-a");
+  ctx.seedPlayer("p-bravo", "hall-a");
+  await seedPlayerBalance(ctx, "p-alfa", 300);
+  await seedPlayerBalance(ctx, "p-bravo", 150);
+  const rows = await ctx.service.searchUsers("a1", "player");
+  assert.equal(rows.length, 2);
+  const alfa = rows.find((r) => r.id === "p-alfa");
+  const bravo = rows.find((r) => r.id === "p-bravo");
+  assert.ok(alfa && bravo);
+  assert.equal(alfa!.walletBalance, 300);
+  assert.equal(bravo!.walletBalance, 150);
+});
+
+test("searchUsers returnerer tom liste for whitespace-query", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p-alfa", "hall-a");
+  const rows = await ctx.service.searchUsers("a1", "   ");
+  assert.deepEqual(rows, []);
+});
+
+test("searchUsers ekskluderer spillere i andre haller", async () => {
+  const ctx = makeSetup();
+  await ctx.seedAgent("a1", "hall-a");
+  ctx.seedPlayer("p-alfa", "hall-a");
+  ctx.seedPlayer("p-charlie", "hall-b"); // annen hall
+  const rows = await ctx.service.searchUsers("a1", "player");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.id, "p-alfa");
 });

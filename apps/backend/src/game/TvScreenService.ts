@@ -16,11 +16,19 @@
  *     Full House. Vi speiler dette navngivningsschemaet i TV-UIet.
  *   * Fail-open på tomme haller: en hall uten spill returnerer tomme felt
  *     (ingen 404) slik at TV-skjermen kan stå på med "Waiting for game".
+ *   * Task 1.7 (2026-04-24): `participatingHalls` på `getState`-response
+ *     — deltakende haller med 🔴/🟠/🟢-fargekode så TV kan matche master-
+ *     konsollens badge-stripe. Data hentes via HallStatusPort (adapter til
+ *     `Game1HallReadyService.getHallStatusForGame` fra HS-PR). Fail-open
+ *     hvis porten kaster (HS-tabell mangler) → tom array, ingen 500.
  *
  * Legacy-spec: Admin V1.0 Game 1 - 24.3.2023 s.17 og Admin CR 21.02.2024.
  */
 
 import type { Pool } from "pg";
+import { logger as rootLogger } from "../util/logger.js";
+
+const log = rootLogger.child({ module: "tv-screen-service" });
 
 export interface TvPatternRow {
   /** "Row 1".."Row 4" | "Full House" */
@@ -33,6 +41,22 @@ export interface TvPatternRow {
   prize: number;
   /** true hvis fasen nettopp ble vunnet (current_phase − 1 i state-maskinen). */
   highlighted: boolean;
+}
+
+/**
+ * Task 1.7: farge-semantikk for deltakende hall-badges (Appendix B.5 i
+ * MASTER_HALL_DASHBOARD_GAP_2026-04-24.md). Matcher master-konsollens koder
+ * slik at TV og bingovert-skjerm er visuelt konsistente.
+ */
+export type TvHallColor = "red" | "orange" | "green";
+
+export interface TvParticipatingHall {
+  hallId: string;
+  hallName: string;
+  /** 🔴/🟠/🟢 per Appendix B.5. "red" = 0 spillere / ekskludert. */
+  color: TvHallColor;
+  /** digital + physical tickets solgt — vises i tooltip ved tap/hover. */
+  playerCount: number;
 }
 
 export interface TvGameState {
@@ -48,6 +72,13 @@ export interface TvGameState {
     lastBall: number | null;
   } | null;
   patterns: TvPatternRow[];
+  /**
+   * Task 1.7 (2026-04-24): deltakende haller med fargekode + spillerantall.
+   * Kilde: `Game1HallReadyService.getHallStatusForGame` (HS-PR). Fail-open:
+   * tom array hvis HS-tabell mangler eller porten kaster — TV'en skal ikke
+   * 500'e når HS-infrastrukturen er fraværende (dev/staging uten migrasjoner).
+   */
+  participatingHalls: TvParticipatingHall[];
   /**
    * Bølge 1 (2026-04-23): antall trukne baller så langt. Legacy
    * `txtTotalNumbersWithdrawn` / `Ball_Drawn_Count_Txt` i
@@ -133,18 +164,45 @@ interface GameStateRow {
   draws_completed: number;
 }
 
+/**
+ * Task 1.7: port-grensesnitt som TvScreenService trenger fra
+ * `Game1HallReadyService`. Vi eksporterer portens form (ikke servicen) så
+ * testene kan stubbe uten å dra inn hele DB-stub-maskineriet. Adapteren i
+ * `index.ts` binder dette til `game1HallReadyService.getHallStatusForGame`.
+ *
+ * Hvis porten er `undefined` (HS-PR ikke merget, eller pre-HS-deploy), leverer
+ * TvScreenService tom `participatingHalls`-array — klienten viser da ingen
+ * badge-stripe men øvrig state fungerer uendret.
+ */
+export interface TvHallStatusPort {
+  getHallStatusForGame(gameId: string): Promise<Array<{
+    hallId: string;
+    playerCount: number;
+    excludedFromGame: boolean;
+    color: TvHallColor;
+  }>>;
+}
+
 export interface TvScreenServiceOptions {
   pool: Pool;
   schema?: string;
+  /**
+   * Task 1.7 (2026-04-24): valgfri adapter for hall-status (fargekode +
+   * playerCount). Hvis ikke satt → `participatingHalls = []`. Wiring i
+   * `index.ts` setter denne når HS-PR er merget.
+   */
+  hallStatusPort?: TvHallStatusPort;
 }
 
 export class TvScreenService {
   private readonly pool: Pool;
   private readonly schema: string;
+  private readonly hallStatusPort: TvHallStatusPort | null;
 
   constructor(opts: TvScreenServiceOptions) {
     this.pool = opts.pool;
     this.schema = opts.schema ?? "public";
+    this.hallStatusPort = opts.hallStatusPort ?? null;
   }
 
   /**
@@ -170,6 +228,7 @@ export class TvScreenService {
           nextGame: null,
           countdownToNextGame: null,
           status: "waiting",
+          participatingHalls: [],
         };
       }
       throw err;
@@ -210,6 +269,7 @@ export class TvScreenService {
         nextGame,
         countdownToNextGame: null,
         status: "waiting",
+        participatingHalls: [],
       };
     }
 
@@ -250,6 +310,12 @@ export class TvScreenService {
       };
     }
 
+    // Task 1.7: hent deltakende haller + fargekode fra HS-port. Fail-open:
+    // hvis porten mangler eller kaster (HS-tabell fraværende / DB-feil), logger
+    // vi warn og returnerer tom array. TV skal aldri 500'e pga. fraværende
+    // ready-infrastruktur — kun vise manglende badges.
+    const participatingHalls = await this.loadParticipatingHalls(gameId);
+
     return {
       hall,
       currentGame: {
@@ -266,6 +332,7 @@ export class TvScreenService {
       nextGame,
       countdownToNextGame: countdown,
       status,
+      participatingHalls,
     };
   }
 
@@ -439,6 +506,49 @@ export class TvScreenService {
       [ids]
     );
     return new Map(rows.map((r) => [r.id, r.name]));
+  }
+
+  /**
+   * Task 1.7: hent deltakende haller + fargekode for aktivt spill. Fail-open:
+   *   - Port mangler (HS-PR ikke merget)  → tom array
+   *   - Port kaster (HS-tabell mangler)   → tom array + warn-log
+   *   - Hall-name lookup feiler           → fallback til hallId som navn
+   *
+   * Rekkefølge: sortert alfabetisk på hallName så TV-stripe har stabil
+   * rendering (ellers rerendrer den ved hver poll pga. Set-iterasjon).
+   */
+  private async loadParticipatingHalls(gameId: string): Promise<TvParticipatingHall[]> {
+    if (!this.hallStatusPort) return [];
+    let statuses: Awaited<ReturnType<TvHallStatusPort["getHallStatusForGame"]>>;
+    try {
+      statuses = await this.hallStatusPort.getHallStatusForGame(gameId);
+    } catch (err) {
+      if (this.isMissingTableError(err)) {
+        log.debug({ gameId }, "hall-status table missing — returning empty participatingHalls");
+      } else {
+        log.warn({ err, gameId }, "hall-status port threw — fail-open with empty array");
+      }
+      return [];
+    }
+    if (statuses.length === 0) return [];
+
+    // Navnoppslag — fail-open hvis app_halls ikke finnes.
+    let nameMap = new Map<string, string>();
+    try {
+      nameMap = await this.loadHallNames(statuses.map((s) => s.hallId));
+    } catch (err) {
+      log.warn({ err, gameId }, "hall-names lookup failed — using hallId as name");
+    }
+
+    const halls: TvParticipatingHall[] = statuses.map((s) => ({
+      hallId: s.hallId,
+      hallName: nameMap.get(s.hallId) ?? s.hallId,
+      color: s.color,
+      playerCount: Math.max(0, Math.floor(s.playerCount)),
+    }));
+    // Stabil ordrelogikk: alfabetisk på navn så badge-stripe ikke hopper.
+    halls.sort((a, b) => a.hallName.localeCompare(b.hallName, "nb-NO"));
+    return halls;
   }
 
   private buildPatternRows(

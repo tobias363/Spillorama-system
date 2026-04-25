@@ -1,0 +1,74 @@
+{
+  "extends": ["stylelint-config-standard"],
+  "plugins": ["./scripts/stylelint-rules/no-blink-hazards.mjs"],
+  "rules": {
+    "plugin/no-backdrop-filter-without-allowlist": [
+      true,
+      {
+        "allowedSelectors": [
+          ".popup-backdrop",
+          ".modal-backdrop",
+          ".dialog-overlay",
+          ".g1-overlay-root > div[data-backdrop]",
+          ".spillvett-card",
+          ".spillvett-drawer",
+          ".mandatory-pause-modal"
+        ]
+      }
+    ],
+    "plugin/no-transition-all": true,
+    "plugin/animation-iteration-whitelist": [
+      true,
+      {
+        "allowedNames": [
+          "pattern-sweep",
+          "pattern-won-flash",
+          "ball-spin",
+          "ball-bounce",
+          "tv-active-pattern-pulse"
+        ]
+      }
+    ],
+    "plugin/will-change-whitelist": [
+      true,
+      {
+        "allowedProperties": ["transform", "opacity"]
+      }
+    ],
+    "alpha-value-notation": null,
+    "at-rule-empty-line-before": null,
+    "color-function-alias-notation": null,
+    "color-function-notation": null,
+    "color-hex-length": null,
+    "comment-empty-line-before": null,
+    "declaration-block-no-redundant-longhand-properties": null,
+    "declaration-block-no-shorthand-property-overrides": null,
+    "declaration-block-single-line-max-declarations": null,
+    "font-family-name-quotes": null,
+    "hue-degree-notation": null,
+    "import-notation": null,
+    "keyframes-name-pattern": null,
+    "media-feature-range-notation": null,
+    "no-descending-specificity": null,
+    "no-duplicate-selectors": null,
+    "rule-empty-line-before": null,
+    "selector-class-pattern": null,
+    "selector-id-pattern": null,
+    "selector-not-notation": null,
+    "shorthand-property-no-redundant-values": null,
+    "value-keyword-case": null
+  },
+  "ignoreFiles": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "apps/admin-web/public/legacy-skin/**",
+    "apps/backend/public/legacy-skin/**",
+    "apps/backend/public/web/Build/**",
+    "apps/backend/public/web/TemplateData/**",
+    "apps/backend/public/web/games/**",
+    "assets spingo/**",
+    "Hovedspill 1 nytt design/**",
+    ".claude/**"
+  ]
+}

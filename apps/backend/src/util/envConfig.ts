@@ -58,6 +58,9 @@ export interface BingoRuntimeConfig {
   // GAME1_SCHEDULE PR 4c: auto-draw-tick for Game 1 (fixed seconds-intervall)
   jobGame1AutoDrawEnabled: boolean;
   jobGame1AutoDrawIntervalMs: number;
+  // Task 1.6: master-transfer expiry tick (60s TTL håndheving)
+  jobGame1TransferExpiryTickEnabled: boolean;
+  jobGame1TransferExpiryTickIntervalMs: number;
   // BIN-FCM: FCM push-notification cron (legacy sendGameStartNotifications)
   jobGameStartNotificationsEnabled: boolean;
   jobGameStartNotificationsIntervalMs: number;
@@ -66,6 +69,12 @@ export interface BingoRuntimeConfig {
   jobXmlExportDailyEnabled: boolean;
   jobXmlExportDailyIntervalMs: number;
   jobXmlExportDailyRunAtHour: number;
+  // MASTER_PLAN §2.3 — daglig jackpot-akkumulering (Appendix B.9).
+  // 00:15 lokal tid per PM-spec (unngår midnatt-race med andre daglige jobs).
+  jobJackpotDailyEnabled: boolean;
+  jobJackpotDailyIntervalMs: number;
+  jobJackpotDailyRunAtHour: number;
+  jobJackpotDailyRunAtMinute: number;
   // Storage
   usePostgresBingoAdapter: boolean;
   checkpointConnectionString: string;
@@ -171,6 +180,18 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   // tick-intervallet bare polles. Default 1000 ms matcher "global 1s tick".
   const jobGame1AutoDrawIntervalMs = Math.max(500, parsePositiveIntEnv(process.env.GAME1_AUTO_DRAW_INTERVAL_MS, 1_000));
 
+  // Task 1.6: transfer-expiry-tick — default ON siden 60s TTL på master-
+  // transfer-requests ellers ikke håndheves. Intervall 5s er grovt nok (TTL
+  // er 60s) og billig (én UPDATE per tick).
+  const jobGame1TransferExpiryTickEnabled = parseBooleanEnv(
+    process.env.GAME1_TRANSFER_EXPIRY_TICK_ENABLED,
+    true,
+  );
+  const jobGame1TransferExpiryTickIntervalMs = Math.max(
+    1_000,
+    parsePositiveIntEnv(process.env.GAME1_TRANSFER_EXPIRY_TICK_INTERVAL_MS, 5_000),
+  );
+
   // BIN-FCM: FCM push-notification cron for pre-game-varsler.
   // Legacy kjørte hver 1min (60s). Default ON når FIREBASE_CREDENTIALS_JSON
   // er satt — service-laget kjører i no-op-modus uten credentials, så
@@ -200,6 +221,26 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
   const jobXmlExportDailyRunAtHour = Math.min(
     23,
     Math.max(0, parsePositiveIntEnv(process.env.JOB_XML_EXPORT_DAILY_RUN_AT_HOUR, 23)),
+  );
+
+  // MASTER_PLAN §2.3 — daglig jackpot-akkumulering (Appendix B.9). Default OFF
+  // inntil PM har testet i staging. Polling 15 min, kjører faktisk work kl
+  // 00:15 lokal tid (service er idempotent via last_accumulation_date).
+  const jobJackpotDailyEnabled = parseBooleanEnv(
+    process.env.JOB_JACKPOT_DAILY_ENABLED,
+    false,
+  );
+  const jobJackpotDailyIntervalMs = Math.max(
+    60_000,
+    parsePositiveIntEnv(process.env.JOB_JACKPOT_DAILY_INTERVAL_MS, 15 * 60 * 1000),
+  );
+  const jobJackpotDailyRunAtHour = Math.min(
+    23,
+    Math.max(0, parsePositiveIntEnv(process.env.JOB_JACKPOT_DAILY_RUN_AT_HOUR, 0)),
+  );
+  const jobJackpotDailyRunAtMinute = Math.min(
+    59,
+    Math.max(0, parsePositiveIntEnv(process.env.JOB_JACKPOT_DAILY_RUN_AT_MINUTE, 15)),
   );
 
   // BIN-159/BIN-240: PostgreSQL checkpointing
@@ -252,8 +293,10 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     jobLoyaltyMonthlyResetEnabled, jobLoyaltyMonthlyResetIntervalMs,
     jobGame1ScheduleTickEnabled, jobGame1ScheduleTickIntervalMs,
     jobGame1AutoDrawEnabled, jobGame1AutoDrawIntervalMs,
+    jobGame1TransferExpiryTickEnabled, jobGame1TransferExpiryTickIntervalMs,
     jobGameStartNotificationsEnabled, jobGameStartNotificationsIntervalMs,
     jobXmlExportDailyEnabled, jobXmlExportDailyIntervalMs, jobXmlExportDailyRunAtHour,
+    jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,

@@ -148,6 +148,44 @@ export interface WalletBalance {
   total: number;
 }
 
+/**
+ * BIN-693 Option B: Wallet-reservasjon for pre-round bong-kjøp.
+ *
+ * Mønster: kredittkort-autorisasjon. Reservasjonen holder beløpet "låst"
+ * uten at wallet_accounts.deposit_balance/winnings_balance endres. Ved
+ * commit konverteres reservasjonen til en faktisk wallet-transfer
+ * (samme kode-path som før — ingen endring i compliance-ledger).
+ *
+ * Lifecycle:
+ *   active → committed (startGame)
+ *   active → released (cancel / game-abort)
+ *   active → expired (TTL passert + bakgrunns-tick)
+ */
+export interface WalletReservation {
+  id: string;
+  walletId: string;
+  amount: number;
+  idempotencyKey: string;
+  status: "active" | "released" | "committed" | "expired";
+  roomCode: string;
+  gameSessionId: string | null;
+  createdAt: string;
+  releasedAt: string | null;
+  committedAt: string | null;
+  expiresAt: string;
+}
+
+export interface ReserveOptions {
+  idempotencyKey: string;
+  roomCode: string;
+  /** Default 30 min hvis ikke satt. Ikke brukt for InMemory-adapter (TTL enforced av expiry-tick-service). */
+  expiresAt?: string;
+}
+
+export interface CommitReservationOptions extends TransferOptions {
+  gameSessionId?: string;
+}
+
 export interface WalletAdapter {
   createAccount(input?: CreateWalletAccountInput): Promise<WalletAccount>;
   ensureAccount(accountId: string): Promise<WalletAccount>;
@@ -197,4 +235,48 @@ export interface WalletAdapter {
    */
   transfer(fromAccountId: string, toAccountId: string, amount: number, reason?: string, options?: TransferOptions): Promise<WalletTransferResult>;
   listTransactions(accountId: string, limit?: number): Promise<WalletTransaction[]>;
+
+  // ── BIN-693 Option B: Wallet-reservasjon (optional per adapter) ───────────
+  //
+  // Alle metoder er optional så test-lokale minimal-adaptere slipper å
+  // implementere dem når de kun tester eksisterende wallet-funksjonalitet.
+  // Produksjons-adaptere (InMemory, File, Postgres, Http) impl-erer dem.
+  //
+  // Callers som bruker reserve-flyten (bet:arm, ticket:cancel, startGame)
+  // må kaste eksplisitt feil hvis `adapter.reserve` er undefined — det
+  // betyr at deploye-t adapter ikke støtter Option B-flyten og admin må
+  // velge en annen adapter (fail-fast framfor silent downgrade).
+
+  /** BIN-693: tilgjengelig saldo = total − sum(active reservations). */
+  getAvailableBalance?: (accountId: string) => Promise<number>;
+
+  /** Opprett reservasjon. Kaster INSUFFICIENT_FUNDS / IDEMPOTENCY_MISMATCH. */
+  reserve?: (accountId: string, amount: number, options: ReserveOptions) => Promise<WalletReservation>;
+
+  /**
+   * Øk eksisterende aktiv reservasjon med `extraAmount`. Additive bet:arm-
+   * flyt bruker dette når spiller kjøper flere bonger enn allerede reservert
+   * for rommet. Kaster INSUFFICIENT_FUNDS hvis tilgjengelig saldo er for lav.
+   */
+  increaseReservation?: (reservationId: string, extraAmount: number) => Promise<WalletReservation>;
+
+  /** Frigi reservasjon. Full (amount omitted) eller partial prorata. */
+  releaseReservation?: (reservationId: string, amount?: number) => Promise<WalletReservation>;
+
+  /** Konverter aktiv reservasjon til faktisk transfer. Status → 'committed'. */
+  commitReservation?: (
+    reservationId: string,
+    toAccountId: string,
+    reason: string,
+    options?: CommitReservationOptions,
+  ) => Promise<WalletTransferResult>;
+
+  /** Aktive reservasjoner tilhørende en wallet. */
+  listActiveReservations?: (accountId: string) => Promise<WalletReservation[]>;
+
+  /** Reservasjoner i ett rom (for game-abort release-all). */
+  listReservationsByRoom?: (roomCode: string) => Promise<WalletReservation[]>;
+
+  /** Bakgrunns-tick: marker stale reservations som expired. */
+  expireStaleReservations?: (nowMs: number) => Promise<number>;
 }

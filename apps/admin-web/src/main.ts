@@ -40,6 +40,7 @@ import { isHallRoute, mountHallRoute } from "./pages/hall/index.js";
 import { isGroupHallRoute, mountGroupHallRoute } from "./pages/groupHall/index.js";
 import { isCmsRoute, mountCmsRoute } from "./pages/cms/index.js";
 import { isSettingsRoute, mountSettingsRoute } from "./pages/settings/index.js";
+import { isProfileRoute, mountProfileRoute } from "./pages/profile/index.js";
 import { isSystemInformationRoute, mountSystemInformationRoute } from "./pages/systemInformation/index.js";
 import { isAuditLogRoute, mountAuditLogRoute } from "./pages/auditLog/index.js";
 import { isOtherGamesRoute, mountOtherGamesRoute } from "./pages/otherGames/index.js";
@@ -52,6 +53,7 @@ import { mountAgentCashInOut } from "./pages/agent-portal/AgentCashInOutPage.js"
 import { mountAgentUniqueId } from "./pages/agent-portal/AgentUniqueIdPage.js";
 import { mountAgentPhysicalCashout } from "./pages/agent-portal/AgentPhysicalCashoutPage.js";
 import { mountAgentCheckForBingo } from "./pages/agent-portal/AgentCheckForBingoPage.js";
+import { renderPastGameWinningHistoryPage } from "./pages/agent-portal/PastGameWinningHistoryPage.js";
 import { isTvRoute, mountTvRoute } from "./pages/tv/index.js";
 
 const MAINTENANCE_MODE = false;
@@ -264,6 +266,10 @@ function mountShell(_root: HTMLElement, session: Session): void {
         mountSettingsRoute(container, bare);
         return;
       }
+      if (isProfileRoute(bare)) {
+        mountProfileRoute(container, bare);
+        return;
+      }
       if (isSystemInformationRoute(bare)) {
         mountSystemInformationRoute(container, bare);
         return;
@@ -383,6 +389,7 @@ const AGENT_PORTAL_PATHS = new Set<string>([
   "/agent/unique-id",
   "/agent/physical-cashout",
   "/agent/bingo-check",
+  "/agent/past-winning-history",
 ]);
 
 function renderPage(container: HTMLElement, route: RouteDef, session: Session): void | Promise<void> {
@@ -429,6 +436,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (route.path === "/agent/bingo-check") {
     mountAgentCheckForBingo(container);
+    return;
+  }
+  if (route.path === "/agent/past-winning-history") {
+    void renderPastGameWinningHistoryPage(container);
     return;
   }
   if (isCashInOutRoute(route.path)) {
@@ -547,6 +558,10 @@ function renderPage(container: HTMLElement, route: RouteDef, session: Session): 
   }
   if (isSettingsRoute(route.path)) {
     mountSettingsRoute(container, route.path);
+    return;
+  }
+  if (isProfileRoute(route.path)) {
+    mountProfileRoute(container, route.path);
     return;
   }
   if (isSystemInformationRoute(route.path)) {
