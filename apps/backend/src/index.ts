@@ -220,6 +220,7 @@ import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { createGame1ScheduledEventHandlers } from "./sockets/game1ScheduledEvents.js";
 import { createAdminGame1Namespace } from "./sockets/adminGame1Namespace.js";
 import { createGame1PlayerBroadcaster } from "./sockets/game1PlayerBroadcasterAdapter.js";
+import { createMiniGameSocketWire } from "./sockets/miniGameSocketWire.js";
 import { initSentry, setSocketSentryContext, addBreadcrumb, captureError, flushSentry } from "./observability/sentry.js";
 import { errorReporter } from "./middleware/errorReporter.js";
 import { PostgresChatMessageStore, type ChatMessageStore } from "./store/ChatMessageStore.js";
@@ -2395,11 +2396,24 @@ const registerGame1ScheduledEvents = createGame1ScheduledEventHandlers({
   bindDefaultVariantConfig: (code, slug) => roomState.bindDefaultVariantConfig(code, slug),
 });
 
+// BIN-MYSTERY Gap D: socket-wire for alle 5 M6 mini-games (wheel, chest,
+// colordraft, oddsen, mystery). Før denne wire-up var setBroadcaster aldri
+// kalt → NoopMiniGameBroadcaster i bruk → klient fikk aldri mini_game-events.
+// `mini_game:choice` lyttes også her — uten wire ble klient-valg aldri sendt
+// til orchestrator.handleChoice().
+const miniGameSocketWire = createMiniGameSocketWire({
+  io,
+  orchestrator: game1MiniGameOrchestrator,
+  platformService,
+});
+game1MiniGameOrchestrator.setBroadcaster(miniGameSocketWire.broadcaster);
+
 io.on("connection", (socket: Socket) => {
   registerGameEvents(socket);
   registerAdminDisplayEvents(socket);
   registerAdminHallEvents(socket);
   registerGame1ScheduledEvents(socket);
+  miniGameSocketWire.register(socket);
 });
 
 // GAME1_SCHEDULE PR 4d.3: `/admin-game1`-namespace for master-konsoll
