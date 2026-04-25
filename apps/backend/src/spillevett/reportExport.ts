@@ -21,6 +21,9 @@ function formatDateTime(value: string | undefined): string {
 }
 
 function formatGameType(gameType: string): string {
+  // Spill 1-3 (slug bingo / rocket / monsterbingo) er hovedspill og skal skrive `gameType: "MAIN_GAME"`.
+  // SpinnGo (Spill 4 / game5 / slug `spillorama`) er databingo og skal skrive `gameType: "DATABINGO"`.
+  // Se docs/architecture/SPILLKATALOG.md §2 for klassifiseringen.
   return gameType === "MAIN_GAME" ? "Hovedspill" : "Databingo";
 }
 

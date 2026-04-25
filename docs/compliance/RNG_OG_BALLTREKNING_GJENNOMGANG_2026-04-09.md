@@ -1,6 +1,7 @@
 # Konsulentrapport: RNG, Balltrekning og RTP i Spillorama Bingo
 
 **Dato:** 9. april 2026
+**Presisert:** 2026-04-25 — spill-klassifisering avklart per [SPILLKATALOG.md](../architecture/SPILLKATALOG.md). Spill 1, 2, 3 er hovedspill (live, server-trukket, min 15% til organisasjoner). SpinnGo (Spill 4 / game5 / slug `spillorama`) er databingo (forhåndstrukket per sekvens, min 30% til organisasjoner). RNG-algoritmen i denne rapporten gjelder bade hovedspill og databingo — implementasjonen er den samme.
 **Oppdragsgiver:** Prosjektleder, Spillorama
 **Utarbeidet av:** Senior ledende teknisk konsulent
 **Scope:** Random Number Generation (RNG), balltrekning, billettgenerering, RTP-mekanikk og operasjonell beredskap
@@ -317,7 +318,7 @@ Per-rom mutex med 5-sekunders timeout:
 - Sertifiseringsrapport som bekrefter at output er uniform og uforutsigbar
 - Formalisert mapping mellom RNG og spillutfall
 
-**Risiko:** Norsk regulering for databingo krever at spillsystemet er godkjent. Uten sertifisering kan man ikke dokumentere overfor Lotteritilsynet at trekningen er rettferdig.
+**Risiko:** Norsk regulering for elektroniske bingospill (både hovedspill per pengespillforskriften §11 og databingo) krever at spillsystemet er godkjent. Uten sertifisering kan man ikke dokumentere overfor Lotteritilsynet at trekningen er rettferdig — gjelder både Spill 1-3 (hovedspill) og SpinnGo (databingo).
 
 **Anbefaling:** Engasjer et akkreditert testlaboratorium for å gjennomføre RNG-testing og sertifisering før live-drift.
 

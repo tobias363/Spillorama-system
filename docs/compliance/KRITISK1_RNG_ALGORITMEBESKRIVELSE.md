@@ -1,18 +1,18 @@
-# RNG Algorithm Description — Spillorama Databingo
+# RNG Algorithm Description — Spillorama (SpinnGo Databingo + Spill 1-3 Hovedspill)
 
 **Document purpose:** Formal algorithm description for submission to accredited RNG test laboratory.
-**System:** Spillorama Databingo (60-ball variant)
+**System:** Spillorama bingo platform — three live hovedspill (Spill 1, 2, 3) and one databingo (SpinnGo / Spill 4 / slug `spillorama`). Det er kun SpinnGo som regulatorisk er databingo; Spill 1-3 er hovedspill (live, server-trukket). Se [`docs/architecture/SPILLKATALOG.md`](../architecture/SPILLKATALOG.md).
 **Date:** 10 April 2026
-**Version:** 1.0
+**Version:** 1.0 (presisert 2026-04-25 — opprinnelig dokument omtalte hele systemet som "databingo"; korrekt klassifisering er at SpinnGo er databingo og Spill 1-3 er hovedspill. RNG-algoritmen som beskrives her er identisk for alle fire spill.)
 
 ---
 
 ## 1. System Overview
 
-Spillorama is a server-based databingo system using a 60-ball pool divided into 5 columns of 12 numbers each. The system generates two types of random output:
+Spillorama er et server-basert bingo-system som dekker fire spillvarianter (Spill 1 = 75-ball 5×5, Spill 2 = 60-ball 3×5 raket, Spill 3 = 60-ball 5×5 mønsterbingo, SpinnGo = 60-ball 3×5 databingo med rulett). 60-ball-variantene bruker en pool delt i 5 kolonner med 12 tall hver; 75-ball-varianten bruker 5 kolonner med 15 tall hver. Algoritmen i dette dokumentet gjelder begge varianter — implementasjonen er den samme; kun pool-størrelsen endres. The system generates two types of random output:
 
-1. **Draw sequences** — a shuffled ordering of all 60 balls determining the draw order for a game.
-2. **Player tickets** — 3x5 grids where each column contains 3 randomly selected numbers from its range.
+1. **Draw sequences** — a shuffled ordering of all balls (60 eller 75 avhengig av variant) determining the draw order for a game.
+2. **Player tickets** — 3x5 eller 5x5 grids where each column contains randomly selected numbers from its range.
 
 All randomness is generated server-side. No client-side RNG is used.
 

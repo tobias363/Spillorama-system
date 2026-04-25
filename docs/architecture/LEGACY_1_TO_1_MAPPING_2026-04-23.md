@@ -2,6 +2,8 @@
 
 Kartlegging av funksjonalitet i legacy Spillorama (`spillorama.aistechnolabs.info`) vs. nåværende Spillorama-system, basert på 18 wireframe-PDF-er fra tidligere utviklerteam (2023-03 → 2025-01).
 
+**Spill-klassifisering** (per [SPILLKATALOG.md](SPILLKATALOG.md)): Spill 1, 2, 3 er **hovedspill** (live, server-trukket, min 15% til organisasjoner). SpinnGo (Spill 4 / Game 5 / slug `spillorama`) er **databingo** (forhåndstrukket per sekvens, min 30% til organisasjoner). Game 4 / `themebingo` er deprecated (BIN-496).
+
 **Formål:** etablere komplett oversikt over hva som mangler for 1:1-paritet med legacy, prioritert for pilot (4 haller + Notodden-link).
 
 **Konklusjon:** legacy-systemet er **to sammenvevde systemer** vi må ha oversikt over:
@@ -20,7 +22,7 @@ Uten Agent-portalen kan bingoverten ikke operere en fysisk hall. Dette er nå id
 | 2 | `WF_B_Spillorama Admin V1.0 - Game 1 - 24.3.2023.pdf` | 2023-03-24 | 34 | Game 1 dyp-spec: Schedule, DailySchedule, Sub Games, Manual/Auto, Unique ID, TV Screen |
 | 3 | `WF_B_Spillorama Admin V1.0 - 5.10.2023.pdf` | 2023-10-05 | 13 | Mystery Game, oppdatert meny |
 | 4 | `WF_F_Game 1, 2 & 3_V1.0 - 5.10.2023.pdf` | 2023-10-05 | 5 | Frontend for Game 1/2/3 (spiller) + Mystery |
-| 5 | `WF_B_Spillorama_Game5_Admin_V1.0_23.11.2023.pdf` | 2023-11-23 | 12 | Game 5 (SpinnGo) admin med pattern multipliers |
+| 5 | `WF_B_Spillorama_Game5_Admin_V1.0_23.11.2023.pdf` | 2023-11-23 | 12 | Game 5 / SpinnGo (databingo) admin med pattern multipliers |
 | 6 | `WF_B_SpilloramaBotReport_V1.0_31.01.2024.pdf` | 2024-01-31 | 8 | Bot Game-checkbox + Report filter By Player/By Bot |
 | 7 | `WF_B_Spillorama Admin_CR_21_02_2024_V1.0.pdf` | 2024-02-21 | 11 | Role Management, Close Day, Import Player, Hall Number, Start Game "not ready"-popup |
 | 8 | `WF_F_Game_CR_21.02.2024_V1.1.pdf` | 2024-02-21 | 3 | Frontend login (Username/Phone/NickName), Landing (Open/Start@HH:MM/Closed), Profile Settings (self-exclusion, monthly limit) |
@@ -227,7 +229,7 @@ Legend:
 
 ### Fase 3 — **Nice-to-have**
 
-- Game 5 (SpinnGo) runtime + admin
+- SpinnGo (Spill 4 / Game 5, slug `spillorama`) — databingo runtime + admin
 - Bot Game-runtime + Report filter By Player/By Bot
 - Game 4 pattern-editor (Jackpot/Double H/2L/Pyram/V)
 - Dashboard Top 5 Players-widget

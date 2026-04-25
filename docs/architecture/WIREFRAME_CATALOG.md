@@ -411,14 +411,14 @@ Frontend interfaces for player signup, game selection, and profile management fo
 
 ---
 
-## PDF 6: Game 5 Admin
+## PDF 6: Game 5 Admin (SpinnGo — Databingo)
 
 **Date**: 23.11.2023  
 **Pages**: 40+  
-**Scope**: Admin configuration for Game 5 (SpinnGo with multipliers)
+**Scope**: Admin configuration for Game 5 / SpinnGo (slug `spillorama`) — **Databingo** (forhåndstrukket per sekvens, min 30% til organisasjoner). Spill 1-3 er hovedspill (15%) — se [SPILLKATALOG.md](SPILLKATALOG.md).
 
 ### Purpose
-Admin interface for configuring SpinnGo game variant with spinning multiplier mechanics and pattern-based winnings.
+Admin interface for configuring SpinnGo game variant with spinning multiplier mechanics and pattern-based winnings. SpinnGo er Spillorama's databingo-spill (player-startet, forhåndstrukket sekvens), i kontrast til Spill 1-3 som er live hovedspill.
 
 ### Key Screens
 

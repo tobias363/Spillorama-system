@@ -3,12 +3,13 @@
 **Dato:** 10. april 2026
 **Status:** LUKKET — ekstern sertifisering er ikke regulatorisk paakrevd
 **Oppdatert:** Basert paa gjennomgang av faktiske krav i pengespillforskriften
+**Presisert 2026-04-25:** Spillorama driver tre hovedspill (Spill 1, 2, 3) og ett databingo (SpinnGo / Spill 4 / slug `spillorama`). RNG-algoritmen er den samme for alle fire spill — kun pool-stoerrelsen varierer (75-ball for Spill 1, 60-ball for Spill 2/3 og SpinnGo). Se [`docs/architecture/SPILLKATALOG.md`](../architecture/SPILLKATALOG.md).
 
 ---
 
 ## 1. Konklusjon
 
-Sikkerhetsgjennomgangen identifiserte KRITISK-1 som behov for ekstern RNG-sertifisering fra akkreditert testlab. Etter gjennomgang av det faktiske regelverket (pengespillforskriften og tilhoerende forskrifter) er dette **ikke et krav** for databingo i Norge.
+Sikkerhetsgjennomgangen identifiserte KRITISK-1 som behov for ekstern RNG-sertifisering fra akkreditert testlab. Etter gjennomgang av det faktiske regelverket (pengespillforskriften og tilhoerende forskrifter) er dette **ikke et krav** verken for hovedspill (Spill 1-3) eller databingo (SpinnGo) i Norge.
 
 Pengespillforskriften stiller ingen krav til ekstern RNG-sertifisering. De faktiske kravene er listet i seksjon 3 nedenfor.
 
@@ -48,7 +49,7 @@ Fullstendige resultater og raadata i `backend/tools/rng-output/`.
 
 ## 3. Faktiske regulatoriske krav (pengespillforskriften)
 
-Disse er de faktiske kravene som gjelder for databingo i Norge:
+Disse er de faktiske kravene som gjelder for elektroniske bingospill i Norge — bade hovedspill og databingo. Punktene under gjelder Spillorama-systemet samlet (Spill 1-3 hovedspill + SpinnGo databingo) der ikke annet er presisert. Se [SPILLKATALOG.md](../architecture/SPILLKATALOG.md) §3 for ledger-dimensjoner og prosent-fordeling per kategori.
 
 ### 3.1 Registrering i offentlig kontrollert system (SS 4)
 Spillingen paa elektroniske bingospill skal registreres gjennom et felles, offentlig kontrollert system. For databingo gjaldt dette fra 2023.

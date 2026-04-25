@@ -36,6 +36,8 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 **Canonical spec:** [`game1-canonical-spec.md`](game1-canonical-spec.md)
 **Slug:** `bingo` / `game_1`
+**Markedsføringsnavn:** Spill 1
+**Regulatorisk kategori:** Hovedspill (live, server-trukket, min 15% til organisasjoner) — se [SPILLKATALOG.md](../architecture/SPILLKATALOG.md)
 **Grid:** 5×5 (fri sentercelle) — 75-ball range
 
 ### 2.1 Kjerne-features
@@ -99,6 +101,8 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 **Canonical spec:** [`game2-canonical-spec.md`](game2-canonical-spec.md) (BIN-529 levert)
 **Slug:** `rocket`
+**Markedsføringsnavn:** Spill 2
+**Regulatorisk kategori:** Hovedspill (live, server-trukket, min 15% til organisasjoner) — se [SPILLKATALOG.md](../architecture/SPILLKATALOG.md)
 **Grid:** 3×5 (15 celler) — 60-ball range
 
 ### 3.1 Kjerne-features
@@ -137,6 +141,8 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 **Canonical spec:** [`game3-canonical-spec.md`](game3-canonical-spec.md) (BIN-530 levert)
 **Slug:** `monsterbingo`
+**Markedsføringsnavn:** Spill 3
+**Regulatorisk kategori:** Hovedspill (live, server-trukket, min 15% til organisasjoner) — se [SPILLKATALOG.md](../architecture/SPILLKATALOG.md)
 **Grid:** 5×5 (fri sentercelle) — 60-ball range + animert kulekø
 
 ### 4.1 Kjerne-features
@@ -172,10 +178,12 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 ---
 
-## 5. Game 5 — Spillorama Bingo
+## 5. SpinnGo (Spill 4 / game5) — Databingo
 
 **Canonical spec:** [`game5-canonical-spec.md`](game5-canonical-spec.md) (BIN-531 levert)
 **Slug:** `spillorama`
+**Markedsføringsnavn:** SpinnGo (synonymt med "Spill 4" i kontrakter)
+**Regulatorisk kategori:** Databingo (forhåndstrukket per sekvens, min 30% til organisasjoner) — se [SPILLKATALOG.md](../architecture/SPILLKATALOG.md)
 **Grid:** 3×5 (15 celler) — 60-ball range + ruletthjul
 
 ### 5.1 Kjerne-features
@@ -218,10 +226,10 @@ Alle fire kolonner må være **✅** for at raden er fullført.
 
 | Spill | Rader | ✅ | 🟡 | ❌ | Release-klar % |
 |-------|------:|---:|---:|---:|---------------:|
-| Game 1 (Hovedspill) | 41 | 17 | 24 | 0 | 41 % |
-| Game 2 (Rocket) | 15 | 0 | 13 | 2 | 0 % |
-| Game 3 (Monster) | 16 | 0 | 13 | 3 | 0 % |
-| Game 5 (Spillorama) | 19 | 0 | 11 | 8 | 0 % |
+| Game 1 / Spill 1 (Hovedspill) | 41 | 17 | 24 | 0 | 41 % |
+| Game 2 / Spill 2 (Hovedspill, Rocket) | 15 | 0 | 13 | 2 | 0 % |
+| Game 3 / Spill 3 (Hovedspill, Monster) | 16 | 0 | 13 | 3 | 0 % |
+| Game 5 / SpinnGo (Databingo) | 19 | 0 | 11 | 8 | 0 % |
 | **Totalt** | **91** | **17** | **61** | **13** | **19 %** |
 
 Totalsum regnet per **Release-klar**-kolonnen — det er den som styrer cutover-beslutning per [`LEGACY_DECOUPLING_STATUS.md`](../architecture/LEGACY_DECOUPLING_STATUS.md).
