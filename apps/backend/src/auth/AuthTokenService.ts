@@ -99,15 +99,25 @@ export class AuthTokenService {
     return kind === "password-reset" ? this.passwordResetTtlMs : this.emailVerifyTtlMs;
   }
 
-  async createToken(kind: AuthTokenKind, userId: string): Promise<CreateTokenResult> {
+  async createToken(
+    kind: AuthTokenKind,
+    userId: string,
+    options?: { ttlMs?: number }
+  ): Promise<CreateTokenResult> {
     await this.ensureInitialized();
     if (!userId || typeof userId !== "string") {
       throw new DomainError("INVALID_INPUT", "userId er påkrevd.");
     }
+    if (options?.ttlMs !== undefined && (!Number.isFinite(options.ttlMs) || options.ttlMs <= 0)) {
+      throw new DomainError("INVALID_INPUT", "ttlMs må være et positivt tall.");
+    }
     const id = randomUUID();
     const token = randomBytes(32).toString("base64url");
     const tokenHash = sha256Hex(token);
-    const expiresAt = new Date(Date.now() + this.ttlFor(kind)).toISOString();
+    // Per-call TTL-override brukes f.eks. for Excel-import-velkomstmail
+    // hvor lenken må vare 7 dager (vs. standard 1 time for forgot-password).
+    const ttlMs = options?.ttlMs ?? this.ttlFor(kind);
+    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
 
     const client = await this.pool.connect();
     try {

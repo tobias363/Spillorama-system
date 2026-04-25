@@ -1457,6 +1457,9 @@ app.use(createAdminPlayersRouter({
   bankIdAdapter,
   webBaseUrl,
   supportEmail,
+  // BIN-702 follow-up: velkomstmail med 7-dagers password-reset-lenke
+  // for spillere importert via Excel/CSV (bulk-import).
+  authTokenService,
 }));
 app.use(createAdminAmlRouter({
   platformService,

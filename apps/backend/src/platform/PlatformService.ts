@@ -2884,6 +2884,10 @@ export class PlatformService {
    * passord — spiller bruker forgot-password for å sette eget passord
    * før første innlogging.
    *
+   * BIN-702 follow-up: returnerer også `importedUsers` (id + email +
+   * displayName) slik at kalleren kan generere password-reset-token og
+   * sende velkomst-mail per spiller via EmailQueue.
+   *
    * Merk: kaller `register`-flyten én rad av gangen — ikke batch-
    * optimalisert, men trygt og enklet auditlogg pr. rad. For pilot-
    * migrasjonsstørrelser (noen hundre spillere) er det akseptabelt.
@@ -2899,10 +2903,12 @@ export class PlatformService {
     skipped: number;
     errors: Array<{ row: number; email: string | null; error: string }>;
     importedEmails: string[];
+    importedUsers: Array<{ userId: string; email: string; displayName: string; hallId: string | null }>;
   }> {
     await this.ensureInitialized();
     const errors: Array<{ row: number; email: string | null; error: string }> = [];
     const importedEmails: string[] = [];
+    const importedUsers: Array<{ userId: string; email: string; displayName: string; hallId: string | null }> = [];
     let imported = 0;
     let skipped = 0;
     for (let i = 0; i < rows.length; i += 1) {
@@ -2931,7 +2937,7 @@ export class PlatformService {
           continue;
         }
         const generatedPassword = randomBytes(16).toString("base64url");
-        await this.register({
+        const session = await this.register({
           email,
           password: generatedPassword,
           displayName: raw.displayName.trim(),
@@ -2941,13 +2947,19 @@ export class PlatformService {
         });
         imported += 1;
         importedEmails.push(email);
+        importedUsers.push({
+          userId: session.user.id,
+          email: session.user.email,
+          displayName: session.user.displayName,
+          hallId: session.user.hallId ?? null,
+        });
       } catch (err) {
         skipped += 1;
         const message = err instanceof DomainError ? err.message : (err instanceof Error ? err.message : "unknown error");
         errors.push({ row: rowNum, email: email || null, error: message });
       }
     }
-    return { imported, skipped, errors, importedEmails };
+    return { imported, skipped, errors, importedEmails, importedUsers };
   }
 
   /**
