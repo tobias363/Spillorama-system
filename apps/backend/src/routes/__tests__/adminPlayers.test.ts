@@ -56,6 +56,8 @@ interface Ctx {
     overrides: Array<{ userId: string; actorId: string; status: KycStatus; reason: string }>;
     softDeletes: string[];
     restores: string[];
+    /** GAP #2: spy for `permanentDeletePlayer`-kall. */
+    permanentDeletes: Array<{ userId: string }>;
     reverifies: Array<{ userId: string; actorId: string }>;
     bulkImports: Array<{ rowCount: number }>;
     hallStatusSets: Array<{ userId: string; hallId: string; isActive: boolean; reason: string | null; actorId: string }>;
@@ -100,6 +102,7 @@ async function startServer(
   const overrides: Ctx["spies"]["overrides"] = [];
   const softDeletes: string[] = [];
   const restores: string[] = [];
+  const permanentDeletes: Array<{ userId: string }> = [];
   const reverifies: Ctx["spies"]["reverifies"] = [];
   const bulkImports: Ctx["spies"]["bulkImports"] = [];
   const hallStatusSets: Ctx["spies"]["hallStatusSets"] = [];
@@ -206,6 +209,24 @@ async function startServer(
     },
     async restorePlayer(userId: string) {
       restores.push(userId);
+    },
+    /**
+     * GAP #2 stub: permanent-slett rejected spiller. Speiler validerings-
+     * regelen i ekte service: må eksistere, må være PLAYER, må være
+     * REJECTED. Returnerer `deletedFrom` som testene asserter på.
+     */
+    async permanentDeletePlayer(userId: string) {
+      const u = usersById.get(userId);
+      if (!u) throw new DomainError("USER_NOT_FOUND", "not found");
+      if (u.role !== "PLAYER") {
+        throw new DomainError("USER_NOT_PLAYER", "kun PLAYER kan slettes");
+      }
+      if (u.kycStatus !== "REJECTED") {
+        throw new DomainError("KYC_NOT_REJECTED", "må være REJECTED");
+      }
+      permanentDeletes.push({ userId });
+      usersById.delete(userId);
+      return { userId, deletedFrom: ["sessions:0", "users:1", "wallet:1"] };
     },
     async resetKycForReverify({ userId, actorId }: { userId: string; actorId: string }) {
       reverifies.push({ userId, actorId });
@@ -424,6 +445,7 @@ async function startServer(
       softDeletes, restores, reverifies, bulkImports, hallStatusSets, bankIdSessions,
       creates,
       playerUpdates,
+      permanentDeletes,
     },
     usersById,
     emailQueue,
@@ -1668,6 +1690,145 @@ test("BIN-634: PUT /api/admin/players/:id — ukjent spiller gir USER_NOT_FOUND"
     });
     assert.equal(res.status, 400);
     assert.equal(res.json.error.code, "USER_NOT_FOUND");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── GAP #2 (audit BACKEND_1TO1_GAP_AUDIT_2026-04-24): permanent-delete rejected ──
+
+test("GAP #2: POST /permanent-delete krever ADMIN/SUPPORT (PLAYER_LIFECYCLE_WRITE)", async () => {
+  const ctx = await startServer(
+    { "op-tok": operatorUser },
+    [makeUser({ id: "p-1", kycStatus: "REJECTED" })]
+  );
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/admin/players/p-1/permanent-delete",
+      "op-tok",
+      { reason: "rydding av gamle KYC-avslag" }
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "FORBIDDEN");
+    assert.equal(ctx.spies.permanentDeletes.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #2: POST /permanent-delete sletter REJECTED-spiller + audit-logger", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-rej", kycStatus: "REJECTED", email: "rej@test.no" })]
+  );
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/admin/players/p-rej/permanent-delete",
+      "admin-tok",
+      { reason: "rydding av avviste-listen" }
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    assert.equal(res.json.data.userId, "p-rej");
+    assert.deepEqual(res.json.data.deletedFrom, ["sessions:0", "users:1", "wallet:1"]);
+    assert.deepEqual(ctx.spies.permanentDeletes, [{ userId: "p-rej" }]);
+    // Spilleren skal være borte fra in-memory user-store
+    assert.equal(ctx.usersById.has("p-rej"), false);
+
+    const event = await waitForAudit(ctx.spies.auditStore, "player.permanent_delete");
+    assert.ok(event, "forventet audit-event player.permanent_delete");
+    assert.equal(event!.actorId, "admin-1");
+    assert.equal(event!.resource, "user");
+    assert.equal(event!.resourceId, "p-rej");
+    assert.equal(event!.details.reason, "rydding av avviste-listen");
+    assert.equal(event!.details.previousStatus, "REJECTED");
+    assert.deepEqual(event!.details.deletedFrom, ["sessions:0", "users:1", "wallet:1"]);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #2: POST /permanent-delete avviser PENDING-spiller (KYC_NOT_REJECTED)", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-pend", kycStatus: "PENDING" })]
+  );
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/admin/players/p-pend/permanent-delete",
+      "admin-tok",
+      {}
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "KYC_NOT_REJECTED");
+    assert.equal(ctx.spies.permanentDeletes.length, 0);
+    assert.equal(ctx.usersById.has("p-pend"), true, "PENDING-spilleren skal IKKE være slettet");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #2: POST /permanent-delete avviser VERIFIED-spiller (KYC_NOT_REJECTED)", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-ver", kycStatus: "VERIFIED" })]
+  );
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/admin/players/p-ver/permanent-delete",
+      "admin-tok",
+      {}
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "KYC_NOT_REJECTED");
+    assert.equal(ctx.spies.permanentDeletes.length, 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #2: POST /permanent-delete returnerer USER_NOT_FOUND for ukjent id", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser }, []);
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "POST",
+      "/api/admin/players/missing-id/permanent-delete",
+      "admin-tok",
+      {}
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "USER_NOT_FOUND");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #2: POST /permanent-delete avviser uten Authorization-header", async () => {
+  const ctx = await startServer(
+    { "admin-tok": adminUser },
+    [makeUser({ id: "p-rej", kycStatus: "REJECTED" })]
+  );
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/admin/players/p-rej/permanent-delete`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
+    );
+    assert.notEqual(res.status, 200);
+    const json = (await res.json()) as { ok: boolean; error?: { code?: string } };
+    assert.equal(json.ok, false);
+    assert.ok(
+      json.error?.code === "UNAUTHORIZED" || json.error?.code === "INVALID_INPUT",
+      `unexpected error-code: ${json.error?.code}`
+    );
+    assert.equal(ctx.spies.permanentDeletes.length, 0);
   } finally {
     await ctx.close();
   }

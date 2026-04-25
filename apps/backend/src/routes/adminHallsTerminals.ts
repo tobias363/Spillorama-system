@@ -66,12 +66,113 @@ export function createAdminHallsTerminalsRouter(deps: AdminSubRouterDeps): expre
         // INVALID_INPUT, not INTERNAL_ERROR.
         clientVariant: typeof req.body?.clientVariant === "string" ? req.body.clientVariant : undefined,
         hallNumber: req.body?.hallNumber !== undefined ? parseOptionalHallNumber(req.body.hallNumber) : undefined,
+        // GAP #19: IP-adresse — string|null aksepteres; "" betyr "tøm".
+        ipAddress: req.body?.ipAddress !== undefined ? parseOptionalIpAddress(req.body.ipAddress) : undefined,
       });
       auditAdmin(req, adminUser, "hall.update", "hall", hallId, {
         fields: Object.keys(req.body ?? {}),
       });
       apiSuccess(res, hall);
     } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * GAP #19 (audit BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.8 / §6 #19):
+   * pre-create-validering av hallNumber + IP-adresse.
+   *
+   * Legacy `POST /hall/check-hall-number` + `/hall/check-ip-address` —
+   * brukes av admin-form for å sjekke at en valgt hallNumber/IP ikke
+   * allerede er i bruk FØR submit. Kan brukes i både create- (uten hallId)
+   * og edit-flow (med hallId for å ekskludere hallen selv).
+   *
+   * Body: { hallNumber?, ipAddress?, hallId? }
+   * Response: { hallNumber?: { ok, conflictingHallId? }, ipAddress?: ... }
+   *
+   * Permission: HALL_READ (samme som å se eksisterende haller — ingen
+   * sensitiv info eksponeres).
+   *
+   * MERK: Routen registreres FØR `/api/admin/halls/:hallId` slik at
+   * "check-availability" ikke matches som hallId. Express router-rekke-
+   * følge respekteres.
+   */
+  router.post("/api/admin/halls/check-availability", async (req, res) => {
+    try {
+      await requireAdminPermissionUser(req, "HALL_READ");
+      const hallNumber = req.body?.hallNumber !== undefined
+        ? parseOptionalHallNumber(req.body.hallNumber)
+        : undefined;
+      const ipAddress = req.body?.ipAddress !== undefined
+        ? parseOptionalIpAddress(req.body.ipAddress)
+        : undefined;
+      const hallIdRaw = typeof req.body?.hallId === "string" && req.body.hallId.trim()
+        ? req.body.hallId.trim()
+        : undefined;
+      const result = await platformService.checkHallAvailability({
+        hallNumber: hallNumber ?? undefined,
+        ipAddress: ipAddress ?? undefined,
+        hallId: hallIdRaw,
+      });
+      apiSuccess(res, result);
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  /**
+   * GAP #17 (audit BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.8 / §6 #17):
+   * soft-delete en hall etter konsolidering.
+   *
+   * Legacy `POST /hall/getHallDelete` (`routes/backend.js:323`) — admin
+   * sletter hall etter at spillere/agenter er flyttet bort. Vi bruker
+   * soft-delete (sett `deleted_at`) for å bevare referanseintegritet
+   * (audit, historikk, regulatoriske rapporter krever fortsatt tilgang
+   * til hall-data selv etter "sletting").
+   *
+   * Validering (i PlatformService.softDeleteHall):
+   *   - Ingen aktive spillere knyttet til hallen.
+   *   - Ingen aktive agenter knyttet til hallen.
+   *   Ved konflikt: HALL_HAS_DEPENDENCIES → HTTP 409 (apiFailure).
+   *
+   * Permission: HALL_WRITE.
+   *
+   * Audit: `hall.delete` med `{ deletedAt }` — soft-delete er destruktiv
+   * (ikke synlig i UI etter), så audit-trail er kritisk for compliance.
+   */
+  router.delete("/api/admin/halls/:hallId", async (req, res) => {
+    try {
+      const adminUser = await requireAdminPermissionUser(req, "HALL_WRITE");
+      const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+      const reason = typeof req.body?.reason === "string" && req.body.reason.trim()
+        ? req.body.reason.trim().slice(0, 500)
+        : null;
+
+      const result = await platformService.softDeleteHall(hallId);
+
+      auditAdmin(req, adminUser, "hall.delete", "hall", result.hallId, {
+        deletedAt: result.deletedAt,
+        reason,
+      });
+
+      apiSuccess(res, result);
+    } catch (error) {
+      // GAP #17 acceptance: ved aktive avhengigheter (HALL_HAS_DEPENDENCIES)
+      // skal vi returnere HTTP 409 Conflict — ikke generic 400. apiFailure
+      // returnerer alltid 400, så vi switcher manuelt på error-code først.
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error as { code: string }).code === "HALL_HAS_DEPENDENCIES"
+      ) {
+        const e = error as { code: string; message?: string; details?: Record<string, unknown> };
+        res.status(409).json({
+          ok: false,
+          error: { code: e.code, message: e.message ?? "", details: e.details ?? {} },
+        });
+        return;
+      }
       apiFailure(res, error);
     }
   });
@@ -493,4 +594,27 @@ function parseOptionalHallNumber(raw: unknown): number | null | undefined {
   }
   if (typeof raw === "number") return raw;
   throw new Error("hallNumber må være et heltall");
+}
+
+/**
+ * GAP #19: parser for IP-adresse-input fra admin-form.
+ *
+ * Aksepterer:
+ *   - undefined → undefined (ikke send til service).
+ *   - null eller "" → null (eksplisitt tømming).
+ *   - string → returneres som-er; service-laget validerer format.
+ *
+ * Selve format-validering (IPv4/IPv6) skjer i
+ * `PlatformService.normalizeHallIpAddress` så samme regel brukes på
+ * tvers av create + update + check-availability.
+ */
+function parseOptionalIpAddress(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed === "") return null;
+    return trimmed;
+  }
+  throw new Error("ipAddress må være en tekst");
 }

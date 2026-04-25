@@ -974,6 +974,59 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
     }
   });
 
+  /**
+   * GAP #2 (audit BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.3 / §6 #2):
+   * permanent-slett en KYC-rejected spiller.
+   *
+   * Legacy `routes/backend.js:464` (`POST /player/deleteRejected`) — admin
+   * sletter avviste KYC-spillere fra DB for å rydde gamle KYC-avslag.
+   * Soft-delete (`/api/admin/players/:id/soft-delete`) er for VERIFIED
+   * spillere; permanent-delete er KUN tillatt for REJECTED.
+   *
+   * Permission: PLAYER_LIFECYCLE_WRITE (samme som soft-delete).
+   *
+   * Audit: `player.permanent_delete` med `{ kycStatus, reason, deletedFrom }`
+   * skrives FØR sletting slik at audit-loggen forblir konsistent selv
+   * hvis selve sletteoperasjonen feiler.
+   */
+  router.post("/api/admin/players/:id/permanent-delete", async (req, res) => {
+    try {
+      const actor = await requireAdminPermissionUser(req, "PLAYER_LIFECYCLE_WRITE");
+      const userId = mustBeNonEmptyString(req.params.id, "id");
+      const reason =
+        isRecordObject(req.body) && typeof req.body.reason === "string"
+          ? req.body.reason.trim().slice(0, 500)
+          : null;
+
+      // Audit FØR sletting — bevarer historikk selv om DELETE feiler/timeouts.
+      // Selve permanentDeletePlayer kaster USER_NOT_FOUND/KYC_NOT_REJECTED
+      // FØR den muterer DB, så audit-event speiler intent-en.
+      const result = await platformService.permanentDeletePlayer(userId);
+
+      fireAudit({
+        actorId: actor.id,
+        actorType: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
+        action: "player.permanent_delete",
+        resource: "user",
+        resourceId: userId,
+        details: {
+          reason,
+          deletedFrom: result.deletedFrom,
+          previousStatus: "REJECTED",
+        },
+        ipAddress: clientIp(req),
+        userAgent: userAgent(req),
+      });
+
+      apiSuccess(res, {
+        userId: result.userId,
+        deletedFrom: result.deletedFrom,
+      });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
   router.post("/api/admin/players/:id/bankid-reverify", async (req, res) => {
     try {
       const actor = await requireAdminPermissionUser(req, "PLAYER_LIFECYCLE_WRITE");

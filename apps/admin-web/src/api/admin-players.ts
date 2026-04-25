@@ -193,6 +193,33 @@ export async function restorePlayer(id: string): Promise<{ restored: boolean }> 
   );
 }
 
+/**
+ * GAP #2 (audit 2026-04-24): permanent-slett en KYC-rejected spiller.
+ *
+ * Tillates KUN når player.kycStatus === 'REJECTED'. Backend kaster
+ * KYC_NOT_REJECTED hvis status ikke matcher; UI bør derfor sjekke status
+ * før knappen vises. Idempotent: re-kall etter sletting → USER_NOT_FOUND.
+ */
+export interface PermanentDeletePlayerResult {
+  userId: string;
+  /** Hvilke tabeller / hvor mange rader ble fjernet (audit-info). */
+  deletedFrom: string[];
+}
+
+export async function permanentDeletePlayer(
+  id: string,
+  reason?: string,
+): Promise<PermanentDeletePlayerResult> {
+  return apiRequest<PermanentDeletePlayerResult>(
+    `/api/admin/players/${encodeURIComponent(id)}/permanent-delete`,
+    {
+      method: "POST",
+      body: reason ? { reason } : {},
+      auth: true,
+    },
+  );
+}
+
 // ── Create / Update (BIN-633 + BIN-634) ─────────────────────────────────────
 
 export interface CreatePlayerInput {
