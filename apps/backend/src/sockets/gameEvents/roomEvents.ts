@@ -128,8 +128,27 @@ export async function reservePreRoundDelta(
     return;
   }
 
+  // PR #513 §1.3 (idempotency-fix): tidligere brukte vi
+  // `${Date.now()}-${Math.random()...}` her — som per definisjon var nye
+  // verdier ved hver retry, så `reserve()`-idempotency aldri kunne matche.
+  // Hvis socket-laget re-emit-et samme `bet:arm` (typisk under
+  // reconnect/disconnect-flapping) endte vi opp med flere DB-reservasjoner
+  // som hver låste penger til 30-minutters TTL utløp.
+  //
+  // Deterministisk key: `arm-${roomCode}-${playerId}-${newTotalWeighted}`.
+  // Logikk: `newTotalWeighted` endres ved hver legitim ny bet:arm-call
+  // (mer eller færre brett), så et legitimt nytt kjøp får ny key og blir
+  // en ny reservasjon. Men en duplikat-emit av samme `bet:arm` (samme
+  // total) får samme key → adapter.reserve returnerer eksisterende
+  // reservasjon i stedet for å lage en ny.
+  //
+  // NB: dette dekker reservation-creation. Increase-pathen (over) bruker
+  // reservation-id direkte, så increaseReservation må selv være idempotent
+  // hvis vi vil dekke det case-et — pr i dag har vi ikke retry-deduplisering
+  // der, men socket.io ack/nack gir én-gangs-levering for de fleste retry-
+  // scenarioene.
   const reservation = await adapter.reserve(walletId, deltaKr, {
-    idempotencyKey: `arm-${roomCode}-${playerId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    idempotencyKey: `arm-${roomCode}-${playerId}-${newTotalWeighted}`,
     roomCode,
   });
   deps.setReservationId(roomCode, playerId, reservation.id);
