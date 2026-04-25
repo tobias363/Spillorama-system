@@ -282,7 +282,9 @@ export function createGame1ScheduledEventHandlers(
           }
           const payload = parsed.data;
           const user = await getAuthenticatedUser(payload);
-          platformService.assertUserEligibleForGameplay(user);
+          // BIN-720 follow-up: assertUserEligibleForGameplay is now async
+          // (gates on blocked_until via ProfileSettingsService).
+          await platformService.assertUserEligibleForGameplay(user);
           engine.assertWalletAllowedForGameplay(user.walletId);
 
           const row = await loadScheduledGameForJoin(payload.scheduledGameId);
