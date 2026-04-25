@@ -359,6 +359,7 @@ const {
   jobJackpotDailyEnabled, jobJackpotDailyIntervalMs, jobJackpotDailyRunAtHour, jobJackpotDailyRunAtMinute,
   usePostgresBingoAdapter, checkpointConnectionString, roomStateProvider, redisUrl, useRedisLock,
   kycMinAge, kycProvider, pgSsl, pgSchema, sessionTtlHours,
+  disablePerRoundOrgDistribution,
 } = cfg;
 
 // runtimeBingoSettings is mutable — Object.assign is used to update it in-place
@@ -409,6 +410,9 @@ const engine = new Game3Engine(localBingoAdapter, walletAdapter, {
   // GAME1_SCHEDULE PR 5: wire loyalty-hook (fire-and-forget points-award
   // ved ticket.purchase + game.win). Default split-rounding-audit er no-op.
   loyaltyHook: loyaltyHookAdapter,
+  // Compliance hotfix: under pilot blokkeres per-round overskudd-fordeling
+  // til kvartalsvis-refactor (post-pilot) er på plass. Default OFF.
+  disablePerRoundOrgDistribution,
 });
 
 // BIN-274: Configurable KYC provider

@@ -303,6 +303,14 @@ interface ComplianceOptions {
    * utbetales. Default: no-op.
    */
   splitRoundingAudit?: SplitRoundingAuditPort;
+  /**
+   * Hotfix-flagg (post-pilot kvartals-refactor): når `true`, skip
+   * wallet-transfer + ORG_DISTRIBUTION-ledger-skriving i
+   * `createOverskuddDistributionBatch`. Per pengespillforskriften skal
+   * fordeling skje kvartalsvis, ikke per runde. STAKE/PRIZE/EXTRA_PRIZE
+   * påvirkes IKKE. Default: `false`.
+   */
+  disablePerRoundOrgDistribution?: boolean;
 }
 
 
@@ -459,7 +467,8 @@ export class BingoEngine {
 
     this.ledger = new ComplianceLedger({
       walletAdapter: this.walletAdapter,
-      persistence: options.persistence
+      persistence: options.persistence,
+      disablePerRoundOrgDistribution: options.disablePerRoundOrgDistribution
     });
 
     // BIN-251: Wire external room state store if provided
