@@ -272,3 +272,56 @@ describe("BingoTicketHtml — setActivePattern", () => {
     expect(getToGoText(t)).toBe("2 igjen til 1 Rad");
   });
 });
+
+describe("BingoTicketHtml — BLINK-FIX (round 3) regressions", () => {
+  it("default-state har INGEN perspective på root (ingen permanent composite-layer per bong)", () => {
+    const t = new BingoTicketHtml({
+      ticket: makeTicket(),
+      price: 10,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    document.body.appendChild(t.root);
+    // perspective skal kun aktiveres under flip — default må være tom string.
+    expect(t.root.style.perspective).toBe("");
+  });
+
+  it("flip aktiverer perspective på root", () => {
+    const t = new BingoTicketHtml({
+      ticket: makeTicket(),
+      price: 10,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    document.body.appendChild(t.root);
+    t.root.click();
+    expect(t.root.style.perspective).toBe("1000px");
+  });
+
+  it("bong-pulse-ring keyframe er IKKE definert (4-lags box-shadow infinite fjernet)", () => {
+    new BingoTicketHtml({
+      ticket: makeTicket(),
+      price: 10,
+      rows: 5,
+      cols: 5,
+      cancelable: false,
+    });
+    const styleEl = document.getElementById("bong-ticket-styles") as HTMLStyleElement | null;
+    expect(styleEl).not.toBeNull();
+    const css = styleEl!.textContent ?? "";
+    // Sjekk at den gamle box-shadow-infinite-keyframen er borte
+    expect(css).not.toContain("@keyframes bong-pulse-ring");
+    // Sjekk at .bong-pulse-klassen ikke refererer bong-pulse-ring i sin animation
+    const bongPulseClass = css.match(/\.bong-pulse\s*\{[^}]+\}/);
+    expect(bongPulseClass).not.toBeNull();
+    expect(bongPulseClass![0]).not.toContain("bong-pulse-ring");
+    expect(bongPulseClass![0]).not.toContain("box-shadow");
+    // Sjekk at bong-pulse-cell ikke lenger animerer background (kun transform)
+    const cellKeyframe = css.match(/@keyframes bong-pulse-cell\s*\{([^}]+(?:\{[^}]*\}[^}]*)*?)\}/);
+    expect(cellKeyframe).not.toBeNull();
+    expect(cellKeyframe![0]).not.toContain("background");
+    expect(cellKeyframe![0]).toContain("transform");
+  });
+});

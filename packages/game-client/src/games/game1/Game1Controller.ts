@@ -332,12 +332,16 @@ class Game1Controller implements GameController {
       this.playScreen.update(state);
     }
 
-    // BIN-460: Show/hide pause overlay based on game state
+    // BIN-460: Show/hide pause overlay based on game state.
+    // BLINK-FIX (round 3, bonus): Fjernet "Spillet er gjenopptatt"-toast.
+    // Under auto-pause-flyt (phase-won → kort pause → resume) er den
+    // overlappende toast-fade + pause-fade + ny ball-trekk en hovedmistenkt
+    // for blink-effekten. Toasten gir ingen verdi når overlay uansett bare
+    // var synlig i ~1s under en automatisk overgang.
     if (state.isPaused && !this.pauseOverlay?.isShowing()) {
       this.pauseOverlay?.show(state.pauseMessage ?? undefined);
     } else if (!state.isPaused && this.pauseOverlay?.isShowing()) {
       this.pauseOverlay?.hide();
-      this.toast?.info("Spillet er gjenopptatt");
     }
   }
 

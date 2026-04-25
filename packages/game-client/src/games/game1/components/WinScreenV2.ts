@@ -396,7 +396,10 @@ export class WinScreenV2 {
         marginLeft: `${-p.size / 2}px`,
         marginTop: `${-p.size / 2}px`,
         opacity: "0",
-        willChange: "transform, opacity",
+        // BLINK-FIX (round 3, hazard 4): Fjernet `willChange: "transform, opacity"`.
+        // Chrome auto-promoterer transform-animerte elementer til composite-layer
+        // — `will-change` er over-aggressivt og holder GPU-minne reservert
+        // selv når elementet ikke animerer.
         transform: "translate3d(0, 0, 0)",
         filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.4))",
       });
