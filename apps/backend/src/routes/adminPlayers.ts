@@ -41,6 +41,7 @@ import type { AuditLogService } from "../compliance/AuditLogService.js";
 import type { EmailService } from "../integration/EmailService.js";
 import type { EmailQueue } from "../integration/EmailQueue.js";
 import type { BankIdKycAdapter } from "../adapters/BankIdKycAdapter.js";
+import type { AuthTokenService } from "../auth/AuthTokenService.js";
 import {
   assertAdminPermission,
   type AdminPermission,
@@ -74,7 +75,22 @@ export interface AdminPlayersRouterDeps {
   /** Base-URL brukt til å bygge resubmit-lenker (sendt i reject-e-post). */
   webBaseUrl: string;
   supportEmail: string;
+  /**
+   * BIN-702 follow-up: brukes til å generere password-reset-tokens for
+   * Excel-importerte spillere (velkomstmail med set-password-lenke).
+   * Valgfri — hvis ikke satt hopper bulk-import-routen over velkomstmail
+   * og logger en advarsel (spilleren må da bruke /forgot-password manuelt).
+   */
+  authTokenService?: AuthTokenService;
 }
+
+/**
+ * BIN-702 follow-up: TTL for password-reset-token sendt ved Excel-import.
+ * 7 dager — gir spilleren rikelig tid til å se mailen og sette passord
+ * uten at lenken er evig (compliance-balanse). Eksportert for tester.
+ */
+export const IMPORT_WELCOME_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const IMPORT_WELCOME_TOKEN_TTL_DAYS = 7;
 
 function clientIp(req: express.Request): string | null {
   const fwd = req.headers["x-forwarded-for"];
@@ -170,6 +186,7 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
     bankIdAdapter,
     webBaseUrl,
     supportEmail,
+    authTokenService,
   } = deps;
   const router = express.Router();
 
@@ -451,6 +468,71 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
         throw new DomainError("INVALID_INPUT", "Maks 1000 rader per import.");
       }
       const summary = await platformService.bulkImportPlayers(parsedRows);
+
+      // BIN-702 follow-up: send velkomstmail med 7-dagers password-reset-lenke
+      // til hver importert spiller. Fire-and-forget (per spiller) — én feil
+      // skal ikke blokkere de andre. Mailen enqueues via EmailQueue hvis
+      // tilgjengelig, ellers fallback til direkte send.
+      let welcomeMailsEnqueued = 0;
+      let welcomeMailsFailed = 0;
+      const hallIdMapping: Record<string, number> = {};
+      if (authTokenService && summary.importedUsers.length > 0) {
+        const base = webBaseUrl.replace(/\/+$/, "");
+        for (const u of summary.importedUsers) {
+          // Bygg hall-id-mapping for audit (uten klartekst-emails).
+          const hallKey = u.hallId ?? "_no_hall";
+          hallIdMapping[hallKey] = (hallIdMapping[hallKey] ?? 0) + 1;
+          try {
+            const { token } = await authTokenService.createToken(
+              "password-reset",
+              u.userId,
+              { ttlMs: IMPORT_WELCOME_TOKEN_TTL_MS }
+            );
+            const setPasswordLink = `${base}/reset-password/${encodeURIComponent(token)}`;
+            const context = {
+              username: u.displayName,
+              setPasswordLink,
+              expiresInDays: IMPORT_WELCOME_TOKEN_TTL_DAYS,
+              supportEmail,
+            };
+            if (emailQueue) {
+              await emailQueue.enqueue({
+                to: u.email,
+                template: "kyc-imported-welcome",
+                context,
+              });
+            } else {
+              try {
+                await emailService.sendTemplate({
+                  to: u.email,
+                  template: "kyc-imported-welcome",
+                  context,
+                });
+              } catch (err) {
+                logger.warn(
+                  { err, userId: u.userId },
+                  "[BIN-702] velkomstmail (Excel-import) feilet, ikke-blokkerende"
+                );
+                welcomeMailsFailed += 1;
+                continue;
+              }
+            }
+            welcomeMailsEnqueued += 1;
+          } catch (err) {
+            logger.warn(
+              { err, userId: u.userId },
+              "[BIN-702] velkomst-token (Excel-import) feilet, ikke-blokkerende"
+            );
+            welcomeMailsFailed += 1;
+          }
+        }
+      } else if (!authTokenService && summary.importedUsers.length > 0) {
+        logger.warn(
+          { imported: summary.importedUsers.length },
+          "[BIN-702] velkomstmail hoppet over: authTokenService ikke konfigurert"
+        );
+      }
+
       fireAudit({
         actorId: actor.id,
         actorType: actor.role === "ADMIN" ? "ADMIN" : "SUPPORT",
@@ -470,6 +552,12 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
             emailDomain: e.email && e.email.includes("@") ? e.email.split("@")[1] : null,
             error: e.error,
           })),
+          // BIN-702 follow-up: velkomstmail-statistikk + hall-id-mapping
+          // (compliance ber om dokumentasjon på hvor importerte spillere
+          // ble plassert; vi logger kun aggregat per hall, ikke per email).
+          welcomeMailsEnqueued,
+          welcomeMailsFailed,
+          hallIdMapping,
         },
         ipAddress: clientIp(req),
         userAgent: userAgent(req),
@@ -478,6 +566,8 @@ export function createAdminPlayersRouter(deps: AdminPlayersRouterDeps): express.
         imported: summary.imported,
         skipped: summary.skipped,
         errors: summary.errors,
+        welcomeMailsEnqueued,
+        welcomeMailsFailed,
       });
     } catch (error) {
       apiFailure(res, error);

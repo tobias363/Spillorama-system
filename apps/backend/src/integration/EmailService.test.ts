@@ -196,6 +196,21 @@ test("BIN-588 previewTemplate: returns subject/html/text triple without sending"
   assert.match(out.html, /Lenken utløper om 2 time/);
 });
 
+test("BIN-702 follow-up previewTemplate: kyc-imported-welcome rendrer setPasswordLink + 7 dager", () => {
+  const out = previewTemplate("kyc-imported-welcome", {
+    username: "Alice",
+    setPasswordLink: "https://test.example/reset-password/abc123",
+    expiresInDays: 7,
+    supportEmail: "support@spillorama.no",
+  });
+  assert.match(out.subject, /Velkommen/);
+  assert.match(out.html, /Hei <strong>Alice<\/strong>/);
+  assert.match(out.html, /https:\/\/test\.example\/reset-password\/abc123/);
+  assert.match(out.html, /utløper om 7 dag/);
+  assert.match(out.html, /support@spillorama\.no/);
+  assert.match(out.text, /https:\/\/test\.example\/reset-password\/abc123/);
+});
+
 test("EmailService: attachments videresendes til transporter", async () => {
   const { transporter, messages } = createFakeTransporter();
   const svc = new EmailService({

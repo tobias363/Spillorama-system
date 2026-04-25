@@ -220,3 +220,45 @@ test("BIN-587 B2.1: tokens lagres aldri i klartekst (kun sha256-hash)", async ()
   assert.notEqual(stored.token_hash, token);
   assert.equal(stored.token_hash.length, 64); // sha256 hex
 });
+
+test("BIN-702 follow-up: createToken aksepterer ttlMs-override (Excel-import-velkomst)", async () => {
+  const store = newStore();
+  // Default password-reset-TTL er 1 time; vi overstyrer til 7 dager.
+  const svc = AuthTokenService.forTesting(makePool(store));
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  const before = Date.now();
+  const { expiresAt } = await svc.createToken("password-reset", "user-1", {
+    ttlMs: sevenDaysMs,
+  });
+  const after = Date.now();
+  const expiresMs = new Date(expiresAt).getTime();
+  // Toleranse: TTL skal lande innenfor [before+ttl, after+ttl]
+  assert.ok(expiresMs >= before + sevenDaysMs);
+  assert.ok(expiresMs <= after + sevenDaysMs + 100);
+});
+
+test("BIN-702 follow-up: createToken med ttlMs=0 eller negativ avvises", async () => {
+  const store = newStore();
+  const svc = AuthTokenService.forTesting(makePool(store));
+  await assert.rejects(
+    () => svc.createToken("password-reset", "user-1", { ttlMs: 0 }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT"
+  );
+  await assert.rejects(
+    () => svc.createToken("password-reset", "user-1", { ttlMs: -1 }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_INPUT"
+  );
+});
+
+test("BIN-702 follow-up: createToken uten ttlMs-override bruker konstruktor-TTL", async () => {
+  const store = newStore();
+  // Konstruktor-TTL er 1 time (default).
+  const svc = AuthTokenService.forTesting(makePool(store));
+  const oneHourMs = 60 * 60 * 1000;
+  const before = Date.now();
+  const { expiresAt } = await svc.createToken("password-reset", "user-1");
+  const after = Date.now();
+  const expiresMs = new Date(expiresAt).getTime();
+  assert.ok(expiresMs >= before + oneHourMs - 50);
+  assert.ok(expiresMs <= after + oneHourMs + 50);
+});
