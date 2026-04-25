@@ -3,10 +3,33 @@
  * ================================================================
  *
  * Isolated dev-tool page for previewing the five Spill 1 mini-game
- * overlays without running a full bingo round. Each overlay gets its
- * own PIXI.Application (800 x 600) and a panel of buttons that fire
- * realistic `show()` / `animateResult()` / `showChoiceError()` calls
- * with dummy payloads.
+ * overlays without running a full bingo round.
+ *
+ * Earlier versions instantiated **5 parallel `Pixi.Application`s** —
+ * one per overlay — each running its own ticker. That inflated the
+ * idle baseline of the performance-budget gate (PR #469) by ~5-7x
+ * (e.g. `rafCallsPerSec=360` for a single canvas at 60Hz instead of
+ * the expected ~60), which masked real ticker leaks under noise.
+ *
+ * Refactor (this file): **single-active-application pattern**.
+ *
+ *   - One `Pixi.Application` (and one ticker) is alive at a time.
+ *   - The five `<div class="stage-wrap" id="stage-X">` slots are kept
+ *     for design-review UX, but only one of them holds a live canvas
+ *     at any moment ("active" scenario). Inactive slots show a
+ *     greyed-out placeholder with a "Klikk for å aktivere" hint and
+ *     are wired so a click on the panel itself activates it.
+ *   - Switching between scenarios destroys the previous Application
+ *     (canvas + ticker + WebGL context) before creating the next one,
+ *     guaranteeing the page never holds more than one ticker at a
+ *     time. `Application.destroy(true, { children:true })` walks the
+ *     whole stage so overlay graphics, GSAP-tracked targets, etc. are
+ *     freed in the same step.
+ *   - `wheel` is the default-active scenario on first load. The
+ *     performance-budget collector (`scripts/performance-budget/
+ *     collect-metrics.ts`) drives only the wheel scenario, so the
+ *     pre-`waitForSelector("#stage-wheel canvas")` fast-path is
+ *     preserved without any change to the collector.
  *
  * No backend calls. No socket. No auth. The overlays' `onChoice`
  * callbacks are captured and logged, not dispatched.
@@ -14,7 +37,7 @@
  * Served at `/web/games/preview.html` after `npm run build`.
  *
  * Covered overlays:
- *   - WheelOverlay        — Lykkehjulet
+ *   - WheelOverlay        — Lykkehjulet (default-active on load)
  *   - TreasureChestOverlay — Skattekisten
  *   - OddsenOverlay       — Oddsen (cross-round mystery)
  *   - ColorDraftOverlay   — Fargetrekning
@@ -39,18 +62,46 @@ const noopBridge = { getState: (): { isPaused: boolean } => ({ isPaused: false }
 
 type OverlayKey = "wheel" | "chest" | "oddsen" | "colordraft" | "mystery";
 
-interface OverlayHandle {
+type AnyOverlay =
+  | WheelOverlay
+  | TreasureChestOverlay
+  | OddsenOverlay
+  | ColorDraftOverlay
+  | MysteryGameOverlay;
+
+interface ActiveScenario {
+  key: OverlayKey;
   app: Application;
-  instance:
-    | WheelOverlay
-    | TreasureChestOverlay
-    | OddsenOverlay
-    | ColorDraftOverlay
-    | MysteryGameOverlay;
-  log: HTMLElement;
+  instance: AnyOverlay;
 }
 
-const handles = new Map<OverlayKey, OverlayHandle>();
+const ALL_KEYS: OverlayKey[] = ["wheel", "chest", "oddsen", "colordraft", "mystery"];
+
+const containerIdFor: Record<OverlayKey, string> = {
+  wheel: "stage-wheel",
+  chest: "stage-chest",
+  oddsen: "stage-oddsen",
+  colordraft: "stage-colordraft",
+  mystery: "stage-mystery",
+};
+
+const logIdFor: Record<OverlayKey, string> = {
+  wheel: "log-wheel",
+  chest: "log-chest",
+  oddsen: "log-oddsen",
+  colordraft: "log-colordraft",
+  mystery: "log-mystery",
+};
+
+const labelFor: Record<OverlayKey, string> = {
+  wheel: "Lykkehjul",
+  chest: "Skattekiste",
+  oddsen: "Oddsen",
+  colordraft: "Fargetrekning",
+  mystery: "Mystery Game",
+};
+
+let active: ActiveScenario | null = null;
 
 function logLine(log: HTMLElement, message: string, isError = false): void {
   const div = document.createElement("div");
@@ -63,9 +114,70 @@ function logLine(log: HTMLElement, message: string, isError = false): void {
   while (log.children.length > 40) log.removeChild(log.firstChild!);
 }
 
+function logFor(key: OverlayKey): HTMLElement | null {
+  return document.getElementById(logIdFor[key]);
+}
+
+function containerFor(key: OverlayKey): HTMLElement | null {
+  return document.getElementById(containerIdFor[key]);
+}
+
+/**
+ * Render a static placeholder in a stage-wrap that has no live canvas.
+ * The panel becomes click-to-activate via the global click handler in
+ * `boot()`; this just gives the user a visible cue for that affordance.
+ */
+function renderInactivePlaceholder(key: OverlayKey): void {
+  const container = containerFor(key);
+  if (!container) return;
+  container.innerHTML = "";
+  const ph = document.createElement("div");
+  ph.className = "stage-placeholder";
+  ph.dataset["overlayPlaceholder"] = key;
+  ph.textContent = `${labelFor[key]} — klikk for å aktivere`;
+  container.appendChild(ph);
+}
+
+/**
+ * Tear down the currently-active Pixi.Application (if any). Destroys
+ * the canvas, the ticker, and the entire stage tree (including the
+ * overlay's Graphics + Text children). After this call the previous
+ * scenario's stage-wrap is empty and can be repopulated with either
+ * a new Application or a placeholder.
+ */
+function destroyActive(): void {
+  if (!active) return;
+  const prev = active;
+  active = null;
+  try {
+    // `removeChildren=true` walks the full stage tree so every overlay
+    // graphic + text is destroyed alongside the renderer/ticker. Pass
+    // `texture:false` because Pixi caches textures on the global
+    // Assets registry and we want to keep the cache hot for the next
+    // scenario — it's the GL context, ticker, and stage tree that
+    // need to go.
+    prev.app.destroy(true, { children: true, texture: false });
+  } catch (err) {
+    // A destroy-failure shouldn't wedge the page; log and move on.
+    const log = logFor(prev.key);
+    if (log) {
+      logLine(
+        log,
+        `app.destroy() warning: ${err instanceof Error ? err.message : String(err)}`,
+        true,
+      );
+    } else {
+      console.warn("[preview] destroyActive failed:", err);
+    }
+  }
+  renderInactivePlaceholder(prev.key);
+}
+
 async function createApp(containerId: string): Promise<Application> {
   const container = document.getElementById(containerId);
   if (!container) throw new Error(`No container element for #${containerId}`);
+  // Clear any placeholder before mounting the new canvas.
+  container.innerHTML = "";
   const app = new Application();
   await app.init({
     width: STAGE_W,
@@ -78,6 +190,98 @@ async function createApp(containerId: string): Promise<Application> {
   });
   container.appendChild(app.canvas);
   return app;
+}
+
+function buildOverlay(key: OverlayKey): AnyOverlay {
+  switch (key) {
+    case "wheel":
+      return new WheelOverlay(STAGE_W, STAGE_H, noopBridge);
+    case "chest":
+      return new TreasureChestOverlay(STAGE_W, STAGE_H, noopBridge);
+    case "oddsen":
+      return new OddsenOverlay(STAGE_W, STAGE_H);
+    case "colordraft":
+      return new ColorDraftOverlay(STAGE_W, STAGE_H);
+    case "mystery":
+      return new MysteryGameOverlay(STAGE_W, STAGE_H);
+  }
+}
+
+/**
+ * Wire the overlay-specific `onChoice` / `onDismiss` hooks. Mirrors
+ * the legacy per-scenario setup but pulled into one switch so the
+ * activation path stays linear.
+ */
+function wireCallbacks(key: OverlayKey, instance: AnyOverlay, log: HTMLElement): void {
+  switch (key) {
+    case "wheel": {
+      const overlay = instance as WheelOverlay;
+      overlay.setOnChoice((choice) => {
+        logLine(
+          log,
+          `onChoice fired: ${JSON.stringify(choice)} — auto-animating fake result in 500 ms`,
+        );
+        // In the real flow, the server would respond with a result. For the
+        // preview we synthesize one so the full animation can be observed.
+        setTimeout(() => overlay.animateResult(wheelResultPayload(), 50000), 500);
+      });
+      overlay.setOnDismiss(() => logLine(log, "onDismiss fired (overlay auto-closed)"));
+      break;
+    }
+    case "chest": {
+      const overlay = instance as TreasureChestOverlay;
+      overlay.setOnChoice((choice) => {
+        logLine(log, `onChoice fired: ${JSON.stringify(choice)} — animerer resultat om 500 ms`);
+        setTimeout(() => overlay.animateResult(chestResultPayload(), 75000), 500);
+      });
+      overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
+      break;
+    }
+    case "oddsen": {
+      const overlay = instance as OddsenOverlay;
+      overlay.setOnChoice((choice) => {
+        logLine(log, `onChoice fired: ${JSON.stringify(choice)} — viser venter-state om 500 ms`);
+        setTimeout(() => overlay.animateResult(oddsenWaitingResultPayload(), 0), 500);
+      });
+      overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
+      break;
+    }
+    case "colordraft": {
+      const overlay = instance as ColorDraftOverlay;
+      overlay.setOnChoice((choice) => {
+        logLine(log, `onChoice fired: ${JSON.stringify(choice)} — animerer treff om 500 ms`);
+        setTimeout(() => overlay.animateResult(colordraftHitResultPayload(), 25000), 500);
+      });
+      overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
+      break;
+    }
+    case "mystery": {
+      const overlay = instance as MysteryGameOverlay;
+      overlay.setOnChoice((choice) => {
+        logLine(log, `onChoice fired: ${JSON.stringify(choice)} — animerer resultat om 500 ms`);
+        setTimeout(() => overlay.animateResult(mysteryWinResultPayload(), 40000), 500);
+      });
+      overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
+      break;
+    }
+  }
+}
+
+/**
+ * Make a scenario the single live one. Tears down whatever was active
+ * before and creates a fresh Application + overlay for the requested
+ * key. Idempotent — if `key` is already active, nothing happens.
+ */
+async function activateScenario(key: OverlayKey): Promise<void> {
+  if (active && active.key === key) return;
+  destroyActive();
+  const app = await createApp(containerIdFor[key]);
+  const instance = buildOverlay(key);
+  app.stage.addChild(instance);
+  const log = logFor(key);
+  if (log) wireCallbacks(key, instance, log);
+  active = { key, app, instance };
+  if (log) logLine(log, "Aktivert. Klar — én Pixi.Application kjører nå.");
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -299,85 +503,6 @@ function mysteryBustResultPayload(): Record<string, unknown> {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Overlay wiring
-// ─────────────────────────────────────────────────────────────────
-
-async function setupWheel(): Promise<void> {
-  const app = await createApp("stage-wheel");
-  const overlay = new WheelOverlay(STAGE_W, STAGE_H, noopBridge);
-  app.stage.addChild(overlay);
-  const log = document.getElementById("log-wheel")!;
-  overlay.setOnChoice((choice) => {
-    logLine(log, `onChoice fired: ${JSON.stringify(choice)} — auto-animating fake result in 500 ms`);
-    // In the real flow, the server would respond with a result. For the
-    // preview we synthesize one so the full animation can be observed.
-    setTimeout(() => overlay.animateResult(wheelResultPayload(), 50000), 500);
-  });
-  overlay.setOnDismiss(() => logLine(log, "onDismiss fired (overlay auto-closed)"));
-  handles.set("wheel", { app, instance: overlay, log });
-  logLine(log, "Klar. Trykk 'Trigger Lykkehjul' for å starte.");
-}
-
-async function setupChest(): Promise<void> {
-  const app = await createApp("stage-chest");
-  const overlay = new TreasureChestOverlay(STAGE_W, STAGE_H, noopBridge);
-  app.stage.addChild(overlay);
-  const log = document.getElementById("log-chest")!;
-  overlay.setOnChoice((choice) => {
-    logLine(log, `onChoice fired: ${JSON.stringify(choice)} — animerer resultat om 500 ms`);
-    setTimeout(() => overlay.animateResult(chestResultPayload(), 75000), 500);
-  });
-  overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
-  handles.set("chest", { app, instance: overlay, log });
-  logLine(log, "Klar. Trykk 'Trigger Skattekiste' for å starte.");
-}
-
-async function setupOddsen(): Promise<void> {
-  const app = await createApp("stage-oddsen");
-  const overlay = new OddsenOverlay(STAGE_W, STAGE_H);
-  app.stage.addChild(overlay);
-  const log = document.getElementById("log-oddsen")!;
-  overlay.setOnChoice((choice) => {
-    logLine(log, `onChoice fired: ${JSON.stringify(choice)} — viser venter-state om 500 ms`);
-    setTimeout(
-      () => overlay.animateResult(oddsenWaitingResultPayload(), 0),
-      500,
-    );
-  });
-  overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
-  handles.set("oddsen", { app, instance: overlay, log });
-  logLine(log, "Klar. Trykk 'Trigger Oddsen' for å starte.");
-}
-
-async function setupColorDraft(): Promise<void> {
-  const app = await createApp("stage-colordraft");
-  const overlay = new ColorDraftOverlay(STAGE_W, STAGE_H);
-  app.stage.addChild(overlay);
-  const log = document.getElementById("log-colordraft")!;
-  overlay.setOnChoice((choice) => {
-    logLine(log, `onChoice fired: ${JSON.stringify(choice)} — animerer treff om 500 ms`);
-    setTimeout(() => overlay.animateResult(colordraftHitResultPayload(), 25000), 500);
-  });
-  overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
-  handles.set("colordraft", { app, instance: overlay, log });
-  logLine(log, "Klar. Trykk 'Trigger Fargetrekning' for å starte.");
-}
-
-async function setupMystery(): Promise<void> {
-  const app = await createApp("stage-mystery");
-  const overlay = new MysteryGameOverlay(STAGE_W, STAGE_H);
-  app.stage.addChild(overlay);
-  const log = document.getElementById("log-mystery")!;
-  overlay.setOnChoice((choice) => {
-    logLine(log, `onChoice fired: ${JSON.stringify(choice)} — animerer resultat om 500 ms`);
-    setTimeout(() => overlay.animateResult(mysteryWinResultPayload(), 40000), 500);
-  });
-  overlay.setOnDismiss(() => logLine(log, "onDismiss fired"));
-  handles.set("mystery", { app, instance: overlay, log });
-  logLine(log, "Klar. Trykk 'Trigger Mystery Game' for å starte.");
-}
-
-// ─────────────────────────────────────────────────────────────────
 // Button-dispatch
 // ─────────────────────────────────────────────────────────────────
 
@@ -391,16 +516,7 @@ async function setupMystery(): Promise<void> {
  * show). Without this, `animateResult()` / `showChoiceError()` run on a
  * Container whose `.visible` is still `false` and the canvas appears empty.
  */
-function ensureShown(
-  overlayKey: OverlayKey,
-  overlay:
-    | WheelOverlay
-    | TreasureChestOverlay
-    | OddsenOverlay
-    | ColorDraftOverlay
-    | MysteryGameOverlay,
-  log: HTMLElement,
-): void {
+function ensureShown(overlayKey: OverlayKey, overlay: AnyOverlay, log: HTMLElement): void {
   if (overlay.visible) return;
   switch (overlayKey) {
     case "wheel":
@@ -416,41 +532,50 @@ function ensureShown(
       (overlay as ColorDraftOverlay).show(colordraftTriggerPayload());
       break;
     case "mystery":
-      (overlay as MysteryGameOverlay).show(mysteryTriggerPayload() as Parameters<MysteryGameOverlay["show"]>[0]);
+      (overlay as MysteryGameOverlay).show(
+        mysteryTriggerPayload() as Parameters<MysteryGameOverlay["show"]>[0],
+      );
       break;
   }
   logLine(log, "(auto-show() først — overlay var skjult)");
 }
 
-function handleAction(overlayKey: OverlayKey, action: string): void {
-  const h = handles.get(overlayKey);
-  if (!h) return;
-  const log = h.log;
+async function handleAction(overlayKey: OverlayKey, action: string): Promise<void> {
+  // Activate this scenario if it isn't already. This destroys whatever
+  // was running before (canvas + ticker + stage tree), so the page only
+  // ever holds one Application at a time.
+  if (!active || active.key !== overlayKey) {
+    await activateScenario(overlayKey);
+  }
+  if (!active || active.key !== overlayKey) return;
+  const log = logFor(overlayKey);
+  if (!log) return;
+  const instance = active.instance;
 
   // For every action except "trigger" (which calls show() itself) and "hide"
   // (which explicitly hides), force the overlay to be visible first. This
   // guarantees the canvas renders even if the user clicks a post-trigger
   // action button standalone.
   if (action !== "trigger" && action !== "hide") {
-    ensureShown(overlayKey, h.instance, log);
+    ensureShown(overlayKey, instance, log);
   }
 
   try {
     switch (overlayKey) {
       case "wheel":
-        handleWheelAction(h.instance as WheelOverlay, action, log);
+        handleWheelAction(instance as WheelOverlay, action, log);
         break;
       case "chest":
-        handleChestAction(h.instance as TreasureChestOverlay, action, log);
+        handleChestAction(instance as TreasureChestOverlay, action, log);
         break;
       case "oddsen":
-        handleOddsenAction(h.instance as OddsenOverlay, action, log);
+        handleOddsenAction(instance as OddsenOverlay, action, log);
         break;
       case "colordraft":
-        handleColorDraftAction(h.instance as ColorDraftOverlay, action, log);
+        handleColorDraftAction(instance as ColorDraftOverlay, action, log);
         break;
       case "mystery":
-        handleMysteryAction(h.instance as MysteryGameOverlay, action, log);
+        handleMysteryAction(instance as MysteryGameOverlay, action, log);
         break;
     }
   } catch (err) {
@@ -606,28 +731,51 @@ function handleMysteryAction(overlay: MysteryGameOverlay, action: string, log: H
 // ─────────────────────────────────────────────────────────────────
 
 async function boot(): Promise<void> {
-  // Wire delegated click-handler before PIXI inits; buttons just sit
-  // idle until setup completes, and any early clicks are no-ops.
+  // Render placeholders for every panel up-front so the layout is
+  // stable and inactive panels show a clear cue to activate them.
+  for (const key of ALL_KEYS) renderInactivePlaceholder(key);
+
+  // Wire delegated click-handler. Two click paths land here:
+  //   1) `button.action[data-action][data-overlay]` — the per-overlay
+  //      action buttons inside `.controls`.
+  //   2) `.stage-placeholder[data-overlay-placeholder]` — the inactive
+  //      panel cue. Clicking it activates that scenario without firing
+  //      any specific action (the user can then trigger from buttons).
   document.addEventListener("click", (ev) => {
     const target = ev.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const placeholder = target.closest<HTMLElement>(".stage-placeholder");
+    if (placeholder) {
+      const placeholderKey = placeholder.dataset["overlayPlaceholder"] as
+        | OverlayKey
+        | undefined;
+      if (placeholderKey) {
+        void activateScenario(placeholderKey).then(() => {
+          const log = logFor(placeholderKey);
+          if (log) logLine(log, "Scenario aktivert via placeholder-klikk");
+        });
+      }
+      return;
+    }
+
     const btn = target.closest<HTMLButtonElement>("button.action");
     if (!btn) return;
     const action = btn.dataset["action"];
     const overlayKey = btn.dataset["overlay"] as OverlayKey | undefined;
     if (!action || !overlayKey) return;
-    handleAction(overlayKey, action);
+    void handleAction(overlayKey, action);
   });
 
-  // Parallel init keeps first paint snappy. Failures log to the specific
-  // overlay log line so one broken overlay doesn't kill the page.
-  await Promise.all([
-    setupWheel().catch((e) => console.error("Wheel setup failed:", e)),
-    setupChest().catch((e) => console.error("Chest setup failed:", e)),
-    setupOddsen().catch((e) => console.error("Oddsen setup failed:", e)),
-    setupColorDraft().catch((e) => console.error("ColorDraft setup failed:", e)),
-    setupMystery().catch((e) => console.error("Mystery setup failed:", e)),
-  ]);
+  // Boot the wheel scenario by default. The performance-budget collector
+  // (scripts/performance-budget/collect-metrics.ts) waits for
+  // `#stage-wheel canvas` immediately after navigation, so wheel must be
+  // active on first paint.
+  try {
+    await activateScenario("wheel");
+  } catch (e) {
+    console.error("Wheel default-activation failed:", e);
+  }
 }
 
 void boot();
