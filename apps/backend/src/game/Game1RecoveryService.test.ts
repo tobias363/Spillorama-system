@@ -405,3 +405,257 @@ test("PR5 recovery: UPDATE returnerer 0 rader → rollback, ingen feil", async (
   assert.equal(result.cancelled, 0, "raced rad skal ikke telles som cancelled");
   assert.equal(result.failures.length, 0, "ingen feil ved race");
 });
+
+// ── Audit-funn 2026-04-25: dato-parsing + custom window ────────────────────
+
+test("PR5 recovery: scheduled_end_time som ISO-string parsed korrekt", async () => {
+  const nowMs = Date.parse("2026-04-21T12:00:00Z");
+  // Simuler at pg returnerer dato som string (ikke Date) — vanlig
+  // for noen pg-konfigurasjoner.
+  const overdueRow = scheduledRow({
+    id: "g-string-date",
+    status: "running",
+    scheduled_end_time: "2026-04-20T01:00:00.000Z",
+  });
+  const { pool } = createStubPool([
+    {
+      match: (sql) => sql.includes("FROM \"public\".\"app_game1_scheduled_games\""),
+      rows: [overdueRow],
+    },
+    { match: (sql) => sql.trim() === "BEGIN", rows: [] },
+    {
+      match: (sql) => sql.includes("UPDATE \"public\".\"app_game1_scheduled_games\""),
+      rows: [{ id: "g-string-date", status: "cancelled" }],
+    },
+    {
+      match: (sql) => sql.includes("FROM \"public\".\"app_game1_hall_ready_status\""),
+      rows: [],
+    },
+    {
+      match: (sql) => sql.includes("INSERT INTO \"public\".\"app_game1_master_audit\""),
+      rows: [],
+    },
+    { match: (sql) => sql.trim() === "COMMIT", rows: [] },
+  ]);
+  const service = Game1RecoveryService.forTesting(pool as never);
+  const result = await service.runRecoveryPass(nowMs);
+  assert.equal(result.cancelled, 1, "ISO-string dato parsed og kansellert");
+  assert.deepEqual(result.cancelledGameIds, ["g-string-date"]);
+});
+
+test("PR5 recovery: ugyldig dato-string → preserved (NaN-finite-guard)", async () => {
+  const nowMs = Date.parse("2026-04-21T12:00:00Z");
+  // Hvis Date.parse gir NaN (f.eks. korrupt dato i DB), service skal ikke
+  // kansellere — fail-closed.
+  const corruptRow = scheduledRow({
+    id: "g-corrupt",
+    status: "running",
+    scheduled_end_time: "ikke-en-dato",
+  });
+  const { pool } = createStubPool([
+    {
+      match: (sql) => sql.includes("FROM \"public\".\"app_game1_scheduled_games\""),
+      rows: [corruptRow],
+    },
+  ]);
+  const service = Game1RecoveryService.forTesting(pool as never);
+  const result = await service.runRecoveryPass(nowMs);
+  assert.equal(result.cancelled, 0, "korrupt dato skal IKKE kansellere");
+  assert.equal(result.preserved, 1, "korrupt dato → preserved (operatør må undersøke)");
+});
+
+test("PR5 recovery: custom maxRunningWindowMs respekteres", async () => {
+  // Service tar maxRunningWindowMs i konstruksjon (default 2t).
+  // Locker at custom window-verdier brukes korrekt.
+  const nowMs = Date.parse("2026-04-21T12:00:00Z");
+  // Game ble ferdig 30 min siden — innenfor default 2t-vindu.
+  const recentRow = scheduledRow({
+    id: "g-recent",
+    status: "running",
+    scheduled_end_time: new Date("2026-04-21T11:30:00Z"),
+  });
+
+  // Test 1: med default 2h window → preserved.
+  {
+    const { pool } = createStubPool([
+      {
+        match: (sql) => sql.includes("FROM \"public\".\"app_game1_scheduled_games\""),
+        rows: [recentRow],
+      },
+    ]);
+    const service = Game1RecoveryService.forTesting(pool as never);
+    const result = await service.runRecoveryPass(nowMs);
+    assert.equal(result.preserved, 1, "default 2h: rad innenfor vindu preserved");
+  }
+
+  // Test 2: med custom 10-min window → 30 min siden er overdue.
+  {
+    const { pool } = createStubPool([
+      {
+        match: (sql) => sql.includes("FROM \"public\".\"app_game1_scheduled_games\""),
+        rows: [recentRow],
+      },
+      { match: (sql) => sql.trim() === "BEGIN", rows: [] },
+      {
+        match: (sql) => sql.includes("UPDATE \"public\".\"app_game1_scheduled_games\""),
+        rows: [{ id: "g-recent", status: "cancelled" }],
+      },
+      {
+        match: (sql) => sql.includes("FROM \"public\".\"app_game1_hall_ready_status\""),
+        rows: [],
+      },
+      {
+        match: (sql) => sql.includes("INSERT INTO \"public\".\"app_game1_master_audit\""),
+        rows: [],
+      },
+      { match: (sql) => sql.trim() === "COMMIT", rows: [] },
+    ]);
+    const service = Game1RecoveryService.forTesting(pool as never, {
+      maxRunningWindowMs: 10 * 60 * 1000, // 10 min
+    });
+    const result = await service.runRecoveryPass(nowMs);
+    assert.equal(result.cancelled, 1, "custom 10-min: rad overdue → kansellert");
+  }
+});
+
+test("PR5 recovery: konstruksjon avviser negativ maxRunningWindowMs", () => {
+  const { pool } = createStubPool();
+  for (const bad of [-1, -1000, NaN]) {
+    assert.throws(
+      () =>
+        new Game1RecoveryService({
+          pool: pool as never,
+          maxRunningWindowMs: bad,
+        }),
+      (err: unknown) => err instanceof DomainError && err.code === "INVALID_CONFIG",
+      `maxRunningWindowMs=${bad} skal avvises`,
+    );
+  }
+});
+
+test("PR5 recovery: konstruksjon avviser Infinity maxRunningWindowMs", () => {
+  // Number.isFinite-guard fanger Infinity (ellers ville cutoff bli
+  // -Infinity og INGENTING bli kansellert).
+  const { pool } = createStubPool();
+  assert.throws(
+    () =>
+      new Game1RecoveryService({
+        pool: pool as never,
+        maxRunningWindowMs: Infinity,
+      }),
+    (err: unknown) => err instanceof DomainError && err.code === "INVALID_CONFIG",
+  );
+});
+
+test("PR5 recovery: maxRunningWindowMs flooret til heltall (3.7 → 3)", () => {
+  // Service har Math.floor i konstruktør — ms-verdier skal være heltall.
+  const { pool } = createStubPool();
+  // Skal ikke kaste — verdier > 0 godtas, floor til heltall.
+  assert.doesNotThrow(
+    () =>
+      new Game1RecoveryService({
+        pool: pool as never,
+        maxRunningWindowMs: 3.7,
+      }),
+  );
+});
+
+test("PR5 recovery: tom hall-ready-snapshot → tom audit-metadata (defaults)", async () => {
+  // Game har ingen hall-ready-rader (helt nytt spill) — snapshotReadyRows
+  // returnerer tomt object.
+  const nowMs = Date.parse("2026-04-21T12:00:00Z");
+  const overdueRow = scheduledRow({
+    id: "g-no-halls",
+    status: "running",
+    scheduled_end_time: new Date("2026-04-20T01:00:00Z"),
+  });
+  const { pool, queries } = createStubPool([
+    {
+      match: (sql) => sql.includes("FROM \"public\".\"app_game1_scheduled_games\""),
+      rows: [overdueRow],
+    },
+    { match: (sql) => sql.trim() === "BEGIN", rows: [] },
+    {
+      match: (sql) => sql.includes("UPDATE \"public\".\"app_game1_scheduled_games\""),
+      rows: [{ id: "g-no-halls", status: "cancelled" }],
+    },
+    {
+      match: (sql) => sql.includes("FROM \"public\".\"app_game1_hall_ready_status\""),
+      rows: [],
+    },
+    {
+      match: (sql) => sql.includes("INSERT INTO \"public\".\"app_game1_master_audit\""),
+      rows: [],
+    },
+    { match: (sql) => sql.trim() === "COMMIT", rows: [] },
+  ]);
+  const service = Game1RecoveryService.forTesting(pool as never);
+  await service.runRecoveryPass(nowMs);
+
+  const auditQuery = queries.find((q) =>
+    q.sql.includes("INSERT INTO \"public\".\"app_game1_master_audit\""),
+  );
+  assert.ok(auditQuery);
+  // Snapshot-param skal være tom JSONB-object.
+  const snapshot = JSON.parse(auditQuery!.params[4] as string);
+  assert.deepEqual(snapshot, {}, "tom hall-snapshot → {}");
+});
+
+test("PR5 recovery: 0 inspected, 0 failures returnerer tomt resultat-objekt", async () => {
+  // Bekreft at serviceren ikke krasjer på fall-trough-stier (alle queries
+  // returnerer tom).
+  const nowMs = Date.parse("2026-04-21T12:00:00Z");
+  const { pool } = createStubPool([]);
+  const service = Game1RecoveryService.forTesting(pool as never);
+  const result = await service.runRecoveryPass(nowMs);
+  assert.deepEqual(result, {
+    inspected: 0,
+    cancelled: 0,
+    preserved: 0,
+    failures: [],
+    cancelledGameIds: [],
+    preservedGameIds: [],
+  });
+});
+
+test("PR5 recovery: master_hall_id + group_hall_id propageres til audit-INSERT", async () => {
+  const nowMs = Date.parse("2026-04-21T12:00:00Z");
+  const overdueRow = scheduledRow({
+    id: "g-multihall",
+    status: "running",
+    master_hall_id: "hall-master-12",
+    group_hall_id: "grp-bingo-east",
+    scheduled_end_time: new Date("2026-04-20T01:00:00Z"),
+  });
+  const { pool, queries } = createStubPool([
+    {
+      match: (sql) => sql.includes("FROM \"public\".\"app_game1_scheduled_games\""),
+      rows: [overdueRow],
+    },
+    { match: (sql) => sql.trim() === "BEGIN", rows: [] },
+    {
+      match: (sql) => sql.includes("UPDATE \"public\".\"app_game1_scheduled_games\""),
+      rows: [{ id: "g-multihall", status: "cancelled" }],
+    },
+    {
+      match: (sql) => sql.includes("FROM \"public\".\"app_game1_hall_ready_status\""),
+      rows: [],
+    },
+    {
+      match: (sql) => sql.includes("INSERT INTO \"public\".\"app_game1_master_audit\""),
+      rows: [],
+    },
+    { match: (sql) => sql.trim() === "COMMIT", rows: [] },
+  ]);
+  const service = Game1RecoveryService.forTesting(pool as never);
+  await service.runRecoveryPass(nowMs);
+
+  const auditQuery = queries.find((q) =>
+    q.sql.includes("INSERT INTO \"public\".\"app_game1_master_audit\""),
+  );
+  assert.ok(auditQuery);
+  // Params shape per writeAudit: [auditId, gameId, actorHallId, groupHallId, snapshot, metadata]
+  assert.equal(auditQuery!.params[1], "g-multihall");
+  assert.equal(auditQuery!.params[2], "hall-master-12", "actor_hall_id = master");
+  assert.equal(auditQuery!.params[3], "grp-bingo-east", "group_hall_id = group");
+});
