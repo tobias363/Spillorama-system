@@ -381,3 +381,186 @@ test("Math.floor på jackpot.draw: 50.9 → 50 (PÅ) / 50.1 → 50 (PÅ)", () =>
   });
   assert.equal(r51.triggered, false, "drawSeq=51 > floor(50.9)=50 → ikke trigget");
 });
+
+// ── Audit-funn 2026-04-25: case-sensitivity + edge cases ───────────────────
+
+test("case-insensitive: ticketColor 'SMALL_YELLOW' (uppercase) finner 'small_yellow' i config", () => {
+  // Service lowercaser ticketColor før oppslag (Game1JackpotService.ts:111).
+  // Locker kontrakten: admin kan lagre 'small_yellow' i config og spilleren
+  // kan komme inn med 'SMALL_YELLOW' eller 'Small_Yellow' uten å miste jackpot.
+  const svc = new Game1JackpotService();
+  for (const variant of ["SMALL_YELLOW", "Small_Yellow", "small_YELLOW"]) {
+    const r = svc.evaluate({
+      phase: 5,
+      drawSequenceAtWin: 30,
+      ticketColor: variant,
+      jackpotConfig: { prizeByColor: { small_yellow: 25000 }, draw: 50 },
+    });
+    assert.equal(r.triggered, true, `farge=${variant}: case-insensitive lookup`);
+    assert.equal(r.lookupMatch, "exact");
+    assert.equal(r.amountCents, 25000 * 100);
+  }
+});
+
+test("case-insensitive: ticketColor whitespace-padded matcher exact lookup", () => {
+  // ticketColor.trim() før oppslag — admin kan ikke se whitespace, men
+  // database-input kan ha det fra import-skript. Ikke brytende hvis vi
+  // er tolerant.
+  const svc = new Game1JackpotService();
+  const r = svc.evaluate({
+    phase: 5,
+    drawSequenceAtWin: 30,
+    ticketColor: "  small_yellow  ",
+    jackpotConfig: { prizeByColor: { small_yellow: 5000 }, draw: 50 },
+  });
+  assert.equal(r.triggered, true, "trimmed ticketColor finner exact-match");
+  assert.equal(r.amountCents, 5000 * 100);
+});
+
+test("edge-case: tom ticketColor → ingen exact-lookup, faller til familie 'other' → ikke trigget", () => {
+  // Tom string er truthy etter trim() returnerer "", som er falsy. Service
+  // skipper exact-lookup når ticketLc er tom og faller til
+  // resolveColorFamily("") = "other" → returneres som ikke-trigget.
+  const svc = new Game1JackpotService();
+  const r = svc.evaluate({
+    phase: 5,
+    drawSequenceAtWin: 30,
+    ticketColor: "",
+    jackpotConfig: { prizeByColor: { yellow: 10000 }, draw: 50 },
+  });
+  assert.equal(r.triggered, false);
+  assert.equal(r.colorFamily, "other");
+  assert.equal(r.lookupMatch, "none");
+});
+
+test("edge-case: ticketColor null/undefined → behandlet som tom, fail-closed", () => {
+  // Service har `(input.ticketColor ?? "").toLowerCase().trim()` —
+  // null/undefined koerses til tom string.
+  const svc = new Game1JackpotService();
+  for (const bad of [null, undefined]) {
+    const r = svc.evaluate({
+      phase: 5,
+      drawSequenceAtWin: 30,
+      ticketColor: bad as unknown as string,
+      jackpotConfig: { prizeByColor: { yellow: 10000 }, draw: 50 },
+    });
+    assert.equal(r.triggered, false, `ticketColor=${bad} → ikke trigget`);
+  }
+});
+
+test("edge-case: prizeByColor med negativ verdi → ikke trigget (>0-guard)", () => {
+  // Negative beløp i config — admin-feil eller datamigrering. Service har
+  // eksplisitt `>0`-guard så dette aldri kan utbetale negativt jackpot.
+  const svc = new Game1JackpotService();
+  const r = svc.evaluate({
+    phase: 5,
+    drawSequenceAtWin: 30,
+    ticketColor: "small_yellow",
+    jackpotConfig: { prizeByColor: { small_yellow: -100, yellow: -50 }, draw: 50 },
+  });
+  assert.equal(r.triggered, false, "negativ prize avvises av >0-guard");
+  assert.equal(r.amountCents, 0);
+});
+
+test("edge-case: prizeByColor med string-verdi → ikke trigget (typeof-guard)", () => {
+  // ticket_config_json kan inneholde rusk-typer. Service sjekker
+  // `typeof === 'number'` så string-tall hopper til familie-fallback.
+  const svc = new Game1JackpotService();
+  const r = svc.evaluate({
+    phase: 5,
+    drawSequenceAtWin: 30,
+    ticketColor: "small_yellow",
+    jackpotConfig: {
+      prizeByColor: { small_yellow: "10000" as unknown as number },
+      draw: 50,
+    },
+  });
+  // exact-lookup avvist, faller til 'yellow' familie som ikke finnes.
+  assert.equal(r.triggered, false);
+  assert.equal(r.lookupMatch, "none");
+});
+
+test("edge-case: prizeByColor med NaN → ikke trigget", () => {
+  // Number.isFinite-guard avviser NaN.
+  const svc = new Game1JackpotService();
+  const r = svc.evaluate({
+    phase: 5,
+    drawSequenceAtWin: 30,
+    ticketColor: "small_yellow",
+    jackpotConfig: { prizeByColor: { small_yellow: NaN, yellow: NaN }, draw: 50 },
+  });
+  assert.equal(r.triggered, false);
+});
+
+test("regulatorisk: drawSequenceAtWin === maxDraw (boundary) trigger jackpot — pengespillforskriften §11", () => {
+  // Eksakt grense skal være INKLUSIV (drawSequenceAtWin <= maxDraw).
+  // Locker kontrakten mot off-by-one-feil. Pengespillforskriften §11:
+  // jackpot-utbetaling må være forutsigbar.
+  const svc = new Game1JackpotService();
+  for (const draw of [50, 55, 59]) {
+    const r = svc.evaluate({
+      phase: 5,
+      drawSequenceAtWin: draw,
+      ticketColor: "small_yellow",
+      jackpotConfig: { prizeByColor: { yellow: 10000 }, draw },
+    });
+    assert.equal(r.triggered, true, `drawSeq=${draw}=maxDraw skal trigge (inklusiv grense)`);
+  }
+});
+
+test("regulatorisk: drawSequenceAtWin === maxDraw + 1 (just-over) ikke trigget", () => {
+  // Off-by-one regression-guard — pengespillforskriften §11.
+  const svc = new Game1JackpotService();
+  for (const draw of [50, 55, 59]) {
+    const r = svc.evaluate({
+      phase: 5,
+      drawSequenceAtWin: draw + 1,
+      ticketColor: "small_yellow",
+      jackpotConfig: { prizeByColor: { yellow: 10000 }, draw },
+    });
+    assert.equal(r.triggered, false, `drawSeq=${draw + 1} > maxDraw=${draw} skal IKKE trigge`);
+  }
+});
+
+test("idempotency: same input gir alltid samme output (pure-service-kontrakt)", () => {
+  // Service skal være helt deterministisk uten side-effekter. Locker
+  // dette så ingen senere kan introdusere caching, side-effekter, eller
+  // implicit Math.random.
+  const svc = new Game1JackpotService();
+  const cfg = { prizeByColor: { yellow: 10000 }, draw: 50 };
+  const r1 = svc.evaluate({ phase: 5, drawSequenceAtWin: 45, ticketColor: "small_yellow", jackpotConfig: cfg });
+  const r2 = svc.evaluate({ phase: 5, drawSequenceAtWin: 45, ticketColor: "small_yellow", jackpotConfig: cfg });
+  const r3 = svc.evaluate({ phase: 5, drawSequenceAtWin: 45, ticketColor: "small_yellow", jackpotConfig: cfg });
+  assert.deepEqual(r1, r2);
+  assert.deepEqual(r2, r3);
+});
+
+test("kr-til-øre konvertering: 99.99 kroner → 9999 øre (Math.round-kontrakt)", () => {
+  // Finansielle tall lagres som heltall-øre. JavaScript-floats kan tape
+  // presisjon: 99.99 * 100 = 9998.999... — Math.round redder oss.
+  // Locker kontrakten mot at noen senere bytter til Math.floor.
+  const svc = new Game1JackpotService();
+  const r = svc.evaluate({
+    phase: 5,
+    drawSequenceAtWin: 30,
+    ticketColor: "small_yellow",
+    jackpotConfig: { prizeByColor: { yellow: 99.99 }, draw: 50 },
+  });
+  assert.equal(r.triggered, true);
+  assert.equal(r.amountCents, 9999, "99.99 kr → 9999 øre via Math.round");
+});
+
+test("colorFamily bevart i resultat selv ved ikke-trigget", () => {
+  // Klient/audit kan se colorFamily i resultatet for diagnostikk når
+  // jackpot ikke utløses (admin debugging, "hvorfor fikk denne ikke jackpot?").
+  const svc = new Game1JackpotService();
+  // Fase 1 (ikke 5) → ikke trigget, men colorFamily skal fortsatt være "yellow".
+  const r = svc.evaluate({
+    phase: 1,
+    drawSequenceAtWin: 30,
+    ticketColor: "large_yellow",
+    jackpotConfig: { prizeByColor: { yellow: 10000 }, draw: 50 },
+  });
+  assert.equal(r.triggered, false);
+  assert.equal(r.colorFamily, "yellow", "colorFamily bevart for diagnostikk");
+});
