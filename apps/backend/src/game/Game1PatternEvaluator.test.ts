@@ -443,3 +443,141 @@ test("edge-case: remainingForPhase returnerer Infinity for ugyldig fase", () => 
     );
   }
 });
+
+// ── Audit-funn 2026-04-25: matchedMask form + edge cases ────────────────────
+
+test("matchedMask: returnert maske er den FØRSTE som matcher (audit-stabilitet)", () => {
+  // evaluatePhase løper gjennom kandidatene i rekkefølge og returnerer
+  // første treff. For audit-stabilitet (rapportering) må samme input alltid
+  // gi samme matchedMask. Locker iterasjonsrekkefølgen.
+  const grid = emptyGrid();
+  // Fase 1: marker BEGGE rad 0 + kol 0 — begge er gyldige fase 1-vinn,
+  // men service returnerer den første som matcher.
+  let markings = markRow(emptyMarkings(), 0);
+  markings = markCol(markings, 0);
+  const r = evaluatePhase(grid, markings, PHASE_1_ONE_ROW);
+  assert.equal(r.isWinner, true);
+  // Rad 0 (5 bits, rad-mask) kommer før kol-masker i PHASE_1_MASKS.
+  // matchedMask skal være rad 0-masken (bits 0-4 = 0x1f).
+  assert.equal(r.matchedMask, 0x1f, "rad 0 (bits 0-4) er første kandidat-match");
+});
+
+test("buildTicketMask: 0 i markings teller IKKE som markert (false-tolkning)", () => {
+  // markings-arrayet er typed som ReadonlyArray<boolean>. JavaScript er
+  // type-løs ved kjøretid og kan få `0` (number) for `false` (mistypet
+  // input). Service har `markings[i] === true`-strict-sjekk.
+  const grid = emptyGrid();
+  const markings = new Array(25).fill(false);
+  // @ts-expect-error — tester runtime-defens mot mistypet input
+  markings[0] = 0; // skal IKKE markeres
+  // @ts-expect-error
+  markings[1] = 1; // 1 er ikke true → skal IKKE markeres
+  // @ts-expect-error
+  markings[2] = "true"; // string er ikke boolean true
+  const mask = buildTicketMask(grid, markings);
+  // Kun centre (idx 12) markert.
+  assert.equal(mask, 1 << 12, "kun strict true gir markering, alle andre verdier ignoreres");
+});
+
+test("evaluatePhase: hele kortet markert (alle 25) vinner ALLE faser", () => {
+  // Locker invariant: full bingo må vinne enhver fase, ikke bare fase 5.
+  // Hvis denne brytes har vi alvorlig kontrakt-feil.
+  const grid = emptyGrid();
+  const markings = new Array(25).fill(true);
+  for (const phase of [
+    PHASE_1_ONE_ROW,
+    PHASE_2_TWO_ROWS,
+    PHASE_3_THREE_ROWS,
+    PHASE_4_FOUR_ROWS,
+    PHASE_5_FULL_HOUSE,
+  ]) {
+    const r = evaluatePhase(grid, markings, phase);
+    assert.equal(r.isWinner, true, `fase ${phase}: full bingo må vinne`);
+  }
+});
+
+test("remainingForPhase: helt tomt kort → største avstand til hver fase", () => {
+  // Sanity-check at remainingForPhase returnerer logiske tall for tomt kort.
+  // Kun centre (idx 12) markert via free-bit. Antall mangler:
+  //   Fase 1: 4 (rad/kol gjennom centre, 4 av 5 bits mangler)
+  //   Fase 2: 9 (rad 2 + en annen rad: 4 + 5 = 9)
+  //   Fase 5: 24 (alle minus centre)
+  const grid = emptyGrid();
+  const markings = emptyMarkings();
+  assert.equal(remainingForPhase(grid, markings, PHASE_1_ONE_ROW), 4);
+  assert.equal(remainingForPhase(grid, markings, PHASE_2_TWO_ROWS), 9);
+  assert.equal(remainingForPhase(grid, markings, PHASE_5_FULL_HOUSE), 24);
+});
+
+test("idempotency: gjentatte evaluatePhase-kall gir samme resultat", () => {
+  // Pure-funksjon-kontrakt: ingen state mellom kall.
+  const grid = emptyGrid();
+  const markings = markRow(emptyMarkings(), 0);
+  const r1 = evaluatePhase(grid, markings, PHASE_1_ONE_ROW);
+  const r2 = evaluatePhase(grid, markings, PHASE_1_ONE_ROW);
+  const r3 = evaluatePhase(grid, markings, PHASE_1_ONE_ROW);
+  assert.deepEqual(r1, r2);
+  assert.deepEqual(r2, r3);
+});
+
+test("buildTicketMask: grid med 26+ celler returnerer 0 (kun 25 aksepteres)", () => {
+  // grid.length !== 25-guard låser at ulovlige grid-størrelser fanges.
+  const grid: Array<number | null> = new Array(26).fill(1);
+  grid[12] = 0;
+  const markings = new Array(25).fill(true);
+  assert.equal(buildTicketMask(grid, markings), 0, "26-celle grid avvises");
+});
+
+test("buildTicketMask: grid med 24 celler returnerer 0 (under-størrelse)", () => {
+  const grid: Array<number | null> = new Array(24).fill(1);
+  const markings = new Array(25).fill(true);
+  assert.equal(buildTicketMask(grid, markings), 0, "24-celle grid avvises");
+});
+
+test("evaluatePhase + remainingForPhase: ugyldig grid (size != 25) gir fail-closed", () => {
+  // Når grid har feil størrelse returneres mask=0 fra buildTicketMask.
+  // evaluatePhase iterer kandidater og finner ingen match (ticketMask=0
+  // matches ikke noen non-zero mask).
+  const grid: Array<number | null> = [1, 2, 3];
+  const markings = new Array(25).fill(true);
+  const r = evaluatePhase(grid, markings, PHASE_1_ONE_ROW);
+  assert.equal(r.isWinner, false, "ugyldig grid → ikke vinner");
+  assert.equal(r.matchedMask, null);
+});
+
+test("matchedMask popcount = forventet antall bits per fase", () => {
+  // Verifiser at matchedMask returnert ved win har korrekt antall bits:
+  //   Fase 1: 5 bits (én rad/kol)
+  //   Fase 2: 10 bits (to kolonner)
+  //   Fase 3: 15 bits (tre kolonner)
+  //   Fase 4: 20 bits (fire kolonner)
+  //   Fase 5: 25 bits (full house)
+  function popcount(n: number): number {
+    let c = 0;
+    let x = n;
+    while (x) {
+      c += x & 1;
+      x >>>= 1;
+    }
+    return c;
+  }
+  const grid = emptyGrid();
+  const allMarked = new Array(25).fill(true);
+  const expected = {
+    [PHASE_1_ONE_ROW]: 5,
+    [PHASE_2_TWO_ROWS]: 10,
+    [PHASE_3_THREE_ROWS]: 15,
+    [PHASE_4_FOUR_ROWS]: 20,
+    [PHASE_5_FULL_HOUSE]: 25,
+  };
+  for (const [phaseStr, bits] of Object.entries(expected)) {
+    const phase = Number(phaseStr);
+    const r = evaluatePhase(grid, allMarked, phase);
+    assert.equal(r.isWinner, true);
+    assert.equal(
+      popcount(r.matchedMask!),
+      bits,
+      `fase ${phase}: matchedMask skal ha ${bits} bits satt`,
+    );
+  }
+});

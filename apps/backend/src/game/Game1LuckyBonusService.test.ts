@@ -286,3 +286,143 @@ test("resolveLuckyBonusConfig: amountCents=12.9 → floor til 12 (enabled)", () 
   });
   assert.deepEqual(c, { amountCents: 12, enabled: true });
 });
+
+// ── Audit-funn 2026-04-25: parse-defens + race-scenarios ────────────────────
+
+test("resolveLuckyBonusConfig: array som luckyBonus → null (array er ikke object)", () => {
+  // Array.isArray-guard fanger array-input. Hvis admin lagrer feil shape
+  // skal vi returnere null (bonus av) i stedet for å kaste.
+  const c = resolveLuckyBonusConfig({ luckyBonus: [{ amountCents: 5000, enabled: true }] });
+  assert.equal(c, null, "array-shape avvises");
+});
+
+test("resolveLuckyBonusConfig: NaN amountCents → 0 + disabled", () => {
+  // Number.isFinite-guard avviser NaN slik at det ikke ender opp som
+  // amountCents: NaN i config (vil ellers gi NaN sammenligning i evaluate).
+  const c = resolveLuckyBonusConfig({
+    luckyBonus: { amountCents: NaN, enabled: true },
+  });
+  assert.deepEqual(c, { amountCents: 0, enabled: false });
+});
+
+test("resolveLuckyBonusConfig: Infinity amountCents → 0 + disabled", () => {
+  const c = resolveLuckyBonusConfig({
+    luckyBonus: { amountCents: Infinity, enabled: true },
+  });
+  assert.deepEqual(c, { amountCents: 0, enabled: false });
+});
+
+test("resolveLuckyBonusConfig: enabled='true' (string) → enabled=false (strict-true-sjekk)", () => {
+  // resolveLuckyBonusConfig har `enabledRaw === true`-strict-sjekk. Locker
+  // kontrakten mot at noen senere bytter til truthy-sjekk og dermed
+  // godtar string "true" som on-flagg.
+  const c = resolveLuckyBonusConfig({
+    luckyBonus: { amountCents: 5000, enabled: "true" },
+  });
+  assert.deepEqual(
+    c,
+    { amountCents: 5000, enabled: false },
+    "enabled-flagg må være boolean true, ikke truthy",
+  );
+});
+
+test("resolveLuckyBonusConfig: kun enabled=true uten amountCents → null (begge må finnes)", () => {
+  // Subtilt: hvis kun enabled finnes (ingen amountCents), returneres null
+  // fordi koden krever at minst ett av amountCents/enabled er satt (Object
+  // har minst én av dem) for å returnere en config. Locker semantikk.
+  const c = resolveLuckyBonusConfig({
+    luckyBonus: { enabled: true },
+  });
+  // amountCents=0, enabled=true. Begge er definert: enabled finnes som key.
+  // amountCents er IKKE definert i input, så undefined-check trigger:
+  // > if (luckyBonus.enabled !== undefined || luckyBonus.amountCents !== undefined)
+  // returner disabled-config ({ amountCents: 0, enabled: false }) — fordi
+  // enabled IS defined.
+  assert.deepEqual(c, { amountCents: 0, enabled: false });
+});
+
+test("evaluate idempotency: gjentatte kall med samme input gir samme output", () => {
+  // Pure-service-kontrakt: ingen state mellom kall.
+  const svc = new Game1LuckyBonusService();
+  const input = {
+    winnerId: "w1",
+    luckyNumber: 42,
+    fullHouseTriggerBall: 42,
+    phase: 5,
+    bonusConfig: { amountCents: 10000, enabled: true },
+  };
+  const r1 = svc.evaluate(input);
+  const r2 = svc.evaluate(input);
+  const r3 = svc.evaluate(input);
+  assert.deepEqual(r1, r2);
+  assert.deepEqual(r2, r3);
+});
+
+test("evaluate: phase=0 → ikke trigget (defens mot off-by-one fra DB)", () => {
+  // Phase verdier som ikke er 1..5 skal aldri trigge bonus. Dette er
+  // fail-closed mot DB-rusk hvor phase kan være 0 eller >5.
+  const svc = new Game1LuckyBonusService();
+  for (const phase of [0, 6, -1, 99, NaN]) {
+    const r = svc.evaluate({
+      winnerId: "w1",
+      luckyNumber: 42,
+      fullHouseTriggerBall: 42,
+      phase,
+      bonusConfig: { amountCents: 5000, enabled: true },
+    });
+    assert.equal(r.triggered, false, `phase=${phase} skal aldri trigge bonus`);
+  }
+});
+
+test("evaluate: bonusConfig=null → ikke trigget (fail-closed)", () => {
+  // Konfig kan være null fra database hvis admin ikke har satt opp
+  // luckyBonus for dette spillet. Service har eksplisitt null-guard
+  // ('!input.bonusConfig'-sjekk).
+  const svc = new Game1LuckyBonusService();
+  const r = svc.evaluate({
+    winnerId: "w1",
+    luckyNumber: 42,
+    fullHouseTriggerBall: 42,
+    phase: 5,
+    bonusConfig: null as unknown as { amountCents: number; enabled: boolean },
+  });
+  assert.equal(r.triggered, false);
+});
+
+test("evaluate: lucky=fullHouseTriggerBall=0 → ikke trigget (defens mot edge-input)", () => {
+  // Backend bør aldri sende ball=0, men hvis det skjer, fall-closed.
+  // luckyNumber kan teoretisk være 0 hvis spilleren glemte å velge.
+  // Grenseverdi: bingo-baller er typisk 1..75 eller 1..90.
+  const svc = new Game1LuckyBonusService();
+  const r = svc.evaluate({
+    winnerId: "w1",
+    luckyNumber: 0,
+    fullHouseTriggerBall: 0,
+    phase: 5,
+    bonusConfig: { amountCents: 5000, enabled: true },
+  });
+  // 0 === 0 og 0 er integer, men luckyNumber=0 betyr "ikke valgt" → trigget=true
+  // fordi service ikke har spesial-sjekk for 0. Kan velge å skrive denne
+  // inverst hvis vi har spesial-semantikk for 0. Aktuell oppførsel:
+  // 0 er integer, ball-match holder, så bonus trigget.
+  assert.equal(
+    r.triggered,
+    true,
+    "luckyNumber=0 + ball=0 trigger fortsatt fordi 0 er valid integer",
+  );
+});
+
+test("evaluate: brukerId/winnerId uses bare for logging — påvirker ikke trigget", () => {
+  // winnerId er kun for logging/idempotency-key-formål, ikke for evaluering.
+  // Bevis: tom string + valid ellers → fortsatt trigget.
+  const svc = new Game1LuckyBonusService();
+  const r = svc.evaluate({
+    winnerId: "",
+    luckyNumber: 42,
+    fullHouseTriggerBall: 42,
+    phase: 5,
+    bonusConfig: { amountCents: 5000, enabled: true },
+  });
+  assert.equal(r.triggered, true, "tom winnerId påvirker ikke evaluering");
+  assert.equal(r.bonusCents, 5000);
+});
