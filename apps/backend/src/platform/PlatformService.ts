@@ -113,6 +113,17 @@ export interface HallDefinition {
    */
   hallNumber?: number | null;
   /**
+   * GAP #19 (audit 2026-04-24): IP-adresse for legacy IP→hall-mapping.
+   * Migrasjon 20260901000000: unique-per-hall når ikke null. Brukt i
+   * `checkHallAvailability` for pre-create-validering.
+   */
+  ipAddress?: string | null;
+  /**
+   * GAP #17 (audit 2026-04-24): soft-delete-tidspunkt. NULL = aktiv hall.
+   * Satt = soft-deleted (skjult fra UI, men beholder referanseintegritet).
+   */
+  deletedAt?: string | null;
+  /**
    * BIN-583: nåværende cash-balanse hallen selv disponerer ("Available
    * Balance"). Muteres atomisk via HallCashLedger.applyCashTx — direkte
    * skriving utenfor ledger er ikke tillatt.
@@ -147,6 +158,8 @@ export interface CreateHallInput {
   invoiceMethod?: string;
   isActive?: boolean;
   hallNumber?: number | null;
+  /** GAP #19: IP-adresse for IP→hall-mapping. */
+  ipAddress?: string | null;
 }
 
 export interface UpdateHallInput {
@@ -164,6 +177,26 @@ export interface UpdateHallInput {
    */
   clientVariant?: HallClientVariant;
   hallNumber?: number | null;
+  /** GAP #19: IP-adresse for IP→hall-mapping. */
+  ipAddress?: string | null;
+}
+
+/** GAP #19 (audit 2026-04-24): pre-create-validering av hallNumber + IP. */
+export interface CheckHallAvailabilityInput {
+  hallNumber?: number | null;
+  ipAddress?: string | null;
+  /** Hvis satt: ignorer denne hallens egne verdier (brukes ved edit). */
+  hallId?: string;
+}
+
+export interface CheckHallAvailabilityField {
+  ok: boolean;
+  conflictingHallId?: string;
+}
+
+export interface CheckHallAvailabilityResult {
+  hallNumber?: CheckHallAvailabilityField;
+  ipAddress?: CheckHallAvailabilityField;
 }
 
 /** BIN-503: DB-backed TV-display tokens. Plaintext never stored or read back. */
@@ -369,6 +402,10 @@ interface HallRow {
   tv_url: string | null;
   /** Migrasjon 20260701000000: legacy Hall Number (101, 102, ...). */
   hall_number: number | null;
+  /** GAP #19 (migration 20260901000000): IP-adresse for legacy IP→hall-mapping. */
+  ip_address: string | null;
+  /** GAP #17 (migration 20260901000000): soft-delete-tidspunkt. */
+  deleted_at: Date | string | null;
   /** BIN-583 B3.3: running cash-balanse (tilgjengelig saldo). */
   cash_balance: string | number | null;
   /** TV Screen public token — backfilt til uuid i migration 20260423000100. */
@@ -1104,16 +1141,23 @@ export class PlatformService {
     return rows.map((row) => this.mapGameSettingsChangeLogEntry(row));
   }
 
-  async listHalls(options?: { includeInactive?: boolean }): Promise<HallDefinition[]> {
+  async listHalls(options?: { includeInactive?: boolean; includeDeleted?: boolean }): Promise<HallDefinition[]> {
     await this.ensureInitialized();
     const includeInactive = options?.includeInactive ?? false;
+    // GAP #17 (audit 2026-04-24): soft-deleted haller ekskluderes fra lister
+    // by default. Admin kan opt-in via `includeDeleted=true` for audit-views.
+    const includeDeleted = options?.includeDeleted ?? false;
+    const where: string[] = [];
+    if (!includeInactive) where.push("is_active = true");
+    if (!includeDeleted) where.push("deleted_at IS NULL");
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
     const { rows } = await this.pool.query<HallRow>(
       `SELECT id, slug, name, region, address,
               organization_number, settlement_account, invoice_method,
-              is_active, tv_url, hall_number, cash_balance, tv_token,
+              is_active, tv_url, hall_number, ip_address, deleted_at, cash_balance, tv_token,
               tv_voice_selection, created_at, updated_at
        FROM ${this.hallsTable()}
-       ${includeInactive ? "" : "WHERE is_active = true"}
+       ${whereClause}
        ORDER BY name ASC, slug ASC`
     );
     return rows.map((row) => this.mapHall(row));
@@ -1213,7 +1257,7 @@ export class PlatformService {
        WHERE id = $1
        RETURNING id, slug, name, region, address,
                  organization_number, settlement_account, invoice_method,
-                 is_active, tv_url, hall_number, cash_balance, tv_token,
+                 is_active, tv_url, hall_number, ip_address, deleted_at, cash_balance, tv_token,
                  tv_voice_selection, created_at, updated_at`,
       [hallRow.id, voice]
     );
@@ -1240,6 +1284,8 @@ export class PlatformService {
     const invoiceMethod = input.invoiceMethod?.trim() || null;
     const isActive = input.isActive ?? true;
     const hallNumber = this.normalizeHallNumber(input.hallNumber);
+    // GAP #19: IP-adresse er optional ved create. Validerer format + unikhet.
+    const ipAddress = this.normalizeHallIpAddress(input.ipAddress);
     const hallId = randomUUID();
 
     const client = await this.pool.connect();
@@ -1261,15 +1307,24 @@ export class PlatformService {
           throw new DomainError("HALL_NUMBER_EXISTS", "Hall-nummer er allerede i bruk.");
         }
       }
+      if (ipAddress !== null) {
+        const { rows: ipConflict } = await client.query<{ id: string }>(
+          `SELECT id FROM ${this.hallsTable()} WHERE ip_address = $1`,
+          [ipAddress]
+        );
+        if (ipConflict[0]) {
+          throw new DomainError("HALL_IP_EXISTS", "IP-adresse er allerede i bruk av en annen hall.");
+        }
+      }
 
       const { rows } = await client.query<HallRow>(
-        `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, organization_number, settlement_account, invoice_method, is_active, hall_number)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO ${this.hallsTable()} (id, slug, name, region, address, organization_number, settlement_account, invoice_method, is_active, hall_number, ip_address)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id, slug, name, region, address,
                    organization_number, settlement_account, invoice_method,
-                   is_active, tv_url, hall_number, cash_balance, tv_token,
+                   is_active, tv_url, hall_number, ip_address, deleted_at, cash_balance, tv_token,
                    tv_voice_selection, created_at, updated_at`,
-        [hallId, slug, name, region, address, organizationNumber, settlementAccount, invoiceMethod, isActive, hallNumber]
+        [hallId, slug, name, region, address, organizationNumber, settlementAccount, invoiceMethod, isActive, hallNumber, ipAddress]
       );
       await this.seedHallGameConfigForHall(client, hallId);
       await client.query("COMMIT");
@@ -1301,6 +1356,10 @@ export class PlatformService {
     const nextHallNumber = update.hallNumber !== undefined
       ? this.normalizeHallNumber(update.hallNumber)
       : (current.hallNumber ?? null);
+    // GAP #19: IP-adresse — valider format + unikhet hvis endret.
+    const nextIpAddress = update.ipAddress !== undefined
+      ? this.normalizeHallIpAddress(update.ipAddress)
+      : (current.ipAddress ?? null);
 
     if (nextSlug !== current.slug) {
       const { rows: conflictRows } = await this.pool.query<{ id: string }>(
@@ -1322,6 +1381,16 @@ export class PlatformService {
       }
     }
 
+    if (nextIpAddress !== null && nextIpAddress !== (current.ipAddress ?? null)) {
+      const { rows: ipConflict } = await this.pool.query<{ id: string }>(
+        `SELECT id FROM ${this.hallsTable()} WHERE ip_address = $1 AND id <> $2`,
+        [nextIpAddress, current.id]
+      );
+      if (ipConflict[0]) {
+        throw new DomainError("HALL_IP_EXISTS", "IP-adresse er allerede i bruk av en annen hall.");
+      }
+    }
+
     const { rows } = await this.pool.query<HallRow>(
       `UPDATE ${this.hallsTable()}
        SET slug = $2,
@@ -1333,16 +1402,195 @@ export class PlatformService {
            invoice_method = $8,
            is_active = $9,
            hall_number = $10,
+           ip_address = $11,
            updated_at = now()
        WHERE id = $1
        RETURNING id, slug, name, region, address,
                  organization_number, settlement_account, invoice_method,
-                 is_active, tv_url, hall_number, cash_balance, tv_token,
+                 is_active, tv_url, hall_number, ip_address, deleted_at, cash_balance, tv_token,
                  tv_voice_selection, created_at, updated_at`,
-      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive, nextHallNumber]
+      [current.id, nextSlug, nextName, nextRegion, nextAddress, nextOrgNumber, nextSettlementAccount, nextInvoiceMethod, nextIsActive, nextHallNumber, nextIpAddress]
     );
 
     return this.mapHall(rows[0]);
+  }
+
+  /**
+   * GAP #17 (audit BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.8 / §6 #2):
+   * soft-delete en hall etter konsolidering. Setter `deleted_at = now()`
+   * og fjerner is_active. Validerer at ingen aktive avhengigheter finnes:
+   *
+   *   1. Aktive spillere (app_hall_registrations.status = 'ACTIVE')
+   *   2. Aktive agenter (app_agent_halls)
+   *   3. Aktive spill (DailySchedule + GameManagement) — håndteres av
+   *      caller via service-layer; her sjekker vi kun referanseintegritet.
+   *
+   * Kaster `HALL_HAS_DEPENDENCIES` (mappes til HTTP 409) ved konflikt.
+   *
+   * Operasjonen er idempotent: re-soft-delete på allerede deleted hall
+   * kaster `HALL_ALREADY_DELETED`. Restore (clear deleted_at) er en
+   * separat operasjon — ikke implementert i denne PRen siden legacy ikke
+   * eksponerer det heller.
+   */
+  async softDeleteHall(hallReference: string): Promise<{
+    hallId: string;
+    deletedAt: string;
+  }> {
+    await this.ensureInitialized();
+    // includeDeleted=true så vi får meningsfulle feilmeldinger (ALREADY_DELETED
+    // i stedet for NOT_FOUND når halen er soft-deleted fra før).
+    const currentRow = await this.resolveHallRowByReference(hallReference, { includeDeleted: true });
+    if (!currentRow) {
+      throw new DomainError("HALL_NOT_FOUND", "Hallen finnes ikke.");
+    }
+    if (currentRow.deleted_at) {
+      throw new DomainError(
+        "HALL_ALREADY_DELETED",
+        "Hallen er allerede soft-deleted."
+      );
+    }
+
+    // Validering: ingen aktive spillere knyttet til hallen.
+    const { rows: playerRows } = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+       FROM "${this.schema}"."app_hall_registrations"
+       WHERE hall_id = $1 AND status IN ('ACTIVE', 'PENDING')`,
+      [currentRow.id]
+    );
+    const activePlayerCount = Number(playerRows[0]?.count ?? "0");
+    if (activePlayerCount > 0) {
+      throw new DomainError(
+        "HALL_HAS_DEPENDENCIES",
+        `Hallen har ${activePlayerCount} aktive spillere — flytt eller fjern disse først.`,
+        { dependency: "players", count: activePlayerCount }
+      );
+    }
+
+    // Aktive agenter (app_agent_halls) — best-effort: tabellen finnes ikke
+    // i alle deploy-variants (test-fixtures), så vi swallow-er manglende-
+    // tabell-feil. Dette holder validering på prod uten å bryke tester
+    // som ikke har agent-skjemaet.
+    try {
+      const { rows: agentRows } = await this.pool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM "${this.schema}"."app_agent_halls"
+         WHERE hall_id = $1`,
+        [currentRow.id]
+      );
+      const agentCount = Number(agentRows[0]?.count ?? "0");
+      if (agentCount > 0) {
+        throw new DomainError(
+          "HALL_HAS_DEPENDENCIES",
+          `Hallen har ${agentCount} tilknyttede agenter — frigjør disse først.`,
+          { dependency: "agents", count: agentCount }
+        );
+      }
+    } catch (err) {
+      // DomainError fra valideringen over skal ALLTID propageres.
+      if (err instanceof DomainError) {
+        throw err;
+      }
+      // Manglende-tabell (42P01) → ignorer; alle andre DB-feil → bobler opp.
+      if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "42P01") {
+        // Tabell finnes ikke — ingen agent-binding å validere.
+      } else {
+        throw err;
+      }
+    }
+
+    // Soft-delete: sett deleted_at + is_active=false så hallen skjules
+    // konsekvent fra ALL listing (legacy hadde hard-delete; vi bevarer
+    // referanseintegritet for audit/historikk).
+    const { rows } = await this.pool.query<{ deleted_at: Date | string }>(
+      `UPDATE ${this.hallsTable()}
+       SET deleted_at = now(),
+           is_active = false,
+           updated_at = now()
+       WHERE id = $1 AND deleted_at IS NULL
+       RETURNING deleted_at`,
+      [currentRow.id]
+    );
+    if (!rows[0]) {
+      // Race condition — en annen request soft-deleted samtidig.
+      throw new DomainError(
+        "HALL_ALREADY_DELETED",
+        "Hallen ble soft-deleted samtidig av en annen forespørsel."
+      );
+    }
+    return {
+      hallId: currentRow.id,
+      deletedAt: asIso(rows[0].deleted_at),
+    };
+  }
+
+  /**
+   * GAP #19 (audit BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.8 / §6 #19):
+   * pre-create-validering av hallNumber + IP-adresse. Returnerer per-felt
+   * `{ ok, conflictingHallId? }` slik at admin-UI kan vise riktig feil-
+   * markør i form-feltet før submit.
+   *
+   * Hvis `hallId` er satt (edit-flow) ekskluderer vi den hallen fra
+   * konflikt-sjekken — ellers ville en hall som beholder sitt eksisterende
+   * hallNumber alltid komme tilbake som "in use" mot seg selv.
+   *
+   * Kun felt som er oppgitt i input-en valideres; manglende felter får
+   * ikke `ok=false`-svar (gir kun det feltet ikke-undefined i resultatet).
+   */
+  async checkHallAvailability(
+    input: CheckHallAvailabilityInput
+  ): Promise<CheckHallAvailabilityResult> {
+    await this.ensureInitialized();
+    const result: CheckHallAvailabilityResult = {};
+    const excludeId = input.hallId ? this.assertEntityReference(input.hallId, "hallId") : null;
+
+    if (input.hallNumber !== undefined && input.hallNumber !== null) {
+      const normalized = this.normalizeHallNumber(input.hallNumber);
+      // Null-tilfellet (clear) er alltid OK — ingen konflikt mulig.
+      if (normalized === null) {
+        result.hallNumber = { ok: true };
+      } else {
+        const params: unknown[] = [normalized];
+        let sql = `SELECT id FROM ${this.hallsTable()} WHERE hall_number = $1`;
+        if (excludeId !== null) {
+          sql += ` AND id <> $2`;
+          params.push(excludeId);
+        }
+        sql += ` LIMIT 1`;
+        const { rows } = await this.pool.query<{ id: string }>(sql, params);
+        result.hallNumber = rows[0]
+          ? { ok: false, conflictingHallId: rows[0].id }
+          : { ok: true };
+      }
+    }
+
+    if (input.ipAddress !== undefined && input.ipAddress !== null) {
+      // Tom-streng → behandlet som "tomt felt" (ingen verdi å sjekke).
+      // Validering av format gjøres via normalizeHallIpAddress; hvis
+      // input er ugyldig kaster den DomainError som propageres til caller.
+      const trimmed = input.ipAddress.trim();
+      if (!trimmed) {
+        result.ipAddress = { ok: true };
+      } else {
+        const normalized = this.normalizeHallIpAddress(input.ipAddress);
+        if (normalized === null) {
+          result.ipAddress = { ok: true };
+        } else {
+          const params: unknown[] = [normalized];
+          let sql = `SELECT id FROM ${this.hallsTable()} WHERE ip_address = $1`;
+          if (excludeId !== null) {
+            sql += ` AND id <> $2`;
+            params.push(excludeId);
+          }
+          sql += ` LIMIT 1`;
+          const { rows } = await this.pool.query<{ id: string }>(sql, params);
+          result.ipAddress = rows[0]
+            ? { ok: false, conflictingHallId: rows[0].id }
+            : { ok: true };
+        }
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -1359,6 +1607,46 @@ export class PlatformService {
       throw new DomainError("INVALID_INPUT", "Hall-nummer må være et positivt heltall.");
     }
     return integer;
+  }
+
+  /**
+   * GAP #19: IP-adresse for hall (legacy IP→hall-mapping).
+   *
+   * Aksepterer:
+   *   - null/undefined/"" → null (eksplisitt tømming).
+   *   - IPv4 (a.b.c.d hvor 0 ≤ a,b,c,d ≤ 255).
+   *   - IPv6 (forenklet: hex-grupper separert med ":").
+   *
+   * Ugyldige verdier kaster DomainError("INVALID_INPUT"). Vi gjør ikke
+   * full RFC-validering — formålet er å fange åpenbare typo-feil
+   * (bokstaver i IPv4, manglende dot-er, etc.) før unique-konflikten
+   * oppdager dem ved insert.
+   */
+  private normalizeHallIpAddress(raw: string | null | undefined): string | null {
+    if (raw === null || raw === undefined) return null;
+    if (typeof raw !== "string") {
+      throw new DomainError("INVALID_INPUT", "IP-adresse må være en tekst.");
+    }
+    const trimmed = raw.trim();
+    if (trimmed === "") return null;
+    // IPv4 (raskere sjekk først — dekker 99% av use-cases).
+    const ipv4Match = trimmed.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4Match) {
+      const octets = ipv4Match.slice(1, 5).map((s) => Number(s));
+      if (octets.every((n) => Number.isFinite(n) && n >= 0 && n <= 255)) {
+        return trimmed;
+      }
+      throw new DomainError("INVALID_INPUT", "IP-adresse er ugyldig (IPv4-oktett må være 0–255).");
+    }
+    // IPv6 (forenklet — tillater hex-grupper med ":" og evt. "::"-shortcut).
+    if (/^[0-9a-fA-F:]+$/.test(trimmed) && trimmed.includes(":")) {
+      // Krev minst 2 ":" for å unngå at en alenestående streng som "abc:" passerer.
+      const colonCount = (trimmed.match(/:/g) ?? []).length;
+      if (colonCount >= 2 && colonCount <= 7) {
+        return trimmed.toLowerCase();
+      }
+    }
+    throw new DomainError("INVALID_INPUT", "IP-adresse er ugyldig (forventet IPv4 eller IPv6).");
   }
 
   // ── BIN-503: TV-display tokens ──────────────────────────────────────────
@@ -2841,6 +3129,146 @@ export class PlatformService {
   }
 
   /**
+   * GAP #2 (audit BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.3 / §6 #2):
+   * permanent-slett en KYC-rejected spiller.
+   *
+   * Legacy `routes/backend.js:464` (`POST /player/deleteRejected`) lar
+   * admin slette KYC-avviste spillere fra DB. Soft-delete eksisterer kun
+   * for approved spillere; rejected spillere kan slettes hardt fordi de
+   * aldri har hatt aktiv konto, transaksjoner eller spill-historikk.
+   *
+   * Validering:
+   *   - Spilleren må eksistere (USER_NOT_FOUND).
+   *   - kyc_status MÅ være 'REJECTED' (KYC_NOT_REJECTED ellers).
+   *   - Rolle MÅ være 'PLAYER' (kan ikke slette admin/agent permanent her).
+   *
+   * Sletting:
+   *   - DELETE FROM app_users — FK-cascades håndterer relaterte rader
+   *     (app_hall_registrations, app_player_hall_status, app_user_profile_settings,
+   *     app_voucher_redemptions, app_notifications osv. har ON DELETE CASCADE).
+   *   - app_sessions, app_audit_log + andre RESTRICT/SET NULL-FKer:
+   *     sesjoner ryddes manuelt, audit-log beholdes (actor_id er TEXT
+   *     uten FK).
+   *
+   * Rapporterer ROW count slik at caller (admin-route) kan logge audit.
+   */
+  async permanentDeletePlayer(userIdInput: string): Promise<{
+    userId: string;
+    deletedFrom: string[];
+  }> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(userIdInput, "userId");
+    // Sjekk eksistens + status + rolle FØR transaksjon for rene feilmeldinger.
+    // getUserById skjuler soft-deleted users — for permanent-delete må vi
+    // tillate begge tilstander (soft-deleted REJECTED kan også slettes
+    // permanent for å rydde gamle KYC-avslag).
+    const { rows: userRows } = await this.pool.query<UserRow>(
+      `SELECT id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at, compliance_data
+       FROM ${this.usersTable()}
+       WHERE id = $1`,
+      [id]
+    );
+    const userRow = userRows[0];
+    if (!userRow) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
+    if (userRow.role !== "PLAYER") {
+      throw new DomainError(
+        "USER_NOT_PLAYER",
+        "Permanent sletting er kun tillatt for PLAYER-rollen."
+      );
+    }
+    if (userRow.kyc_status !== "REJECTED") {
+      throw new DomainError(
+        "KYC_NOT_REJECTED",
+        "Permanent sletting er kun tillatt for spillere med kyc_status='REJECTED'."
+      );
+    }
+
+    const deletedFrom: string[] = [];
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Rydd opp manuelt for FK-konstrains som ikke har ON DELETE CASCADE
+      // og blokkerer DELETE. Sesjoner: PR=app_sessions.user_id REFERENCES
+      // app_users(id) (no clause → NO ACTION). For en REJECTED spiller
+      // skal det normalt ikke finnes sesjoner, men rydd defensiv.
+      const { rowCount: sessionRows } = await client.query(
+        `DELETE FROM ${this.sessionsTable()} WHERE user_id = $1`,
+        [id]
+      );
+      if (sessionRows && sessionRows > 0) {
+        deletedFrom.push(`sessions:${sessionRows}`);
+      }
+
+      // Auth-tokens (password-reset, email-verify, etc.) — best-effort.
+      try {
+        const { rowCount: tokenRows } = await client.query(
+          `DELETE FROM "${this.schema}"."app_auth_tokens" WHERE user_id = $1`,
+          [id]
+        );
+        if (tokenRows && tokenRows > 0) {
+          deletedFrom.push(`auth_tokens:${tokenRows}`);
+        }
+      } catch (err) {
+        if (err && typeof err === "object" && "code" in err && (err as { code: string }).code !== "42P01") {
+          throw err;
+        }
+      }
+
+      // Selve user-raden. ON DELETE CASCADE-FK-er rydder hall_registrations
+      // o.l. automatisk; RESTRICT-FK-er (app_agent_shifts, products) skal
+      // ikke kunne ha rader for en PLAYER med kyc=REJECTED, men hvis de
+      // skulle eksistere kaster DELETE en 23503 som vi mapper til
+      // HALL_HAS_DEPENDENCIES-aktig feil for spillere.
+      const { rowCount: userDelRows } = await client.query(
+        `DELETE FROM ${this.usersTable()} WHERE id = $1 AND kyc_status = 'REJECTED' AND role = 'PLAYER'`,
+        [id]
+      );
+      if (!userDelRows) {
+        throw new DomainError(
+          "USER_DELETE_RACE",
+          "Brukeren ble endret samtidig — prøv igjen."
+        );
+      }
+      deletedFrom.push("users:1");
+
+      // Wallet-raden er ikke direkte koblet via FK på app_users.id (wallet_id
+      // er TEXT uten REFERENCES), så vi rydder den eksplisitt for å unngå
+      // orphan-rader.
+      try {
+        const { rowCount: walletRows } = await client.query(
+          `DELETE FROM "${this.schema}"."app_wallets" WHERE id = $1`,
+          [userRow.wallet_id]
+        );
+        if (walletRows && walletRows > 0) {
+          deletedFrom.push(`wallet:${walletRows}`);
+        }
+      } catch (err) {
+        if (err && typeof err === "object" && "code" in err && (err as { code: string }).code !== "42P01") {
+          throw err;
+        }
+      }
+
+      await client.query("COMMIT");
+      return { userId: id, deletedFrom };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      // FK-konflikt (23503) — spilleren har data som blokkerer hard-delete.
+      if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "23503") {
+        throw new DomainError(
+          "USER_HAS_DEPENDENCIES",
+          "Spilleren har relaterte data som blokkerer permanent sletting."
+        );
+      }
+      throw this.wrapError(err);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * BIN-587 B2.3: sett status til UNVERIFIED + revoker sesjoner slik at
    * spilleren tvinges gjennom BankID-flow ved neste innlogging. Admin-
    * rutinen returnerer info om hvorvidt en ny BankID-sesjon kan genereres
@@ -3533,6 +3961,10 @@ export class PlatformService {
       clientVariant: "web",
       tvUrl: row.tv_url ?? undefined,
       hallNumber: row.hall_number ?? null,
+      // GAP #19: IP-adresse for legacy IP→hall-mapping.
+      ipAddress: row.ip_address ?? null,
+      // GAP #17: soft-delete-tidspunkt — null = aktiv.
+      deletedAt: row.deleted_at ? asIso(row.deleted_at) : null,
       cashBalance: Number.isFinite(cashBalance) ? cashBalance : 0,
       tvToken: row.tv_token,
       tvVoiceSelection: this.normalizeTvVoice(row.tv_voice_selection),
@@ -3746,17 +4178,24 @@ export class PlatformService {
     );
   }
 
-  private async resolveHallRowByReference(hallReference: string): Promise<HallRow | undefined> {
+  private async resolveHallRowByReference(
+    hallReference: string,
+    options?: { includeDeleted?: boolean }
+  ): Promise<HallRow | undefined> {
     const normalizedReference = this.assertEntityReference(hallReference, "hallId");
     const normalizedSlug = normalizedReference.toLowerCase();
+    // GAP #17: by default skjuler vi soft-deleted haller fra ALL hall-resolve;
+    // soft-delete-flow + restore-flow setter `includeDeleted=true` for å nå dem.
+    const includeDeleted = options?.includeDeleted ?? false;
+    const deletedClause = includeDeleted ? "" : "AND deleted_at IS NULL";
     const { rows } = await this.pool.query<HallRow>(
       `SELECT id, slug, name, region, address,
               organization_number, settlement_account, invoice_method,
-              is_active, tv_url, hall_number, cash_balance, tv_token,
+              is_active, tv_url, hall_number, ip_address, deleted_at, cash_balance, tv_token,
               tv_voice_selection, created_at, updated_at
        FROM ${this.hallsTable()}
-       WHERE id = $1
-          OR slug = $2
+       WHERE (id = $1 OR slug = $2)
+         ${deletedClause}
        LIMIT 1`,
       [normalizedReference, normalizedSlug]
     );
@@ -3939,11 +4378,25 @@ export class PlatformService {
         "dropsafe_balance NUMERIC(14, 2) NOT NULL DEFAULT 0",
         // BIN-498 migrasjon 20260418140000: TV-display embed URL.
         "tv_url TEXT",
+        // GAP #17 (audit 2026-04-24): soft-delete-flagg. NULL = aktiv.
+        "deleted_at TIMESTAMPTZ",
+        // GAP #19 (audit 2026-04-24): IP-adresse for legacy IP→hall-mapping.
+        "ip_address TEXT",
       ]) {
         await client.query(
           `ALTER TABLE ${this.hallsTable()} ADD COLUMN IF NOT EXISTS ${col}`
         ).catch(() => {});
       }
+      // GAP #17 partial-indeks for soft-delete-skanning.
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_${this.schema}_app_halls_deleted_at
+         ON ${this.hallsTable()}(deleted_at) WHERE deleted_at IS NOT NULL`
+      ).catch(() => {});
+      // GAP #19 partial-unique-indeks for IP-adresse (matcher hall_number-mønster).
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS app_halls_ip_address_unique
+         ON ${this.hallsTable()}(ip_address) WHERE ip_address IS NOT NULL`
+      ).catch(() => {});
       // TV Screen public token (migrasjon 20260423000100). Idempotent fallback
       // for test-schema boot + fresh installs: sikrer at default + UNIQUE-
       // indeks også er på plass uten at migrations har kjørt.

@@ -36,6 +36,16 @@ export interface AdminHall {
   tvUrl?: string;
   /** Legacy Hall Number (101, 102, …). Null = ikke satt. */
   hallNumber?: number | null;
+  /**
+   * GAP #19 (audit 2026-04-24): IP-adresse for legacy IP→hall-mapping.
+   * Null = ikke satt.
+   */
+  ipAddress?: string | null;
+  /**
+   * GAP #17 (audit 2026-04-24): soft-delete-tidspunkt. Null = aktiv hall;
+   * ISO-streng = soft-deleted (skjult fra default-listing).
+   */
+  deletedAt?: string | null;
   /** Cash-balanse hallen disponerer (Available Balance). Default 0. */
   cashBalance?: number;
   /**
@@ -90,6 +100,8 @@ export interface CreateHallInput {
   invoiceMethod?: string;
   isActive?: boolean;
   hallNumber?: number | null;
+  /** GAP #19: IP-adresse for legacy IP→hall-mapping. */
+  ipAddress?: string | null;
 }
 
 export function createHall(input: CreateHallInput): Promise<AdminHall> {
@@ -111,6 +123,62 @@ export interface UpdateHallInput {
   isActive?: boolean;
   clientVariant?: HallClientVariant;
   hallNumber?: number | null;
+  /** GAP #19: IP-adresse for legacy IP→hall-mapping. */
+  ipAddress?: string | null;
+}
+
+// ── GAP #17 + #19 (audit 2026-04-24): soft-delete + pre-create-validering ───
+
+/**
+ * GAP #17: soft-delete en hall etter konsolidering.
+ * Backend validerer at ingen aktive avhengigheter finnes (spillere/agenter);
+ * ved konflikt returnerer 409 med error-code `HALL_HAS_DEPENDENCIES`.
+ */
+export interface DeleteHallResult {
+  hallId: string;
+  deletedAt: string;
+}
+
+export function deleteHall(hallId: string): Promise<DeleteHallResult> {
+  return apiRequest<DeleteHallResult>(
+    `/api/admin/halls/${encodeURIComponent(hallId)}`,
+    { method: "DELETE", auth: true },
+  );
+}
+
+/**
+ * GAP #19: pre-create-validering av hallNumber + IP. Returnerer per-felt
+ * `{ ok, conflictingHallId? }` slik at form-feltet kan vise riktig markør
+ * før submit.
+ */
+export interface CheckHallAvailabilityInput {
+  hallNumber?: number | null;
+  ipAddress?: string | null;
+  /** Hvis satt: ekskluder denne hallen fra konflikt-sjekken (edit-flow). */
+  hallId?: string;
+}
+
+export interface CheckHallAvailabilityField {
+  ok: boolean;
+  conflictingHallId?: string;
+}
+
+export interface CheckHallAvailabilityResult {
+  hallNumber?: CheckHallAvailabilityField;
+  ipAddress?: CheckHallAvailabilityField;
+}
+
+export function checkHallAvailability(
+  input: CheckHallAvailabilityInput,
+): Promise<CheckHallAvailabilityResult> {
+  return apiRequest<CheckHallAvailabilityResult>(
+    "/api/admin/halls/check-availability",
+    {
+      method: "POST",
+      body: input,
+      auth: true,
+    },
+  );
 }
 
 // ── Add Money / balanse-transaksjoner ────────────────────────────────────────
