@@ -231,6 +231,7 @@ import { createAdminDisplayHandlers } from "./sockets/adminDisplayEvents.js";
 import { createAdminHallHandlers } from "./sockets/adminHallEvents.js";
 import { TvScreenService } from "./game/TvScreenService.js";
 import { createTvScreenRouter } from "./routes/tvScreen.js";
+import { createTvVoiceAssetsRouter } from "./routes/tvVoiceAssets.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -301,6 +302,12 @@ app.use(httpRateLimiter.middleware());
 app.get(["/", "/index.html"], (_req, res) => { res.redirect(302, "/web/"); });
 app.use("/admin", express.static(adminWebDir));
 app.use(express.static(publicDir));
+// TV-voice ball-utrop. express.static-mounten over plukker opp eventuelle
+// override-filer i `apps/backend/public/tv-voices/<voice>/<ball>.<ext>` først;
+// hvis ingen override finnes, fall vi tilbake til de eksisterende voice-pakkene
+// i `packages/game-client/public/assets/game1/audio/`. Se router-modulen for
+// mapping voice1/2/3 → no-male/no-female/en.
+app.use(createTvVoiceAssetsRouter({ projectDir }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -763,6 +770,16 @@ const profileSettingsService = responsibleGamingStore
       auditLogService,
     })
   : undefined;
+
+// BIN-720 follow-up: wire ProfileSettingsService into PlatformService so
+// `assertUserEligibleForGameplay` gates gameplay on time-based block-
+// myself (1d/7d/30d via blocked_until). Done after construction to
+// break the chicken-and-egg (ProfileSettingsService takes engine, which
+// is independent of PlatformService at runtime). When the service is
+// undefined (no RG-persistence) the gate is a silent no-op.
+if (profileSettingsService) {
+  platformService.setProfileSettingsService(profileSettingsService);
+}
 
 // BIN-583 B3.1: agent-domene (auth + shift + admin-CRUD). Bruker samme
 // Postgres-pool som PlatformService slik at ensureInitialized sikrer
@@ -1457,6 +1474,9 @@ app.use(createAdminPlayersRouter({
   bankIdAdapter,
   webBaseUrl,
   supportEmail,
+  // BIN-702 follow-up: velkomstmail med 7-dagers password-reset-lenke
+  // for spillere importert via Excel/CSV (bulk-import).
+  authTokenService,
 }));
 app.use(createAdminAmlRouter({
   platformService,

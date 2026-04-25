@@ -125,6 +125,51 @@ test("transfer idempotencyKey: gjentatt transfer returnerer samme tx (winnings)"
   assert.equal(toBalances.deposit, 0);
 });
 
+// Regresjonstest mot tidligere flaky-bug (PR #465, #472):
+// Replay-lookupen for idempotens brukte `tx.createdAt === existing.createdAt`
+// for å finne partner-tx. På trege CI-runnere ga separate `new Date()`-kall
+// for fromTx/toTx ulike ms — partner-lookup feilet, code falt gjennom og
+// utførte en ny dobbel transfer. Vi forcer her ulike timestamps per Date()-kall
+// for å sikre at fixen bruker én delt `now` for begge tx-radene.
+test("transfer idempotencyKey: deterministisk under clock-skew (regresjon mot CI flake)", async () => {
+  const realToISO = Date.prototype.toISOString;
+  let counter = 0;
+  // Hver `new Date().toISOString()`-kall får unik monotont økende ms.
+  Date.prototype.toISOString = function () {
+    counter++;
+    return realToISO.call(new Date(Date.UTC(2030, 0, 1, 0, 0, 0, counter)));
+  };
+
+  try {
+    const wallet = new InMemoryWalletAdapter(0);
+    await wallet.createAccount({ accountId: "from", initialBalance: 500 });
+    await wallet.createAccount({ accountId: "to", initialBalance: 0 });
+
+    const r1 = await wallet.transfer("from", "to", 100, "retry-me", {
+      idempotencyKey: "xfer-skew",
+    });
+    const r2 = await wallet.transfer("from", "to", 100, "retry-me", {
+      idempotencyKey: "xfer-skew",
+    });
+
+    assert.equal(r1.fromTx.id, r2.fromTx.id, "samme fromTx.id under clock-skew");
+    assert.equal(r1.toTx.id, r2.toTx.id, "samme toTx.id under clock-skew");
+    assert.equal(
+      r1.fromTx.createdAt,
+      r1.toTx.createdAt,
+      "fromTx og toTx må ha identisk createdAt for at partner-lookup skal være deterministisk",
+    );
+
+    const toBalances = await wallet.getBothBalances("to");
+    assert.equal(toBalances.deposit, 100, "deposit kreditert kun én gang (ikke dobbelt)");
+    assert.equal(toBalances.winnings, 0);
+    const fromBalances = await wallet.getBothBalances("from");
+    assert.equal(fromBalances.deposit, 400, "from-deposit trukket kun én gang");
+  } finally {
+    Date.prototype.toISOString = realToISO;
+  }
+});
+
 // ── Scenarios som speiler BingoEngine/Game2/Game3 payout-flows ──────────────
 
 test("payout-simulering: house → player (winnings) — realistisk BingoEngine-flow", async () => {
