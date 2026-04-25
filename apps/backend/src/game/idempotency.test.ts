@@ -49,6 +49,27 @@ describe("IdempotencyKeys — byte-identitet mot legacy template-literals", () =
     assert.equal(key, "game1-purchase:client-abc:debit");
   });
 
+  test("game1PurchaseCompensate matcher `game1-purchase:{clientKey}:compensate` (#499 issue 2)", () => {
+    const key = IdempotencyKeys.game1PurchaseCompensate({
+      clientIdempotencyKey: "client-abc",
+    });
+    assert.equal(key, "game1-purchase:client-abc:compensate");
+    assert.match(key, IDEMPOTENCY_KEY_FORMAT);
+  });
+
+  test("game1PurchaseCompensate skiller seg fra game1PurchaseDebit (samme clientKey)", () => {
+    // KRITISK: dedup på debit-key skal IKKE blokkere compensate-credit, og
+    // dedup på compensate-key skal IKKE blokkere debit. Wallet-adapteren
+    // bruker key til lookup — kollisjon ville skapt en ulovlig wallet-state.
+    const debitKey = IdempotencyKeys.game1PurchaseDebit({
+      clientIdempotencyKey: "same-client",
+    });
+    const compKey = IdempotencyKeys.game1PurchaseCompensate({
+      clientIdempotencyKey: "same-client",
+    });
+    assert.notEqual(debitKey, compKey);
+  });
+
   test("game1LuckyBonus matcher `g1-lucky-bonus-{scheduledGameId}-{winnerId}` (K1-C PM-spec)", () => {
     const key = IdempotencyKeys.game1LuckyBonus({
       scheduledGameId: "sg-7",

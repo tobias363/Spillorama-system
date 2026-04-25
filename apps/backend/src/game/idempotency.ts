@@ -91,6 +91,18 @@ export const IdempotencyKeys = {
     `game1-purchase:${params.clientIdempotencyKey}:debit`,
 
   /**
+   * Game1TicketPurchaseService.purchase — kompensasjons-credit ved feilet INSERT
+   * (ikke-23505). Brukes til å rulle tilbake wallet-debit når INSERT av
+   * purchase-rad feiler etter wallet er debitert (FK-violation, transient
+   * connection-død, etc). Idempotent: ved retry treffer wallet-adapterens
+   * dedup på samme key og dobbel-kreditering forhindres.
+   * Se apps/backend/src/game/Game1TicketPurchaseService.ts (issue 2 fra
+   * Spill 1 review #499).
+   */
+  game1PurchaseCompensate: (params: { clientIdempotencyKey: string }): string =>
+    `game1-purchase:${params.clientIdempotencyKey}:compensate`,
+
+  /**
    * Game1TicketPurchaseService.refundPurchase — én per purchaseId.
    * Se apps/backend/src/game/Game1TicketPurchaseService.ts.
    */

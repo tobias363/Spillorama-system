@@ -382,6 +382,22 @@ export class Game1TicketPurchaseService {
     }
 
     // INSERT — UNIQUE(idempotency_key) race-handling.
+    //
+    // KRITISK kompensasjons-blokk (Spill 1 review #499 issue 2):
+    //   Wallet er allerede debitert for digital_wallet over (linje ~364).
+    //   Hvis INSERT feiler med ikke-23505-feilkode (FK-violation, transient
+    //   connection-død, schema-mismatch, …) er pengene tapt uten audit-trail
+    //   med mindre vi kompenserer.
+    //
+    //   - 23505 (unique_violation) er IKKE tap — det betyr noen andre vant
+    //     racet (samme idempotency-key) og det finnes en gyldig purchase-rad
+    //     vi kan returnere. Ingen kompensasjon.
+    //   - Alle andre koder → wallet.credit med deterministisk idempotency-key
+    //     `game1-purchase:<clientKey>:compensate`. Wallet-adapterens dedup
+    //     sørger for at retry ikke dobbel-krediterer.
+    //   - Hvis selve kompensasjonen feiler logger vi CRITICAL og lar feilen
+    //     boble opp slik at den havner i monitoring (operations må manuelt
+    //     refundere). Vi maskerer IKKE original-feilen.
     let alreadyExisted = false;
     let insertedRow: Game1TicketPurchaseRow;
     try {
@@ -397,7 +413,7 @@ export class Game1TicketPurchaseService {
         idempotencyKey: input.idempotencyKey,
       });
     } catch (err) {
-      // Postgres unique_violation.
+      // Postgres unique_violation — annen process vant racet, ikke tap.
       const code = (err as { code?: string } | null)?.code ?? "";
       if (code === "23505") {
         const dup = await this.findByIdempotencyKey(input.idempotencyKey);
@@ -407,6 +423,105 @@ export class Game1TicketPurchaseService {
             totalAmountCents: Number(dup.totalAmountCents),
             alreadyExisted: true,
           };
+        }
+        // 23505 men ingen rad funnet — fall through til kompensasjon.
+        // Dette er en degenerert situasjon (rad ble slettet mellom INSERT
+        // og lookup), men vi behandler det konservativt som tap.
+      }
+
+      // Kompensér wallet-debit hvis det skjedde. Cash/card_agent har ingen
+      // wallet-flyt så vi har ingenting å rulle tilbake der.
+      if (
+        input.paymentMethod === "digital_wallet" &&
+        walletDebitTx !== null &&
+        buyerWalletId !== null
+      ) {
+        try {
+          await this.wallet.credit(
+            buyerWalletId,
+            centsToAmount(totalAmountCents),
+            `game1_purchase_compensate:${purchaseId}`,
+            {
+              idempotencyKey: IdempotencyKeys.game1PurchaseCompensate({
+                clientIdempotencyKey: input.idempotencyKey,
+              }),
+              // Refund tilbake til deposit-siden (samme prinsipp som
+              // refundPurchase) — kjøp som aldri ble fullført skal ikke
+              // havne på winnings-siden. Se WALLET_SPLIT_DESIGN §3.2.
+              to: "deposit",
+            }
+          );
+          log.error(
+            {
+              err,
+              code,
+              purchaseId,
+              buyerUserId: input.buyerUserId,
+              hallId: input.hallId,
+              walletDebitTxId: walletDebitTx.id,
+              totalAmountCents,
+            },
+            "[CRITICAL] Game1 purchase INSERT feilet — wallet kompensert (credit). Original-feil rekastes."
+          );
+          // Fire-and-forget audit av kompensasjonen for revisjons-trail.
+          this.fireAudit({
+            actorId: input.buyerUserId,
+            actorType: "PLAYER",
+            action: "game1_purchase.compensate",
+            resource: "game1_ticket_purchase",
+            resourceId: purchaseId,
+            details: {
+              scheduledGameId: input.scheduledGameId,
+              buyerUserId: input.buyerUserId,
+              hallId: input.hallId,
+              totalAmountCents,
+              paymentMethod: input.paymentMethod,
+              walletDebitTxId: walletDebitTx.id,
+              insertErrorCode: code || "UNKNOWN",
+              insertErrorMessage:
+                err instanceof Error ? err.message : String(err),
+              reason: "INSERT_FAILED_AFTER_DEBIT",
+            },
+          });
+        } catch (compErr) {
+          // Kompensasjon feilet — dette er DOBBELT KRITISK. Logg på CRITICAL
+          // og la original-feilen boble opp så monitoring fanger det. Manuell
+          // intervensjon kreves: operations må refundere wallet via admin-flyt.
+          log.error(
+            {
+              originalErr: err,
+              compensationErr: compErr,
+              code,
+              purchaseId,
+              buyerUserId: input.buyerUserId,
+              hallId: input.hallId,
+              walletDebitTxId: walletDebitTx.id,
+              totalAmountCents,
+            },
+            "[CRITICAL][MANUAL_INTERVENTION] Game1 purchase INSERT feilet OG wallet-kompensasjon feilet. Manuell refund kreves."
+          );
+          // Fire-and-forget audit av kompensasjonsfeil for sporbarhet.
+          this.fireAudit({
+            actorId: input.buyerUserId,
+            actorType: "PLAYER",
+            action: "game1_purchase.compensate_failed",
+            resource: "game1_ticket_purchase",
+            resourceId: purchaseId,
+            details: {
+              scheduledGameId: input.scheduledGameId,
+              buyerUserId: input.buyerUserId,
+              hallId: input.hallId,
+              totalAmountCents,
+              paymentMethod: input.paymentMethod,
+              walletDebitTxId: walletDebitTx.id,
+              insertErrorCode: code || "UNKNOWN",
+              compensationErrorMessage:
+                compErr instanceof Error
+                  ? compErr.message
+                  : String(compErr),
+              reason: "COMPENSATION_FAILED_MANUAL_INTERVENTION_REQUIRED",
+            },
+          });
         }
       }
       throw err;
