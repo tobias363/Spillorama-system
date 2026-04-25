@@ -15,7 +15,7 @@ Forrige audit (historisk referanse, ikke oppdatert): [`BACKEND_PARITY_AUDIT_2026
 |---|---:|---:|---|---|
 | HTTP-endepunkter (ruter) | **559** | **421** | +299 (+245%) | **~50–80 funksjonelt unike mangler** (fra ~250); resten er server-renderte admin-HTML-sider som erstattes av admin-web SPA. BIN-587 ble **CLOSED 2026-04-19** med 0 MANGLER i de 6 avklarte kategoriene. |
 | Socket.IO-events (handlers) | **134 unike events** | **35 unike events** | +7 | Konsolidert semantisk. Gjenstår: FCM/notif-events, enkelte CMS-views. |
-| Games ported | Game1–5 (Game4 deprecated) | Hovedspill (G1), G2, G3, G5 | uendret | G4 deprecated pr. BIN-496. Hovedspill dominerende fokus pr. 23.4. |
+| Games ported | Game1–5 (Game4 deprecated) | Spill 1-3 hovedspill + SpinnGo (game5) databingo | uendret | G4 deprecated pr. BIN-496. Spill 1-3 (G1/G2/G3) er hovedspill (15% min); SpinnGo (game5/slug `spillorama`) er databingo (30% min). Se [SPILLKATALOG.md](../architecture/SPILLKATALOG.md). |
 | Cron-jobs (bakgrunnsjobber) | 2 CronJob + 4 setInterval i `Boot/Server.js` | **6 jobber registrert i `JobScheduler`** (BIN-582) | Fra 0 til 6 | Swedbank-sync, BankID-reminder, RG-cleanup, loyalty-reset, game1-schedule-tick, game1-auto-draw-tick — alle implementert |
 | DB-tabeller | 55 Mongoose-modeller | **91 PostgreSQL-tabeller** | +62 (+214%) | Store tillegg: agent_*, physical_tickets, CMS, AML, loyalty, hall_groups, patterns, sub_games, saved_games, schedules, app_game1_* (11 tabeller) |
 | Push notifications (FCM) | Ja — fcm-node, firebase-admin | **Fortsatt nei** | uendret | `/api/notifications` er stub som returnerer `[]` |
@@ -421,7 +421,9 @@ Hvis mobil-appen skal motta push-varsler (spill-start, bonuser, RG-varsler), må
 
 ## 4. Spill-spesifikk logikk — status per spill
 
-### Hovedspill (Game 1, slug: `bingo` / `game_1`) — ✅ OK
+> **Klassifisering** (per [SPILLKATALOG.md](../architecture/SPILLKATALOG.md)): Spill 1, 2, 3 er **hovedspill** (live, server-trukket, min 15% til organisasjoner). SpinnGo (Spill 4 / game5 / slug `spillorama`) er **databingo** (forhåndstrukket per sekvens, min 30% til organisasjoner). Game 4 / `themebingo` er deprecated (BIN-496).
+
+### Spill 1 — Hovedspill (Game 1, slug: `bingo` / `game_1`) — ✅ OK
 
 - **Legacy:** `Game/Game1/Controllers/GameController.js` (4056 linjer) + `GameProcess.js` (6261 linjer) + helpers.
 - **Ny:** `apps/backend/src/game/BingoEngine.ts` (2518 linjer) + `variantConfig.ts` + `ticket.ts` + 11 app_game1_*-tabeller (scheduled_games, draws, game_state, hall_ready_status, master_audit, mini_game_results, oddsen_state, phase_winners, pot_events, ticket_assignments, ticket_purchases, accumulating_pots).
@@ -429,13 +431,13 @@ Hvis mobil-appen skal motta push-varsler (spill-start, bonuser, RG-varsler), må
 - **Client:** `packages/game-client/src/games/game1/` med README + audit-rapport + porterings-guide.
 - **Mangler:** Bot-injeksjon (skippet), "save game" (pause og fortsett senere i dager) — ikke nødvendig for pilot.
 
-### Game 2 — 🟡 DELVIS
+### Spill 2 — Hovedspill (Game 2 / Rocket) — 🟡 DELVIS
 
 - **Legacy:** 2538 linjer.
 - **Ny:** Via `BingoEngine` med `gameType = "rocket"`. `variantConfig.ts` har rocket-variant.
 - **Mangler:** `Game2BuyBlindTickets` (blind-kjøp), voucher-logikk (se §2.2).
 
-### Game 3 — 🟡 DELVIS
+### Spill 3 — Hovedspill (Game 3 / Mønsterbingo) — 🟡 DELVIS
 
 - **Legacy:** 1750 linjer + `gamehelper/game3.js` (1839 linjer).
 - **Ny:** Via `BingoEngine`. Client finnes.
@@ -445,7 +447,7 @@ Hvis mobil-appen skal motta push-varsler (spill-start, bonuser, RG-varsler), må
 
 - Lukket per BIN-496 (2026-04-17). Ikke port.
 
-### Game 5 (Spillorama Slot/Rulett) — 🟡 DELVIS
+### SpinnGo (Spill 4 / Game 5, slug `spillorama`) — Databingo — 🟡 DELVIS
 
 - **Legacy:** `Game/Game5/Controllers/GameController.js` (756) + `GameProcess.js` (1531) + `gamehelper/game5.js` (1172).
 - **Ny:** Ticket swap implementert (`ticket:swap`, BIN-585). Rulett/WoF-auto-select delvis.

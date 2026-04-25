@@ -101,6 +101,8 @@ Dependencies: Epic A.
 
 Goal: ensure gameplay flow matches databingo and electronic rules.
 
+> **Scope-presisering** (per [SPILLKATALOG.md](../architecture/SPILLKATALOG.md)): Reglene `BG-011`, `BG-012`, `BG-013` og `BG-014` gjelder **kun SpinnGo** (Spill 4 / game5 / slug `spillorama`) — det er Spillorama's eneste databingo. Spill 1, 2, 3 er hovedspill (live, server-trukket) og har egne regulatoriske grenser per pengespillforskriften §11. Implementasjonen må scope checks per slug/gameType, ikke globalt over alle spill.
+
 ### Stories
 
 1. `BG-010` - Remove autoplay and autoscheduler in production mode (`P0`, 2d)
@@ -108,24 +110,28 @@ Acceptance:
 - Backend auto-start/auto-draw disabled by production config guard.
 - Unity auto-spin disabled in production build profile.
 
-2. `BG-011` - Enforce min 30 seconds between databingo sequences (`P0`, 2d)
+2. `BG-011` - Enforce min 30 seconds between databingo sequences (`P0`, 2d) — **scope: SpinnGo only**
 Acceptance:
-- Server gate per hall/game-type enforces interval.
+- Server gate per hall/game-type enforces interval — gjelder kun trafikk med `gameType="DATABINGO"` (i.e. SpinnGo / slug `spillorama`).
 - Attempted early start rejected and logged.
+- Ikke trigger for Spill 1-3 (hovedspill).
 
-3. `BG-012` - Enforce max 5 databingo tickets (`P0`, 1d)
+3. `BG-012` - Enforce max 5 databingo tickets (`P0`, 1d) — **scope: SpinnGo only**
 Acceptance:
-- Already enforced server-side; add test coverage and hall-specific config checks.
+- Already enforced server-side for SpinnGo; add test coverage and hall-specific config checks.
+- Spill 1-3 (hovedspill) har egne ticket-grenser (max 30 elektroniske bonger per spill per pengespillforskriften §65).
 
-4. `BG-013` - Enforce one active databingo per player (`P0`, 2d)
+4. `BG-013` - Enforce one active databingo per player (`P0`, 2d) — **scope: SpinnGo only**
 Acceptance:
-- Server blocks joining/starting second active databingo session.
+- Server blocks joining/starting second active databingo session — gjelder kun SpinnGo.
 - Works across reconnect and multi-client scenarios.
+- Spill 1-3 (hovedspill) støtter parallell deltakelse (en spiller kan kjøpe flere bonger til samme runde).
 
-5. `BG-014` - Block extra draw purchases (`P0`, 1d)
+5. `BG-014` - Block extra draw purchases (`P0`, 1d) — **scope: SpinnGo only**
 Acceptance:
-- No API/client path for extra draws in databingo.
+- No API/client path for extra draws in databingo (SpinnGo).
 - Explicit validation and event audit for denied attempts.
+- Spill 1-3 (hovedspill) kan ha extra-draw-mekanikk per game-design (sjekk per-spill-spec).
 
 Dependencies: Epic A.
 
@@ -137,8 +143,9 @@ Goal: enforce prize caps and provable payout correctness.
 
 1. `BG-015` - Prize policy engine by game type (`P0`, 3d)
 Acceptance:
-- Databingo max single prize 2500.
+- Databingo (SpinnGo / slug `spillorama`) max single prize 2500.
 - Databingo extra prize max 12000/day/link.
+- Hovedspill (Spill 1-3) max single prize 2500 per pengespillforskriften §11.
 - Rules configurable per hall/link with effective date.
 
 2. `BG-016` - Correct simultaneous winner handling (`P1`, 2d)
@@ -174,8 +181,9 @@ Acceptance:
 
 4. `BG-021` - Overskudd distribution engine (`P0`, 3d)
 Acceptance:
-- Main game min 15% to organizations.
-- Databingo min 30% to organizations.
+- Main game min 15% to organizations — gjelder Spill 1, 2, 3 (slug `bingo`, `rocket`, `monsterbingo`).
+- Databingo min 30% to organizations — gjelder SpinnGo (Spill 4 / slug `spillorama`).
+- Implementasjon i `apps/backend/src/game/ComplianceLedgerOverskudd.ts:75` switcher korrekt på `gameType === "DATABINGO" ? 0.3 : 0.15`. Forutsetter at call-sites skriver riktig gameType per spill — se [SPILL1_GAMETYPE_INVESTIGATION_2026-04-25.md](../compliance/SPILL1_GAMETYPE_INVESTIGATION_2026-04-25.md) for kjent misklassifisering som må fikses.
 - Transfer records linked to accounting batch and organization account.
 
 Dependencies: Epic A, D.

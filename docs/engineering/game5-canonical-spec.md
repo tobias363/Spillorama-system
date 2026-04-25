@@ -1,6 +1,8 @@
 ---
 game: game5
 name: Spillorama Bingo
+marketName: SpinnGo  # Synonymt med "Spill 4" i kontrakter — SpinnGo er produktnavn. Se docs/architecture/SPILLKATALOG.md
+regulatoryCategory: Databingo  # Forhåndstrukket per sekvens, min 30% til organisasjoner. Spill 1-3 er hovedspill (15%). Se docs/architecture/SPILLKATALOG.md
 slug: spillorama
 ticketGrid: 3x5
 centerCell: none
@@ -57,7 +59,10 @@ parityStatus: MVP  # Rulett visuell, men flere G5-unike features gjenstår
 commitRef: 300b248cd3975ba0a723c9a911cc187979e79af1
 ---
 
-# Game 5 Canonical Spec — Spillorama Bingo
+# Game 5 Canonical Spec — SpinnGo (Spillorama Bingo)
+
+**Markedsføringsnavn:** SpinnGo (synonymt med "Spill 4" i kontrakter og papir-planer).
+**Regulatorisk kategori:** Databingo. Spiller starter selv en forhåndstrukket sekvens; min 30% til organisasjoner. Spill 1-3 er hovedspill (15%) — se [`docs/architecture/SPILLKATALOG.md`](../architecture/SPILLKATALOG.md).
 
 **Formål:** Frosset spesifikasjon av Game 5 sin faktiske oppførsel i `apps/backend/` + `packages/game-client/src/games/game5/` per 2026-04-17. Referansepunkt for paritet-arbeid ([BIN-525](https://linear.app/bingosystem/issue/BIN-525) parity matrix) og release-gate mot legacy Game 5.
 
