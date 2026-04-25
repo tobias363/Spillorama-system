@@ -30,6 +30,7 @@ import {
   PostgresAuditLogStore,
   type AuditLogStore,
 } from "./compliance/AuditLogService.js";
+import { Spill1StopVoteService } from "./spillevett/Spill1StopVoteService.js";
 import { Pool } from "pg";
 import { getPoolTuning } from "./util/pgPool.js";
 import { DrawScheduler } from "./draw-engine/DrawScheduler.js";
@@ -2336,6 +2337,19 @@ io.use(async (socket, next) => {
   next();
 });
 
+// GAP #38: Spillvett player-initiated stop-game vote service. Threshold
+// is read from BINGO_STOP_VOTE_THRESHOLD_PERCENT env (default 50% of
+// players). Service tracks votes per running round, releases armed
+// reservations when the threshold is reached, and audits both per-vote
+// and threshold-reached events.
+const spill1StopVoteService = new Spill1StopVoteService({
+  engine,
+  auditLogService,
+  walletAdapter,
+  getReservationId: (code, pid) => roomState.getReservationId(code, pid),
+  clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
+});
+
 const registerGameEvents = createGameEventHandlers({
   engine, platformService, io, socketRateLimiter,
   emitRoomUpdate, emitManyRoomUpdates, buildRoomUpdatePayload,
@@ -2389,6 +2403,8 @@ const registerGameEvents = createGameEventHandlers({
   getReservationId: (code, pid) => roomState.getReservationId(code, pid),
   setReservationId: (code, pid, rid) => roomState.setReservationId(code, pid, rid),
   clearReservationId: (code, pid) => roomState.clearReservationId(code, pid),
+  // GAP #38: Spillvett stop-game vote service.
+  spill1StopVoteService,
 });
 
 // BIN-498 + BIN-503: TV-display socket handlers.

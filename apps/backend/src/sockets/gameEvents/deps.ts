@@ -122,4 +122,11 @@ export interface GameEventsDeps {
   getReservationId?: (roomCode: string, playerId: string) => string | null;
   setReservationId?: (roomCode: string, playerId: string, reservationId: string) => void;
   clearReservationId?: (roomCode: string, playerId: string) => void;
+
+  /**
+   * GAP #38: Player-initiated stop-game (Spillvett-vote). Optional dep so
+   * test harnesses can wire the handler without the full service. Handler
+   * returns NOT_SUPPORTED when missing.
+   */
+  spill1StopVoteService?: import("../../spillevett/Spill1StopVoteService.js").Spill1StopVoteService;
 }

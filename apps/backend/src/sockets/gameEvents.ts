@@ -18,6 +18,7 @@
  *   - chatEvents.ts          — chat:send / chat:history
  *   - lifecycleEvents.ts     — leaderboard:get / disconnect
  *   - voucherEvents.ts       — voucher:redeem (+ voucher:redeemed / voucher:rejected emits)
+ *   - stopVoteEvents.ts      — game:stop:vote (GAP #38, Spillvett player-initiated stop)
  */
 import type { Socket } from "socket.io";
 import { buildRegistryContext, buildSocketContext } from "./gameEvents/context.js";
@@ -30,6 +31,7 @@ import { registerMiniGameEvents } from "./gameEvents/miniGameEvents.js";
 import { registerChatEvents } from "./gameEvents/chatEvents.js";
 import { registerLifecycleEvents } from "./gameEvents/lifecycleEvents.js";
 import { registerVoucherEvents } from "./gameEvents/voucherEvents.js";
+import { registerStopVoteEvents } from "./gameEvents/stopVoteEvents.js";
 import type { GameEventsDeps } from "./gameEvents/deps.js";
 
 export { emitG3DrawEvents } from "./gameEvents/drawEmits.js";
@@ -50,5 +52,6 @@ export function createGameEventHandlers(deps: GameEventsDeps) {
     registerChatEvents(sctx);
     registerLifecycleEvents(sctx);
     registerVoucherEvents(sctx);
+    registerStopVoteEvents(sctx);
   };
 }

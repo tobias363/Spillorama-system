@@ -119,6 +119,13 @@ export const SocketEvents = {
   BET_ARM: "bet:arm",
   GAME_START: "game:start",
   GAME_END: "game:end",
+  /**
+   * GAP #38: Player-initiated stop-game (Spillvett-vote). Pengespillforskriften
+   * gives players the right to vote to stop a running round. When the
+   * threshold is reached the game ends + reservations are released.
+   * Idempotent — same player can re-cast without double-counting.
+   */
+  GAME_STOP_VOTE: "game:stop:vote",
   DRAW_NEXT: "draw:next",
   DRAW_EXTRA_PURCHASE: "draw:extra:purchase",
   TICKET_MARK: "ticket:mark",
