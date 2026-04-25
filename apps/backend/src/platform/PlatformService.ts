@@ -520,6 +520,19 @@ export class PlatformService {
 
   private initPromise: Promise<void> | null = null;
 
+  /**
+   * BIN-720 follow-up: optional gate for time-based block-myself
+   * (1d/7d/30d via app_user_profile_settings.blocked_until). Wired
+   * after both PlatformService and ProfileSettingsService are
+   * constructed (chicken-and-egg: ProfileSettingsService needs
+   * BingoEngine which needs PlatformService for some test paths).
+   * When undefined the gate is a no-op — keeps test harnesses and
+   * deployments without RG-persistence working.
+   */
+  private profileSettingsService?: {
+    assertUserNotBlocked(userId: string): Promise<void>;
+  };
+
   constructor(
     private readonly walletAdapter: WalletAdapter,
     options: PlatformServiceOptions
@@ -3332,7 +3345,34 @@ export class PlatformService {
     }
   }
 
-  assertUserEligibleForGameplay(user: PublicAppUser): void {
+  /**
+   * BIN-720 follow-up: wire ProfileSettingsService into PlatformService
+   * after both are constructed. Lets `assertUserEligibleForGameplay`
+   * gate gameplay on time-based block-myself (1d/7d/30d). Idempotent —
+   * later calls overwrite the previous reference.
+   */
+  setProfileSettingsService(service: { assertUserNotBlocked(userId: string): Promise<void> }): void {
+    this.profileSettingsService = service;
+  }
+
+  /**
+   * Pre-gameplay eligibility check — KYC + age + (BIN-720 follow-up)
+   * time-based block-myself.
+   *
+   * The block-myself check is enforced even in non-production builds,
+   * because dev-flows still need a working block UI; only KYC/age are
+   * dev-skipped. 1y/permanent self-exclusion is enforced separately by
+   * `BingoEngine.assertWalletAllowedForGameplay` (ComplianceManager-
+   * scoped, wallet-keyed).
+   */
+  async assertUserEligibleForGameplay(user: PublicAppUser): Promise<void> {
+    // BIN-720 follow-up: time-based block-myself runs first so that
+    // a blocked player gets the same "PLAYER_BLOCKED" message in dev
+    // and prod. Skipped silently when the service hasn't been wired.
+    if (this.profileSettingsService) {
+      await this.profileSettingsService.assertUserNotBlocked(user.id);
+    }
+
     // DEV: skip KYC/age checks in development mode
     if (process.env.NODE_ENV !== "production") {
       return;
