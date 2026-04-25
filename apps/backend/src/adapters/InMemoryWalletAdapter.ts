@@ -240,10 +240,17 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     // side. PR-W3: CREDIT-side bruker `targetSide` (default deposit). InMemory-
     // adapter har ikke system-konto-markering — hvis det var viktig i prod,
     // måtte det dekkes i Postgres-adapter i stedet.
+    // Idempotency-replay (over) finner partner-tx via `createdAt`-likhet.
+    // Bruk samme `now` for begge tx-radene slik at de er garantert like —
+    // separate `new Date()`-kall kan gi ulike ms på trege CI-runnere og
+    // bryte paringen, noe som førte til flaky tester (PR #465, #472) og
+    // potensielt dobbel transfer ved retry.
+    const now = new Date().toISOString();
+
     const fromSplit = this.splitDebit(from, amount);
     from.depositBalance -= fromSplit.fromDeposit;
     from.winningsBalance -= fromSplit.fromWinnings;
-    from.updatedAt = new Date().toISOString();
+    from.updatedAt = now;
 
     const targetSide: WalletAccountSide = options?.targetSide ?? "deposit";
     const toSplit: WalletTransactionSplit =
@@ -255,13 +262,13 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     } else {
       to.depositBalance += amount;
     }
-    to.updatedAt = new Date().toISOString();
+    to.updatedAt = now;
 
     this.accounts.set(from.id, from);
     this.accounts.set(to.id, to);
 
-    const fromTx = this.recordTx(from.id, "TRANSFER_OUT", amount, reason, to.id, options?.idempotencyKey, fromSplit);
-    const toTx = this.recordTx(to.id, "TRANSFER_IN", amount, reason, from.id, undefined, toSplit);
+    const fromTx = this.recordTx(from.id, "TRANSFER_OUT", amount, reason, to.id, options?.idempotencyKey, fromSplit, now);
+    const toTx = this.recordTx(to.id, "TRANSFER_IN", amount, reason, from.id, undefined, toSplit, now);
     return { fromTx, toTx };
   }
 
@@ -496,7 +503,8 @@ export class InMemoryWalletAdapter implements WalletAdapter {
     reason: string,
     relatedAccountId?: string,
     idempotencyKey?: string,
-    split?: WalletTransactionSplit
+    split?: WalletTransactionSplit,
+    createdAt?: string
   ): WalletTransaction {
     const tx: WalletTransaction = {
       id: randomUUID(),
@@ -504,7 +512,7 @@ export class InMemoryWalletAdapter implements WalletAdapter {
       type,
       amount,
       reason,
-      createdAt: new Date().toISOString(),
+      createdAt: createdAt ?? new Date().toISOString(),
       relatedAccountId,
       split
     };
