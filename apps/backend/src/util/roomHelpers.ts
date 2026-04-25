@@ -101,15 +101,31 @@ export type RoomUpdatePayload = RoomSnapshot & {
   luckyNumbers: Record<string, number>;
   serverTimestamp: number;
   /**
-   * Server-authoritative stake per player (in kroner).
+   * Server-authoritative ACTIVE-ROUND stake per player (in kroner).
    * Clients display this directly — no client-side calculation needed.
    *
-   * Only populated for players with an active stake:
-   *   - RUNNING game → participant's ticket cost (entryFee × priceMultiplier per ticket)
-   *   - Between rounds + armed → projected cost for next round
-   * Players with 0 stake are omitted (absence = "—" / no stake).
+   * Strict semantics (round-state-isolation, Tobias 2026-04-25):
+   *   - RUNNING game with gameTickets → stake = entryFee × tickets
+   *   - RUNNING game without gameTickets (spectator) → 0 (omitted)
+   *   - WAITING / ENDED + armed → projected cost for next round
+   *   - Otherwise → 0 (omitted)
+   *
+   * Pre-round arms made WHILE a game is RUNNING are NOT included here —
+   * they belong to the NEXT round and live in `playerPendingStakes` so
+   * Innsats reflects only what's at risk in the active round.
    */
   playerStakes: Record<string, number>;
+  /**
+   * Server-authoritative NEXT-ROUND (pre-round) stake per player.
+   * Populated when a player has armed tickets that will start in the
+   * next round — both during a running round (mid-round additive arm,
+   * money already reserved) and between rounds before round-start.
+   *
+   * Distinct from `playerStakes` so the client can render two separate
+   * indicators: Innsats = active-round risk, Forhåndskjøp = next-round
+   * commitment. Players with no pending arm are omitted.
+   */
+  playerPendingStakes: Record<string, number>;
   /** BIN-443: Game variant info for the client's purchase UI. */
   gameVariant?: {
     gameType: string;
@@ -252,8 +268,6 @@ export function buildRoomUpdatePayload(
   const variantEntryFee = snapshot.currentGame?.entryFee && snapshot.currentGame.entryFee > 0
     ? snapshot.currentGame.entryFee
     : opts.getRoomConfiguredEntryFee(snapshot.code);
-  // TEMP diagnostic — remove once bug #3 is verified closed.
-  console.log(`[DIAG gameVariant] room=${snapshot.code} effectiveGameType=${effectiveGameType} ticketTypes=${JSON.stringify(effectiveConfig.ticketTypes.map((t) => ({ name: t.name, type: t.type, hasName: typeof t.name === "string", hasType: typeof t.type === "string" })))}`);
   const gameVariant = {
     gameType: effectiveGameType,
     ticketTypes: effectiveConfig.ticketTypes,
@@ -304,46 +318,86 @@ export function buildRoomUpdatePayload(
 
   // ── Server-authoritative stake per player ──────────────────────────────────
   // Calculated here so the client never has to derive monetary amounts itself.
-  // Rules mirror StakeCalculator.ts but are the single source of truth.
+  //
+  // Round-state-isolation (Tobias 2026-04-25, BIN-CRITICAL):
+  //   playerStakes        = ACTIVE-ROUND risk only. RUNNING + gameTickets →
+  //                         actual ticket cost. Otherwise: between-round
+  //                         armed → projected next-round cost. Spectator
+  //                         in a running round → 0 (no entry).
+  //   playerPendingStakes = NEXT-ROUND commitment when a player has armed
+  //                         pre-round tickets DURING a running round (the
+  //                         money is already reserved but the tickets won't
+  //                         play until the next round starts). Empty when
+  //                         no game is running because the pre-round arm
+  //                         IS the active stake at that point.
   const armedPlayerIds = opts.getArmedPlayerIds(snapshot.code);
   const armedPlayerSelections = opts.getArmedPlayerSelections?.(snapshot.code) ?? {};
   const isGameRunning = snapshot.currentGame?.status === "RUNNING";
   const playerStakes: Record<string, number> = {};
+  const playerPendingStakes: Record<string, number> = {};
+  const roomEntryFee = opts.getRoomConfiguredEntryFee(snapshot.code);
+  const ticketTypes = effectiveConfig.ticketTypes;
+
+  function priceForSelections(
+    selections: Array<{ type: string; qty: number; name?: string }>,
+    fee: number,
+  ): number {
+    return roundCurrency(
+      selections.reduce((sum, sel) => {
+        // Match by name first (Small Yellow vs Small Purple share type), fall
+        // back to type for legacy single-name variants.
+        const tt =
+          (sel.name ? ticketTypes.find((x: TicketTypeConfig) => x.name === sel.name) : undefined) ??
+          ticketTypes.find((x: TicketTypeConfig) => x.type === sel.type);
+        return sum + fee * (tt?.priceMultiplier ?? 1) * sel.qty;
+      }, 0),
+    );
+  }
+
+  function priceForTickets(tickets: Ticket[], fee: number): number {
+    return roundCurrency(
+      tickets.reduce((sum, t) => {
+        const tt = ticketTypes.find((x: TicketTypeConfig) => x.type === t.type);
+        return sum + fee * (tt?.priceMultiplier ?? 1);
+      }, 0),
+    );
+  }
 
   for (const player of snapshot.players) {
-    let tickets: Ticket[] = [];
-    let fee = 0;
+    if (isGameRunning) {
+      // RUNNING — Innsats reflects ONLY what's at risk in the active round.
+      // gameTickets[player.id] is empty for spectators → no stake entry.
+      // Pre-round arms (armedPlayerIds) belong to NEXT round → playerPendingStakes.
+      const liveTickets = gameTickets[player.id];
+      if (liveTickets && liveTickets.length > 0 && snapshot.currentGame!.entryFee > 0) {
+        playerStakes[player.id] = priceForTickets(liveTickets, snapshot.currentGame!.entryFee);
+      }
 
-    if (isGameRunning && gameTickets[player.id]?.length > 0) {
-      // Active game participant — stake from actual game tickets & game's entry fee.
-      tickets = gameTickets[player.id];
-      fee = snapshot.currentGame!.entryFee;
-    } else if (armedPlayerIds.includes(player.id)) {
-      // Armed for next round — stake from pre-round tickets & room's configured fee.
-      tickets = preRoundTickets[player.id] ?? [];
-      fee = opts.getRoomConfiguredEntryFee(snapshot.code);
-    }
-
-    if (fee > 0) {
-      // If the player has per-type selections (armed phase), use those for precise pricing
-      const selections = armedPlayerSelections[player.id];
-      if (!isGameRunning && selections && selections.length > 0) {
-        const ticketTypes = effectiveConfig.ticketTypes;
-        playerStakes[player.id] = roundCurrency(
-          selections.reduce((sum, sel) => {
-            const tt = ticketTypes.find((x: TicketTypeConfig) => x.type === sel.type);
-            return sum + fee * (tt?.priceMultiplier ?? 1) * sel.qty;
-          }, 0),
-        );
-      } else if (tickets.length > 0) {
-        // Running game or legacy arm — calculate from actual tickets
-        const ticketTypes = effectiveConfig.ticketTypes;
-        playerStakes[player.id] = roundCurrency(
-          tickets.reduce((sum, t) => {
-            const tt = ticketTypes.find((x: TicketTypeConfig) => x.type === t.type);
-            return sum + fee * (tt?.priceMultiplier ?? 1);
-          }, 0),
-        );
+      if (armedPlayerIds.includes(player.id) && roomEntryFee > 0) {
+        const selections = armedPlayerSelections[player.id];
+        if (selections && selections.length > 0) {
+          playerPendingStakes[player.id] = priceForSelections(selections, roomEntryFee);
+        } else {
+          const pending = preRoundTickets[player.id] ?? [];
+          if (pending.length > 0) {
+            playerPendingStakes[player.id] = priceForTickets(pending, roomEntryFee);
+          }
+        }
+      }
+    } else {
+      // WAITING / ENDED / no game — pre-round arm IS the active stake.
+      // No separate pending bucket: the arm goes into Innsats so the player
+      // sees what they'll pay when the next round starts.
+      if (armedPlayerIds.includes(player.id) && roomEntryFee > 0) {
+        const selections = armedPlayerSelections[player.id];
+        if (selections && selections.length > 0) {
+          playerStakes[player.id] = priceForSelections(selections, roomEntryFee);
+        } else {
+          const pending = preRoundTickets[player.id] ?? [];
+          if (pending.length > 0) {
+            playerStakes[player.id] = priceForTickets(pending, roomEntryFee);
+          }
+        }
       }
     }
   }
@@ -359,6 +413,7 @@ export function buildRoomUpdatePayload(
     preRoundTickets: enrichedPreRound,
     armedPlayerIds,
     playerStakes,
+    playerPendingStakes,
     luckyNumbers: getLuckyNumbers(snapshot.code),
     scheduler: buildRoomSchedulerState(snapshot, nowMs, opts),
     serverTimestamp: nowMs,

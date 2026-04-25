@@ -21,6 +21,13 @@ export class LeftInfoPanel {
   private playerCountEl: HTMLSpanElement;
   private entryFeeEl: HTMLSpanElement;
   private prizeEl: HTMLSpanElement;
+  /**
+   * Round-state-isolation (Tobias 2026-04-25): "Forhåndskjøp"-rad vises kun
+   * når myPendingStake > 0 (mid-round arm for neste runde). Skjult ellers
+   * for å unngå støy mellom runder hvor pre-round IS aktiv-stake.
+   */
+  private pendingStakeRow: HTMLDivElement;
+  private pendingStakeEl: HTMLSpanElement;
   private bridge: PauseAwareBridge | null = null;
 
   constructor(overlay: HtmlOverlayManager, bridge?: PauseAwareBridge) {
@@ -60,6 +67,20 @@ export class LeftInfoPanel {
     betInfo.appendChild(document.createElement("br"));
     betInfo.appendChild(this.prizeEl);
     this.root.appendChild(betInfo);
+
+    // Row 3: forhåndskjøp (next-round commitment, hidden by default).
+    // Round-state-isolation: when a player has armed pre-round tickets DURING
+    // a running round, the money is reserved but the brett play in the NEXT
+    // round. Vises som egen rad så bruker forstår at dette er separat fra
+    // aktiv-rundens innsats.
+    this.pendingStakeRow = document.createElement("div");
+    this.pendingStakeRow.className = "pending-stake-info";
+    this.pendingStakeRow.style.cssText =
+      "font-size:13px;color:#9bd49b;line-height:1.4;display:none;margin-top:2px;";
+    this.pendingStakeEl = document.createElement("span");
+    this.pendingStakeEl.textContent = "Forhåndskjøp: 0 kr";
+    this.pendingStakeRow.appendChild(this.pendingStakeEl);
+    this.root.appendChild(this.pendingStakeRow);
   }
 
   // BIN-blink-permanent-fix: memoize text-writes. `.textContent = X` erstatter
@@ -70,6 +91,7 @@ export class LeftInfoPanel {
   private lastPlayerCount = "";
   private lastEntryFee = "";
   private lastPrize = "";
+  private lastPendingStake = -1;
 
   update(
     playerCount: number,
@@ -79,6 +101,7 @@ export class LeftInfoPanel {
     _drawCount: number,
     _totalDrawCapacity: number,
     players?: Player[],
+    pendingStake: number = 0,
   ): void {
     // G2/G3: multi-hall labelling.
     let hallCount = 0;
@@ -111,6 +134,19 @@ export class LeftInfoPanel {
     if (nextPrize !== this.lastPrize) {
       this.prizeEl.textContent = nextPrize;
       this.lastPrize = nextPrize;
+    }
+
+    // Forhåndskjøp: kun vis når > 0 (mid-round arm for neste runde). Mellom
+    // runder havner pre-round-arm i totalStake/Innsats, så vi unngår dobbel-
+    // visning ved å skjule denne raden helt når 0.
+    if (pendingStake !== this.lastPendingStake) {
+      if (pendingStake > 0) {
+        this.pendingStakeEl.textContent = `Forhåndskjøp: ${pendingStake} kr`;
+        this.pendingStakeRow.style.display = "block";
+      } else {
+        this.pendingStakeRow.style.display = "none";
+      }
+      this.lastPendingStake = pendingStake;
     }
   }
 

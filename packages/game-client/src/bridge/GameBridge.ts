@@ -80,11 +80,23 @@ export interface GameState {
   isArmed: boolean;
 
   /**
-   * Server-authoritative stake in kroner.
+   * Server-authoritative ACTIVE-ROUND stake in kroner.
    * Calculated by backend — the client never derives monetary amounts itself.
    * 0 = no active stake (player is spectating or hasn't bought).
    */
   myStake: number;
+
+  /**
+   * Round-state-isolation (Tobias 2026-04-25): server-authoritative
+   * NEXT-round commitment when the player has armed pre-round tickets
+   * during a RUNNING round. 0 means no pending arm.
+   *
+   * Distinct from `myStake` so the UI can render the active-round
+   * Innsats and the pre-round "Forhåndskjøp" indicator separately.
+   * Older backends omit `playerPendingStakes` from room:update; we
+   * default to 0 in that case.
+   */
+  myPendingStake: number;
 
   // Server time for sync
   serverTimestamp: number;
@@ -289,6 +301,10 @@ export class GameBridge {
       this.state.isArmed = (payload.armedPlayerIds ?? []).includes(this.myPlayerId);
       // Server-authoritative stake — no client-side monetary calculation needed.
       this.state.myStake = payload.playerStakes?.[this.myPlayerId] ?? 0;
+      // Round-state-isolation: pending stake is the next-round commitment
+      // surfaced separately during a running round. Optional on the wire so
+      // older backends fall back to 0 → "no pending arm" semantics.
+      this.state.myPendingStake = payload.playerPendingStakes?.[this.myPlayerId] ?? 0;
     }
 
     // Scheduler
@@ -520,6 +536,7 @@ export class GameBridge {
       preRoundTickets: [],
       isArmed: false,
       myStake: 0,
+      myPendingStake: 0,
       serverTimestamp: 0,
     };
   }

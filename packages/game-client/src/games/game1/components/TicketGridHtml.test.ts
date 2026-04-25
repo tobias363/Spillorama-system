@@ -123,16 +123,18 @@ describe("TicketGridHtml", () => {
     expect(grid.root.querySelector("button[aria-label='Avbestill brett']")).toBeNull();
   });
 
-  it("BIN-CRITICAL: pre-round tickets keep × even when running (mid-round arm)", () => {
-    // Reproduserer regresjonen Tobias rapporterte 2026-04-25: under en aktiv
-    // runde der spilleren hadde armet brett for neste runde (mid-round
-    // additive arm), forsvant ×-knappen helt fordi PlayScreen sendte
-    // `cancelable: !running`. Nå sender vi `cancelable: true` og lar
-    // TicketGridHtml.rebuild forcere live-brett til false per index.
+  it("forces × off for live tickets even when caller passes cancelable: true", () => {
+    // Round-state-isolation (Tobias 2026-04-25): PlayScreen viser nå KUN
+    // live-brett under RUNNING og KUN pre-round-brett mellom runder, så det
+    // mixede scenariet eksisterer ikke lenger fra controlleren. TicketGridHtml
+    // forventes likevel å håndtere mixede inputs defensivt: live-brett (index
+    // < liveCount) skal aldri få ×, selv om caller sender cancelable: true.
+    // Beholdt som regresjons-guard mot at noen senere reintroduserer mixede
+    // grids uten å oppdatere cancelable-semantikken.
     const liveTicket = makeTicket(0, "Small Yellow");
     const preRoundTicket = makeTicket(1, "Small Purple");
     grid.setTickets([liveTicket, preRoundTicket], {
-      cancelable: true, // PlayScreen now passes this unconditionally
+      cancelable: true,
       entryFee: 10,
       state: makeState(),
       liveTicketCount: 1, // Første brett er live, andre er pre-round

@@ -334,6 +334,41 @@ describe("GameBridge", () => {
 
       expect(bridge.getState().preRoundTickets).toEqual(tickets);
     });
+
+    it("round-state-isolation: myStake reflects active-round stake from playerStakes", () => {
+      // RUNNING + 4 live brett → stake = 80 kr.
+      bridge.start("player-1");
+      socket.fire(
+        "roomUpdate",
+        makeRoomUpdate({ playerStakes: { "player-1": 80 } }),
+      );
+      expect(bridge.getState().myStake).toBe(80);
+    });
+
+    it("round-state-isolation: myPendingStake reflects pre-round commitment", () => {
+      // RUNNING + 50 brett armet for neste runde → pending = 1000 kr.
+      bridge.start("player-1");
+      socket.fire(
+        "roomUpdate",
+        makeRoomUpdate({
+          playerStakes: { "player-1": 80 },
+          playerPendingStakes: { "player-1": 1000 },
+        }),
+      );
+      expect(bridge.getState().myStake).toBe(80, "Innsats kun aktiv-runde");
+      expect(bridge.getState().myPendingStake).toBe(1000, "Forhåndskjøp = neste runde");
+    });
+
+    it("round-state-isolation: missing playerPendingStakes defaults to 0 (older backend)", () => {
+      bridge.start("player-1");
+      socket.fire(
+        "roomUpdate",
+        makeRoomUpdate({ playerStakes: { "player-1": 40 } }),
+        // playerPendingStakes intentionally omitted
+      );
+      expect(bridge.getState().myStake).toBe(40);
+      expect(bridge.getState().myPendingStake).toBe(0, "default 0 når server mangler feltet");
+    });
   });
 
   describe("event subscription", () => {

@@ -229,6 +229,13 @@ export const RoomUpdatePayloadSchema = RoomSnapshotSchema.extend({
   luckyNumbers: z.record(z.string(), z.number().int()),
   serverTimestamp: z.number().int(),
   playerStakes: z.record(z.string(), z.number()),
+  /**
+   * Round-state-isolation (Tobias 2026-04-25): per-player NEXT-round
+   * commitment when a player has armed pre-round tickets during a
+   * RUNNING round. Optional — older backends omit it; clients must
+   * default to {} when absent.
+   */
+  playerPendingStakes: z.record(z.string(), z.number()).optional(),
   gameVariant: GameVariantSchema.optional(),
 });
 export type RoomUpdatePayload = z.infer<typeof RoomUpdatePayloadSchema>;

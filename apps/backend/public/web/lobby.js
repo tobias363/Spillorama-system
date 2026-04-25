@@ -388,8 +388,30 @@
       if (balance === null) return;
       // Optimistic total-update so UI reflects change immediately; deposit/
       // winnings split is corrected by the debounced refetch below.
+      //
+      // Round-state-isolation (Tobias 2026-04-25): rerender chip text NOW
+      // — the previous version only stored balance in lobbyState and waited
+      // 250ms for the refetch, so saldoen sto urørt på skjermen rett etter
+      // bet:arm. Render bruker depositBalance fra eksisterende state hvis
+      // vi har split-data; ellers bruker vi total-balance som approximation
+      // (refetch fyller inn riktig split innen 250ms).
       if (lobbyState.wallet && lobbyState.wallet.account) {
+        var oldDeposit = lobbyState.wallet.account.depositBalance;
+        var oldWinnings = lobbyState.wallet.account.winningsBalance;
+        var oldBalance = lobbyState.wallet.account.balance;
         lobbyState.wallet.account.balance = balance;
+        // Approximate the new deposit balance: if we know how the split
+        // ratioed before, preserve winnings and put the rest in deposit.
+        // Otherwise just blast `balance` into both fields and let the
+        // refetch correct it.
+        if (typeof oldDeposit === 'number' && typeof oldWinnings === 'number' && typeof oldBalance === 'number' && oldBalance > 0) {
+          var winningsRatio = oldWinnings / oldBalance;
+          lobbyState.wallet.account.winningsBalance = Math.max(0, balance * winningsRatio);
+          lobbyState.wallet.account.depositBalance = balance - lobbyState.wallet.account.winningsBalance;
+        } else {
+          lobbyState.wallet.account.depositBalance = balance;
+        }
+        applyWalletToHeader(lobbyState.wallet.account);
       }
       _scheduleBalanceRefetch();
     };

@@ -42,8 +42,15 @@ export interface StakeInput {
 // ── Beregning ─────────────────────────────────────────────────────────────────
 
 /**
- * Returnerer total innsats i kroner.
+ * Returnerer total innsats i kroner — KUN aktiv-rundens innsats.
  * 0 betyr "vis ingenting" (vises som "—" i LeftInfoPanel).
+ *
+ * Round-state-isolation (Tobias 2026-04-25):
+ *   Innsats-feltet skal aldri inkludere pre-round / forhåndskjøp-bonger
+ *   for fremtidige runder. Backend skiller dette via `playerStakes`
+ *   (aktiv-runde) og `playerPendingStakes` (neste runde). Klienten
+ *   trustar `myStake` blindt under RUNNING — server returnerer 0 for
+ *   spectator selv om de har armet for neste runde.
  *
  * Strategi:
  *   1. Hvis `myStake` er definert (server-autoritativ): bruk direkte.
@@ -54,8 +61,9 @@ export function calculateStake(input: StakeInput): number {
   const hasServerStake = serverStake !== undefined && serverStake !== null;
 
   // ── RUNNING: server-autoritativ uansett verdi ──
-  // Under en aktiv runde reflekterer backend faktisk debiterte brett,
-  // inkludert 0 (spectator). Vi stoler blindt.
+  // Under en aktiv runde reflekterer backend kun gameTickets-innsats
+  // (round-state-isolation). Pre-round-arms for neste runde holdes utenfor
+  // og leveres separat via myPendingStake. 0 = spectator = vis "—".
   if (input.gameStatus === "RUNNING" && hasServerStake) {
     return serverStake;
   }
@@ -63,11 +71,11 @@ export function calculateStake(input: StakeInput): number {
   // ── Ikke-RUNNING: server-autoritativ KUN når > 0 ──
   //
   // BIN-686 fix-up: backend sender `playerStakes` som 0 under WAITING
-  // selv når spilleren har armet pre-round-bonger. Pre-round-stake
-  // beregnes ikke server-side før runden starter. Hvis server stake > 0
-  // mellom runder stoler vi — det betyr backend har eksplisitt debitert.
-  // Hvis 0, må vi falle tilbake til ticket-beregning så Innsats
-  // oppdaterer seg straks bruker klikker Kjøp.
+  // selv når spilleren har armet pre-round-bonger. Hvis server stake > 0
+  // mellom runder stoler vi — det betyr backend har eksplisitt registrert
+  // armed-state. Hvis 0, må vi falle tilbake til ticket-beregning så Innsats
+  // oppdaterer seg straks bruker klikker Kjøp (race-vindu før neste
+  // room:update lander).
   if (hasServerStake && serverStake > 0) {
     return serverStake;
   }
@@ -81,11 +89,16 @@ export function calculateStake(input: StakeInput): number {
 /**
  * Velger hvilke tickets som skal brukes som grunnlag for innsatsberegning.
  * Returnerer tom liste hvis spilleren ikke skal vise innsats.
+ *
+ * Round-state-isolation: under RUNNING brukes KUN myTickets (live-brett).
+ * Pre-round-bonger (forhåndskjøp for neste runde) telles aldri i Innsats —
+ * de er separat commitment som telles i myPendingStake.
  */
 function resolveTickets(input: StakeInput): Ticket[] {
   const { gameStatus, myTickets, preRoundTickets, isArmed } = input;
 
   // Regel 1 & 2: Under en aktiv runde er myTickets kilden til sannhet.
+  // Pre-round preRoundTickets ignoreres her — de er for neste runde.
   if (gameStatus === "RUNNING") {
     return myTickets; // Kan være tom (spectator) → returnerer 0
   }

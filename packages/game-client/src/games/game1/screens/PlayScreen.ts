@@ -395,28 +395,30 @@ export class PlayScreen extends Container {
     }
 
     // Tickets displayed depend on game phase:
-    //   - RUNNING with live brett → myTickets (markable) + preRoundTickets (preview
-    //     for next round, not markable, cancelable via ×). Mid-round additive-arm.
-    //   - Otherwise → preRoundTickets (pre-round queue, cancelable).
+    //   - RUNNING                    → KUN myTickets (markable, ikke cancelable)
+    //   - WAITING / ENDED / NONE     → preRoundTickets (pre-round queue, cancelable)
     //
-    // BIN-CRITICAL fix (2026-04-25): pass `cancelable: true` so pre-round
-    // tickets keep their × even when a round is RUNNING (mid-round additive
-    // arm). TicketGridHtml.rebuild forces `cancelable=false` for the first
-    // `liveTicketCount` slots (already-paid live brett) — so live tickets
-    // stay non-cancelable while the queue for the next round shows ×.
-    // Previous `!running` short-circuited the whole grid and hid the ×
-    // completely whenever a game was active.
+    // Round-state-isolation (Tobias 2026-04-25): pre-round-bonger for
+    // NESTE runde må aldri blandes inn i den aktive rundens grid. Forrige
+    // versjon kombinerte `myTickets + preRoundTickets` under RUNNING for
+    // å vise mid-round additive arm — det forvirret bruker som så bonger
+    // for fremtidig runde mellom de aktive. PreRoundTickets vises nå kun
+    // når ingen runde er aktiv; under RUNNING kommuniseres pending arm
+    // via "Forhåndskjøp"-indikatoren (myPendingStake > 0).
     const running = state.gameStatus === "RUNNING";
-    const hasLive = running && state.myTickets.length > 0;
-    const tickets = hasLive
-      ? [...state.myTickets, ...(state.preRoundTickets ?? [])]
+    const tickets = running
+      ? state.myTickets
       : (state.preRoundTickets ?? []);
 
     this.ticketGrid.setTickets(tickets, {
-      cancelable: true,
+      // Live brett (RUNNING) skal aldri ha × — de er allerede betalt.
+      // Pre-round-brett (mellom runder) er kjøpt men ikke startet, så ×
+      // gir refund via ticket:cancel. cancelable=running=false for
+      // live-grid; cancelable=true for pre-round.
+      cancelable: !running,
       entryFee: state.entryFee || 10,
       state,
-      liveTicketCount: hasLive ? state.myTickets.length : 0,
+      liveTicketCount: running ? state.myTickets.length : 0,
     });
 
     // Ball tube + called-numbers overlay reflect drawn history. We always sync
@@ -459,6 +461,9 @@ export class PlayScreen extends Container {
       state.drawCount,
       state.totalDrawCapacity,
       state.players,
+      // Round-state-isolation: pass next-round commitment so LeftInfoPanel
+      // kan vise "Forhåndskjøp"-rad når > 0. 0 → raden skjules.
+      state.myPendingStake,
     );
     // "X/Y" counter under the ring — rendered as standalone Pixi Text so the
     // CenterBall idle-float doesn't drag it around.
@@ -475,8 +480,9 @@ export class PlayScreen extends Container {
     // Auto-open the buy popup on entry so the player doesn't have to hunt for
     // the "Forhåndskjøp" button. One-shot per screen-session (see
     // autoShowBuyPopupDone doc) — applies to WAITING and SPECTATING mid-round
-    // joiners. Skipped for active players (hasLive) and once ticketTypes
-    // haven't arrived yet (first snapshot before gameVariant populates).
+    // joiners. Skipped for active players (har live brett) og hvis ticketTypes
+    // ikke har kommet enda (første snapshot før gameVariant populeres).
+    const hasLive = running && state.myTickets.length > 0;
     if (
       !this.autoShowBuyPopupDone
       && !hasLive

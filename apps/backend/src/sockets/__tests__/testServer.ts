@@ -278,6 +278,7 @@ export async function createTestServer(opts: CreateTestServerOptions = {}): Prom
       preRoundTickets,
       armedPlayerIds: roomState.getArmedPlayerIds(snapshot.code),
       playerStakes: {},
+      playerPendingStakes: {},
       luckyNumbers,
       scheduler: {
         enabled: false,
