@@ -36,6 +36,11 @@ import {
   KYC_REJECTED_SUBJECT,
   KYC_REJECTED_TEXT,
 } from "./kyc-rejected.js";
+import {
+  KYC_IMPORTED_WELCOME_HTML,
+  KYC_IMPORTED_WELCOME_SUBJECT,
+  KYC_IMPORTED_WELCOME_TEXT,
+} from "./kyc-imported-welcome.js";
 
 export type TemplateKey =
   | "verify-email"
@@ -43,7 +48,8 @@ export type TemplateKey =
   | "bankid-expiry-reminder"
   | "role-changed"
   | "kyc-approved"
-  | "kyc-rejected";
+  | "kyc-rejected"
+  | "kyc-imported-welcome";
 
 export interface EmailTemplate {
   subject: string;
@@ -81,6 +87,11 @@ export const EMAIL_TEMPLATES: Record<TemplateKey, EmailTemplate> = {
     subject: KYC_REJECTED_SUBJECT,
     html: KYC_REJECTED_HTML,
     text: KYC_REJECTED_TEXT,
+  },
+  "kyc-imported-welcome": {
+    subject: KYC_IMPORTED_WELCOME_SUBJECT,
+    html: KYC_IMPORTED_WELCOME_HTML,
+    text: KYC_IMPORTED_WELCOME_TEXT,
   },
 };
 
