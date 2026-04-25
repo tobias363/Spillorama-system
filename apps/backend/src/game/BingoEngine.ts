@@ -843,7 +843,12 @@ export class BingoEngine {
             sourceAccountId: transfer.fromTx.accountId,
             targetAccountId: transfer.toTx.accountId,
             metadata: {
-              reason: "BINGO_BUYIN"
+              reason: "BINGO_BUYIN",
+              // GAP #28: tag the gameSlug so per-slug reports
+              // (Spill 1 bingo / Spill 2 rocket / Spill 3 monsterbingo /
+              // SpinnGo spillorama) can aggregate without doing
+              // session-table joins.
+              gameSlug: room.gameSlug
             }
           });
         }
@@ -1320,6 +1325,13 @@ export class BingoEngine {
         sourceAccountId: transfer.fromTx.accountId,
         targetAccountId: transfer.toTx.accountId,
         policyVersion: capped.policy.id,
+        // GAP #28: tag the slug so per-slug reports can match prizes to
+        // their game-type without joining `game_sessions`.
+        metadata: {
+          reason: "BINGO_PRIZE",
+          gameSlug: room.gameSlug,
+          claimType: claim.type,
+        },
       });
       await this.payoutAudit.appendPayoutAuditEvent({
         kind: "CLAIM_PRIZE",
