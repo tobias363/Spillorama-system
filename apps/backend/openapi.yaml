@@ -2064,6 +2064,170 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /api/payments/swedbank/iframe/{intentId}:
+    get:
+      tags: [Payments]
+      summary: Iframe-host wrap for the Swedbank Pay checkout (BIN-GAP-#7)
+      description: |
+        Returns an HTML page that embeds the Swedbank Pay checkout in a
+        sandboxed iframe (`sandbox="allow-scripts allow-forms allow-popups
+        allow-same-origin"`). Locked-down CSP restricts frame-src to
+        `https://*.payex.com` and `https://*.swedbankpay.com` and disables
+        all form submission / external script loading on the host page.
+
+        Authenticated via Bearer token + intent ownership-check. Unknown or
+        not-owned intent ids return 404 (the leak-free response) so a
+        guessed UUID cannot be used to enumerate other users' deposits.
+
+        The inline bootstrap script `postMessage`s a
+        `{ type: 'swedbank:iframe:opened', intentId, status }` envelope to
+        `window.parent` and `window.opener`, allowing the player-app shell
+        to track checkout state without an additional HTTP poll.
+      parameters:
+        - in: path
+          name: intentId
+          required: true
+          schema: { type: string }
+          description: SwedbankPaymentIntent UUID (from POST /topup-intent)
+      responses:
+        "200":
+          description: HTML iframe-host page
+          content:
+            text/html:
+              schema:
+                type: string
+        "401":
+          description: UNAUTHORIZED — missing/invalid Bearer token
+          content:
+            text/plain:
+              schema: { type: string }
+        "404":
+          description: PAYMENT_INTENT_NOT_FOUND — unknown id or not owned by this user
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/payments/swedbank/deposit/response:
+    get:
+      tags: [Payments]
+      summary: Post-redirect "thank-you" page (BIN-GAP-#8)
+      description: |
+        URL Swedbank Pay redirects the user back to once the checkout
+        finishes. The user-agent has no Bearer token at this point —
+        authentication is implicit via the `swedbank_intent` UUID query
+        param plus the authoritative remote-status fetch inside
+        `reconcileIntentById`, which gates the wallet credit.
+
+        Behaviour:
+          1. Look up the intent by `swedbank_intent` (or `intentId`).
+          2. Reconcile (best-effort). On `walletCreditedNow` the wallet
+             room is broadcast over Socket.IO so the player-app's balance
+             updates without a poll.
+          3. Render the thank-you page with auto-close (`window.close()`),
+             a platform-specific deeplink (when `platform=ios|android`),
+             and a `postMessage({ type: 'swedbank:result', status,
+             intentId, amountMajor, currency })` envelope to the parent
+             window.
+          4. Audit-log the response with action
+             `payment.swedbank.response`.
+
+        Locked-down CSP (`default-src 'none'; form-action 'none';
+        base-uri 'none'`) so a stolen/replayed link cannot be used to
+        execute an attacker's script.
+      security: []
+      parameters:
+        - in: query
+          name: swedbank_intent
+          schema: { type: string }
+          description: SwedbankPaymentIntent UUID (preferred, set by `createTopupIntent`)
+        - in: query
+          name: intentId
+          schema: { type: string }
+          description: Alias for `swedbank_intent` (compat)
+        - in: query
+          name: order_number
+          schema: { type: string }
+          description: Legacy fallback — Swedbank order-reference, accepted but not authoritative
+        - in: query
+          name: platform
+          schema:
+            type: string
+            enum: [ios, android, web]
+          description: Optional platform-hint used to embed a back-to-app deeplink in the inline payload
+      responses:
+        "200":
+          description: HTML thank-you page (always 200 — the page itself shows the status banner)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /api/payments/swedbank/goback:
+    post:
+      tags: [Payments]
+      summary: Native-app "back to app" deeplink (BIN-GAP-#9)
+      description: |
+        After the deposit-response page fires its `postMessage`, the
+        native shell calls this endpoint so the backend can:
+
+          1. validate the player owns the intent (no leaking via guessable
+             id),
+          2. write an audit-log row marking the payment-flow as
+             completed (action `payment.swedbank.goback`),
+          3. return a platform-specific deeplink the shell can navigate
+             to.
+
+        Deeplink shape:
+          - `ios` / `android`: `spillorama://payment/result?id=<intentId>&status=<status>`
+            (scheme override via env `MOBILE_APP_DEEPLINK_SCHEME`)
+          - `web`: `<WEB_GOBACK_BASE_URL>/payment/result?id=<intentId>&status=<status>`
+            (falls back to a relative `/wallet?...` URL when no base is
+            configured)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paymentId, platform]
+              properties:
+                paymentId:
+                  type: string
+                  description: SwedbankPaymentIntent UUID. Alias `intentId` is also accepted.
+                intentId:
+                  type: string
+                  description: Alias for `paymentId`.
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+      responses:
+        "200":
+          description: Goback envelope with the platform-specific URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          url:
+                            type: string
+                          status:
+                            type: string
+                            enum: [success, cancelled, failed, pending, unknown]
+                          platform:
+                            type: string
+                            enum: [ios, android, web]
+        "400":
+          description: Validation or ownership failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   # ── Admin — Auth ──────────────────────────────────────────────────────────
 
   /api/admin/auth/login:

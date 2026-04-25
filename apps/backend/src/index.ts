@@ -2209,6 +2209,13 @@ app.use(createPaymentsRouter({
   // BIN-603: HMAC-verifisering av Swedbank webhook. Tom secret → callback
   // fail-closed med 503 slik at ops merker det med én gang i prod.
   swedbankWebhookSecret: (process.env.SWEDBANK_WEBHOOK_SECRET ?? "").trim(),
+  // BIN-GAP-#7/#8/#9: iframe-host + deposit-response + goback deeplink.
+  auditLogService,
+  // Native-app deeplink-scheme + web-goback-base for "back to app" URLs.
+  // Defaults work for the canonical Spillorama mobile shells; ops can override
+  // via env if a hall-specific build needs a different scheme.
+  nativeAppDeeplinkScheme: (process.env.MOBILE_APP_DEEPLINK_SCHEME ?? "spillorama").trim() || "spillorama",
+  webGobackBaseUrl: (process.env.WEB_GOBACK_BASE_URL ?? "").trim(),
 }));
 app.use(createPaymentRequestsRouter({ platformService, paymentRequestService, emitWalletRoomUpdates }));
 app.use(createGameRouter({ platformService, engine, drawScheduler, emitRoomUpdate, buildRoomUpdatePayload, assertUserCanAccessRoom, assertUserCanActAsPlayer }));

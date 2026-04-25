@@ -453,6 +453,39 @@ export class SwedbankPayService {
     return this.reconcileRow(row);
   }
 
+  /**
+   * BIN-GAP-#8: Look up an intent by id only — used by the post-redirect
+   * `/payment/deposit/response` endpoint where the player is bounced back
+   * from Swedbank without an Authorization header. Auth on the *intent id*
+   * (a UUID never exposed to other users) takes the place of bearer-auth.
+   * Returns the public `SwedbankTopupIntent` shape; missing intent throws
+   * the same DomainError as the user-scoped variant.
+   */
+  async getIntentById(intentId: string): Promise<SwedbankTopupIntent> {
+    await this.ensureInitialized();
+    const row = await this.findIntentById(intentId);
+    if (!row) {
+      throw new DomainError("PAYMENT_INTENT_NOT_FOUND", "Fant ikke Swedbank intent.");
+    }
+    return this.mapRow(row);
+  }
+
+  /**
+   * BIN-GAP-#8: Reconcile by intent-id without a user-check, used after
+   * redirect from Swedbank. Same authoritative-fetch + ledger semantics as
+   * the user-scoped variant — wallet credit is still gated by the remote
+   * status fetch inside `reconcileRow`, so an attacker who guessed an id
+   * cannot force a credit.
+   */
+  async reconcileIntentById(intentId: string): Promise<SwedbankReconcileResult> {
+    await this.ensureInitialized();
+    const row = await this.findIntentById(intentId);
+    if (!row) {
+      throw new DomainError("PAYMENT_INTENT_NOT_FOUND", "Fant ikke Swedbank intent.");
+    }
+    return this.reconcileRow(row);
+  }
+
   async processCallback(payload: unknown): Promise<SwedbankReconcileResult> {
     await this.ensureInitialized();
     const callback = asObject(payload);
@@ -875,6 +908,38 @@ export class SwedbankPayService {
        WHERE id = $1
          AND user_id = $2`,
       [intentId.trim(), userId.trim()]
+    );
+    return rows[0] ?? null;
+  }
+
+  private async findIntentById(intentId: string): Promise<SwedbankIntentRow | null> {
+    const trimmed = intentId.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const { rows } = await this.pool.query<SwedbankIntentRow>(
+      `SELECT
+         id,
+         provider,
+         user_id,
+         wallet_id,
+         order_reference,
+         payee_reference,
+         swedbank_payment_order_id,
+         amount_minor,
+         amount_major,
+         currency,
+         status,
+         checkout_redirect_url,
+         checkout_view_url,
+         credited_transaction_id,
+         credited_at,
+         last_error,
+         created_at,
+         updated_at
+       FROM ${this.intentsTable()}
+       WHERE id = $1`,
+      [trimmed]
     );
     return rows[0] ?? null;
   }
