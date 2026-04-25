@@ -771,6 +771,16 @@ const profileSettingsService = responsibleGamingStore
     })
   : undefined;
 
+// BIN-720 follow-up: wire ProfileSettingsService into PlatformService so
+// `assertUserEligibleForGameplay` gates gameplay on time-based block-
+// myself (1d/7d/30d via blocked_until). Done after construction to
+// break the chicken-and-egg (ProfileSettingsService takes engine, which
+// is independent of PlatformService at runtime). When the service is
+// undefined (no RG-persistence) the gate is a silent no-op.
+if (profileSettingsService) {
+  platformService.setProfileSettingsService(profileSettingsService);
+}
+
 // BIN-583 B3.1: agent-domene (auth + shift + admin-CRUD). Bruker samme
 // Postgres-pool som PlatformService slik at ensureInitialized sikrer
 // schema før første spørring.

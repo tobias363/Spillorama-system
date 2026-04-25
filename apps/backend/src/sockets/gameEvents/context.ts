@@ -209,7 +209,9 @@ export function buildSocketContext(socket: Socket, base: RegistryContext): Socke
     hallId?: string;
   }): Promise<{ playerName: string; walletId: string; hallId: string }> {
     const user = await base.getAuthenticatedSocketUser(payload);
-    platformService.assertUserEligibleForGameplay(user);
+    // BIN-720 follow-up: assertUserEligibleForGameplay is now async (it
+    // gates on blocked_until via ProfileSettingsService).
+    await platformService.assertUserEligibleForGameplay(user);
     engine.assertWalletAllowedForGameplay(user.walletId);
     const hallId = await requireActiveHallIdFromInput(payload?.hallId);
     return {
@@ -223,7 +225,9 @@ export function buildSocketContext(socket: Socket, base: RegistryContext): Socke
     payload: RoomActionPayload,
   ): Promise<{ roomCode: string; playerId: string }> {
     const user = await base.getAuthenticatedSocketUser(payload);
-    platformService.assertUserEligibleForGameplay(user);
+    // BIN-720 follow-up: assertUserEligibleForGameplay is now async (it
+    // gates on blocked_until via ProfileSettingsService).
+    await platformService.assertUserEligibleForGameplay(user);
     engine.assertWalletAllowedForGameplay(user.walletId);
     let roomCode = mustBeNonEmptyString(payload?.roomCode, "roomCode").toUpperCase();
 
