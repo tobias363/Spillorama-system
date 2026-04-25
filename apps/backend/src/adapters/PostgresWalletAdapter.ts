@@ -384,137 +384,155 @@ export class PostgresWalletAdapter implements WalletAdapter {
     await this.ensureAccount(fromId);
     await this.ensureAccount(toId);
 
-    // PR-W3: targetSide styrer hvilken side CREDIT-siden lander på. Hvis
-    // mottaker er systemkonto ignoreres feltet (CHECK-constraint winnings=0).
-    const requestedTarget: WalletAccountSide = options?.targetSide ?? "deposit";
-
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const operationId = randomUUID();
-      const fromTxId = randomUUID();
-      const toTxId = randomUUID();
-
-      // Les from-account inne i samme FOR UPDATE som executeLedger vil holde,
-      // for å beregne winnings-first splitt atomisk.
-      const fromAccount = await this.selectAccountForUpdate(client, fromId);
-      if (!fromAccount) {
-        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${fromId} finnes ikke.`);
-      }
-      const toAccount = await this.selectAccountForUpdate(client, toId);
-      if (!toAccount) {
-        throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${toId} finnes ikke.`);
-      }
-      const fromState: InternalAccountState = {
-        id: fromAccount.id,
-        balance: asMoney(fromAccount.balance),
-        depositBalance: asMoney(fromAccount.deposit_balance),
-        winningsBalance: asMoney(fromAccount.winnings_balance),
-        isSystem: fromAccount.is_system
-      };
-
-      // PR-W3: system-konto som avsender bruker deposit-siden (winnings = 0).
-      // For brukerkonto: winnings-first-split.
-      const fromSplit: WalletTransactionSplit = fromState.isSystem
-        ? { fromDeposit: amount, fromWinnings: 0 }
-        : splitDebitFromAccount(fromState, amount);
-
-      // PR-W3: effektivt target — system-konto som mottaker tvinger deposit
-      // (CHECK-constraint winnings_balance=0 for system).
-      const effectiveTarget: WalletAccountSide = toAccount.is_system ? "deposit" : requestedTarget;
-
-      const toSplit: WalletTransactionSplit =
-        effectiveTarget === "winnings"
-          ? { fromDeposit: 0, fromWinnings: amount }
-          : { fromDeposit: amount, fromWinnings: 0 };
-
-      const entries: LedgerEntryInput[] = [];
-      // DEBIT-siden: avsender
-      if (fromState.isSystem) {
-        // System: alt på deposit (winnings er alltid 0).
-        entries.push({
-          operationId,
-          accountId: fromId,
-          side: "DEBIT",
-          amount,
-          transactionId: fromTxId,
-          accountSide: "deposit"
-        });
-      } else {
-        if (fromSplit.fromWinnings > 0) {
-          entries.push({
-            operationId,
-            accountId: fromId,
-            side: "DEBIT",
-            amount: fromSplit.fromWinnings,
-            transactionId: fromTxId,
-            accountSide: "winnings"
-          });
-        }
-        if (fromSplit.fromDeposit > 0) {
-          entries.push({
-            operationId,
-            accountId: fromId,
-            side: "DEBIT",
-            amount: fromSplit.fromDeposit,
-            transactionId: fromTxId,
-            accountSide: "deposit"
-          });
-        }
-      }
-      // CREDIT-siden: mottaker — alt lander på effectiveTarget.
-      entries.push({
-        operationId,
-        accountId: toId,
-        side: "CREDIT",
-        amount,
-        transactionId: toTxId,
-        accountSide: effectiveTarget
-      });
-
-      const txRows = await this.executeLedger(client, {
-        transactions: [
-          {
-            id: fromTxId,
-            operationId,
-            accountId: fromId,
-            type: "TRANSFER_OUT",
-            amount,
-            reason,
-            relatedAccountId: toId,
-            idempotencyKey: options?.idempotencyKey,
-            split: fromSplit
-          },
-          {
-            id: toTxId,
-            operationId,
-            accountId: toId,
-            type: "TRANSFER_IN",
-            amount,
-            reason,
-            relatedAccountId: fromId,
-            split: toSplit
-          }
-        ],
-        entries
-      });
-
+      const result = await this.executeTransferInTx(client, fromId, toId, amount, reason, options);
       await client.query("COMMIT");
-      const fromTx = txRows.find((tx) => tx.id === fromTxId);
-      const toTx = txRows.find((tx) => tx.id === toTxId);
-      if (!fromTx || !toTx) {
-        throw new WalletError("INVALID_WALLET_RESPONSE", "Transfer mangler transaksjonsrader.");
-      }
-      return {
-        fromTx,
-        toTx
-      };
+      return result;
     } catch (error) {
       await client.query("ROLLBACK");
       throw this.wrapError(error);
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Intern transfer-helper som kjører i en eksisterende transaksjon.
+   * Caller eier BEGIN/COMMIT/ROLLBACK + connection-livssyklus.
+   *
+   * Refaktorert ut av `transfer()` for PR #513 §1.2 — slik at
+   * `commitReservation()` kan dele samme transaksjon som SELECT FOR UPDATE
+   * på reservation-raden, og dermed eliminerer TOCTOU-racet mot
+   * `expireStaleReservations`-tick.
+   */
+  private async executeTransferInTx(
+    client: PoolClient,
+    fromId: string,
+    toId: string,
+    amount: number,
+    reason: string,
+    options?: TransferOptions,
+  ): Promise<WalletTransferResult> {
+    // PR-W3: targetSide styrer hvilken side CREDIT-siden lander på. Hvis
+    // mottaker er systemkonto ignoreres feltet (CHECK-constraint winnings=0).
+    const requestedTarget: WalletAccountSide = options?.targetSide ?? "deposit";
+
+    const operationId = randomUUID();
+    const fromTxId = randomUUID();
+    const toTxId = randomUUID();
+
+    // Les from-account inne i samme FOR UPDATE som executeLedger vil holde,
+    // for å beregne winnings-first splitt atomisk.
+    const fromAccount = await this.selectAccountForUpdate(client, fromId);
+    if (!fromAccount) {
+      throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${fromId} finnes ikke.`);
+    }
+    const toAccount = await this.selectAccountForUpdate(client, toId);
+    if (!toAccount) {
+      throw new WalletError("ACCOUNT_NOT_FOUND", `Wallet ${toId} finnes ikke.`);
+    }
+    const fromState: InternalAccountState = {
+      id: fromAccount.id,
+      balance: asMoney(fromAccount.balance),
+      depositBalance: asMoney(fromAccount.deposit_balance),
+      winningsBalance: asMoney(fromAccount.winnings_balance),
+      isSystem: fromAccount.is_system
+    };
+
+    // PR-W3: system-konto som avsender bruker deposit-siden (winnings = 0).
+    // For brukerkonto: winnings-first-split.
+    const fromSplit: WalletTransactionSplit = fromState.isSystem
+      ? { fromDeposit: amount, fromWinnings: 0 }
+      : splitDebitFromAccount(fromState, amount);
+
+    // PR-W3: effektivt target — system-konto som mottaker tvinger deposit
+    // (CHECK-constraint winnings_balance=0 for system).
+    const effectiveTarget: WalletAccountSide = toAccount.is_system ? "deposit" : requestedTarget;
+
+    const toSplit: WalletTransactionSplit =
+      effectiveTarget === "winnings"
+        ? { fromDeposit: 0, fromWinnings: amount }
+        : { fromDeposit: amount, fromWinnings: 0 };
+
+    const entries: LedgerEntryInput[] = [];
+    // DEBIT-siden: avsender
+    if (fromState.isSystem) {
+      // System: alt på deposit (winnings er alltid 0).
+      entries.push({
+        operationId,
+        accountId: fromId,
+        side: "DEBIT",
+        amount,
+        transactionId: fromTxId,
+        accountSide: "deposit"
+      });
+    } else {
+      if (fromSplit.fromWinnings > 0) {
+        entries.push({
+          operationId,
+          accountId: fromId,
+          side: "DEBIT",
+          amount: fromSplit.fromWinnings,
+          transactionId: fromTxId,
+          accountSide: "winnings"
+        });
+      }
+      if (fromSplit.fromDeposit > 0) {
+        entries.push({
+          operationId,
+          accountId: fromId,
+          side: "DEBIT",
+          amount: fromSplit.fromDeposit,
+          transactionId: fromTxId,
+          accountSide: "deposit"
+        });
+      }
+    }
+    // CREDIT-siden: mottaker — alt lander på effectiveTarget.
+    entries.push({
+      operationId,
+      accountId: toId,
+      side: "CREDIT",
+      amount,
+      transactionId: toTxId,
+      accountSide: effectiveTarget
+    });
+
+    const txRows = await this.executeLedger(client, {
+      transactions: [
+        {
+          id: fromTxId,
+          operationId,
+          accountId: fromId,
+          type: "TRANSFER_OUT",
+          amount,
+          reason,
+          relatedAccountId: toId,
+          idempotencyKey: options?.idempotencyKey,
+          split: fromSplit
+        },
+        {
+          id: toTxId,
+          operationId,
+          accountId: toId,
+          type: "TRANSFER_IN",
+          amount,
+          reason,
+          relatedAccountId: fromId,
+          split: toSplit
+        }
+      ],
+      entries
+    });
+
+    const fromTx = txRows.find((tx) => tx.id === fromTxId);
+    const toTx = txRows.find((tx) => tx.id === toTxId);
+    if (!fromTx || !toTx) {
+      throw new WalletError("INVALID_WALLET_RESPONSE", "Transfer mangler transaksjonsrader.");
+    }
+    return { fromTx, toTx };
   }
 
   async listTransactions(accountId: string, limit = 100): Promise<WalletTransaction[]> {
@@ -962,6 +980,49 @@ export class PostgresWalletAdapter implements WalletAdapter {
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_wallet_entries_account_side
          ON ${this.entriesTable()} (account_id, account_side, created_at DESC)`
+      );
+
+      // BIN-693 Option B + PR #513 §1.1: app_wallet_reservations.
+      // Mirror av migration `20260724100000_wallet_reservations.sql` +
+      // `20260425000000_wallet_reservations_numeric.sql`. Inline CREATE her
+      // gjør at integration-tester med fresh schema (test_<uuid>) har tabellen
+      // klar uten å måtte kjøre migration-CLI separat.
+      //
+      // amount_cents er NUMERIC(20,6) — IKKE BIGINT — for å matche
+      // wallet-balance-presisjon og støtte fractional NOK (eks. 12.50 kr).
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this.reservationsTable()} (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          wallet_id TEXT NOT NULL,
+          amount_cents NUMERIC(20, 6) NOT NULL CHECK (amount_cents > 0),
+          idempotency_key TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL DEFAULT 'active'
+            CHECK (status IN ('active', 'released', 'committed', 'expired')),
+          room_code TEXT NOT NULL,
+          game_session_id TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          released_at TIMESTAMPTZ NULL,
+          committed_at TIMESTAMPTZ NULL,
+          expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 minutes')
+        )`
+      );
+      // PR #513 §1.1: oppgrader eksisterende BIGINT-kolonne til NUMERIC(20,6).
+      // Idempotent: ALTER COLUMN TYPE er no-op hvis typen allerede stemmer.
+      await client.query(
+        `ALTER TABLE ${this.reservationsTable()}
+           ALTER COLUMN amount_cents TYPE NUMERIC(20, 6) USING amount_cents::numeric(20, 6)`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_wallet_reservations_wallet_active
+         ON ${this.reservationsTable()}(wallet_id) WHERE status = 'active'`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_wallet_reservations_expires_active
+         ON ${this.reservationsTable()}(expires_at) WHERE status = 'active'`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS idx_wallet_reservations_room
+         ON ${this.reservationsTable()}(room_code)`
       );
 
       await this.insertSystemAccountIfMissing(client, this.houseAccountId);
@@ -1452,45 +1513,85 @@ export class PostgresWalletAdapter implements WalletAdapter {
     options?: CommitReservationOptions,
   ): Promise<WalletTransferResult> {
     await this.ensureInitialized();
-    // Hent reservasjonen (ingen FOR UPDATE her — transfer() tar egen lås
-    // på begge wallets). Validér status + les beløp før vi går til transfer.
-    const { rows } = await this.pool.query(
-      `SELECT id, wallet_id, amount_cents, status
-         FROM ${this.reservationsTable()}
-         WHERE id = $1`,
-      [reservationId],
-    );
-    if (rows.length === 0) {
-      throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
-    }
-    const res = rows[0];
-    if (res.status !== "active") {
-      throw new WalletError(
-        "INVALID_STATE",
-        `Reservasjon ${reservationId} er ${res.status}, kan ikke committes.`,
+    const toId = this.normalizeUserWalletId(toAccountId);
+
+    // PR #513 §1.2 (TOCTOU-fix): hele commit-en kjøres i én atomisk
+    // transaksjon. Tidligere mønster var:
+    //   1. SELECT reservation (ingen lås)
+    //   2. transfer()  — egen tx, debiterer wallet
+    //   3. UPDATE reservation status='committed' WHERE status='active'
+    // Hvis `expireStaleReservations` kjørte en sweep mellom (1) og (3),
+    // ble reservasjonen markert 'expired' samtidig som walleten ble debitert,
+    // og UPDATE i (3) traff null rader (status != 'active'). Resultat:
+    // wallet trukket, reservation-audit sier 'expired'. Compliance-ledger
+    // og reservation-historikk i desync.
+    //
+    // Fix: SELECT ... FOR UPDATE låser reservation-raden, transfer() kjøres
+    // via shared client (executeTransferInTx), og UPDATE skjer i samme tx.
+    // expireStaleReservations vil blokkere på row-låsen til vi committer.
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // FOR UPDATE: blokker expireStaleReservations + parallel commit-attempts.
+      const { rows } = await client.query(
+        `SELECT id, wallet_id, amount_cents, status
+           FROM ${this.reservationsTable()}
+           WHERE id = $1
+           FOR UPDATE`,
+        [reservationId],
       );
+      if (rows.length === 0) {
+        throw new WalletError("RESERVATION_NOT_FOUND", `Reservasjon ${reservationId} finnes ikke.`);
+      }
+      const res = rows[0];
+      if (res.status !== "active") {
+        throw new WalletError(
+          "INVALID_STATE",
+          `Reservasjon ${reservationId} er ${res.status}, kan ikke committes.`,
+        );
+      }
+
+      const fromId = this.normalizeUserWalletId(res.wallet_id);
+      if (fromId === toId) {
+        throw new WalletError("INVALID_TRANSFER", "Kan ikke overføre til samme wallet.");
+      }
+
+      // ensureAccount-er via separate connections er trygt — vi har ikke
+      // begynt å mutere account-rader ennå. Disse oppretter system-kontoer
+      // hvis de mangler (idempotent ON CONFLICT DO NOTHING).
+      await this.ensureAccount(fromId);
+      await this.ensureAccount(toId);
+
+      // Utfør faktisk transfer i samme transaksjon — winnings-først,
+      // compliance-ledger, split-entries.
+      const transfer = await this.executeTransferInTx(
+        client,
+        fromId,
+        toId,
+        Number(res.amount_cents),
+        reason,
+        options,
+      );
+
+      // Marker reservasjon committed. Inne i samme tx — hvis dette feiler
+      // ruller vi tilbake hele debit-en også, så wallet og reservation
+      // forblir konsistente.
+      await client.query(
+        `UPDATE ${this.reservationsTable()}
+           SET status = 'committed', committed_at = NOW(), game_session_id = $1
+           WHERE id = $2`,
+        [options?.gameSessionId ?? null, reservationId],
+      );
+
+      await client.query("COMMIT");
+      return transfer;
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err instanceof WalletError ? err : this.wrapError(err);
+    } finally {
+      client.release();
     }
-
-    // Utfør faktisk transfer — samme kode som før (winnings-først,
-    // compliance-ledger, split-entries). Idempotencykey ivaretatt av caller.
-    const transfer = await this.transfer(
-      res.wallet_id,
-      toAccountId,
-      Number(res.amount_cents),
-      reason,
-      options,
-    );
-
-    // Marker reservasjon committed. Hvis dette feiler (sjeldent) har vi
-    // lekket en dobbelt-debit — men transfer selv er idempotent via
-    // idempotencyKey, så retry gir samme tx + commit.
-    await this.pool.query(
-      `UPDATE ${this.reservationsTable()}
-         SET status = 'committed', committed_at = NOW(), game_session_id = $1
-         WHERE id = $2 AND status = 'active'`,
-      [options?.gameSessionId ?? null, reservationId],
-    );
-    return transfer;
   }
 
   async listActiveReservations(accountId: string): Promise<WalletReservation[]> {
