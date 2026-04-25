@@ -25,6 +25,7 @@ import { Toast } from "../../../components/Toast.js";
 import { Modal, type ModalInstance } from "../../../components/Modal.js";
 import {
   fetchGame1Detail,
+  fetchGame1HallStatus,
   startGame1,
   excludeGame1Hall,
   includeGame1Hall,
@@ -34,6 +35,7 @@ import {
   type Game1GameDetail,
   type Game1HallDetail,
   type Game1JackpotState,
+  type Game1HallStatus,
 } from "../../../api/admin-game1-master.js";
 import { AdminGame1Socket } from "./adminGame1Socket.js";
 
@@ -44,6 +46,11 @@ let activeSocket: AdminGame1Socket | null = null;
 // PR 4e.2: siste vellykkede detail-fetch — brukes i stop-dialog for å vise
 // refund-omfang uten å kreve ekstra API-kall.
 let lastDetail: Game1GameDetail | null = null;
+// TASK HS: siste fetched hall-status (farger + scan-data) cachet per hallId.
+let lastHallStatus = new Map<string, Game1HallStatus>();
+// TASK HS: eksplisitt bekreftelse fra master om at røde haller ekskluderes.
+// Nullstilles når refresh-ing oppdager at hallene ikke er røde lenger.
+let confirmedRedHallIds = new Set<string>();
 
 export async function renderGame1MasterConsole(
   container: HTMLElement,
@@ -72,6 +79,31 @@ export async function renderGame1MasterConsole(
     // umiddelbart. refresh() henter oppdatert engineState.
     onResumed: () => {
       void refresh(container, gameId);
+    },
+    // TASK HS: ved per-hall farge-oppdatering — merge direkte i cache uten
+    // full re-fetch, og re-render halls-seksjonen pluss action-knappene.
+    onHallStatusUpdate: (payload) => {
+      const cached = lastHallStatus.get(payload.hallId);
+      lastHallStatus.set(payload.hallId, {
+        hallId: payload.hallId,
+        hallName: payload.hallName ?? cached?.hallName ?? payload.hallId,
+        color: payload.color,
+        playerCount: payload.playerCount,
+        startScanDone: payload.startScanDone,
+        finalScanDone: payload.finalScanDone,
+        readyConfirmed: payload.readyConfirmed,
+        soldCount: payload.soldCount,
+        startTicketId: payload.startTicketId,
+        finalScanTicketId: payload.finalScanTicketId,
+        digitalTicketsSold: cached?.digitalTicketsSold ?? 0,
+        physicalTicketsSold: cached?.physicalTicketsSold ?? 0,
+        excludedFromGame: payload.excludedFromGame,
+        excludedReason: cached?.excludedReason ?? null,
+      });
+      if (lastDetail) {
+        renderHalls(container, lastDetail);
+        renderActions(container, lastDetail);
+      }
     },
     onFallbackActive: (active) => {
       if (active) {
@@ -195,9 +227,28 @@ function renderAutoPauseBanner(
 
 async function refresh(container: HTMLElement, gameId: string): Promise<void> {
   try {
-    const detail = await fetchGame1Detail(gameId);
+    const [detail, hallStatusResp] = await Promise.all([
+      fetchGame1Detail(gameId),
+      // TASK HS: parallel fetch av farge-kode + scan-data. Soft-fail:
+      // hvis endepunktet feiler, faller vi tilbake til å kun vise legacy
+      // ready-status uten farge.
+      fetchGame1HallStatus(gameId).catch(() => null),
+    ]);
     lastDetail = detail;
     renderAutoPauseBanner(container, detail);
+    if (hallStatusResp) {
+      lastHallStatus = new Map(
+        hallStatusResp.halls.map((h) => [h.hallId, h])
+      );
+      // Opprydd confirmed-liste: hvis en tidligere bekreftet rød hall ikke
+      // lenger er rød (noen kjøpte bong), fjern fra confirmed.
+      for (const hallId of Array.from(confirmedRedHallIds)) {
+        const s = lastHallStatus.get(hallId);
+        if (!s || s.color !== "red" || s.excludedFromGame) {
+          confirmedRedHallIds.delete(hallId);
+        }
+      }
+    }
     renderGameInfo(container, detail);
     renderHalls(container, detail);
     renderActions(container, detail);
@@ -289,7 +340,13 @@ function renderHalls(container: HTMLElement, detail: Game1GameDetail): void {
   if (!host) return;
   const rowsHtml = detail.halls
     .map((h) => {
-      const badge = hallStatusBadge(h);
+      const hallStatus = lastHallStatus.get(h.hallId);
+      const badge = hallStatus
+        ? trafficLightBadge(hallStatus)
+        : hallStatusBadge(h);
+      const descriptionHtml = hallStatus
+        ? hallStatusDescription(hallStatus)
+        : "";
       const excludeBtn =
         h.excludedFromGame
           ? `<button class="btn btn-xs btn-default"
@@ -308,13 +365,17 @@ function renderHalls(container: HTMLElement, detail: Game1GameDetail): void {
                        title="${escapeHtml(t("game1_master_exclude_hall_tooltip"))}">
                  ${escapeHtml(t("game1_master_exclude_hall"))}
                </button>`;
+      const soldCell =
+        hallStatus && hallStatus.soldCount > 0
+          ? `<small>(${hallStatus.soldCount})</small>`
+          : "";
       return `
-        <tr>
+        <tr data-hall-id="${escapeHtml(h.hallId)}">
           <td><code>${escapeHtml(h.hallId)}</code><br>
               <small>${escapeHtml(h.hallName)}</small></td>
-          <td>${badge}</td>
+          <td>${badge}${descriptionHtml}</td>
           <td class="text-right">${h.digitalTicketsSold}</td>
-          <td class="text-right">${h.physicalTicketsSold}</td>
+          <td class="text-right">${h.physicalTicketsSold} ${soldCell}</td>
           <td>${excludeBtn}</td>
         </tr>
       `;
@@ -347,6 +408,54 @@ function renderHalls(container: HTMLElement, detail: Game1GameDetail): void {
   });
 }
 
+/**
+ * TASK HS: farge-kodet hall-badge med sirkel-ikon (🔴/🟠/🟢) + kompakt label.
+ * Brukes i halls-tabellen for rask visuell statusoversikt.
+ */
+function trafficLightBadge(status: Game1HallStatus): string {
+  if (status.excludedFromGame) {
+    return `<span class="label label-default" data-marker="hall-color-excluded">⚫ ekskludert</span>`;
+  }
+  switch (status.color) {
+    case "red":
+      return `<span class="label label-danger" data-marker="hall-color-red">🔴 ${escapeHtml(
+        t("game1_master_hall_red")
+      )}</span>`;
+    case "orange":
+      return `<span class="label label-warning" data-marker="hall-color-orange">🟠 ${escapeHtml(
+        t("game1_master_hall_orange")
+      )}</span>`;
+    case "green":
+      return `<span class="label label-success" data-marker="hall-color-green">🟢 ${escapeHtml(
+        t("game1_master_hall_green")
+      )}</span>`;
+  }
+}
+
+/**
+ * TASK HS: kort, menneskelig beskrivelse under badge-en —
+ * "0 spillere · Ekskludert", "5 spillere · Mangler slutt-scan", etc.
+ */
+function hallStatusDescription(status: Game1HallStatus): string {
+  const parts: string[] = [`${status.playerCount} ${t("game1_master_players")}`];
+  if (status.color === "red") {
+    parts.push(t("game1_master_hall_red_desc"));
+  } else if (status.color === "orange") {
+    if (!status.finalScanDone) {
+      parts.push(t("game1_master_hall_orange_no_final_scan"));
+    } else if (!status.readyConfirmed) {
+      parts.push(t("game1_master_hall_orange_no_ready"));
+    } else {
+      parts.push(t("game1_master_hall_orange_generic"));
+    }
+  } else if (status.color === "green") {
+    parts.push(
+      `${status.soldCount} ${t("game1_master_hall_sold_suffix")}`
+    );
+  }
+  return `<br><small class="text-muted">${escapeHtml(parts.join(" · "))}</small>`;
+}
+
 function renderActions(container: HTMLElement, detail: Game1GameDetail): void {
   const host = container.querySelector<HTMLElement>("#g1-master-actions");
   if (!host) return;
@@ -356,22 +465,94 @@ function renderActions(container: HTMLElement, detail: Game1GameDetail): void {
   // status='running' + engine.paused=true (paused_at_phase satt).
   const isAutoPaused =
     engine !== null && engine.isPaused && engine.pausedAtPhase !== null;
-  const canStart =
-    status === "ready_to_start" ||
-    (status === "purchase_open" && detail.allReady);
-  // Pause-knapp er kun aktuell når engine faktisk trekker kuler. Når auto-
-  // paused er draw-engine allerede stoppet, så det er meningsløst å pause
-  // på nytt.
+
+  // TASK HS: bruk farge-cache (hvis tilgjengelig) for start-knapp-logikk.
+  // Oransje haller blokkerer start. Røde haller må bekreftes eksplisitt
+  // via checkbox (confirmedRedHallIds).
+  const hallStatusList = Array.from(lastHallStatus.values()).filter(
+    (h) => !h.excludedFromGame
+  );
+  const orangeHalls = hallStatusList.filter((h) => h.color === "orange");
+  const redHalls = hallStatusList.filter(
+    (h) => h.color === "red" && h.hallId !== detail.game.masterHallId
+  );
+  const allRedConfirmed = redHalls.every((h) =>
+    confirmedRedHallIds.has(h.hallId)
+  );
+
+  const hasHallStatusData = lastHallStatus.size > 0;
+  // Når vi har farge-data: bruk TASK HS-regelen. Ellers fall tilbake til
+  // legacy-allReady-flagget slik at konsollen fortsatt fungerer uten
+  // hall-status-endepunktet tilgjengelig.
+  const canStart = hasHallStatusData
+    ? (status === "ready_to_start" || status === "purchase_open") &&
+      orangeHalls.length === 0 &&
+      allRedConfirmed
+    : status === "ready_to_start" ||
+      (status === "purchase_open" && detail.allReady);
+
+  // Task 1.1: pause-knapp er kun aktuell når engine faktisk trekker kuler.
+  // Når auto-paused er draw-engine allerede stoppet, så det er meningsløst å
+  // pause på nytt.
   const canPause = status === "running" && !isAutoPaused;
-  // Resume-knapp aktiveres for begge paused-varianter (Task 1.1).
+  // Task 1.1: resume-knapp aktiveres for begge paused-varianter.
   const canResume = status === "paused" || isAutoPaused;
   const canStop = ["purchase_open", "ready_to_start", "running", "paused"].includes(
     status
   );
+
+  const orangeWarning =
+    orangeHalls.length > 0
+      ? `<div class="alert alert-warning" data-marker="start-orange-warning" style="margin-top:12px;">
+           <strong>${escapeHtml(
+             t("game1_master_start_blocked_orange_title")
+           )}</strong>
+           <br><small>${escapeHtml(
+             t("game1_master_start_blocked_orange_body")
+           )}: ${escapeHtml(
+               orangeHalls.map((h) => h.hallName || h.hallId).join(", ")
+             )}</small>
+         </div>`
+      : "";
+
+  const redCheckboxHtml =
+    redHalls.length > 0
+      ? `<div class="panel panel-warning" data-marker="red-halls-confirm" style="margin-top:12px;padding:12px;">
+           <strong>${escapeHtml(
+             t("game1_master_red_halls_title")
+           )}</strong>
+           <br><small>${escapeHtml(
+             t("game1_master_red_halls_body")
+           )}</small>
+           <div style="margin-top:8px;">
+             ${redHalls
+               .map(
+                 (h) => `
+               <label style="display:block;">
+                 <input type="checkbox" data-action="confirm-red-hall"
+                        data-hall-id="${escapeHtml(h.hallId)}"
+                        ${confirmedRedHallIds.has(h.hallId) ? "checked" : ""}>
+                 ${escapeHtml(t("game1_master_exclude_hall_from_game"))}:
+                 <strong>${escapeHtml(h.hallName || h.hallId)}</strong>
+                 <small class="text-muted">(0 ${escapeHtml(t("game1_master_players"))})</small>
+               </label>`
+               )
+               .join("")}
+           </div>
+         </div>`
+      : "";
+
+  const startTooltip =
+    orangeHalls.length > 0
+      ? `title="${escapeHtml(
+          `${orangeHalls.length} ${t("game1_master_halls_not_ready_tooltip")}`
+        )}"`
+      : "";
+
   host.innerHTML = `
     <h3 style="margin-top:0;">${escapeHtml(t("game1_master_actions"))}</h3>
     <div class="btn-group" role="group">
-      <button class="btn btn-success" data-action="start" ${canStart ? "" : "disabled"}>
+      <button class="btn btn-success" data-action="start" ${startTooltip} ${canStart ? "" : "disabled"}>
         ${escapeHtml(t("game1_master_start"))}
       </button>
       <button class="btn btn-warning" data-action="pause" ${canPause ? "" : "disabled"}>
@@ -384,6 +565,8 @@ function renderActions(container: HTMLElement, detail: Game1GameDetail): void {
         ${escapeHtml(t("game1_master_stop"))}
       </button>
     </div>
+    ${orangeWarning}
+    ${redCheckboxHtml}
     <p class="text-muted small" style="margin-top:12px;">
       ${escapeHtml(t("game1_master_poll_hint"))}
     </p>
@@ -403,6 +586,21 @@ function renderActions(container: HTMLElement, detail: Game1GameDetail): void {
   host.querySelector<HTMLButtonElement>('[data-action="stop"]')?.addEventListener(
     "click",
     () => onStop(container, detail.game.id)
+  );
+  host.querySelectorAll<HTMLInputElement>('[data-action="confirm-red-hall"]').forEach(
+    (cb) => {
+      cb.addEventListener("change", () => {
+        const hallId = cb.dataset.hallId ?? "";
+        if (!hallId) return;
+        if (cb.checked) {
+          confirmedRedHallIds.add(hallId);
+        } else {
+          confirmedRedHallIds.delete(hallId);
+        }
+        // Re-render actions for å oppdatere Start-knapp disabled-state.
+        renderActions(container, detail);
+      });
+    }
   );
 }
 
@@ -454,8 +652,15 @@ async function onStart(container: HTMLElement, detail: Game1GameDetail): Promise
     confirmExcludedHalls = excludedHallIds;
   }
 
-  // Task 1.5 + MASTER_PLAN §2.3 — kombinert override-flyt:
-  //   1) Kall /start uten override.
+  // TASK HS: send confirmedRedHallIds som `confirmExcludeRedHalls`. Backend
+  // setter excluded_from_game=true for disse i samme transaksjon som start.
+  const confirmExcludeRedHalls =
+    confirmedRedHallIds.size > 0
+      ? Array.from(confirmedRedHallIds)
+      : undefined;
+
+  // Task 1.5 + MASTER_PLAN §2.3 + TASK HS — kombinert override-flyt:
+  //   1) Kall /start med confirmExcludedHalls + confirmExcludeRedHalls.
   //   2) HALLS_NOT_READY → popup med unready-liste + [Avbryt]/[Start uansett];
   //      ved [Start uansett] re-kall med `confirmUnreadyHalls`.
   //   3) JACKPOT_CONFIRM_REQUIRED → popup med pot-amount + thresholds;
@@ -470,7 +675,11 @@ async function onStart(container: HTMLElement, detail: Game1GameDetail): Promise
     try {
       await startGame1(
         detail.game.id,
-        { confirmExcludedHalls, confirmUnreadyHalls: confirmedUnreadyHalls },
+        {
+          confirmExcludedHalls,
+          confirmExcludeRedHalls,
+          confirmUnreadyHalls: confirmedUnreadyHalls,
+        },
         jackpotConfirmed || undefined
       );
       Toast.success(t("saved"));

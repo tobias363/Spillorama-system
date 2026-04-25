@@ -52,6 +52,25 @@ export interface AdminGame1Resumed {
   resumeType: "auto" | "manual";
 }
 
+/**
+ * TASK HS: beriket per-hall status-broadcast — farge-kode + scan-data.
+ */
+export interface AdminGame1HallStatusUpdate {
+  gameId: string;
+  hallId: string;
+  hallName: string;
+  color: "red" | "orange" | "green";
+  playerCount: number;
+  startScanDone: boolean;
+  finalScanDone: boolean;
+  readyConfirmed: boolean;
+  soldCount: number;
+  startTicketId: string | null;
+  finalScanTicketId: string | null;
+  excludedFromGame: boolean;
+  at: number;
+}
+
 export interface AdminGame1SocketOptions {
   /** Base-URL for Socket.IO-serveren. Default: window.location.origin. */
   baseUrl?: string;
@@ -67,6 +86,8 @@ export interface AdminGame1SocketOptions {
   onAutoPaused?: (payload: AdminGame1AutoPaused) => void;
   /** Task 1.1: valgfri — master-console bruker den. */
   onResumed?: (payload: AdminGame1Resumed) => void;
+  /** TASK HS: per-hall farge/scan-oppdatering. Valgfri for bakoverkompat. */
+  onHallStatusUpdate?: (payload: AdminGame1HallStatusUpdate) => void;
   onFallbackActive: (fallbackActive: boolean) => void;
   /** Testing-hook: bytte ut io-factory for å slippe ekte nettverks-call. */
   _ioFactory?: typeof io;
@@ -81,6 +102,7 @@ export class AdminGame1Socket {
     onDrawProgressed: (payload: AdminGame1DrawProgressed) => void;
     onAutoPaused?: (payload: AdminGame1AutoPaused) => void;
     onResumed?: (payload: AdminGame1Resumed) => void;
+    onHallStatusUpdate: (payload: AdminGame1HallStatusUpdate) => void;
     onFallbackActive: (fallbackActive: boolean) => void;
     _ioFactory: typeof io;
   };
@@ -97,6 +119,7 @@ export class AdminGame1Socket {
       onDrawProgressed: options.onDrawProgressed,
       onAutoPaused: options.onAutoPaused,
       onResumed: options.onResumed,
+      onHallStatusUpdate: options.onHallStatusUpdate ?? (() => undefined),
       onFallbackActive: options.onFallbackActive,
       _ioFactory: options._ioFactory ?? io,
     };
@@ -163,6 +186,15 @@ export class AdminGame1Socket {
       (payload: AdminGame1Resumed) => {
         if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
         this.options.onResumed?.(payload);
+      }
+    );
+
+    // TASK HS: real-time farge/scan-oppdatering per hall.
+    this.socket.on(
+      "game1:hall-status-update",
+      (payload: AdminGame1HallStatusUpdate) => {
+        if (!this.currentGameId || payload.gameId !== this.currentGameId) return;
+        this.options.onHallStatusUpdate(payload);
       }
     );
   }

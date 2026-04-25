@@ -35,6 +35,34 @@ export interface Game1HallDetail {
   excludedReason: string | null;
 }
 
+/**
+ * TASK HS: beriket per-hall status med farge-kode + scan-data.
+ * Hentes fra GET /api/admin/game1/games/:gameId/hall-status.
+ */
+export type HallStatusColor = "red" | "orange" | "green";
+
+export interface Game1HallStatus {
+  hallId: string;
+  hallName: string;
+  color: HallStatusColor;
+  playerCount: number;
+  startScanDone: boolean;
+  finalScanDone: boolean;
+  readyConfirmed: boolean;
+  soldCount: number;
+  startTicketId: string | null;
+  finalScanTicketId: string | null;
+  digitalTicketsSold: number;
+  physicalTicketsSold: number;
+  excludedFromGame: boolean;
+  excludedReason: string | null;
+}
+
+export interface Game1HallStatusResponse {
+  gameId: string;
+  halls: Game1HallStatus[];
+}
+
 export interface Game1MasterAuditEntry {
   id: string;
   action: Game1MasterAction;
@@ -139,6 +167,8 @@ export async function startGame1(
     if (overrides.confirmUnreadyHalls !== undefined) {
       body.confirmUnreadyHalls = overrides.confirmUnreadyHalls;
     }
+    // TASK HS: ny liste for røde haller (0 spillere) som master eksplisitt
+    // ekskluderer fra dagens spill.
     if (overrides.confirmExcludeRedHalls !== undefined) {
       body.confirmExcludeRedHalls = overrides.confirmExcludeRedHalls;
     }
@@ -162,6 +192,49 @@ export async function fetchGame1JackpotState(
   return apiRequest<{ jackpot: (Game1JackpotState & { hallGroupId: string }) | null }>(
     `/api/admin/game1/jackpot-state/${encodeURIComponent(hallGroupId)}`,
     { auth: true }
+  );
+}
+
+// TASK HS ───────────────────────────────────────────────────────────────────
+
+export async function fetchGame1HallStatus(
+  gameId: string
+): Promise<Game1HallStatusResponse> {
+  return apiRequest<Game1HallStatusResponse>(
+    `/api/admin/game1/games/${encodeURIComponent(gameId)}/hall-status`,
+    { auth: true }
+  );
+}
+
+export interface Game1ScanResponse {
+  gameId: string;
+  hallId: string;
+  startTicketId: string | null;
+  finalScanTicketId: string | null;
+  startScannedAt?: string | null;
+  finalScannedAt?: string | null;
+  physicalTicketsSold?: number;
+}
+
+export async function recordGame1StartScan(
+  gameId: string,
+  hallId: string,
+  ticketId: string
+): Promise<Game1ScanResponse> {
+  return apiRequest<Game1ScanResponse>(
+    `/api/admin/game1/games/${encodeURIComponent(gameId)}/halls/${encodeURIComponent(hallId)}/scan-start`,
+    { method: "POST", auth: true, body: { ticketId } }
+  );
+}
+
+export async function recordGame1FinalScan(
+  gameId: string,
+  hallId: string,
+  ticketId: string
+): Promise<Game1ScanResponse> {
+  return apiRequest<Game1ScanResponse>(
+    `/api/admin/game1/games/${encodeURIComponent(gameId)}/halls/${encodeURIComponent(hallId)}/scan-final`,
+    { method: "POST", auth: true, body: { ticketId } }
   );
 }
 

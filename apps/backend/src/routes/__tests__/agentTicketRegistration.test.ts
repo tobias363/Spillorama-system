@@ -193,6 +193,10 @@ async function startServer(
           physicalTicketsSold: 0,
           excludedFromGame: false,
           excludedReason: null,
+          startTicketId: null,
+          startScannedAt: null,
+          finalScanTicketId: null,
+          finalScannedAt: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };

@@ -1,7 +1,9 @@
 /**
- * GAME1_SCHEDULE PR 2: admin-router for ready-flow per hall i Game 1.
+ * GAME1_SCHEDULE PR 2 + TASK HS: admin-router for ready-flow + scan-flow per
+ * hall i Game 1.
  *
- * Spec: .claude/worktrees/interesting-ellis-eb99bd/GAME1_SCHEDULE_SPEC.md §3.4.
+ * Spec: .claude/worktrees/interesting-ellis-eb99bd/GAME1_SCHEDULE_SPEC.md §3.4
+ *       + Task HS (låst 2026-04-24).
  *
  * Endepunkter:
  *   POST /api/admin/game1/halls/:hallId/ready
@@ -9,7 +11,7 @@
  *     Permission: GAME1_HALL_READY_WRITE (ADMIN + HALL_OPERATOR + AGENT)
  *     Hall-scope: HALL_OPERATOR/AGENT må være knyttet til hallId via
  *     assertUserHallScope. AuditLog: hall.sales.closed.
- *     Socket: game1:ready-status-update til master-UI + hall-displays.
+ *     Socket: game1:ready-status-update + game1:hall-status-update.
  *
  *   POST /api/admin/game1/halls/:hallId/unready
  *     Body: { gameId }
@@ -20,18 +22,35 @@
  *     Permission: GAME1_GAME_READ
  *     Returnerer: { gameId, status, halls: [...], allReady }
  *
+ *   TASK HS (nye):
+ *   POST /api/admin/game1/games/:gameId/halls/:hallId/scan-start
+ *     Body: { ticketId }
+ *     Permission: GAME1_HALL_READY_WRITE
+ *     AuditLog: hall.scan.start.
+ *     Socket: game1:hall-status-update.
+ *
+ *   POST /api/admin/game1/games/:gameId/halls/:hallId/scan-final
+ *     Body: { ticketId }
+ *     Permission: GAME1_HALL_READY_WRITE
+ *     AuditLog: hall.scan.final.
+ *     Socket: game1:hall-status-update.
+ *
+ *   GET /api/admin/game1/games/:gameId/hall-status
+ *     Permission: GAME1_GAME_READ
+ *     Returnerer: { gameId, halls: [{hallId, color, playerCount, ...}] }
+ *
  * Rolle-krav:
  *   - GAME1_HALL_READY_WRITE: ADMIN + HALL_OPERATOR + AGENT (bingovert).
  *   - GAME1_GAME_READ: ADMIN + HALL_OPERATOR + SUPPORT + AGENT.
  *   Hall-scope håndheves per-endepunkt for HALL_OPERATOR/AGENT — de kan
- *   kun ready/unready *egen* hall.
+ *   kun ready/unready/scan *egen* hall.
  *
- * Socket-event:
- *   game1:ready-status-update {
- *     gameId, hallId, hallName, isReady, digitalSold, physicalSold,
- *     excludedFromGame, allReady
- *   }
- *   Sendes til admin-UI (broadcasted via io.emit) + hall-displays.
+ * Socket-events:
+ *   game1:ready-status-update { gameId, hallId, hallName, isReady, ... }
+ *   game1:hall-status-update  { gameId, hallId, hallName, color, playerCount,
+ *                               startScanDone, finalScanDone, readyConfirmed,
+ *                               soldCount, startTicketId, finalScanTicketId,
+ *                               excludedFromGame, at }
  */
 
 import express from "express";
@@ -187,7 +206,76 @@ export function createAdminGame1ReadyRouter(
       io.emit("game1:ready-status-update", event);
       io.to(`hall:${hallId}:display`).emit("game1:ready-status-update", event);
     }
+    // TASK HS: også broadcast beriket farge-event. Hentes separat for å
+    // inkludere scan-data. Broadcastet til `group:<groupId>`-rom slik at
+    // alle abonnenter i gruppen får oppdatering.
+    await broadcastHallStatusUpdate(gameId, hallId, hallName);
     return { hallName, allReady };
+  }
+
+  /**
+   * TASK HS: broadcast `game1:hall-status-update` — beriket per-hall status
+   * med farge-kode, spiller-count og scan-data. Separat fra ready-update for
+   * å ikke sprenge eksisterende kontrakt.
+   *
+   * Broadcastet til:
+   *   - Default namespace, rom `group:<groupId>` (hall-displays abonnerer der).
+   *   - `/admin-game1`-namespace, rom `game1:<gameId>` (master-konsoll
+   *     abonnerer der via AdminGame1Socket).
+   */
+  async function broadcastHallStatusUpdate(
+    gameId: string,
+    hallId: string,
+    hallNameHint?: string
+  ): Promise<void> {
+    if (!io) return;
+    try {
+      const [hallStatuses, groupId] = await Promise.all([
+        hallReadyService.getHallStatusForGame(gameId),
+        hallReadyService.getGameGroupId(gameId),
+      ]);
+      const hallStatus = hallStatuses.find((s) => s.hallId === hallId);
+      if (!hallStatus) return;
+      let hallName = hallNameHint ?? hallId;
+      if (!hallNameHint) {
+        try {
+          const hall = await platformService.getHall(hallId);
+          hallName = hall.name;
+        } catch {
+          // soft-fail
+        }
+      }
+      const payload = {
+        gameId,
+        hallId,
+        hallName,
+        color: hallStatus.color,
+        playerCount: hallStatus.playerCount,
+        startScanDone: hallStatus.startScanDone,
+        finalScanDone: hallStatus.finalScanDone,
+        readyConfirmed: hallStatus.readyConfirmed,
+        soldCount: hallStatus.soldCount,
+        startTicketId: hallStatus.startTicketId,
+        finalScanTicketId: hallStatus.finalScanTicketId,
+        excludedFromGame: hallStatus.excludedFromGame,
+        at: Date.now(),
+      };
+      // Default namespace — hall-displays + admin pollers.
+      io.to(`group:${groupId}`).emit("game1:hall-status-update", payload);
+      // Admin-game1 namespace — master-console real-time subscription.
+      try {
+        io.of("/admin-game1")
+          .to(`game1:${gameId}`)
+          .emit("game1:hall-status-update", payload);
+      } catch {
+        // namespace kan mangle i minimal-test-setup; ignorer
+      }
+    } catch (err) {
+      logger.warn(
+        { err, gameId, hallId },
+        "[TASK HS] hall-status-update broadcast feilet — route-respons er allerede sendt"
+      );
+    }
   }
 
   // ── POST /api/admin/game1/halls/:hallId/ready ────────────────────────────
@@ -349,6 +437,150 @@ export function createAdminGame1ReadyRouter(
       apiFailure(res, error);
     }
   });
+
+  // ── TASK HS: POST /api/admin/game1/games/:gameId/halls/:hallId/scan-start ─
+
+  router.post(
+    "/api/admin/game1/games/:gameId/halls/:hallId/scan-start",
+    async (req, res) => {
+      try {
+        const actor = await requirePermission(req, "GAME1_HALL_READY_WRITE");
+        const gameId = mustBeNonEmptyString(req.params.gameId, "gameId");
+        const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+        assertHallScopeForReadyFlow(actor, hallId);
+        if (!isRecordObject(req.body)) {
+          throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+        }
+        const ticketId = mustBeNonEmptyString(req.body.ticketId, "ticketId");
+
+        const status = await hallReadyService.recordStartScan({
+          gameId,
+          hallId,
+          ticketId,
+        });
+
+        fireAudit({
+          actorId: actor.id,
+          actorType: actorTypeFromRole(actor.role),
+          action: "hall.scan.start",
+          resource: "game1_scheduled_game",
+          resourceId: gameId,
+          details: { hallId, ticketId },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        });
+
+        await broadcastHallStatusUpdate(gameId, hallId);
+
+        apiSuccess(res, {
+          gameId,
+          hallId,
+          startTicketId: status.startTicketId,
+          startScannedAt: status.startScannedAt,
+          finalScanTicketId: status.finalScanTicketId,
+          finalScannedAt: status.finalScannedAt,
+        });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    }
+  );
+
+  // ── TASK HS: POST /api/admin/game1/games/:gameId/halls/:hallId/scan-final ─
+
+  router.post(
+    "/api/admin/game1/games/:gameId/halls/:hallId/scan-final",
+    async (req, res) => {
+      try {
+        const actor = await requirePermission(req, "GAME1_HALL_READY_WRITE");
+        const gameId = mustBeNonEmptyString(req.params.gameId, "gameId");
+        const hallId = mustBeNonEmptyString(req.params.hallId, "hallId");
+        assertHallScopeForReadyFlow(actor, hallId);
+        if (!isRecordObject(req.body)) {
+          throw new DomainError("INVALID_INPUT", "Payload må være et objekt.");
+        }
+        const ticketId = mustBeNonEmptyString(req.body.ticketId, "ticketId");
+
+        const status = await hallReadyService.recordFinalScan({
+          gameId,
+          hallId,
+          ticketId,
+        });
+
+        fireAudit({
+          actorId: actor.id,
+          actorType: actorTypeFromRole(actor.role),
+          action: "hall.scan.final",
+          resource: "game1_scheduled_game",
+          resourceId: gameId,
+          details: {
+            hallId,
+            ticketId,
+            startTicketId: status.startTicketId,
+            physicalTicketsSold: status.physicalTicketsSold,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        });
+
+        await broadcastHallStatusUpdate(gameId, hallId);
+
+        apiSuccess(res, {
+          gameId,
+          hallId,
+          startTicketId: status.startTicketId,
+          finalScanTicketId: status.finalScanTicketId,
+          finalScannedAt: status.finalScannedAt,
+          physicalTicketsSold: status.physicalTicketsSold,
+        });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    }
+  );
+
+  // ── TASK HS: GET /api/admin/game1/games/:gameId/hall-status ──────────────
+
+  router.get(
+    "/api/admin/game1/games/:gameId/hall-status",
+    async (req, res) => {
+      try {
+        await requirePermission(req, "GAME1_GAME_READ");
+        const gameId = mustBeNonEmptyString(req.params.gameId, "gameId");
+        const statuses = await hallReadyService.getHallStatusForGame(gameId);
+        const halls = await Promise.all(
+          statuses.map(async (s) => {
+            let hallName = s.hallId;
+            try {
+              const hall = await platformService.getHall(s.hallId);
+              hallName = hall.name;
+            } catch {
+              // soft-fail
+            }
+            return {
+              hallId: s.hallId,
+              hallName,
+              color: s.color,
+              playerCount: s.playerCount,
+              startScanDone: s.startScanDone,
+              finalScanDone: s.finalScanDone,
+              readyConfirmed: s.readyConfirmed,
+              soldCount: s.soldCount,
+              startTicketId: s.startTicketId,
+              finalScanTicketId: s.finalScanTicketId,
+              digitalTicketsSold: s.digitalTicketsSold,
+              physicalTicketsSold: s.physicalTicketsSold,
+              excludedFromGame: s.excludedFromGame,
+              excludedReason: s.excludedReason,
+            };
+          })
+        );
+        apiSuccess(res, { gameId, halls });
+      } catch (error) {
+        apiFailure(res, error);
+      }
+    }
+  );
 
   return router;
 }

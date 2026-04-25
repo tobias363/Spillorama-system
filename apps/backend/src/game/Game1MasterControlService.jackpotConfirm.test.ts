@@ -87,8 +87,8 @@ function happyPathResponses(status = "ready_to_start"): StubResponse[] {
     {
       match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
       rows: [
-        { hall_id: "hall-master", is_ready: true, excluded_from_game: false },
-        { hall_id: "hall-2", is_ready: true, excluded_from_game: false },
+        { hall_id: "hall-master", is_ready: true, excluded_from_game: false, digital_tickets_sold: 5, physical_tickets_sold: 0, start_ticket_id: null, final_scan_ticket_id: null },
+        { hall_id: "hall-2", is_ready: true, excluded_from_game: false, digital_tickets_sold: 5, physical_tickets_sold: 0, start_ticket_id: null, final_scan_ticket_id: null },
       ],
     },
     {
@@ -129,8 +129,8 @@ test("startGame uten jackpot-service → legacy no-op (ingen JACKPOT_CONFIRM_REQ
     {
       match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
       rows: [
-        { hall_id: "hall-master", is_ready: true, excluded_from_game: false },
-        { hall_id: "hall-2", is_ready: true, excluded_from_game: false },
+        { hall_id: "hall-master", is_ready: true, excluded_from_game: false, digital_tickets_sold: 5, physical_tickets_sold: 0, start_ticket_id: null, final_scan_ticket_id: null },
+        { hall_id: "hall-2", is_ready: true, excluded_from_game: false, digital_tickets_sold: 5, physical_tickets_sold: 0, start_ticket_id: null, final_scan_ticket_id: null },
       ],
     },
     {
@@ -206,8 +206,8 @@ test("startGame uten group_hall_id → hopper over jackpot-preflight", async () 
     {
       match: (s) => s.includes("hall_id, is_ready, excluded_from_game"),
       rows: [
-        { hall_id: "hall-master", is_ready: true, excluded_from_game: false },
-        { hall_id: "hall-2", is_ready: true, excluded_from_game: false },
+        { hall_id: "hall-master", is_ready: true, excluded_from_game: false, digital_tickets_sold: 5, physical_tickets_sold: 0, start_ticket_id: null, final_scan_ticket_id: null },
+        { hall_id: "hall-2", is_ready: true, excluded_from_game: false, digital_tickets_sold: 5, physical_tickets_sold: 0, start_ticket_id: null, final_scan_ticket_id: null },
       ],
     },
     {

@@ -98,6 +98,13 @@ function readyRow(overrides: Record<string, unknown> = {}): unknown {
     hall_id: "hall-2",
     is_ready: true,
     excluded_from_game: false,
+    // TASK HS: defaultverdier som gjør hallen GRØNN (digital-only, ingen
+    // fysisk salg → ingen scan kreves; har spillere). Tester som vil teste
+    // ulike farger overrider disse.
+    digital_tickets_sold: 5,
+    physical_tickets_sold: 0,
+    start_ticket_id: null,
+    final_scan_ticket_id: null,
     ...overrides,
   };
 }

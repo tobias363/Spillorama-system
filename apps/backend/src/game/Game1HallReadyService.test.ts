@@ -98,6 +98,21 @@ test("markReady happy path — UPSERT + returnerer rad", async () => {
       match: (s) => s.includes('FROM "public"."app_physical_tickets"'),
       rows: [{ cnt: "3" }],
     },
+    // TASK HS: loadExistingRow må returnere en rad med start+final scan utført
+    // slik at FINAL_SCAN_REQUIRED-guarden ikke blokkerer happy-path-testen.
+    {
+      match: (s) =>
+        s.includes("SELECT game_id") && s.includes("WHERE game_id = $1 AND hall_id = $2"),
+      rows: [
+        hallReadyRow({
+          start_ticket_id: "100",
+          start_scanned_at: "2026-04-24T10:00:00.000Z",
+          final_scan_ticket_id: "103",
+          final_scanned_at: "2026-04-24T10:30:00.000Z",
+          physical_tickets_sold: 3,
+        }),
+      ],
+    },
     {
       match: (s) => s.includes('INSERT INTO "public"."app_game1_hall_ready_status"'),
       rows: [hallReadyRow({ physical_tickets_sold: 3 })],

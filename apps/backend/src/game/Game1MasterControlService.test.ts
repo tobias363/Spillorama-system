@@ -81,6 +81,12 @@ function readyRow(overrides: Record<string, unknown> = {}): unknown {
     hall_id: "hall-2",
     is_ready: true,
     excluded_from_game: false,
+    // TASK HS: default ticket-counts slik at haller ikke tilfeldig er røde
+    // (0 spillere). Tester som vil ha rød hall setter disse eksplisitt.
+    digital_tickets_sold: 5,
+    physical_tickets_sold: 0,
+    start_ticket_id: null,
+    final_scan_ticket_id: null,
     ...overrides,
   };
 }

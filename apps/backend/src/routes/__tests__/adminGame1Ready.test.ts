@@ -97,6 +97,11 @@ function defaultStatus(overrides: Partial<HallReadyStatusRow> = {}): HallReadySt
     excludedReason: overrides.excludedReason ?? null,
     createdAt: overrides.createdAt ?? "2026-04-21T09:50:00.000Z",
     updatedAt: overrides.updatedAt ?? "2026-04-21T10:00:00.000Z",
+    // TASK HS: scan-felt — eksisterende tester trenger ingen scan-data.
+    startTicketId: overrides.startTicketId ?? null,
+    startScannedAt: overrides.startScannedAt ?? null,
+    finalScanTicketId: overrides.finalScanTicketId ?? null,
+    finalScannedAt: overrides.finalScannedAt ?? null,
   };
 }
 
