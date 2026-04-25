@@ -693,3 +693,149 @@ test("BIN-587 B3.1: generateGameSessions respects limit", () => {
   const report = ledger.generateGameSessions({ startDate: "2026-04-14", endDate: "2026-04-14", limit: 3 });
   assert.equal(report.rows.length, 3);
 });
+
+// ── Hotfix: DISABLE_PER_ROUND_ORG_DISTRIBUTION ────────────────────────────
+//
+// Per pengespillforskriften skal §11-fordeling skje kvartalsvis. Dagens
+// kode gjør den per-rapport, og denne hotfixen lar oss skru av side-
+// effektene (wallet-transfer + ORG_DISTRIBUTION-ledger-skriving) under
+// pilot mens kvartalsvis-refactor venter post-pilot. STAKE/PRIZE/
+// EXTRA_PRIZE-skriving skal IKKE påvirkes (audit-trail beholdes).
+
+test("DISABLE_PER_ROUND_ORG_DISTRIBUTION default (false): wallet-transfer + ORG_DISTRIBUTION-ledger-skriving skjer som før", async () => {
+  const wallet = new InMemoryWalletAdapter();
+  // Eksplisitt false for å vise default-flow.
+  const ledger = new ComplianceLedger({ walletAdapter: wallet, disablePerRoundOrgDistribution: false });
+
+  const date = "2026-04-25";
+  const dayMsTs = new Date(2026, 3, 25).getTime();
+
+  // Plant både STAKE og PRIZE for å bekrefte at audit-trail (STAKE/PRIZE)
+  // skrives via separate kanaler og er upåvirket av hotfixen.
+  await ledger.recordAccountingEvent({
+    hallId: "hall-default", gameType: "DATABINGO", channel: "INTERNET",
+    eventType: "STAKE", amount: 1000
+  });
+  await ledger.recordAccountingEvent({
+    hallId: "hall-default", gameType: "DATABINGO", channel: "INTERNET",
+    eventType: "PRIZE", amount: 300
+  });
+  // Backdate entries så generateDailyReport plukker dem opp på `date`.
+  const internal = ledger as unknown as { complianceLedger: { createdAtMs: number; createdAt: string }[] };
+  for (const entry of internal.complianceLedger) {
+    entry.createdAtMs = dayMsTs + 1000;
+    entry.createdAt = new Date(dayMsTs + 1000).toISOString();
+  }
+
+  // net = 1000 - 300 = 700, DATABINGO => requiredMinimum = 700 * 0.30 = 210
+  const transfersBefore = wallet.transferCallCount;
+  const batch = await ledger.createOverskuddDistributionBatch({
+    date, allocations: TEST_ALLOCATIONS
+  });
+
+  assert.notEqual(batch.id, "DISABLED_PER_ROUND", "batch.id skal ikke være disabled-stub");
+  assert.equal(batch.requiredMinimum, 210);
+  assert.equal(batch.distributedAmount, 210);
+  assert.equal(batch.transfers.length, 2, "to org-allokeringer => to transfers");
+  assert.equal(wallet.transferCallCount - transfersBefore, 2, "to wallet-transfers utført");
+
+  // ORG_DISTRIBUTION-ledger-entries skrevet
+  const orgDistributions = ledger.listComplianceLedgerEntries().filter((e) => e.eventType === "ORG_DISTRIBUTION");
+  assert.equal(orgDistributions.length, 2, "to ORG_DISTRIBUTION ledger-entries");
+
+  // STAKE/PRIZE-entries fortsatt til stede (audit-trail beholdt)
+  const stakes = ledger.listComplianceLedgerEntries().filter((e) => e.eventType === "STAKE");
+  const prizes = ledger.listComplianceLedgerEntries().filter((e) => e.eventType === "PRIZE");
+  assert.equal(stakes.length, 1);
+  assert.equal(prizes.length, 1);
+});
+
+test("DISABLE_PER_ROUND_ORG_DISTRIBUTION=true: skip wallet-transfer + ORG_DISTRIBUTION-skriving, behold STAKE/PRIZE, emit INFO-log", async () => {
+  const wallet = new InMemoryWalletAdapter();
+  const ledger = new ComplianceLedger({ walletAdapter: wallet, disablePerRoundOrgDistribution: true });
+
+  // ComplianceLedger.ts gjør `rootLogger.child({module: ...})` på modul-
+  // load. Pino-children deler én felles prototype (per root), og deres
+  // `info`-metode lever på den prototypen — så vi patcher den prototypen
+  // for å fange alle .info()-kall i child-loggeren som modulen alt har
+  // bundet. process.stdout.write virker ikke for å fange pino-output —
+  // SonicBoom skriver direkte til fd og bypasser process.stdout.write.
+  const { logger: rootLogger } = await import("../util/logger.js");
+  const probeChild = rootLogger.child({ __probe: true });
+  const childProto = Object.getPrototypeOf(probeChild) as { info: (...args: unknown[]) => void };
+  const captured: { obj?: unknown; msg?: unknown }[] = [];
+  const originalInfo = childProto.info;
+  childProto.info = function spyInfo(this: unknown, ...args: unknown[]): void {
+    if (args.length >= 2) {
+      captured.push({ obj: args[0], msg: args[1] });
+    } else {
+      captured.push({ msg: args[0] });
+    }
+    return originalInfo.apply(this, args as Parameters<typeof originalInfo>);
+  };
+
+  let batch;
+  try {
+    const date = "2026-04-26";
+    const dayMsTs = new Date(2026, 3, 26).getTime();
+
+    await ledger.recordAccountingEvent({
+      hallId: "hall-disabled", gameType: "DATABINGO", channel: "INTERNET",
+      eventType: "STAKE", amount: 1000
+    });
+    await ledger.recordAccountingEvent({
+      hallId: "hall-disabled", gameType: "DATABINGO", channel: "INTERNET",
+      eventType: "PRIZE", amount: 300
+    });
+    const internal = ledger as unknown as { complianceLedger: { createdAtMs: number; createdAt: string }[] };
+    for (const entry of internal.complianceLedger) {
+      entry.createdAtMs = dayMsTs + 1000;
+      entry.createdAt = new Date(dayMsTs + 1000).toISOString();
+    }
+
+    const transfersBefore = wallet.transferCallCount;
+    batch = await ledger.createOverskuddDistributionBatch({
+      date, allocations: TEST_ALLOCATIONS
+    });
+
+    // Side-effekter SKIPPED
+    assert.equal(wallet.transferCallCount - transfersBefore, 0, "ingen wallet-transfer skal skje");
+    const orgDistributions = ledger.listComplianceLedgerEntries().filter((e) => e.eventType === "ORG_DISTRIBUTION");
+    assert.equal(orgDistributions.length, 0, "ingen ORG_DISTRIBUTION-ledger-entries skal skrives");
+  } finally {
+    childProto.info = originalInfo;
+  }
+
+  // Disabled-stub-batch
+  assert.equal(batch.id, "DISABLED_PER_ROUND");
+  assert.equal(batch.transfers.length, 0);
+  assert.equal(batch.distributedAmount, 0);
+  // requiredMinimum bevart for sporbarhet (net=700, DATABINGO=>30%=210)
+  assert.equal(batch.requiredMinimum, 210);
+
+  // STAKE/PRIZE upåvirket — audit-trail beholdt
+  const stakes = ledger.listComplianceLedgerEntries().filter((e) => e.eventType === "STAKE");
+  const prizes = ledger.listComplianceLedgerEntries().filter((e) => e.eventType === "PRIZE");
+  assert.equal(stakes.length, 1, "STAKE-entry skal være upåvirket");
+  assert.equal(prizes.length, 1, "PRIZE-entry skal være upåvirket");
+
+  // INFO-log emitted med beløp + hall-id (én per skipped allocation)
+  const skippedLogs = captured.filter((c) => {
+    const obj = c.obj as { event?: string } | undefined;
+    return obj?.event === "org_distribution_skipped";
+  });
+  assert.equal(skippedLogs.length, 2, "to org-allokeringer => to skipped INFO-logs");
+  for (const log of skippedLogs) {
+    const obj = log.obj as {
+      reason: string;
+      hallId: string;
+      amount: number;
+      organizationId: string;
+    };
+    assert.equal(obj.reason, "DISABLE_PER_ROUND_ORG_DISTRIBUTION");
+    assert.equal(obj.hallId, "hall-disabled");
+    assert.ok(obj.amount > 0, "amount må være > 0 for debug-sporbarhet");
+    assert.ok(obj.organizationId);
+    assert.match(String(log.msg), /Per-round org-distribution skipped/);
+  }
+});

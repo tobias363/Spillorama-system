@@ -107,10 +107,17 @@ export class ComplianceLedger {
 
   private readonly walletAdapter: WalletAdapter;
   private readonly persistence?: ResponsibleGamingPersistenceAdapter;
+  /**
+   * Hotfix-flagg: når `true`, skip wallet-transfer +
+   * ORG_DISTRIBUTION-ledger-skriving i createOverskuddDistributionBatch.
+   * Se ComplianceLedgerConfig.disablePerRoundOrgDistribution for detaljer.
+   */
+  private readonly disablePerRoundOrgDistribution: boolean;
 
   constructor(config: ComplianceLedgerConfig) {
     this.walletAdapter = config.walletAdapter;
     this.persistence = config.persistence;
+    this.disablePerRoundOrgDistribution = config.disablePerRoundOrgDistribution ?? false;
   }
 
   // ── Hydration ───────────────────────────────────────────────────
@@ -382,6 +389,41 @@ export class ComplianceLedger {
       gameType: input.gameType,
       channel: input.channel
     });
+
+    // Hotfix: når flagget er på, skip wallet-transfer og
+    // ORG_DISTRIBUTION-ledger-skriving. Vi bruker preview-implementasjonen
+    // for å beholde requiredMinimum-rapportering (uten side-effekter), og
+    // emitter en INFO-log per rad slik at debugging fortsatt har sporbarhet.
+    // STAKE/PRIZE/EXTRA_PRIZE-ledger-skriving er ikke i denne kode-banen og
+    // forblir uberørt.
+    if (this.disablePerRoundOrgDistribution) {
+      const previewBatch = previewOverskuddImpl(report, input);
+      for (const transfer of previewBatch.transfers) {
+        logger.info(
+          {
+            event: "org_distribution_skipped",
+            reason: "DISABLE_PER_ROUND_ORG_DISTRIBUTION",
+            hallId: transfer.hallId,
+            gameType: transfer.gameType,
+            channel: transfer.channel,
+            organizationId: transfer.organizationId,
+            amount: transfer.amount,
+            date: transfer.date
+          },
+          "Per-round org-distribution skipped (DISABLE_PER_ROUND_ORG_DISTRIBUTION=true)"
+        );
+      }
+      // Returner en disabled-stub-batch slik at API-kontrakten holdes:
+      // ingen transfers, requiredMinimum bevart for sporbarhet, ingen
+      // wallet-side-effekter, ingen ORG_DISTRIBUTION-ledger-entries.
+      const disabledBatch: OverskuddDistributionBatch = {
+        ...previewBatch,
+        id: "DISABLED_PER_ROUND",
+        transfers: [],
+        distributedAmount: 0
+      };
+      return disabledBatch;
+    }
 
     const batch = await createOverskuddBatchImpl(
       {

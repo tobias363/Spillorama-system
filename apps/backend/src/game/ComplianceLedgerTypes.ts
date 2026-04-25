@@ -231,4 +231,15 @@ export interface ComplianceLedgerHydrationSnapshot {
 export interface ComplianceLedgerConfig {
   walletAdapter: WalletAdapter;
   persistence?: ResponsibleGamingPersistenceAdapter;
+  /**
+   * Hotfix-flagg (post-pilot kvartals-refactor): når `true`, skip
+   * `walletAdapter.transfer` + ORG_DISTRIBUTION-ledger-skriving i
+   * `createOverskuddDistributionBatch`. Per pengespillforskriften skal
+   * fordeling skje kvartalsvis, ikke per runde — flagget lar oss kjøre
+   * pilot uten å akkumulere feil data. STAKE/PRIZE/EXTRA_PRIZE-skriving
+   * er IKKE påvirket.
+   *
+   * Default: `false` (bakovers-kompatibel).
+   */
+  disablePerRoundOrgDistribution?: boolean;
 }

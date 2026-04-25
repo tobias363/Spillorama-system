@@ -90,6 +90,11 @@ export interface BingoRuntimeConfig {
   sessionTtlHours: number;
   // BIN-585 PR D: hall-display screensaver config
   screensaverConfig: { enabled: boolean; timeoutMs: number; imageRotationMs: number };
+  // Compliance hotfix (post-pilot kvartals-refactor): når true, skip
+  // wallet-transfer + ORG_DISTRIBUTION-ledger-skriving i overskudd-batch
+  // så fordeling ikke akkumulerer feil data per runde under pilot. Faktisk
+  // kvartalsvis-fordeling håndteres av separat post-pilot refactor.
+  disablePerRoundOrgDistribution: boolean;
 }
 
 export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
@@ -278,6 +283,18 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     imageRotationMs: parsePositiveIntEnv(process.env.HALL_SCREENSAVER_IMAGE_ROTATION_MS, 10 * 1000),
   };
 
+  // Compliance hotfix: blokker per-runde overskudd-fordeling under pilot.
+  // Pengespillforskriften krever kvartalsvis utbetaling, ikke per runde —
+  // post-pilot refactor flytter fordelingen til riktig cadence. Default OFF
+  // for bakovers-kompat. Når ON: createOverskuddDistributionBatch hopper
+  // over walletAdapter.transfer + ORG_DISTRIBUTION-ledger-skriving og
+  // logger en INFO-melding per skipped allocation. STAKE/PRIZE/EXTRA_PRIZE
+  // er IKKE påvirket (audit-trail beholdes).
+  const disablePerRoundOrgDistribution = parseBooleanEnv(
+    process.env.DISABLE_PER_ROUND_ORG_DISTRIBUTION,
+    false,
+  );
+
   return {
     bingoMinRoundIntervalMs, bingoDailyLossLimit, bingoMonthlyLossLimit, bingoPlaySessionLimitMs,
     bingoPauseDurationMs, bingoSelfExclusionMinMs, bingoMaxDrawsPerRound,
@@ -300,5 +317,6 @@ export function loadBingoRuntimeConfig(): BingoRuntimeConfig {
     usePostgresBingoAdapter, checkpointConnectionString,
     roomStateProvider, redisUrl, useRedisLock, kycMinAge, kycProvider,
     pgSsl, pgSchema, sessionTtlHours, screensaverConfig,
+    disablePerRoundOrgDistribution,
   };
 }
