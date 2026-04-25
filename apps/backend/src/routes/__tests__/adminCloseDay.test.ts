@@ -23,6 +23,10 @@ import type {
   CloseDayService,
   CloseDayEntry,
   CloseDaySummary,
+  CloseManyInput,
+  CloseManyResult,
+  UpdateDateInput,
+  DeleteDateInput,
 } from "../../admin/CloseDayService.js";
 import type { PlatformService, PublicAppUser } from "../../platform/PlatformService.js";
 import { DomainError } from "../../game/BingoEngine.js";
@@ -54,6 +58,10 @@ interface Ctx {
     auditStore: InMemoryAuditLogStore;
     closes: Array<{ gameManagementId: string; closeDate: string; closedBy: string }>;
     summaries: Array<{ gameManagementId: string; closeDate: string }>;
+    closeManys: CloseManyInput[];
+    updates: UpdateDateInput[];
+    deletes: DeleteDateInput[];
+    lists: string[];
   };
   entries: Map<string, CloseDayEntry>;
   close: () => Promise<void>;
@@ -97,7 +105,69 @@ async function startServer(
 
   const closes: Ctx["spies"]["closes"] = [];
   const summaries: Ctx["spies"]["summaries"] = [];
+  const closeManys: Ctx["spies"]["closeManys"] = [];
+  const updates: Ctx["spies"]["updates"] = [];
+  const deletes: Ctx["spies"]["deletes"] = [];
+  const lists: Ctx["spies"]["lists"] = [];
   let idCounter = entries.size;
+
+  function makeEntry(
+    gameId: string,
+    closeDate: string,
+    closedBy: string,
+    startTime: string | null,
+    endTime: string | null,
+    notes: string | null
+  ): CloseDayEntry {
+    idCounter += 1;
+    const id = `cd-${idCounter}`;
+    const closedAt = "2026-04-20T12:00:00.000Z";
+    const summary = makeSummary(gameId, closeDate, {
+      alreadyClosed: true,
+      closedAt,
+      closedBy,
+    });
+    const entry: CloseDayEntry = {
+      id,
+      gameManagementId: gameId,
+      closeDate,
+      closedBy,
+      closedAt,
+      startTime,
+      endTime,
+      notes,
+      summary,
+    };
+    entries.set(id, entry);
+    entriesByKey.set(`${gameId}::${closeDate}`, entry);
+    return entry;
+  }
+
+  function planConsecutive(
+    startDate: string,
+    endDate: string,
+    startTime: string,
+    endTime: string
+  ): Array<{ closeDate: string; startTime: string; endTime: string }> {
+    const startMs = Date.parse(`${startDate}T00:00:00Z`);
+    const endMs = Date.parse(`${endDate}T00:00:00Z`);
+    const dayMs = 86400000;
+    const dates: string[] = [];
+    for (let t = startMs; t <= endMs; t += dayMs) {
+      const d = new Date(t);
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(d.getUTCDate()).padStart(2, "0");
+      dates.push(`${y}-${m}-${day}`);
+    }
+    return dates.map((date, i) => {
+      if (dates.length === 1) return { closeDate: date, startTime, endTime };
+      if (i === 0) return { closeDate: date, startTime, endTime: "23:59" };
+      if (i === dates.length - 1)
+        return { closeDate: date, startTime: "00:00", endTime };
+      return { closeDate: date, startTime: "00:00", endTime: "23:59" };
+    });
+  }
 
   const platformService = {
     async getUserFromAccessToken(token: string) {
@@ -127,8 +197,15 @@ async function startServer(
       gameManagementId: string;
       closeDate: string;
       closedBy: string;
+      startTime?: string | null;
+      endTime?: string | null;
+      notes?: string | null;
     }): Promise<CloseDayEntry> {
-      closes.push({ ...input });
+      closes.push({
+        gameManagementId: input.gameManagementId,
+        closeDate: input.closeDate,
+        closedBy: input.closedBy,
+      });
       if (!knownGames.includes(input.gameManagementId)) {
         throw new DomainError("GAME_MANAGEMENT_NOT_FOUND", "not found");
       }
@@ -139,25 +216,132 @@ async function startServer(
           `Dagen ${input.closeDate} er allerede lukket for dette spillet.`
         );
       }
-      idCounter += 1;
-      const id = `cd-${idCounter}`;
-      const closedAt = "2026-04-20T12:00:00.000Z";
-      const summary = makeSummary(input.gameManagementId, input.closeDate, {
-        alreadyClosed: true,
-        closedAt,
-        closedBy: input.closedBy,
-      });
-      const entry: CloseDayEntry = {
-        id,
-        gameManagementId: input.gameManagementId,
-        closeDate: input.closeDate,
-        closedBy: input.closedBy,
-        closedAt,
-        summary,
+      return makeEntry(
+        input.gameManagementId,
+        input.closeDate,
+        input.closedBy,
+        input.startTime ?? null,
+        input.endTime ?? null,
+        input.notes ?? null
+      );
+    },
+    async closeMany(input: CloseManyInput): Promise<CloseManyResult> {
+      closeManys.push(input);
+      if (!knownGames.includes(input.gameManagementId)) {
+        throw new DomainError("GAME_MANAGEMENT_NOT_FOUND", "not found");
+      }
+      type Plan = { closeDate: string; startTime: string | null; endTime: string | null };
+      let plan: Plan[] = [];
+      const notes = (input as { notes?: string | null }).notes ?? null;
+      switch (input.mode) {
+        case "single":
+          plan = [
+            {
+              closeDate: input.closeDate,
+              startTime: input.startTime ?? null,
+              endTime: input.endTime ?? null,
+            },
+          ];
+          break;
+        case "consecutive":
+          plan = planConsecutive(
+            input.startDate,
+            input.endDate,
+            input.startTime,
+            input.endTime
+          );
+          break;
+        case "random": {
+          const defaultStart = input.startTime ?? null;
+          const defaultEnd = input.endTime ?? null;
+          plan = input.closeDates.map((cd) => {
+            if (typeof cd === "string") {
+              return {
+                closeDate: cd,
+                startTime: defaultStart,
+                endTime: defaultEnd,
+              };
+            }
+            return {
+              closeDate: cd.closeDate,
+              startTime: cd.startTime ?? defaultStart,
+              endTime: cd.endTime ?? defaultEnd,
+            };
+          });
+          plan.sort((a, b) => a.closeDate.localeCompare(b.closeDate));
+          break;
+        }
+      }
+      const result: CloseManyResult = {
+        entries: [],
+        createdDates: [],
+        skippedDates: [],
       };
-      entries.set(id, entry);
-      entriesByKey.set(key, entry);
-      return entry;
+      for (const item of plan) {
+        const key = `${input.gameManagementId}::${item.closeDate}`;
+        const existing = entriesByKey.get(key);
+        if (existing) {
+          result.entries.push(existing);
+          result.skippedDates.push(item.closeDate);
+          continue;
+        }
+        const e = makeEntry(
+          input.gameManagementId,
+          item.closeDate,
+          input.closedBy,
+          item.startTime,
+          item.endTime,
+          notes
+        );
+        result.entries.push(e);
+        result.createdDates.push(item.closeDate);
+      }
+      return result;
+    },
+    async updateDate(input: UpdateDateInput): Promise<CloseDayEntry> {
+      updates.push(input);
+      if (!knownGames.includes(input.gameManagementId)) {
+        throw new DomainError("GAME_MANAGEMENT_NOT_FOUND", "not found");
+      }
+      const key = `${input.gameManagementId}::${input.closeDate}`;
+      const existing = entriesByKey.get(key);
+      if (!existing) {
+        throw new DomainError("CLOSE_DAY_NOT_FOUND", "not found");
+      }
+      const updated: CloseDayEntry = {
+        ...existing,
+        startTime:
+          input.startTime !== undefined ? input.startTime : existing.startTime,
+        endTime: input.endTime !== undefined ? input.endTime : existing.endTime,
+        notes: input.notes !== undefined ? input.notes : existing.notes,
+      };
+      entries.set(updated.id, updated);
+      entriesByKey.set(key, updated);
+      return updated;
+    },
+    async deleteDate(input: DeleteDateInput): Promise<CloseDayEntry> {
+      deletes.push(input);
+      if (!knownGames.includes(input.gameManagementId)) {
+        throw new DomainError("GAME_MANAGEMENT_NOT_FOUND", "not found");
+      }
+      const key = `${input.gameManagementId}::${input.closeDate}`;
+      const existing = entriesByKey.get(key);
+      if (!existing) {
+        throw new DomainError("CLOSE_DAY_NOT_FOUND", "not found");
+      }
+      entries.delete(existing.id);
+      entriesByKey.delete(key);
+      return existing;
+    },
+    async listForGame(gameId: string): Promise<CloseDayEntry[]> {
+      lists.push(gameId);
+      if (!knownGames.includes(gameId)) return [];
+      const out: CloseDayEntry[] = [];
+      for (const e of entries.values()) {
+        if (e.gameManagementId === gameId) out.push(e);
+      }
+      out.sort((a, b) => a.closeDate.localeCompare(b.closeDate));
+      return out;
     },
   } as unknown as CloseDayService;
 
@@ -178,7 +362,15 @@ async function startServer(
 
   return {
     baseUrl,
-    spies: { auditStore, closes, summaries },
+    spies: {
+      auditStore,
+      closes,
+      summaries,
+      closeManys,
+      updates,
+      deletes,
+      lists,
+    },
     entries,
     close: () =>
       new Promise<void>((resolve, reject) =>
@@ -331,6 +523,9 @@ test("BIN-623 router: GET summary flagger alreadyClosed=true når dagen allerede
     closeDate: "2026-04-20",
     closedBy: "admin-1",
     closedAt: "2026-04-20T23:00:00.000Z",
+    startTime: null,
+    endTime: null,
+    notes: null,
     summary: makeSummary("gm-1", "2026-04-20", {
       alreadyClosed: true,
       closedBy: "admin-1",
@@ -451,6 +646,9 @@ test("BIN-623 router: POST close-day på allerede-lukket dag → 409 CLOSE_DAY_A
     closeDate: "2026-04-20",
     closedBy: "admin-1",
     closedAt: "2026-04-20T23:00:00.000Z",
+    startTime: null,
+    endTime: null,
+    notes: null,
     summary: makeSummary("gm-1", "2026-04-20", { alreadyClosed: true }),
   };
   const ctx = await startServer({ "t-admin": adminUser }, [seeded]);
@@ -505,6 +703,484 @@ test("BIN-623 router: POST close-day med tom body (null) håndteres", async () =
       headers: { authorization: "Bearer t-admin" },
     });
     assert.equal(res.status, 200, `got ${res.status}: ${await res.text()}`);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-700: POST close-day mode=consecutive | mode=random ───────────────
+
+test("BIN-700 router: POST consecutive lukker date-range med legacy-tids-vinduer", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "consecutive",
+      startDate: "2026-12-23",
+      endDate: "2026-12-25",
+      startTime: "18:00",
+      endTime: "10:00",
+      notes: "Jul",
+    });
+    assert.equal(res.status, 200, `got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.data.mode, "consecutive");
+    assert.equal(res.body.data.entries.length, 3);
+    assert.deepEqual(res.body.data.createdDates, [
+      "2026-12-23",
+      "2026-12-24",
+      "2026-12-25",
+    ]);
+    assert.deepEqual(res.body.data.skippedDates, []);
+    // Verifiser tids-vinduer per legacy:10166-10186
+    const e23 = res.body.data.entries[0];
+    const e24 = res.body.data.entries[1];
+    const e25 = res.body.data.entries[2];
+    assert.equal(e23.startTime, "18:00");
+    assert.equal(e23.endTime, "23:59");
+    assert.equal(e24.startTime, "00:00");
+    assert.equal(e24.endTime, "23:59");
+    assert.equal(e25.startTime, "00:00");
+    assert.equal(e25.endTime, "10:00");
+
+    // Audit-log: én entry per ny dato
+    await new Promise((r) => setImmediate(r));
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.length, 3);
+    for (const ev of events) {
+      assert.equal(ev.action, "admin.game.close-day");
+      const details = ev.details as Record<string, unknown>;
+      assert.equal(details.mode, "consecutive");
+    }
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: POST random lukker liste av frittstående datoer", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "random",
+      closeDates: ["2026-12-25", "2026-04-01", "2026-05-17"],
+    });
+    assert.equal(res.status, 200, `got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.data.entries.length, 3);
+    assert.deepEqual(res.body.data.createdDates, [
+      "2026-04-01",
+      "2026-05-17",
+      "2026-12-25",
+    ]);
+    // 3 audit-log entries — én per dato
+    await new Promise((r) => setImmediate(r));
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.length, 3);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: POST consecutive er idempotent på re-run", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    // Første runde: 3 nye
+    const a = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "consecutive",
+      startDate: "2026-12-23",
+      endDate: "2026-12-25",
+      startTime: "00:00",
+      endTime: "23:59",
+    });
+    assert.equal(a.status, 200);
+    assert.equal(a.body.data.createdDates.length, 3);
+
+    // Andre runde: alle skipped
+    const b = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "consecutive",
+      startDate: "2026-12-23",
+      endDate: "2026-12-25",
+      startTime: "00:00",
+      endTime: "23:59",
+    });
+    assert.equal(b.status, 200);
+    assert.deepEqual(b.body.data.createdDates, []);
+    assert.deepEqual(b.body.data.skippedDates, [
+      "2026-12-23",
+      "2026-12-24",
+      "2026-12-25",
+    ]);
+    assert.equal(b.body.data.entries.length, 3);
+
+    // Audit-log: 3 fra første runde, 0 fra andre.
+    await new Promise((r) => setImmediate(r));
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.length, 3);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: POST consecutive uten startDate/endDate → 400", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "consecutive",
+      startTime: "00:00",
+      endTime: "23:59",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: POST random uten closeDates-array → 400", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "random",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: POST med ukjent mode → 400", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "weekly",
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-700: PUT /api/admin/games/:id/close-day/:closeDate ─────────────
+
+test("BIN-700 router: PUT close-day/:closeDate uten token → 401", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(
+      ctx,
+      "PUT" as "POST",
+      "/api/admin/games/gm-1/close-day/2026-04-20",
+      undefined,
+      { startTime: "08:00" }
+    );
+    assert.equal(res.status, 401);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: PUT close-day/:closeDate som SUPPORT → 403", async () => {
+  const seeded: CloseDayEntry = {
+    id: "cd-1",
+    gameManagementId: "gm-1",
+    closeDate: "2026-04-20",
+    closedBy: "admin-1",
+    closedAt: "2026-04-20T23:00:00.000Z",
+    startTime: "00:00",
+    endTime: "23:59",
+    notes: null,
+    summary: makeSummary("gm-1", "2026-04-20", { alreadyClosed: true }),
+  };
+  const ctx = await startServer({ "t-sup": supportUser }, [seeded]);
+  try {
+    const res = await req(
+      ctx,
+      "PUT" as "POST",
+      "/api/admin/games/gm-1/close-day/2026-04-20",
+      "t-sup",
+      { startTime: "08:00" }
+    );
+    assert.equal(res.status, 403);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: PUT close-day oppdaterer kun spesifikk dato", async () => {
+  const seeded: CloseDayEntry[] = [
+    {
+      id: "cd-23",
+      gameManagementId: "gm-1",
+      closeDate: "2026-12-23",
+      closedBy: "admin-1",
+      closedAt: "2026-04-20T12:00:00.000Z",
+      startTime: "00:00",
+      endTime: "23:59",
+      notes: null,
+      summary: makeSummary("gm-1", "2026-12-23"),
+    },
+    {
+      id: "cd-24",
+      gameManagementId: "gm-1",
+      closeDate: "2026-12-24",
+      closedBy: "admin-1",
+      closedAt: "2026-04-20T12:00:00.000Z",
+      startTime: "00:00",
+      endTime: "23:59",
+      notes: null,
+      summary: makeSummary("gm-1", "2026-12-24"),
+    },
+  ];
+  const ctx = await startServer({ "t-admin": adminUser }, seeded);
+  try {
+    const res = await req(
+      ctx,
+      "PUT" as "POST",
+      "/api/admin/games/gm-1/close-day/2026-12-24",
+      "t-admin",
+      { startTime: "08:00", endTime: "20:00", notes: "redusert" }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.startTime, "08:00");
+    assert.equal(res.body.data.endTime, "20:00");
+    assert.equal(res.body.data.notes, "redusert");
+
+    // Verifiser at 12-23 ikke ble endret
+    const e23 = ctx.entries.get("cd-23");
+    assert.equal(e23?.startTime, "00:00");
+    assert.equal(e23?.endTime, "23:59");
+
+    // Audit-log
+    await new Promise((r) => setImmediate(r));
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.action, "admin.game.close-day.update");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: PUT close-day på ikke-eksisterende rad → 404", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(
+      ctx,
+      "PUT" as "POST",
+      "/api/admin/games/gm-1/close-day/2026-04-20",
+      "t-admin",
+      { startTime: "08:00" }
+    );
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, "CLOSE_DAY_NOT_FOUND");
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-700: DELETE /api/admin/games/:id/close-day/:closeDate ─────────
+
+test("BIN-700 router: DELETE close-day/:closeDate uten token → 401", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/admin/games/gm-1/close-day/2026-04-20`,
+      { method: "DELETE" }
+    );
+    assert.equal(res.status, 401);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: DELETE close-day/:closeDate fjerner kun spesifikk dato", async () => {
+  const seeded: CloseDayEntry[] = [
+    {
+      id: "cd-23",
+      gameManagementId: "gm-1",
+      closeDate: "2026-12-23",
+      closedBy: "admin-1",
+      closedAt: "2026-04-20T12:00:00.000Z",
+      startTime: null,
+      endTime: null,
+      notes: null,
+      summary: makeSummary("gm-1", "2026-12-23"),
+    },
+    {
+      id: "cd-24",
+      gameManagementId: "gm-1",
+      closeDate: "2026-12-24",
+      closedBy: "admin-1",
+      closedAt: "2026-04-20T12:00:00.000Z",
+      startTime: null,
+      endTime: null,
+      notes: null,
+      summary: makeSummary("gm-1", "2026-12-24"),
+    },
+  ];
+  const ctx = await startServer({ "t-admin": adminUser }, seeded);
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/admin/games/gm-1/close-day/2026-12-24`,
+      {
+        method: "DELETE",
+        headers: { authorization: "Bearer t-admin" },
+      }
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { ok: boolean; data: { closeDate: string } };
+    assert.equal(body.ok, true);
+    assert.equal(body.data.closeDate, "2026-12-24");
+
+    // 12-23 fortsatt der
+    assert.ok(ctx.entries.has("cd-23"));
+    // 12-24 fjernet
+    assert.ok(!ctx.entries.has("cd-24"));
+
+    // Audit-log: én delete-event med slettet-rad-info i details
+    await new Promise((r) => setImmediate(r));
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.action, "admin.game.close-day.delete");
+    const details = events[0]!.details as Record<string, unknown>;
+    assert.equal(details.closeDate, "2026-12-24");
+    assert.ok(details.summary, "summary-snapshot bevares for audit");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: DELETE close-day på ikke-eksisterende rad → 404", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/admin/games/gm-1/close-day/2026-04-20`,
+      {
+        method: "DELETE",
+        headers: { authorization: "Bearer t-admin" },
+      }
+    );
+    assert.equal(res.status, 404);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: DELETE close-day som SUPPORT → 403", async () => {
+  const ctx = await startServer({ "t-sup": supportUser });
+  try {
+    const res = await fetch(
+      `${ctx.baseUrl}/api/admin/games/gm-1/close-day/2026-04-20`,
+      {
+        method: "DELETE",
+        headers: { authorization: "Bearer t-sup" },
+      }
+    );
+    assert.equal(res.status, 403);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-700: GET /api/admin/games/:id/close-day (list) ────────────────
+
+test("BIN-700 router: GET /close-day lister alle lukkinger sortert ascending", async () => {
+  const seeded: CloseDayEntry[] = [
+    {
+      id: "cd-2",
+      gameManagementId: "gm-1",
+      closeDate: "2026-12-25",
+      closedBy: "admin-1",
+      closedAt: "2026-04-20T12:00:00.000Z",
+      startTime: null,
+      endTime: null,
+      notes: null,
+      summary: makeSummary("gm-1", "2026-12-25"),
+    },
+    {
+      id: "cd-1",
+      gameManagementId: "gm-1",
+      closeDate: "2026-04-01",
+      closedBy: "admin-1",
+      closedAt: "2026-04-20T12:00:00.000Z",
+      startTime: null,
+      endTime: null,
+      notes: null,
+      summary: makeSummary("gm-1", "2026-04-01"),
+    },
+  ];
+  const ctx = await startServer({ "t-admin": adminUser }, seeded);
+  try {
+    const res = await req(ctx, "GET", "/api/admin/games/gm-1/close-day", "t-admin");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.entries.length, 2);
+    assert.deepEqual(
+      res.body.data.entries.map((e: { closeDate: string }) => e.closeDate),
+      ["2026-04-01", "2026-12-25"]
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: GET /close-day uten token → 401", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(ctx, "GET", "/api/admin/games/gm-1/close-day");
+    assert.equal(res.status, 401);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: GET /close-day som PLAYER → 403", async () => {
+  const ctx = await startServer({ "t-pl": playerUser });
+  try {
+    const res = await req(ctx, "GET", "/api/admin/games/gm-1/close-day", "t-pl");
+    assert.equal(res.status, 403);
+  } finally {
+    await ctx.close();
+  }
+});
+
+// ── BIN-700: backwards-compat ─────────────────────────────────────────
+
+test("BIN-700 router: legacy POST shape (uten mode) fortsatt fungerer som single", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      closeDate: "2026-04-20",
+    });
+    assert.equal(res.status, 200);
+    // Legacy response shape: ingen "mode" key, bare entry-felter
+    assert.equal(res.body.data.closeDate, "2026-04-20");
+    assert.equal(res.body.data.gameManagementId, "gm-1");
+    assert.ok(!("mode" in res.body.data), "single-mode beholder gammel response-shape");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("BIN-700 router: POST mode=single tillater notes + tids-vindu", async () => {
+  const ctx = await startServer({ "t-admin": adminUser });
+  try {
+    const res = await req(ctx, "POST", "/api/admin/games/gm-1/close-day", "t-admin", {
+      mode: "single",
+      closeDate: "2026-04-20",
+      startTime: "09:00",
+      endTime: "17:00",
+      notes: "redusert dag",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.data.startTime, "09:00");
+    assert.equal(res.body.data.endTime, "17:00");
+    assert.equal(res.body.data.notes, "redusert dag");
+
+    await new Promise((r) => setImmediate(r));
+    const events = await ctx.spies.auditStore.list();
+    assert.equal(events.length, 1);
+    const details = events[0]!.details as Record<string, unknown>;
+    assert.equal(details.mode, "single");
+    assert.equal(details.startTime, "09:00");
+    assert.equal(details.notes, "redusert dag");
   } finally {
     await ctx.close();
   }
