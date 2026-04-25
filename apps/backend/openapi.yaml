@@ -3592,6 +3592,215 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  # ── Admin History (GAP #10 + #12) ────────────────────────────────────────
+
+  /api/admin/deposits/history:
+    get:
+      tags: [Admin — Payment Requests]
+      summary: Deposit history listing (GAP #10 — legacy /deposit/history)
+      description: |
+        **GAP #10** (BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.5): replaces legacy
+        `GET /deposit/history` + `/deposit/history/get`. Returns ALL deposit
+        rows (PENDING + ACCEPTED + REJECTED by default) with cursor-based
+        pagination.
+
+        **RBAC:** `PAYMENT_REQUEST_READ` (ADMIN, HALL_OPERATOR, SUPPORT).
+        **Hall-scope:** HALL_OPERATOR is auto-restricted to own hall via
+        `resolveHallScopeFilter` — overriding `?hallId=` to a different hall
+        returns 400 FORBIDDEN.
+
+        **CSV export:** `?format=csv` returns `text/csv; charset=utf-8` with
+        UTF-8 BOM and CRLF line endings (Excel-NO compatible). CSV-mode
+        skips pagination — up to 5000 rows are fetched in one batch.
+
+        **Type filter (forward-compat):** `?type=hall` returns all rows
+        (current data is cash-in-hall only); `?type=vipps` and `?type=card`
+        return empty for now. This keeps the API stable for future
+        Vipps/Card source-splits without client-side breakage.
+      parameters:
+        - in: query
+          name: format
+          required: false
+          schema:
+            type: string
+            enum: [json, csv]
+        - in: query
+          name: fromDate
+          required: false
+          schema:
+            type: string
+            description: ISO-8601 date or datetime (YYYY-MM-DD shorthand allowed).
+        - in: query
+          name: toDate
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: hallId
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+          description: |
+            CSV-list of statuses (PENDING, ACCEPTED, REJECTED). Omit to
+            include all three.
+        - in: query
+          name: type
+          required: false
+          schema:
+            type: string
+            enum: [hall, vipps, card, all]
+        - in: query
+          name: playerId
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
+            description: Opaque cursor from previous response's `nextCursor`.
+      responses:
+        "200":
+          description: Sorted newest-first; `nextCursor` is `null` when no more rows.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/PaymentRequest"
+                          nextCursor:
+                            type: [string, "null"]
+            text/csv:
+              schema:
+                type: string
+                description: |
+                  CSV with UTF-8 BOM. Columns: id, kind, status, userId,
+                  walletId, amountCents, hallId, destinationType,
+                  submittedBy, acceptedBy, acceptedAt, rejectedBy, rejectedAt,
+                  rejectionReason, walletTransactionId, createdAt, updatedAt.
+        "400":
+          description: INVALID_INPUT (bad date, status, type, limit, cursor) or FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/admin/withdrawals/history:
+    get:
+      tags: [Admin — Payment Requests]
+      summary: Withdraw history listing (GAP #12 — legacy /withdraw/history/{hall,bank})
+      description: |
+        **GAP #12** (BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.5): consolidates
+        legacy `GET /withdraw/history/hall` + `/withdraw/history/bank` +
+        `*/get` into one endpoint with `?type=hall|bank|all`. Returns ALL
+        withdraw rows (PENDING + ACCEPTED + REJECTED by default) with
+        cursor-based pagination.
+
+        **RBAC:** `PAYMENT_REQUEST_READ` (ADMIN, HALL_OPERATOR, SUPPORT).
+        **Hall-scope:** identical to deposits/history.
+
+        **CSV export:** `?format=csv` returns `text/csv; charset=utf-8` with
+        UTF-8 BOM and CRLF line endings.
+      parameters:
+        - in: query
+          name: format
+          required: false
+          schema:
+            type: string
+            enum: [json, csv]
+        - in: query
+          name: type
+          required: false
+          schema:
+            type: string
+            enum: [hall, bank, all]
+        - in: query
+          name: fromDate
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: toDate
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: hallId
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: playerId
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sorted newest-first; `nextCursor` null when no more rows.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiSuccess"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/PaymentRequest"
+                          nextCursor:
+                            type: [string, "null"]
+            text/csv:
+              schema:
+                type: string
+        "400":
+          description: INVALID_INPUT or FORBIDDEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   # ── Auth — Password Reset + Email Verify (BIN-587 B2.1) ───────────────────
 
   /api/auth/reset-password/{token}:

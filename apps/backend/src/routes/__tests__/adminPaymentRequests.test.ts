@@ -35,6 +35,19 @@ const PAYMENT_REQUEST_ENDPOINT_CASES: EndpointPolicyCase[] = [
     permission: "PAYMENT_REQUEST_WRITE",
     allowedRoles: ["ADMIN", "HALL_OPERATOR"],
   },
+  // GAP #10 + #12 (BACKEND_1TO1_GAP_AUDIT_2026-04-24 §1.5): admin-history
+  // gjenbruker PAYMENT_REQUEST_READ — alle tre admin-roller, inkludert
+  // SUPPORT (compliance-innsyn).
+  {
+    endpoint: "GET /api/admin/deposits/history",
+    permission: "PAYMENT_REQUEST_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  },
+  {
+    endpoint: "GET /api/admin/withdrawals/history",
+    permission: "PAYMENT_REQUEST_READ",
+    allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"],
+  },
 ];
 
 const ALL_ROLES: UserRole[] = ["ADMIN", "HALL_OPERATOR", "SUPPORT", "PLAYER"];
