@@ -1,25 +1,32 @@
 /**
- * BIN-623 + BIN-700: admin-router for CloseDay — regulatorisk dagslukking
- * per spill med 3-mode-støtte (Single / Consecutive / Random) og per-dato
- * update/delete.
+ * BIN-623 + BIN-700 + REQ-116: admin-router for CloseDay — regulatorisk
+ * dagslukking per spill med 4-mode-støtte (Single / Consecutive / Random /
+ * Recurring) og per-dato update/delete.
  *
  * Endepunkter:
  *   GET    /api/admin/games/:id/close-day-summary?closeDate=YYYY-MM-DD
  *   GET    /api/admin/games/:id/close-day                   — list alle lukkinger
- *   POST   /api/admin/games/:id/close-day                   — Single | Consecutive | Random
+ *   POST   /api/admin/games/:id/close-day                   — Single | Consecutive | Random | Recurring
  *   PUT    /api/admin/games/:id/close-day/:closeDate        — per-dato oppdatering
  *   DELETE /api/admin/games/:id/close-day/:closeDate        — per-dato sletting
+ *   GET    /api/admin/games/:id/close-day/recurring         — list aktive recurring patterns (REQ-116)
+ *   DELETE /api/admin/games/:id/close-day/recurring/:patternId — slett pattern + alle child-rader (REQ-116)
  *
  * Rolle-krav:
- *   - GAME_MGMT_READ  for GET (summary + list)
- *   - GAME_MGMT_WRITE for POST/PUT/DELETE
+ *   - GAME_MGMT_READ  for GET (summary + list + recurring-list)
+ *   - GAME_MGMT_WRITE for POST/PUT/DELETE (inkl. recurring-delete)
  *
  * Regulatorisk: alle skrive-operasjoner skriver til `app_close_day_log` (for
  * idempotency) og `app_audit_log` (action = "admin.game.close-day" /
- * "admin.game.close-day.update" / "admin.game.close-day.delete"). Dobbel-
- * lukking av samme dag i Single-mode returnerer HTTP 409 med feilkode
- * `CLOSE_DAY_ALREADY_CLOSED`. Multi-mode (closeMany) hopper over eksisterende
- * datoer og returnerer 200 med `createdDates`/`skippedDates`.
+ * "admin.game.close-day.update" / "admin.game.close-day.delete" /
+ * "admin.game.close-day.recurring.create" /
+ * "admin.game.close-day.recurring.delete"). Dobbel-lukking av samme dag i
+ * Single-mode returnerer HTTP 409 med feilkode `CLOSE_DAY_ALREADY_CLOSED`.
+ * Multi-mode (closeMany) hopper over eksisterende datoer og returnerer 200
+ * med `createdDates`/`skippedDates`. Recurring-mode persister parent-pattern
+ * i `app_close_day_recurring_patterns` og expanderer alle individuelle
+ * datoer som child-rader i `app_close_day_log` med `recurring_pattern_id`-
+ * peker.
  *
  * Backwards-compat: gammel POST-shape `{ closeDate }` (uten `mode`) støttes
  * uendret for å unngå å bryte eksisterende admin-UI-kall.
@@ -33,6 +40,8 @@ import type {
   CloseDayEntry,
   CloseDaySummary,
   CloseManyInput,
+  CloseRecurringResult,
+  RecurringPattern,
 } from "../admin/CloseDayService.js";
 import {
   assertAdminPermission,
@@ -104,6 +113,7 @@ function respondWithError(res: express.Response, err: unknown): void {
       break;
     case "GAME_MANAGEMENT_NOT_FOUND":
     case "CLOSE_DAY_NOT_FOUND":
+    case "CLOSE_DAY_RECURRING_NOT_FOUND":
       status = 404;
       break;
     case "FORBIDDEN":
@@ -116,6 +126,19 @@ function respondWithError(res: express.Response, err: unknown): void {
       status = 400;
   }
   res.status(status).json({ ok: false, error: publicError });
+}
+
+/**
+ * REQ-116: type-guard for å skille recurring-result fra plain CloseManyResult.
+ * `closeMany` returnerer enten `CloseManyResult` (Single/Consecutive/Random)
+ * eller `CloseRecurringResult` (utvider med `pattern` + `expandedCount`).
+ */
+function isRecurringResult(result: object): result is CloseRecurringResult {
+  return (
+    "pattern" in result &&
+    "expandedCount" in result &&
+    typeof (result as { expandedCount?: unknown }).expandedCount === "number"
+  );
 }
 
 /** Komprimert summary-utdrag for audit-detail-payload. */
@@ -255,10 +278,47 @@ function parseCloseBody(
             : undefined,
       };
     }
+    case "recurring": {
+      // REQ-116: pattern-feltet validerers strict i service-laget. Vi
+      // gir det videre uten å peke på en konkret type her — `unknown`-
+      // input fra body kastes til RecurringPattern via service-validering.
+      if (!body.pattern) {
+        throw new DomainError(
+          "INVALID_INPUT",
+          "Recurring-mode krever pattern-objekt."
+        );
+      }
+      return {
+        mode: "recurring",
+        gameManagementId: gameId,
+        closedBy,
+        pattern: body.pattern as RecurringPattern,
+        startDate:
+          typeof body.startDate === "string" ? body.startDate : undefined,
+        endDate:
+          typeof body.endDate === "string" ? body.endDate : undefined,
+        maxOccurrences:
+          typeof body.maxOccurrences === "number"
+            ? body.maxOccurrences
+            : undefined,
+        startTime:
+          typeof body.startTime === "string" || body.startTime === null
+            ? (body.startTime as string | null)
+            : undefined,
+        endTime:
+          typeof body.endTime === "string" || body.endTime === null
+            ? (body.endTime as string | null)
+            : undefined,
+        notes:
+          typeof body.notes === "string" || body.notes === null
+            ? (body.notes as string | null)
+            : undefined,
+      };
+    }
     default:
       throw new DomainError(
         "INVALID_INPUT",
-        `Ugyldig mode "${String(mode)}" — må være "single", "consecutive" eller "random".`
+        `Ugyldig mode "${String(mode)}" — må være "single", "consecutive", "random" eller "recurring".`
       );
   }
 }
@@ -363,8 +423,39 @@ export function createAdminCloseDayRouter(
         return;
       }
 
-      // Consecutive | Random: idempotent multi-dato.
+      // Consecutive | Random | Recurring: idempotent multi-dato.
       const result = await closeDayService.closeMany(input);
+
+      // REQ-116: Recurring-mode skriver også en audit-event for parent-
+      // pattern (separat fra child-rad-eventene under). Dette gjør det
+      // mulig å spore "hvem opprettet pattern X" uavhengig av "hvem
+      // expanderte dato Y". `pattern`-feltet finnes kun i recurring-result.
+      const recurringResult = isRecurringResult(result) ? result : null;
+      if (recurringResult) {
+        fireAudit({
+          actorId: actor.id,
+          actorType: actorTypeFromRole(actor.role),
+          action: "admin.game.close-day.recurring.create",
+          resource: "game_management",
+          resourceId: recurringResult.pattern.gameManagementId,
+          details: {
+            patternId: recurringResult.pattern.id,
+            pattern: recurringResult.pattern.pattern,
+            startDate: recurringResult.pattern.startDate,
+            endDate: recurringResult.pattern.endDate,
+            maxOccurrences: recurringResult.pattern.maxOccurrences,
+            startTime: recurringResult.pattern.startTime,
+            endTime: recurringResult.pattern.endTime,
+            notes: recurringResult.pattern.notes,
+            expandedCount: recurringResult.expandedCount,
+            createdCount: recurringResult.createdDates.length,
+            skippedCount: recurringResult.skippedDates.length,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        });
+      }
+
       // Audit-log per nylig opprettet rad (ikke skip'ede). Skip'ede er
       // allerede regulatorisk dokumentert i forrige lukking.
       for (const entry of result.entries) {
@@ -382,22 +473,93 @@ export function createAdminCloseDayRouter(
             startTime: entry.startTime,
             endTime: entry.endTime,
             notes: entry.notes,
+            recurringPatternId: entry.recurringPatternId,
             summary: summaryForAudit(entry),
           },
           ipAddress: clientIp(req),
           userAgent: userAgent(req),
         });
       }
-      apiSuccess(res, {
-        mode: input.mode,
-        entries: result.entries,
-        createdDates: result.createdDates,
-        skippedDates: result.skippedDates,
-      });
+
+      if (recurringResult) {
+        apiSuccess(res, {
+          mode: "recurring",
+          pattern: recurringResult.pattern,
+          entries: recurringResult.entries,
+          createdDates: recurringResult.createdDates,
+          skippedDates: recurringResult.skippedDates,
+          expandedCount: recurringResult.expandedCount,
+        });
+      } else {
+        apiSuccess(res, {
+          mode: input.mode,
+          entries: result.entries,
+          createdDates: result.createdDates,
+          skippedDates: result.skippedDates,
+        });
+      }
     } catch (error) {
       respondWithError(res, error);
     }
   });
+
+  // ── REQ-116: list aktive recurring-patterns ──────────────────────────
+  router.get(
+    "/api/admin/games/:id/close-day/recurring",
+    async (req, res) => {
+      try {
+        await requirePermission(req, "GAME_MGMT_READ");
+        const id = mustBeNonEmptyString(req.params.id, "id");
+        const patterns = await closeDayService.listRecurringPatterns(id);
+        apiSuccess(res, { patterns });
+      } catch (error) {
+        respondWithError(res, error);
+      }
+    }
+  );
+
+  // ── REQ-116: slett pattern + soft-delete alle expanded child-rader ──
+  //
+  // Audit-loggen bevarer pattern-snapshot + deletedChildCount. Child-rader
+  // hard-slettes (de var planlagte fremtidige stengninger uten regulatorisk
+  // verdi); pattern soft-deletes for å bevare "hvem opprettet" + tidslinje.
+  router.delete(
+    "/api/admin/games/:id/close-day/recurring/:patternId",
+    async (req, res) => {
+      try {
+        const actor = await requirePermission(req, "GAME_MGMT_WRITE");
+        const id = mustBeNonEmptyString(req.params.id, "id");
+        const patternId = mustBeNonEmptyString(
+          req.params.patternId,
+          "patternId"
+        );
+        const result = await closeDayService.deleteRecurringPattern({
+          gameManagementId: id,
+          patternId,
+          deletedBy: actor.id,
+        });
+        fireAudit({
+          actorId: actor.id,
+          actorType: actorTypeFromRole(actor.role),
+          action: "admin.game.close-day.recurring.delete",
+          resource: "game_management",
+          resourceId: result.pattern.gameManagementId,
+          details: {
+            patternId: result.pattern.id,
+            pattern: result.pattern.pattern,
+            startDate: result.pattern.startDate,
+            endDate: result.pattern.endDate,
+            deletedChildCount: result.deletedChildCount,
+          },
+          ipAddress: clientIp(req),
+          userAgent: userAgent(req),
+        });
+        apiSuccess(res, result);
+      } catch (error) {
+        respondWithError(res, error);
+      }
+    }
+  );
 
   // ── Write: per-dato oppdatering ───────────────────────────────────
   router.put(
