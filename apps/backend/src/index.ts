@@ -218,6 +218,7 @@ import { createVoucherRouter } from "./routes/voucher.js";
 import { createAdminUniqueIdsAndPayoutsRouter } from "./routes/adminUniqueIdsAndPayouts.js";
 import { createAdminUsersRouter } from "./routes/adminUsers.js";
 import { createAdminPlayerActivityRouter } from "./routes/adminPlayerActivity.js";
+import { createAdminGameOversightRouter } from "./routes/adminGameOversight.js";
 import { createGameRouter } from "./routes/game.js";
 import { createGameEventHandlers } from "./sockets/gameEvents.js";
 import { createGame1ScheduledEventHandlers } from "./sockets/game1ScheduledEvents.js";
@@ -1837,6 +1838,18 @@ app.use(createAdminPlayerActivityRouter({
   walletAdapter,
   engine,
   auditLogService,
+}));
+
+// GAP #16 (BACKEND_1TO1_GAP_AUDIT_2026-04-24): manual-winning admin override.
+//   POST /api/admin/games/:gameId/manual-winning
+// Strict ADMIN-only via EXTRA_PRIZE_AWARD. Routes through engine.awardExtraPrize
+// (legitim payout-flow med EXTRA_PRIZE compliance-entry) — NEVER direct
+// admin-credit til winnings (per ADMIN_WINNINGS_CREDIT_FORBIDDEN).
+app.use(createAdminGameOversightRouter({
+  platformService,
+  engine,
+  auditLogService,
+  emitWalletRoomUpdates,
 }));
 
 // BIN-583 B3.1: agent auth/shift + admin agent-CRUD.

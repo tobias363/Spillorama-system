@@ -120,6 +120,24 @@ const ENDPOINT_POLICY_CASES: EndpointPolicyCase[] = [
     endpoint: "GET /api/admin/players/top",
     permission: "DAILY_REPORT_READ",
     allowedRoles: ["ADMIN", "HALL_OPERATOR", "SUPPORT"]
+  },
+  {
+    // GAP #4: per-spiller game-management-detail aggregat. Sentralisert
+    // spillerprofil-domain (samme PLAYER_KYC_READ-gate som game-history /
+    // chips-history). HALL_OPERATOR er bevisst utelatt.
+    endpoint: "GET /api/admin/players/:userId/game-management-detail",
+    permission: "PLAYER_KYC_READ",
+    allowedRoles: ["ADMIN", "SUPPORT"]
+  },
+  {
+    // GAP #16: manual winning admin override. Strict ADMIN-only via
+    // EXTRA_PRIZE_AWARD — same gate som /api/admin/wallets/:walletId/extra-prize
+    // siden manual-winning routes through engine.awardExtraPrize (legitim
+    // payout-flow med EXTRA_PRIZE compliance-entry, IKKE direkte
+    // admin-credit til winnings — ADMIN_WINNINGS_CREDIT_FORBIDDEN).
+    endpoint: "POST /api/admin/games/:gameId/manual-winning",
+    permission: "EXTRA_PRIZE_AWARD",
+    allowedRoles: ["ADMIN"]
   }
 ];
 

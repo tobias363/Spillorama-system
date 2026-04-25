@@ -724,3 +724,191 @@ test("BIN-629: from/to-validering — ugyldig ISO gir INVALID_INPUT", async () =
     await ctx.close();
   }
 });
+
+// ── GAP #4: game-management-detail tests ─────────────────────────────────
+
+test("GAP #4: game-management-detail aggregerer per gameType", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+    ledger: [
+      makeLedger("s1", player.walletId, "hall-a", "STAKE"),
+      makeLedger("s2", player.walletId, "hall-a", "STAKE"),
+      makeLedger("p1", player.walletId, "hall-a", "PRIZE"),
+      makeLedger("ep1", player.walletId, "hall-a", "EXTRA_PRIZE"),
+    ],
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-1/game-management-detail",
+      "admin-tok"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.userId, "target-1");
+    assert.equal(res.json.data.walletId, player.walletId);
+    assert.equal(res.json.data.rows.length, 1);
+    const row = res.json.data.rows[0];
+    assert.equal(row.gameType, "MAIN_GAME"); // makeLedger setter MAIN_GAME som default
+    assert.equal(row.totalTickets, 2);
+    assert.equal(row.totalStake, 200);
+    assert.equal(row.totalWinnings, 200); // 100 PRIZE + 100 EXTRA_PRIZE
+    assert.equal(row.prizeCount, 1);
+    assert.equal(row.extraPrizeCount, 1);
+    assert.equal(res.json.data.totals.totalTickets, 2);
+    assert.equal(res.json.data.totals.extraPrizeCount, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #4: game-management-detail filtrerer på walletId i engine-call", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+    ledger: [
+      makeLedger("s1", player.walletId, "hall-a", "STAKE"),
+      makeLedger("s2", "other-wallet", "hall-a", "STAKE"),
+    ],
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-1/game-management-detail",
+      "admin-tok"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.totals.totalTickets, 1);
+    assert.equal(res.json.data.totals.totalStake, 100);
+    // engine-mock filtrerer på walletId
+    const call = ctx.listLedgerCalls[0];
+    assert.equal(call?.walletId, player.walletId);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #4: game-management-detail med fromDate/toDate/gameType-filter", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+    ledger: [makeLedger("s1", player.walletId, "hall-a", "STAKE")],
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-1/game-management-detail?fromDate=2026-04-01T00:00:00Z&toDate=2026-04-30T23:59:59Z&gameType=DATABINGO",
+      "admin-tok"
+    );
+    assert.equal(res.status, 200);
+    const call = ctx.listLedgerCalls[0];
+    assert.equal(call?.dateFrom, "2026-04-01T00:00:00.000Z");
+    assert.equal(call?.dateTo, "2026-04-30T23:59:59.000Z");
+    assert.equal(call?.gameType, "DATABINGO");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #4: game-management-detail avviser fromDate > toDate", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-1/game-management-detail?fromDate=2026-04-30T00:00:00Z&toDate=2026-04-01T00:00:00Z",
+      "admin-tok"
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #4: game-management-detail avviser ugyldig gameType", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-1": player },
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-1/game-management-detail?gameType=INVALID_TYPE",
+      "admin-tok"
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #4: game-management-detail avviser ikke-PLAYER target", async () => {
+  const ctx = await startServer({
+    users: { "admin-tok": adminUser },
+    usersById: { "target-admin": { ...makePlayer("target-admin"), role: "SUPPORT" } },
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-admin/game-management-detail",
+      "admin-tok"
+    );
+    assert.equal(res.status, 400);
+    assert.equal(res.json.error.code, "INVALID_INPUT");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #4: game-management-detail blokkerer PLAYER + HALL_OPERATOR", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: {
+      "pl-tok": playerUser,
+      "op-a-tok": operatorA,
+    },
+    usersById: { "target-1": player },
+  });
+  try {
+    for (const tok of ["pl-tok", "op-a-tok"]) {
+      const res = await req(
+        ctx.baseUrl,
+        "/api/admin/players/target-1/game-management-detail",
+        tok
+      );
+      assert.equal(res.status, 400);
+      assert.equal(res.json.error.code, "FORBIDDEN");
+    }
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP #4: game-management-detail — SUPPORT kan lese", async () => {
+  const player = makePlayer("target-1");
+  const ctx = await startServer({
+    users: { "sup-tok": supportUser },
+    usersById: { "target-1": player },
+    ledger: [makeLedger("s1", player.walletId, "hall-a", "STAKE")],
+  });
+  try {
+    const res = await req(
+      ctx.baseUrl,
+      "/api/admin/players/target-1/game-management-detail",
+      "sup-tok"
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.json.data.totals.totalTickets, 1);
+  } finally {
+    await ctx.close();
+  }
+});
