@@ -200,6 +200,7 @@ import { MiniGamesConfigService } from "./admin/MiniGamesConfigService.js";
 import { createAdminSavedGamesRouter } from "./routes/adminSavedGames.js";
 import { SavedGameService } from "./admin/SavedGameService.js";
 import { createAdminCmsRouter } from "./routes/adminCms.js";
+import { createPublicCmsRouter } from "./routes/publicCms.js";
 import { CmsService } from "./admin/CmsService.js";
 import { createAdminTrackSpendingRouter } from "./routes/adminTrackSpending.js";
 import { createAdminReportsSubgameDrillDownRouter } from "./routes/adminReportsSubgameDrillDown.js";
@@ -1757,6 +1758,12 @@ app.use(createAdminCmsRouter({
   auditLogService,
   cmsService,
 }));
+// Public (un-authenticated) CMS endpoints — regulatorisk krav: spillere
+// må kunne lese T&C / FAQ / responsible-gaming UTEN konto. Routeren
+// håndhever publish-status (regulatoriske slugs trenger live-versjon;
+// ikke-regulatoriske trenger ikke-tom innhold) og legger på
+// Cache-Control: public, max-age=300 for å avlaste backenden.
+app.use(createPublicCmsRouter({ cmsService }));
 // BIN-628: admin track-spending aggregat (regulatorisk P2 — pengespill-
 // forskriften §11). Gjenbruker de samme env-var-drevne loss-limitene som
 // BingoEngine er konstruert med (`bingoDailyLossLimit` / `bingoMonthlyLossLimit`)
