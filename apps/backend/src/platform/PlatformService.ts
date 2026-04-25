@@ -33,6 +33,15 @@ export interface AppUser {
   birthDate?: string;
   kycVerifiedAt?: string;
   kycProviderRef?: string;
+  /**
+   * GAP #5: profile/BankID image-URLs. Settes via
+   * `POST /api/players/me/profile/image?category=...`. `null` når ingen
+   * upload har skjedd. Verdien kan være en relativ sti (lokal storage)
+   * eller absolutt URL (Cloudinary).
+   */
+  profileImageUrl?: string | null;
+  bankidSelfieUrl?: string | null;
+  bankidDocumentUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -339,6 +348,11 @@ interface UserRow {
   kyc_verified_at: Date | string | null;
   kyc_provider_ref: string | null;
   compliance_data: Record<string, unknown> | null;
+  /** GAP #5: profile/BankID image storage URLs. Optional på alle queries
+   *  så eksisterende SELECT-er som ikke ber om kolonnene fortsetter å virke. */
+  profile_image_url?: string | null;
+  bankid_selfie_url?: string | null;
+  bankid_document_url?: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -689,7 +703,11 @@ export class PlatformService {
       // BIN-587 B2.3: deleted_at IS NULL — soft-deleted users kan ikke re-
       // bruke eksisterende access-tokens etter at soft-delete revoker
       // sesjoner (belt-and-suspenders mot race mellom revoker og bruk)
-      `SELECT u.id, u.email, u.display_name, u.surname, u.wallet_id, u.role, u.kyc_status, u.birth_date, u.kyc_verified_at, u.kyc_provider_ref, u.hall_id, u.created_at, u.updated_at
+      // GAP #5: profile_image_url + bankid_*_url er med i SELECT så
+      // /api/players/me/profile kan returnere image-URL-ene direkte uten
+      // ekstra round-trip.
+      `SELECT u.id, u.email, u.display_name, u.surname, u.wallet_id, u.role, u.kyc_status, u.birth_date, u.kyc_verified_at, u.kyc_provider_ref, u.hall_id, u.created_at, u.updated_at,
+              u.profile_image_url, u.bankid_selfie_url, u.bankid_document_url
        FROM ${this.sessionsTable()} s
        JOIN ${this.usersTable()} u ON u.id = s.user_id
        WHERE s.token_hash = $1
@@ -2236,6 +2254,59 @@ export class PlatformService {
     return this.withBalance(this.mapUser(rows[0]));
   }
 
+  /**
+   * GAP #5: persist en profil/BankID-image-URL til riktig kolonne.
+   *
+   * `category`-mapping:
+   *   - `profile` → app_users.profile_image_url
+   *   - `bankid_selfie` → app_users.bankid_selfie_url
+   *   - `bankid_document` → app_users.bankid_document_url
+   *
+   * `imageUrl = null` rydder kolonnen (brukes når spilleren fjerner
+   * profilbildet sitt). Service-laget validerer URL-formatet før kall —
+   * her gjør vi kun en idempotent UPDATE og returnerer den nye user-raden.
+   */
+  async updateProfileImage(input: {
+    userId: string;
+    category: "profile" | "bankid_selfie" | "bankid_document";
+    imageUrl: string | null;
+  }): Promise<PublicAppUser> {
+    await this.ensureInitialized();
+    const id = this.assertEntityReference(input.userId, "userId");
+    const columnByCategory: Record<typeof input.category, string> = {
+      profile: "profile_image_url",
+      bankid_selfie: "bankid_selfie_url",
+      bankid_document: "bankid_document_url",
+    };
+    const column = columnByCategory[input.category];
+    if (!column) {
+      throw new DomainError(
+        "INVALID_INPUT",
+        "category må være profile, bankid_selfie eller bankid_document."
+      );
+    }
+    const url =
+      typeof input.imageUrl === "string" ? input.imageUrl.trim() : null;
+    if (url !== null && url.length === 0) {
+      throw new DomainError("INVALID_INPUT", "imageUrl mangler.");
+    }
+    if (url !== null && url.length > 2048) {
+      throw new DomainError("INVALID_INPUT", "imageUrl er for lang (maks 2048 tegn).");
+    }
+    const { rows } = await this.pool.query<UserRow>(
+      `UPDATE ${this.usersTable()}
+       SET ${column} = $1, updated_at = now()
+       WHERE id = $2
+       RETURNING id, email, display_name, surname, phone, wallet_id, role, kyc_status, birth_date, kyc_verified_at, kyc_provider_ref, hall_id, created_at, updated_at,
+                 profile_image_url, bankid_selfie_url, bankid_document_url`,
+      [url, id]
+    );
+    if (!rows[0]) {
+      throw new DomainError("USER_NOT_FOUND", "Bruker finnes ikke.");
+    }
+    return this.withBalance(this.mapUser(rows[0]));
+  }
+
   async changePassword(
     userId: string,
     input: { currentPassword: string; newPassword: string }
@@ -3492,6 +3563,13 @@ export class PlatformService {
       birthDate,
       kycVerifiedAt: row.kyc_verified_at ? asIso(row.kyc_verified_at) : undefined,
       kycProviderRef: row.kyc_provider_ref ?? undefined,
+      // GAP #5: image-kolonnene er optional i UserRow så ikke alle queries
+      // selecter dem. Bevarer null for kjente queries og undefined for
+      // call-sites som ikke har spurt om kolonnen — kallere bruker
+      // `?? null` ved API-mapping uansett.
+      profileImageUrl: row.profile_image_url ?? null,
+      bankidSelfieUrl: row.bankid_selfie_url ?? null,
+      bankidDocumentUrl: row.bankid_document_url ?? null,
       createdAt: asIso(row.created_at),
       updatedAt: asIso(row.updated_at)
     };
@@ -4017,6 +4095,16 @@ export class PlatformService {
       await client.query(
         `CREATE INDEX IF NOT EXISTS idx_${this.schema}_app_users_deleted_at
          ON ${this.usersTable()}(deleted_at) WHERE deleted_at IS NOT NULL`
+      );
+
+      // GAP #5: profile/BankID image columns. Migration 20260825000000
+      // skriver de samme kolonnene på fresh schemas; ALTER TABLE ... IF
+      // NOT EXISTS er idempotent og dekker både ny init og oppgradering.
+      await client.query(
+        `ALTER TABLE ${this.usersTable()}
+         ADD COLUMN IF NOT EXISTS profile_image_url   TEXT NULL,
+         ADD COLUMN IF NOT EXISTS bankid_selfie_url   TEXT NULL,
+         ADD COLUMN IF NOT EXISTS bankid_document_url TEXT NULL`
       );
       await client.query(
         `CREATE TABLE IF NOT EXISTS "${this.schema}"."app_player_hall_status" (

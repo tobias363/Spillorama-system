@@ -97,6 +97,9 @@ import { createPaymentsRouter } from "./routes/payments.js";
 import { createPaymentRequestsRouter } from "./routes/paymentRequests.js";
 import { createPlayersRouter } from "./routes/players.js";
 import { createUserProfileRouter } from "./routes/userProfile.js";
+import { createPlayerProfileImageRouter } from "./routes/playerProfileImage.js";
+import { createValidateGameViewRouter } from "./routes/validateGameView.js";
+import { LocalImageStorageAdapter } from "./media/ImageStorageService.js";
 import { ProfileSettingsService } from "./compliance/ProfileSettingsService.js";
 import { createAdminPlayersRouter } from "./routes/adminPlayers.js";
 import { createAdminAmlRouter } from "./routes/adminAml.js";
@@ -1456,6 +1459,40 @@ app.use(createPlayersRouter({
   platformService,
   auditLogService,
 }));
+
+// GAP #5: profile + BankID image upload. Lokal storage som default —
+// Cloudinary-bytte er TODO. Mappen serveres via express.static-mounten
+// over (publicDir → /uploads/...) så lagrede filer er nedlastbare uten
+// ytterligere routes.
+const profileImageStorageDir = path.join(publicDir, "uploads", "profile-images");
+const profileImageUrlPrefix = "/uploads/profile-images";
+app.use(
+  createPlayerProfileImageRouter({
+    platformService,
+    auditLogService,
+    imageStorage: new LocalImageStorageAdapter({
+      storageDir: profileImageStorageDir,
+      urlPrefix: profileImageUrlPrefix,
+    }),
+  }),
+);
+
+// GAP #29: pre-join game-view validation. Player-app kaller dette FØR
+// socket-rommet åpnes så feilmodi (HALL_BLOCKED, ROOM_NOT_FOUND, etc.)
+// kan rendres som UX uten å rive ned realtime-kanalen.
+app.use(
+  createValidateGameViewRouter({
+    platformService,
+    profileSettingsService: profileSettingsService ?? null,
+    engine,
+    // Entry-fee read-out for INSUFFICIENT_BALANCE-flagg (info-only).
+    // Bruker globale auto-round-default — game-spesifikke entry-fees
+    // settes per scheduled-game og er ikke alltid synlige uten DB-spørring,
+    // så vi defaulterer til 0 her og lar klient-laget håndtere mer
+    // detaljert pris-info via game-detail-endpoint.
+    getMinEntryFeeForGame: () => 0,
+  }),
+);
 
 // BIN-720: Profile Settings API (PDF 8 + PDF 9 wireframes). Router wires
 // kun når responsibleGamingStore er tilgjengelig (instansen konstrueres
