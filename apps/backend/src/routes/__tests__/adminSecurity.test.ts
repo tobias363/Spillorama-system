@@ -386,3 +386,76 @@ test("BIN-587 B3-security: HALL_OPERATOR blokkert fra audit-search", async () =>
     await ctx.close();
   }
 });
+
+// ── GAP #25: Country-list-for-dropdown ────────────────────────────────
+
+test("GAP-25 country-list: ADMIN får full ISO-3166-1 lista", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser });
+  try {
+    const res = await req(ctx.baseUrl, "GET", "/api/admin/security/countries", "admin-tok");
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.json.data.countries));
+    assert.ok(res.json.data.countries.length >= 240, "lengde nær 249");
+    assert.ok(res.json.data.countries.length <= 260);
+    assert.equal(res.json.data.count, res.json.data.countries.length);
+    // Norge må finnes i lista
+    const no = res.json.data.countries.find((c: { code: string }) => c.code === "NO");
+    assert.ok(no);
+    assert.equal(no.nameNo, "Norge");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP-25 country-list: SUPPORT (READ) kan hente lista", async () => {
+  const ctx = await startServer({ "sup-tok": supportUser });
+  try {
+    const res = await req(ctx.baseUrl, "GET", "/api/admin/security/countries", "sup-tok");
+    assert.equal(res.status, 200);
+    assert.ok(res.json.data.count > 0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP-25 country-list: HALL_OPERATOR + PLAYER blokkert", async () => {
+  const ctx = await startServer({ "op-tok": operatorUser, "pl-tok": playerUser });
+  try {
+    const op = await req(ctx.baseUrl, "GET", "/api/admin/security/countries", "op-tok");
+    assert.equal(op.status, 400);
+    assert.equal(op.json.error.code, "FORBIDDEN");
+
+    const pl = await req(ctx.baseUrl, "GET", "/api/admin/security/countries", "pl-tok");
+    assert.equal(pl.status, 400);
+    assert.equal(pl.json.error.code, "FORBIDDEN");
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP-25 country-list: uten token gir UNAUTHORIZED", async () => {
+  const ctx = await startServer({});
+  try {
+    const res = await req(ctx.baseUrl, "GET", "/api/admin/security/countries");
+    assert.equal(res.status, 400);
+    assert.ok(res.json?.error);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("GAP-25 country-list: hver oppføring har riktig shape (code, nameNo, nameEn)", async () => {
+  const ctx = await startServer({ "admin-tok": adminUser });
+  try {
+    const res = await req(ctx.baseUrl, "GET", "/api/admin/security/countries", "admin-tok");
+    assert.equal(res.status, 200);
+    for (const c of res.json.data.countries) {
+      assert.equal(typeof c.code, "string");
+      assert.equal(typeof c.nameNo, "string");
+      assert.equal(typeof c.nameEn, "string");
+      assert.ok(/^[A-Z]{2}$/.test(c.code), `code må være 2 ISO-bokstaver: ${c.code}`);
+    }
+  } finally {
+    await ctx.close();
+  }
+});

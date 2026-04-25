@@ -192,6 +192,8 @@ import { createAdminLoyaltyRouter } from "./routes/adminLoyalty.js";
 import { LoyaltyService } from "./compliance/LoyaltyService.js";
 import { createAdminSettingsRouter } from "./routes/adminSettings.js";
 import { SettingsService } from "./admin/SettingsService.js";
+import { createAdminScreenSaverRouter } from "./routes/adminScreenSaver.js";
+import { ScreenSaverService } from "./admin/ScreenSaverService.js";
 import { createAdminMaintenanceRouter } from "./routes/adminMaintenance.js";
 import { MaintenanceService } from "./admin/MaintenanceService.js";
 import { createAdminSystemInfoRouter } from "./routes/adminSystemInfo.js";
@@ -690,6 +692,14 @@ const agentPermissionService = new AgentPermissionService({
 // gangen). Begge er sentrale ADMIN-only endepunkter; HALL_OPERATOR styrer
 // per-hall-Spillvett via adminHalls.ts.
 const settingsService = new SettingsService({
+  connectionString: platformConnectionString,
+  schema: pgSchema,
+});
+// GAP #23: Screen-saver-bilder for hall-TV. Service-laget eier KUN bildelista
+// (multi-image carousel + per-image vis-tid + reorder). On/off-toggle og
+// global timeout-minutter ligger i SettingsService (`branding.screen_saver_*`).
+// Tabell `app_screen_saver_images` kommer fra migration 20260425125008.
+const screenSaverService = new ScreenSaverService({
   connectionString: platformConnectionString,
   schema: pgSchema,
 });
@@ -1757,6 +1767,15 @@ app.use(createAdminSettingsRouter({
   platformService,
   auditLogService,
   settingsService,
+}));
+// GAP #23: Screen-saver bilde-CRUD + reorder. SETTINGS_READ for GET,
+// SETTINGS_WRITE (ADMIN-only) for skriving. Image-URL leveres av admin-UI
+// (klient-side Cloudinary upload eller manuelt URL-felt). Server-side
+// upload-flyt er TODO når CLOUDINARY_*-env er klare.
+app.use(createAdminScreenSaverRouter({
+  platformService,
+  auditLogService,
+  screenSaverService,
 }));
 app.use(createAdminMaintenanceRouter({
   platformService,

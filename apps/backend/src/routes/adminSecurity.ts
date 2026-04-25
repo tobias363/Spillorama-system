@@ -11,6 +11,11 @@
  *     POST   /api/admin/security/risk-countries
  *     DELETE /api/admin/security/risk-countries/:code
  *
+ *   Country-list-for-dropdown (GAP #25):
+ *     GET    /api/admin/security/countries
+ *     Static ISO-3166-1 alpha-2 lista med norske navn — brukt av
+ *     risk-country-dropdown i admin-UI. Read-only, ingen audit.
+ *
  *   Blocked-IPs:
  *     GET    /api/admin/security/blocked-ips
  *     POST   /api/admin/security/blocked-ips
@@ -39,6 +44,7 @@ import {
   parseLimit,
   isRecordObject,
 } from "../util/httpHelpers.js";
+import { getCountryList } from "../util/iso3166.js";
 import { logger as rootLogger } from "../util/logger.js";
 
 const logger = rootLogger.child({ module: "admin-security" });
@@ -216,6 +222,20 @@ export function createAdminSecurityRouter(deps: AdminSecurityRouterDeps): expres
         userAgent: userAgent(req),
       });
       apiSuccess(res, { removed: true });
+    } catch (error) {
+      apiFailure(res, error);
+    }
+  });
+
+  // ── Country-list-for-dropdown (GAP #25) ──────────────────────────────
+  // Statisk ISO-3166-1 alpha-2 lista med norske navn. Read-only, ingen
+  // audit (ingen state-endring). Krever SECURITY_READ — samme som
+  // risk-countries-listen, og dropdown brukes i samme UI-flyt.
+  router.get("/api/admin/security/countries", async (req, res) => {
+    try {
+      await requirePermission(req, "SECURITY_READ");
+      const countries = getCountryList();
+      apiSuccess(res, { countries, count: countries.length });
     } catch (error) {
       apiFailure(res, error);
     }
