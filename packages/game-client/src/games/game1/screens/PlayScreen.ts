@@ -668,16 +668,24 @@ export class PlayScreen extends Container {
     });
 
     // Venstre høylys-stripe
+    // BLINK-FIX (round 3, hazard 2): Fjernet filter:blur(0.5px) — samme
+    // composite-hazard som backdrop-filter: Chrome må re-kompositere
+    // blur-pixels hver Pixi-frame. Erstattet med en feathered horisontal
+    // gradient (4px bred, falmer ut på sidene) som gir samme myke kant uten
+    // GPU-blur. Visuelt nesten identisk; ingen layout-endring.
     const leftHi = document.createElement("div");
     Object.assign(leftHi.style, {
       position: "absolute",
-      left: "4px",
+      left: "3px",
       top: "8px",
       bottom: "4px",
-      width: "3px",
+      width: "5px",
       borderRadius: "3px",
-      background: "linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.35))",
-      filter: "blur(0.5px)",
+      background: [
+        "linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 50%, rgba(255,255,255,0) 100%)",
+        "linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.35))",
+      ].join(","),
+      backgroundBlendMode: "multiply",
     });
     glass.appendChild(leftHi);
 
@@ -685,13 +693,16 @@ export class PlayScreen extends Container {
     const rightHi = document.createElement("div");
     Object.assign(rightHi.style, {
       position: "absolute",
-      right: "3px",
+      right: "2px",
       top: "12px",
       bottom: "4px",
-      width: "2px",
+      width: "4px",
       borderRadius: "2px",
-      background: "linear-gradient(180deg, rgba(255,255,255,0.25), rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.18))",
-      filter: "blur(0.5px)",
+      background: [
+        "linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 50%, rgba(255,255,255,0) 100%)",
+        "linear-gradient(180deg, rgba(255,255,255,0.25), rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.18))",
+      ].join(","),
+      backgroundBlendMode: "multiply",
     });
     glass.appendChild(rightHi);
 

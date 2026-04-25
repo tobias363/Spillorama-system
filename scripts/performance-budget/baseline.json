@@ -1,12 +1,12 @@
 {
   "description": "Spill 1 performance budget — refresh with `npm run perf:baseline` after an intentional change. Reviewers must check the `current` diff carefully; see scripts/performance-budget/README.md for the review protocol.",
-  "_note": "Baseline captured on 2026-04-24 after PR #468 removed 12 backdrop-filter elements (`backdropFilterCount` 2→0). `rafCallsPerSec` values reflect preview.html hosting 5 concurrent Pixi.Application instances (wheel/chest/oddsen/colordraft/mystery), each running its own ticker — so at 60Hz CI the aggregate RAF count floats around 300/s, scaling up on 120Hz+ dev displays. `max` values carry ~2x headroom to tolerate both CI variance and high-refresh dev measurements; tighten via `npm run perf:baseline` once we have a stable post-merge reference.",
+  "_note": "Re-baselined 2026-04-25 after refactor/consolidate-pixi-preview consolidated preview.html from 5 concurrent Pixi.Applications down to a single-active-application pattern (only one ticker / canvas alive at a time). Aggregate `rafCallsPerSec` dropped ~3-5x (idle: 220→110, buy_popup: 360→103, during_draw: 420→163 on 120Hz dev display; expect ~half on 60Hz CI). `max` values now carry ~1.5x headroom over the new dev `current` values to tolerate both CI variance and high-refresh dev measurements; previous baselines reserved ~2x for the noisier 5-app aggregate.",
   "scenarios": {
     "spill1_idle": {
       "backdropFilterCount": { "current": 0, "max": 2 },
       "cssAnimationCount": { "current": 0, "max": 5 },
       "infiniteAnimationCount": { "current": 0, "max": 1 },
-      "rafCallsPerSec": { "current": 220, "max": 500 },
+      "rafCallsPerSec": { "current": 110, "max": 170 },
       "paintCountPer2s": { "current": 0, "max": 30 },
       "gsapActiveTweens": { "current": -1, "max": -1 },
       "longAnimationFrames": { "current": 0, "max": 2 }
@@ -15,16 +15,16 @@
       "backdropFilterCount": { "current": 0, "max": 3 },
       "cssAnimationCount": { "current": 0, "max": 6 },
       "infiniteAnimationCount": { "current": 0, "max": 1 },
-      "rafCallsPerSec": { "current": 360, "max": 600 },
+      "rafCallsPerSec": { "current": 103, "max": 170 },
       "paintCountPer2s": { "current": 0, "max": 40 },
       "gsapActiveTweens": { "current": -1, "max": -1 },
-      "longAnimationFrames": { "current": 0, "max": 3 }
+      "longAnimationFrames": { "current": 1, "max": 3 }
     },
     "spill1_during_draw": {
       "backdropFilterCount": { "current": 0, "max": 3 },
       "cssAnimationCount": { "current": 0, "max": 6 },
       "infiniteAnimationCount": { "current": 0, "max": 1 },
-      "rafCallsPerSec": { "current": 420, "max": 700 },
+      "rafCallsPerSec": { "current": 163, "max": 250 },
       "paintCountPer2s": { "current": 0, "max": 60 },
       "gsapActiveTweens": { "current": -1, "max": -1 },
       "longAnimationFrames": { "current": 0, "max": 5 }

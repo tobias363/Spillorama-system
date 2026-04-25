@@ -92,22 +92,24 @@ function ensureBongStyles(): void {
 }
 
 /* Per-celle "one to go"-puls — Bong.jsx-port.
- * Cellen som vil fullføre aktivt pattern hvis markert pulserer med:
- *  - bakgrunn fra 0.55 → 0.95 alpha (hvit translucent → hvit solid)
- *  - scale 1 → 1.04
- *  - ekspanderende ring-skygge som fader ut
- *  - 2px mørk-rød outline (matcher marked-farge) */
+ *
+ * BLINK-FIX (round 3, hazard 3): Tidligere animerte vi BÅDE background (rgba)
+ * OG box-shadow (4 lag, infinite). Box-shadow + background er ikke
+ * composite-bar — Chrome må re-paint hver frame, og med 20-50+ "one-to-go"-
+ * celler samtidig på alle billetter genererer dette nok GPU-pressure til at
+ * Pixi-canvas blinker. Vi fjerner derfor:
+ *  - bong-pulse-ring keyframe (4-lags box-shadow) helt
+ *  - background-animasjon i bong-pulse-cell (kun transform: scale igjen)
+ *  - statisk solid hvit bakgrunn + outline gir samme visuelle "one-to-go"
+ *    signal uten paint-trafikk.
+ * Transform er composite-bar i Chrome → kjører på GPU uten layout/paint. */
 @keyframes bong-pulse-cell {
-  0%, 100% { background: rgba(255,255,255,0.55); transform: scale(1); }
-  50%      { background: rgba(255,255,255,0.95); transform: scale(1.04); }
-}
-@keyframes bong-pulse-ring {
-  0%   { box-shadow: 0 0 0 0 rgba(122,26,26,0.65), 0 0 0 0 rgba(122,26,26,0.35); }
-  70%  { box-shadow: 0 0 0 6px rgba(122,26,26,0), 0 0 0 10px rgba(122,26,26,0); }
-  100% { box-shadow: 0 0 0 0 rgba(122,26,26,0), 0 0 0 0 rgba(122,26,26,0); }
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
 }
 .bong-pulse {
-  animation: bong-pulse-cell 1.3s ease-in-out infinite, bong-pulse-ring 1.3s ease-in-out infinite;
+  animation: bong-pulse-cell 1.3s ease-in-out infinite;
+  background: rgba(255,255,255,0.95);
   outline: 2px solid #7a1a1a;
   z-index: 1;
   position: relative;
@@ -154,11 +156,18 @@ export class BingoTicketHtml {
       // sentraliserer bongen når celle-bredden overstiger maxWidth. På brede
       // skjermer (cell ≈ 275px) blir bongen ~275×344. På smale blir den
       // mindre men bevarer proporsjonene.
+      //
+      // BLINK-FIX (round 3, hazard 4): `perspective: 1000px` på root promoterer
+      // hver bong til en permanent composite-layer. Med 30 bonger × ~12MB
+      // GPU-tekstur-minne kan det utløse layer-eviction → blink. Vi aktiverer
+      // `perspective` KUN under aktiv flip-animasjon i `toggleFlip()`.
+      // `transform-style: preserve-3d` beholdes på `inner` så
+      // `backface-visibility: hidden` fortsetter å skjule baksiden uten
+      // perspective (flat 3d-kontekst, ingen depth-projection).
       width: "100%",
       maxWidth: "360px",
       aspectRatio: `${this.cardWidth} / ${this.cardHeight}`,
       justifySelf: "center",
-      perspective: "1000px",
       cursor: "pointer",
       userSelect: "none",
     });
@@ -691,6 +700,14 @@ export class BingoTicketHtml {
 
   private toggleFlip(): void {
     this.flipped = !this.flipped;
+
+    // BLINK-FIX (round 3, hazard 4): Aktiver `perspective` KUN under flip.
+    // Default-state har ingen perspective på root → ingen permanent
+    // composite-layer per bong. Når vi flipper setter vi perspective på root,
+    // og fjerner det igjen 450ms etter at transition er ferdig (transition er
+    // 400ms, vi gir 50ms slack). `transform-style: preserve-3d` på inner
+    // beholdes alltid så backface-visibility fortsatt fungerer.
+    this.root.style.perspective = "1000px";
     this.inner.style.transform = this.flipped ? "rotateY(180deg)" : "rotateY(0deg)";
 
     // Refresh back-face content each time we flip TO it, so the price / bought
@@ -701,9 +718,16 @@ export class BingoTicketHtml {
       this.flipTimer = setTimeout(() => {
         if (this.flipped) this.toggleFlip();
       }, 3000);
-    } else if (this.flipTimer !== null) {
-      clearTimeout(this.flipTimer);
-      this.flipTimer = null;
+    } else {
+      if (this.flipTimer !== null) {
+        clearTimeout(this.flipTimer);
+        this.flipTimer = null;
+      }
+      // Tilbake til front. Fjern `perspective` når flip-transition er ferdig
+      // så bong-laget kan slippes fra GPU og frigjøre tekstur-minne.
+      setTimeout(() => {
+        if (!this.flipped) this.root.style.perspective = "";
+      }, 450);
     }
   }
 }

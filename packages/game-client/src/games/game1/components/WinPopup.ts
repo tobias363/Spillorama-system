@@ -288,6 +288,9 @@ export class WinPopup {
       const dur = 5 + j * 3;
 
       const item = document.createElement("div");
+      // BLINK-FIX (round 3, hazard 4): Fjernet `will-change:transform, opacity`.
+      // Chrome auto-promoterer animerte elementer; `will-change` brukte
+      // unødvendig GPU-minne og bidro til layer-eviction-pressure.
       item.style.cssText = [
         "position:absolute",
         "top:50%",
@@ -298,7 +301,6 @@ export class WinPopup {
         `margin-top:${-size / 2}px`,
         `animation:wp-float ${dur}s ease-in-out ${delay}s infinite`,
         "filter:drop-shadow(0 4px 10px rgba(0,0,0,0.35))",
-        "will-change:transform, opacity",
       ].join(";");
       item.style.setProperty("--sx", `${sx}px`);
       item.style.setProperty("--sy", `${sy}px`);
