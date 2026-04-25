@@ -713,11 +713,11 @@ export function detectPhaseWinners(
 /**
  * BIN-694: Evaluér om et brett oppfyller aktiv fase sitt krav.
  *
- * Fase-modell (norsk 75-ball, avklart 2026-04-20):
+ * Fase-modell (norsk 75-ball, avklart 2026-04-24):
  *   - "1 Rad" (fase 1): ≥1 horisontal rad ELLER ≥1 vertikal kolonne
- *   - "2 Rader" (fase 2): ≥2 hele vertikale kolonner
- *   - "3 Rader" (fase 3): ≥3 hele vertikale kolonner
- *   - "4 Rader" (fase 4): ≥4 hele vertikale kolonner
+ *   - "2 Rader" (fase 2): ≥2 hele horisontale rader
+ *   - "3 Rader" (fase 3): ≥3 hele horisontale rader
+ *   - "4 Rader" (fase 4): ≥4 hele horisontale rader
  *   - "Fullt Hus" (fase 5): alle 25 felt merket
  *
  * Klassifisering og kandidat-masker ligger i

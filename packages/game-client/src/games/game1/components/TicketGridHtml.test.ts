@@ -209,4 +209,93 @@ describe("TicketGridHtml", () => {
     btn.click();
     expect(cancelled).toBe("tkt-0");
   });
+
+  describe("blink prevention (mark-state-diff-kontrakt)", () => {
+    // Round 3 av BIN-blink-permanent-fix: backend sender room:update ~1.2s/tick
+    // under trekning. Uten mark-state-sig re-kjører vi markNumbers × alle live
+    // tickets × alle drawn numbers pr. tick — selv når ingenting er nytt.
+    // Dette testsettet måler MutationObserver-count for å låse kontrakten.
+    it("repeterte setTickets med identisk mark-state → 0 mutasjoner på celle-attributter", async () => {
+      const tickets = [makeTicket(0, "Small Yellow"), makeTicket(1, "Small White")];
+      const state = makeState({ drawnNumbers: [7, 12, 18] });
+      grid.setTickets(tickets, { cancelable: false, entryFee: 10, state, liveTicketCount: 2 });
+
+      const cells = Array.from(grid.root.querySelectorAll("[data-number]")) as HTMLElement[];
+
+      // Observer ALLE celle-attributter + inline-style (mark/paint skriver
+      // `background`, `color`, `fontWeight`, `boxShadow`, `dataset.lucky`).
+      let mutations = 0;
+      const observers = cells.map((c) => {
+        const o = new MutationObserver((list) => { mutations += list.length; });
+        o.observe(c, { attributes: true, attributeFilter: ["style", "data-lucky", "class"] });
+        return o;
+      });
+
+      // Fem "ticks" med identisk state — skal gi 0 mutasjoner på cellene.
+      for (let i = 0; i < 5; i++) {
+        grid.setTickets(tickets, { cancelable: false, entryFee: 10, state, liveTicketCount: 2 });
+      }
+
+      // Gi MutationObserver tid til å levere pending records.
+      await new Promise((r) => setTimeout(r, 0));
+      for (const o of observers) o.disconnect();
+
+      expect(mutations).toBe(0);
+    });
+
+    it("nytt drawn number → mutasjon kun på cellen som får ny mark", async () => {
+      const tickets = [makeTicket(0, "Small Yellow")];
+      const state1 = makeState({ drawnNumbers: [7, 12] });
+      grid.setTickets(tickets, { cancelable: false, entryFee: 10, state: state1, liveTicketCount: 1 });
+
+      const cells = Array.from(grid.root.querySelectorAll("[data-number]")) as HTMLElement[];
+
+      const perCell = new Map<HTMLElement, number>();
+      const observers = cells.map((c) => {
+        const o = new MutationObserver((list) => {
+          perCell.set(c, (perCell.get(c) ?? 0) + list.length);
+        });
+        o.observe(c, { attributes: true, attributeFilter: ["style"] });
+        return o;
+      });
+
+      // Ny state med ett ekstra drawn number (18 → cell index 17 på i=0-ticket).
+      const state2 = makeState({ drawnNumbers: [7, 12, 18] });
+      grid.setTickets(tickets, { cancelable: false, entryFee: 10, state: state2, liveTicketCount: 1 });
+
+      await new Promise((r) => setTimeout(r, 0));
+      for (const o of observers) o.disconnect();
+
+      // Mark-state-sig endret → applyMarks kjører. markNumber er idempotent
+      // så kun den NYE cellen (18) skal få style-mutasjon.
+      const mutated = Array.from(perCell.entries()).filter(([, n]) => n > 0);
+      const mutatedNumbers = mutated.map(([cell]) => cell.dataset.number);
+      expect(mutatedNumbers).toEqual(["18"]);
+    });
+
+    it("repetert highlightLuckyNumber er idempotent (ingen style-writes etter første)", async () => {
+      const state = makeState({ drawnNumbers: [], myLuckyNumber: 7 });
+      const tickets = [makeTicket(0, "Small Yellow")];
+      grid.setTickets(tickets, { cancelable: false, entryFee: 10, state, liveTicketCount: 1 });
+
+      const cells = Array.from(grid.root.querySelectorAll("[data-number]")) as HTMLElement[];
+      let mutations = 0;
+      const observers = cells.map((c) => {
+        const o = new MutationObserver((list) => { mutations += list.length; });
+        o.observe(c, { attributes: true, attributeFilter: ["style", "data-lucky"] });
+        return o;
+      });
+
+      // Gjenta highlightLuckyNumber direkte — dataset.lucky er allerede satt,
+      // så andre kall skal være no-op.
+      grid.highlightLuckyNumber(7);
+      grid.highlightLuckyNumber(7);
+      grid.highlightLuckyNumber(7);
+
+      await new Promise((r) => setTimeout(r, 0));
+      for (const o of observers) o.disconnect();
+
+      expect(mutations).toBe(0);
+    });
+  });
 });

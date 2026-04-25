@@ -234,8 +234,16 @@ export class ChatPanelV2 {
     this.unsubChat = onChat((msg) => this.addMessage(msg));
   }
 
+  // BIN-blink-permanent-fix: memoize player-count tekst. Uten memoize
+  // skriver hver PlayScreen.update ny text-node til DOM selv når count
+  // er samme — 2-3 childList-mutasjoner per state-update uten grunn.
+  private lastPlayerCountText = "";
+
   updatePlayerCount(count: number): void {
-    this.activeCountEl.textContent = String(count);
+    const next = String(count);
+    if (next === this.lastPlayerCountText) return;
+    this.activeCountEl.textContent = next;
+    this.lastPlayerCountText = next;
   }
 
   addMessage(msg: ChatMessage): void {

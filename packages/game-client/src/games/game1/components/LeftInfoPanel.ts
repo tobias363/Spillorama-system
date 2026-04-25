@@ -62,6 +62,15 @@ export class LeftInfoPanel {
     this.root.appendChild(betInfo);
   }
 
+  // BIN-blink-permanent-fix: memoize text-writes. `.textContent = X` erstatter
+  // alltid text-noden selv om strengen er lik (spec'd oppførsel), så hver
+  // state-update (ofte ~5/sek) genererte 3 childList-mutasjoner på dette
+  // panelet uten at noe faktisk endret seg. Cache forrige verdi og skipp
+  // DOM-writes når ingen endring.
+  private lastPlayerCount = "";
+  private lastEntryFee = "";
+  private lastPrize = "";
+
   update(
     playerCount: number,
     totalStake: number,
@@ -82,14 +91,27 @@ export class LeftInfoPanel {
     }
 
     const countStr = String(playerCount).padStart(2, "0");
-    this.playerCountEl.textContent = hallCount > 1
+    const nextPlayerCount = hallCount > 1
       ? `${countStr} (${hallCount} haller)`
       : countStr;
+    if (nextPlayerCount !== this.lastPlayerCount) {
+      this.playerCountEl.textContent = nextPlayerCount;
+      this.lastPlayerCount = nextPlayerCount;
+    }
 
-    this.entryFeeEl.textContent = `Innsats: ${totalStake} kr`;
+    const nextEntryFee = `Innsats: ${totalStake} kr`;
+    if (nextEntryFee !== this.lastEntryFee) {
+      this.entryFeeEl.textContent = nextEntryFee;
+      this.lastEntryFee = nextEntryFee;
+    }
+
     // "Gevinst" = this player's accumulated winnings this round (see PlayScreen
     // summation) — not the full prize pool (2026-04-21 Tobias-report).
-    this.prizeEl.textContent = `Gevinst: ${myWinnings} kr`;
+    const nextPrize = `Gevinst: ${myWinnings} kr`;
+    if (nextPrize !== this.lastPrize) {
+      this.prizeEl.textContent = nextPrize;
+      this.lastPrize = nextPrize;
+    }
   }
 
   /** Expose the root element so PlayScreen can re-parent it into the

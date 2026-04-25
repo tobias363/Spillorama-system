@@ -4,7 +4,7 @@
  * WinScreenV2 (Fullt Hus fullskjerm) — port av WinScreenV2.jsx.
  * Dekker: mount/unmount, shared-info, rAF-cleanup ved destroy.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { WinScreenV2 } from "./WinScreenV2.js";
 
 function container(): HTMLElement {
@@ -65,16 +65,24 @@ describe("WinScreenV2", () => {
     expect(parent.children.length).toBe(0);
   });
 
-  it("Skru av-knapp trigger onDismiss + fjerner scene", () => {
+  it("Tilbake-knapp trigger onDismiss + fjerner scene", () => {
     let dismissed = false;
     screen.show({ amount: 100, onDismiss: () => { dismissed = true; } });
-    const dismissBtn = Array.from(parent.querySelectorAll("button")).find(
-      (b) => b.textContent?.trim() === "Skru av",
+    const backBtn = Array.from(parent.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Tilbake",
     );
-    expect(dismissBtn).not.toBeUndefined();
-    dismissBtn!.click();
+    expect(backBtn).not.toBeUndefined();
+    backBtn!.click();
     expect(dismissed).toBe(true);
     expect(parent.children.length).toBe(0);
+  });
+
+  it("kun Tilbake-knapp — ingen Spill av på nytt / Skru av (regel-endring 2026-04-24)", () => {
+    screen.show({ amount: 100 });
+    const buttonTexts = Array.from(parent.querySelectorAll("button")).map(
+      (b) => b.textContent?.trim(),
+    );
+    expect(buttonTexts).toEqual(["Tilbake"]);
   });
 
   it("destroy() er idempotent", () => {
@@ -89,5 +97,35 @@ describe("WinScreenV2", () => {
     screen.destroy();
     screen.show({ amount: 200 });
     expect(parent.textContent).toContain("BINGO! DU VANT");
+  });
+
+  it("auto-close 5s etter animasjonen er ferdig (regel-endring 2026-04-24 rev 3)", () => {
+    // Total delay = FOSS_DURATION_MS (3600) + COUNT_UP_DURATION_MS (2200)
+    //               + POST_ANIMATION_DWELL_MS (5000) = 10800ms.
+    vi.useFakeTimers();
+    let dismissed = false;
+    screen.show({ amount: 100, onDismiss: () => { dismissed = true; } });
+    expect(parent.children.length).toBeGreaterThan(0);
+    vi.advanceTimersByTime(10799);
+    expect(parent.children.length).toBeGreaterThan(0);
+    expect(dismissed).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(parent.children.length).toBe(0);
+    expect(dismissed).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("manuell Tilbake overstyrer auto-close timer (ingen dobbel onDismiss)", () => {
+    vi.useFakeTimers();
+    let dismissCount = 0;
+    screen.show({ amount: 100, onDismiss: () => { dismissCount++; } });
+    const backBtn = Array.from(parent.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Tilbake",
+    )!;
+    backBtn.click();
+    expect(dismissCount).toBe(1);
+    vi.advanceTimersByTime(12000);
+    expect(dismissCount).toBe(1);
+    vi.useRealTimers();
   });
 });

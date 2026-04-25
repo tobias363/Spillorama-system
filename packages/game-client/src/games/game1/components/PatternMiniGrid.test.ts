@@ -30,11 +30,18 @@ function asInternals(grid: PatternMiniGrid): MiniGridInternals {
 }
 
 function filledCellIndices(cells: HTMLDivElement[]): number[] {
+  // BIN-blink-permanent-fix: styling er nå via `.hit`-CSS-klasse (ikke inline
+  // style.background), så vi sjekker classList i stedet.
   const out: number[] = [];
   for (let i = 0; i < cells.length; i++) {
-    if (cells[i].style.background.includes(FILL_BG_KEYWORD)) out.push(i);
+    if (cells[i].classList.contains("hit")) out.push(i);
   }
   return out;
+}
+
+/** Test-helper: forventet "fylt"-sjekk via classList. */
+function isCellFilled(cell: HTMLDivElement): boolean {
+  return cell.classList.contains("hit");
 }
 
 function colCellIndices(col: number): number[] {
@@ -80,73 +87,81 @@ describe("PatternMiniGrid — fase 1 (rad ELLER kolonne)", () => {
   });
 });
 
-// ── Fase 2-4: kun vertikale kolonner ────────────────────────────────────────
+// ── Fase 2-4: KUN adjacent horisontale rader ───────────────────────────────
+// Regel-endring 2026-04-24 (Tobias): animasjonen cycler bare sammenhengende
+// rader slik at spiller ser hvor mange rader som spilles om.
 
-describe("PatternMiniGrid — fase 2-4 bruker KUN vertikale kolonner", () => {
-  it("fase 2 → C(5,2) = 10 kolonne-par", () => {
+describe("PatternMiniGrid — fase 2-4 bruker KUN adjacent horisontale rader", () => {
+  it("fase 2 → 4 adjacent rad-par (0-1, 1-2, 2-3, 3-4)", () => {
     const grid = asInternals(new PatternMiniGrid());
     const combos = grid.getPhaseCombinations(2);
-    expect(combos.length).toBe(10);
-    for (const combo of combos) {
-      expect(combo.length).toBe(2);
-      for (const line of combo) {
-        expect(line.axis).toBe("col");
+    expect(combos.length).toBe(4);
+    for (let i = 0; i < combos.length; i++) {
+      expect(combos[i].length).toBe(2);
+      expect(combos[i][0].axis).toBe("row");
+      expect(combos[i][0].index).toBe(i);
+      expect(combos[i][1].index).toBe(i + 1);
+    }
+    grid.destroy();
+  });
+
+  it("fase 3 → 3 adjacent rad-tripler (0-2, 1-3, 2-4)", () => {
+    const grid = asInternals(new PatternMiniGrid());
+    const combos = grid.getPhaseCombinations(3);
+    expect(combos.length).toBe(3);
+    for (let i = 0; i < combos.length; i++) {
+      expect(combos[i].length).toBe(3);
+      for (let j = 0; j < 3; j++) {
+        expect(combos[i][j].axis).toBe("row");
+        expect(combos[i][j].index).toBe(i + j);
       }
     }
     grid.destroy();
   });
 
-  it("fase 3 → C(5,3) = 10 kolonne-tripler", () => {
-    const grid = asInternals(new PatternMiniGrid());
-    const combos = grid.getPhaseCombinations(3);
-    expect(combos.length).toBe(10);
-    for (const combo of combos) {
-      expect(combo.length).toBe(3);
-      for (const line of combo) expect(line.axis).toBe("col");
-    }
-    grid.destroy();
-  });
-
-  it("fase 4 → C(5,4) = 5 kolonne-firere", () => {
+  it("fase 4 → 2 adjacent rad-firere (0-3, 1-4)", () => {
     const grid = asInternals(new PatternMiniGrid());
     const combos = grid.getPhaseCombinations(4);
-    expect(combos.length).toBe(5);
-    for (const combo of combos) {
-      expect(combo.length).toBe(4);
-      for (const line of combo) expect(line.axis).toBe("col");
+    expect(combos.length).toBe(2);
+    for (let i = 0; i < combos.length; i++) {
+      expect(combos[i].length).toBe(4);
+      for (let j = 0; j < 4; j++) {
+        expect(combos[i][j].axis).toBe("row");
+        expect(combos[i][j].index).toBe(i + j);
+      }
     }
     grid.destroy();
   });
 
-  it("fase 2-kombinasjon fyller nøyaktig 2 kolonner (10 celler, 9 hvis kol 2 er med)", () => {
+  it("fase 2-kombinasjon fyller nøyaktig 2 rader (10 celler, 9 hvis rad 2 er med)", () => {
     const grid = asInternals(new PatternMiniGrid());
-    // Kol 0 + kol 1 — ingen krysser center
+    // Rad 0 + rad 1 — ingen krysser center
     grid.highlightLines([
-      { axis: "col", index: 0 },
-      { axis: "col", index: 1 },
+      { axis: "row", index: 0 },
+      { axis: "row", index: 1 },
     ]);
     expect(filledCellIndices(grid.cells).length).toBe(10);
-    expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
+    expect(isCellFilled(grid.cells[CENTER_INDEX])).toBe(false);
 
-    // Kol 0 + kol 2 — kol 2 krysser center
+    // Rad 1 + rad 2 — rad 2 krysser center
     grid.highlightLines([
-      { axis: "col", index: 0 },
-      { axis: "col", index: 2 },
+      { axis: "row", index: 1 },
+      { axis: "row", index: 2 },
     ]);
     expect(filledCellIndices(grid.cells).length).toBe(9);
-    expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
+    expect(isCellFilled(grid.cells[CENTER_INDEX])).toBe(false);
     grid.destroy();
   });
 
-  it("fase 4-kombinasjon fyller 4 kolonner; den utelatte kolonnen er tom", () => {
+  it("fase 4-kombinasjon fyller 4 adjacent rader; den utelatte raden er tom", () => {
     const grid = asInternals(new PatternMiniGrid());
     const combos = grid.getPhaseCombinations(4);
     for (const combo of combos) {
       grid.highlightLines(combo);
-      const usedCols = new Set(combo.map((l) => l.index));
-      const missingCol = [0, 1, 2, 3, 4].find((c) => !usedCols.has(c))!;
-      for (const idx of colCellIndices(missingCol)) {
-        expect(grid.cells[idx].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
+      const usedRows = new Set(combo.map((l) => l.index));
+      const missingRow = [0, 1, 2, 3, 4].find((r) => !usedRows.has(r))!;
+      for (const idx of rowCellIndices(missingRow)) {
+        expect(isCellFilled(grid.cells[idx])).toBe(false);
       }
     }
     grid.destroy();
@@ -157,7 +172,7 @@ describe("PatternMiniGrid — fase 2-4 bruker KUN vertikale kolonner", () => {
     for (const phase of [1, 2, 3, 4]) {
       for (const combo of grid.getPhaseCombinations(phase)) {
         grid.highlightLines(combo);
-        expect(grid.cells[CENTER_INDEX].style.background.includes(FILL_BG_KEYWORD)).toBe(false);
+        expect(isCellFilled(grid.cells[CENTER_INDEX])).toBe(false);
       }
     }
     grid.destroy();

@@ -100,26 +100,51 @@ export class CalledNumbersOverlay {
     this.backdrop.appendChild(this.grid);
   }
 
-  /** Replace all drawn numbers (used on reconnect / initial load). */
+  /** True hvis grid-DOM er ute av sync med `drawnNumbers`. Settes av
+   *  setNumbers/clearNumbers/addNumber og tømmes av render(). Brukes for
+   *  å utsette DOM-rebuild til overlay faktisk vises. */
+  private dirty = false;
+
+  /** Replace all drawn numbers (used on reconnect / initial load).
+   *
+   *  BIN-blink-permanent-fix: render() kjører KUN hvis overlay er synlig.
+   *  PlayScreen.syncBallHistory kaller setNumbers hver state-update med
+   *  samme array — tidligere trigget det full DOM-rebuild (innerHTML = ""
+   *  + N × appendChild) selv om overlay var display:none. Nå markerer vi
+   *  bare `dirty` og utsetter render til `show()` kjøres. Under spill
+   *  med 70 baller trukket sparte dette 70 × updateRate ≈ hundrevis av
+   *  mutasjoner per sekund i et usynlig element. */
   setNumbers(numbers: number[]): void {
+    // Hopp over hvis innholdet er identisk (samme rekkefølge + lengde).
+    if (this.drawnNumbers.length === numbers.length) {
+      let identical = true;
+      for (let i = 0; i < numbers.length; i++) {
+        if (this.drawnNumbers[i] !== numbers[i]) { identical = false; break; }
+      }
+      if (identical) return;
+    }
     this.drawnNumbers = [...numbers];
-    this.render();
+    this.dirty = true;
+    if (this.isShowing()) this.render();
   }
 
   /** Clear all drawn numbers (used on game end / new round). */
   clearNumbers(): void {
+    if (this.drawnNumbers.length === 0 && !this.dirty) return;
     this.drawnNumbers = [];
+    this.dirty = false;
     this.grid.innerHTML = "";
     this.countEl.textContent = "0 tall trukket";
   }
 
   addNumber(number: number): void {
     this.drawnNumbers.push(number);
+    this.dirty = true;
     if (this.isShowing()) this.render();
   }
 
   show(): void {
-    this.render();
+    if (this.dirty) this.render();
     this.backdrop.style.display = "flex";
   }
 
@@ -153,6 +178,7 @@ export class CalledNumbersOverlay {
       ball.textContent = String(n);
       this.grid.appendChild(ball);
     }
+    this.dirty = false;
   }
 
   destroy(): void {

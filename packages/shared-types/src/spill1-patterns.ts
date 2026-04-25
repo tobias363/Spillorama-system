@@ -44,16 +44,16 @@ export const COLUMN_MASKS: readonly PatternMask[] = Object.freeze([
   0x1084210, // kol 4
 ]);
 
-function columnCombinations(k: number): PatternMask[] {
+function rowCombinations(k: number): PatternMask[] {
   const results: PatternMask[] = [];
   const pick = (start: number, picked: number[]): void => {
     if (picked.length === k) {
       let union = 0;
-      for (const idx of picked) union |= COLUMN_MASKS[idx];
+      for (const idx of picked) union |= ROW_MASKS[idx];
       results.push(union);
       return;
     }
-    for (let i = start; i < COLUMN_MASKS.length; i++) {
+    for (let i = start; i < ROW_MASKS.length; i++) {
       picked.push(i);
       pick(i + 1, picked);
       picked.pop();
@@ -68,12 +68,12 @@ export const PHASE_1_MASKS: readonly PatternMask[] = Object.freeze([
   ...ROW_MASKS,
   ...COLUMN_MASKS,
 ]);
-/** Fase 2: 2 hele vertikale kolonner. C(5,2) = 10. */
-export const PHASE_2_MASKS: readonly PatternMask[] = Object.freeze(columnCombinations(2));
-/** Fase 3: 3 hele vertikale kolonner. C(5,3) = 10. */
-export const PHASE_3_MASKS: readonly PatternMask[] = Object.freeze(columnCombinations(3));
-/** Fase 4: 4 hele vertikale kolonner. C(5,4) = 5. */
-export const PHASE_4_MASKS: readonly PatternMask[] = Object.freeze(columnCombinations(4));
+/** Fase 2: 2 hele horisontale rader. C(5,2) = 10. */
+export const PHASE_2_MASKS: readonly PatternMask[] = Object.freeze(rowCombinations(2));
+/** Fase 3: 3 hele horisontale rader. C(5,3) = 10. */
+export const PHASE_3_MASKS: readonly PatternMask[] = Object.freeze(rowCombinations(3));
+/** Fase 4: 4 hele horisontale rader. C(5,4) = 5. */
+export const PHASE_4_MASKS: readonly PatternMask[] = Object.freeze(rowCombinations(4));
 /** Fase 5 (Fullt Hus): alle 25 celler. */
 export const FULL_HOUSE_MASKS: readonly PatternMask[] = Object.freeze([PATTERN_MASK_FULL]);
 
